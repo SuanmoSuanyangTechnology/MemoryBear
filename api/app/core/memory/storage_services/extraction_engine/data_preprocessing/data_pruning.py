@@ -409,14 +409,13 @@ class SemanticPruner:
         )
         msgs = dialog.context.msgs
 
-        # 分类：LLM保护 / 填充 / 其他可删
-        protected_ids: set = set()
+        # 分类：填充 / 其他可删（LLM保护消息通过不加入任何桶来隐式保护）
         filler_ids: set = set()
         deletable: List[ConversationMessage] = []
 
         for m in msgs:
             if self._msg_matches_tokens(m, preserve_tokens):
-                protected_ids.add(id(m))
+                pass  # 保护消息：不加入任何桶，不会被删除
             elif self._is_filler_message(m):
                 filler_ids.add(id(m))
             else:
@@ -427,7 +426,7 @@ class SemanticPruner:
         delete_target = int(total_unrel * proportion)
         if proportion > 0 and total_unrel > 0 and delete_target == 0:
             delete_target = 1
-        max_deletable = max(0, total_unrel - 1)
+        max_deletable = min(len(filler_ids) + len(deletable), max(0, total_unrel - 1))
         delete_target = min(delete_target, max_deletable)
 
         # 优先删填充，再删其他可删消息（按出现顺序）
@@ -447,8 +446,11 @@ class SemanticPruner:
             kept_msgs = [msgs[0]]
 
         deleted_total = len(msgs) - len(kept_msgs)
+        protected_count = len(msgs) - len(filler_ids) - len(deletable)
         self._log(
-            f"[剪枝-对话] 对话ID={dialog.id} 总消息={len(msgs)} 删除目标={delete_target} 实删={deleted_total} 保留={len(kept_msgs)}"
+            f"[剪枝-对话] 对话ID={dialog.id} 总消息={len(msgs)} "
+            f"(保护={protected_count} 填充={len(filler_ids)} 可删={len(deletable)}) "
+            f"删除目标={delete_target} 实删={deleted_total} 保留={len(kept_msgs)}"
         )
 
         dialog.context = ConversationContext(msgs=kept_msgs)
