@@ -1,3 +1,4 @@
+import asyncio
 from typing import List
 
 # 使用新的仓储层
@@ -288,6 +289,14 @@ async def save_dialog_and_statements_to_neo4j(
         }
         logger.info("Transaction completed. Summary: %s", summary)
         logger.debug("Full transaction results: %r", results)
+
+        # 写入成功后，触发聚类
+        if entity_nodes:
+            end_user_id = entity_nodes[0].end_user_id
+            new_entity_ids = [e.id for e in entity_nodes]
+            logger.info(f"[Clustering] 准备触发聚类，实体数: {len(new_entity_ids)}, end_user_id: {end_user_id}")
+            await _trigger_clustering(new_entity_ids, end_user_id)
+
         return True
 
     except Exception as e:
@@ -295,3 +304,28 @@ async def save_dialog_and_statements_to_neo4j(
         print(f"Neo4j integration error: {e}")
         print("Continuing without database storage...")
         return False
+
+
+async def _trigger_clustering(
+    new_entity_ids: List[str],
+    end_user_id: str,
+) -> None:
+    """
+    聚类触发函数，自动判断全量初始化还是增量更新。
+    """
+    connector = None
+    try:
+        from app.core.memory.storage_services.clustering_engine import LabelPropagationEngine
+        logger.info(f"[Clustering] 开始聚类，end_user_id={end_user_id}, 实体数={len(new_entity_ids)}")
+        connector = Neo4jConnector()
+        engine = LabelPropagationEngine(connector)
+        await engine.run(end_user_id=end_user_id, new_entity_ids=new_entity_ids)
+        logger.info(f"[Clustering] 聚类完成，end_user_id={end_user_id}")
+    except Exception as e:
+        logger.error(f"[Clustering] 聚类触发失败: {e}", exc_info=True)
+    finally:
+        if connector:
+            try:
+                await connector.close()
+            except Exception:
+                pass
