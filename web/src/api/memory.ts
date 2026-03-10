@@ -224,6 +224,10 @@ export const getConversationDetail = (end_user_id: string, conversation_id: stri
 export const forgetTrigger = (data: { max_merge_batch_size: number; min_days_since_access: number; end_user_id: string;}) => {
   return request.post(`/memory/forget-memory/trigger`, data)
 }
+// RAG type - Refresh RAG user summary and memory insight
+export const generateRagProfile = (end_user_id: string) => {
+  return request.post(`/dashboard/generate_rag_profile`, { end_user_id })
+}
 /*************** end User Memory APIs ******************************/
 
 /****************** Memory Management APIs *******************************/
