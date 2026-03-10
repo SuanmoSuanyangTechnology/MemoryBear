@@ -234,33 +234,9 @@ class SemanticPruner:
         if re.fullmatch(r"(\[[^\]]+\])+", t):
             return True
         
-        # 检查是否为纯emoji（Unicode表情）
-        emoji_pattern = re.compile(
-            "["
-            "\U0001F600-\U0001F64F"  # 表情符号
-            "\U0001F300-\U0001F5FF"  # 符号和象形文字
-            "\U0001F680-\U0001F6FF"  # 交通和地图符号
-            "\U0001F1E0-\U0001F1FF"  # 旗帜
-            "\U00002702-\U000027B0"
-            "\U000024C2-\U0001F251"
-            "]+", flags=re.UNICODE
-        )
-        if emoji_pattern.fullmatch(t):
-            return True
-        
         # 纯标点符号
         if re.fullmatch(r"[。！？,.!?…·\s]+", t):
             return True
-        
-        # 安全防线：包含情绪词或兴趣词的消息，无论多短都不视为填充
-        # 避免"我好开心呀"、"好喜欢打羽毛球呀"等被误删
-        _emotion_interest_guard = re.compile(
-            r"开心|高兴|快乐|幸福|感动|难过|悲伤|伤心|委屈|失落|沮丧|郁闷|"
-            r"生气|愤怒|烦躁|焦虑|害怕|担心|压力|兴奋|期待|"
-            r"喜欢|热爱|爱好|兴趣|擅长|享受|沉迷|着迷|讨厌|厌恶"
-        )
-        if _emotion_interest_guard.search(t):
-            return False
         
         return False
     
