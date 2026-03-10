@@ -200,32 +200,20 @@ class SemanticPruner:
             
         return min(score, 10)  # 最高10分
 
-    # 情绪/兴趣/爱好安全防线正则（类级别，避免重复编译）
-    _EMOTION_INTEREST_GUARD = re.compile(
-        r"开心|高兴|快乐|幸福|感动|难过|悲伤|伤心|委屈|失落|沮丧|郁闷|"
-        r"生气|愤怒|烦躁|焦虑|害怕|担心|压力|兴奋|期待|惊喜|惊讶|"
-        r"喜欢|热爱|爱好|兴趣|擅长|享受|沉迷|着迷|讨厌|厌恶|"
-        r"happy|sad|angry|excited|anxious|love|hate|enjoy|like|dislike"
-    )
+    # 情绪/兴趣/爱好安全防线正则已移除，改由 extracat_Pruning.jinja2 提示词中的 preserve_keywords 机制处理
 
     def _is_filler_message(self, message: ConversationMessage) -> bool:
         """检测典型寒暄/口头禅/确认类短消息。
 
         判断顺序：
-        1. 情绪/兴趣安全防线（最高优先级）：包含情绪词或兴趣词的消息，无论多短都不视为填充
-        2. 空消息
-        3. 场景特定填充词库精确匹配
-        4. 常见寒暄精确匹配
-        5. 纯表情/标点
+        1. 空消息
+        2. 场景特定填充词库精确匹配
+        3. 常见寒暄精确匹配
+        4. 纯表情/标点
         """
         t = message.msg.strip()
         if not t:
             return True
-
-        # ── 最高优先级：情绪/兴趣安全防线 ──
-        # "我好开心呀"、"好喜欢打羽毛球呀"、"我好难过" 等一律不视为填充
-        if self._EMOTION_INTEREST_GUARD.search(t):
-            return False
 
         # 检查是否在场景特定填充词库中（精确匹配）
         if t in self.scene_config.filler_phrases:
