@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:55 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:49:55 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-11 15:11:06
  */
 /**
  * Multi-Key Configuration Modal
@@ -28,9 +28,12 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
   const [model, setModel] = useState<ModelListItem>({} as ModelListItem);
   const [form] = Form.useForm<MultiKeyForm>();
   const [loading, setLoading] = useState(false)
+  const [abortController, setAbortController] = useState<AbortController | null>(null)
 
   /** Close modal and refresh parent */
   const handleClose = () => {
+    abortController?.abort()
+    setAbortController(null)
     setModel({} as ModelListItem);
     refresh?.()
 
@@ -60,12 +63,14 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
       .validateFields()
       .then((values) => {
         setLoading(true)
+        const controller = new AbortController()
+        setAbortController(controller)
         addModelApiKey(model.id, {
           ...values,
           model_config_id: model.id,
           model_name: model.name,
           provider: model.provider,
-        }).then(() => {
+        }, controller.signal).then(() => {
             message.success(t('common.saveSuccess'))
             form.resetFields();
             getData(model)
@@ -98,7 +103,6 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
       open={visible}
       onCancel={handleClose}
       footer={null}
-      confirmLoading={loading}
     >
       {model.api_keys && model.api_keys.length > 0 && (
         <div className="rb:mb-4">
