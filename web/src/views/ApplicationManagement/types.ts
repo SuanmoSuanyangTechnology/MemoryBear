@@ -13,8 +13,9 @@ import type { WorkflowConfig } from '@/views/Workflow/types';
  */
 export interface Query {
   /** Search keyword */
-  search: string;
+  search?: string;
   type?: string;
+  include_shared?: boolean;
 }
 
 /**
@@ -49,6 +50,16 @@ export interface Application {
   is_active: boolean;
   /** Whether application is shared */
   is_shared: boolean;
+  /** Share permission: readonly | editable (only for shared apps) */
+  share_permission?: string | null;
+  /** Source workspace name (only for shared apps) */
+  source_workspace_name?: string | null;
+  /** Source workspace icon (only for shared apps) */
+  source_workspace_icon?: string | null;
+  /** App version name */
+  source_app_version?: string | null;
+  /** Whether app is active */
+  source_app_is_active?: boolean | null;
   /** Creation timestamp */
   created_at: number;
   /** Last update timestamp */

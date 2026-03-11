@@ -125,6 +125,55 @@ class AppService:
             )
             raise BusinessException("应用不可访问", BizCode.WORKSPACE_NO_ACCESS)
 
+    def _get_share_permission(self, app: App, workspace_id: Optional[uuid.UUID]) -> Optional[str]:
+        """获取共享应用的权限
+
+        Returns:
+            None: 不是共享应用（是本工作空间的应用）
+            'readonly': 只读共享
+            'editable': 可编辑共享
+        """
+        from app.models import AppShare
+
+        if workspace_id is None or app.workspace_id == workspace_id:
+            return None  # 本工作空间的应用，不是共享的
+
+        stmt = select(AppShare).where(
+            AppShare.source_app_id == app.id,
+            AppShare.target_workspace_id == workspace_id
+        )
+        share = self.db.scalars(stmt).first()
+        return share.permission if share else None
+
+    def _validate_app_writable(self, app: App, workspace_id: Optional[uuid.UUID]) -> None:
+        """验证应用是否可写（owner 或 editable 共享）
+
+        用于修改配置、更新应用等写操作。
+        - 本工作空间的应用：允许
+        - editable 共享的应用：允许
+        - readonly 共享的应用：拒绝
+
+        Raises:
+            BusinessException: 当应用不可写时
+        """
+        if workspace_id is None:
+            return
+
+        # 本工作空间的应用，直接放行
+        if app.workspace_id == workspace_id:
+            return
+
+        # 检查共享权限
+        permission = self._get_share_permission(app, workspace_id)
+        if permission == "editable":
+            return
+
+        logger.warning(
+            "应用写操作被拒",
+            extra={"app_id": str(app.id), "workspace_id": str(workspace_id), "permission": permission}
+        )
+        raise BusinessException("应用不可修改（只读共享）", BizCode.WORKSPACE_NO_ACCESS)
+
     def _get_app_or_404(self, app_id: uuid.UUID) -> App:
         """获取应用或抛出404异常
 
@@ -454,6 +503,32 @@ class AppService:
         Returns:
             app_schema.App: 应用 Schema
         """
+        is_shared = app.workspace_id != current_workspace_id
+        share_permission = None
+        source_workspace_name = None
+        source_workspace_icon = None
+        source_app_version = None
+        source_app_is_active = None
+
+        if is_shared:
+            # 查询共享权限和来源工作空间名称
+            from app.models import AppShare
+            stmt = select(AppShare).where(
+                AppShare.source_app_id == app.id,
+                AppShare.target_workspace_id == current_workspace_id
+            )
+            share = self.db.scalars(stmt).first()
+            if share:
+                share_permission = share.permission
+                if share.source_workspace:
+                    source_workspace_name = share.source_workspace.name
+                    source_workspace_icon = share.source_workspace.icon
+
+        # 版本号和生效状态
+        if app.current_release:
+            source_app_version = app.current_release.version_name
+        source_app_is_active = app.is_active
+
         app_dict = {
             "id": app.id,
             "workspace_id": app.workspace_id,
@@ -468,7 +543,12 @@ class AppService:
             "tags": app.tags or [],
             "current_release_id": app.current_release_id,
             "is_active": app.is_active,
-            "is_shared": app.workspace_id != current_workspace_id,  # 判断是否是共享应用
+            "is_shared": is_shared,
+            "share_permission": share_permission,
+            "source_workspace_name": source_workspace_name,
+            "source_workspace_icon": source_workspace_icon,
+            "source_app_version": source_app_version,
+            "source_app_is_active": source_app_is_active,
             "created_at": app.created_at,
             "updated_at": app.updated_at
         }
@@ -594,7 +674,7 @@ class AppService:
         logger.info("更新应用", extra={"app_id": str(app_id)})
 
         app = self._get_app_or_404(app_id)
-        self._validate_workspace_access(app, workspace_id)
+        self._validate_app_writable(app, workspace_id)
 
         changed = False
         for field in ["name", "description", "icon", "icon_type", "visibility", "status", "tags"]:
@@ -952,7 +1032,7 @@ class AppService:
         if app.type != "agent":
             raise BusinessException("只有 Agent 类型应用支持 Agent 配置", BizCode.APP_TYPE_NOT_SUPPORTED)
 
-        self._validate_workspace_access(app, workspace_id)
+        self._validate_app_writable(app, workspace_id)
 
         stmt = select(AgentConfig).where(AgentConfig.app_id == app_id, AgentConfig.is_active.is_(True)).order_by(
             AgentConfig.updated_at.desc())
@@ -1163,7 +1243,7 @@ class AppService:
         if app.type != AppType.WORKFLOW:
             raise BusinessException("只有 Workflow 类型应用支持 Workflow 配置", BizCode.APP_TYPE_NOT_SUPPORTED)
 
-        self._validate_workspace_access(app, workspace_id)
+        self._validate_app_writable(app, workspace_id)
 
         # 获取现有配置
         repo = WorkflowConfigRepository(self.db)
@@ -1654,7 +1734,8 @@ class AppService:
             app_id: uuid.UUID,
             target_workspace_ids: List[uuid.UUID],
             user_id: uuid.UUID,
-            workspace_id: Optional[uuid.UUID] = None
+            workspace_id: Optional[uuid.UUID] = None,
+            permission: str = "readonly"
     ) -> list[AppShare]:
         """分享应用到其他工作空间
 
@@ -1725,6 +1806,7 @@ class AppService:
                 source_workspace_id=app.workspace_id,
                 target_workspace_id=target_ws_id,
                 shared_by=user_id,
+                permission=permission,
                 created_at=now,
                 updated_at=now
             )
@@ -1847,6 +1929,119 @@ class AppService:
         )
 
         return shares
+
+    def remove_shared_app(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID
+    ) -> None:
+        """被共享者从自己的工作空间移除共享应用
+
+        只删除共享记录，不影响源应用。
+
+        Args:
+            app_id: 应用ID
+            workspace_id: 当前工作空间ID（被共享的目标工作空间）
+
+        Raises:
+            ResourceNotFoundException: 当共享记录不存在时
+        """
+        from app.models import AppShare
+
+        logger.info(
+            "移除共享应用",
+            extra={"app_id": str(app_id), "workspace_id": str(workspace_id)}
+        )
+
+        stmt = select(AppShare).where(
+            AppShare.source_app_id == app_id,
+            AppShare.target_workspace_id == workspace_id
+        )
+        share = self.db.scalars(stmt).first()
+
+        if not share:
+            raise ResourceNotFoundException(
+                "共享记录",
+                f"app_id={app_id}, workspace_id={workspace_id}"
+            )
+
+        self.db.delete(share)
+        self.db.commit()
+
+        logger.info(
+            "共享应用已移除",
+            extra={"app_id": str(app_id), "workspace_id": str(workspace_id)}
+        )
+
+    def list_my_shared_out(
+            self,
+            *,
+            workspace_id: uuid.UUID
+    ) -> List[AppShare]:
+        """列出本工作空间主动分享出去的所有记录（我的共享）
+
+        Returns:
+            List[AppShare]: 分享记录列表，含源应用信息
+        """
+        from app.models import AppShare
+
+        stmt = (
+            select(AppShare)
+            .where(AppShare.source_workspace_id == workspace_id)
+            .order_by(AppShare.created_at.desc())
+        )
+        return list(self.db.scalars(stmt).all())
+    def update_share_permission(
+            self,
+            *,
+            app_id: uuid.UUID,
+            target_workspace_id: uuid.UUID,
+            permission: str,
+            workspace_id: Optional[uuid.UUID] = None
+    ) -> "AppShare":
+        """更新共享权限（readonly <-> editable）
+
+        Args:
+            app_id: 应用ID
+            target_workspace_id: 目标工作空间ID
+            permission: 新权限值 readonly | editable
+            workspace_id: 当前工作空间ID（用于权限验证）
+
+        Returns:
+            AppShare: 更新后的共享记录
+        """
+        from app.models import AppShare
+
+        if permission not in ("readonly", "editable"):
+            raise BusinessException("权限值无效，只允许 readonly 或 editable", BizCode.INVALID_PARAMETER)
+
+        app = self._get_app_or_404(app_id)
+        self._validate_workspace_access(app, workspace_id)
+
+        stmt = select(AppShare).where(
+            AppShare.source_app_id == app_id,
+            AppShare.target_workspace_id == target_workspace_id
+        )
+        share = self.db.scalars(stmt).first()
+
+        if not share:
+            raise ResourceNotFoundException(
+                "共享记录",
+                f"app_id={app_id}, target_workspace_id={target_workspace_id}"
+            )
+
+        share.permission = permission
+        share.updated_at = datetime.datetime.now()
+        self.db.commit()
+        self.db.refresh(share)
+
+        logger.info(
+            "共享权限已更新",
+            extra={"app_id": str(app_id), "target_workspace_id": str(target_workspace_id), "permission": permission}
+        )
+        return share
+
 
 # ==================== 向后兼容的函数接口 ====================
 # 保留函数接口以兼容现有代码，但内部使用服务类

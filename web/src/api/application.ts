@@ -116,6 +116,30 @@ export const getShareToken = (share_token: string, user_id: string) => {
 export const copyApplication = (app_id: string, new_name: string) => {
   return request.post(`/apps/${app_id}/copy?new_name=${new_name}`)
 }
+// Share app to workspace (跨工作空间共享)
+export const shareAppToWorkspace = (app_id: string, data: { target_workspace_ids: string[]; permission: string }) => {
+  return request.post(`/apps/${app_id}/share`, data)
+}
+// Unshare app from workspace
+export const unshareAppFromWorkspace = (app_id: string, target_workspace_id: string) => {
+  return request.delete(`/apps/${app_id}/share/${target_workspace_id}`)
+}
+// Remove shared app from my workspace (被共享者移除)
+export const removeSharedApp = (app_id: string) => {
+  return request.delete(`/apps/${app_id}/shared`)
+}
+// List app shares
+export const getAppShares = (app_id: string) => {
+  return request.get(`/apps/${app_id}/shares`)
+}
+// List apps I shared out from my workspace
+export const getMySharedOut = () => {
+  return request.get('/apps/my-shared-out')
+}
+// Update share permission
+export const updateSharePermission = (app_id: string, target_workspace_id: string, permission: string) => {
+  return request.patch(`/apps/${app_id}/share/${target_workspace_id}`, { permission })
+}
 // Data statistics
 export const getAppStatistics = (app_id: string, data: { start_date: number; end_date: number; }) => {
   return request.get(`/apps/${app_id}/statistics`, data)

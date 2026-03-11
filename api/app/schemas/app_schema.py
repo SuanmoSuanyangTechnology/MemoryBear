@@ -277,7 +277,12 @@ class App(BaseModel):
     tags: List[str] = []
     current_release_id: Optional[uuid.UUID] = None
     is_active: bool
-    is_shared: bool = False  # 是否是共享应用（从其他工作空间共享来的）
+    is_shared: bool = False
+    share_permission: Optional[str] = None
+    source_workspace_name: Optional[str] = None  # 共享来源工作空间名称（仅共享应用有值）
+    source_workspace_icon: Optional[str] = None  # 共享来源工作空间图标
+    source_app_version: Optional[str] = None     # 应用版本号
+    source_app_is_active: Optional[bool] = None  # 应用是否生效
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
@@ -422,6 +427,12 @@ class AppRelease(BaseModel):
 class AppShareCreate(BaseModel):
     """应用分享请求"""
     target_workspace_ids: List[uuid.UUID] = Field(..., description="目标工作空间ID列表")
+    permission: str = Field(default="readonly", description="权限模式: readonly | editable")
+
+
+class UpdateSharePermissionRequest(BaseModel):
+    """更新共享权限请求"""
+    permission: str = Field(..., description="新权限值: readonly | editable")
 
 
 class AppShare(BaseModel):
@@ -433,8 +444,31 @@ class AppShare(BaseModel):
     source_workspace_id: uuid.UUID
     target_workspace_id: uuid.UUID
     shared_by: uuid.UUID
+    permission: str = "readonly"
     created_at: datetime.datetime
     updated_at: datetime.datetime
+
+    # 关联名称（从 relationship 读取）
+    source_app_name: Optional[str] = None
+    source_app_type: Optional[str] = None
+    source_app_version: Optional[str] = None
+    source_app_is_active: Optional[bool] = None
+    target_workspace_name: Optional[str] = None
+    target_workspace_icon: Optional[str] = None
+
+    @classmethod
+    def model_validate(cls, obj, **kwargs):
+        instance = super().model_validate(obj, **kwargs)
+        if hasattr(obj, 'source_app') and obj.source_app:
+            instance.source_app_name = obj.source_app.name
+            instance.source_app_type = obj.source_app.type
+            instance.source_app_is_active = obj.source_app.is_active
+            release = obj.source_app.current_release
+            instance.source_app_version = release.version_name if release else None
+        if hasattr(obj, 'target_workspace') and obj.target_workspace:
+            instance.target_workspace_name = obj.target_workspace.name
+            instance.target_workspace_icon = obj.target_workspace.icon
+        return instance
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):

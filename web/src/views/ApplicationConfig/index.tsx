@@ -17,6 +17,7 @@ import Cluster from './Cluster'
 import { getApplication } from '@/api/application'
 import Workflow from '@/views/Workflow';
 import Statistics from './Statistics'
+import SharedReadonlyView from './SharedReadonlyView'
 
 /**
  * Application configuration page component
@@ -78,6 +79,8 @@ const ApplicationConfig: React.FC = () => {
     })
   }
 
+  const isReadonlyShared = application?.is_shared && application?.share_permission === 'readonly'
+
   return (
     <>
       <ConfigHeader 
@@ -88,9 +91,18 @@ const ApplicationConfig: React.FC = () => {
         appRef={application?.type === 'agent' ? agentRef : application?.type === 'multi_agent' ? clusterRef : application?.type === 'workflow' ? workflowRef : undefined}
         workflowRef={workflowRef}
       />
-      {activeTab === 'arrangement' && application?.type === 'agent' && <Agent ref={agentRef} />}
-      {activeTab === 'arrangement' && application?.type === 'multi_agent' && <Cluster ref={clusterRef} />}
-      {activeTab === 'arrangement' && application?.type === 'workflow' && <Workflow ref={workflowRef} />}
+      {/* arrangement tab：只读共享时显示只读视图，否则显示正常编辑界面 */}
+      {activeTab === 'arrangement' && (
+        isReadonlyShared ? (
+          <SharedReadonlyView application={application as Application} />
+        ) : (
+          <>
+            {application?.type === 'agent' && <Agent ref={agentRef} />}
+            {application?.type === 'multi_agent' && <Cluster ref={clusterRef} />}
+            {application?.type === 'workflow' && <Workflow ref={workflowRef} />}
+          </>
+        )
+      )}
       {activeTab === 'api' && <Api application={application} />}
       {activeTab === 'release' && <ReleasePage data={application as Application} refresh={getApplicationInfo} />}
       {activeTab === 'statistics' && <Statistics application={application} />}

@@ -285,6 +285,16 @@ export interface ReleaseShareModalRef {
 }
 
 /**
+ * App share modal ref methods
+ */
+export interface AppShareModalRef {
+  /** Open app share modal */
+  handleOpen: () => void;
+  /** Close app share modal */
+  handleClose: () => void;
+}
+
+/**
  * Copy modal ref methods
  */
 export interface CopyModalRef {

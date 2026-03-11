@@ -93,6 +93,20 @@ def list_apps(
     return success(data=PageData(page=meta, items=items))
 
 
+@router.get("/my-shared-out", summary="列出本工作空间主动分享出去的记录")
+@cur_workspace_access_guard()
+def list_my_shared_out(
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """列出本工作空间主动分享给其他工作空间的所有记录（我的共享）"""
+    workspace_id = current_user.current_workspace_id
+    service = app_service.AppService(db)
+    shares = service.list_my_shared_out(workspace_id=workspace_id)
+    data = [app_schema.AppShare.model_validate(s) for s in shares]
+    return success(data=data)
+
+
 @router.get("/{app_id}", summary="获取应用详情")
 @cur_workspace_access_guard()
 def get_app(
@@ -302,7 +316,8 @@ def share_app(
         app_id=app_id,
         target_workspace_ids=payload.target_workspace_ids,
         user_id=current_user.id,
-        workspace_id=workspace_id
+        workspace_id=workspace_id,
+        permission=payload.permission
     )
 
     data = [app_schema.AppShare.model_validate(s) for s in shares]
@@ -333,6 +348,32 @@ def unshare_app(
     return success(msg="应用分享已取消")
 
 
+@router.patch("/{app_id}/share/{target_workspace_id}", summary="更新共享权限")
+@cur_workspace_access_guard()
+def update_share_permission(
+        app_id: uuid.UUID,
+        target_workspace_id: uuid.UUID,
+        payload: app_schema.UpdateSharePermissionRequest,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """更新共享权限（readonly <-> editable）
+
+    - 只能修改自己工作空间应用的共享权限
+    """
+    workspace_id = current_user.current_workspace_id
+
+    service = app_service.AppService(db)
+    share = service.update_share_permission(
+        app_id=app_id,
+        target_workspace_id=target_workspace_id,
+        permission=payload.permission,
+        workspace_id=workspace_id
+    )
+
+    return success(data=app_schema.AppShare.model_validate(share))
+
+
 @router.get("/{app_id}/shares", summary="列出应用的分享记录")
 @cur_workspace_access_guard()
 def list_app_shares(
@@ -354,6 +395,29 @@ def list_app_shares(
 
     data = [app_schema.AppShare.model_validate(s) for s in shares]
     return success(data=data)
+
+
+@router.delete("/{app_id}/shared", summary="移除共享给我的应用")
+@cur_workspace_access_guard()
+def remove_shared_app(
+        app_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """被共享者从自己的工作空间移除共享应用
+
+    - 不会删除源应用，只删除共享记录
+    - 只能移除共享给自己工作空间的应用
+    """
+    workspace_id = current_user.current_workspace_id
+
+    service = app_service.AppService(db)
+    service.remove_shared_app(
+        app_id=app_id,
+        workspace_id=workspace_id
+    )
+
+    return success(msg="已移除共享应用")
 
 
 @router.post("/{app_id}/draft/run", summary="试运行 Agent（使用当前草稿配置）")

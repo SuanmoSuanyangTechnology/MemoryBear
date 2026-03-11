@@ -14,7 +14,8 @@ import RbCard from '@/components/RbCard/Card'
 import { getReleaseList, rollbackRelease, appExport } from '@/api/application'
 import ReleaseModal from './components/ReleaseModal'
 import ReleaseShareModal from './components/ReleaseShareModal'
-import type { Release, ReleaseModalRef, ReleaseShareModalRef } from './types'
+import AppShareModal from './components/AppShareModal'
+import type { Release, ReleaseModalRef, ReleaseShareModalRef, AppShareModalRef } from './types'
 import type { Application } from '@/views/ApplicationManagement/types'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
@@ -35,10 +36,12 @@ const tagColors: Record<Release['tagKey'], TagProps['color']> = {
  * @param refresh - Function to refresh application data
  */
 const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refresh}) => {
+  const isReadonlyShared = data.is_shared && data.share_permission === 'readonly'
   const { t } = useTranslation();
   const { message } = App.useApp()
   const releaseModalRef = useRef<ReleaseModalRef>(null)
   const releaseShareModalRef = useRef<ReleaseShareModalRef>(null)
+  const appShareModalRef = useRef<AppShareModalRef>(null)
   const [selectedVersion, setSelectedVersion] = useState<Release | null>(null);
   const [releaseList, setReleaseList] = useState<Release[]>([])
 
@@ -126,11 +129,12 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
 
             <Space size={10}>
               {selectedVersion && <>
-                {data?.type !== 'multi_agent' && <Button onClick={handleExport}>{t('common.export')}</Button>}
-                {data.current_release_id !== selectedVersion.id && <Button onClick={handleRollback}>{t('application.willRollToThisVersion')}</Button>}
-                <Button type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</Button>
+                {!isReadonlyShared && data?.type !== 'multi_agent' && <Button onClick={handleExport}>{t('common.export')}</Button>}
+                {!isReadonlyShared && data.current_release_id !== selectedVersion.id && <Button onClick={handleRollback}>{t('application.willRollToThisVersion')}</Button>}
+                {!isReadonlyShared && <Button type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</Button>}
+                {!isReadonlyShared && <Button type="primary" ghost onClick={() => appShareModalRef.current?.handleOpen()}>{t('appShare.title')}</Button>}
               </>}
-              <Button type="primary" onClick={() => releaseModalRef.current?.handleOpen()}>{t('application.release')}</Button>
+              {!isReadonlyShared && <Button type="primary" onClick={() => releaseModalRef.current?.handleOpen()}>{t('application.release')}</Button>}
             </Space>
           </div>
           {selectedVersion && 
@@ -177,6 +181,10 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
       <ReleaseShareModal
         ref={releaseShareModalRef}
         version={selectedVersion}
+      />
+      <AppShareModal
+        ref={appShareModalRef}
+        appId={data.id}
       />
     </div>
   );

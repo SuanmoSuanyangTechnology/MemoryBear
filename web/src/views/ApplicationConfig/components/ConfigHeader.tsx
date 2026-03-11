@@ -19,7 +19,7 @@ import deleteIcon from '@/assets/images/delete_hover.svg'
 import type { Application, ApplicationModalRef } from '@/views/ApplicationManagement/types';
 import ApplicationModal from '@/views/ApplicationManagement/components/ApplicationModal'
 import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef } from '../types'
-import { deleteApplication, appExport } from '@/api/application'
+import { deleteApplication, appExport, removeSharedApp } from '@/api/application'
 import CopyModal from './CopyModal'
 
 const { Header } = Layout;
@@ -107,7 +107,8 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
     if (!id) {
       return
     }
-    deleteApplication(id as string)
+    const deleteAction = application?.is_shared ? removeSharedApp(id as string) : deleteApplication(id as string)
+    deleteAction
       .then(() => {
         goToApplication()
       })
@@ -152,7 +153,18 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
    * Format dropdown menu items
    */
   const formatMenuItems = useMemo(() => {
-    const items = (application?.type !== 'multi_agent' ? ['edit', 'copy', 'export', 'delete'] : ['edit', 'copy', 'delete']).map(key => ({
+    const baseKeys = application?.type === 'workflow' ? ['edit', 'copy', 'export', 'delete'] : ['edit', 'copy', 'delete']
+    let keys: string[]
+    if (application?.is_shared && application?.share_permission === 'readonly') {
+      // readonly: hide copy and export
+      keys = baseKeys.filter(k => k !== 'copy' && k !== 'export')
+    } else if (application?.is_shared && application?.share_permission === 'editable') {
+      // editable shared: all types include export
+      keys = baseKeys.includes('export') ? baseKeys : [...baseKeys.filter(k => k !== 'delete'), 'export', 'delete']
+    } else {
+      keys = baseKeys
+    }
+    const items = keys.map(key => ({
       key,
       icon: <img src={menuIcons[key]} className="rb:w-4 rb:h-4 rb:mr-2" />,
       label: t(`common.${key}`),
