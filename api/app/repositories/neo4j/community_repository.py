@@ -14,6 +14,7 @@ from app.repositories.neo4j.cypher_queries import (
     GET_ENTITY_NEIGHBORS,
     GET_ALL_ENTITIES_FOR_USER,
     GET_COMMUNITY_MEMBERS,
+    GET_ALL_COMMUNITY_MEMBERS_BATCH,
     CHECK_USER_HAS_COMMUNITIES,
     UPDATE_COMMUNITY_MEMBER_COUNT,
 )
@@ -100,6 +101,25 @@ class CommunityRepository:
         except Exception as e:
             logger.error(f"get_community_members failed: {e}")
             return []
+
+    async def get_all_community_members_batch(
+        self, community_ids: List[str], end_user_id: str
+    ) -> Dict[str, List[Dict]]:
+        """批量查询多个社区的成员，返回 {community_id: [members]} 字典。"""
+        try:
+            rows = await self.connector.execute_query(
+                GET_ALL_COMMUNITY_MEMBERS_BATCH,
+                community_ids=community_ids,
+                end_user_id=end_user_id,
+            )
+            result: Dict[str, List[Dict]] = {}
+            for row in rows:
+                cid = row["community_id"]
+                result.setdefault(cid, []).append(row)
+            return result
+        except Exception as e:
+            logger.error(f"get_all_community_members_batch failed: {e}")
+            return {}
 
     async def has_communities(self, end_user_id: str) -> bool:
         """检查该用户是否已有 Community 节点（用于判断全量 vs 增量）。"""
