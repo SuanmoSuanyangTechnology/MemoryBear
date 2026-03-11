@@ -1814,7 +1814,7 @@ export const zh = {
       marketInDatabase: '已入库',
       marketAdd: '添加',
       marketRefresh: '刷新',
-      marketConfig: '配置',
+      marketConfigBtn: '配置',
       marketConfigConnection: '配置连接',
       marketNoServices: '暂无可用的 MCP 服务',
       marketNotConnected: '尚未连接此市场',

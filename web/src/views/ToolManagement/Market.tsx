@@ -279,6 +279,20 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
     }
   };
 
+  const handleRefreshAfterAdd = async () => {
+    // 添加成功后，刷新当前选中的市场源的 MCP 列表
+    if (!selectedSource) return;
+    
+    // 清除缓存并重新加载，这样会重新获取工具列表并更新 inDatabase 标记
+    setMcpCache(prev => {
+      const next = { ...prev };
+      delete next[selectedSource];
+      return next;
+    });
+    setCurrentPage(1);
+    await fetchMcpList(selectedSource, 1);
+  };
+
   const renderSourceDetail = () => {
     if (!selectedSource) {
       return (
@@ -355,7 +369,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
               )}
             </div>
             <Button icon={<SettingOutlined />} onClick={() => handleOpenConfig(selectedSource)}>
-              {t('tool.marketConfig')}
+              {t('tool.marketConfigBtn')}
             </Button>
             <Button type="primary" icon={<GlobalOutlined />} onClick={() => window.open(source.url, '_blank')}>
               {t('tool.marketVisit')}
@@ -373,7 +387,13 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                 loader={<Skeleton active paragraph={{ rows: 2 }} className="rb:mt-4" />}
                 scrollableTarget="mcpScrollableDiv"
               >
-                <div className="rb:grid rb:grid-cols-3 rb:gap-4">
+                <div 
+                  className="rb:gap-4" 
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))'
+                  }}
+                >
                   {filteredList.map(mcp => (
                   <div 
                     key={mcp.id} 
@@ -425,7 +445,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                         {mcp.activated && <Tag color="success">{t('tool.marketActivated')}</Tag>}
                         {mcp.inDatabase && <Tag color="blue">{t('tool.marketInDatabase')}</Tag>}
                       </div>
-                      <Button type="primary" size="small" onClick={() => handleOpenMcpServiceModal(mcp)}>
+                      <Button disabled={mcp.inDatabase} type="primary" size="small" onClick={() => handleOpenMcpServiceModal(mcp)}>
                         + {t('tool.marketAdd')}
                       </Button>
                     </div>
@@ -523,7 +543,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
       />
       <McpServiceModal
         ref={mcpServiceModalRef}
-        refresh={() => {}}
+        refresh={handleRefreshAfterAdd}
       />
     </div>
   );

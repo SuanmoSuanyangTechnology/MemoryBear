@@ -1818,7 +1818,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       marketInDatabase: 'In Database',
       marketAdd: 'Add',
       marketRefresh: 'Refresh',
-      marketConfig: 'Configure',
+      marketConfigBtn: 'Configure',
       marketConfigConnection: 'Configure Connection',
       marketNoServices: 'No MCP Services Available',
       marketNotConnected: 'Not Connected to This Market',
