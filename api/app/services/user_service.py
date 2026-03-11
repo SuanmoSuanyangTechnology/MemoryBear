@@ -438,24 +438,26 @@ def update_last_login_time(db: Session, user_id: uuid.UUID) -> User:
 
 async def change_password(db: Session, user_id: uuid.UUID, old_password: str, new_password: str, current_user: User) -> User:
     """普通用户修改自己的密码"""
+    from app.i18n.service import t
+    
     business_logger.info(f"用户修改密码请求: user_id={user_id}, current_user={current_user.id}")
     
     # 检查权限：只能修改自己的密码
     if current_user.id != user_id:
         business_logger.warning(f"用户尝试修改他人密码: current_user={current_user.id}, target_user={user_id}")
-        raise PermissionDeniedException("You can only change your own password")
+        raise PermissionDeniedException(t("auth.password.change_failed"))
     
     try:
         # 获取用户
         db_user = user_repository.get_user_by_id(db=db, user_id=user_id)
         if not db_user:
             business_logger.warning(f"用户不存在: {user_id}")
-            raise BusinessException("User not found", code=BizCode.USER_NOT_FOUND)
+            raise BusinessException(t("auth.user.not_found"), code=BizCode.USER_NOT_FOUND)
         
         # 验证旧密码
         if not verify_password(old_password, db_user.hashed_password):
             business_logger.warning(f"用户旧密码验证失败: {user_id}")
-            raise BusinessException("当前密码不正确", code=BizCode.VALIDATION_FAILED)
+            raise BusinessException(t("auth.password.incorrect"), code=BizCode.VALIDATION_FAILED)
         
         # 更新密码
         db_user.hashed_password = get_password_hash(new_password)
@@ -471,7 +473,7 @@ async def change_password(db: Session, user_id: uuid.UUID, old_password: str, ne
     except Exception as e:
         business_logger.error(f"修改用户密码失败: user_id={user_id} - {str(e)}")
         db.rollback()
-        raise BusinessException(f"修改用户密码失败: user_id={user_id} - {str(e)}", code=BizCode.DB_ERROR)
+        raise BusinessException(t("auth.password.change_failed"), code=BizCode.DB_ERROR)
 
 
 async def admin_change_password(db: Session, target_user_id: uuid.UUID, new_password: str = None, current_user: User = None) -> tuple[User, str]:
@@ -487,6 +489,8 @@ async def admin_change_password(db: Session, target_user_id: uuid.UUID, new_pass
     Returns:
         tuple[User, str]: (更新后的用户对象, 实际使用的密码)
     """
+    from app.i18n.service import t
+    
     business_logger.info(f"管理员修改用户密码请求: admin={current_user.id}, target_user={target_user_id}")
     
     # 检查权限：只有超级管理员可以修改他人密码
@@ -496,7 +500,7 @@ async def admin_change_password(db: Session, target_user_id: uuid.UUID, new_pass
     try:
         permission_service.check_superuser(
             subject,
-            error_message="只有超级管理员可以修改他人密码"
+            error_message=t("auth.password.change_failed")
         )
     except PermissionDeniedException as e:
         business_logger.warning(f"非超管用户尝试修改他人密码: current_user={current_user.id}")
@@ -507,12 +511,12 @@ async def admin_change_password(db: Session, target_user_id: uuid.UUID, new_pass
         target_user = user_repository.get_user_by_id(db=db, user_id=target_user_id)
         if not target_user:
             business_logger.warning(f"目标用户不存在: {target_user_id}")
-            raise BusinessException("目标用户不存在", code=BizCode.USER_NOT_FOUND)
+            raise BusinessException(t("auth.user.not_found"), code=BizCode.USER_NOT_FOUND)
         
         # 检查租户权限：超管只能修改同租户用户的密码
         if current_user.tenant_id != target_user.tenant_id:
             business_logger.warning(f"跨租户密码修改尝试: admin_tenant={current_user.tenant_id}, target_tenant={target_user.tenant_id}")
-            raise BusinessException("不可跨租户修改用户密码", code=BizCode.FORBIDDEN)
+            raise BusinessException(t("auth.password.change_failed"), code=BizCode.FORBIDDEN)
         
         # 如果没有提供新密码，则生成随机密码
         actual_password = new_password if new_password else generate_random_password()
@@ -532,7 +536,7 @@ async def admin_change_password(db: Session, target_user_id: uuid.UUID, new_pass
     except Exception as e:
         business_logger.error(f"管理员修改用户密码失败: admin={current_user.id}, target_user={target_user_id} - {str(e)}")
         db.rollback()
-        raise BusinessException(f"管理员修改用户密码失败: admin={current_user.id}, target_user={target_user_id} - {str(e)}", code=BizCode.DB_ERROR)
+        raise BusinessException(t("auth.password.change_failed"), code=BizCode.DB_ERROR)
 
 
 def generate_random_password(length: int = 12) -> str:
@@ -740,3 +744,54 @@ async def verify_and_change_email(db: Session, user_id: uuid.UUID, new_email: Em
 #
 #     business_logger.info(f"用户邮箱修改成功: {db_user.username}, new_email={new_email}")
 #     return db_user
+
+
+def get_user_language_preference(db: Session, user_id: uuid.UUID, current_user: User) -> str:
+    """获取用户语言偏好"""
+    business_logger.info(f"获取用户语言偏好: user_id={user_id}")
+    
+    # 权限检查：只能获取自己的语言偏好
+    if current_user.id != user_id:
+        raise PermissionDeniedException("只能获取自己的语言偏好")
+    
+    db_user = user_repository.get_user_by_id(db=db, user_id=user_id)
+    if not db_user:
+        raise BusinessException("用户不存在", code=BizCode.USER_NOT_FOUND)
+    
+    language = db_user.preferred_language or "zh"
+    business_logger.info(f"用户语言偏好: {db_user.username}, language={language}")
+    return language
+
+
+def update_user_language_preference(
+    db: Session, 
+    user_id: uuid.UUID, 
+    language: str, 
+    current_user: User
+) -> User:
+    """更新用户语言偏好"""
+    business_logger.info(f"更新用户语言偏好: user_id={user_id}, language={language}")
+    
+    # 权限检查：只能修改自己的语言偏好
+    if current_user.id != user_id:
+        raise PermissionDeniedException("只能修改自己的语言偏好")
+    
+    # 验证语言代码是否支持
+    from app.core.config import settings
+    if language not in settings.I18N_SUPPORTED_LANGUAGES:
+        raise BusinessException(
+            f"不支持的语言代码: {language}。支持的语言: {', '.join(settings.I18N_SUPPORTED_LANGUAGES)}",
+            code=BizCode.VALIDATION_FAILED
+        )
+    
+    db_user = user_repository.get_user_by_id(db=db, user_id=user_id)
+    if not db_user:
+        raise BusinessException("用户不存在", code=BizCode.USER_NOT_FOUND)
+    
+    # 更新语言偏好
+    db_user.preferred_language = language
+    db.commit()
+    db.refresh(db_user)
+    
+    business_logger.info(f"用户语言偏好更新成功: {db_user.username}, language={language}")
+    return db_user
