@@ -1065,26 +1065,6 @@ Graph_Node_query = """
 # Community 节点 & BELONGS_TO_COMMUNITY 边
 # ============================================================
 
-COMMUNITY_NODE_SAVE = """
-MERGE (c:Community {community_id: $community_id})
-SET c.end_user_id = $end_user_id,
-    c.formed_at = $formed_at,
-    c.updated_at = datetime(),
-    c.status = $status,
-    c.member_count = $member_count
-RETURN c.community_id AS community_id
-"""
-
-COMMUNITY_ADD_MEMBER = """
-MATCH (e:ExtractedEntity {id: $entity_id, end_user_id: $end_user_id})
-MATCH (c:Community {community_id: $community_id, end_user_id: $end_user_id})
-MERGE (e)-[:BELONGS_TO_COMMUNITY]->(c)
-SET c.updated_at = datetime(),
-    c.member_count = $member_count
-"""
-
-
-
 # ─── Community 聚类相关 Cypher 模板 ───────────────────────────────────────────
 
 COMMUNITY_NODE_UPSERT = """
@@ -1111,12 +1091,23 @@ DELETE r
 
 GET_ENTITY_NEIGHBORS = """
 MATCH (e:ExtractedEntity {id: $entity_id, end_user_id: $end_user_id})
-OPTIONAL MATCH (e)-[:EXTRACTED_RELATIONSHIP]-(nb:ExtractedEntity {end_user_id: $end_user_id})
+
+// 来源一：直接关系邻居（EXTRACTED_RELATIONSHIP 边）
+OPTIONAL MATCH (e)-[:EXTRACTED_RELATIONSHIP]-(nb1:ExtractedEntity {end_user_id: $end_user_id})
+
+// 来源二：同 Statement 共现邻居（REFERENCES_ENTITY 边）
+OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(nb2:ExtractedEntity {end_user_id: $end_user_id})
+WHERE nb2.id <> e.id
+
+WITH collect(DISTINCT nb1) + collect(DISTINCT nb2) AS all_neighbors
+UNWIND all_neighbors AS nb
+WITH nb WHERE nb IS NOT NULL
 OPTIONAL MATCH (nb)-[:BELONGS_TO_COMMUNITY]->(c:Community)
 RETURN DISTINCT
-    nb.id            AS id,
-    nb.name          AS name,
-    nb.name_embedding AS name_embedding,
+    nb.id               AS id,
+    nb.name             AS name,
+    nb.name_embedding   AS name_embedding,
     nb.activation_value AS activation_value,
     CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
@@ -1137,6 +1128,15 @@ RETURN e.id AS id, e.name AS name, e.entity_type AS entity_type,
        e.importance_score AS importance_score, e.activation_value AS activation_value,
        e.name_embedding AS name_embedding
 ORDER BY coalesce(e.activation_value, 0) DESC
+"""
+
+GET_ALL_COMMUNITY_MEMBERS_BATCH = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community)
+WHERE c.community_id IN $community_ids
+RETURN c.community_id AS community_id,
+       e.id AS id,
+       e.name_embedding AS name_embedding,
+       e.activation_value AS activation_value
 """
 
 CHECK_USER_HAS_COMMUNITIES = """
