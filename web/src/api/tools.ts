@@ -36,7 +36,7 @@ export const getToolMethods = (tool_id: string) => {
 }
 
 // MCP市场列表
-export const getMarketTools = (data: Query) => {
+export const getMarketTools = (data?: Record<string, any>) => {
   return request.get('/mcp_markets/mcp_markets', data)
 }
 // 市场配置创建
