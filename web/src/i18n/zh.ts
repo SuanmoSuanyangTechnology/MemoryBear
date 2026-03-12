@@ -754,7 +754,7 @@ export const zh = {
       gotoList: '返回应用列表',
       gotoDetail: '查看详情',
       dify: 'Dify',
-      pleaseUploadFile: '请上传工作流文件',
+      pleaseUploadFile: '请上传文件',
     },
     table: {
       totalRecords: '共 {{total}} 条记录'
