@@ -1370,7 +1370,7 @@ export const en = {
       gotoList: 'Return to Application List',
       gotoDetail: 'View Details',
       dify: 'Dify',
-      pleaseUploadFile: 'Please upload workflow file', 
+      pleaseUploadFile: 'Please upload file', 
     },
     userMemory: {
       userMemory: 'User Memory',
