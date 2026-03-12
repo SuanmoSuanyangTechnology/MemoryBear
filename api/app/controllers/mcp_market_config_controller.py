@@ -65,13 +65,18 @@ async def get_mcp_servers(
         api_logger.warning(
             f"The mcp market config does not exist or access is denied: mcp_market_config_id={mcp_market_config_id}")
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="The mcp market config does not exist or access is denied"
         )
 
     # 3. Execute paged query
-    api = MCPApi()
     token = db_mcp_market_config.token
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MCP market config token is not configured"
+        )
+    api = MCPApi()
     api.login(token)
 
     body = {
@@ -141,13 +146,18 @@ async def get_operational_mcp_servers(
         api_logger.warning(
             f"The mcp market config does not exist or access is denied: mcp_market_config_id={mcp_market_config_id}")
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="The mcp market config does not exist or access is denied"
         )
 
     # 2. Execute paged query
-    api = MCPApi()
     token = db_mcp_market_config.token
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MCP market config token is not configured"
+        )
+    api = MCPApi()
     api.login(token)
 
     url = f'{api.mcp_base_url}/operational'
@@ -199,13 +209,18 @@ async def get_mcp_server(
         api_logger.warning(
             f"The mcp market config does not exist or access is denied: mcp_market_config_id={mcp_market_config_id}")
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="The mcp market config does not exist or access is denied"
         )
 
     # 2. Get detailed information for a specific MCP Server
-    api = MCPApi()
     token = db_mcp_market_config.token
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MCP market config token is not configured"
+        )
+    api = MCPApi()
     api.login(token)
 
     result = api.get_mcp_server(server_id=server_id)
@@ -263,7 +278,7 @@ async def get_mcp_market_config(
         if not db_mcp_market_config:
             api_logger.warning(f"The mcp market config does not exist or access is denied: mcp_market_config_id={mcp_market_config_id}")
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="The mcp market config does not exist or access is denied"
             )
 
@@ -296,7 +311,7 @@ async def get_mcp_market_config_by_mcp_market_id(
         if not db_mcp_market_config:
             api_logger.warning(f"The mcp market config does not exist or access is denied: mcp_market_id={mcp_market_id}")
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="The mcp market config does not exist or access is denied"
             )
 
@@ -325,7 +340,7 @@ async def update_mcp_market_config(
         api_logger.warning(
             f"The mcp market config does not exist or you do not have permission to access it: mcp_market_config_id={mcp_market_config_id}")
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="The mcp market config does not exist or you do not have permission to access it"
         )
 
@@ -382,7 +397,7 @@ async def delete_mcp_market_config(
             api_logger.warning(
                 f"The mcp market config does not exist or you do not have permission to access it: mcp_market_config_id={mcp_market_config_id}")
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="The mcp market config does not exist or you do not have permission to access it"
             )
 
