@@ -749,8 +749,8 @@ async def generate_rag_profile(
     if not end_user:
         raise ValueError(f"end_user {end_user_id} 不存在")
 
-    rag_content = get_rag_content(end_user_id, limit, db, current_user)
-    chunks = rag_content.get("contents", [])
+    rag_content = get_rag_content(end_user_id, page=1, pagesize=limit, db=db, current_user=current_user)
+    chunks = rag_content.get("items", [])
 
     if not chunks:
         business_logger.warning(f"未找到chunk内容，无法生产RAG画像: end_user_id={end_user_id}")
