@@ -749,7 +749,7 @@ async def generate_rag_profile(
     if not end_user:
         raise ValueError(f"end_user {end_user_id} 不存在")
 
-    rag_content = get_rag_content(end_user_id, 1, limit, db, current_user)
+    rag_content = get_rag_content(end_user_id, page=1, pagesize=limit, db=db, current_user=current_user)
     chunks = rag_content.get("items", [])
 
     if not chunks:
