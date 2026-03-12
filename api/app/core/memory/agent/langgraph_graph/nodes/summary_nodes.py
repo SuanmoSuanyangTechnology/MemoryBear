@@ -23,18 +23,39 @@ logger = get_agent_logger(__name__)
 
 
 class SummaryNodeService(LLMServiceMixin):
-    """总结节点服务类"""
+    """
+    Summary node service class
+    
+    Handles summary generation operations using LLM services. Inherits from 
+    LLMServiceMixin to provide structured LLM calling capabilities for 
+    generating summaries from retrieved information.
+    
+    Attributes:
+        template_service: Service for rendering Jinja2 templates
+    """
 
     def __init__(self):
         super().__init__()
         self.template_service = TemplateService(template_root)
 
 
-# 创建全局服务实例
+# Create global service instance
 summary_service = SummaryNodeService()
 
 
 async def rag_config(state):
+    """
+    Configure RAG (Retrieval-Augmented Generation) settings for summary operations
+    
+    Creates configuration for knowledge base retrieval including similarity thresholds,
+    weights, and reranker settings specifically for summary generation.
+    
+    Args:
+        state: Current state containing user_rag_memory_id
+        
+    Returns:
+        dict: RAG configuration dictionary with knowledge base settings
+    """
     user_rag_memory_id = state.get('user_rag_memory_id', '')
     kb_config = {
         "knowledge_bases": [
@@ -54,6 +75,23 @@ async def rag_config(state):
 
 
 async def rag_knowledge(state, question):
+    """
+    Retrieve knowledge using RAG approach for summary generation
+    
+    Performs knowledge retrieval from configured knowledge bases using the
+    provided question and returns formatted results for summary processing.
+    
+    Args:
+        state: Current state containing configuration
+        question: Question to search for in knowledge base
+        
+    Returns:
+        tuple: (retrieval_knowledge, clean_content, cleaned_query, raw_results)
+            - retrieval_knowledge: List of retrieved knowledge chunks
+            - clean_content: Formatted content string
+            - cleaned_query: Processed query string
+            - raw_results: Raw retrieval results
+    """
     kb_config = await rag_config(state)
     end_user_id = state.get('end_user_id', '')
     user_rag_memory_id = state.get("user_rag_memory_id", '')
@@ -74,6 +112,18 @@ async def rag_knowledge(state, question):
 
 
 async def summary_history(state: ReadState) -> ReadState:
+    """
+    Retrieve conversation history for summary context
+    
+    Gets the conversation history for the current user to provide context
+    for summary generation operations.
+    
+    Args:
+        state: ReadState containing end_user_id
+        
+    Returns:
+        ReadState: Conversation history data
+    """
     end_user_id = state.get("end_user_id", '')
     history = await SessionService(store).get_history(end_user_id, end_user_id, end_user_id)
     return history
@@ -82,11 +132,26 @@ async def summary_history(state: ReadState) -> ReadState:
 async def summary_llm(state: ReadState, history, retrieve_info, template_name, operation_name, response_model,
                       search_mode) -> str:
     """
-    增强的summary_llm函数，包含更好的错误处理和数据验证
+    Enhanced summary_llm function with better error handling and data validation
+    
+    Generates summaries using LLM with structured output. Includes fallback mechanisms
+    for handling LLM failures and provides robust error recovery.
+    
+    Args:
+        state: ReadState containing current context
+        history: Conversation history for context
+        retrieve_info: Retrieved information to summarize
+        template_name: Jinja2 template name for prompt generation
+        operation_name: Type of operation (summary, input_summary, retrieve_summary)
+        response_model: Pydantic model for structured output
+        search_mode: Search mode flag ("0" for simple, "1" for complex)
+        
+    Returns:
+        str: Generated summary text or fallback message
     """
     data = state.get("data", '')
 
-    # 构建系统提示词
+    # Build system prompt
     if str(search_mode) == "0":
         system_prompt = await summary_service.template_service.render_template(
             template_name=template_name,
@@ -103,7 +168,7 @@ async def summary_llm(state: ReadState, history, retrieve_info, template_name, o
             retrieve_info=retrieve_info
         )
     try:
-        # 使用优化的LLM服务进行结构化输出
+        # Use optimized LLM service for structured output
         with get_db_context() as db_session:
             structured = await summary_service.call_llm_structured(
                 state=state,
@@ -112,23 +177,23 @@ async def summary_llm(state: ReadState, history, retrieve_info, template_name, o
                 response_model=response_model,
                 fallback_value=None
             )
-        # 验证结构化响应
+        # Validate structured response
         if structured is None:
             logger.warning("LLM返回None，使用默认回答")
             return "信息不足，无法回答"
 
-        # 根据操作类型提取答案
+        # Extract answer based on operation type
         if operation_name == "summary":
             aimessages = getattr(structured, 'query_answer', None) or "信息不足，无法回答"
         else:
-            # 处理RetrieveSummaryResponse
+            # Handle RetrieveSummaryResponse
             if hasattr(structured, 'data') and structured.data:
                 aimessages = getattr(structured.data, 'query_answer', None) or "信息不足，无法回答"
             else:
                 logger.warning("结构化响应缺少data字段")
                 aimessages = "信息不足，无法回答"
 
-        # 验证答案不为空
+        # Validate answer is not empty
         if not aimessages or aimessages.strip() == "":
             aimessages = "信息不足，无法回答"
 
@@ -137,7 +202,7 @@ async def summary_llm(state: ReadState, history, retrieve_info, template_name, o
     except Exception as e:
         logger.error(f"结构化输出失败: {e}", exc_info=True)
 
-        # 尝试非结构化输出作为fallback
+        # Try unstructured output as fallback
         try:
             logger.info("尝试非结构化输出作为fallback")
             response = await summary_service.call_llm_simple(
@@ -148,9 +213,9 @@ async def summary_llm(state: ReadState, history, retrieve_info, template_name, o
             )
 
             if response and response.strip():
-                # 简单清理响应
+                # Simple response cleaning
                 cleaned_response = response.strip()
-                # 移除可能的JSON标记
+                # Remove possible JSON markers
                 if cleaned_response.startswith('```'):
                     lines = cleaned_response.split('\n')
                     cleaned_response = '\n'.join(lines[1:-1])
@@ -165,6 +230,19 @@ async def summary_llm(state: ReadState, history, retrieve_info, template_name, o
 
 
 async def summary_redis_save(state: ReadState, aimessages) -> ReadState:
+    """
+    Save summary results to Redis session storage
+    
+    Stores the generated summary and user query in Redis for session management
+    and conversation history tracking.
+    
+    Args:
+        state: ReadState containing user and query information
+        aimessages: Generated summary message to save
+        
+    Returns:
+        ReadState: Updated state after saving to Redis
+    """
     data = state.get("data", '')
     end_user_id = state.get("end_user_id", '')
     await SessionService(store).save_session(
@@ -179,6 +257,20 @@ async def summary_redis_save(state: ReadState, aimessages) -> ReadState:
 
 
 async def summary_prompt(state: ReadState, aimessages, raw_results) -> ReadState:
+    """
+    Format summary results for different output types
+    
+    Creates structured output formats for both input summary and retrieval summary
+    operations, including metadata and intermediate results for frontend display.
+    
+    Args:
+        state: ReadState containing storage and user information
+        aimessages: Generated summary message
+        raw_results: Raw search/retrieval results
+        
+    Returns:
+        tuple: (input_summary, retrieve_summary) formatted result dictionaries
+    """
     storage_type = state.get("storage_type", '')
     user_rag_memory_id = state.get("user_rag_memory_id", '')
     data = state.get("data", '')
@@ -217,6 +309,19 @@ async def summary_prompt(state: ReadState, aimessages, raw_results) -> ReadState
 
 
 async def Input_Summary(state: ReadState) -> ReadState:
+    """
+    Generate quick input summary from retrieved information
+    
+    Performs fast retrieval and generates a quick summary response for user queries.
+    This function prioritizes speed by only searching summary nodes and provides
+    immediate feedback to users.
+    
+    Args:
+        state: ReadState containing user query, storage configuration, and context
+        
+    Returns:
+        ReadState: Dictionary containing summary results with status and metadata
+    """
     start = time.time()
     storage_type = state.get("storage_type", '')
     memory_config = state.get('memory_config', None)
@@ -266,6 +371,19 @@ async def Input_Summary(state: ReadState) -> ReadState:
 
 
 async def Retrieve_Summary(state: ReadState) -> ReadState:
+    """
+    Generate comprehensive summary from retrieved expansion issues
+    
+    Processes retrieved expansion issues and generates a detailed summary using LLM.
+    This function handles complex retrieval results and provides comprehensive answers
+    based on expanded query results.
+    
+    Args:
+        state: ReadState containing retrieve data with expansion issues
+        
+    Returns:
+        ReadState: Dictionary containing comprehensive summary results
+    """
     retrieve = state.get("retrieve", '')
     history = await summary_history(state)
     import json
@@ -299,13 +417,26 @@ async def Retrieve_Summary(state: ReadState) -> ReadState:
         duration = 0.0
     log_time('Retrieval summary', duration)
 
-    # 修复协程调用 - 先await，然后访问返回值
+    # Fixed coroutine call - await first, then access return value
     summary_result = await summary_prompt(state, aimessages, retrieve_info_str)
     summary = summary_result[1]
     return {"summary": summary}
 
 
 async def Summary(state: ReadState) -> ReadState:
+    """
+    Generate final comprehensive summary from verified data
+    
+    Creates the final summary using verified expansion issues and conversation history.
+    This function processes verified data to generate the most comprehensive and
+    accurate response to user queries.
+    
+    Args:
+        state: ReadState containing verified data and query information
+        
+    Returns:
+        ReadState: Dictionary containing final summary results
+    """
     start = time.time()
     query = state.get("data", '')
     verify = state.get("verify", '')
@@ -336,13 +467,26 @@ async def Summary(state: ReadState) -> ReadState:
         duration = 0.0
     log_time('Retrieval summary', duration)
 
-    # 修复协程调用 - 先await，然后访问返回值
+    # Fixed coroutine call - await first, then access return value
     summary_result = await summary_prompt(state, aimessages, retrieve_info_str)
     summary = summary_result[1]
     return {"summary": summary}
 
 
 async def Summary_fails(state: ReadState) -> ReadState:
+    """
+    Generate fallback summary when normal summary process fails
+    
+    Provides a fallback summary generation mechanism when the standard summary
+    process encounters errors or fails to produce satisfactory results. Uses
+    a specialized failure template to handle edge cases.
+    
+    Args:
+        state: ReadState containing verified data and failure context
+        
+    Returns:
+        ReadState: Dictionary containing fallback summary results
+    """
     storage_type = state.get("storage_type", '')
     user_rag_memory_id = state.get("user_rag_memory_id", '')
     history = await summary_history(state)

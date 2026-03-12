@@ -29,6 +29,18 @@ logger = get_agent_logger(__name__)
 
 
 async def rag_config(state):
+    """
+    Configure RAG (Retrieval-Augmented Generation) settings
+    
+    Creates configuration for knowledge base retrieval including similarity thresholds,
+    weights, and reranker settings.
+    
+    Args:
+        state: Current state containing user_rag_memory_id
+        
+    Returns:
+        dict: RAG configuration dictionary
+    """
     user_rag_memory_id = state.get('user_rag_memory_id', '')
     kb_config = {
         "knowledge_bases": [
@@ -48,6 +60,19 @@ async def rag_config(state):
 
 
 async def rag_knowledge(state, question):
+    """
+    Retrieve knowledge using RAG approach
+    
+    Performs knowledge retrieval from configured knowledge bases using the
+    provided question and returns formatted results.
+    
+    Args:
+        state: Current state containing configuration
+        question: Question to search for
+        
+    Returns:
+        tuple: (retrieval_knowledge, clean_content, cleaned_query, raw_results)
+    """
     kb_config = await rag_config(state)
     end_user_id = state.get('end_user_id', '')
     user_rag_memory_id = state.get("user_rag_memory_id", '')
@@ -68,12 +93,24 @@ async def rag_knowledge(state, question):
 
 
 async def llm_infomation(state: ReadState) -> ReadState:
+    """
+    Get LLM configuration information from state
+    
+    Retrieves model configuration details including model ID and tenant ID
+    from the memory configuration in the current state.
+    
+    Args:
+        state: ReadState containing memory configuration
+        
+    Returns:
+        ReadState: Model configuration as Pydantic model
+    """
     memory_config = state.get('memory_config', None)
     model_id = memory_config.llm_model_id
     tenant_id = memory_config.tenant_id
 
-    # 使用现有的 memory_config 而不是重新查询数据库
-    # 或者使用线程安全的数据库访问
+    # Use existing memory_config instead of re-querying database
+    # or use thread-safe database access
     with get_db_context() as db:
         result_orm = ModelConfigService.get_model_by_id(db=db, model_id=model_id, tenant_id=tenant_id)
         result_pydantic = model_schema.ModelConfig.model_validate(result_orm)
@@ -82,16 +119,20 @@ async def llm_infomation(state: ReadState) -> ReadState:
 
 async def clean_databases(data) -> str:
     """
-    简化的数据库搜索结果清理函数
+    Simplified database search result cleaning function
+    
+    Processes and cleans search results from various sources including
+    reranked results and time-based search results. Extracts text content
+    from structured data and returns as formatted string.
     
     Args:
-        data: 搜索结果数据
+        data: Search result data (can be string, dict, or other types)
         
     Returns:
-        清理后的内容字符串
+        str: Cleaned content string
     """
     try:
-        # 解析JSON字符串
+        # Parse JSON string
         if isinstance(data, str):
             try:
                 data = json.loads(data)
@@ -101,24 +142,24 @@ async def clean_databases(data) -> str:
         if not isinstance(data, dict):
             return str(data)
 
-        # 获取结果数据
+        # Get result data
         # with open("搜索结果.json","w",encoding='utf-8') as f:
         #     f.write(json.dumps(data, indent=4, ensure_ascii=False))
         results = data.get('results', data)
         if not isinstance(results, dict):
             return str(results)
 
-        # 收集所有内容
+        # Collect all content
         content_list = []
 
-        # 处理重排序结果
+        # Process reranked results
         reranked = results.get('reranked_results', {})
         if reranked:
             for category in ['summaries', 'statements', 'chunks', 'entities']:
                 items = reranked.get(category, [])
                 if isinstance(items, list):
                     content_list.extend(items)
-        # 处理时间搜索结果
+        # Process time search results
         time_search = results.get('time_search', {})
         if time_search:
             if isinstance(time_search, dict):
@@ -128,7 +169,7 @@ async def clean_databases(data) -> str:
             elif isinstance(time_search, list):
                 content_list.extend(time_search)
 
-        # 提取文本内容
+        # Extract text content
         text_parts = []
         for item in content_list:
             if isinstance(item, dict):
@@ -146,10 +187,19 @@ async def clean_databases(data) -> str:
 
 
 async def retrieve_nodes(state: ReadState) -> ReadState:
-    '''
-
-    模型信息
-    '''
+    """
+    Retrieve information using simplified search approach
+    
+    Processes extended problems from previous nodes and performs retrieval
+    using either RAG or hybrid search based on storage type. Handles concurrent
+    processing of multiple questions and deduplicates results.
+    
+    Args:
+        state: ReadState containing problem extensions and configuration
+        
+    Returns:
+        ReadState: Updated state with retrieval results and intermediate outputs
+    """
 
     problem_extension = state.get('problem_extension', '')['context']
     storage_type = state.get('storage_type', '')
@@ -163,7 +213,7 @@ async def retrieve_nodes(state: ReadState) -> ReadState:
             problem_list.append(data)
     logger.info(f"Retrieve: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
 
-    # 创建异步任务处理单个问题
+    # Create async task to process individual questions
     async def process_question_nodes(idx, question):
         try:
             # Prepare search parameters based on storage type
@@ -209,7 +259,7 @@ async def retrieve_nodes(state: ReadState) -> ReadState:
                 }
             }
 
-    # 并发处理所有问题
+    # Process all questions concurrently
     tasks = [process_question_nodes(idx, question) for idx, question in enumerate(problem_list)]
     databases_anser = await asyncio.gather(*tasks)
     databases_data = {
@@ -257,7 +307,20 @@ async def retrieve_nodes(state: ReadState) -> ReadState:
 
 
 async def retrieve(state: ReadState) -> ReadState:
-    # 从state中获取end_user_id
+    """
+    Advanced retrieve function using LangChain agents and tools
+    
+    Uses LangChain agents with specialized retrieval tools (time-based and hybrid)
+    to perform sophisticated information retrieval. Supports both RAG and traditional
+    memory storage approaches with concurrent processing and result deduplication.
+    
+    Args:
+        state: ReadState containing problem extensions and configuration
+        
+    Returns:
+        ReadState: Updated state with retrieval results and intermediate outputs
+    """
+    # Get end_user_id from state
     import time
     start = time.time()
     problem_extension = state.get('problem_extension', '')['context']
@@ -299,21 +362,21 @@ async def retrieve(state: ReadState) -> ReadState:
         system_prompt=f"我是检索专家，可以根据适合的工具进行检索。当前使用的end_user_id是: {end_user_id}"
     )
 
-    # 创建异步任务处理单个问题
+    # Create async task to process individual questions
     import asyncio
 
-    # 在模块级别定义信号量，限制最大并发数
-    SEMAPHORE = asyncio.Semaphore(5)  # 限制最多5个并发数据库操作
+    # Define semaphore at module level to limit maximum concurrency
+    SEMAPHORE = asyncio.Semaphore(5)  # Limit to maximum 5 concurrent database operations
 
     async def process_question(idx, question):
-        async with SEMAPHORE:  # 限制并发
+        async with SEMAPHORE:  # Limit concurrency
             try:
                 if storage_type == "rag" and user_rag_memory_id:
                     retrieval_knowledge, clean_content, cleaned_query, raw_results = await rag_knowledge(state,
                                                                                                          question)
                 else:
                     cleaned_query = question
-                    # 使用 asyncio 在线程池中运行同步的 agent.invoke
+                    # Use asyncio to run synchronous agent.invoke in thread pool
                     import asyncio
                     response = await asyncio.get_event_loop().run_in_executor(
                         None,
@@ -362,7 +425,7 @@ async def retrieve(state: ReadState) -> ReadState:
                     }
                 }
 
-    # 并发处理所有问题
+    # Process all questions concurrently
     import asyncio
     tasks = [process_question(idx, question) for idx, question in enumerate(problem_list)]
     databases_anser = await asyncio.gather(*tasks)

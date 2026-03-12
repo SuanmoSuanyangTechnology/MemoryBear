@@ -22,57 +22,73 @@ logger = get_agent_logger(__name__)
 template_root = os.path.join(PROJECT_ROOT_, 'memory', 'agent', 'utils', 'prompt')
 
 async def write_rag_agent(end_user_id, user_message, ai_message, user_rag_memory_id):
-    # RAG 模式：组合消息为字符串格式（保持原有逻辑）
+    """
+    Write messages to RAG storage system
+    
+    Combines user and AI messages into a single string format and stores them
+    in the RAG (Retrieval-Augmented Generation) knowledge base for future retrieval.
+    
+    Args:
+        end_user_id: User identifier for the conversation
+        user_message: User's input message content
+        ai_message: AI's response message content
+        user_rag_memory_id: RAG memory identifier for storage location
+    """
+    # RAG mode: combine messages into string format (maintain original logic)
     combined_message = f"user: {user_message}\nassistant: {ai_message}"
     await write_rag(end_user_id, combined_message, user_rag_memory_id)
     logger.info(f'RAG_Agent:{end_user_id};{user_rag_memory_id}')
 async def write(storage_type, end_user_id, user_message, ai_message, user_rag_memory_id, actual_end_user_id,
                 actual_config_id, long_term_messages=[]):
     """
-    写入记忆（支持结构化消息）
-
+    Write memory with structured message support
+    
+    Handles memory writing operations for different storage types (Neo4j/RAG).
+    Supports both individual message pairs and batch long-term message processing.
+    
     Args:
-        storage_type: 存储类型 (neo4j/rag)
-        end_user_id: 终端用户ID
-        user_message: 用户消息内容
-        ai_message: AI 回复内容
-        user_rag_memory_id: RAG 记忆ID
-        actual_end_user_id: 实际用户ID
-        actual_config_id: 配置ID
-
-    逻辑说明：
-    - RAG 模式：组合 user_message 和 ai_message 为字符串格式，保持原有逻辑不变
-    - Neo4j 模式：使用结构化消息列表
-      1. 如果 user_message 和 ai_message 都不为空：创建配对消息 [user, assistant]
-      2. 如果只有 user_message：创建单条用户消息 [user]（用于历史记忆场景）
-      3. 每条消息会被转换为独立的 Chunk，保留 speaker 字段
+        storage_type: Storage type identifier ("neo4j" or "rag")
+        end_user_id: Terminal user identifier
+        user_message: User message content
+        ai_message: AI response content
+        user_rag_memory_id: RAG memory identifier
+        actual_end_user_id: Actual user identifier for storage
+        actual_config_id: Configuration identifier
+        long_term_messages: Optional list of structured messages for batch processing
+        
+    Logic explanation:
+    - RAG mode: Combines user_message and ai_message into string format, maintains original logic
+    - Neo4j mode: Uses structured message lists
+      1. If both user_message and ai_message are not empty: Creates paired messages [user, assistant]
+      2. If only user_message exists: Creates single user message [user] (for historical memory scenarios)
+      3. Each message is converted to independent Chunk, preserving speaker field
     """
 
     db = next(get_db())
     try:
         actual_config_id = resolve_config_id(actual_config_id, db)
-        # Neo4j 模式：使用结构化消息列表
+        # Neo4j mode: Use structured message lists
         structured_messages = []
 
-        # 始终添加用户消息（如果不为空）
+        # Always add user message (if not empty)
         if isinstance(user_message, str) and user_message.strip() != "":
             structured_messages.append({"role": "user", "content": user_message})
 
-        # 只有当 AI 回复不为空时才添加 assistant 消息
+        # Only add assistant message when AI reply is not empty
         if isinstance(ai_message, str) and ai_message.strip() != "":
             structured_messages.append({"role": "assistant", "content": ai_message})
 
-        # 如果提供了 long_term_messages，使用它替代 structured_messages
+        # If long_term_messages provided, use it to replace structured_messages
         if long_term_messages and isinstance(long_term_messages, list):
             structured_messages = long_term_messages
         elif long_term_messages and isinstance(long_term_messages, str):
-            # 如果是 JSON 字符串，先解析
+            # If it's a JSON string, parse it first
             try:
                 structured_messages = json.loads(long_term_messages)
             except json.JSONDecodeError:
                 logger.error(f"Failed to parse long_term_messages as JSON: {long_term_messages}")
 
-        # 如果没有消息，直接返回
+        # If no messages, return directly
         if not structured_messages:
             logger.warning(f"No messages to write for user {actual_end_user_id}")
             return
@@ -80,11 +96,11 @@ async def write(storage_type, end_user_id, user_message, ai_message, user_rag_me
         logger.info(
             f"[WRITE] Submitting Celery task - user={actual_end_user_id}, messages={len(structured_messages)}, config={actual_config_id}")
         write_id = write_message_task.delay(
-            actual_end_user_id,  # end_user_id: 用户ID
-            structured_messages,  # message: JSON 字符串格式的消息列表
-            str(actual_config_id),  # config_id: 配置ID字符串
+            actual_end_user_id,  # end_user_id: User ID
+            structured_messages,  # message: JSON string format message list
+            str(actual_config_id),  # config_id: Configuration ID string
             storage_type,  # storage_type: "neo4j"
-            user_rag_memory_id or ""  # user_rag_memory_id: RAG记忆ID（Neo4j模式下不使用）
+            user_rag_memory_id or ""  # user_rag_memory_id: RAG memory ID (not used in Neo4j mode)
         )
         logger.info(f"[WRITE] Celery task submitted - task_id={write_id}")
         write_status = get_task_memory_write_result(str(write_id))
@@ -93,6 +109,20 @@ async def write(storage_type, end_user_id, user_message, ai_message, user_rag_me
         db.close()
 
 async def term_memory_save(long_term_messages,actual_config_id,end_user_id,type,scope):
+    """
+    Save long-term memory data to database
+    
+    Handles the storage of long-term memory data based on different strategies
+    (chunk-based or aggregate-based) and manages the transition from short-term
+    to long-term memory storage.
+    
+    Args:
+        long_term_messages: Long-term message data to be saved
+        actual_config_id: Configuration identifier for memory settings
+        end_user_id: User identifier for memory association
+        type: Memory storage strategy type (STRATEGY_CHUNK or STRATEGY_AGGREGATE)
+        scope: Scope/window size for memory processing
+    """
     with get_db_context() as db_session:
         repo = LongTermMemoryRepository(db_session)
 
@@ -113,16 +143,20 @@ async def term_memory_save(long_term_messages,actual_config_id,end_user_id,type,
 
 
 
-'''根据窗口'''
+"""Window-based dialogue processing"""
 async def window_dialogue(end_user_id,langchain_messages,memory_config,scope):
-    '''
-    根据窗口获取redis数据,写入neo4j：
-     Args:
-        end_user_id: 终端用户ID
-        memory_config: 内存配置对象
-        langchain_messages：原始数据LIST
-        scope：窗口大小
-    '''
+    """
+    Process dialogue based on window size and write to Neo4j
+    
+    Manages conversation data based on a sliding window approach. When the window
+    reaches the specified scope size, it triggers long-term memory storage to Neo4j.
+    
+    Args:
+        end_user_id: Terminal user identifier
+        memory_config: Memory configuration object containing settings
+        langchain_messages: Original message data list
+        scope: Window size determining when to trigger long-term storage
+    """
     scope=scope
     is_end_user_id = count_store.get_sessions_count(end_user_id)
     if is_end_user_id is not False:
@@ -135,7 +169,7 @@ async def window_dialogue(end_user_id,langchain_messages,memory_config,scope):
     elif int(is_end_user_id) == int(scope):
         logger.info('写入长期记忆NEO4J')
         formatted_messages = (redis_messages)
-        # 获取 config_id（如果 memory_config 是对象，提取 config_id；否则直接使用）
+        # Get config_id (if memory_config is an object, extract config_id; otherwise use directly)
         if hasattr(memory_config, 'config_id'):
             config_id = memory_config.config_id
         else:
@@ -148,14 +182,19 @@ async def window_dialogue(end_user_id,langchain_messages,memory_config,scope):
         count_store.save_sessions_count(end_user_id, 1, langchain_messages)
 
 
-"""根据时间"""
+"""Time-based memory processing"""
 async def memory_long_term_storage(end_user_id,memory_config,time):
-    '''
-    根据时间获取redis数据,写入neo4j：
-     Args:
-        end_user_id: 终端用户ID
-        memory_config: 内存配置对象
-    '''
+    """
+    Process memory storage based on time intervals and write to Neo4j
+    
+    Retrieves Redis data based on time intervals and writes it to Neo4j for
+    long-term storage. This function handles time-based memory consolidation.
+    
+    Args:
+        end_user_id: Terminal user identifier
+        memory_config: Memory configuration object containing settings
+        time: Time interval for data retrieval
+    """
     long_time_data = write_store.find_user_recent_sessions(end_user_id, time)
     format_messages = (long_time_data)
     messages=[]
@@ -166,19 +205,25 @@ async def memory_long_term_storage(end_user_id,memory_config,time):
     if format_messages!=[]:
         await write(AgentMemory_Long_Term.STORAGE_NEO4J, end_user_id, "", "", None, end_user_id,
                     memory_config, messages)
-'''聚合判断'''
+"""Aggregation judgment processing"""
 async def aggregate_judgment(end_user_id: str, ori_messages: list, memory_config) -> dict:
     """
-    聚合判断函数：判断输入句子和历史消息是否描述同一事件
+    Aggregation judgment function: determine if input sentence and historical messages describe the same event
+    
+    Uses LLM-based analysis to determine whether new messages should be aggregated with existing
+    historical data or stored as separate events. This helps optimize memory storage and retrieval.
     
     Args:
-        end_user_id: 终端用户ID
-        ori_messages: 原始消息列表，格式如 [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
-        memory_config: 内存配置对象
+        end_user_id: Terminal user identifier
+        ori_messages: Original message list, format like [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
+        memory_config: Memory configuration object containing LLM settings
+        
+    Returns:
+        dict: Aggregation judgment result containing is_same_event flag and processed output
     """
 
     try:
-        # 1. 获取历史会话数据（使用新方法）
+        # 1. Get historical session data (using new method)
         result = write_store.get_all_sessions_by_end_user_id(end_user_id)
         history = await format_parsing(result)
         if not result:
