@@ -65,7 +65,7 @@ celery_app.conf.update(
     
     # 时区
     timezone='Asia/Shanghai',
-    enable_utc=True,
+    enable_utc=False,
     
     # 任务追踪
     task_track_started=True,
