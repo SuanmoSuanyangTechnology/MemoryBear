@@ -18,6 +18,7 @@ from app.models.tool_model import ToolConfig as ToolConfigModel
 from app.models.workflow_model import WorkflowConfig
 from app.services.workflow_service import WorkflowService
 from app.core.workflow.adapters.memory_bear.memory_bear_adapter import MemoryBearAdapter
+from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
 
 
 class AppDslService:
@@ -220,7 +221,7 @@ class AppDslService:
             id=uuid.uuid4(),
             workspace_id=workspace_id,
             created_by=user_id,
-            name=app_meta.get("name", "导入应用"),
+            name=self._unique_app_name(app_meta.get("name", "导入应用"), workspace_id, app_type),
             description=app_meta.get("description"),
             icon=app_meta.get("icon"),
             icon_type=app_meta.get("icon_type"),
@@ -295,6 +296,19 @@ class AppDslService:
         self.db.commit()
         self.db.refresh(new_app)
         return new_app, warnings
+
+    def _unique_app_name(self, name: str, workspace_id: uuid.UUID, app_type: AppType) -> str:
+        existing = {r[0] for r in self.db.query(App.name).filter(
+            App.workspace_id == workspace_id,
+            App.type == app_type,
+            App.is_active.is_(True)
+        ).all()}
+        if name not in existing:
+            return name
+        counter = 1
+        while f"{name}({counter})" in existing:
+            counter += 1
+        return f"{name}({counter})"
 
     def _resolve_model(self, ref: Optional[dict], tenant_id: uuid.UUID, warnings: list) -> Optional[uuid.UUID]:
         if not ref:
@@ -398,9 +412,19 @@ class AppDslService:
         config_id = memory.get("memory_config_id") or memory.get("memory_content")
         if not config_id:
             return memory
-        from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+        try:
+            config_uuid = uuid.UUID(str(config_id))
+        except (ValueError, AttributeError):
+            exists = self.db.query(MemoryConfigModel).filter(
+                MemoryConfigModel.config_id_old == int(config_id),
+                MemoryConfigModel.workspace_id == workspace_id
+            ).first()
+            if not exists:
+                warnings.append(f"记忆配置 '{config_id}' 未匹配，已置空，请导入后手动配置")
+                return {**memory, "memory_config_id": None, "enabled": False}
+            return memory
         exists = self.db.query(MemoryConfigModel).filter(
-            MemoryConfigModel.config_id == config_id,
+            MemoryConfigModel.config_id == config_uuid,
             MemoryConfigModel.workspace_id == workspace_id
         ).first()
         if not exists:
