@@ -1818,16 +1818,12 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       marketInDatabase: 'In Database',
       marketAdd: 'Add',
       marketRefresh: 'Refresh',
-<<<<<<< HEAD
       marketConfigBtn: 'Configure',
       marketConfigConnection: 'Configure Connection',
       marketNoData: 'No Data',
       marketNoDataDesc: 'This market currently has no available services',
       marketNoSearchResult: 'No Search Results',
       marketNoSearchResultDesc: 'No matching services found, please try other keywords',
-=======
-      marketConfig: 'Configure Connection',
->>>>>>> 5041e082 (feat(app): add application share permission management- Add database model for share permission- Add API endpoints for permission CRUD- Add service layer logic for permission validation- Update dependency libraries)
       marketNoServices: 'No MCP Services Available',
       marketNotConnected: 'Not Connected to This Market',
       marketNoServicesDesc: 'This market currently has no available services',

@@ -1814,16 +1814,12 @@ export const zh = {
       marketInDatabase: '已入库',
       marketAdd: '添加',
       marketRefresh: '刷新',
-<<<<<<< HEAD
       marketConfigBtn: '配置',
       marketConfigConnection: '配置连接',
       marketNoData: '暂无数据',
       marketNoDataDesc: '该市场暂时没有可用的服务',
       marketNoSearchResult: '无搜索结果',
       marketNoSearchResultDesc: '未找到匹配的服务，请尝试其他关键词',
-=======
-      marketConfig: '配置连接',
->>>>>>> 5041e082 (feat(app): add application share permission management- Add database model for share permission- Add API endpoints for permission CRUD- Add service layer logic for permission validation- Update dependency libraries)
       marketNoServices: '暂无可用的 MCP 服务',
       marketNotConnected: '尚未连接此市场',
       marketNoServicesDesc: '该市场暂时没有可用的服务',
