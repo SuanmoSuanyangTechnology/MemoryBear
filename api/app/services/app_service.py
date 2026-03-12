@@ -146,33 +146,27 @@ class AppService:
         return share.permission if share else None
 
     def _validate_app_writable(self, app: App, workspace_id: Optional[uuid.UUID]) -> None:
-        """验证应用是否可写（owner 或 editable 共享）
+        """Validate that the app config is writable (owner only).
 
-        用于修改配置、更新应用等写操作。
-        - 本工作空间的应用：允许
-        - editable 共享的应用：允许
-        - readonly 共享的应用：拒绝
+        Shared apps (both readonly and editable) cannot modify config.
+        - Own workspace app: allowed
+        - Any shared app: denied
 
         Raises:
-            BusinessException: 当应用不可写时
+            BusinessException: when app is not writable
         """
         if workspace_id is None:
             return
 
-        # 本工作空间的应用，直接放行
+        # Own workspace app, allow
         if app.workspace_id == workspace_id:
-            return
-
-        # 检查共享权限
-        permission = self._get_share_permission(app, workspace_id)
-        if permission == "editable":
             return
 
         logger.warning(
             "应用写操作被拒",
-            extra={"app_id": str(app.id), "workspace_id": str(workspace_id), "permission": permission}
+            extra={"app_id": str(app.id), "workspace_id": str(workspace_id)}
         )
-        raise BusinessException("应用不可修改（只读共享）", BizCode.WORKSPACE_NO_ACCESS)
+        raise BusinessException("共享应用不可修改配置", BizCode.WORKSPACE_NO_ACCESS)
 
     def _get_app_or_404(self, app_id: uuid.UUID) -> App:
         """获取应用或抛出404异常
@@ -1765,6 +1759,14 @@ class AppService:
         # 1. 验证应用
         app = self._get_app_or_404(app_id)
         self._validate_workspace_access(app, workspace_id)
+
+        # 仅允许 agent 和 workflow 类型共享，multi_agent 不支持
+        from app.models.app_model import AppType
+        if app.type == AppType.MULTI_AGENT:
+            raise BusinessException(
+                "集群 Agent 不支持共享应用功能",
+                BizCode.INVALID_PARAMETER
+            )
 
         # 2. 验证目标工作空间
         for target_ws_id in target_workspace_ids:

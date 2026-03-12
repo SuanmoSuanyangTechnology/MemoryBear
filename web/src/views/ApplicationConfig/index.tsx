@@ -79,7 +79,7 @@ const ApplicationConfig: React.FC = () => {
     })
   }
 
-  const isReadonlyShared = application?.is_shared && application?.share_permission === 'readonly'
+  const isShared = application?.is_shared
 
   return (
     <>
@@ -91,9 +91,9 @@ const ApplicationConfig: React.FC = () => {
         appRef={application?.type === 'agent' ? agentRef : application?.type === 'multi_agent' ? clusterRef : application?.type === 'workflow' ? workflowRef : undefined}
         workflowRef={workflowRef}
       />
-      {/* arrangement tab：只读共享时显示只读视图，否则显示正常编辑界面 */}
+      {/* arrangement tab：共享应用显示只读视图，否则显示正常编辑界面 */}
       {activeTab === 'arrangement' && (
-        isReadonlyShared ? (
+        isShared ? (
           <SharedReadonlyView application={application as Application} />
         ) : (
           <>

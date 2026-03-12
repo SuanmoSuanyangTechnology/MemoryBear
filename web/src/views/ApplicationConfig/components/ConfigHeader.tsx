@@ -156,11 +156,11 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
     const baseKeys = application?.type === 'workflow' ? ['edit', 'copy', 'export', 'delete'] : ['edit', 'copy', 'delete']
     let keys: string[]
     if (application?.is_shared && application?.share_permission === 'readonly') {
-      // readonly: hide copy and export
-      keys = baseKeys.filter(k => k !== 'copy' && k !== 'export')
+      // readonly: only remove (delete = remove shared app)
+      keys = ['delete']
     } else if (application?.is_shared && application?.share_permission === 'editable') {
-      // editable shared: all types include export
-      keys = baseKeys.includes('export') ? baseKeys : [...baseKeys.filter(k => k !== 'delete'), 'export', 'delete']
+      // editable: copy + export(agent & workflow) + delete, no edit
+      keys = application?.type !== 'multi_agent' ? ['copy', 'export', 'delete'] : ['copy', 'delete']
     } else {
       keys = baseKeys
     }
@@ -201,7 +201,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
             className={styles.tabs}
           />
         </div>
-        {application?.type === 'workflow'
+        {application?.type === 'workflow' && !application?.is_shared
         ? <div className="rb:h-8 rb:flex rb:items-center rb:justify-end rb:gap-2.5">
             <Button onClick={clear}>{t('workflow.clear')}</Button>
             <Button onClick={addvariable}>{t('workflow.addvariable')}</Button>

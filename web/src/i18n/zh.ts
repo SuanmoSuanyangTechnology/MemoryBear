@@ -2729,6 +2729,7 @@ export const zh = {
       selectWorkspace: '请选择目标工作空间',
       selectTarget: '选择目标工作空间',
       selectTargetTip: '共享后，目标工作空间可使用该应用，但默认不可修改配置',
+      selectedCount: '已选 {{count}} 个',
       permissionMode: '权限模式',
       readonly: '仅使用',
       editable: '可编辑',

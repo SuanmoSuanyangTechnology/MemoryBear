@@ -36,7 +36,8 @@ const tagColors: Record<Release['tagKey'], TagProps['color']> = {
  * @param refresh - Function to refresh application data
  */
 const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refresh}) => {
-  const isReadonlyShared = data.is_shared && data.share_permission === 'readonly'
+  const isEditableShared = data.is_shared && data.share_permission === 'editable'
+  const isShared = data.is_shared
   const { t } = useTranslation();
   const { message } = App.useApp()
   const releaseModalRef = useRef<ReleaseModalRef>(null)
@@ -129,12 +130,12 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
 
             <Space size={10}>
               {selectedVersion && <>
-                {!isReadonlyShared && data?.type !== 'multi_agent' && <Button onClick={handleExport}>{t('common.export')}</Button>}
-                {!isReadonlyShared && data.current_release_id !== selectedVersion.id && <Button onClick={handleRollback}>{t('application.willRollToThisVersion')}</Button>}
-                {!isReadonlyShared && <Button type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</Button>}
-                {!isReadonlyShared && <Button type="primary" ghost onClick={() => appShareModalRef.current?.handleOpen()}>{t('appShare.title')}</Button>}
+                {(!isShared || isEditableShared) && data?.type !== 'multi_agent' && <Button onClick={handleExport}>{t('common.export')}</Button>}
+                {!isShared && data.current_release_id !== selectedVersion.id && <Button onClick={handleRollback}>{t('application.willRollToThisVersion')}</Button>}
+                {!isShared && <Button type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</Button>}
+                {!isShared && <Button type="primary" ghost onClick={() => appShareModalRef.current?.handleOpen()}>{t('appShare.title')}</Button>}
               </>}
-              {!isReadonlyShared && <Button type="primary" onClick={() => releaseModalRef.current?.handleOpen()}>{t('application.release')}</Button>}
+              {!isShared && <Button type="primary" onClick={() => releaseModalRef.current?.handleOpen()}>{t('application.release')}</Button>}
             </Space>
           </div>
           {selectedVersion && 

@@ -2728,6 +2728,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       selectWorkspace: 'Please select a target workspace',
       selectTarget: 'Select Target Workspace',
       selectTargetTip: 'After sharing, the target workspace can use this app but cannot modify its configuration by default',
+      selectedCount: '{{count}} selected',
       permissionMode: 'Permission Mode',
       readonly: 'Use Only',
       editable: 'Editable',
