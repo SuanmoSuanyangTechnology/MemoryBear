@@ -1150,3 +1150,12 @@ WITH c, count(e) AS cnt
 SET c.member_count = cnt
 RETURN c.community_id AS community_id, cnt AS member_count
 """
+
+UPDATE_COMMUNITY_METADATA = """
+MATCH (c:Community {community_id: $community_id, end_user_id: $end_user_id})
+SET c.name         = $name,
+    c.summary      = $summary,
+    c.core_entities = $core_entities,
+    c.updated_at   = datetime()
+RETURN c.community_id AS community_id
+"""

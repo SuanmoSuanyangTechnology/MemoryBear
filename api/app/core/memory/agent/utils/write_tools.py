@@ -165,7 +165,9 @@ async def write(
                 statement_chunk_edges=all_statement_chunk_edges,
                 statement_entity_edges=all_statement_entity_edges,
                 entity_edges=all_entity_entity_edges,
-                connector=neo4j_connector
+                connector=neo4j_connector,
+                config_id=config_id,
+                llm_model_id=str(memory_config.llm_model_id) if memory_config.llm_model_id else None,
             )
             if success:
                 logger.info("Successfully saved all data to Neo4j")

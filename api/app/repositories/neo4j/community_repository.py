@@ -17,6 +17,7 @@ from app.repositories.neo4j.cypher_queries import (
     GET_ALL_COMMUNITY_MEMBERS_BATCH,
     CHECK_USER_HAS_COMMUNITIES,
     UPDATE_COMMUNITY_MEMBER_COUNT,
+    UPDATE_COMMUNITY_METADATA,
 )
 
 logger = logging.getLogger(__name__)
@@ -147,3 +148,26 @@ class CommunityRepository:
         except Exception as e:
             logger.error(f"refresh_member_count failed: {e}")
             return 0
+
+    async def update_community_metadata(
+        self,
+        community_id: str,
+        end_user_id: str,
+        name: str,
+        summary: str,
+        core_entities: List[str],
+    ) -> bool:
+        """更新社区的名称、摘要和核心实体列表。"""
+        try:
+            result = await self.connector.execute_query(
+                UPDATE_COMMUNITY_METADATA,
+                community_id=community_id,
+                end_user_id=end_user_id,
+                name=name,
+                summary=summary,
+                core_entities=core_entities,
+            )
+            return bool(result)
+        except Exception as e:
+            logger.error(f"update_community_metadata failed: {e}")
+            return False
