@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 10:58:41
+ * @Last Modified time: 2026-03-12 18:25:06
  */
 import { request } from '@/utils/request'
 import type {
@@ -118,8 +118,9 @@ export const getChunkInsight = (end_user_id: string) => {
   return request.get(`/dashboard/chunk_insight`, { end_user_id })
 }
 // RAG User Memory - Storage content
-export const getRagContent = (end_user_id: string) => {
-  return request.get(`/dashboard/rag_content`, { end_user_id, limit: 20 })
+export const getRagContentUrl = '/dashboard/rag_content'
+export const getRagContent = (end_user_id: string, page = 1, pagesize = 20) => {
+  return request.get(getRagContentUrl, { end_user_id, page, pagesize })
 }
 // Emotion distribution analysis
 export const getWordCloud = (end_user_id: string) => {

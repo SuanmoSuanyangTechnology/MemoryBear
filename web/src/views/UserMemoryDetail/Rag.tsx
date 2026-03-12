@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:11 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:57:11 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-12 18:00:11
  */
 /**
  * RAG User Memory Detail View
@@ -150,9 +150,12 @@ const Rag: FC = () => {
       })
   }
   return (
-    <Row gutter={[16, 16]} className="rb:pb-6">
+    <Row gutter={[16, 16]} className="rb:h-full!">
       <Col span={8}>
-        <RbCard>
+        <RbCard
+          className="rb:h-[calc(100vh-104px)]!"
+          bodyClassName="rb:overflow-y-auto! rb:h-full!"
+        >
           <div className="rb:flex rb:items-center">
             <div className="rb:flex-[0_0_auto] rb:w-20 rb:h-20 rb:text-center rb:font-semibold rb:text-[28px] rb:leading-20 rb:rounded-lg rb:text-[#FBFDFF] rb:bg-[#155EEF]">{name?.[0]}</div>
             <Flex>
