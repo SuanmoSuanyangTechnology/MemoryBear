@@ -9,7 +9,6 @@ import type { McpServiceModalRef } from './types';
 import pageEmptyIcon from '@/assets/images/empty/pageEmpty.png'
 import Empty from '@/components/Empty/index'
 import { getMarketTools, getMarketConfig, getMarketMCPs, getMarketMCPDetail, getMarketMCPsActivated, getTools } from '@/api/tools';
-import BodyWrapper from '@/components/Empty/BodyWrapper';
 interface MarketSource {
   id: string;
   name: string;
@@ -75,6 +74,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
   const [activatedMcps, setActivatedMcps] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 20;
+  const searchTimerRef = useRef<number | null>(null);
 
   // 获取市场数据
   useEffect(() => {
@@ -109,7 +109,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
     fetchMarketData();
   }, [message]);
 
-  const fetchMcpList = async (sourceId: string, page = 1, append = false) => {
+  const fetchMcpList = async (sourceId: string, page = 1, append = false, keywords = '') => {
     setLoading(true);
     try {
       let configId = configIdMap[sourceId];
@@ -139,7 +139,12 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
       const allTools: any = await getTools({ tool_type: 'mcp' });
       const toolsList = Array.isArray(allTools) ? allTools : [];
 
-      const res: any = await getMarketMCPs({ mcp_market_config_id: configId, page, pagesize: pageSize });
+      const res: any = await getMarketMCPs({ 
+        mcp_market_config_id: configId, 
+        page, 
+        pagesize: pageSize,
+        ...(keywords ? { keywords } : {})
+      });
       if (res?.items && Array.isArray(res.items)) {
         // 标记已激活和已入库的 MCP
         const mcpsWithActivated = res.items.map((item: MarketMcp) => {
@@ -176,8 +181,46 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
 
   const loadMore = useCallback(() => {
     if (!selectedSource || loading) return;
-    fetchMcpList(selectedSource, currentPage + 1, true);
-  }, [selectedSource, currentPage, loading]);
+    fetchMcpList(selectedSource, currentPage + 1, true, searchKeyword);
+  }, [selectedSource, currentPage, loading, searchKeyword]);
+
+  const handleSearchChange = (value: string) => {
+    setSearchKeyword(value);
+    
+    // 清除之前的定时器
+    if (searchTimerRef.current) {
+      clearTimeout(searchTimerRef.current);
+    }
+    
+    // 如果清空搜索框，恢复原始列表
+    if (!value.trim()) {
+      if (selectedSource) {
+        // 清除缓存，重新加载原始列表
+        setMcpCache(prev => {
+          const next = { ...prev };
+          delete next[selectedSource];
+          return next;
+        });
+        setCurrentPage(1);
+        fetchMcpList(selectedSource, 1, false, '');
+      }
+      return;
+    }
+    
+    // 设置新的定时器，500ms 后执行搜索
+    searchTimerRef.current = setTimeout(() => {
+      if (selectedSource) {
+        // 清除缓存，重新搜索
+        setMcpCache(prev => {
+          const next = { ...prev };
+          delete next[selectedSource];
+          return next;
+        });
+        setCurrentPage(1);
+        fetchMcpList(selectedSource, 1, false, value);
+      }
+    }, 500);
+  };
 
   const handleSelectSource = async (sourceId: string) => {
     setSelectedSource(sourceId);
@@ -279,6 +322,20 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
     }
   };
 
+  const handleRefreshAfterAdd = async () => {
+    // 添加成功后，刷新当前选中的市场源的 MCP 列表
+    if (!selectedSource) return;
+    
+    // 清除缓存并重新加载，这样会重新获取工具列表并更新 inDatabase 标记
+    setMcpCache(prev => {
+      const next = { ...prev };
+      delete next[selectedSource];
+      return next;
+    });
+    setCurrentPage(1);
+    await fetchMcpList(selectedSource, 1);
+  };
+
   const renderSourceDetail = () => {
     if (!selectedSource) {
       return (
@@ -299,12 +356,6 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
     if (!source) return null;
 
     const mcpList = mcpCache[selectedSource] || [];
-    const filteredList = mcpList.filter(mcp => {
-      const name = getLocaleField(mcp, 'name');
-      const desc = getLocaleField(mcp, 'description');
-      return name.toLowerCase().includes(searchKeyword.toLowerCase()) ||
-        desc.toLowerCase().includes(searchKeyword.toLowerCase());
-    });
 
     return (
       <>
@@ -344,18 +395,20 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                   {t('tool.marketRefresh')}
                 </Button>
               )}
-              {mcpList.length > 0 && (
+              
                 <Input
                   prefix={<SearchOutlined />}
                   placeholder={t('tool.marketSearchPlaceholder')}
                   value={searchKeyword}
-                  onChange={(e) => setSearchKeyword(e.target.value)}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  allowClear
                   style={{ width: 200 }}
+                  
                 />
-              )}
+              
             </div>
             <Button icon={<SettingOutlined />} onClick={() => handleOpenConfig(selectedSource)}>
-              {t('tool.marketConfig')}
+              {t('tool.marketConfigBtn')}
             </Button>
             <Button type="primary" icon={<GlobalOutlined />} onClick={() => window.open(source.url, '_blank')}>
               {t('tool.marketVisit')}
@@ -364,17 +417,31 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
         </div>
 
         <div className="rb:mt-6">
-          <BodyWrapper loading={loading} empty={mcpList.length === 0}>
             <div id="mcpScrollableDiv" className="rb:overflow-y-auto rb:h-[calc(100vh-260px)]">
+              {!loading && mcpList.length === 0 ? (
+                <Empty
+                  url={pageEmptyIcon}
+                  title={searchKeyword ? t('tool.marketNoSearchResult') : t('tool.marketNoData')}
+                  subTitle={searchKeyword ? t('tool.marketNoSearchResultDesc') : t('tool.marketNoDataDesc')}
+                  size={200}
+                  className="rb:h-full"
+                />
+              ) : (
               <InfiniteScroll
-                dataLength={filteredList.length}
+                dataLength={mcpList.length}
                 next={loadMore}
                 hasMore={hasMore}
                 loader={<Skeleton active paragraph={{ rows: 2 }} className="rb:mt-4" />}
                 scrollableTarget="mcpScrollableDiv"
               >
-                <div className="rb:grid rb:grid-cols-3 rb:gap-4">
-                  {filteredList.map(mcp => (
+                <div 
+                  className="rb:gap-4" 
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))'
+                  }}
+                >
+                  {mcpList.map(mcp => (
                   <div 
                     key={mcp.id} 
                     className="rb:bg-white rb:border rb:border-gray-200 rb:rounded-lg rb:p-4 rb:pb-2 rb:transition-all rb:duration-200 hover:rb:shadow-lg hover:rb:border-gray-300"
@@ -425,7 +492,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                         {mcp.activated && <Tag color="success">{t('tool.marketActivated')}</Tag>}
                         {mcp.inDatabase && <Tag color="blue">{t('tool.marketInDatabase')}</Tag>}
                       </div>
-                      <Button type="primary" size="small" onClick={() => handleOpenMcpServiceModal(mcp)}>
+                      <Button disabled={mcp.inDatabase} type="primary" size="small" onClick={() => handleOpenMcpServiceModal(mcp)}>
                         + {t('tool.marketAdd')}
                       </Button>
                     </div>
@@ -433,8 +500,8 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                 ))}
                 </div>
               </InfiniteScroll>
+              )}
             </div>
-          </BodyWrapper>
         </div>
       </>
     );
@@ -495,9 +562,9 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                       <span className="rb:flex-1 rb:font-medium rb:text-[12px] rb:overflow-hidden rb:text-ellipsis rb:whitespace-nowrap">
                         {source.name}
                       </span>
-                      <span className="rb:text-xs rb:text-gray-500 rb:px-1.5 rb:py-0.5 rb:bg-gray-100 rb:rounded-full rb:flex-shrink-0">
+                      {/* <span className="rb:text-xs rb:text-gray-500 rb:px-1.5 rb:py-0.5 rb:bg-gray-100 rb:rounded-full rb:flex-shrink-0">
                         {source.mcp_count}
-                      </span>
+                      </span> */}
                       {source.connected && (
                         <span className="rb:text-green-500 rb:text-[8px] rb:flex-shrink-0">●</span>
                       )}
@@ -523,7 +590,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
       />
       <McpServiceModal
         ref={mcpServiceModalRef}
-        refresh={() => {}}
+        refresh={handleRefreshAfterAdd}
       />
     </div>
   );

@@ -132,12 +132,14 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
         const request = editVo?.id ? updateTool(editVo.id, newService) : addTool(newService)
         request.then((res: any) => {
           message.success(t('common.saveSuccess'));
-          testConnection(res.tool_id || editVo?.id)
-            .finally(() => {
-              setLoading(false);
-              handleClose();
-              refresh()
-            })
+          setLoading(false);
+          handleClose();
+          refresh();
+          
+          // 在后台测试连接，不阻塞用户操作
+          testConnection(res.tool_id || editVo?.id).catch((err) => {
+            console.error('测试连接失败:', err);
+          });
         })
         .catch(() => {
           setLoading(false);
