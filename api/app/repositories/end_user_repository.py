@@ -247,7 +247,6 @@ class EndUserRepository:
                         EndUser.user_summary: user_summary,
                         EndUser.rag_tags: rag_tags,
                         EndUser.rag_personas: rag_personas,
-                        EndUser.storage_type: "rag",
                         EndUser.rag_summary_updated_at: datetime.datetime.now(),
                     },
                     synchronize_session=False
@@ -286,7 +285,6 @@ class EndUserRepository:
                 .update(
                     {
                         EndUser.memory_insight: memory_insight,
-                        EndUser.storage_type: "rag",
                         EndUser.memory_insight_updated_at: datetime.datetime.now(),
                     },
                     synchronize_session=False
