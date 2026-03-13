@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-05 17:03:46
+ * @Last Modified time: 2026-03-13 15:20:32
  */
 /**
  * Chat debugging component for application testing
@@ -13,7 +13,8 @@
 import { type FC, useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx'
-import { Flex, Dropdown, type MenuProps, App, Divider } from 'antd'
+import { Flex, Dropdown, type MenuProps, App, Divider } from 'antd';
+import { SettingOutlined } from '@ant-design/icons'
 
 import ChatIcon from '@/assets/images/application/chat.png'
 import DebuggingEmpty from '@/assets/images/application/debuggingEmpty.png'
@@ -45,13 +46,17 @@ interface ChatProps {
   /** Source type: multi-agent cluster or single agent */
   source?: 'multi_agent' | 'agent';
   chatVariables?: Variable[]; // Add chatVariables prop
+  handleEditVariables?: () => void;
 }
 
 /**
  * Chat debugging component
  * Allows testing application with different model configurations side-by-side
  */
-const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, source = 'agent', chatVariables }) => {
+const Chat: FC<ChatProps> = ({
+  chatList, data, updateChatList, handleSave, source = 'agent', chatVariables,
+  handleEditVariables
+}) => {
   const { t } = useTranslation();
   const { message: messageApi } = App.useApp()
   const [loading, setLoading] = useState(false)
@@ -434,6 +439,7 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
   const updateFileList = (list?: any[]) => {
     setFileList([...list || []])
   }
+  const isNeedVariableConfig = chatVariables?.some(vo => vo.required && (vo.value === null || vo.value === undefined || vo.value === ''))
 
   return (
     <div className="rb:relative rb:h-full rb:flex rb:flex-col">
@@ -521,6 +527,18 @@ const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, sourc
                       className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/link.svg')] rb:hover:bg-[url('@/assets/images/conversation/link_hover.svg')]"
                     ></div>
                   </Dropdown>
+                  {chatVariables && chatVariables.length > 0 && (
+                    <div
+                      className={clsx("rb:flex rb:items-center rb:border rb:rounded-lg rb:px-2 rb:text-[12px] rb:h-6 rb:cursor-pointer rb:hover:bg-[#F0F3F8] rb:text-[#212332]", {
+                        'rb:border-[#FF5D34] rb:text-[#FF5D34]': isNeedVariableConfig,
+                        'rb:border-[#DFE4ED]': !isNeedVariableConfig,
+                      })}
+                      onClick={handleEditVariables}
+                    >
+                      <SettingOutlined className="rb:mr-1" />
+                      {t(`memoryConversation.variableConfig`)}
+                    </div>
+                  )}
                 </Flex>
                 <Flex align="center">
                   <AudioRecorder onRecordingComplete={handleRecordingComplete} />
