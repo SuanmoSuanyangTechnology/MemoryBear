@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:45:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-06 21:05:09 
+ * @Last Modified time: 2026-03-12 13:57:51
  */
 import { type ReactNode } from 'react'
 
@@ -53,6 +53,7 @@ export interface ChatProps {
   fileList?: any[];
   /** Attachment update */
   fileChange?: (fileList: any[]) => void;
+  renderRuntime?: (item: ChatItem, index: number) => ReactNode;
 }
 
 /**

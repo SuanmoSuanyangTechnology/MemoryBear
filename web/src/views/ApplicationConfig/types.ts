@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-28 16:40:30
+ * @Last Modified time: 2026-03-13 17:01:04
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
@@ -77,6 +77,8 @@ export interface Config extends MultiAgentConfig {
   /** Last update timestamp */
   updated_at: number;
   skills?: SkillConfigForm | null;
+
+  funConfig?: FunConfigForm;
 }
 
 /**
@@ -127,6 +129,8 @@ export interface AgentRef {
    * @param flag - Whether to show success message
    */
   handleSave: (flag?: boolean) => Promise<unknown>;
+  funConfig: Config['funConfig'];
+  handleSaveFunConfig?: (value: FunConfigForm) => void;
 }
 
 /**
@@ -138,6 +142,8 @@ export interface ClusterRef {
    * @param flag - Whether to show success message
    */
   handleSave: (flag?: boolean) => Promise<unknown>;
+  funConfig: Config['funConfig'];
+  handleSaveFunConfig?: (value: FunConfigForm) => void;
 }
 
 /**
@@ -156,6 +162,8 @@ export interface WorkflowRef {
   /** Add variable */
   addVariable: () => void;
   config: WorkflowConfig | null;
+  funConfig: WorkflowConfig['funConfig'];
+  handleSaveFunConfig?: (value: FunConfigForm) => void;
 }
 
 /**
@@ -400,4 +408,34 @@ export interface StatisticsData {
   total_api_calls: number;
   /** Total tokens used */
   total_tokens: number;
+}
+
+export interface FileTypeConfig {
+  type: string;
+  enabled: boolean;
+  maxCount: number;
+  maxSize: number;
+}
+export interface FunConfigForm {
+  enabled: boolean;
+  fileTypes: FileTypeConfig[]
+  uploadType: 'local' | 'url' | 'both';
+}
+/**
+ * Function config modal ref methods
+ */
+export interface FunConfigModalRef {
+  /** Open function config modal */
+  handleOpen: (value: FunConfigForm) => void;
+}
+
+/**
+ * App sharing modal ref methods
+ */
+export interface AppSharingModalRef {
+  handleOpen: () => void;
+}
+export interface AppSharingForm {
+  target_workspace_ids: string[];
+  permission: 'readonly' | 'editable'
 }

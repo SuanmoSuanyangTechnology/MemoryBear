@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:41 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:29:41 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-11 17:44:24
  */
 import { type FC, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -14,7 +14,8 @@ import RbCard from '@/components/RbCard/Card'
 import { getReleaseList, rollbackRelease, appExport } from '@/api/application'
 import ReleaseModal from './components/ReleaseModal'
 import ReleaseShareModal from './components/ReleaseShareModal'
-import type { Release, ReleaseModalRef, ReleaseShareModalRef } from './types'
+import AppSharingModal from './components/AppSharingModal'
+import type { Release, ReleaseModalRef, ReleaseShareModalRef, AppSharingModalRef } from './types'
 import type { Application } from '@/views/ApplicationManagement/types'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
@@ -39,6 +40,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
   const { message } = App.useApp()
   const releaseModalRef = useRef<ReleaseModalRef>(null)
   const releaseShareModalRef = useRef<ReleaseShareModalRef>(null)
+  const appSharingModalRef = useRef<AppSharingModalRef>(null)
   const [selectedVersion, setSelectedVersion] = useState<Release | null>(null);
   const [releaseList, setReleaseList] = useState<Release[]>([])
 
@@ -129,6 +131,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                 {data?.type !== 'multi_agent' && <Button onClick={handleExport}>{t('common.export')}</Button>}
                 {data.current_release_id !== selectedVersion.id && <Button onClick={handleRollback}>{t('application.willRollToThisVersion')}</Button>}
                 <Button type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</Button>
+                <Button type="primary" ghost onClick={() => appSharingModalRef.current?.handleOpen()}>{t('application.sharing')}</Button>
               </>}
               <Button type="primary" onClick={() => releaseModalRef.current?.handleOpen()}>{t('application.release')}</Button>
             </Space>
@@ -176,6 +179,11 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
       />
       <ReleaseShareModal
         ref={releaseShareModalRef}
+        version={selectedVersion}
+      />
+      <AppSharingModal
+        ref={appSharingModalRef}
+        appId={data.id}
         version={selectedVersion}
       />
     </div>

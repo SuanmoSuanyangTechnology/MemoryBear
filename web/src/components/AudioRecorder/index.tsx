@@ -1,13 +1,23 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-02-06 21:11:51 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-13 17:11:14
+ */
 import { type FC, useRef, useState } from 'react'
 import RecordRTC from 'recordrtc'
 
 import { fileUploadUrlWithoutApiPrefix } from '@/api/fileStorage'
 import { request } from '@/utils/request'
 
+/** Props for the AudioRecorder component */
 interface AudioRecorderProps {
+  /** Callback fired when recording is complete, receives uploaded file info and raw blob */
   onRecordingComplete?: (file: { file_id: string; file_key: string; url: string; type?: string; }, blob?: Blob) => void
   className?: string;
+  /** Upload endpoint URL, defaults to fileUploadUrlWithoutApiPrefix */
   action?: string;
+  /** Additional config passed to the upload request */
   requestConfig?: Record<string, any>;
 }
 
@@ -17,9 +27,12 @@ const AudioRecorder: FC<AudioRecorderProps> = ({
   action = fileUploadUrlWithoutApiPrefix,
   requestConfig = {}
 }) => {
+  // Whether the recorder is currently capturing audio
   const [isRecording, setIsRecording] = useState(false)
+  // Holds the RecordRTC instance across renders
   const recorderRef = useRef<RecordRTC | null>(null)
 
+  /** Request microphone access and start recording */
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -34,6 +47,7 @@ const AudioRecorder: FC<AudioRecorderProps> = ({
     }
   }
 
+  /** Stop recording, upload the audio blob, then invoke the completion callback */
   const stopRecording = () => {
     if (recorderRef.current) {
       recorderRef.current.stopRecording(() => {
@@ -49,6 +63,7 @@ const AudioRecorder: FC<AudioRecorderProps> = ({
               type: blob.type,
               url
             }, blob)
+            // Release recorder resources after upload
             recorderRef.current?.destroy()
             recorderRef.current = null
           })
@@ -57,12 +72,14 @@ const AudioRecorder: FC<AudioRecorderProps> = ({
     }
   }
 
+  // Toggle between recording/idle states on click;
+  // swap background image to reflect current state
   return (
     <div
       className={`rb:size-5.5 rb:cursor-pointer rb:bg-cover ${className} ${
         isRecording
           ? `rb:bg-[url('@/assets/images/conversation/audio_ing.gif')]`
-          : `rb:bg-[url('@/assets/images/conversation/audio.svg')] rb:hover:bg-[url('@/assets/images/conversation/audio_hover.svg')]`
+          : `rb:bg-[url('@/assets/images/conversation/audio.svg')]`
       }`}
       onClick={isRecording ? stopRecording : startRecording}
     />

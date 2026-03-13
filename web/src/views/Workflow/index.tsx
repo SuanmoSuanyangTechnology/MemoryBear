@@ -60,7 +60,8 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
     handleRun,
     graphRef,
     addVariable,
-    config
+    config,
+    funConfig: config?.funConfig
   }))
   return (
     <div className="rb:h-[calc(100vh-64px)] rb:relative">
