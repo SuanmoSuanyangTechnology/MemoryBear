@@ -53,6 +53,7 @@ def list_apps(
         status: str | None = None,
         search: str | None = None,
         include_shared: bool = True,
+        shared_only: bool = False,
         page: int = 1,
         pagesize: int = 10,
         ids: Optional[str] = None,
@@ -84,6 +85,7 @@ def list_apps(
         status=status,
         search=search,
         include_shared=include_shared,
+        shared_only=shared_only,
         page=page,
         pagesize=pagesize,
     )
@@ -105,6 +107,23 @@ def list_my_shared_out(
     shares = service.list_my_shared_out(workspace_id=workspace_id)
     data = [app_schema.AppShare.model_validate(s) for s in shares]
     return success(data=data)
+
+
+@router.delete("/share/{target_workspace_id}", summary="取消对某工作空间的所有应用分享")
+@cur_workspace_access_guard()
+def unshare_all_apps_to_workspace(
+        target_workspace_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """Cancel all app shares from current workspace to a target workspace."""
+    workspace_id = current_user.current_workspace_id
+    service = app_service.AppService(db)
+    count = service.unshare_all_apps_to_workspace(
+        target_workspace_id=target_workspace_id,
+        workspace_id=workspace_id
+    )
+    return success(msg=f"已取消 {count} 个应用的分享", data={"count": count})
 
 
 @router.get("/{app_id}", summary="获取应用详情")
@@ -395,6 +414,23 @@ def list_app_shares(
 
     data = [app_schema.AppShare.model_validate(s) for s in shares]
     return success(data=data)
+
+
+@router.delete("/shared/{source_workspace_id}", summary="批量移除某来源工作空间的所有共享应用")
+@cur_workspace_access_guard()
+def remove_all_shared_apps_from_workspace(
+        source_workspace_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """Remove all shared apps from a specific source workspace (recipient operation)."""
+    workspace_id = current_user.current_workspace_id
+    service = app_service.AppService(db)
+    count = service.remove_all_shared_apps_from_workspace(
+        source_workspace_id=source_workspace_id,
+        workspace_id=workspace_id
+    )
+    return success(msg=f"已移除 {count} 个共享应用", data={"count": count})
 
 
 @router.delete("/{app_id}/shared", summary="移除共享给我的应用")

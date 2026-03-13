@@ -12,7 +12,7 @@ import uuid
 from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 from fastapi import Depends
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -102,7 +102,8 @@ class AppService:
         # 2. 检查是否是共享给本工作空间的应用
         stmt = select(AppShare).where(
             AppShare.source_app_id == app.id,
-            AppShare.target_workspace_id == workspace_id
+            AppShare.target_workspace_id == workspace_id,
+            AppShare.is_active.is_(True)
         )
         share = self.db.scalars(stmt).first()
 
@@ -140,7 +141,8 @@ class AppService:
 
         stmt = select(AppShare).where(
             AppShare.source_app_id == app.id,
-            AppShare.target_workspace_id == workspace_id
+            AppShare.target_workspace_id == workspace_id,
+            AppShare.is_active.is_(True)
         )
         share = self.db.scalars(stmt).first()
         return share.permission if share else None
@@ -509,7 +511,8 @@ class AppService:
             from app.models import AppShare
             stmt = select(AppShare).where(
                 AppShare.source_app_id == app.id,
-                AppShare.target_workspace_id == current_workspace_id
+                AppShare.target_workspace_id == current_workspace_id,
+                AppShare.is_active.is_(True)
             )
             share = self.db.scalars(stmt).first()
             if share:
@@ -878,6 +881,7 @@ class AppService:
             status: Optional[str] = None,
             search: Optional[str] = None,
             include_shared: bool = True,
+            shared_only: bool = False,
             page: int = 1,
             pagesize: int = 10,
     ) -> Tuple[List[App], int]:
@@ -923,18 +927,24 @@ class AppService:
         if search:
             filters.append(func.lower(App.name).like(f"%{search.lower()}%"))
 
-        # 基础查询：本工作空间的应用
-        if include_shared:
-            # 查询本工作空间的应用 + 分享给本工作空间的应用
-            # 使用 OR 条件：workspace_id = current OR app_id IN (shared apps)
+        # shared_only implies include_shared; enforce to avoid confusing API usage
+        if shared_only:
+            include_shared = True
 
-            # 获取分享给本工作空间的应用ID列表
+        # 基础查询：本工作空间的应用
+        if shared_only:
+            # 只返回共享给本工作空间的应用，不含自有应用
             shared_app_ids_stmt = (
                 select(AppShare.source_app_id)
-                .where(AppShare.target_workspace_id == workspace_id)
+                .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
             )
-
-            # 构建主查询：本工作空间的应用 OR 分享的应用
+            stmt = select(App).where(App.id.in_(shared_app_ids_stmt))
+        elif include_shared:
+            # 查询本工作空间的应用 + 分享给本工作空间的应用
+            shared_app_ids_stmt = (
+                select(AppShare.source_app_id)
+                .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
+            )
             stmt = select(App).where(
                 or_(
                     App.workspace_id == workspace_id,
@@ -1789,7 +1799,8 @@ class AppService:
             # 检查是否已经分享过
             stmt = select(AppShare).where(
                 AppShare.source_app_id == app_id,
-                AppShare.target_workspace_id == target_ws_id
+                AppShare.target_workspace_id == target_ws_id,
+                AppShare.is_active.is_(True)
             )
             existing_share = self.db.scalars(stmt).first()
 
@@ -1868,7 +1879,8 @@ class AppService:
         # 2. 查找分享记录
         stmt = select(AppShare).where(
             AppShare.source_app_id == app_id,
-            AppShare.target_workspace_id == target_workspace_id
+            AppShare.target_workspace_id == target_workspace_id,
+            AppShare.is_active.is_(True)
         )
         share = self.db.scalars(stmt).first()
 
@@ -1882,14 +1894,56 @@ class AppService:
                 f"app_id={app_id}, target_workspace_id={target_workspace_id}"
             )
 
-        # 3. 删除分享记录
-        self.db.delete(share)
+        # 3. 逻辑删除分享记录
+        share.is_active = False
         self.db.commit()
 
         logger.info(
             "应用分享已取消",
             extra={"app_id": str(app_id), "target_workspace_id": str(target_workspace_id)}
         )
+
+    def unshare_all_apps_to_workspace(
+            self,
+            *,
+            target_workspace_id: uuid.UUID,
+            workspace_id: uuid.UUID
+    ) -> int:
+        """Cancel all app shares from current workspace to a target workspace.
+
+        Args:
+            target_workspace_id: Target workspace ID to cancel all shares to
+            workspace_id: Current workspace ID (source)
+
+        Returns:
+            Number of share records deleted
+        """
+        from app.models import AppShare
+
+        logger.info(
+            "取消对目标工作空间的所有应用分享",
+            extra={"target_workspace_id": str(target_workspace_id), "workspace_id": str(workspace_id)}
+        )
+
+        # Query active records first for reliable count
+        id_stmt = select(AppShare.id).where(
+            AppShare.source_workspace_id == workspace_id,
+            AppShare.target_workspace_id == target_workspace_id,
+            AppShare.is_active.is_(True)
+        )
+        ids = list(self.db.scalars(id_stmt).all())
+        count = len(ids)
+
+        if ids:
+            # Soft delete: mark as inactive
+            from sqlalchemy import update as sa_update
+            self.db.execute(
+                sa_update(AppShare).where(AppShare.id.in_(ids)).values(is_active=False)
+            )
+            self.db.commit()
+
+        logger.info("已取消分享记录数", extra={"count": count})
+        return count
 
     def list_app_shares(
             self,
@@ -1920,7 +1974,8 @@ class AppService:
 
         # 查询分享记录
         stmt = select(AppShare).where(
-            AppShare.source_app_id == app_id
+            AppShare.source_app_id == app_id,
+            AppShare.is_active.is_(True)
         ).order_by(AppShare.created_at.desc())
 
         shares = list(self.db.scalars(stmt).all())
@@ -1958,7 +2013,8 @@ class AppService:
 
         stmt = select(AppShare).where(
             AppShare.source_app_id == app_id,
-            AppShare.target_workspace_id == workspace_id
+            AppShare.target_workspace_id == workspace_id,
+            AppShare.is_active.is_(True)
         )
         share = self.db.scalars(stmt).first()
 
@@ -1968,13 +2024,55 @@ class AppService:
                 f"app_id={app_id}, workspace_id={workspace_id}"
             )
 
-        self.db.delete(share)
+        # Soft delete
+        share.is_active = False
         self.db.commit()
 
         logger.info(
             "共享应用已移除",
             extra={"app_id": str(app_id), "workspace_id": str(workspace_id)}
         )
+
+    def remove_all_shared_apps_from_workspace(
+            self,
+            *,
+            source_workspace_id: uuid.UUID,
+            workspace_id: uuid.UUID
+    ) -> int:
+        """Remove all shared apps from a specific source workspace.
+
+        Args:
+            source_workspace_id: The workspace that shared the apps
+            workspace_id: Current workspace ID (recipient)
+
+        Returns:
+            Number of share records deleted
+        """
+        from app.models import AppShare
+
+        logger.info(
+            "批量移除来源工作空间的共享应用",
+            extra={"source_workspace_id": str(source_workspace_id), "workspace_id": str(workspace_id)}
+        )
+
+        # Query active records for reliable count, then soft delete
+        id_stmt = select(AppShare.id).where(
+            AppShare.source_workspace_id == source_workspace_id,
+            AppShare.target_workspace_id == workspace_id,
+            AppShare.is_active.is_(True)
+        )
+        ids = list(self.db.scalars(id_stmt).all())
+        count = len(ids)
+
+        if ids:
+            from sqlalchemy import update as sa_update
+            self.db.execute(
+                sa_update(AppShare).where(AppShare.id.in_(ids)).values(is_active=False)
+            )
+            self.db.commit()
+
+        logger.info("已移除共享记录数", extra={"count": count})
+        return count
 
     def list_my_shared_out(
             self,
@@ -1990,7 +2088,10 @@ class AppService:
 
         stmt = (
             select(AppShare)
-            .where(AppShare.source_workspace_id == workspace_id)
+            .where(
+                AppShare.source_workspace_id == workspace_id,
+                AppShare.is_active.is_(True)
+            )
             .order_by(AppShare.created_at.desc())
         )
         return list(self.db.scalars(stmt).all())
@@ -2023,7 +2124,8 @@ class AppService:
 
         stmt = select(AppShare).where(
             AppShare.source_app_id == app_id,
-            AppShare.target_workspace_id == target_workspace_id
+            AppShare.target_workspace_id == target_workspace_id,
+            AppShare.is_active.is_(True)
         )
         share = self.db.scalars(stmt).first()
 
@@ -2139,6 +2241,7 @@ def list_apps(
         status: Optional[str] = None,
         search: Optional[str] = None,
         include_shared: bool = True,
+        shared_only: bool = False,
         page: int = 1,
         pagesize: int = 10,
 ) -> Tuple[List[App], int]:
@@ -2151,6 +2254,7 @@ def list_apps(
         status=status,
         search=search,
         include_shared=include_shared,
+        shared_only=shared_only,
         page=page,
         pagesize=pagesize,
     )
