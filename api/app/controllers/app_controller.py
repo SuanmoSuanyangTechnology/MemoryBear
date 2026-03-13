@@ -123,7 +123,7 @@ def unshare_all_apps_to_workspace(
         target_workspace_id=target_workspace_id,
         workspace_id=workspace_id
     )
-    return success(msg=f"已取消 {count} 个应用的分享")
+    return success(msg=f"已取消 {count} 个应用的分享", data={"count": count})
 
 
 @router.get("/{app_id}", summary="获取应用详情")
@@ -430,7 +430,7 @@ def remove_all_shared_apps_from_workspace(
         source_workspace_id=source_workspace_id,
         workspace_id=workspace_id
     )
-    return success(msg=f"已移除 {count} 个共享应用")
+    return success(msg=f"已移除 {count} 个共享应用", data={"count": count})
 
 
 @router.delete("/{app_id}/shared", summary="移除共享给我的应用")

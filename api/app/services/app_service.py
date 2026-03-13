@@ -924,6 +924,10 @@ class AppService:
         if search:
             filters.append(func.lower(App.name).like(f"%{search.lower()}%"))
 
+        # shared_only implies include_shared; enforce to avoid confusing API usage
+        if shared_only:
+            include_shared = True
+
         # 基础查询：本工作空间的应用
         if shared_only:
             # 只返回共享给本工作空间的应用，不含自有应用
@@ -1921,14 +1925,18 @@ class AppService:
             extra={"target_workspace_id": str(target_workspace_id), "workspace_id": str(workspace_id)}
         )
 
-        stmt = delete(AppShare).where(
+        # Query IDs first to get a reliable count, avoiding rowcount driver inconsistencies
+        id_stmt = select(AppShare.id).where(
             AppShare.source_workspace_id == workspace_id,
             AppShare.target_workspace_id == target_workspace_id
         )
-        result = self.db.execute(stmt)
-        self.db.commit()
+        ids = list(self.db.scalars(id_stmt).all())
+        count = len(ids)
 
-        count = result.rowcount
+        if ids:
+            self.db.execute(delete(AppShare).where(AppShare.id.in_(ids)))
+            self.db.commit()
+
         logger.info("已取消分享记录数", extra={"count": count})
         return count
 
@@ -2039,14 +2047,18 @@ class AppService:
             extra={"source_workspace_id": str(source_workspace_id), "workspace_id": str(workspace_id)}
         )
 
-        stmt = delete(AppShare).where(
+        # Query IDs first to get a reliable count, avoiding rowcount driver inconsistencies
+        id_stmt = select(AppShare.id).where(
             AppShare.source_workspace_id == source_workspace_id,
             AppShare.target_workspace_id == workspace_id
         )
-        result = self.db.execute(stmt)
-        self.db.commit()
+        ids = list(self.db.scalars(id_stmt).all())
+        count = len(ids)
 
-        count = result.rowcount
+        if ids:
+            self.db.execute(delete(AppShare).where(AppShare.id.in_(ids)))
+            self.db.commit()
+
         logger.info("已移除共享记录数", extra={"count": count})
         return count
 
