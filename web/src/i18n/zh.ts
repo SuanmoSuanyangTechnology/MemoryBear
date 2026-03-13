@@ -1993,6 +1993,7 @@ export const zh = {
       marketConnected: '● 已连接',
       marketDisconnected: '○ 未连接',
       marketConnecting: '正在连接 {{name}}...',
+      marketConfigUpdated: '{{name}} 配置已更新',
       serverUrlInvalid: '必须以 http:// 或 https:// 开头，且不能有前后空格',
       requestHeaderKeyInvalid: '只支持英文、数字、连字符(-)、下划线(_)，不能以连字符或下划线开头结尾',
     },

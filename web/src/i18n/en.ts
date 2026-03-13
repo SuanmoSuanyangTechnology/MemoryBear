@@ -1997,6 +1997,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       marketConnected: '● Connected',
       marketDisconnected: '○ Disconnected',
       marketConnecting: 'Connecting to {{name}}...',
+      marketConfigUpdated: '{{name}} configuration updated',
       serverUrlInvalid: 'Must start with http:// or https://, and cannot have leading or trailing spaces',
       requestHeaderKeyInvalid: 'Only English letters, numbers, hyphens (-), and underscores (_) are allowed, and cannot start or end with a hyphen or underscore',
     },
