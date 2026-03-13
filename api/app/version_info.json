@@ -1,4 +1,38 @@
 {
+  "v0.2.7": {
+    "introduction": {
+      "codeName": "武陵",
+      "releaseDate": "2026-3-13",
+      "upgradePosition": "🐻 应用可移植性、工具生态扩展与记忆智能精细化",
+      "coreUpgrades": [
+        "1. 应用管理与可移植性<br>* 应用导入/导出：全面支持 Agent 配置和工作流定义的导入导出，实现跨环境无缝迁移、备份和共享",
+        "2. 工具生态扩展 🔌<br>* MCP 广场集成：工具管理接入 MCP 广场，提供集中式工具发现、浏览和集成枢纽",
+        "3. 工作流增强 📝<br>* 备注节点：新增备注节点类型，支持工作流图中的内联文档和上下文说明，提升协作效率",
+        "4. 记忆智能精细化 🧠<br>* 隐性记忆与情绪记忆生成逻辑优化：含数据存在性校验、时间轴筛选和兴趣分布缓存校验<br>* 兴趣分布生成逻辑改进：优化算法产生更准确的用户兴趣画像",
+        "5. 用户体验改进 🎨<br>* 知识库分享加载状态：增加加载指示器，改善感知响应速度",
+        "6. 稳健性与缺陷修复 🔧<br>* 应用调试终端用户管理：修复调试会话错误创建 end_user 记录问题<br>* 知识库数据集创建流程：解决创建数据集后无法进入下一步的缺陷<br>* RAG 空间记忆生成失败：修复记忆生成失败和存储中断的关键问题<br>* 应用字符限制强制执行：增加条件校验防止过长输入<br>* 语义剪枝情绪/兴趣保留：优化剪枝逻辑防止误删情绪和兴趣片段<br>* 语义剪枝效果优化：增强算法平衡记忆压缩与信息保留",
+        "<br>",
+        "v0.2.8 及更远的未来将引入多模态记忆能力，实现知识库和模型的分服务部署，为应用增加语音输入支持，并扩展应用能力至语音回复、BI 可视化、PPT 生成和直接生图。应用会话分享和联网搜索功能将得到修复和增强。记忆检索基准测试和情景记忆聚类算法将增强上下文召回和时序推理能力。通往真正智能、多模态、上下文感知应用的旅程仍在继续。",
+        "记忆熊，智慧致远 🐻✨"
+      ]
+    },
+    "introduction_en": {
+      "codeName": "WuLing",
+      "releaseDate": "2026-3-13",
+      "upgradePosition": "🐻 Application portability, tool ecosystem expansion, and memory intelligence refinement",
+      "coreUpgrades": [
+        "1. Application Management & Portability<br>* Application Import/Export: Full support for importing and exporting agent configurations and workflow definitions, enabling seamless cross-environment migration, backup, and sharing",
+        "2. Tool Ecosystem Expansion 🔌<br>* MCP Marketplace Integration: Tool management now includes MCP Marketplace access for centralized tool discovery, browsing, and integration",
+        "3. Workflow Enhancements 📝<br>* Annotation Node: Introduced annotation node type for inline documentation and contextual notes within workflow graphs, improving collaboration",
+        "4. Memory Intelligence Refinement 🧠<br>* Implicit & Emotional Memory Generation Logic: Comprehensive optimization including data existence validation, timeline filtering, and interest distribution cache validation<br>* Interest Distribution Generation Logic: Refined algorithm for more accurate user interest profiles",
+        "5. User Experience Improvements 🎨<br>* Knowledge Base Sharing Loading State: Added loading indicators to improve perceived responsiveness",
+        "6. Robustness & Bug Fixes 🔧<br>* End User Management in App Debugging: Fixed incorrect end_user record creation during debugging sessions<br>* Knowledge Base Dataset Creation Flow: Resolved bug preventing next step after dataset creation<br>* RAG Space Memory Generation Failure: Fixed critical memory generation and storage interruption issue<br>* Application Character Limit Enforcement: Added conditional validation to prevent excessively long input<br>* Semantic Pruning Emotion/Interest Preservation: Optimized pruning logic to prevent incorrect deletion of emotional and interest fragments<br>* Semantic Pruning Effectiveness: Enhanced algorithm balance between memory compression and information retention",
+        "<br>",
+        "Looking forward to v0.2.8 and beyond, we will introduce multimodal memory capabilities with distributed service deployment for knowledge bases and models, enabling voice input for applications and expanding application capabilities with voice responses, BI visualizations, PPT generation, and direct image creation. Application conversation sharing and web search functionality will be restored and enhanced. Memory retrieval benchmarking and episodic memory clustering algorithms will enhance contextual recall and temporal reasoning. The journey toward truly intelligent, multimodal, context-aware applications continues.",
+        "MemoryBear, Wisdom Reaching Far 🐻✨"
+      ]
+    }
+  },
   "v0.2.6": {
     "introduction": {
       "codeName": "听剑",
