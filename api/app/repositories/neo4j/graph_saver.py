@@ -293,15 +293,8 @@ async def save_dialog_and_statements_to_neo4j(
         logger.info("Transaction completed. Summary: %s", summary)
         logger.debug("Full transaction results: %r", results)
 
-        # 写入成功后，触发聚类（可通过环境变量 CLUSTERING_ENABLED=false 禁用，用于基准测试对比）
-        clustering_enabled = os.getenv("CLUSTERING_ENABLED", "true").lower() != "false"
-        if entity_nodes and clustering_enabled:
-            end_user_id = entity_nodes[0].end_user_id
-            new_entity_ids = [e.id for e in entity_nodes]
-            logger.info(f"[Clustering] 准备触发聚类，实体数: {len(new_entity_ids)}, end_user_id: {end_user_id}")
-            asyncio.create_task(_trigger_clustering(new_entity_ids, end_user_id, config_id=config_id, llm_model_id=llm_model_id))
-        elif entity_nodes and not clustering_enabled:
-            logger.info("[Clustering] 聚类已禁用（CLUSTERING_ENABLED=false），跳过聚类触发")
+        # 写入成功后，异步触发聚类（不阻塞写入响应）
+        schedule_clustering_after_write(entity_nodes, config_id=config_id, llm_model_id=llm_model_id)
 
         return True
 
@@ -310,6 +303,31 @@ async def save_dialog_and_statements_to_neo4j(
         print(f"Neo4j integration error: {e}")
         print("Continuing without database storage...")
         return False
+
+
+def schedule_clustering_after_write(
+    entity_nodes: List,
+    config_id: Optional[str] = None,
+    llm_model_id: Optional[str] = None,
+) -> None:
+    """
+    写入 Neo4j 成功后，调度后台聚类任务。
+
+    可通过环境变量 CLUSTERING_ENABLED=false 禁用（用于基准测试对比）。
+    使用 asyncio.create_task 异步触发，不阻塞写入响应。
+    """
+    if not entity_nodes:
+        return
+
+    clustering_enabled = os.getenv("CLUSTERING_ENABLED", "true").lower() != "false"
+    if not clustering_enabled:
+        logger.info("[Clustering] 聚类已禁用（CLUSTERING_ENABLED=false），跳过聚类触发")
+        return
+
+    end_user_id = entity_nodes[0].end_user_id
+    new_entity_ids = [e.id for e in entity_nodes]
+    logger.info(f"[Clustering] 准备触发聚类，实体数: {len(new_entity_ids)}, end_user_id: {end_user_id}")
+    asyncio.create_task(_trigger_clustering(new_entity_ids, end_user_id, config_id=config_id, llm_model_id=llm_model_id))
 
 
 async def _trigger_clustering(

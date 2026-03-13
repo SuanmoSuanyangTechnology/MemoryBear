@@ -2707,32 +2707,26 @@ def init_community_clustering_for_users(self, end_user_ids: List[str]) -> Dict[s
         try:
             repo = CommunityRepository(connector)
 
-            # 获取 llm_model_id（从第一个用户的配置中读取，作为全局兜底）
-            llm_model_id = None
+            # 批量预取所有用户的配置（内置兜底：用户配置不可用时自动回退到工作空间默认配置）
+            user_llm_map: Dict[str, Optional[str]] = {}
             try:
                 with get_db_context() as db:
-                    from app.services.memory_agent_service import get_end_user_connected_config
+                    from app.services.memory_agent_service import get_end_users_connected_configs_batch
                     from app.services.memory_config_service import MemoryConfigService
-                    for uid in end_user_ids:
-                        try:
-                            connected = get_end_user_connected_config(uid, db)
-                            config_id = connected.get("memory_config_id")
-                            workspace_id = connected.get("workspace_id")
-                            if config_id or workspace_id:
-                                cfg = MemoryConfigService(db).load_memory_config(
-                                    config_id=config_id, workspace_id=workspace_id
-                                )
-                                llm_model_id = str(cfg.llm_model_id)
-                                break
-                        except Exception:
-                            continue
+                    batch_configs = get_end_users_connected_configs_batch(end_user_ids, db)
+                    for uid, cfg_info in batch_configs.items():
+                        config_id = cfg_info.get("memory_config_id")
+                        if config_id:
+                            try:
+                                cfg = MemoryConfigService(db).load_memory_config(config_id=config_id)
+                                user_llm_map[uid] = str(cfg.llm_model_id) if cfg.llm_model_id else None
+                            except Exception as e:
+                                logger.warning(f"[CommunityCluster] 用户 {uid} 加载 LLM 配置失败，将使用 None: {e}")
+                                user_llm_map[uid] = None
+                        else:
+                            user_llm_map[uid] = None
             except Exception as e:
-                logger.warning(f"[CommunityCluster] 获取 LLM 配置失败，将使用兜底值: {e}")
-
-            engine = LabelPropagationEngine(
-                connector=connector,
-                llm_model_id=llm_model_id,
-            )
+                logger.warning(f"[CommunityCluster] 批量获取 LLM 配置失败，所有用户将使用 None: {e}")
 
             for end_user_id in end_user_ids:
                 try:
@@ -2750,7 +2744,14 @@ def init_community_clustering_for_users(self, end_user_ids: List[str]) -> Dict[s
                         logger.debug(f"[CommunityCluster] 用户 {end_user_id} 无实体节点，跳过")
                         continue
 
-                    logger.info(f"[CommunityCluster] 用户 {end_user_id} 有 {len(entities)} 个实体，开始全量聚类")
+                    # 每个用户使用自己的 llm_model_id
+                    llm_model_id = user_llm_map.get(end_user_id)
+                    engine = LabelPropagationEngine(
+                        connector=connector,
+                        llm_model_id=llm_model_id,
+                    )
+
+                    logger.info(f"[CommunityCluster] 用户 {end_user_id} 有 {len(entities)} 个实体，开始全量聚类，llm_model_id={llm_model_id}")
                     await engine.full_clustering(end_user_id)
                     initialized += 1
                     logger.info(f"[CommunityCluster] 用户 {end_user_id} 聚类完成")
@@ -2779,15 +2780,7 @@ def init_community_clustering_for_users(self, end_user_ids: List[str]) -> Dict[s
         except ImportError:
             pass
 
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
+        loop = set_asyncio_event_loop()
         result = loop.run_until_complete(_run())
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
