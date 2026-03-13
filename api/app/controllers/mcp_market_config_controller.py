@@ -55,6 +55,12 @@ async def get_mcp_servers(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="The paging parameter must be greater than 0"
         )
+    if page * pagesize > 100:
+        api_logger.warning(f"Paging parameters exceed ModelScope limit: page={page}, pagesize={pagesize}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"page × pagesize must not exceed 100 (got {page} × {pagesize} = {page * pagesize})"
+        )
 
     # 2. Query mcp market config information from the database
     api_logger.debug(f"Query mcp market config: {mcp_market_config_id}")
