@@ -55,6 +55,12 @@ async def get_mcp_servers(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="The paging parameter must be greater than 0"
         )
+    if page * pagesize > 100:
+        api_logger.warning(f"Paging parameters exceed ModelScope limit: page={page}, pagesize={pagesize}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"The maximum number of MCP services can view is 100. Please visit the ModelScope MCP Plaza."
+        )
 
     # 2. Query mcp market config information from the database
     api_logger.debug(f"Query mcp market config: {mcp_market_config_id}")
@@ -64,10 +70,7 @@ async def get_mcp_servers(
     if not db_mcp_market_config:
         api_logger.warning(
             f"The mcp market config does not exist or access is denied: mcp_market_config_id={mcp_market_config_id}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The mcp market config does not exist or access is denied"
-        )
+        return success(msg='The mcp market config does not exist or access is denied')
 
     # 3. Execute paged query
     token = db_mcp_market_config.token
@@ -145,10 +148,7 @@ async def get_operational_mcp_servers(
     if not db_mcp_market_config:
         api_logger.warning(
             f"The mcp market config does not exist or access is denied: mcp_market_config_id={mcp_market_config_id}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The mcp market config does not exist or access is denied"
-        )
+        return success(msg='The mcp market config does not exist or access is denied')
 
     # 2. Execute paged query
     token = db_mcp_market_config.token
@@ -208,10 +208,7 @@ async def get_mcp_server(
     if not db_mcp_market_config:
         api_logger.warning(
             f"The mcp market config does not exist or access is denied: mcp_market_config_id={mcp_market_config_id}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The mcp market config does not exist or access is denied"
-        )
+        return success(msg='The mcp market config does not exist or access is denied')
 
     # 2. Get detailed information for a specific MCP Server
     token = db_mcp_market_config.token
@@ -241,7 +238,26 @@ async def create_mcp_market_config(
 
     try:
         api_logger.debug(f"Start creating the mcp market config: {create_data.mcp_market_id}")
-        # 1. Check if the mcp market name already exists
+        # 1. Validate token can access ModelScope MCP market
+        if not create_data.token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Token is required to access ModelScope MCP market"
+            )
+        try:
+            api = MCPApi()
+            api.login(create_data.token)
+            body = {'filter': {}, 'page_number': 1, 'page_size': 1, 'search': None}
+            cookies = api.get_cookies(create_data.token)
+            r = api.session.put(url=api.mcp_base_url, headers=api.builder_headers(api.headers), json=body, cookies=cookies)
+            raise_for_http_status(r)
+        except Exception as e:
+            api_logger.warning(f"Token validation failed for ModelScope MCP market: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unable to access ModelScope MCP market with the provided token: {str(e)}"
+            )
+        # 2. Check if the mcp market name already exists
         db_mcp_market_config_exist = mcp_market_config_service.get_mcp_market_config_by_mcp_market_id(db, mcp_market_id=create_data.mcp_market_id, current_user=current_user)
         if db_mcp_market_config_exist:
             api_logger.warning(f"The mcp market id already exists: {create_data.mcp_market_id}")
@@ -277,10 +293,7 @@ async def get_mcp_market_config(
         db_mcp_market_config = mcp_market_config_service.get_mcp_market_config_by_id(db, mcp_market_config_id=mcp_market_config_id, current_user=current_user)
         if not db_mcp_market_config:
             api_logger.warning(f"The mcp market config does not exist or access is denied: mcp_market_config_id={mcp_market_config_id}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The mcp market config does not exist or access is denied"
-            )
+            return success(msg='The mcp market config does not exist or access is denied')
 
         api_logger.info(f"mcp market config query successful: (ID: {db_mcp_market_config.id})")
         return success(data=jsonable_encoder(mcp_market_config_schema.McpMarketConfig.model_validate(db_mcp_market_config)),
@@ -310,10 +323,7 @@ async def get_mcp_market_config_by_mcp_market_id(
         db_mcp_market_config = mcp_market_config_service.get_mcp_market_config_by_mcp_market_id(db, mcp_market_id=mcp_market_id, current_user=current_user)
         if not db_mcp_market_config:
             api_logger.warning(f"The mcp market config does not exist or access is denied: mcp_market_id={mcp_market_id}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The mcp market config does not exist or access is denied"
-            )
+            return success(msg='The mcp market config does not exist or access is denied')
 
         api_logger.info(f"mcp market config query successful: (ID: {db_mcp_market_config.id})")
         return success(data=jsonable_encoder(mcp_market_config_schema.McpMarketConfig.model_validate(db_mcp_market_config)),
@@ -339,12 +349,25 @@ async def update_mcp_market_config(
     if not db_mcp_market_config:
         api_logger.warning(
             f"The mcp market config does not exist or you do not have permission to access it: mcp_market_config_id={mcp_market_config_id}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The mcp market config does not exist or you do not have permission to access it"
-        )
+        return success(msg='The mcp market config does not exist or access is denied')
 
-    # 2. Update fields (only update non-null fields)
+    # 2. Validate new token if provided
+    if update_data.token is not None:
+        try:
+            api = MCPApi()
+            api.login(update_data.token)
+            body = {'filter': {}, 'page_number': 1, 'page_size': 1, 'search': None}
+            cookies = api.get_cookies(update_data.token)
+            r = api.session.put(url=api.mcp_base_url, headers=api.builder_headers(api.headers), json=body, cookies=cookies)
+            raise_for_http_status(r)
+        except Exception as e:
+            api_logger.warning(f"Token validation failed for ModelScope MCP market: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unable to access ModelScope MCP market with the provided token: {str(e)}"
+            )
+
+    # 3. Update fields (only update non-null fields)
     api_logger.debug(f"Start updating the mcp market config fields: {mcp_market_config_id}")
     update_dict = update_data.dict(exclude_unset=True)
     updated_fields = []
@@ -359,7 +382,7 @@ async def update_mcp_market_config(
     if updated_fields:
         api_logger.debug(f"updated fields: {', '.join(updated_fields)}")
 
-    # 3. Save to database
+    # 4. Save to database
     try:
         db.commit()
         db.refresh(db_mcp_market_config)
@@ -396,10 +419,7 @@ async def delete_mcp_market_config(
         if not db_mcp_market_config:
             api_logger.warning(
                 f"The mcp market config does not exist or you do not have permission to access it: mcp_market_config_id={mcp_market_config_id}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The mcp market config does not exist or you do not have permission to access it"
-            )
+            return success(msg='The mcp market config does not exist or access is denied')
 
         # 2. Deleting mcp market config
         mcp_market_config_service.delete_mcp_market_config_by_id(db, mcp_market_config_id=mcp_market_config_id, current_user=current_user)

@@ -307,20 +307,8 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
     }));
     setConfigIdMap(prev => ({ ...prev, [sourceId]: configId }));
 
-    // 用 configId 获取第一页 MCP 列表
-    try {
-      const res: any = await getMarketMCPs({ mcp_market_config_id: configId, page: 1, pagesize: pageSize });
-      if (res?.items && Array.isArray(res.items)) {
-        setMcpCache(prev => ({ ...prev, [sourceId]: res.items }));
-      }
-      if (res?.page) {
-        setMcpTotal(res.page.total || 0);
-        setHasMore(!!res.page.has_next);
-        setCurrentPage(1);
-      }
-    } catch (error) {
-      console.error('获取 MCP 列表失败:', error);
-    }
+    // 使用 fetchMcpList 获取完整的 MCP 列表（包含激活状态和入库状态）
+    await fetchMcpList(sourceId, 1);
   };
 
   const handleRefreshAfterAdd = async () => {
