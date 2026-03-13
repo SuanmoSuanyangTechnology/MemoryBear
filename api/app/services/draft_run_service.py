@@ -688,7 +688,8 @@ class AgentRunService:
                 conversation_id=conversation_id,
                 app_id=agent_config.app_id,
                 workspace_id=workspace_id,
-                user_id=user_id
+                user_id=user_id,
+                sub_agent=sub_agent
             )
 
             # 6. 加载历史消息
@@ -848,7 +849,8 @@ class AgentRunService:
             conversation_id: Optional[str],
             app_id: uuid.UUID,
             workspace_id: uuid.UUID,
-            user_id: Optional[str]
+            user_id: Optional[str],
+            sub_agent: bool = False
     ) -> str:
         """确保会话存在（创建或验证）
 
@@ -909,20 +911,36 @@ class AgentRunService:
             conv_uuid = uuid.UUID(conversation_id)
             conversation = conversation_service.get_conversation(conv_uuid)
 
-            # 验证会话属于当前工作空间
-            if conversation.workspace_id != workspace_id:
-                logger.warning(
-                    "会话不属于当前工作空间",
-                    extra={
-                        "conversation_id": conversation_id,
-                        "conversation_workspace_id": str(conversation.workspace_id),
-                        "current_workspace_id": str(workspace_id)
-                    }
-                )
-                raise BusinessException(
-                    "会话不属于当前工作空间",
-                    BizCode.PERMISSION_DENIED
-                )
+            # 验证会话属于当前工作空间（或属于共享应用的源工作空间）
+            # sub_agent 内部调用时跳过校验，已在上层验证过
+            if not sub_agent and conversation.workspace_id != workspace_id:
+                # 检查是否是共享应用的会话（被共享者 workspace 访问源应用）
+                from app.models import AppShare
+                from sqlalchemy import select as sa_select
+                share = self.db.scalars(
+                    sa_select(AppShare).where(
+                        AppShare.source_app_id == app_id,
+                        AppShare.target_workspace_id == workspace_id
+                    )
+                ).first()
+
+                # 情况2：sub_agent 内部调用时，workspace_id 是源应用的 workspace，
+                # 而会话是被共享者创建的，只要会话属于同一个 app 即可放行
+                same_app = (conversation.app_id == app_id)
+
+                if not share and not same_app:
+                    logger.warning(
+                        "会话不属于当前工作空间",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "conversation_workspace_id": str(conversation.workspace_id),
+                            "current_workspace_id": str(workspace_id)
+                        }
+                    )
+                    raise BusinessException(
+                        "会话不属于当前工作空间",
+                        BizCode.PERMISSION_DENIED
+                    )
 
             logger.debug(
                 "使用现有会话",
