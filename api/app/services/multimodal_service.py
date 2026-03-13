@@ -130,7 +130,7 @@ class BedrockFormatStrategy(MultimodalFormatStrategy):
         # 下载图片
         if content is None:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(url)
+                response = await client.get(url, follow_redirects=True)
                 response.raise_for_status()
                 content = response.content
                 self.file.set_content(content)
@@ -236,7 +236,7 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
             audio_data = content
             if content is None:
                 async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.get(url)
+                    response = await client.get(url, follow_redirects=True)
                     response.raise_for_status()
                     audio_data = response.content
                     self.file.set_content(audio_data)
@@ -566,7 +566,7 @@ class MultimodalService:
             file_content = file.get_content()
             if not file_content:
                 async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.get(file.url)
+                    response = await client.get(file.url, follow_redirects=True)
                     response.raise_for_status()
                     file_content = response.content
                     file.set_content(file_content)
