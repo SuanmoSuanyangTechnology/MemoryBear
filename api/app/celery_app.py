@@ -116,6 +116,7 @@ celery_app.conf.update(
         'app.tasks.update_implicit_emotions_storage': {'queue': 'periodic_tasks'},
         'app.tasks.init_implicit_emotions_for_users': {'queue': 'periodic_tasks'},
         'app.tasks.init_interest_distribution_for_users': {'queue': 'periodic_tasks'},
+        'app.tasks.init_community_clustering_for_users': {'queue': 'periodic_tasks'},
     },
 )
 
