@@ -25,5 +25,6 @@ class AgentMemory_Long_Term(ABC):
     STRATEGY_CHUNK = "chunk"
     STRATEGY_TIME = "time"
     DEFAULT_SCOPE = 6
+    TIME_SCOPE=5
 
 

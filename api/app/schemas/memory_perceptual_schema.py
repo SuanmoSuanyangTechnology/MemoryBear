@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -85,7 +84,6 @@ class Semantic(BaseModel):
 
 
 class Content(BaseModel):
-    summary: str
     keywords: list[str]
     topic: str
     domain: str

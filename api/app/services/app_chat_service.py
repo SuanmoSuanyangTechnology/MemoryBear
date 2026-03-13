@@ -8,25 +8,21 @@ from typing import Optional, Dict, Any, AsyncGenerator, Annotated, List
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
-from app.core.agent.agent_middleware import AgentMiddleware
 from app.core.agent.langchain_agent import LangChainAgent
-from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.db import get_db
-from app.models import MultiAgentConfig, AgentConfig
+from app.models import MultiAgentConfig, AgentConfig, ModelType
 from app.models import WorkflowConfig
 from app.repositories.tool_repository import ToolRepository
 from app.schemas import DraftRunRequest
 from app.schemas.app_schema import FileInput
+from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 from app.services.conversation_service import ConversationService
-from app.services.draft_run_service import create_knowledge_retrieval_tool, create_long_term_memory_tool, \
-    AgentRunService
-from app.services.draft_run_service import create_web_search_tool
+from app.services.draft_run_service import AgentRunService
 from app.services.model_service import ModelApiKeyService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
 from app.services.multimodal_service import MultimodalService
-from app.services.tool_service import ToolService
 from app.services.workflow_service import WorkflowService
 
 logger = get_business_logger()
@@ -126,8 +122,17 @@ class AppChatService:
         # 处理多模态文件
         processed_files = None
         if files:
-            multimodal_service = MultimodalService(self.db, api_key_obj.provider, is_omni=api_key_obj.is_omni)
-            processed_files = await multimodal_service.process_files(files)
+            model_info = ModelInfo(
+                model_name=api_key_obj.model_name,
+                provider=api_key_obj.provider,
+                api_key=api_key_obj.api_key,
+                api_base=api_key_obj.api_base,
+                capability=api_key_obj.capability,
+                is_omni=api_key_obj.is_omni,
+                model_type=ModelType.LLM
+            )
+            multimodal_service = MultimodalService(self.db, model_info)
+            processed_files = await multimodal_service.process_files(user_id, files)
             logger.info(f"处理了 {len(processed_files)} 个文件")
 
         # 调用 Agent（支持多模态）
@@ -266,8 +271,17 @@ class AppChatService:
             # 处理多模态文件
             processed_files = None
             if files:
-                multimodal_service = MultimodalService(self.db, api_key_obj.provider, is_omni=api_key_obj.is_omni)
-                processed_files = await multimodal_service.process_files(files)
+                model_info = ModelInfo(
+                    model_name=api_key_obj.model_name,
+                    provider=api_key_obj.provider,
+                    api_key=api_key_obj.api_key,
+                    api_base=api_key_obj.api_base,
+                    capability=api_key_obj.capability,
+                    is_omni=api_key_obj.is_omni,
+                    model_type=ModelType.LLM
+                )
+                multimodal_service = MultimodalService(self.db, model_info)
+                processed_files = await multimodal_service.process_files(user_id, files)
                 logger.info(f"处理了 {len(processed_files)} 个文件")
 
             # 流式调用 Agent（支持多模态）

@@ -1,0 +1,27 @@
+{
+  "language": {
+    "not_found": "语言 {locale} 不存在",
+    "already_exists": "语言 {locale} 已存在",
+    "add_instructions": "语言 {locale} 验证成功。请在 {dir} 目录下创建翻译文件以完成添加。",
+    "update_instructions": "语言 {locale} 更新验证成功。请更新环境变量 I18N_SUPPORTED_LANGUAGES 以应用配置更改。"
+  },
+  "namespace": {
+    "not_found": "命名空间 {namespace} 在语言 {locale} 中不存在"
+  },
+  "translation": {
+    "invalid_key_format": "翻译键格式无效: {key}。应使用格式: namespace.key.subkey",
+    "update_instructions": "翻译 {locale}/{key} 更新验证成功。请修改对应的 JSON 翻译文件以应用更改。"
+  },
+  "reload": {
+    "disabled": "翻译热重载功能已禁用。请在配置中启用 I18N_ENABLE_HOT_RELOAD。",
+    "success": "翻译重载成功",
+    "failed": "翻译重载失败: {error}"
+  },
+  "metrics": {
+    "reset_success": "性能指标已重置"
+  },
+  "logs": {
+    "export_success": "缺失翻译已导出到: {file}",
+    "clear_success": "缺失翻译日志已清除"
+  }
+}
