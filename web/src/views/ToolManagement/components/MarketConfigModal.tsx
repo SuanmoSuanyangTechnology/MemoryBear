@@ -37,6 +37,7 @@ const MarketConfigModal = forwardRef<MarketConfigModalRef, MarketConfigModalProp
   const [loading, setLoading] = useState(false);
   const [currentSource, setCurrentSource] = useState<MarketSource | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
+  const formValues = Form.useWatch([], form);
 
   const handleClose = () => {
     setVisible(false);
@@ -101,6 +102,9 @@ const MarketConfigModal = forwardRef<MarketConfigModalRef, MarketConfigModalProp
     }
   };
 
+  // 检查是否可以保存：token 字段必须有值
+  const canSave = formValues?.token && formValues.token.trim().length > 0;
+
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
@@ -116,6 +120,7 @@ const MarketConfigModal = forwardRef<MarketConfigModalRef, MarketConfigModalProp
       okText={t('tool.marketSaveAndConnect')}
       onOk={handleSave}
       confirmLoading={loading}
+      okButtonProps={{ disabled: !canSave }}
       width={600}
     >
       <div>
@@ -169,7 +174,7 @@ const MarketConfigModal = forwardRef<MarketConfigModalRef, MarketConfigModalProp
             name="token"
             label={
               <span>
-                API Key <span className="rb:text-gray-400 rb:font-normal">({t('tool.marketApiKeyOptional')})</span>
+                API Key
               </span>
             }
             extra={<span style={{ display: 'inline-block', marginTop: 8 }}>{t('tool.marketApiKeyExtra')}</span>}
