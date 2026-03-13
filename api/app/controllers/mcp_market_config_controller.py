@@ -70,18 +70,17 @@ async def get_mcp_servers(
         )
 
     # 3. Execute paged query
-    api = MCPApi()
-    token = db_mcp_market_config.token
-    api.login(token)
-
-    body = {
-        'filter': {},
-        'page_number': page,
-        'page_size': pagesize,
-        'search': keywords
-    }
-
     try:
+        api = MCPApi()
+        token = db_mcp_market_config.token
+        api.login(token)
+
+        body = {
+            'filter': {},
+            'page_number': page,
+            'page_size': pagesize,
+            'search': keywords
+        }
         cookies = api.get_cookies(token)
         r = api.session.put(
             url=api.mcp_base_url,
@@ -245,6 +244,30 @@ async def create_mcp_market_config(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"The mcp market id already exists: {create_data.mcp_market_id}"
             )
+        # 2. verify token
+        create_data.status = 1
+        try:
+            api = MCPApi()
+            token = create_data.token
+            api.login(token)
+
+            body = {
+                'filter': {},
+                'page_number': 1,
+                'page_size': 20,
+                'search': ""
+            }
+            cookies = api.get_cookies(token)
+            r = api.session.put(
+                url=api.mcp_base_url,
+                headers=api.builder_headers(api.headers),
+                json=body,
+                cookies=cookies)
+            raise_for_http_status(r)
+        except requests.exceptions.RequestException as e:
+            api_logger.error(f"Failed to get MCP servers: {str(e)}")
+            create_data.status = 0
+        # 3. create mcp_market_config
         db_mcp_market_config = mcp_market_config_service.create_mcp_market_config(db=db, mcp_market_config=create_data, current_user=current_user)
         api_logger.info(
             f"The mcp market config has been successfully created: (ID: {db_mcp_market_config.id})")
@@ -355,7 +378,31 @@ async def update_mcp_market_config(
     if updated_fields:
         api_logger.debug(f"updated fields: {', '.join(updated_fields)}")
 
-    # 3. Save to database
+    # 3. verify token
+    db_mcp_market_config.status = 1
+    try:
+        api = MCPApi()
+        token = update_data.token
+        api.login(token)
+
+        body = {
+            'filter': {},
+            'page_number': 1,
+            'page_size': 20,
+            'search': ""
+        }
+        cookies = api.get_cookies(token)
+        r = api.session.put(
+            url=api.mcp_base_url,
+            headers=api.builder_headers(api.headers),
+            json=body,
+            cookies=cookies)
+        raise_for_http_status(r)
+    except requests.exceptions.RequestException as e:
+        api_logger.error(f"Failed to get MCP servers: {str(e)}")
+        db_mcp_market_config.status = 0
+
+    # 4. Save to database
     try:
         db.commit()
         db.refresh(db_mcp_market_config)
@@ -368,7 +415,7 @@ async def update_mcp_market_config(
             detail=f"The mcp market config update failed: {str(e)}"
         )
 
-    # 4. Return the updated mcp market config
+    # 5. Return the updated mcp market config
     return success(data=jsonable_encoder(mcp_market_config_schema.McpMarketConfig.model_validate(db_mcp_market_config)),
                    msg="The mcp market config information updated successfully")
 
