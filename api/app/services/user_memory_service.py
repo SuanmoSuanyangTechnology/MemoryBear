@@ -1749,24 +1749,8 @@ async def analytics_community_graph_data(
             }
 
         # 查询社区节点、实体节点、BELONGS_TO_COMMUNITY 边、实体间关系
-        cypher = """
-        MATCH (c:Community {end_user_id: $end_user_id})
-        MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[b:BELONGS_TO_COMMUNITY]->(c)
-        OPTIONAL MATCH (e)-[r:EXTRACTED_RELATIONSHIP]-(e2:ExtractedEntity {end_user_id: $end_user_id})
-        RETURN
-            elementId(c)          AS c_id,
-            properties(c)         AS c_props,
-            elementId(e)          AS e_id,
-            properties(e)         AS e_props,
-            elementId(b)          AS b_id,
-            elementId(e2)         AS e2_id,
-            properties(e2)        AS e2_props,
-            elementId(r)          AS r_id,
-            type(r)               AS r_type,
-            properties(r)         AS r_props,
-            startNode(r) = e      AS r_from_e
-        """
-        rows = await _neo4j_connector.execute_query(cypher, end_user_id=end_user_id)
+        from app.repositories.neo4j.cypher_queries import GET_COMMUNITY_GRAPH_DATA
+        rows = await _neo4j_connector.execute_query(GET_COMMUNITY_GRAPH_DATA, end_user_id=end_user_id)
 
         nodes_map: Dict[str, dict] = {}
         edges_map: Dict[str, dict] = {}

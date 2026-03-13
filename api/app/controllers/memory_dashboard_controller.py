@@ -200,7 +200,6 @@ async def get_workspace_end_users(
         from app.tasks import init_community_clustering_for_users
         init_community_clustering_for_users.apply_async(
             kwargs={"end_user_ids": end_user_ids},
-            queue="periodic_tasks",
         )
         api_logger.info(f"已触发社区聚类补全任务，候选用户数: {len(end_user_ids)}")
     except Exception as e:
