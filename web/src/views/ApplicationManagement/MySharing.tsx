@@ -2,11 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-13 16:19:37
+ * @Last Modified time: 2026-03-13 17:36:16
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, App, Flex, Row, Col, Collapse, Tag } from 'antd';
+import { Button, App, Flex, Row, Col, Collapse } from 'antd';
 import clsx from 'clsx';
 
 import type { MySharedOutItem } from './types';
@@ -88,14 +88,15 @@ const MySharing: React.FC = () => {
                       {workspace.target_workspace_name[0]}
                     </div>
                 }
-                <span className="rb:font-medium">{workspace.target_workspace_name}</span>
-                <Tag color="blue">{t('application.appCount', { count: items.length })}</Tag>
+                <div>
+                  <span className="rb:font-medium">{workspace.target_workspace_name}</span>
+                  <div className="rb:text-[#5B6167] rb:text-[12px]">{t('application.appCount', { count: items.length })}</div>
+                </div>
               </Flex>
             ),
             extra: (
               <Button
                 size="small"
-                danger
                 onClick={e => { e.stopPropagation(); handleAllCancel(workspace); }}
               >
                 {t('application.allCancel')}

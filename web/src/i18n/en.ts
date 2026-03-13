@@ -1423,6 +1423,7 @@ export const en = {
       souceStatus: 'Source App Status',
       confirmCopyDesc: 'Are you sure to copy 【{{app}}】 app?',
       noShareAuth: 'No permission to share apps',
+      appCount: '{{count}} apps shared to this space',
     },
     userMemory: {
       userMemory: 'User Memory',

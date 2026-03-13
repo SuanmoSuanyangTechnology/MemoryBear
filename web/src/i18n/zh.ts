@@ -807,6 +807,7 @@ export const zh = {
       souceStatus: '源应用状态',
       confirmCopyDesc: '确定复制【{{app}}】应用？',
       noShareAuth: '无共享应用的权限',
+      appCount: '{{count}}个应用共享到此空间',
     },
     table: {
       totalRecords: '共 {{total}} 条记录'
