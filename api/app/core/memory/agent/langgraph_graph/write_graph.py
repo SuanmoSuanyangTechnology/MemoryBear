@@ -13,7 +13,6 @@ from app.core.memory.agent.langgraph_graph.nodes.write_nodes import write_node
 from app.schemas.memory_agent_schema import AgentMemory_Long_Term
 from app.services.memory_config_service import MemoryConfigService
 
-
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 logger = get_agent_logger(__name__)
 
@@ -42,13 +41,15 @@ async def make_write_graph():
 
     yield graph
 
-async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[],memory_config:str='',end_user_id:str='',scope:int=6):
+
+async def long_term_storage(long_term_type: str = "chunk", langchain_messages: list = [], memory_config: str = '',
+                            end_user_id: str = '', scope: int = 6):
     """
     Handle long-term memory storage with different strategies
-    
-    Supports multiple storage strategies including chunk-based, time-based, 
+
+    Supports multiple storage strategies including chunk-based, time-based,
     and aggregate judgment approaches for long-term memory persistence.
-    
+
     Args:
         long_term_type: Storage strategy type ('chunk', 'time', 'aggregate')
         langchain_messages: List of messages to store
@@ -56,9 +57,10 @@ async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[
         end_user_id: User group identifier
         scope: Scope parameter for chunk-based storage (default: 6)
     """
-    from app.core.memory.agent.langgraph_graph.routing.write_router import memory_long_term_storage, window_dialogue,aggregate_judgment
+    from app.core.memory.agent.langgraph_graph.routing.write_router import memory_long_term_storage, window_dialogue, \
+        aggregate_judgment
     from app.core.memory.agent.utils.redis_tool import write_store
-    write_store.save_session_write(end_user_id,  (langchain_messages))
+    write_store.save_session_write(end_user_id, langchain_messages)
     # 获取数据库会话
     with get_db_context() as db_session:
         config_service = MemoryConfigService(db_session)
@@ -66,25 +68,24 @@ async def long_term_storage(long_term_type:str="chunk",langchain_messages:list=[
             config_id=memory_config,  # 改为整数
             service_name="MemoryAgentService"
         )
-        if long_term_type==AgentMemory_Long_Term.STRATEGY_CHUNK:
+        if long_term_type == AgentMemory_Long_Term.STRATEGY_CHUNK:
             '''Strategy 1: Dialogue window with 6 rounds of conversation'''
-            await window_dialogue(end_user_id,langchain_messages,memory_config,scope)
-        if long_term_type==AgentMemory_Long_Term.STRATEGY_TIME:
+            await window_dialogue(end_user_id, langchain_messages, memory_config, scope)
+        if long_term_type == AgentMemory_Long_Term.STRATEGY_TIME:
             """Time-based strategy"""
-            await memory_long_term_storage(end_user_id, memory_config,AgentMemory_Long_Term.TIME_SCOPE)
-        if  long_term_type==AgentMemory_Long_Term.STRATEGY_AGGREGATE:
+            await memory_long_term_storage(end_user_id, memory_config, AgentMemory_Long_Term.TIME_SCOPE)
+        if long_term_type == AgentMemory_Long_Term.STRATEGY_AGGREGATE:
             """Strategy 3: Aggregate judgment"""
             await aggregate_judgment(end_user_id, langchain_messages, memory_config)
 
 
-
-async def write_long_term(storage_type,end_user_id,message_chat,aimessages,user_rag_memory_id,actual_config_id):
+async def write_long_term(storage_type, end_user_id, message_chat, aimessages, user_rag_memory_id, actual_config_id):
     """
     Write long-term memory with different storage types
-    
+
     Handles both RAG-based storage and traditional memory storage approaches.
     For traditional storage, uses chunk-based strategy with paired user-AI messages.
-    
+
     Args:
         storage_type: Type of storage (RAG or traditional)
         end_user_id: User group identifier
@@ -95,7 +96,7 @@ async def write_long_term(storage_type,end_user_id,message_chat,aimessages,user_
     """
     from app.core.memory.agent.langgraph_graph.routing.write_router import write_rag_agent
     from app.core.memory.agent.langgraph_graph.routing.write_router import term_memory_save
-    from app.core.memory.agent.langgraph_graph.tools.write_tool import  agent_chat_messages
+    from app.core.memory.agent.langgraph_graph.tools.write_tool import agent_chat_messages
     if storage_type == AgentMemory_Long_Term.STORAGE_RAG:
         await write_rag_agent(end_user_id, message_chat, aimessages, user_rag_memory_id)
     else:

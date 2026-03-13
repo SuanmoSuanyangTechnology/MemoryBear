@@ -274,7 +274,7 @@ class MemoryAgentService:
 
         Args:
             end_user_id: Group identifier (also used as end_user_id)
-            message: Message to write
+            messages: Message to write
             config_id: Configuration ID from database
             db: SQLAlchemy database session
             storage_type: Storage type (neo4j or rag)

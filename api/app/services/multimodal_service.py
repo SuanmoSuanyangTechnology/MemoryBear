@@ -10,6 +10,7 @@
 """
 import base64
 import io
+import uuid
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 
@@ -23,9 +24,12 @@ from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
+from app.models import ModelApiKey
 from app.models.file_metadata_model import FileMetadata
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
+from app.schemas.model_schema import ModelInfo
 from app.services.audio_transcription_service import AudioTranscriptionService
+from app.tasks import write_perceptual_memory
 
 logger = get_business_logger()
 
@@ -39,6 +43,7 @@ DOC_MIME = [
 
 class MultimodalFormatStrategy(ABC):
     """多模态格式策略基类"""
+
     def __init__(self, file: FileInput):
         self.file = file
 
@@ -95,7 +100,7 @@ class DashScopeFormatStrategy(MultimodalFormatStrategy):
         if transcription:
             return {
                 "type": "text",
-                "text": f"<audio url=\"{url}\">\n{transcription}\n</audio>"
+                "text": f"<audio url=\"{url}\">\ntext_transcription:{transcription}\n</audio>"
             }
         # 通义千问音频格式：{"type": "audio", "audio": "url"}
         return {
@@ -284,34 +289,56 @@ PROVIDER_STRATEGIES = {
 
 
 class MultimodalService:
-    """多模态文件处理服务"""
+    """
+    Service for handling multimodal file processing.
 
-    def __init__(self, db: Session, provider: str = "dashscope", api_key: Optional[str] = None,
-                 enable_audio_transcription: bool = False, is_omni: bool = False):
+    Attributes:
+        db (Session): Database session.
+        model_api_key (str): API key for the model provider.
+        provider (str): Name of the model provider.
+        is_omni (bool): Indicates whether the model supports full multimodal capability.
+        capability (list): Capability configuration of the model.
+        audio_api_key (str | None): API key used for audio transcription.
+        enable_audio_transcription (bool): Whether audio transcription is enabled.
+    """
+
+    def __init__(
+            self,
+            db: Session,
+            api_config: ModelInfo | None = None,
+            audio_api_key: Optional[str] = None,
+            enable_audio_transcription: bool = False,
+    ):
         """
-        初始化多模态服务
-        
+        Initialize the multimodal service.
+
         Args:
-            db: 数据库会话
-            provider: 模型提供商（dashscope, bedrock, anthropic, openai 等）
-            api_key: API 密钥（用于音频转文本）
-            enable_audio_transcription: 是否启用音频转文本
-            is_omni: 是否为 Omni 模型（dashscope 的 omni 模型需要使用 OpenAI 兼容格式）
+            db (Session): Database session.
+            api_config (ModelApiKey | None): Model API configuration.
+            audio_api_key (str | None): API key for audio transcription.
+            enable_audio_transcription (bool): Enable audio transcription.
         """
         self.db = db
-        self.provider = provider.lower()
-        self.api_key = api_key
+        self.api_config = api_config
+        if self.api_config is not None:
+            self.model_api_key = api_config.api_key
+            self.provider = api_config.provider.lower()
+            self.is_omni = api_config.is_omni
+            self.capability = api_config.capability
+        self.audio_api_key = audio_api_key
         self.enable_audio_transcription = enable_audio_transcription
-        self.is_omni = is_omni
 
     async def process_files(
             self,
-            files: Optional[List[FileInput]]
+            end_user_id: uuid.UUID | str,
+            files: Optional[List[FileInput]],
+
     ) -> List[Dict[str, Any]]:
         """
         处理文件列表，返回 LLM 可用的格式
         
         Args:
+            end_user_id: 用户ID
             files: 文件输入列表
             
         Returns:
@@ -319,6 +346,8 @@ class MultimodalService:
         """
         if not files:
             return []
+        if isinstance(end_user_id, uuid.UUID):
+            end_user_id = str(end_user_id)
 
         # 获取对应的策略
         # dashscope 的 omni 模型使用 OpenAI 兼容格式
@@ -333,19 +362,25 @@ class MultimodalService:
         result = []
         for idx, file in enumerate(files):
             strategy = strategy_class(file)
+            if not file.url:
+                file.url = await self.get_file_url(file)
             try:
-                if file.type == FileType.IMAGE:
+                if file.type == FileType.IMAGE and "vision" in self.capability:
                     content = await self._process_image(file, strategy)
                     result.append(content)
+                    self.write_perceptual_memory(end_user_id, file.type, file.url, content)
                 elif file.type == FileType.DOCUMENT:
                     content = await self._process_document(file, strategy)
                     result.append(content)
-                elif file.type == FileType.AUDIO:
+                    self.write_perceptual_memory(end_user_id, file.type, file.url, content)
+                elif file.type == FileType.AUDIO and "audio" in self.capability:
                     content = await self._process_audio(file, strategy)
                     result.append(content)
-                elif file.type == FileType.VIDEO:
+                    self.write_perceptual_memory(end_user_id, file.type, file.url, content)
+                elif file.type == FileType.VIDEO and "video" in self.capability:
                     content = await self._process_video(file, strategy)
                     result.append(content)
+                    self.write_perceptual_memory(end_user_id, file.type, file.url, content)
                 else:
                     logger.warning(f"不支持的文件类型: {file.type}")
             except Exception as e:
@@ -355,7 +390,8 @@ class MultimodalService:
                         "file_index": idx,
                         "file_type": file.type,
                         "error": str(e)
-                    }
+                    },
+                    exc_info=True
                 )
                 # 继续处理其他文件，不中断整个流程
                 result.append({
@@ -365,6 +401,17 @@ class MultimodalService:
 
         logger.info(f"成功处理 {len(result)}/{len(files)} 个文件，provider={self.provider}")
         return result
+
+    def write_perceptual_memory(
+            self,
+            end_user_id: str,
+            file_type: str,
+            file_url: str,
+            file_message: dict
+    ):
+        """写入感知记忆"""
+        if end_user_id and self.api_config:
+            write_perceptual_memory.delay(end_user_id, self.api_config.model_dump(), file_type, file_url, file_message)
 
     async def _process_image(self, file: FileInput, strategy) -> Dict[str, Any]:
         """
@@ -387,43 +434,6 @@ class MultimodalService:
                 "text": f"[图片处理失败: {str(e)}]"
             }
 
-    @staticmethod
-    async def _download_and_encode_image(url: str) -> tuple[str, str]:
-        """
-        下载图片并转换为 base64
-        
-        Args:
-            url: 图片 URL
-            
-        Returns:
-            tuple: (base64_data, media_type)
-        """
-        from mimetypes import guess_type
-
-        # 下载图片
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-
-            # 获取图片数据
-            image_data = response.content
-
-            # 确定 media type
-            content_type = response.headers.get("content-type")
-            if content_type and content_type.startswith("image/"):
-                media_type = content_type
-            else:
-                # 从 URL 推断
-                guessed_type, _ = guess_type(url)
-                media_type = guessed_type if guessed_type and guessed_type.startswith("image/") else "image/jpeg"
-
-            # 转换为 base64
-            base64_data = base64.b64encode(image_data).decode("utf-8")
-
-            logger.debug(f"图片编码完成: media_type={media_type}, size={len(base64_data)}")
-
-            return base64_data, media_type
-
     async def _process_document(self, file: FileInput, strategy) -> Dict[str, Any]:
         """
         处理文档文件（PDF、Word 等）
@@ -436,7 +446,6 @@ class MultimodalService:
             Dict: 根据 provider 返回不同格式的文档内容
         """
         if file.transfer_method == TransferMethod.REMOTE_URL:
-            # 远程文档暂不支持提取
             return {
                 "type": "text",
                 "text": f"<document url=\"{file.url}\">\n{await self._extract_document_text(file)}\n</document>"
@@ -471,12 +480,12 @@ class MultimodalService:
 
             # 如果启用音频转文本且有 API Key
             transcription = None
-            if self.enable_audio_transcription and self.api_key:
+            if self.enable_audio_transcription and self.audio_api_key:
                 logger.info(f"开始音频转文本: {url}")
                 if self.provider == "dashscope":
-                    transcription = await AudioTranscriptionService.transcribe_dashscope(url, self.api_key)
+                    transcription = await AudioTranscriptionService.transcribe_dashscope(url, self.audio_api_key)
                 elif self.provider == "openai":
-                    transcription = await AudioTranscriptionService.transcribe_openai(url, self.api_key)
+                    transcription = await AudioTranscriptionService.transcribe_openai(url, self.audio_api_key)
                 else:
                     logger.warning(f"Provider {self.provider} 不支持音频转文本")
 

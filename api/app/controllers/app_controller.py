@@ -808,6 +808,15 @@ async def draft_run_compare(
         raise BusinessException("只有 Agent 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
     service._validate_app_accessible(app, workspace_id)
 
+    if payload.user_id is None:
+        end_user_repo = EndUserRepository(db)
+        new_end_user = end_user_repo.get_or_create_end_user(
+            app_id=app_id,
+            other_id=str(current_user.id),
+            original_user_id=str(current_user.id)  # Save original user_id to other_id
+        )
+        payload.user_id = str(new_end_user.id)
+
     # 2. 获取 Agent 配置
     from sqlalchemy import select
     from app.models import AgentConfig
@@ -853,6 +862,8 @@ async def draft_run_compare(
             "conversation_id": model_item.conversation_id  # 传递每个模型的 conversation_id
         })
 
+
+
     # 流式返回
     if payload.stream:
         async def event_generator():
@@ -864,7 +875,7 @@ async def draft_run_compare(
                     message=payload.message,
                     workspace_id=workspace_id,
                     conversation_id=payload.conversation_id,
-                    user_id=payload.user_id or str(current_user.id),
+                    user_id=payload.user_id,
                     variables=payload.variables,
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
@@ -895,7 +906,7 @@ async def draft_run_compare(
         message=payload.message,
         workspace_id=workspace_id,
         conversation_id=payload.conversation_id,
-        user_id=payload.user_id or str(current_user.id),
+        user_id=payload.user_id,
         variables=payload.variables,
         storage_type=storage_type,
         user_rag_memory_id=user_rag_memory_id,
