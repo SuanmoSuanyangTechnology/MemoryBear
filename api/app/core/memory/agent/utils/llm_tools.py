@@ -8,10 +8,11 @@ from langgraph.graph import add_messages
 
 PROJECT_ROOT_ = str(Path(__file__).resolve().parents[3])
 
+
 class WriteState(TypedDict):
-    '''
+    """
     Langgrapg Writing TypedDict
-    '''
+    """
     messages: Annotated[list[AnyMessage], add_messages]
     end_user_id: str
     errors: list[dict]  # Track errors: [{"tool": "tool_name", "error": "message"}]
@@ -19,6 +20,7 @@ class WriteState(TypedDict):
     write_result: dict
     data: str
     language: str  # 语言类型 ("zh" 中文, "en" 英文)
+
 
 class ReadState(TypedDict):
     """
@@ -43,18 +45,20 @@ class ReadState(TypedDict):
     config_id: str
     data: str  # 新增字段用于传递内容
     spit_data: dict  # 新增字段用于传递问题分解结果
-    problem_extension:dict
+    problem_extension: dict
     storage_type: str
     user_rag_memory_id: str
     llm_id: str
     embedding_id: str
     memory_config: object  # 新增字段用于传递内存配置对象
-    retrieve:dict
+    retrieve: dict
     RetrieveSummary: dict
     InputSummary: dict
     verify: dict
     SummaryFails: dict
     summary: dict
+
+
 class COUNTState:
     """
     工作流对话检索内容计数器
@@ -99,6 +103,7 @@ class COUNTState:
         self.total = 0
         print("[COUNTState] 已重置为 0")
 
+
 def deduplicate_entries(entries):
     seen = set()
     deduped = []
@@ -108,6 +113,7 @@ def deduplicate_entries(entries):
             seen.add(key)
             deduped.append(entry)
     return deduped
+
 
 def merge_to_key_value_pairs(data, query_key, result_key):
     grouped = defaultdict(list)

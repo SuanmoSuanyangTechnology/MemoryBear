@@ -23,9 +23,10 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_db_context
-from app.models import AgentConfig, ModelConfig
+from app.models import AgentConfig, ModelConfig, ModelType
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput
+from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
 from app.services import task_service
 from app.services.conversation_service import ConversationService
@@ -501,9 +502,18 @@ class AgentRunService:
             processed_files = None
             if files:
                 # 获取 provider 信息
+                model_info = ModelInfo(
+                    model_name=api_key_config["model_name"],
+                    provider=api_key_config["provider"],
+                    api_key=api_key_config["api_key"],
+                    api_base=api_key_config["api_base"],
+                    capability=api_key_config["capability"],
+                    is_omni=api_key_config["is_omni"],
+                    model_type=ModelType.LLM
+                )
                 provider = api_key_config.get("provider", "openai")
-                multimodal_service = MultimodalService(self.db, provider=provider, is_omni=api_key_config.get("is_omni", False))
-                processed_files = await multimodal_service.process_files(files)
+                multimodal_service = MultimodalService(self.db, model_info)
+                processed_files = await multimodal_service.process_files(user_id, files)
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
 
             # 7. 知识库检索
@@ -704,9 +714,18 @@ class AgentRunService:
             processed_files = None
             if files:
                 # 获取 provider 信息
+                model_info = ModelInfo(
+                    model_name=api_key_config["model_name"],
+                    provider=api_key_config["provider"],
+                    api_key=api_key_config["api_key"],
+                    api_base=api_key_config["api_base"],
+                    capability=api_key_config["capability"],
+                    is_omni=api_key_config["is_omni"],
+                    model_type=ModelType.LLM
+                )
                 provider = api_key_config.get("provider", "openai")
-                multimodal_service = MultimodalService(self.db, provider=provider, is_omni=api_key_config.get("is_omni", False))
-                processed_files = await multimodal_service.process_files(files)
+                multimodal_service = MultimodalService(self.db, model_info)
+                processed_files = await multimodal_service.process_files(user_id, files)
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
 
             # 7. 知识库检索
@@ -841,7 +860,8 @@ class AgentRunService:
             "api_key": api_key.api_key,
             "api_base": api_key.api_base,
             "api_key_id": api_key.id,
-            "is_omni": api_key.is_omni
+            "is_omni": api_key.is_omni,
+            "capability": api_key.capability
         }
 
     async def _ensure_conversation(

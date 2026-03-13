@@ -20,6 +20,7 @@ from app.core.workflow.nodes.llm.config import LLMNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_db_context
 from app.models import ModelType
+from app.schemas.model_schema import ModelInfo
 from app.services.model_service import ModelConfigService
 
 logger = logging.getLogger(__name__)
@@ -113,12 +114,15 @@ class LLMNode(BaseNode):
 
             # 在 Session 关闭前提取所有需要的数据
             api_config = self.model_balance(config)
-            model_name = api_config.model_name
-            provider = api_config.provider
-            api_key = api_config.api_key
-            api_base = api_config.api_base
-            is_omni = api_config.is_omni
-            model_type = config.type
+            model_info = ModelInfo(
+                model_name=api_config.model_name,
+                model_type=ModelType(config.type),
+                api_key=api_config.api_key,
+                api_base=api_config.api_base,
+                provider=api_config.provider,
+                is_omni=api_config.is_omni,
+                capability=api_config.capability
+            )
 
         # 4. 创建 LLM 实例（使用已提取的数据）
         # 注意：对于流式输出，需要在模型初始化时设置 streaming=True
@@ -126,17 +130,18 @@ class LLMNode(BaseNode):
 
         llm = RedBearLLM(
             RedBearModelConfig(
-                model_name=model_name,
-                provider=provider,
-                api_key=api_key,
-                base_url=api_base,
+                model_name=model_info.model_name,
+                provider=model_info.provider,
+                api_key=model_info.api_key,
+                base_url=model_info.api_base,
                 extra_params=extra_params,
-                is_omni=is_omni
+                is_omni=model_info.is_omni
             ),
-            type=ModelType(model_type)
+            type=model_info.model_type
         )
 
-        logger.debug(f"创建 LLM 实例: provider={provider}, model={model_name}, streaming={stream}")
+        logger.debug(
+            f"创建 LLM 实例: provider={model_info.provider}, model={model_info.model_name}, streaming={stream}")
 
         messages_config = self.typed_config.messages
 
@@ -148,35 +153,40 @@ class LLMNode(BaseNode):
                 content_template = msg_config.content
                 content_template = self._render_context(content_template, variable_pool)
                 content = self._render_template(content_template, variable_pool)
-
+                user_id = self.get_variable("sys.user_id", variable_pool)
                 # 根据角色创建对应的消息对象
                 if role == "system":
                     messages.append({
                         "role": "system",
-                        "content": await self.process_message(provider, is_omni, content, self.typed_config.vision)
+                        "content": await self.process_message(
+                            model_info,
+                            content,
+                            user_id,
+                            self.typed_config.vision,
+                        )
                     })
                 elif role in ["user", "human"]:
                     messages.append({
                         "role": "user",
-                        "content": await self.process_message(provider, is_omni, content, self.typed_config.vision)
+                        "content": await self.process_message(model_info, content, user_id, self.typed_config.vision)
                     })
                 elif role in ["ai", "assistant"]:
                     messages.append({
                         "role": "assistant",
-                        "content": await self.process_message(provider, is_omni, content, self.typed_config.vision)
+                        "content": await self.process_message(model_info, content, user_id, self.typed_config.vision)
                     })
                 else:
                     logger.warning(f"未知的消息角色: {role}，默认使用 user")
                     messages.append({
                         "role": "user",
-                        "content": await self.process_message(provider, is_omni, content, self.typed_config.vision)
+                        "content": await self.process_message(model_info, content, user_id, self.typed_config.vision)
                     })
 
             if self.typed_config.vision_input and self.typed_config.vision:
                 file_content = []
                 files = variable_pool.get_instance(self.typed_config.vision_input)
                 for file in files.value:
-                    content = await self.process_message(provider, is_omni, file.value, self.typed_config.vision)
+                    content = await self.process_message(model_info, file.value, user_id, self.typed_config.vision)
                     if content:
                         file_content.extend(content)
                 if messages and messages[-1]["role"] == 'user':
@@ -190,14 +200,19 @@ class LLMNode(BaseNode):
                     if isinstance(message["content"], list):
                         file_content = []
                         for file in message["content"]:
-                            content = await self.process_message(provider, is_omni, file, self.typed_config.vision)
+                            content = await self.process_message(model_info, file, user_id, self.typed_config.vision)
                             if content:
                                 file_content.extend(content)
                         history_message.append(
                             {"role": message["role"], "content": file_content}
                         )
                     else:
-                        message["content"] = await self.process_message(provider, is_omni, message["content"], self.typed_config.vision)
+                        message["content"] = await self.process_message(
+                            model_info,
+                            message["content"],
+                            user_id,
+                            self.typed_config.vision
+                        )
                         history_message.append(message)
                 messages = messages[:-1] + history_message + messages[-1:]
             self.messages = messages
@@ -293,7 +308,7 @@ class LLMNode(BaseNode):
 
         # 调用 LLM（流式，支持字符串或消息列表）
         last_meta_data = {}
-        async for chunk in llm.astream(self.messages, stream_usage=True):
+        async for chunk in llm.astream(self.messages):
             # 提取内容
             if hasattr(chunk, 'content'):
                 content = self.process_model_output(chunk.content)

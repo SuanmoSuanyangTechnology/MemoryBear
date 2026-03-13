@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db import Base
+from app.schemas import FileType
 
 
 class PerceptualType(IntEnum):
@@ -14,6 +15,16 @@ class PerceptualType(IntEnum):
     AUDIO = 2
     TEXT = 3
     CONVERSATION = 4
+
+    @staticmethod
+    def trans_from_file_type(file_type: FileType | str):
+        type_map = {
+            FileType.IMAGE: PerceptualType.VISION,
+            FileType.AUDIO: PerceptualType.AUDIO,
+            FileType.VIDEO: PerceptualType.VISION,
+            FileType.DOCUMENT: PerceptualType.TEXT
+        }
+        return type_map.get(file_type, PerceptualType.TEXT)
 
 
 class FileStorageService(IntEnum):

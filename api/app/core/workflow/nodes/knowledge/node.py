@@ -30,6 +30,12 @@ class KnowledgeRetrievalNode(BaseNode):
             "output": VariableType.ARRAY_STRING
         }
 
+    def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
+        return {
+            "query": self._render_template(self.typed_config.query, variable_pool),
+            "knowledge_bases": [kb_config.model_dump(mode="json") for kb_config in self.typed_config.knowledge_bases],
+        }
+
     @staticmethod
     def _build_kb_filter(kb_ids: list[uuid.UUID], permission: knowledge_model.PermissionType):
         """
