@@ -43,6 +43,7 @@
     "i18next": "^25.6.0",
     "js-yaml": "^4.1.1",
     "lexical": "^0.39.0",
+    "mammoth": "^1.12.0",
     "mermaid": "^11.12.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -58,6 +59,7 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "tailwindcss": "^4.1.14",
+    "xlsx": "^0.18.5",
     "zustand": "^5.0.8"
   },
   "devDependencies": {
