@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-28 14:08:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 12:05:46
+ * @Last Modified time: 2026-03-12 17:19:33
  */
 /**
  * UploadWorkflowModal Component
@@ -72,6 +72,7 @@ const UploadWorkflowModal = forwardRef<UploadWorkflowModalRef, UploadWorkflowMod
     setFirstFormData(null);
     setAppId(null);
     setLoading(false);
+    refresh()
   };
 
   /**

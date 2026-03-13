@@ -33,7 +33,7 @@ from app.models import (
     Workspace,
 )
 from app.models.app_model import AppStatus, AppType
-from app.repositories.app_repository import get_apps_by_id
+from app.repositories.app_repository import get_apps_by_id, AppRepository
 from app.repositories.workflow_repository import WorkflowConfigRepository
 from app.schemas import app_schema
 from app.schemas.workflow_schema import WorkflowConfigUpdate
@@ -59,6 +59,7 @@ class AppService:
             db: 数据库会话
         """
         self.db = db
+        self.app_repo = AppRepository(self.db)
 
     # ==================== 私有辅助方法 ====================
 
@@ -521,6 +522,9 @@ class AppService:
             "创建应用",
             extra={"app_name": data.name, "type": data.type, "workspace_id": str(workspace_id)}
         )
+        apps = self.app_repo.get_apps_by_name(data.name, data.type, workspace_id)
+        if apps:
+            raise BusinessException(message="已存在同名应用", code=BizCode.RESOURCE_ALREADY_EXISTS)
 
         try:
             now = datetime.datetime.now()
@@ -1367,6 +1371,15 @@ class AppService:
             agent_cfg = self.db.scalars(stmt).first()
             if not agent_cfg:
                 raise BusinessException("Agent 应用缺少配置，无法发布", BizCode.AGENT_CONFIG_MISSING)
+
+            miss_params = []
+            if agent_cfg.default_model_config_id is None:
+                miss_params.append("model config")
+
+            if agent_cfg.memory.get("enabled") and not agent_cfg.memory.get("memory_config_id"):
+                miss_params.append("memory config")
+            if miss_params:
+                raise BusinessException(f"{', '.join(miss_params)} is required")
 
             config = {
                 "system_prompt": agent_cfg.system_prompt,

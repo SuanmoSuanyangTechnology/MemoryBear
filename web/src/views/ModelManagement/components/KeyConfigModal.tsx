@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:40 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:49:40 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-11 15:12:17
  */
 /**
  * Key Configuration Modal
@@ -11,7 +11,7 @@
  */
 
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, App } from 'antd';
+import { Form, Input, App, Button } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { KeyConfigModalForm, ProviderModelItem, KeyConfigModalRef, KeyConfigModalProps } from '../types';
@@ -30,9 +30,12 @@ const KeyConfigModal = forwardRef<KeyConfigModalRef, KeyConfigModalProps>(({
   const [model, setModel] = useState<ProviderModelItem>({} as ProviderModelItem);
   const [form] = Form.useForm<KeyConfigModalForm>();
   const [loading, setLoading] = useState(false)
+  const [abortController, setAbortController] = useState<AbortController | null>(null)
 
   /** Close modal and reset state */
   const handleClose = () => {
+    abortController?.abort()
+    setAbortController(null)
     setModel({} as ProviderModelItem);
     form.resetFields();
     setLoading(false)
@@ -51,10 +54,13 @@ const KeyConfigModal = forwardRef<KeyConfigModalRef, KeyConfigModalProps>(({
       .then((values) => {
         setLoading(true)
 
+        const controller = new AbortController()
+        setAbortController(controller)
+
         updateProviderApiKeys({
           ...values,
           provider: model.provider
-        }).then((res) => {
+        }, controller.signal).then((res) => {
             if (refresh) {
               refresh();
             }
@@ -81,9 +87,10 @@ const KeyConfigModal = forwardRef<KeyConfigModalRef, KeyConfigModalProps>(({
       title={`${model.provider} - ${t('modelNew.keyConfig')}`}
       open={visible}
       onCancel={handleClose}
-      okText={t(`common.save`)}
-      onOk={handleSave}
-      confirmLoading={loading}
+      footer={[
+        <Button key="cancel" onClick={handleClose}>{t('common.cancel')}</Button>,
+        <Button key="confirm" type="primary" loading={loading} onClick={handleSave}>{t(`common.save`)}</Button>,
+      ]}
     >
       <Form
         form={form}

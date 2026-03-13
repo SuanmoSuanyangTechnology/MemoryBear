@@ -754,7 +754,7 @@ export const zh = {
       gotoList: '返回应用列表',
       gotoDetail: '查看详情',
       dify: 'Dify',
-      pleaseUploadFile: '请上传工作流文件',
+      pleaseUploadFile: '请上传文件',
     },
     table: {
       totalRecords: '共 {{total}} 条记录'
@@ -1816,6 +1816,10 @@ export const zh = {
       marketRefresh: '刷新',
       marketConfigBtn: '配置',
       marketConfigConnection: '配置连接',
+      marketNoData: '暂无数据',
+      marketNoDataDesc: '该市场暂时没有可用的服务',
+      marketNoSearchResult: '无搜索结果',
+      marketNoSearchResultDesc: '未找到匹配的服务，请尝试其他关键词',
       marketNoServices: '暂无可用的 MCP 服务',
       marketNotConnected: '尚未连接此市场',
       marketNoServicesDesc: '该市场暂时没有可用的服务',
@@ -2036,6 +2040,7 @@ export const zh = {
       self_optimization: '自我优化',
       process_evolution: '流程演化',
       unknown: '未知节点',
+      notes: '便签',
 
       clickToConfigure: '点击配置节点参数',
       nodeProperties: '节点属性',
@@ -2225,6 +2230,12 @@ export const zh = {
         },
         unknown: {
           replaceNodeType: '替换节点'
+        },
+        notes: {
+          showAuth: '显示作者',
+          enterLink: '输入链接 URL',
+          placeholder: '输入注释...',
+          removeLink: '取消链接',
         },
         name: '键',
         type: '类型',

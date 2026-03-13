@@ -395,6 +395,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                   {t('tool.marketRefresh')}
                 </Button>
               )}
+              
                 <Input
                   prefix={<SearchOutlined />}
                   placeholder={t('tool.marketSearchPlaceholder')}
@@ -402,7 +403,9 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                   onChange={(e) => handleSearchChange(e.target.value)}
                   allowClear
                   style={{ width: 200 }}
+                  
                 />
+              
             </div>
             <Button icon={<SettingOutlined />} onClick={() => handleOpenConfig(selectedSource)}>
               {t('tool.marketConfigBtn')}
@@ -559,9 +562,9 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                       <span className="rb:flex-1 rb:font-medium rb:text-[12px] rb:overflow-hidden rb:text-ellipsis rb:whitespace-nowrap">
                         {source.name}
                       </span>
-                      <span className="rb:text-xs rb:text-gray-500 rb:px-1.5 rb:py-0.5 rb:bg-gray-100 rb:rounded-full rb:flex-shrink-0">
+                      {/* <span className="rb:text-xs rb:text-gray-500 rb:px-1.5 rb:py-0.5 rb:bg-gray-100 rb:rounded-full rb:flex-shrink-0">
                         {source.mcp_count}
-                      </span>
+                      </span> */}
                       {source.connected && (
                         <span className="rb:text-green-500 rb:text-[8px] rb:flex-shrink-0">●</span>
                       )}

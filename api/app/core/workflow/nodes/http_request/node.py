@@ -1,22 +1,144 @@
 import asyncio
 import json
 import logging
+import mimetypes
 import uuid
+import imghdr
+from email.message import Message
 from typing import Any, Callable, Coroutine
 
 import httpx
-# import filetypes # TODO: File support (Feature)
 from httpx import AsyncClient, Response, Timeout
+import magic
 
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.enums import HttpRequestMethod, HttpErrorHandle, HttpAuthType, HttpContentType
 from app.core.workflow.nodes.http_request.config import HttpRequestNodeConfig, HttpRequestNodeOutput
-from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.utils.file_processer import mime_to_file_type
+from app.core.workflow.variable.base_variable import VariableType, FileObject
 from app.core.workflow.variable.variable_objects import FileVariable, ArrayVariable
+from app.schemas import FileType, TransferMethod
 
 logger = logging.getLogger(__file__)
+
+
+class HttpResponse:
+    def __init__(self, response: httpx.Response):
+        self.response = response
+        self.headers = dict(response.headers)
+
+        self._is_file: bool | None = None
+
+    @property
+    def content_type(self) -> str:
+        return self.headers.get("content-type", "")
+
+    @property
+    def content_disposition(self) -> Message | None:
+        content_disposition = self.headers.get("content-disposition", "")
+        if content_disposition:
+            msg = Message()
+            msg["content-disposition"] = content_disposition
+            return msg
+        return None
+
+    @property
+    def is_file(self) -> bool:
+        if self._is_file is not None:
+            return self._is_file
+        content_type = self.content_type.split(";")[0].strip().lower()
+
+        parsed_content_disposition = self.content_disposition
+        if parsed_content_disposition:
+            disp_type = parsed_content_disposition.get_content_disposition()
+            filename = parsed_content_disposition.get_filename()
+            if disp_type == "attachment" or filename:
+                self._is_file = True
+                return True
+
+        if content_type.startswith("text/") and "csv" not in content_type:
+            return False
+
+        if content_type.startswith("application/"):
+            if any(
+                    text_type in content_type
+                    for text_type in {"json", "xml", "javascript", "x-www-form-urlencoded", "yaml", "graphql"}
+            ):
+                self._is_file = False
+                return False
+            try:
+                content_sample = self.response.content[:1024]
+                content_sample.decode("utf-8")
+                text_markers = (b"{", b"[", b"<", b"function", b"var ", b"const ", b"let ")
+                if any(marker in content_sample for marker in text_markers):
+                    return False
+            except UnicodeDecodeError:
+                self._is_file = True
+                return True
+
+        main_type, _ = mimetypes.guess_type("dummy" + (mimetypes.guess_extension(content_type) or ""))
+        if main_type:
+            self._is_file = main_type.split("/")[0] in ("application", "image", "audio", "video")
+            return self._is_file
+        self._is_file = any(media_type in content_type for media_type in ("image/", "audio/", "video/"))
+        return self._is_file
+
+    @property
+    def is_image(self):
+        if self.is_file:
+            kind = imghdr.what(None, h=self.response.content)
+            return kind is not None
+        return False
+
+    @property
+    def url(self) -> str:
+        return str(self.response.url)
+
+    @property
+    def body(self) -> str:
+        if self.is_file:
+            return f"{'!' if self.is_image else ''}[file]({self.url})"
+        return self.response.text
+
+    @staticmethod
+    def get_file_type(file_bytes) -> tuple[FileType | None, str | None]:
+        mime = magic.from_buffer(file_bytes, mime=True)
+
+        if mime.startswith("image"):
+            return FileType.IMAGE, mime
+        elif mime.startswith("video"):
+            return FileType.VIDEO, mime
+        elif mime.startswith("audio"):
+            return FileType.AUDIO, mime
+        elif mime in ["application/pdf",
+                      "application/msword",
+                      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                      "application/vnd.ms-excel",
+                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                      "text/plain"]:
+            return FileType.DOCUMENT, mime
+        return None, None
+
+    @property
+    def files(self) -> list[FileObject]:
+        file_type, mime_type = self.get_file_type(self.response.content)
+        origin_file_type = mime_to_file_type(mime_type)
+        if self.is_file and file_type and origin_file_type:
+            file_obj = FileObject(
+                type=file_type,
+                url=self.url,
+                transfer_method=TransferMethod.REMOTE_URL.value,
+                origin_file_type=origin_file_type,
+                file_id=None,
+                is_file=True
+            )
+            file_obj.set_content(self.response.content)
+            return [
+                file_obj
+            ]
+        return []
 
 
 class HttpRequestNode(BaseNode):
@@ -44,6 +166,7 @@ class HttpRequestNode(BaseNode):
             "body": VariableType.STRING,
             "status_code": VariableType.NUMBER,
             "headers": VariableType.OBJECT,
+            "files": VariableType.ARRAY_FILE,
             "output": VariableType.STRING
         }
 
@@ -232,10 +355,12 @@ class HttpRequestNode(BaseNode):
                     )
                     resp.raise_for_status()
                     logger.info(f"Node {self.node_id}: HTTP request succeeded")
+                    response = HttpResponse(resp)
                     return HttpRequestNodeOutput(
-                        body=resp.text,
+                        body=response.body,
                         status_code=resp.status_code,
                         headers=resp.headers,
+                        files=response.files
                     ).model_dump()
                 except (httpx.HTTPStatusError, httpx.RequestError) as e:
                     logger.error(f"HTTP request node exception: {e}")

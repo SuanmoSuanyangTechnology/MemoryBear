@@ -5,8 +5,9 @@ This module provides functionality to extract meaningful tags from chunk content
 """
 
 import asyncio
+import os
 from collections import Counter
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from app.core.logging_config import get_business_logger
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
@@ -15,12 +16,31 @@ from pydantic import BaseModel, Field
 
 business_logger = get_business_logger()
 
+DEFAULT_LLM_ID = os.getenv("SELECTED_LLM_ID", "openai/qwen-plus")
 
-def _get_llm_client():
-    """Get LLM client using db context."""
+
+def _get_llm_client(end_user_id: Optional[str] = None):
+    """Get LLM client, preferring user-connected config with fallback to default."""
     with get_db_context() as db:
+        try:
+            if end_user_id:
+                from app.services.memory_agent_service import get_end_user_connected_config
+                from app.services.memory_config_service import MemoryConfigService
+                connected_config = get_end_user_connected_config(end_user_id, db)
+                config_id = connected_config.get("memory_config_id")
+                workspace_id = connected_config.get("workspace_id")
+                if config_id or workspace_id:
+                    config_service = MemoryConfigService(db)
+                    memory_config = config_service.load_memory_config(
+                        config_id=config_id,
+                        workspace_id=workspace_id
+                    )
+                    factory = MemoryClientFactory(db)
+                    return factory.get_llm_client(memory_config.llm_model_id)
+        except Exception as e:
+            business_logger.warning(f"Failed to get user connected config, using default LLM: {e}")
         factory = MemoryClientFactory(db)
-        return factory.get_llm_client(None)  # Uses default LLM
+        return factory.get_llm_client(DEFAULT_LLM_ID)
 
 
 class ExtractedTags(BaseModel):
@@ -33,7 +53,7 @@ class ExtractedPersona(BaseModel):
     personas: List[str] = Field(..., description="从文本中提取的人物形象列表，如'产品设计师'、'旅行爱好者'等")
 
 
-async def extract_chunk_tags(chunks: List[str], max_tags: int = 10, max_chunks: int = 10) -> List[Tuple[str, int]]:
+async def extract_chunk_tags(chunks: List[str], max_tags: int = 10, max_chunks: int = 10, end_user_id: Optional[str] = None) -> List[Tuple[str, int]]:
     """
     Extract meaningful tags from the given chunks.
     
@@ -64,7 +84,7 @@ async def extract_chunk_tags(chunks: List[str], max_tags: int = 10, max_chunks: 
             "标签应该是名词或名词短语，能够准确概括文本的核心内容。"
         )
         
-        llm_client = _get_llm_client()
+        llm_client = _get_llm_client(end_user_id)
         
         # 为每个chunk单独提取标签，然后统计频率
         all_tags = []
@@ -116,7 +136,7 @@ async def extract_chunk_tags_with_frequency(chunks: List[str], max_tags: int = 1
     return await extract_chunk_tags(chunks, max_tags=max_tags, max_chunks=len(chunks))
 
 
-async def extract_chunk_persona(chunks: List[str], max_personas: int = 5, max_chunks: int = 20) -> List[str]:
+async def extract_chunk_persona(chunks: List[str], max_personas: int = 5, max_chunks: int = 20, end_user_id: Optional[str] = None) -> List[str]:
     """
     Extract persona (人物形象) from the given chunks.
     
@@ -159,7 +179,7 @@ async def extract_chunk_persona(chunks: List[str], max_personas: int = 5, max_ch
         ]
         
         # 调用LLM提取人物形象
-        llm_client = _get_llm_client()
+        llm_client = _get_llm_client(end_user_id)
         structured_response = await llm_client.response_structured(
             messages=messages,
             response_model=ExtractedPersona

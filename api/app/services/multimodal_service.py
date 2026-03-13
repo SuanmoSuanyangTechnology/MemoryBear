@@ -8,32 +8,42 @@
 - Bedrock/Anthropic: 仅支持 base64 格式
 - OpenAI: 支持 URL 和 base64 格式
 """
-import uuid
-import httpx
 import base64
-from typing import List, Dict, Any, Optional
-from abc import ABC, abstractmethod
-from sqlalchemy.orm import Session
-from docx import Document
 import io
-import PyPDF2
+from abc import ABC, abstractmethod
+from typing import List, Dict, Any, Optional
 
-from app.core.logging_config import get_business_logger
-from app.core.exceptions import BusinessException
-from app.core.error_codes import BizCode
-from app.schemas.app_schema import FileInput, FileType, TransferMethod
-from app.models.file_metadata_model import FileMetadata
+import PyPDF2
+import httpx
+import magic
+from docx import Document
+from sqlalchemy.orm import Session
+
 from app.core.config import settings
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
+from app.core.logging_config import get_business_logger
+from app.models.file_metadata_model import FileMetadata
+from app.schemas.app_schema import FileInput, FileType, TransferMethod
 from app.services.audio_transcription_service import AudioTranscriptionService
 
 logger = get_business_logger()
 
+TEXT_MIME = ['text/plain', 'text/x-markdown']
+PDF_MIME = ['application/pdf']
+DOC_MIME = [
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+]
+
 
 class MultimodalFormatStrategy(ABC):
     """多模态格式策略基类"""
+    def __init__(self, file: FileInput):
+        self.file = file
 
     @abstractmethod
-    async def format_image(self, url: str) -> Dict[str, Any]:
+    async def format_image(self, url: str, content: bytes | None = None) -> Dict[str, Any]:
         """格式化图片"""
         pass
 
@@ -43,7 +53,7 @@ class MultimodalFormatStrategy(ABC):
         pass
 
     @abstractmethod
-    async def format_audio(self, file_type: str, url: str) -> Dict[str, Any]:
+    async def format_audio(self, file_type: str, url: str, content: bytes | None = None) -> Dict[str, Any]:
         """格式化音频"""
         pass
 
@@ -56,7 +66,7 @@ class MultimodalFormatStrategy(ABC):
 class DashScopeFormatStrategy(MultimodalFormatStrategy):
     """通义千问策略"""
 
-    async def format_image(self, url: str) -> Dict[str, Any]:
+    async def format_image(self, url: str, content: bytes | None = None) -> Dict[str, Any]:
         """通义千问图片格式：{"type": "image", "image": "url"}"""
         return {
             "type": "image",
@@ -70,7 +80,13 @@ class DashScopeFormatStrategy(MultimodalFormatStrategy):
             "text": f"<document name=\"{file_name}\">\n{text}\n</document>"
         }
 
-    async def format_audio(self, file_type: str, url: str, transcription: Optional[str] = None) -> Dict[str, Any]:
+    async def format_audio(
+            self,
+            file_type: str,
+            url: str,
+            content: bytes | None = None,
+            transcription: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         通义千问音频格式
         - 原生支持: qwen-audio 系列
@@ -98,44 +114,37 @@ class DashScopeFormatStrategy(MultimodalFormatStrategy):
 class BedrockFormatStrategy(MultimodalFormatStrategy):
     """Bedrock/Anthropic 策略"""
 
-    async def format_image(self, url: str) -> Dict[str, Any]:
+    async def format_image(self, url: str, content: bytes | None = None) -> Dict[str, Any]:
         """
         Bedrock/Anthropic 格式: base64 编码
         {"type": "image", "source": {"type": "base64", "media_type": "...", "data": "..."}}
         """
-        from mimetypes import guess_type
 
         logger.info(f"下载并编码图片: {url}")
 
         # 下载图片
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-
-            # 获取图片数据
-            image_data = response.content
+        if content is None:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                content = response.content
+                self.file.set_content(content)
 
             # 确定 media type
-            content_type = response.headers.get("content-type")
-            if content_type and content_type.startswith("image/"):
-                media_type = content_type
-            else:
-                guessed_type, _ = guess_type(url)
-                media_type = guessed_type if guessed_type and guessed_type.startswith("image/") else "image/jpeg"
+        content_type = magic.from_buffer(content, mime=True)
+        media_type = content_type if content_type.startswith("image/") else "image/jpeg"
+        base64_data = base64.b64encode(content).decode("utf-8")
 
-            # 转换为 base64
-            base64_data = base64.b64encode(image_data).decode("utf-8")
+        logger.info(f"图片编码完成: media_type={media_type}, size={len(base64_data)}")
 
-            logger.info(f"图片编码完成: media_type={media_type}, size={len(base64_data)}")
-
-            return {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": base64_data
-                }
+        return {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": base64_data
             }
+        }
 
     async def format_document(self, file_name: str, text: str) -> Dict[str, Any]:
         """Bedrock/Anthropic 文档格式（需要 base64 编码）"""
@@ -152,7 +161,12 @@ class BedrockFormatStrategy(MultimodalFormatStrategy):
             }
         }
 
-    async def format_audio(self, file_type: str, url: str, transcription: Optional[str] = None) -> Dict[str, Any]:
+    async def format_audio(
+            self, file_type: str,
+            url: str,
+            content: bytes | None = None,
+            transcription: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Bedrock/Anthropic 音频格式
         不支持原生音频，必须转录为文本
@@ -178,7 +192,7 @@ class BedrockFormatStrategy(MultimodalFormatStrategy):
 class OpenAIFormatStrategy(MultimodalFormatStrategy):
     """OpenAI 策略"""
 
-    async def format_image(self, url: str) -> Dict[str, Any]:
+    async def format_image(self, url: str, content: bytes | None = None) -> Dict[str, Any]:
         """OpenAI 格式: {"type": "image_url", "image_url": {"url": "..."}}"""
         return {
             "type": "image_url",
@@ -194,7 +208,13 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
             "text": f"<document name=\"{file_name}\">\n{text}\n</document>"
         }
 
-    async def format_audio(self, file_type: str, url: str, transcription: Optional[str] = None) -> Dict[str, Any]:
+    async def format_audio(
+            self,
+            file_type: str,
+            url: str,
+            content: bytes | None = None,
+            transcription: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         OpenAI 音频格式
         - gpt-4o-audio 系列支持原生音频（需要 base64 编码）
@@ -208,31 +228,35 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
 
         # OpenAI 音频需要 base64 编码
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                audio_data = response.content
-                base64_audio = base64.b64encode(audio_data).decode('utf-8')
-                # 1. 优先从 file_type (MIME) 取扩展名
-                file_ext = file_type.split('/')[-1] if file_type and '/' in file_type else None
-                # 2. 从响应头 content-type 取
-                if not file_ext:
-                    ct = response.headers.get("content-type", "")
-                    file_ext = ct.split('/')[-1].split(';')[0].strip() if '/' in ct else None
-                # 3. 从 URL 路径取扩展名
-                if not file_ext:
-                    file_ext = url.split('?')[0].rsplit('.', 1)[-1].lower() or None
-                # 4. 默认 wav
-                # supported_ext = {"wav", "mp3", "mp4", "ogg", "flac", "webm", "m4a", "wave", "x-m4a"}
-                file_ext = "wav" if not file_ext else file_ext
+            audio_data = content
+            if content is None:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(url)
+                    response.raise_for_status()
+                    audio_data = response.content
+                    self.file.set_content(audio_data)
+            base64_audio = base64.b64encode(audio_data).decode('utf-8')
 
-                return {
-                    "type": "input_audio",
-                    "input_audio": {
-                        "data": f"data:;base64,{base64_audio}",
-                        "format": file_ext
-                    }
+            # 1. 优先从 file_type (MIME) 取扩展名
+            file_ext = file_type.split('/')[-1] if file_type and '/' in file_type else None
+            # 2. 从响应头 content-type 取
+            if not file_ext:
+                content_type = magic.from_buffer(audio_data, mime=True)
+                file_ext = content_type.split('/')[-1].split(';')[0].strip() if '/' in content_type else None
+            # 3. 从 URL 路径取扩展名
+            if not file_ext:
+                file_ext = url.split('?')[0].rsplit('.', 1)[-1].lower() or None
+            # 4. 默认 wav
+            # supported_ext = {"wav", "mp3", "mp4", "ogg", "flac", "webm", "m4a", "wave", "x-m4a"}
+            file_ext = "wav" if not file_ext else file_ext
+
+            return {
+                "type": "input_audio",
+                "input_audio": {
+                    "data": f"data:;base64,{base64_audio}",
+                    "format": file_ext
                 }
+            }
         except Exception as e:
             logger.error(f"下载音频失败: {e}")
             return {
@@ -262,7 +286,8 @@ PROVIDER_STRATEGIES = {
 class MultimodalService:
     """多模态文件处理服务"""
 
-    def __init__(self, db: Session, provider: str = "dashscope", api_key: Optional[str] = None, enable_audio_transcription: bool = False, is_omni: bool = False):
+    def __init__(self, db: Session, provider: str = "dashscope", api_key: Optional[str] = None,
+                 enable_audio_transcription: bool = False, is_omni: bool = False):
         """
         初始化多模态服务
         
@@ -305,10 +330,9 @@ class MultimodalService:
                 logger.warning(f"未找到 provider '{self.provider}' 的策略，使用默认策略")
                 strategy_class = DashScopeFormatStrategy
 
-        strategy = strategy_class()
-
         result = []
         for idx, file in enumerate(files):
+            strategy = strategy_class(file)
             try:
                 if file.type == FileType.IMAGE:
                     content = await self._process_image(file, strategy)
@@ -355,7 +379,7 @@ class MultimodalService:
         """
         try:
             url = await self.get_file_url(file)
-            return await strategy.format_image(url)
+            return await strategy.format_image(url, content=file.get_content())
         except Exception as e:
             logger.error(f"处理图片失败: {e}", exc_info=True)
             return {
@@ -415,11 +439,13 @@ class MultimodalService:
             # 远程文档暂不支持提取
             return {
                 "type": "text",
-                "text": f"<document url=\"{file.url}\">\n[远程文档，暂不支持内容提取]\n</document>"
+                "text": f"<document url=\"{file.url}\">\n{await self._extract_document_text(file)}\n</document>"
             }
         else:
             # 本地文件，提取文本内容
-            text = await self._extract_document_text(file.upload_file_id)
+            server_url = settings.FILE_LOCAL_SERVER_URL
+            file.url = f"{server_url}/storage/permanent/{file.upload_file_id}"
+            text = await self._extract_document_text(file)
             file_metadata = self.db.query(FileMetadata).filter(
                 FileMetadata.id == file.upload_file_id
             ).first()
@@ -454,7 +480,7 @@ class MultimodalService:
                 else:
                     logger.warning(f"Provider {self.provider} 不支持音频转文本")
 
-            return await strategy.format_audio(file.file_type, url, transcription)
+            return await strategy.format_audio(file.file_type, url, file.get_content(), transcription)
         except Exception as e:
             logger.error(f"处理音频失败: {e}", exc_info=True)
             return {
@@ -500,8 +526,6 @@ class MultimodalService:
             return file.url
         else:
             file_id = file.upload_file_id
-            print("="*50)
-            print("file_id",file_id)
 
             # 查询 FileMetadata
             file_metadata = self.db.query(FileMetadata).filter(
@@ -519,66 +543,44 @@ class MultimodalService:
             server_url = settings.FILE_LOCAL_SERVER_URL
             return f"{server_url}/storage/permanent/{file_id}"
 
-    async def _extract_document_text(self, file_id: uuid.UUID) -> str:
+    async def _extract_document_text(self, file: FileInput) -> str:
         """
         提取文档文本内容
         
         Args:
-            file_id: 文件ID
+            file: 文件输入
             
         Returns:
             str: 提取的文本内容
         """
-        file_metadata = self.db.query(FileMetadata).filter(
-            FileMetadata.id == file_id,
-            FileMetadata.status == "completed"
-        ).first()
-
-        if not file_metadata:
-            raise BusinessException(
-                f"文件不存在或已删除: {file_id}",
-                BizCode.NOT_FOUND
-            )
-
-        file_ext = file_metadata.file_ext.lower()
-        server_url = settings.FILE_LOCAL_SERVER_URL
-        file_url = f"{server_url}/storage/permanent/{file_id}"
-
-        if file_ext in ['.txt', '.md', '.markdown']:
-            return await self._read_text_file(file_url)
-        elif file_ext == '.pdf':
-            return await self._extract_pdf_text(file_url)
-        elif file_ext in ['.doc', '.docx']:
-            return await self._extract_word_text(file_url)
-        else:
-            return f"[不支持的文档格式: {file_ext}]"
-
-    @staticmethod
-    async def _read_text_file(file_url: str) -> str:
-        """读取纯文本文件"""
         try:
-            # 下载文件
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(file_url)
-                response.raise_for_status()
-                return response.text
+            file_content = file.get_content()
+            if not file_content:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(file.url)
+                    response.raise_for_status()
+                    file_content = response.content
+                    file.set_content(file_content)
+            file_mime_type = magic.from_buffer(file_content, mime=True)
+            if file_mime_type in TEXT_MIME:
+                return file_content.decode("utf-8")
+            elif file_mime_type in PDF_MIME:
+                return await self._extract_pdf_text(file_content)
+            elif file_mime_type in DOC_MIME:
+                return await self._extract_word_text(file_content)
+            else:
+                return f"[Unsupported file type: {file_mime_type}]"
         except Exception as e:
-            logger.error(f"读取文本文件失败: {e}")
-            return f"[文件读取失败: {str(e)}]"
+            logger.error(f"Failed to load file. - {e}")
+            return "[Failed to load file.]"
 
     @staticmethod
-    async def _extract_pdf_text(file_url: str) -> str:
+    async def _extract_pdf_text(file_content: bytes) -> str:
         """提取 PDF 文本"""
         try:
-            # 下载 PDF 文件
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(file_url)
-                response.raise_for_status()
-                pdf_data = response.content
-            
             # 使用 BytesIO 读取 PDF
             text_parts = []
-            pdf_file = io.BytesIO(pdf_data)
+            pdf_file = io.BytesIO(file_content)
             pdf_reader = PyPDF2.PdfReader(pdf_file)
             for page in pdf_reader.pages:
                 text_parts.append(page.extract_text())
@@ -588,17 +590,11 @@ class MultimodalService:
             return f"[PDF 提取失败: {str(e)}]"
 
     @staticmethod
-    async def _extract_word_text(file_url: str) -> str:
+    async def _extract_word_text(file_content: bytes) -> str:
         """提取 Word 文档文本"""
         try:
-            # 下载 Word 文件
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(file_url)
-                response.raise_for_status()
-                word_data = response.content
-            
             # 使用 BytesIO 读取 Word 文档
-            word_file = io.BytesIO(word_data)
+            word_file = io.BytesIO(file_content)
             doc = Document(word_file)
             text_parts = [paragraph.text for paragraph in doc.paragraphs]
             return '\n'.join(text_parts)

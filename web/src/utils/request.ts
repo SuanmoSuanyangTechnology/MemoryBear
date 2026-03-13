@@ -347,6 +347,23 @@ export const request = {
       document.body.removeChild(link);
       callback?.()
     });
+  },
+  getDownloadFile(url: string, fileName: string, data?: unknown, callback?: () => void) {
+    service.get(url, {
+      params: paramFilter(data as Record<string, string | number | boolean | ObjectWithPush | null | undefined>),
+      responseType: "blob",
+    })
+      .then(res => {
+        const link = document.createElement("a");
+        const blob = new Blob([res as unknown as BlobPart]);
+        link.style.display = "none";
+        link.href = URL.createObjectURL(blob);
+        link.setAttribute("download", decodeURI(fileName || fileName));
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        callback?.()
+      });
   }
 };
 

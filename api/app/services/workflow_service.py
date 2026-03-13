@@ -458,7 +458,7 @@ class WorkflowService:
                     type=file.type,
                     url=await self.multimodal_service.get_file_url(file),
                     transfer_method=file.transfer_method,
-                    file_id=str(file.upload_file_id),
+                    file_id=str(file.upload_file_id) if file.upload_file_id else None,
                     origin_file_type=file.file_type,
                     is_file=True
                 ).model_dump()
