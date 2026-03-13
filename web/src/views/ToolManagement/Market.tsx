@@ -255,6 +255,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
     if (!source) return;
     try {
       const config: any = await getMarketConfig(sourceId);
+      console.log('获取到的配置数据:', config);
       marketConfigModalRef.current?.handleOpen({
         ...source,
         connected: config?.status === 1,
@@ -431,7 +432,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                 dataLength={mcpList.length}
                 next={loadMore}
                 hasMore={hasMore}
-                loader={<Skeleton active paragraph={{ rows: 2 }} className="rb:mt-4" />}
+                loader={null}
                 scrollableTarget="mcpScrollableDiv"
               >
                 <div 
