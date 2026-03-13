@@ -198,9 +198,7 @@ async def get_workspace_end_users(
     # 对有 ExtractedEntity 但无 Community 节点的存量用户自动补跑全量聚类
     try:
         from app.tasks import init_community_clustering_for_users
-        init_community_clustering_for_users.apply_async(
-            kwargs={"end_user_ids": end_user_ids},
-        )
+        init_community_clustering_for_users.delay(end_user_ids=end_user_ids)
         api_logger.info(f"已触发社区聚类补全任务，候选用户数: {len(end_user_ids)}")
     except Exception as e:
         api_logger.warning(f"触发社区聚类补全任务失败（不影响主流程）: {str(e)}")
