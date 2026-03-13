@@ -136,3 +136,11 @@ export const getExperienceConfig = (share_token: string) => {
     }
   })
 }
+// Export application
+export const appExport = (app_id: string, appName: string, data?: { release_version: string }) => {
+  return request.getDownloadFile(`/apps/${app_id}/export`, `${appName}.yml`, data)
+}
+// Import application
+export const appImport = (formData: FormData) => {
+  return request.uploadFile(`/apps/import`, formData)
+}

@@ -14,6 +14,7 @@ from app.models import User
 from app.models.tool_model import ToolType, ToolStatus, AuthType
 from app.services.tool_service import ToolService
 from app.schemas.response_schema import ApiResponse
+from app.core.exceptions import BusinessException
 
 router = APIRouter(prefix="/tools", tags=["Tool System"])
 
@@ -97,7 +98,13 @@ async def create_tool(
 ):
     """创建工具"""
     try:
-        tool_id = service.create_tool(
+        # 将 MCP 来源字段合并进 config
+        if request.tool_type == ToolType.MCP:
+            for key in ("source_channel", "market_id", "market_config_id", "mcp_service_id"):
+                val = getattr(request, key, None)
+                if val is not None:
+                    request.config[key] = val
+        tool_id = await service.create_tool(
             name=request.name,
             tool_type=request.tool_type,
             tenant_id=current_user.tenant_id,
@@ -107,6 +114,8 @@ async def create_tool(
             tags=request.tags
         )
         return success(data={"tool_id": tool_id}, msg="工具创建成功")
+    except BusinessException as e:
+        raise HTTPException(status_code=400, detail=e.message)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

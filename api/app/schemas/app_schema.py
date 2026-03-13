@@ -45,10 +45,18 @@ class FileInput(BaseModel):
     url: Optional[str] = Field(None, description="远程URL（remote_url时必填）")
     file_type: Optional[str] = Field(None, description="具体文件格式（如image/jpg、audio/wav、document/docx、video/mp4）")
 
+    _content = None
+
     def __init__(self, **data):
         if "type" in data:
             data['file_type'] = data['type']
         super().__init__(**data)
+
+    def set_content(self, content: bytes):
+        self._content = content
+
+    def get_content(self) -> bytes | None:
+        return self._content
 
     @field_validator("type", mode="before")
     @classmethod

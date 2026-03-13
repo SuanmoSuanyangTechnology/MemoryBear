@@ -11,7 +11,7 @@ import { Button, Space, Input, Form, App } from 'antd';
 
 import Tag, { type TagProps } from './components/Tag'
 import RbCard from '@/components/RbCard/Card'
-import { getReleaseList, rollbackRelease } from '@/api/application'
+import { getReleaseList, rollbackRelease, appExport } from '@/api/application'
 import ReleaseModal from './components/ReleaseModal'
 import ReleaseShareModal from './components/ReleaseShareModal'
 import type { Release, ReleaseModalRef, ReleaseShareModalRef } from './types'
@@ -66,6 +66,9 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
       getData()
       message.success(t('common.operateSuccess'))
     })
+  }
+  const handleExport = () => {
+    appExport(data.id, data.name)
   }
   return (
     <div className="rb:flex rb:h-[calc(100vh-64px)]">
@@ -123,7 +126,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
 
             <Space size={10}>
               {selectedVersion && <>
-                {/* <Button>{t('application.exportDSLFile')}</Button> */}
+                {data?.type !== 'multi_agent' && <Button onClick={handleExport}>{t('common.export')}</Button>}
                 {data.current_release_id !== selectedVersion.id && <Button onClick={handleRollback}>{t('application.willRollToThisVersion')}</Button>}
                 <Button type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</Button>
               </>}

@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:11 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:57:11 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-12 18:00:11
  */
 /**
  * RAG User Memory Detail View
@@ -13,7 +13,8 @@
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import clsx from 'clsx'
-import { Row, Col, Skeleton } from 'antd'
+import { Row, Col, Skeleton, Spin, Flex, Tooltip } from 'antd'
+import { LoadingOutlined } from '@ant-design/icons';
 import { useParams } from 'react-router-dom'
 
 import aboutUs from '@/assets/images/userMemory/aboutUs.svg'
@@ -26,6 +27,7 @@ import {
   getUserProfile,
   getTotalRagMemoryCountByUser,
   getChunkInsight,
+  generateRagProfile
 } from '@/api/memory'
 import Empty from '@/components/Empty'
 import ConversationMemory from './components/ConversationMemory'
@@ -133,16 +135,46 @@ const Rag: FC = () => {
     })
   }
   const name = loading.detail ? '' : data?.name && data?.name !== '' ? data.name : id
+
+  const [refreshLoading, setRefreshLoading] = useState(false)
+  const handleRefresh = () => {
+    if (refreshLoading || !id) return
+    setRefreshLoading(true)
+    generateRagProfile(id as string)
+      .then(() => {
+        getSummary()
+        getInsightReport()
+      })
+      .finally(() => {
+        setRefreshLoading(false)
+      })
+  }
   return (
-    <Row gutter={[16, 16]} className="rb:pb-6">
+    <Row gutter={[16, 16]} className="rb:h-full!">
       <Col span={8}>
-        <RbCard>
+        <RbCard
+          className="rb:h-[calc(100vh-104px)]!"
+          bodyClassName="rb:overflow-y-auto! rb:h-full!"
+        >
           <div className="rb:flex rb:items-center">
             <div className="rb:flex-[0_0_auto] rb:w-20 rb:h-20 rb:text-center rb:font-semibold rb:text-[28px] rb:leading-20 rb:rounded-lg rb:text-[#FBFDFF] rb:bg-[#155EEF]">{name?.[0]}</div>
-            <div className="rb:text-[24px] rb:font-semibold rb:leading-8 rb:ml-4">
-              {name}<br/>
-              <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 rb:mt-2">{personas?.join(' | ')}</div>
-            </div>
+            <Flex>
+              <div className="rb:text-[24px] rb:font-semibold rb:leading-8 rb:ml-4 rb:flex-1">
+                {name}<br />
+                <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 rb:mt-2">{personas?.join(' | ')}</div>
+              </div>
+              <Tooltip title={t('common.refresh')}>
+                {refreshLoading
+                  ? <Spin indicator={<LoadingOutlined spin />} />
+                  : (
+                    <div
+                      className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/refresh.svg')] rb:hover:bg-[url('@/assets/images/refresh_hover.svg')]"
+                      onClick={handleRefresh}
+                    ></div>
+                  )
+                }
+              </Tooltip>
+            </Flex>
           </div>
 
           <div className="rb:flex rb:gap-2 rb:mb-2 rb:flex-wrap rb:mt-6.25">

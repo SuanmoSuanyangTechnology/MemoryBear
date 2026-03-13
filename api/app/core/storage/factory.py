@@ -85,6 +85,7 @@ class StorageFactory:
                 access_key_id=settings.S3_ACCESS_KEY_ID,
                 secret_access_key=settings.S3_SECRET_ACCESS_KEY,
                 bucket_name=settings.S3_BUCKET_NAME,
+                endpoint_url=settings.S3_ENDPOINT_URL,
             )
 
         else:

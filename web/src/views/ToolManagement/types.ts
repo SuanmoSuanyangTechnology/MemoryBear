@@ -75,6 +75,10 @@ export interface ToolItem {
     tool_class: string;
 
     schema_content: string;
+    source_channel?: string;
+    market_id?: string;
+    market_config_id?: string;
+    mcp_service_id?: string;
   };
   status: 'available' | 'unavailable';
   tags: string[];
@@ -136,4 +140,11 @@ export interface ExecuteData {
 export interface CustomToolModalRef {
   handleOpen: (data?: ToolItem) => void;
   handleClose: () => void;
+}
+
+export interface MarketQuery {
+  mcp_market_config_id?: string;
+  page?: number;
+  pagesize?: number;
+  keywords?: string;
 }
