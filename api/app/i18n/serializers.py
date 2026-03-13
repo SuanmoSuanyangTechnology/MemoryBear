@@ -72,7 +72,9 @@ class I18nResponseMixin:
         Returns:
             添加了 _display 字段的字典
         """
-        from app.i18n.service import translation_service
+        from app.i18n.service import get_translation_service
+        
+        translation_service = get_translation_service()
         
         result = data.copy()
         
