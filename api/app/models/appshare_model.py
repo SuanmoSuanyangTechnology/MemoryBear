@@ -19,7 +19,7 @@ class AppShare(Base):
     target_workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False, comment="目标工作空间ID")
     shared_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False, comment="分享者用户ID")
     permission = Column(String, default="readonly", nullable=False, comment="权限模式: readonly | editable")
-    is_active = Column(Boolean, default=True, nullable=False, comment="是否有效，False 表示逻辑删除")
+    is_active = Column(Boolean, default=True, server_default='true', nullable=False, comment="是否有效，False 表示逻辑删除")
     created_at = Column(DateTime, default=datetime.datetime.now)
     updated_at = Column(DateTime, default=datetime.datetime.now)
 
