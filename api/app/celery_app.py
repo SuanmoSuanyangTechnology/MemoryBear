@@ -63,9 +63,9 @@ celery_app.conf.update(
     accept_content=['json'],
     result_serializer='json',
     
-    # 时区
-    timezone='Asia/Shanghai',
-    enable_utc=False,
+    # # 时区
+    # timezone='Asia/Shanghai',
+    # enable_utc=False,
     
     # 任务追踪
     task_track_started=True,
