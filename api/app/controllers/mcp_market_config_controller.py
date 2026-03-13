@@ -59,7 +59,7 @@ async def get_mcp_servers(
         api_logger.warning(f"Paging parameters exceed ModelScope limit: page={page}, pagesize={pagesize}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"page × pagesize must not exceed 100 (got {page} × {pagesize} = {page * pagesize})"
+            detail=f"The maximum number of MCP services can view is 100. Please visit the ModelScope MCP Plaza."
         )
 
     # 2. Query mcp market config information from the database
@@ -238,7 +238,26 @@ async def create_mcp_market_config(
 
     try:
         api_logger.debug(f"Start creating the mcp market config: {create_data.mcp_market_id}")
-        # 1. Check if the mcp market name already exists
+        # 1. Validate token can access ModelScope MCP market
+        if not create_data.token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Token is required to access ModelScope MCP market"
+            )
+        try:
+            api = MCPApi()
+            api.login(create_data.token)
+            body = {'filter': {}, 'page_number': 1, 'page_size': 1, 'search': None}
+            cookies = api.get_cookies(create_data.token)
+            r = api.session.put(url=api.mcp_base_url, headers=api.builder_headers(api.headers), json=body, cookies=cookies)
+            raise_for_http_status(r)
+        except Exception as e:
+            api_logger.warning(f"Token validation failed for ModelScope MCP market: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unable to access ModelScope MCP market with the provided token: {str(e)}"
+            )
+        # 2. Check if the mcp market name already exists
         db_mcp_market_config_exist = mcp_market_config_service.get_mcp_market_config_by_mcp_market_id(db, mcp_market_id=create_data.mcp_market_id, current_user=current_user)
         if db_mcp_market_config_exist:
             api_logger.warning(f"The mcp market id already exists: {create_data.mcp_market_id}")
@@ -332,7 +351,23 @@ async def update_mcp_market_config(
             f"The mcp market config does not exist or you do not have permission to access it: mcp_market_config_id={mcp_market_config_id}")
         return success(msg='The mcp market config does not exist or access is denied')
 
-    # 2. Update fields (only update non-null fields)
+    # 2. Validate new token if provided
+    if update_data.token is not None:
+        try:
+            api = MCPApi()
+            api.login(update_data.token)
+            body = {'filter': {}, 'page_number': 1, 'page_size': 1, 'search': None}
+            cookies = api.get_cookies(update_data.token)
+            r = api.session.put(url=api.mcp_base_url, headers=api.builder_headers(api.headers), json=body, cookies=cookies)
+            raise_for_http_status(r)
+        except Exception as e:
+            api_logger.warning(f"Token validation failed for ModelScope MCP market: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unable to access ModelScope MCP market with the provided token: {str(e)}"
+            )
+
+    # 3. Update fields (only update non-null fields)
     api_logger.debug(f"Start updating the mcp market config fields: {mcp_market_config_id}")
     update_dict = update_data.dict(exclude_unset=True)
     updated_fields = []
@@ -347,7 +382,7 @@ async def update_mcp_market_config(
     if updated_fields:
         api_logger.debug(f"updated fields: {', '.join(updated_fields)}")
 
-    # 3. Save to database
+    # 4. Save to database
     try:
         db.commit()
         db.refresh(db_mcp_market_config)
