@@ -1144,6 +1144,31 @@ MATCH (c:Community {end_user_id: $end_user_id})
 RETURN count(c) AS community_count
 """
 
+# 一次性拉取某用户所有实体的邻居，用于全量聚类时的邻居缓存
+GET_ALL_ENTITY_NEIGHBORS_BATCH = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+
+// 来源一：直接关系邻居
+OPTIONAL MATCH (e)-[:EXTRACTED_RELATIONSHIP]-(nb1:ExtractedEntity {end_user_id: $end_user_id})
+
+// 来源二：同 Statement 共现邻居
+OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(nb2:ExtractedEntity {end_user_id: $end_user_id})
+WHERE nb2.id <> e.id
+
+WITH e, collect(DISTINCT nb1) + collect(DISTINCT nb2) AS all_neighbors
+UNWIND all_neighbors AS nb
+WITH e, nb WHERE nb IS NOT NULL
+OPTIONAL MATCH (nb)-[:BELONGS_TO_COMMUNITY]->(c:Community)
+RETURN DISTINCT
+    e.id                AS entity_id,
+    nb.id               AS id,
+    nb.name             AS name,
+    nb.name_embedding   AS name_embedding,
+    nb.activation_value AS activation_value,
+    CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
+"""
+
 UPDATE_COMMUNITY_MEMBER_COUNT = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community {community_id: $community_id})
 WITH c, count(e) AS cnt

@@ -15,6 +15,7 @@ from app.repositories.neo4j.cypher_queries import (
     GET_ALL_ENTITIES_FOR_USER,
     GET_COMMUNITY_MEMBERS,
     GET_ALL_COMMUNITY_MEMBERS_BATCH,
+    GET_ALL_ENTITY_NEIGHBORS_BATCH,
     CHECK_USER_HAS_COMMUNITIES,
     UPDATE_COMMUNITY_MEMBER_COUNT,
     UPDATE_COMMUNITY_METADATA,
@@ -63,6 +64,31 @@ class CommunityRepository:
         except Exception as e:
             logger.error(f"assign_entity_to_community failed: {e}")
             return False
+
+    async def get_all_entity_neighbors_batch(
+        self, end_user_id: str
+    ) -> Dict[str, List[Dict]]:
+        """一次性拉取该用户所有实体的邻居，返回 {entity_id: [neighbors]} 字典。
+        用于全量聚类时避免 O(|E|) 次单独查询。"""
+        try:
+            rows = await self.connector.execute_query(
+                GET_ALL_ENTITY_NEIGHBORS_BATCH,
+                end_user_id=end_user_id,
+            )
+            result: Dict[str, List[Dict]] = {}
+            for row in rows:
+                eid = row["entity_id"]
+                result.setdefault(eid, []).append({
+                    "id": row["id"],
+                    "name": row["name"],
+                    "name_embedding": row["name_embedding"],
+                    "activation_value": row["activation_value"],
+                    "community_id": row["community_id"],
+                })
+            return result
+        except Exception as e:
+            logger.error(f"get_all_entity_neighbors_batch failed: {e}")
+            return {}
 
     async def get_entity_neighbors(
         self, entity_id: str, end_user_id: str
