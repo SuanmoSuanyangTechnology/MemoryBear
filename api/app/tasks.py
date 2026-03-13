@@ -2416,3 +2416,141 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
             "elapsed_time": elapsed_time,
             "task_id": self.request.id
         }
+
+
+# =============================================================================
+# 社区聚类补全任务（触发型）
+# =============================================================================
+
+@celery_app.task(
+    name="app.tasks.init_community_clustering_for_users",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=7200,   # 2小时硬超时
+    soft_time_limit=6900,
+)
+def init_community_clustering_for_users(self, end_user_ids: List[str]) -> Dict[str, Any]:
+    """触发型任务：检查指定用户列表，对有 ExtractedEntity 但无 Community 节点的用户执行全量聚类。
+
+    由 /dashboard/end_users 接口触发，已有社区节点的用户直接跳过。
+
+    Args:
+        end_user_ids: 需要检查的用户 ID 列表
+
+    Returns:
+        包含任务执行结果的字典
+    """
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.logging_config import get_logger
+        from app.repositories.neo4j.community_repository import CommunityRepository
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+        from app.core.memory.storage_services.clustering_engine.label_propagation import LabelPropagationEngine
+
+        logger = get_logger(__name__)
+        logger.info(f"[CommunityCluster] 开始社区聚类补全任务，候选用户数: {len(end_user_ids)}")
+
+        initialized = 0
+        skipped = 0
+        failed = 0
+
+        connector = Neo4jConnector()
+        try:
+            repo = CommunityRepository(connector)
+
+            # 获取 llm_model_id（从第一个用户的配置中读取，作为全局兜底）
+            llm_model_id = None
+            try:
+                with get_db_context() as db:
+                    from app.services.memory_agent_service import get_end_user_connected_config
+                    from app.services.memory_config_service import MemoryConfigService
+                    for uid in end_user_ids:
+                        try:
+                            connected = get_end_user_connected_config(uid, db)
+                            config_id = connected.get("memory_config_id")
+                            workspace_id = connected.get("workspace_id")
+                            if config_id or workspace_id:
+                                cfg = MemoryConfigService(db).load_memory_config(
+                                    config_id=config_id, workspace_id=workspace_id
+                                )
+                                llm_model_id = str(cfg.llm_model_id)
+                                break
+                        except Exception:
+                            continue
+            except Exception as e:
+                logger.warning(f"[CommunityCluster] 获取 LLM 配置失败，将使用兜底值: {e}")
+
+            engine = LabelPropagationEngine(
+                connector=connector,
+                llm_model_id=llm_model_id,
+            )
+
+            for end_user_id in end_user_ids:
+                try:
+                    # 已有社区节点则跳过
+                    has_communities = await repo.has_communities(end_user_id)
+                    if has_communities:
+                        skipped += 1
+                        logger.debug(f"[CommunityCluster] 用户 {end_user_id} 已有社区节点，跳过")
+                        continue
+
+                    # 检查是否有 ExtractedEntity 节点
+                    entities = await repo.get_all_entities(end_user_id)
+                    if not entities:
+                        skipped += 1
+                        logger.debug(f"[CommunityCluster] 用户 {end_user_id} 无实体节点，跳过")
+                        continue
+
+                    logger.info(f"[CommunityCluster] 用户 {end_user_id} 有 {len(entities)} 个实体，开始全量聚类")
+                    await engine.full_clustering(end_user_id)
+                    initialized += 1
+                    logger.info(f"[CommunityCluster] 用户 {end_user_id} 聚类完成")
+
+                except Exception as e:
+                    failed += 1
+                    logger.error(f"[CommunityCluster] 用户 {end_user_id} 聚类失败: {e}")
+
+        finally:
+            await connector.close()
+
+        logger.info(
+            f"[CommunityCluster] 任务完成: 初始化={initialized}, 跳过={skipped}, 失败={failed}"
+        )
+        return {
+            "status": "SUCCESS",
+            "initialized": initialized,
+            "skipped": skipped,
+            "failed": failed,
+        }
+
+    try:
+        try:
+            import nest_asyncio
+            nest_asyncio.apply()
+        except ImportError:
+            pass
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        result = loop.run_until_complete(_run())
+        result["elapsed_time"] = time.time() - start_time
+        result["task_id"] = self.request.id
+        return result
+
+    except Exception as e:
+        return {
+            "status": "FAILURE",
+            "error": str(e),
+            "elapsed_time": time.time() - start_time,
+            "task_id": self.request.id,
+        }
