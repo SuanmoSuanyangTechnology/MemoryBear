@@ -1059,3 +1059,146 @@ Graph_Node_query = """
                 LIMIT $limit
 
             """
+
+
+# ============================================================
+# Community 节点 & BELONGS_TO_COMMUNITY 边
+# ============================================================
+
+# ─── Community 聚类相关 Cypher 模板 ───────────────────────────────────────────
+
+COMMUNITY_NODE_UPSERT = """
+MERGE (c:Community {community_id: $community_id})
+SET c.end_user_id = $end_user_id,
+    c.member_count = $member_count,
+    c.updated_at = datetime()
+RETURN c.community_id AS community_id
+"""
+
+ENTITY_JOIN_COMMUNITY = """
+MATCH (e:ExtractedEntity {id: $entity_id, end_user_id: $end_user_id})
+MATCH (c:Community {community_id: $community_id, end_user_id: $end_user_id})
+MERGE (e)-[:BELONGS_TO_COMMUNITY]->(c)
+SET c.updated_at = datetime()
+RETURN e.id AS entity_id, c.community_id AS community_id
+"""
+
+ENTITY_LEAVE_ALL_COMMUNITIES = """
+MATCH (e:ExtractedEntity {id: $entity_id, end_user_id: $end_user_id})
+MATCH (e)-[r:BELONGS_TO_COMMUNITY]->(:Community)
+DELETE r
+"""
+
+GET_ENTITY_NEIGHBORS = """
+MATCH (e:ExtractedEntity {id: $entity_id, end_user_id: $end_user_id})
+
+// 来源一：直接关系邻居（EXTRACTED_RELATIONSHIP 边）
+OPTIONAL MATCH (e)-[:EXTRACTED_RELATIONSHIP]-(nb1:ExtractedEntity {end_user_id: $end_user_id})
+
+// 来源二：同 Statement 共现邻居（REFERENCES_ENTITY 边）
+OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(nb2:ExtractedEntity {end_user_id: $end_user_id})
+WHERE nb2.id <> e.id
+
+WITH collect(DISTINCT nb1) + collect(DISTINCT nb2) AS all_neighbors
+UNWIND all_neighbors AS nb
+WITH nb WHERE nb IS NOT NULL
+OPTIONAL MATCH (nb)-[:BELONGS_TO_COMMUNITY]->(c:Community)
+RETURN DISTINCT
+    nb.id               AS id,
+    nb.name             AS name,
+    nb.name_embedding   AS name_embedding,
+    nb.activation_value AS activation_value,
+    CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
+"""
+
+GET_ALL_ENTITIES_FOR_USER = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+OPTIONAL MATCH (e)-[:BELONGS_TO_COMMUNITY]->(c:Community)
+RETURN e.id AS id,
+       e.name AS name,
+       e.name_embedding AS name_embedding,
+       e.activation_value AS activation_value,
+       CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
+"""
+
+GET_COMMUNITY_MEMBERS = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community {community_id: $community_id})
+RETURN e.id AS id, e.name AS name, e.entity_type AS entity_type,
+       e.importance_score AS importance_score, e.activation_value AS activation_value,
+       e.name_embedding AS name_embedding
+ORDER BY coalesce(e.activation_value, 0) DESC
+"""
+
+GET_ALL_COMMUNITY_MEMBERS_BATCH = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community)
+WHERE c.community_id IN $community_ids
+RETURN c.community_id AS community_id,
+       e.id AS id,
+       e.name_embedding AS name_embedding,
+       e.activation_value AS activation_value
+"""
+
+CHECK_USER_HAS_COMMUNITIES = """
+MATCH (c:Community {end_user_id: $end_user_id})
+RETURN count(c) AS community_count
+"""
+
+UPDATE_COMMUNITY_MEMBER_COUNT = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community {community_id: $community_id})
+WITH c, count(e) AS cnt
+SET c.member_count = cnt
+RETURN c.community_id AS community_id, cnt AS member_count
+"""
+
+UPDATE_COMMUNITY_METADATA = """
+MATCH (c:Community {community_id: $community_id, end_user_id: $end_user_id})
+SET c.name         = $name,
+    c.summary      = $summary,
+    c.core_entities = $core_entities,
+    c.updated_at   = datetime()
+RETURN c.community_id AS community_id
+"""
+
+GET_ALL_ENTITY_NEIGHBORS_BATCH = """
+// 批量拉取某用户下所有实体的邻居（用于全量聚类预加载）
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+
+// 来源一：直接关系邻居
+OPTIONAL MATCH (e)-[:EXTRACTED_RELATIONSHIP]-(nb1:ExtractedEntity {end_user_id: $end_user_id})
+
+// 来源二：同 Statement 共现邻居
+OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(nb2:ExtractedEntity {end_user_id: $end_user_id})
+WHERE nb2.id <> e.id
+
+WITH e, collect(DISTINCT nb1) + collect(DISTINCT nb2) AS all_neighbors
+UNWIND all_neighbors AS nb
+WITH e, nb WHERE nb IS NOT NULL
+OPTIONAL MATCH (nb)-[:BELONGS_TO_COMMUNITY]->(c:Community)
+RETURN DISTINCT
+    e.id                AS entity_id,
+    nb.id               AS id,
+    nb.name             AS name,
+    nb.name_embedding   AS name_embedding,
+    nb.activation_value AS activation_value,
+    CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
+"""
+
+GET_COMMUNITY_GRAPH_DATA = """
+MATCH (c:Community {end_user_id: $end_user_id})
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[b:BELONGS_TO_COMMUNITY]->(c)
+OPTIONAL MATCH (e)-[r:EXTRACTED_RELATIONSHIP]-(e2:ExtractedEntity {end_user_id: $end_user_id})
+RETURN
+    elementId(c)          AS c_id,
+    properties(c)         AS c_props,
+    elementId(e)          AS e_id,
+    properties(e)         AS e_props,
+    elementId(b)          AS b_id,
+    elementId(e2)         AS e2_id,
+    properties(e2)        AS e2_props,
+    elementId(r)          AS r_id,
+    type(r)               AS r_type,
+    properties(r)         AS r_props,
+    startNode(r) = e      AS r_from_e
+"""
