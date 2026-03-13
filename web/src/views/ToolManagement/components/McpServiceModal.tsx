@@ -41,6 +41,7 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
   const values = Form.useWatch<MCPToolItem>([], form)
   const requestHeaderModalRef = useRef<RequestHeaderModalRef>(null)
   const [requestHeaderList, setRequestHeaderList] = useState<RequestHeader[]>([])
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   const formatTabItems = () => {
     return tabKeys.map(key => ({
@@ -54,6 +55,12 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
 
   // 封装取消方法，添加关闭弹窗逻辑
   const handleClose = () => {
+    // 如果有正在进行的请求，取消它
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    
     setVisible(false);
     form.resetFields();
     setLoading(false);
@@ -103,6 +110,10 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
       .validateFields()
       .then(() => {
         setLoading(true);
+        
+        // 创建 AbortController 用于取消请求
+        abortControllerRef.current = new AbortController();
+        
         // 创建新服务对象
         const { config, ...rest } = values
 
@@ -129,8 +140,13 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
           (newService.config as any).mcp_service_id = (editVo as any).mcp_service_id;
         }
         
-        const request = editVo?.id ? updateTool(editVo.id, newService) : addTool(newService)
+        const request = editVo?.id 
+          ? updateTool(editVo.id, newService, { signal: abortControllerRef.current.signal }) 
+          : addTool(newService, { signal: abortControllerRef.current.signal })
         request.then((res: any) => {
+          // 清除 AbortController
+          abortControllerRef.current = null;
+          
           message.success(t('common.saveSuccess'));
           setLoading(false);
           handleClose();
@@ -141,7 +157,16 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
             console.error('测试连接失败:', err);
           });
         })
-        .catch(() => {
+        .catch((error) => {
+          // 清除 AbortController
+          abortControllerRef.current = null;
+          
+          // 如果是用户主动取消，不显示错误提示
+          if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
+            console.log('请求已取消');
+          } else {
+            message.error(t('common.saveFailed'));
+          }
           setLoading(false);
         })
       })
@@ -171,7 +196,13 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
       onCancel={handleClose}
       okText={t('tool.saveAndTest')}
       onOk={handleSave}
-      confirmLoading={loading}
+      okButtonProps={{ loading: loading }}
+      footer={(_, { OkBtn, CancelBtn }) => (
+        <>
+          <CancelBtn />
+          <OkBtn />
+        </>
+      )}
     >
       <Form
         form={form}

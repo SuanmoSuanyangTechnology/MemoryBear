@@ -6,12 +6,12 @@ export const getTools = (data: Query) => {
   return request.get('/tools', data)
 }
 // 创建MCP工具
-export const addTool = (values: MCPToolItem | CustomToolItem) => {
-  return request.post('/tools', values)
+export const addTool = (values: MCPToolItem | CustomToolItem, config?: { signal?: AbortSignal }) => {
+  return request.post('/tools', values, config)
 }
 // 更新工具
-export const updateTool = (tool_id: string, data: MCPToolItem | InnerToolItem | CustomToolItem) => {
-  return request.put(`/tools/${tool_id}`, data)
+export const updateTool = (tool_id: string, data: MCPToolItem | InnerToolItem | CustomToolItem, config?: { signal?: AbortSignal }) => {
+  return request.put(`/tools/${tool_id}`, data, config)
 }
 // 删除工具
 export const deleteTool = (tool_id: string) => {
