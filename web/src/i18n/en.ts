@@ -1990,6 +1990,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       marketUrlPlaceholder: 'Market URL',
       marketCopy: 'Copy',
       marketApiKeyOptional: 'Optional',
+      marketApiKeyRequired: 'API Key is required',
       marketApiKeyExtra: 'Some markets require an API Key to access the full service list',
       marketApiKeyPlaceholder: 'Enter API Key to access more services',
       marketConnectionStatus: 'Connection Status',

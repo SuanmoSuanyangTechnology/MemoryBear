@@ -1986,6 +1986,7 @@ export const zh = {
       marketUrlPlaceholder: '市场地址',
       marketCopy: '复制',
       marketApiKeyOptional: '可选',
+      marketApiKeyRequired: '请输入 API Key',
       marketApiKeyExtra: '部分市场需要 API Key 才能获取完整的服务列表',
       marketApiKeyPlaceholder: '输入 API Key 以获取更多服务',
       marketConnectionStatus: '连接状态',
