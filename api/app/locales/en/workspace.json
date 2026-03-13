@@ -1,0 +1,44 @@
+{
+  "list_retrieved": "Workspace list retrieved successfully",
+  "created": "Workspace created successfully",
+  "updated": "Workspace updated successfully",
+  "deleted": "Workspace deleted successfully",
+  "switched": "Workspace switched successfully",
+  "not_found": "Workspace not found or access denied",
+  "already_exists": "Workspace already exists",
+  "permission_denied": "No permission to access this workspace",
+  "name_required": "Workspace name is required",
+  "invalid_name": "Invalid workspace name format",
+  "members": {
+    "list_retrieved": "Workspace members list retrieved successfully",
+    "role_updated": "Member role updated successfully",
+    "deleted": "Member deleted successfully",
+    "not_found": "Member not found",
+    "cannot_remove_self": "Cannot remove yourself",
+    "cannot_remove_last_manager": "Cannot remove the last manager",
+    "already_member": "User is already a workspace member"
+  },
+  "invites": {
+    "created": "Invite created successfully",
+    "list_retrieved": "Invite list retrieved successfully",
+    "validated": "Invite validated successfully",
+    "revoked": "Invite revoked successfully",
+    "accepted": "Invite accepted",
+    "not_found": "Invite not found",
+    "expired": "Invite has expired",
+    "already_used": "Invite has already been used",
+    "invalid_token": "Invalid invite token",
+    "email_required": "Email address is required",
+    "invalid_email": "Invalid email address format"
+  },
+  "storage": {
+    "type_retrieved": "Storage type retrieved successfully",
+    "type_updated": "Storage type updated successfully",
+    "invalid_type": "Invalid storage type"
+  },
+  "models": {
+    "config_retrieved": "Model configuration retrieved successfully",
+    "config_updated": "Model configuration updated successfully",
+    "invalid_config": "Invalid model configuration"
+  }
+}

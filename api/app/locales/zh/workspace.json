@@ -1,0 +1,44 @@
+{
+  "list_retrieved": "工作空间列表获取成功",
+  "created": "工作空间创建成功",
+  "updated": "工作空间更新成功",
+  "deleted": "工作空间删除成功",
+  "switched": "工作空间切换成功",
+  "not_found": "工作空间不存在或无权访问",
+  "already_exists": "工作空间已存在",
+  "permission_denied": "没有权限访问此工作空间",
+  "name_required": "工作空间名称不能为空",
+  "invalid_name": "工作空间名称格式不正确",
+  "members": {
+    "list_retrieved": "工作空间成员列表获取成功",
+    "role_updated": "成员角色更新成功",
+    "deleted": "成员删除成功",
+    "not_found": "成员不存在",
+    "cannot_remove_self": "不能删除自己",
+    "cannot_remove_last_manager": "不能删除最后一个管理员",
+    "already_member": "用户已经是工作空间成员"
+  },
+  "invites": {
+    "created": "邀请创建成功",
+    "list_retrieved": "邀请列表获取成功",
+    "validated": "邀请验证成功",
+    "revoked": "邀请撤销成功",
+    "accepted": "邀请已接受",
+    "not_found": "邀请不存在",
+    "expired": "邀请已过期",
+    "already_used": "邀请已被使用",
+    "invalid_token": "无效的邀请令牌",
+    "email_required": "邮箱地址不能为空",
+    "invalid_email": "邮箱地址格式不正确"
+  },
+  "storage": {
+    "type_retrieved": "存储类型获取成功",
+    "type_updated": "存储类型更新成功",
+    "invalid_type": "无效的存储类型"
+  },
+  "models": {
+    "config_retrieved": "模型配置获取成功",
+    "config_updated": "模型配置更新成功",
+    "invalid_config": "无效的模型配置"
+  }
+}
