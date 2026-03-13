@@ -53,6 +53,7 @@ class SimpleMCPClient:
             else:
                 await self._connect_http()
         except Exception as e:
+            await self.disconnect()
             logger.error(f"MCP连接失败: {self.server_url}, 错误: {e}")
             raise MCPConnectionError(f"连接失败: {e}")
     
