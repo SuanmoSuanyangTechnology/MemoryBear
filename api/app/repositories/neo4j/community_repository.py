@@ -15,6 +15,7 @@ from app.repositories.neo4j.cypher_queries import (
     GET_ALL_ENTITIES_FOR_USER,
     GET_COMMUNITY_MEMBERS,
     GET_ALL_COMMUNITY_MEMBERS_BATCH,
+    GET_ALL_ENTITY_NEIGHBORS_BATCH,
     CHECK_USER_HAS_COMMUNITIES,
     UPDATE_COMMUNITY_MEMBER_COUNT,
     UPDATE_COMMUNITY_METADATA,
@@ -77,6 +78,26 @@ class CommunityRepository:
         except Exception as e:
             logger.error(f"get_entity_neighbors failed: {e}")
             return []
+
+    async def get_all_entity_neighbors_batch(
+        self, end_user_id: str
+    ) -> Dict[str, List[Dict]]:
+        """一次性批量拉取该用户下所有实体的邻居，返回 {entity_id: [neighbors]} 字典。
+        用于全量聚类预加载，避免每个实体单独查询。"""
+        try:
+            rows = await self.connector.execute_query(
+                GET_ALL_ENTITY_NEIGHBORS_BATCH,
+                end_user_id=end_user_id,
+            )
+            result: Dict[str, List[Dict]] = {}
+            for row in rows:
+                eid = row["entity_id"]
+                neighbor = {k: v for k, v in row.items() if k != "entity_id"}
+                result.setdefault(eid, []).append(neighbor)
+            return result
+        except Exception as e:
+            logger.error(f"get_all_entity_neighbors_batch failed: {e}")
+            return {}
 
     async def get_all_entities(self, end_user_id: str) -> List[Dict]:
         """拉取某用户下所有实体及其当前社区归属。"""

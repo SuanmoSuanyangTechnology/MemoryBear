@@ -121,12 +121,18 @@ class LabelPropagationEngine:
             e["id"]: e.get("name_embedding") for e in entities
         }
 
+        # 预加载所有实体的邻居，避免迭代内 O(iterations * |E|) 次 Neo4j 往返
+        logger.info(f"[Clustering] 预加载 {len(entities)} 个实体的邻居图...")
+        neighbors_cache: Dict[str, List[Dict]] = await self.repo.get_all_entity_neighbors_batch(end_user_id)
+        logger.info(f"[Clustering] 邻居预加载完成，覆盖实体数: {len(neighbors_cache)}")
+
         for iteration in range(MAX_ITERATIONS):
             changed = 0
             # 随机顺序（Python dict 在 3.7+ 保持插入顺序，这里直接遍历）
             for entity in entities:
                 eid = entity["id"]
-                neighbors = await self.repo.get_entity_neighbors(eid, end_user_id)
+                # 直接从缓存取邻居，不再发起 Neo4j 查询
+                neighbors = neighbors_cache.get(eid, [])
 
                 # 将邻居的当前内存标签注入（覆盖 Neo4j 中的旧值）
                 enriched = []
