@@ -283,6 +283,7 @@ export interface KnowledgeBaseListItem extends KnowledgeBase {
   reranker?: Model;
   llm?: Model;
   image2text?: Model;
+  _expanded?: boolean;
 }
 
 // 知识库列表响应
