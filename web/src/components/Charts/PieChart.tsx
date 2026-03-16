@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-10 13:35:45 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-10 13:35:45 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-16 11:34:30
  */
 /*
  * PieChart Component
@@ -51,6 +51,11 @@ interface PieChartProps {
   chartData: ChartData[];
   height?: number;
   colors?: string[];
+  itemGap?: number;
+  seriesWidth?: number;
+  seriesHeight?: number;
+  seriesLabel?: boolean;
+  seriesTop?: number;
 }
 
 /**
@@ -76,7 +81,12 @@ interface PieChartProps {
 const PieChart: FC<PieChartProps> = ({
   chartData,
   height = 260,
+  seriesWidth = 182,
+  seriesHeight = 182,
   colors = Colors,
+  itemGap = 48,
+  seriesLabel = true,
+  seriesTop = 24,
 }) => {
   /** Reference to the ECharts instance for programmatic control */
   const chartRef = useRef<ReactEcharts>(null);
@@ -139,7 +149,7 @@ const PieChart: FC<PieChartProps> = ({
               itemHeight: 12,
               borderRadius: 2,
               orient: 'horizontal',
-              itemGap: 48,
+              itemGap: itemGap,
               textStyle: {
                 color: '#5B6167',
                 fontFamily: 'PingFangSC, PingFang SC',
@@ -153,10 +163,10 @@ const PieChart: FC<PieChartProps> = ({
                 avoidLabelOverlap: false,
                 percentPrecision: 0,
                 padAngle: 1,
-                width: 182,
-                height: 182,
+                width: seriesWidth,
+                height: seriesHeight,
                 left: 'center',
-                top: 24,
+                top: seriesTop,
                 itemStyle: {
                   borderRadius: 2,
                   shadowBlur: 4,
@@ -165,6 +175,7 @@ const PieChart: FC<PieChartProps> = ({
                   shadowColor: 'rgba(0,0,0,0.25)',
                 },
                 label: {
+                  show: seriesLabel,
                   fontWeight: 'bold',
                   color: '#171719',
                   formatter: '{d}%',

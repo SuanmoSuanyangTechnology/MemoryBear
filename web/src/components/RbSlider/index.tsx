@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:23:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-11 11:10:40
+ * @Last Modified time: 2026-03-12 16:16:49
  */
 /**
  * RbSlider Component
@@ -15,7 +15,7 @@
  * @component
  */
 
-import { type FC, useEffect, useState } from 'react';
+import { type FC, type ReactNode, useEffect, useState } from 'react';
 import { Slider, type SliderSingleProps, Flex, InputNumber, type InputNumberProps } from 'antd';
 
 /** Props interface for RbSlider component */
@@ -27,6 +27,8 @@ interface RbSliderProps extends SliderSingleProps {
   isInput?: boolean;
   size?: 'small' | 'default';
   className?: string;
+  prefix?: string | ReactNode;
+  inputClassName?: string;
 }
 
 /** Custom slider component with value display */
@@ -40,6 +42,8 @@ const RbSlider: FC<RbSliderProps> = ({
   size = 'default' ,
   isInput = false,
   className = '',
+  prefix,
+  inputClassName,
   ...rest
 }) => {
   const [curValue, setCurValue] = useState<SliderSingleProps['value']>(0)
@@ -93,7 +97,8 @@ const RbSlider: FC<RbSliderProps> = ({
           step={step as number}
           value={curValue}
           onChange={handleInputChange}
-          className="rb:w-20!"
+          prefix={prefix}
+          className={`${inputClassName || '' } rb:w-20!`}
         />
         : <div className="rb:text-[14px] rb:text-[#155EEF] rb:leading-5">{curValue || min}</div>
       }

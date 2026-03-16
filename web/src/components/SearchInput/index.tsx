@@ -115,7 +115,7 @@ const SearchInput: FC<SearchInputProps> = ({
       value={value}
       onChange={handleChange}
       style={{ width: '300px' }}
-      className={className}
+      className={`rb:border-none! ${className}`}
       {...props}
     />
   );

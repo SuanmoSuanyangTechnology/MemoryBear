@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:29:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-11 11:14:29
+ * @Last Modified time: 2026-03-16 11:59:09
  */
 /**
  * StatusTag Component
@@ -41,9 +41,9 @@ const StatusTag: FC<StatusTagProps> = ({
   text
 }) => {
   return (
-    <Tag style={{ backgroundColor: '#fff', borderColor: '#DFE4ED' }}>
-      <Flex align="center" className='rb:text-[#5B6167] rb:pl-px rb:pr-px'>
-        <span className={clsx(' rb:w-1.25 rb:h-1.25 rb:rounded-full rb:mr-1', Colors[status])}></span>
+    <Tag className="rb:bg-white! rb:border-[#EBEBEB]! rb:rounded-md!">
+      <Flex align="center" gap={4} className='rb:text-[#5B6167] rb:py-px rb:px-2'>
+        <span className={clsx('rb:size-1.25 rb:rounded-full', Colors[status])}></span>
         { text }
       </Flex>
     </Tag>
