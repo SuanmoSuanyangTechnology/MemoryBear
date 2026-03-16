@@ -566,6 +566,7 @@ const Private: FC = () => {
       title: t('knowledgeBase.status'),
       dataIndex: 'progress',
       key: 'progress',
+      width: 160,
       render: (value: string | number) => {
         return (
           <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
