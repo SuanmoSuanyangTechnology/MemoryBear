@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db import Base
-from app.schemas import FileType
+from app.schemas.app_schema import FileType
 
 
 class PerceptualType(IntEnum):
