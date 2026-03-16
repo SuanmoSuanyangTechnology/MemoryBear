@@ -1158,13 +1158,11 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
         try:
             _r = get_sync_redis_client()
             if _r is not None:
-                from datetime import timedelta as _td
                 from datetime import timezone as _tz
-                _CST = _tz(_td(hours=8))
-                _now_cst = datetime.now(_CST).replace(tzinfo=None).isoformat()
+                _now_utc = datetime.now(_tz.utc).isoformat()
                 _r.set(
                     f"write_message:last_done:{end_user_id}",
-                    _now_cst,
+                    _now_utc,
                     ex=86400 * 30,
                 )
         except Exception as _e:
