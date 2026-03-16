@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-07 15:23:39
+ * @Last Modified time: 2026-03-16 16:11:01
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -593,6 +593,13 @@ export const useWorkflowGraph = ({
     if (!graphRef.current) return false;
     const selectedNodes = graphRef.current.getNodes().filter(node => node.getData()?.isSelected);
     if (selectedNodes.length) {
+      selectedNodes.forEach(node => {
+        const data = node.getData();
+        node.setData({
+          ...data,
+          id: `${(data.type as string).replace(/-/g, '_')}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        });
+      });
       graphRef.current.copy(selectedNodes);
     }
     return false;

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-13 17:12:59
+ * @Last Modified time: 2026-03-16 15:58:10
  */
 import { type FC, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -97,10 +97,16 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         applicationModalRef.current?.handleOpen(application)
         break;
       case 'copy':
-        copyModalRef.current?.handleOpen()
+        appRef?.current?.handleSave(false)
+          .then(() => {
+            copyModalRef.current?.handleOpen()
+          })
         break;
       case 'export':
-        appExport(application.id, application.name)
+        appRef?.current?.handleSave(false)
+          .then(() => {
+            appExport(application.id, application.name)
+          })
         break;
       case 'delete':
         handleDelete()
