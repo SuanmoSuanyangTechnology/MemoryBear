@@ -63,6 +63,7 @@ async def lifespan(app: FastAPI):
 
     logger.info("应用程序启动完成")
     yield
+    # 应用关闭事件
     logger.info("应用程序正在关闭")
 
 
