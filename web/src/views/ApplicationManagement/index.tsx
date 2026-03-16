@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-13 17:03:40
+ * @Last Modified time: 2026-03-16 09:56:02
  */
 /**
  * Application Management Page
@@ -185,7 +185,7 @@ const ApplicationManagement: React.FC = () => {
         <PageScrollList<Application, Query>
           ref={scrollListRef}
           url={getApplicationListUrl}
-          query={{ ...query, include_shared: activeTab === 'sharing' }}
+          query={{ ...query, shared_only: activeTab === 'sharing' }}
           renderItem={(item) => (
             <RbCard
               title={item.name}
