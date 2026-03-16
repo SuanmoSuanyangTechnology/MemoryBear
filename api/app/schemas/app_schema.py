@@ -283,6 +283,10 @@ class App(BaseModel):
     source_workspace_icon: Optional[str] = None  # 共享来源工作空间图标
     source_app_version: Optional[str] = None     # 应用版本号
     source_app_is_active: Optional[bool] = None  # 应用是否生效
+    share_id: Optional[uuid.UUID] = None         # 分享记录ID（取消共享时使用）
+    shared_by: Optional[uuid.UUID] = None        # 分享者用户ID
+    shared_by_name: Optional[str] = None         # 分享者名称
+    shared_at: Optional[datetime.datetime] = None  # 分享时间
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
@@ -292,6 +296,10 @@ class App(BaseModel):
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
+        return int(dt.timestamp() * 1000) if dt else None
+
+    @field_serializer("shared_at", when_used="json")
+    def _serialize_shared_at(self, dt: Optional[datetime.datetime]):
         return int(dt.timestamp() * 1000) if dt else None
 
 
