@@ -176,24 +176,24 @@ class SearchService:
                     r.get("id") for r in community_results if r.get("id")
                 ]
                 if community_ids and end_user_id:
+                    from app.repositories.neo4j.graph_search import search_graph_community_expand
+                    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+                    expand_connector = Neo4jConnector()
                     try:
-                        from app.repositories.neo4j.graph_search import search_graph_community_expand
-                        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-                        connector = Neo4jConnector()
                         expand_result = await search_graph_community_expand(
-                            connector=connector,
+                            connector=expand_connector,
                             community_ids=community_ids,
                             end_user_id=end_user_id,
                             limit=10,
                         )
-                        await connector.close()
                         expanded_stmts = expand_result.get("expanded_statements", [])
                         if expanded_stmts:
-                            # 展开的 statements 插入 communities 之后、statements 之前
                             answer_list.extend(expanded_stmts)
                             logger.info(f"社区展开检索追加 {len(expanded_stmts)} 条 statements")
                     except Exception as e:
                         logger.warning(f"社区展开检索失败，跳过: {e}")
+                    finally:
+                        await expand_connector.close()
             
             # Extract clean content from all results
             content_list = [

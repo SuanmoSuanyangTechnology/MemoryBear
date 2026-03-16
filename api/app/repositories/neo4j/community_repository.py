@@ -13,6 +13,8 @@ from app.repositories.neo4j.cypher_queries import (
     ENTITY_LEAVE_ALL_COMMUNITIES,
     GET_ENTITY_NEIGHBORS,
     GET_ALL_ENTITIES_FOR_USER,
+    GET_ENTITY_COUNT_FOR_USER,
+    GET_ALL_ENTITY_IDS_FOR_USER,
     GET_ENTITIES_PAGE,
     GET_COMMUNITY_MEMBERS,
     GET_ALL_COMMUNITY_MEMBERS_BATCH,
@@ -20,7 +22,6 @@ from app.repositories.neo4j.cypher_queries import (
     GET_ENTITY_NEIGHBORS_BATCH_FOR_IDS,
     CHECK_USER_HAS_COMMUNITIES,
     UPDATE_COMMUNITY_MEMBER_COUNT,
-    UPDATE_COMMUNITY_METADATA,
     UPDATE_COMMUNITY_METADATA,
 )
 
@@ -111,6 +112,30 @@ class CommunityRepository:
             )
         except Exception as e:
             logger.error(f"get_all_entities failed: {e}")
+            return []
+
+    async def get_entity_count(self, end_user_id: str) -> int:
+        """仅返回用户实体总数，不加载实体数据。"""
+        try:
+            result = await self.connector.execute_query(
+                GET_ENTITY_COUNT_FOR_USER,
+                end_user_id=end_user_id,
+            )
+            return result[0]["entity_count"] if result else 0
+        except Exception as e:
+            logger.error(f"get_entity_count failed: {e}")
+            return 0
+
+    async def get_all_entity_ids(self, end_user_id: str) -> List[str]:
+        """仅返回用户所有实体 ID 列表，不加载 embedding 等大字段。"""
+        try:
+            result = await self.connector.execute_query(
+                GET_ALL_ENTITY_IDS_FOR_USER,
+                end_user_id=end_user_id,
+            )
+            return [r["id"] for r in result]
+        except Exception as e:
+            logger.error(f"get_all_entity_ids failed: {e}")
             return []
 
     async def get_entities_page(

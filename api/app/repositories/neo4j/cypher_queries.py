@@ -1122,6 +1122,16 @@ RETURN e.id AS id,
        CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
+GET_ENTITY_COUNT_FOR_USER = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+RETURN count(e) AS entity_count
+"""
+
+GET_ALL_ENTITY_IDS_FOR_USER = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+RETURN e.id AS id
+"""
+
 GET_COMMUNITY_MEMBERS = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community {community_id: $community_id})
 RETURN e.id AS id, e.name AS name, e.entity_type AS entity_type,

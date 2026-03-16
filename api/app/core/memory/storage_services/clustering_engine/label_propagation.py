@@ -116,23 +116,19 @@ class LabelPropagationEngine:
         """
         BATCH_SIZE = 2000  # 每批实体数，可按需调整
 
-        # 先查总数，决定批次数
-        total_entities = await self.repo.get_all_entities(end_user_id)
-        if not total_entities:
+        # 轻量查询：只获取总数和 ID 列表，不加载 embedding 等大字段
+        total_count = await self.repo.get_entity_count(end_user_id)
+        if not total_count:
             logger.info(f"[Clustering] 用户 {end_user_id} 无实体，跳过全量聚类")
             return
 
-        total_count = len(total_entities)
+        all_entity_ids = await self.repo.get_all_entity_ids(end_user_id)
         logger.info(f"[Clustering] 用户 {end_user_id} 共 {total_count} 个实体，"
                     f"分批大小 {BATCH_SIZE}，共 {(total_count + BATCH_SIZE - 1) // BATCH_SIZE} 批")
 
-        # labels 跨批次共享：先用全量数据初始化（只存 id，内存极小）
-        labels: Dict[str, str] = {e["id"]: e["id"] for e in total_entities}
-        # embeddings 也跨批次共享（每个向量 ~6KB，10万实体约 600MB，这是不可避免的）
-        # 但只在当前批次的实体需要时才保留，其余批次的 embedding 不常驻
-        # 实际上 embeddings 只在 _weighted_vote 中用于计算 self_embedding，
-        # 所以只需要当前批次实体的 embedding，不需要全量
-        del total_entities  # 释放全量列表，后续按批次加载
+        # labels 跨批次共享：只存 id→community_id，内存极小
+        labels: Dict[str, str] = {eid: eid for eid in all_entity_ids}
+        del all_entity_ids  # 释放 ID 列表，后续按批次加载完整数据
 
         for batch_start in range(0, total_count, BATCH_SIZE):
             batch_entities = await self.repo.get_entities_page(
