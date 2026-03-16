@@ -193,7 +193,6 @@ class LabelPropagationEngine:
 
         logger.info(
             f"[Clustering] 全量聚类完成，合并前 {pre_merge_count} 个社区，"
-            f"[Clustering] 全量聚类完成，合并前 {pre_merge_count} 个社区，"
             f"{len(labels)} 个实体"
         )
 
