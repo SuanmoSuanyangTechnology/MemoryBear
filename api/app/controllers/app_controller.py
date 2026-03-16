@@ -254,6 +254,27 @@ def get_agent_config(
     return success(data=app_schema.AgentConfig.model_validate(cfg))
 
 
+@router.get("/{app_id}/opening", summary="获取应用开场白配置")
+@cur_workspace_access_guard()
+def get_opening(
+        app_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """返回开场白文本和预设问题，供前端对话界面初始化时展示"""
+    workspace_id = current_user.current_workspace_id
+    cfg = app_service.get_agent_config(db, app_id=app_id, workspace_id=workspace_id)
+    features = cfg.features or {}
+    if hasattr(features, "model_dump"):
+        features = features.model_dump()
+    opening = features.get("opening_statement", {})
+    return success(data=app_schema.OpeningResponse(
+        enabled=opening.get("enabled", False),
+        statement=opening.get("statement"),
+        suggested_questions=opening.get("suggested_questions", []),
+    ))
+
+
 @router.post("/{app_id}/publish", summary="发布应用（生成不可变快照）")
 @cur_workspace_access_guard()
 def publish_app(
@@ -513,11 +534,11 @@ async def draft_run(
     service._validate_app_accessible(app, workspace_id)
 
     if payload.user_id is None:
+        # 先获取 app 的 workspace_id
         end_user_repo = EndUserRepository(db)
         new_end_user = end_user_repo.get_or_create_end_user(
-            app_id=app_id,
+            workspace_id=app.workspace_id,
             other_id=str(current_user.id),
-            original_user_id=str(current_user.id)  # Save original user_id to other_id
         )
         payload.user_id = str(new_end_user.id)
 
@@ -845,11 +866,11 @@ async def draft_run_compare(
     service._validate_app_accessible(app, workspace_id)
 
     if payload.user_id is None:
+        # 先获取 app 的 workspace_id
         end_user_repo = EndUserRepository(db)
         new_end_user = end_user_repo.get_or_create_end_user(
-            app_id=app_id,
+            workspace_id=app.workspace_id,
             other_id=str(current_user.id),
-            original_user_id=str(current_user.id)  # Save original user_id to other_id
         )
         payload.user_id = str(new_end_user.id)
 
@@ -898,7 +919,12 @@ async def draft_run_compare(
             "conversation_id": model_item.conversation_id  # 传递每个模型的 conversation_id
         })
 
-
+    # 从 features 中读取功能开关（与 draft_run 保持一致）
+    features_config: dict = agent_cfg.features or {}
+    if hasattr(features_config, 'model_dump'):
+        features_config = features_config.model_dump()
+    web_search_feature = features_config.get("web_search", {})
+    web_search = isinstance(web_search_feature, dict) and web_search_feature.get("enabled", False)
 
     # 流式返回
     if payload.stream:
@@ -915,7 +941,7 @@ async def draft_run_compare(
                     variables=payload.variables,
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
-                    web_search=True,
+                    web_search=web_search,
                     memory=True,
                     parallel=payload.parallel,
                     timeout=payload.timeout or 60,
@@ -946,7 +972,7 @@ async def draft_run_compare(
         variables=payload.variables,
         storage_type=storage_type,
         user_rag_memory_id=user_rag_memory_id,
-        web_search=True,
+        web_search=web_search,
         memory=True,
         parallel=payload.parallel,
         timeout=payload.timeout or 60,

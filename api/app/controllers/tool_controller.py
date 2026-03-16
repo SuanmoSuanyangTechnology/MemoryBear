@@ -4,7 +4,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.schemas.tool_schema import (
-    ToolCreateRequest, ToolUpdateRequest, ToolExecuteRequest, ParseSchemaRequest, CustomToolTestRequest
+    ToolCreateRequest, ToolUpdateRequest, ToolExecuteRequest, ParseSchemaRequest,
+    CustomToolTestRequest, ToolActiveUpdate
 )
 
 from app.core.response_utils import success
@@ -156,12 +157,36 @@ async def delete_tool(
         current_user: User = Depends(get_current_user),
         service: ToolService = Depends(get_tool_service)
 ):
-    """删除工具"""
+    """删除工具（逻辑删除，is_active=False）"""
     try:
         success_flag = service.delete_tool(tool_id, current_user.tenant_id)
         if not success_flag:
             raise HTTPException(status_code=404, detail="工具不存在")
         return success(msg="工具删除成功")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/{tool_id}/active", response_model=ApiResponse)
+async def set_tool_active(
+        tool_id: str,
+        request: ToolActiveUpdate,
+        current_user: User = Depends(get_current_user),
+        service: ToolService = Depends(get_tool_service)
+):
+    """设置工具可用状态（启用/禁用）
+
+    - is_active=true: 启用工具
+    - is_active=false: 禁用工具（等同于删除，但可恢复）
+    """
+    try:
+        success_flag = service.set_tool_active(tool_id, current_user.tenant_id, request.is_active)
+        if not success_flag:
+            raise HTTPException(status_code=404, detail="工具不存在")
+        action = "启用" if request.is_active else "禁用"
+        return success(msg=f"工具已{action}")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

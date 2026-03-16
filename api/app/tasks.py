@@ -1292,9 +1292,9 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                     }
 
                 # 2. 查询所有app下的end_user_id（去重）
-                app_ids = [app.id for app in apps]
+                # app_ids = [app.id for app in apps]
                 end_users = db.query(EndUser.id).filter(
-                    EndUser.app_id.in_(app_ids)
+                    EndUser.workspace_id == workspace_id
                 ).distinct().all()
 
                 # 3. 遍历所有end_user，查询每个宿主的记忆总量并累加
@@ -1433,9 +1433,9 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
                             continue
 
                         # 2. 查询所有app下的end_user_id（去重）
-                        app_ids = [app.id for app in apps]
+                        # app_ids = [app.id for app in apps]
                         end_users = db.query(EndUser.id).filter(
-                            EndUser.app_id.in_(app_ids)
+                            EndUser.workspace_id == workspace_id
                         ).distinct().all()
 
                         # 3. 遍历所有end_user，查询每个宿主的记忆总量并累加

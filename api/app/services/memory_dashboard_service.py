@@ -68,14 +68,14 @@ def get_workspace_end_users(
             return []
         
         # 提取所有 app_id
-        app_ids = [app.id for app in apps_orm]
+        # app_ids = [app.id for app in apps_orm]
         
         # 批量查询所有 end_users（一次查询而非循环查询）
         # 按 created_at 降序排序，NULL 值排在最后；id 作为次级排序键保证确定性
         from app.models.end_user_model import EndUser as EndUserModel
         from sqlalchemy import desc, nullslast
         end_users_orm = db.query(EndUserModel).filter(
-            EndUserModel.app_id.in_(app_ids)
+            EndUserModel.workspace_id == workspace_id
         ).order_by(
             nullslast(desc(EndUserModel.created_at)),
             desc(EndUserModel.id)

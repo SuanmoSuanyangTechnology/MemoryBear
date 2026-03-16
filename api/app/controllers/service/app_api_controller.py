@@ -94,9 +94,8 @@ async def chat(
     workspace_id = app.workspace_id
     end_user_repo = EndUserRepository(db)
     new_end_user = end_user_repo.get_or_create_end_user(
-        app_id=app.id,
+        workspace_id=workspace_id,
         other_id=other_id,
-        original_user_id=other_id  # Save original user_id to other_id
     )
     end_user_id = str(new_end_user.id)
     web_search = True

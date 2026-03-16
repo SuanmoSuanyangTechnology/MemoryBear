@@ -22,6 +22,7 @@ from app.schemas import release_share_schema, conversation_schema
 from app.schemas.response_schema import PageData, PageMeta
 from app.services import workspace_service
 from app.services.app_chat_service import AppChatService, get_app_chat_service
+from app.services.app_service import AppService
 from app.services.auth_service import create_access_token
 from app.services.conversation_service import ConversationService
 from app.services.release_share_service import ReleaseShareService
@@ -215,8 +216,10 @@ def list_conversations(
     service = SharedChatService(db)
     share, release = service.get_release_by_share_token(share_data.share_token, password)
     end_user_repo = EndUserRepository(db)
+    app_service = AppService(db)
+    app = app_service._get_app_or_404(share.app_id)
     new_end_user = end_user_repo.get_or_create_end_user(
-        app_id=share.app_id,
+        workspace_id=app.workspace_id,
         other_id=other_id
     )
     logger.debug(new_end_user.id)
@@ -308,25 +311,28 @@ async def chat(
 
         # Store end_user_id in database with original user_id
         end_user_repo = EndUserRepository(db)
+        app_service = AppService(db)
+        app = app_service._get_app_or_404(share.app_id)
+        workspace_id = app.workspace_id
         new_end_user = end_user_repo.get_or_create_end_user(
-            app_id=share.app_id,
+            workspace_id=workspace_id,
             other_id=other_id,
-            original_user_id=user_id  # Save original user_id to other_id
+            original_user_id=user_id
         )
         end_user_id = str(new_end_user.id)
 
-        appid = share.app_id
+        # appid = share.app_id
         """获取存储类型和工作空间的ID"""
 
         # 直接通过 SQLAlchemy 查询 app（仅查询未删除的应用）
-        app = db.query(App).filter(
-            App.id == appid,
-            App.is_active.is_(True)
-        ).first()
-        if not app:
-            raise BusinessException("应用不存在", BizCode.APP_NOT_FOUND)
+        # app = db.query(App).filter(
+        #     App.id == appid,
+        #     App.is_active.is_(True)
+        # ).first()
+        # if not app:
+        #     raise BusinessException("应用不存在", BizCode.APP_NOT_FOUND)
 
-        workspace_id = app.workspace_id
+        # workspace_id = app.workspace_id
 
         # 直接从 workspace 获取 storage_type（公开分享场景无需权限检查）
         storage_type = workspace_service.get_workspace_storage_type_without_auth(
@@ -654,17 +660,20 @@ async def config_query(
         workflow_service = WorkflowService(db)
         content = {
             "app_type": release.app.type,
-            "variables": workflow_service.get_start_node_variables(release.config)
+            "variables": workflow_service.get_start_node_variables(release.config),
+            "features": release.config.get("features")
         }
     elif release.app.type == AppType.AGENT:
         content = {
             "app_type": release.app.type,
-            "variables": release.config.get("variables")
+            "variables": release.config.get("variables"),
+            "features": release.config.get("features")
         }
     elif release.app.type == AppType.MULTI_AGENT:
         content = {
             "app_type": release.app.type,
-            "variables": []
+            "variables": [],
+            "features": release.config.get("features")
         }
     else:
         return fail(msg="Unsupported app type", code=BizCode.APP_TYPE_NOT_SUPPORTED)

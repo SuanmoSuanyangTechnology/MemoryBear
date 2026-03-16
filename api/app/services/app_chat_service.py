@@ -49,11 +49,22 @@ class AppChatService:
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
             workspace_id: Optional[str] = None,
-            files: Optional[List[FileInput]] = None  # 新增：多模态文件
+            files: Optional[List[FileInput]] = None
     ) -> Dict[str, Any]:
         """聊天（非流式）"""
         start_time = time.time()
         config_id = None
+
+        # 应用 features 配置
+        features_config: dict = config.features or {}
+        if hasattr(features_config, 'model_dump'):
+            features_config = features_config.model_dump()
+        web_search_feature = features_config.get("web_search", {})
+        if not (isinstance(web_search_feature, dict) and web_search_feature.get("enabled")):
+            web_search = False
+
+        # 校验文件上传
+        self.agent_service._validate_file_upload(features_config, files)
 
         variables = self.agent_service.prepare_variables(variables, config.variables)
 
@@ -107,17 +118,14 @@ class AppChatService:
         )
 
         # 加载历史消息
-        history = []
-        memory_config = {"enabled": True, 'max_history': 10}
-        if memory_config.get("enabled"):
-            messages = self.conversation_service.get_messages(
-                conversation_id=conversation_id,
-                limit=memory_config.get("max_history", 10)
-            )
-            history = [
-                {"role": msg.role, "content": msg.content}
-                for msg in messages
-            ]
+        messages = self.conversation_service.get_messages(
+            conversation_id=conversation_id,
+            limit=10
+        )
+        history = [
+            {"role": msg.role, "content": msg.content}
+            for msg in messages
+        ]
 
         # 处理多模态文件
         processed_files = None
@@ -166,6 +174,23 @@ class AppChatService:
 
         elapsed_time = time.time() - start_time
 
+        # suggested_questions
+        suggested_questions = []
+        sq_config = features_config.get("suggested_questions_after_answer", {})
+        if isinstance(sq_config, dict) and sq_config.get("enabled"):
+            suggested_questions = await self.agent_service._generate_suggested_questions(
+                features_config, result["content"],
+                {"model_name": api_key_obj.model_name, "api_key": api_key_obj.api_key,
+                 "api_base": api_key_obj.api_base}, {}
+            )
+
+        audio_url = await self.agent_service._generate_tts(
+            features_config, result["content"],
+            {"model_name": api_key_obj.model_name, "api_key": api_key_obj.api_key,
+             "api_base": api_key_obj.api_base, "provider": api_key_obj.provider},
+            tenant_id=tenant_id, workspace_id=workspace_id
+        )
+
         return {
             "conversation_id": conversation_id,
             "message_id": str(message_id),
@@ -175,7 +200,10 @@ class AppChatService:
                 "completion_tokens": 0,
                 "total_tokens": 0
             }),
-            "elapsed_time": elapsed_time
+            "elapsed_time": elapsed_time,
+            "suggested_questions": suggested_questions,
+            "citations": self.agent_service._filter_citations(features_config, result.get("citations", [])),
+            "audio_url": audio_url,
         }
 
     async def agnet_chat_stream(
@@ -190,7 +218,7 @@ class AppChatService:
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
             workspace_id: Optional[str] = None,
-            files: Optional[List[FileInput]] = None  # 新增：多模态文件
+            files: Optional[List[FileInput]] = None
     ) -> AsyncGenerator[str, None]:
         """聊天（流式）"""
 
@@ -198,10 +226,19 @@ class AppChatService:
             start_time = time.time()
             config_id = None
             message_id = uuid.uuid4()
-            yield f"event: start\ndata: {json.dumps({
-                'conversation_id': str(conversation_id), 
-                "message_id": str(message_id)
-            }, ensure_ascii=False)}\n\n"
+
+            # 应用 features 配置
+            features_config: dict = config.features or {}
+            if hasattr(features_config, 'model_dump'):
+                features_config = features_config.model_dump()
+            web_search_feature = features_config.get("web_search", {})
+            if not (isinstance(web_search_feature, dict) and web_search_feature.get("enabled")):
+                web_search = False
+
+            # 校验文件上传
+            self.agent_service._validate_file_upload(features_config, files)
+
+            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id)}, ensure_ascii=False)}\n\n"
 
             variables = self.agent_service.prepare_variables(variables, config.variables)
             # 获取模型配置ID
@@ -327,8 +364,22 @@ class AppChatService:
 
             ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
 
-            # 发送结束事件
-            end_data = {"elapsed_time": elapsed_time, "message_length": len(full_content), "error": None}
+            # 发送结束事件（包含 suggested_questions、tts、citations）
+            end_data: dict = {"elapsed_time": elapsed_time, "message_length": len(full_content), "error": None}
+            sq_config = features_config.get("suggested_questions_after_answer", {})
+            if isinstance(sq_config, dict) and sq_config.get("enabled"):
+                end_data["suggested_questions"] = await self.agent_service._generate_suggested_questions(
+                    features_config, full_content,
+                    {"model_name": api_key_obj.model_name, "api_key": api_key_obj.api_key,
+                     "api_base": api_key_obj.api_base}, {}
+                )
+            end_data["audio_url"] = await self.agent_service._generate_tts(
+                features_config, full_content,
+                {"model_name": api_key_obj.model_name, "api_key": api_key_obj.api_key,
+                 "api_base": api_key_obj.api_base, "provider": api_key_obj.provider},
+                tenant_id=tenant_id, workspace_id=workspace_id
+            )
+            end_data["citations"] = self.agent_service._filter_citations(features_config, [])
             yield f"event: end\ndata: {json.dumps(end_data, ensure_ascii=False)}\n\n"
 
             logger.info(
@@ -442,7 +493,7 @@ class AppChatService:
         try:
             message_id = uuid.uuid4()
             # 发送开始事件
-            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), "message_id": str(message_id)}, ensure_ascii=False)}\n\n"
+            yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id)}, ensure_ascii=False)}\n\n"
 
             full_content = ""
             total_tokens = 0
