@@ -129,6 +129,28 @@ class AppService:
             )
             raise BusinessException("应用不可访问", BizCode.WORKSPACE_NO_ACCESS)
 
+    def _unique_app_name(self, name: str, workspace_id: uuid.UUID, app_type: AppType) -> str:
+        """生成唯一应用名称，同时检查本空间自有应用和共享到本空间的应用"""
+        existing = {r[0] for r in self.db.query(App.name).filter(
+            App.workspace_id == workspace_id,
+            App.type == app_type,
+            App.is_active.is_(True)
+        ).all()}
+        shared_names = {r[0] for r in self.db.query(App.name).join(
+            AppShare, AppShare.source_app_id == App.id
+        ).filter(
+            AppShare.target_workspace_id == workspace_id,
+            App.type == app_type,
+            App.is_active.is_(True)
+        ).all()}
+        existing |= shared_names
+        if name not in existing:
+            return name
+        counter = 1
+        while f"{name}({counter})" in existing:
+            counter += 1
+        return f"{name}({counter})"
+
     def _get_share_permission(self, app: App, workspace_id: Optional[uuid.UUID]) -> Optional[str]:
         """获取共享应用的权限
 
@@ -781,6 +803,7 @@ class AppService:
             # 确定新应用名称
             if not new_name:
                 new_name = f"{source_app.name} - 副本"
+            new_name = self._unique_app_name(new_name, target_workspace_id, source_app.type)
 
             now = datetime.datetime.now()
 
