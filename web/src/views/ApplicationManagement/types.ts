@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-28 16:16:03
+ * @Last Modified time: 2026-03-16 09:55:52
  */
 /**
  * Type definitions for Application Management
@@ -15,6 +15,7 @@ export interface Query {
   /** Search keyword */
   search: string;
   type?: string;
+  shared_only?: boolean;
 }
 
 /**
@@ -53,6 +54,11 @@ export interface Application {
   created_at: number;
   /** Last update timestamp */
   updated_at: number;
+  share_permission?: string;
+  source_workspace_name?: string;
+  source_workspace_icon?: string;
+  source_app_version?: string;
+  source_app_is_active?: boolean;
 }
 
 /**
@@ -241,4 +247,20 @@ export interface UploadWorkflowModalRef {
 export interface UploadModalRef {
   /** Open the upload workflow modal */
   handleOpen: () => void;
+}
+export interface MySharedOutItem {
+  id: string;
+  source_app_id: string;
+  source_workspace_id: string;
+  target_workspace_id: string;
+  shared_by: string;
+  permission: 'readonly' | 'editable';
+  created_at: number;
+  updated_at: number;
+  source_app_name: string;
+  source_app_type: string;
+  source_app_version: string;
+  source_app_is_active: boolean;
+  target_workspace_name: string;
+  target_workspace_icon: string;
 }

@@ -19,7 +19,7 @@ from app.models import mcp_market_config_model
 from app.models.user_model import User
 from app.schemas import mcp_market_config_schema
 from app.schemas.response_schema import ApiResponse
-from app.services import mcp_market_config_service
+from app.services import mcp_market_config_service, mcp_market_service
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
@@ -123,6 +123,17 @@ async def get_mcp_servers(
             "has_next": True if page * pagesize < total else False
         }
     }
+    # 5. Update mck_market.mcp_count
+    db_mcp_market = mcp_market_service.get_mcp_market_by_id(db, mcp_market_id=db_mcp_market_config.mcp_market_id, current_user=current_user)
+    if not db_mcp_market:
+        api_logger.warning(f"The mcp market does not exist or access is denied: mcp_market_id={db_mcp_market_config.mcp_market_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The mcp market does not exist or access is denied"
+        )
+    db_mcp_market.mcp_count = total
+    db.commit()
+    db.refresh(db_mcp_market)
     return success(data=result, msg="Query of mcp servers list successful")
 
 
@@ -265,6 +276,30 @@ async def create_mcp_market_config(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"The mcp market id already exists: {create_data.mcp_market_id}"
             )
+        # 2. verify token
+        create_data.status = 1
+        try:
+            api = MCPApi()
+            token = create_data.token
+            api.login(token)
+
+            body = {
+                'filter': {},
+                'page_number': 1,
+                'page_size': 20,
+                'search': ""
+            }
+            cookies = api.get_cookies(token)
+            r = api.session.put(
+                url=api.mcp_base_url,
+                headers=api.builder_headers(api.headers),
+                json=body,
+                cookies=cookies)
+            raise_for_http_status(r)
+        except requests.exceptions.RequestException as e:
+            api_logger.error(f"Failed to get MCP servers: {str(e)}")
+            create_data.status = 0
+        # 3. create mcp_market_config
         db_mcp_market_config = mcp_market_config_service.create_mcp_market_config(db=db, mcp_market_config=create_data, current_user=current_user)
         api_logger.info(
             f"The mcp market config has been successfully created: (ID: {db_mcp_market_config.id})")
@@ -395,7 +430,7 @@ async def update_mcp_market_config(
             detail=f"The mcp market config update failed: {str(e)}"
         )
 
-    # 4. Return the updated mcp market config
+    # 5. Return the updated mcp market config
     return success(data=jsonable_encoder(mcp_market_config_schema.McpMarketConfig.model_validate(db_mcp_market_config)),
                    msg="The mcp market config information updated successfully")
 

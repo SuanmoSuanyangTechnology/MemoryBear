@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:33 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:29:33 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-05 13:47:23
  */
 import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -165,7 +165,8 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
     setSubAgents(prev => prev.filter(item => item.agent_id !== agent.agent_id))
   }
   useImperativeHandle(ref, () => ({
-    handleSave
+    handleSave,
+    funConfig: data?.funConfig
   }))
 
   const modelConfigModalRef = useRef<ModelConfigModalRef>(null)

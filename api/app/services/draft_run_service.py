@@ -23,9 +23,10 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_db_context
-from app.models import AgentConfig, ModelConfig
+from app.models import AgentConfig, ModelConfig, ModelType
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput
+from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
 from app.services import task_service
 from app.services.conversation_service import ConversationService
@@ -501,9 +502,18 @@ class AgentRunService:
             processed_files = None
             if files:
                 # 获取 provider 信息
+                model_info = ModelInfo(
+                    model_name=api_key_config["model_name"],
+                    provider=api_key_config["provider"],
+                    api_key=api_key_config["api_key"],
+                    api_base=api_key_config["api_base"],
+                    capability=api_key_config["capability"],
+                    is_omni=api_key_config["is_omni"],
+                    model_type=ModelType.LLM
+                )
                 provider = api_key_config.get("provider", "openai")
-                multimodal_service = MultimodalService(self.db, provider=provider, is_omni=api_key_config.get("is_omni", False))
-                processed_files = await multimodal_service.process_files(files)
+                multimodal_service = MultimodalService(self.db, model_info)
+                processed_files = await multimodal_service.process_files(user_id, files)
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
 
             # 7. 知识库检索
@@ -688,7 +698,8 @@ class AgentRunService:
                 conversation_id=conversation_id,
                 app_id=agent_config.app_id,
                 workspace_id=workspace_id,
-                user_id=user_id
+                user_id=user_id,
+                sub_agent=sub_agent
             )
 
             # 6. 加载历史消息
@@ -703,9 +714,18 @@ class AgentRunService:
             processed_files = None
             if files:
                 # 获取 provider 信息
+                model_info = ModelInfo(
+                    model_name=api_key_config["model_name"],
+                    provider=api_key_config["provider"],
+                    api_key=api_key_config["api_key"],
+                    api_base=api_key_config["api_base"],
+                    capability=api_key_config["capability"],
+                    is_omni=api_key_config["is_omni"],
+                    model_type=ModelType.LLM
+                )
                 provider = api_key_config.get("provider", "openai")
-                multimodal_service = MultimodalService(self.db, provider=provider, is_omni=api_key_config.get("is_omni", False))
-                processed_files = await multimodal_service.process_files(files)
+                multimodal_service = MultimodalService(self.db, model_info)
+                processed_files = await multimodal_service.process_files(user_id, files)
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
 
             # 7. 知识库检索
@@ -840,7 +860,8 @@ class AgentRunService:
             "api_key": api_key.api_key,
             "api_base": api_key.api_base,
             "api_key_id": api_key.id,
-            "is_omni": api_key.is_omni
+            "is_omni": api_key.is_omni,
+            "capability": api_key.capability
         }
 
     async def _ensure_conversation(
@@ -848,7 +869,8 @@ class AgentRunService:
             conversation_id: Optional[str],
             app_id: uuid.UUID,
             workspace_id: uuid.UUID,
-            user_id: Optional[str]
+            user_id: Optional[str],
+            sub_agent: bool = False
     ) -> str:
         """确保会话存在（创建或验证）
 
@@ -909,20 +931,36 @@ class AgentRunService:
             conv_uuid = uuid.UUID(conversation_id)
             conversation = conversation_service.get_conversation(conv_uuid)
 
-            # 验证会话属于当前工作空间
-            if conversation.workspace_id != workspace_id:
-                logger.warning(
-                    "会话不属于当前工作空间",
-                    extra={
-                        "conversation_id": conversation_id,
-                        "conversation_workspace_id": str(conversation.workspace_id),
-                        "current_workspace_id": str(workspace_id)
-                    }
-                )
-                raise BusinessException(
-                    "会话不属于当前工作空间",
-                    BizCode.PERMISSION_DENIED
-                )
+            # 验证会话属于当前工作空间（或属于共享应用的源工作空间）
+            # sub_agent 内部调用时跳过校验，已在上层验证过
+            if not sub_agent and conversation.workspace_id != workspace_id:
+                # 检查是否是共享应用的会话（被共享者 workspace 访问源应用）
+                from app.models import AppShare
+                from sqlalchemy import select as sa_select
+                share = self.db.scalars(
+                    sa_select(AppShare).where(
+                        AppShare.source_app_id == app_id,
+                        AppShare.target_workspace_id == workspace_id
+                    )
+                ).first()
+
+                # 情况2：sub_agent 内部调用时，workspace_id 是源应用的 workspace，
+                # 而会话是被共享者创建的，只要会话属于同一个 app 即可放行
+                same_app = (conversation.app_id == app_id)
+
+                if not share and not same_app:
+                    logger.warning(
+                        "会话不属于当前工作空间",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "conversation_workspace_id": str(conversation.workspace_id),
+                            "current_workspace_id": str(workspace_id)
+                        }
+                    )
+                    raise BusinessException(
+                        "会话不属于当前工作空间",
+                        BizCode.PERMISSION_DENIED
+                    )
 
             logger.debug(
                 "使用现有会话",

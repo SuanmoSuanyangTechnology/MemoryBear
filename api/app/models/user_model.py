@@ -1,6 +1,6 @@
 import datetime
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.db import Base
@@ -21,6 +21,9 @@ class User(Base):
     # SSO 外部关联字段
     external_id = Column(String(100), nullable=True)  # 外部用户ID
     external_source = Column(String(50), nullable=True)  # 来源系统
+    
+    # 用户语言偏好
+    preferred_language = Column(String(10), server_default=text("'zh'"), default='zh', nullable=False, index=True)  # 用户偏好语言，默认中文
     
     current_workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=True)  # 当前工作空间ID，可为空
     

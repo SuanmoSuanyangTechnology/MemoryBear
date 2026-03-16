@@ -53,6 +53,7 @@ def list_apps(
         status: str | None = None,
         search: str | None = None,
         include_shared: bool = True,
+        shared_only: bool = False,
         page: int = 1,
         pagesize: int = 10,
         ids: Optional[str] = None,
@@ -84,6 +85,7 @@ def list_apps(
         status=status,
         search=search,
         include_shared=include_shared,
+        shared_only=shared_only,
         page=page,
         pagesize=pagesize,
     )
@@ -91,6 +93,37 @@ def list_apps(
     items = [service._convert_to_schema(app, workspace_id) for app in items_orm]
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
     return success(data=PageData(page=meta, items=items))
+
+
+@router.get("/my-shared-out", summary="列出本工作空间主动分享出去的记录")
+@cur_workspace_access_guard()
+def list_my_shared_out(
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """列出本工作空间主动分享给其他工作空间的所有记录（我的共享）"""
+    workspace_id = current_user.current_workspace_id
+    service = app_service.AppService(db)
+    shares = service.list_my_shared_out(workspace_id=workspace_id)
+    data = [app_schema.AppShare.model_validate(s) for s in shares]
+    return success(data=data)
+
+
+@router.delete("/share/{target_workspace_id}", summary="取消对某工作空间的所有应用分享")
+@cur_workspace_access_guard()
+def unshare_all_apps_to_workspace(
+        target_workspace_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """Cancel all app shares from current workspace to a target workspace."""
+    workspace_id = current_user.current_workspace_id
+    service = app_service.AppService(db)
+    count = service.unshare_all_apps_to_workspace(
+        target_workspace_id=target_workspace_id,
+        workspace_id=workspace_id
+    )
+    return success(msg=f"已取消 {count} 个应用的分享", data={"count": count})
 
 
 @router.get("/{app_id}", summary="获取应用详情")
@@ -302,7 +335,8 @@ def share_app(
         app_id=app_id,
         target_workspace_ids=payload.target_workspace_ids,
         user_id=current_user.id,
-        workspace_id=workspace_id
+        workspace_id=workspace_id,
+        permission=payload.permission
     )
 
     data = [app_schema.AppShare.model_validate(s) for s in shares]
@@ -333,6 +367,32 @@ def unshare_app(
     return success(msg="应用分享已取消")
 
 
+@router.patch("/{app_id}/share/{target_workspace_id}", summary="更新共享权限")
+@cur_workspace_access_guard()
+def update_share_permission(
+        app_id: uuid.UUID,
+        target_workspace_id: uuid.UUID,
+        payload: app_schema.UpdateSharePermissionRequest,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """更新共享权限（readonly <-> editable）
+
+    - 只能修改自己工作空间应用的共享权限
+    """
+    workspace_id = current_user.current_workspace_id
+
+    service = app_service.AppService(db)
+    share = service.update_share_permission(
+        app_id=app_id,
+        target_workspace_id=target_workspace_id,
+        permission=payload.permission,
+        workspace_id=workspace_id
+    )
+
+    return success(data=app_schema.AppShare.model_validate(share))
+
+
 @router.get("/{app_id}/shares", summary="列出应用的分享记录")
 @cur_workspace_access_guard()
 def list_app_shares(
@@ -354,6 +414,46 @@ def list_app_shares(
 
     data = [app_schema.AppShare.model_validate(s) for s in shares]
     return success(data=data)
+
+
+@router.delete("/shared/{source_workspace_id}", summary="批量移除某来源工作空间的所有共享应用")
+@cur_workspace_access_guard()
+def remove_all_shared_apps_from_workspace(
+        source_workspace_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """Remove all shared apps from a specific source workspace (recipient operation)."""
+    workspace_id = current_user.current_workspace_id
+    service = app_service.AppService(db)
+    count = service.remove_all_shared_apps_from_workspace(
+        source_workspace_id=source_workspace_id,
+        workspace_id=workspace_id
+    )
+    return success(msg=f"已移除 {count} 个共享应用", data={"count": count})
+
+
+@router.delete("/{app_id}/shared", summary="移除共享给我的应用")
+@cur_workspace_access_guard()
+def remove_shared_app(
+        app_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """被共享者从自己的工作空间移除共享应用
+
+    - 不会删除源应用，只删除共享记录
+    - 只能移除共享给自己工作空间的应用
+    """
+    workspace_id = current_user.current_workspace_id
+
+    service = app_service.AppService(db)
+    service.remove_shared_app(
+        app_id=app_id,
+        workspace_id=workspace_id
+    )
+
+    return success(msg="已移除共享应用")
 
 
 @router.post("/{app_id}/draft/run", summary="试运行 Agent（使用当前草稿配置）")
@@ -744,6 +844,15 @@ async def draft_run_compare(
         raise BusinessException("只有 Agent 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
     service._validate_app_accessible(app, workspace_id)
 
+    if payload.user_id is None:
+        end_user_repo = EndUserRepository(db)
+        new_end_user = end_user_repo.get_or_create_end_user(
+            app_id=app_id,
+            other_id=str(current_user.id),
+            original_user_id=str(current_user.id)  # Save original user_id to other_id
+        )
+        payload.user_id = str(new_end_user.id)
+
     # 2. 获取 Agent 配置
     from sqlalchemy import select
     from app.models import AgentConfig
@@ -789,6 +898,8 @@ async def draft_run_compare(
             "conversation_id": model_item.conversation_id  # 传递每个模型的 conversation_id
         })
 
+
+
     # 流式返回
     if payload.stream:
         async def event_generator():
@@ -800,7 +911,7 @@ async def draft_run_compare(
                     message=payload.message,
                     workspace_id=workspace_id,
                     conversation_id=payload.conversation_id,
-                    user_id=payload.user_id or str(current_user.id),
+                    user_id=payload.user_id,
                     variables=payload.variables,
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
@@ -831,7 +942,7 @@ async def draft_run_compare(
         message=payload.message,
         workspace_id=workspace_id,
         conversation_id=payload.conversation_id,
-        user_id=payload.user_id or str(current_user.id),
+        user_id=payload.user_id,
         variables=payload.variables,
         storage_type=storage_type,
         user_rag_memory_id=user_rag_memory_id,

@@ -2,9 +2,17 @@ import json
 
 
 def escape_lucene_query(query: str) -> str:
-    """Escape Lucene special characters in a free-text query.
-
-    This prevents ParseException when using Neo4j full-text procedures.
+    """
+    Escape special characters in Lucene queries
+    
+    Prevents ParseException when using Neo4j full-text search procedures.
+    Escapes all Lucene reserved special characters and operators.
+    
+    Args:
+        query: Original query string
+        
+    Returns:
+        str: Escaped query string safe for Lucene search
     """
     if query is None:
         return ""
@@ -22,11 +30,21 @@ def escape_lucene_query(query: str) -> str:
     return s
 
 def extract_plain_query(query_input: str) -> str:
-    """Extract clean, plain-text query from various input forms.
-
+    """
+    Extract clean plain-text query from various input forms
+    
+    Handles the following cases:
     - Strips surrounding quotes and whitespace
     - If input looks like JSON, prefers the 'original' field
-    - Fallbacks to the raw string when parsing fails
+    - Falls back to raw string when parsing fails
+    - Handles dictionary-type input
+    - Best-effort unescape common escape characters
+    
+    Args:
+        query_input: Query input in various forms (string, dict, etc.)
+        
+    Returns:
+        str: Extracted plain-text query string
     """
     if query_input is None:
         return ""

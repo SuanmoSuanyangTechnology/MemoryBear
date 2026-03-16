@@ -2,6 +2,7 @@
 import { Graph } from '@antv/x6';
 import type { KnowledgeConfig } from './components/Properties/Knowledge/types'
 import type { Variable } from './components/Properties/VariableList/types'
+import type { FunConfigForm } from '@/views/ApplicationConfig/types'
 export interface NodeConfig {
   type: 'input' | 'textarea' | 'select' | 'inputNumber' | 'slider' | 'customSelect' | 'define' | 'knowledge' | 'variableList' | string;
   placeholder?: string;
@@ -89,6 +90,8 @@ export interface WorkflowConfig {
   is_active: boolean;
   created_at: number;
   updated_at: number;
+
+  funConfig?: FunConfigForm;
 }
 
 export interface ChatRef {

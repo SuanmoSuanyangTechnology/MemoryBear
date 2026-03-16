@@ -70,43 +70,44 @@ celery_app.conf.update(
     # 任务追踪
     task_track_started=True,
     task_ignore_result=False,
-    
+
     # 超时设置
     task_time_limit=3600,  # 60分钟硬超时
     task_soft_time_limit=3000,  # 50分钟软超时
-    
+
     # Worker 设置 (per-worker settings are in docker-compose command line)
     worker_prefetch_multiplier=1,  # Don't hoard tasks, fairer distribution
-    
+
     # 结果过期时间
     result_expires=3600,  # 结果保存1小时
-    
+
     # 任务确认设置
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     worker_disable_rate_limits=True,
-    
+
     # FLower setting 
     worker_send_task_events=True,
     task_send_sent_event=True,
-    
+
     # task routing
     task_routes={
         # Memory tasks → memory_tasks queue (threads worker)
         'app.core.memory.agent.read_message_priority': {'queue': 'memory_tasks'},
         'app.core.memory.agent.read_message': {'queue': 'memory_tasks'},
         'app.core.memory.agent.write_message': {'queue': 'memory_tasks'},
-        
+        'app.tasks.write_perceptual_memory': {'queue': 'memory_tasks'},
+
         # Long-term storage tasks → memory_tasks queue (batched write strategies)
         'app.core.memory.agent.long_term_storage.window': {'queue': 'memory_tasks'},
         'app.core.memory.agent.long_term_storage.time': {'queue': 'memory_tasks'},
         'app.core.memory.agent.long_term_storage.aggregate': {'queue': 'memory_tasks'},
-        
+
         # Document tasks → document_tasks queue (prefork worker)
         'app.core.rag.tasks.parse_document': {'queue': 'document_tasks'},
         'app.core.rag.tasks.build_graphrag_for_kb': {'queue': 'document_tasks'},
         'app.core.rag.tasks.sync_knowledge_for_kb': {'queue': 'document_tasks'},
-        
+
         # Beat/periodic tasks → periodic_tasks queue (dedicated periodic worker)
         'app.tasks.workspace_reflection_task': {'queue': 'periodic_tasks'},
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
@@ -115,6 +116,7 @@ celery_app.conf.update(
         'app.tasks.update_implicit_emotions_storage': {'queue': 'periodic_tasks'},
         'app.tasks.init_implicit_emotions_for_users': {'queue': 'periodic_tasks'},
         'app.tasks.init_interest_distribution_for_users': {'queue': 'periodic_tasks'},
+        'app.tasks.init_community_clustering_for_users': {'queue': 'periodic_tasks'},
     },
 )
 
@@ -131,7 +133,7 @@ implicit_emotions_update_schedule = crontab(
     minute=settings.IMPLICIT_EMOTIONS_UPDATE_MINUTE,
 )
 
-#构建定时任务配置
+# 构建定时任务配置
 beat_schedule_config = {
     "run-workspace-reflection": {
         "task": "app.tasks.workspace_reflection_task",
