@@ -120,7 +120,7 @@ class SearchService:
             raw_results is None if return_raw_results=False
         """
         if include is None:
-            include = ["statements", "chunks", "entities", "summaries"]
+            include = ["statements", "chunks", "entities", "summaries", "communities"]
         
         # Clean query
         cleaned_query = self.clean_query(question)
@@ -146,8 +146,8 @@ class SearchService:
             if search_type == "hybrid":
                 reranked_results = answer.get('reranked_results', {})
                 
-                # Priority order: summaries first (most contextual), then statements, chunks, entities
-                priority_order = ['summaries', 'statements', 'chunks', 'entities']
+                # Priority order: summaries first (most contextual), then communities, statements, chunks, entities
+                priority_order = ['summaries', 'communities', 'statements', 'chunks', 'entities']
                 
                 for category in priority_order:
                     if category in include and category in reranked_results:
@@ -157,13 +157,43 @@ class SearchService:
             else:
                 # For keyword or embedding search, results are directly in answer dict
                 # Apply same priority order
-                priority_order = ['summaries', 'statements', 'chunks', 'entities']
+                priority_order = ['summaries', 'communities', 'statements', 'chunks', 'entities']
                 
                 for category in priority_order:
                     if category in include and category in answer:
                         category_results = answer[category]
                         if isinstance(category_results, list):
                             answer_list.extend(category_results)
+
+            # 对命中的 community 节点展开其成员 statements
+            if "communities" in include:
+                community_results = (
+                    answer.get('reranked_results', {}).get('communities', [])
+                    if search_type == "hybrid"
+                    else answer.get('communities', [])
+                )
+                community_ids = [
+                    r.get("id") for r in community_results if r.get("id")
+                ]
+                if community_ids and end_user_id:
+                    try:
+                        from app.repositories.neo4j.graph_search import search_graph_community_expand
+                        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+                        connector = Neo4jConnector()
+                        expand_result = await search_graph_community_expand(
+                            connector=connector,
+                            community_ids=community_ids,
+                            end_user_id=end_user_id,
+                            limit=10,
+                        )
+                        await connector.close()
+                        expanded_stmts = expand_result.get("expanded_statements", [])
+                        if expanded_stmts:
+                            # 展开的 statements 插入 communities 之后、statements 之前
+                            answer_list.extend(expanded_stmts)
+                            logger.info(f"社区展开检索追加 {len(expanded_stmts)} 条 statements")
+                    except Exception as e:
+                        logger.warning(f"社区展开检索失败，跳过: {e}")
             
             # Extract clean content from all results
             content_list = [

@@ -1,5 +1,4 @@
 import asyncio
-import os
 from typing import List, Optional
 
 # 使用新的仓储层
@@ -158,10 +157,11 @@ async def save_dialog_and_statements_to_neo4j(
         statement_chunk_edges: List[StatementChunkEdge],
         statement_entity_edges: List[StatementEntityEdge],
         connector: Neo4jConnector,
-        config_id: Optional[str] = None,
-        llm_model_id: Optional[str] = None,
 ) -> bool:
     """Save dialogue nodes, chunk nodes, statement nodes, entities, and all relationships to Neo4j using graph models.
+
+    只负责数据写入，不触发聚类。聚类由调用方在写入成功后通过
+    schedule_clustering_after_write() 显式触发。
 
     Args:
         dialogue_nodes: List of DialogueNode objects to save
@@ -293,9 +293,6 @@ async def save_dialog_and_statements_to_neo4j(
         logger.info("Transaction completed. Summary: %s", summary)
         logger.debug("Full transaction results: %r", results)
 
-        # 写入成功后，异步触发聚类（不阻塞写入响应）
-        schedule_clustering_after_write(entity_nodes, config_id=config_id, llm_model_id=llm_model_id)
-
         return True
 
     except Exception as e:
@@ -309,6 +306,7 @@ def schedule_clustering_after_write(
     entity_nodes: List,
     config_id: Optional[str] = None,
     llm_model_id: Optional[str] = None,
+    embedding_model_id: Optional[str] = None,
 ) -> None:
     """
     写入 Neo4j 成功后，调度后台聚类任务。
@@ -327,7 +325,7 @@ def schedule_clustering_after_write(
     end_user_id = entity_nodes[0].end_user_id
     new_entity_ids = [e.id for e in entity_nodes]
     logger.info(f"[Clustering] 准备触发聚类，实体数: {len(new_entity_ids)}, end_user_id: {end_user_id}")
-    asyncio.create_task(_trigger_clustering(new_entity_ids, end_user_id, config_id=config_id, llm_model_id=llm_model_id))
+    asyncio.create_task(_trigger_clustering(new_entity_ids, end_user_id, config_id=config_id, llm_model_id=llm_model_id, embedding_model_id=embedding_model_id))
 
 
 async def _trigger_clustering(
@@ -335,6 +333,7 @@ async def _trigger_clustering(
     end_user_id: str,
     config_id: Optional[str] = None,
     llm_model_id: Optional[str] = None,
+    embedding_model_id: Optional[str] = None,
 ) -> None:
     """
     聚类触发函数，自动判断全量初始化还是增量更新。
@@ -344,7 +343,7 @@ async def _trigger_clustering(
         from app.core.memory.storage_services.clustering_engine import LabelPropagationEngine
         logger.info(f"[Clustering] 开始聚类，end_user_id={end_user_id}, 实体数={len(new_entity_ids)}")
         connector = Neo4jConnector()
-        engine = LabelPropagationEngine(connector, config_id=config_id, llm_model_id=llm_model_id)
+        engine = LabelPropagationEngine(connector, config_id=config_id, llm_model_id=llm_model_id, embedding_model_id=embedding_model_id)
         await engine.run(end_user_id=end_user_id, new_entity_ids=new_entity_ids)
         logger.info(f"[Clustering] 聚类完成，end_user_id={end_user_id}")
     except Exception as e:
