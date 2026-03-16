@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:56:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-03 16:57:17
+ * @Last Modified time: 2026-03-12 16:58:14
  */
 /**
  * Emotion Engine Configuration Page
@@ -11,18 +11,21 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Row, Col, Form, Slider, Button, Alert, message, Space } from 'antd';
+import { Row, Col, Form, Button, message, Space, Flex, Tooltip } from 'antd';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import clsx from 'clsx';
 
 import RbCard from '@/components/RbCard/Card';
-import strategyImpactSimulator from '@/assets/images/memory/strategyImpactSimulator.svg'
 import { getMemoryEmotionConfig, updateMemoryEmotionConfig } from '@/api/memory'
 import type { ConfigForm } from './types'
 import CustomSelect from '@/components/CustomSelect';
 import { getModelListUrl } from '@/api/models'
-import Tag from '@/components/Tag'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
+import LabelWrapper from '@/components/FormItem/LabelWrapper'
+import DescWrapper from '@/components/FormItem/DescWrapper'
+import RbSlider from '@/components/RbSlider';
+import RbAlert from '@/components/RbAlert';
 
 /**
  * Configuration field definitions
@@ -40,10 +43,11 @@ const configList = [
   },
   {
     key: 'emotion_min_intensity',
-    type: 'slider',
+    type: 'decimal',
     min: 0,
     max: 1,
-    step: 0.05
+    step: 0.05,
+    range: [0, 1],
   },
   {
     key: 'emotion_extract_keywords',
@@ -119,12 +123,15 @@ const EmotionEngine: React.FC = () => {
     <Row gutter={[16, 16]}>
       <Col span={12}>
         <RbCard 
-          title={
-            <div className="rb:flex rb:items-center">
-              <img src={strategyImpactSimulator} className="rb:w-5 rb:h-5 rb:mr-2" />
-              {t('emotionEngine.emotionEngineConfig')}
-            </div>
-          }
+          title={t('emotionEngine.emotionEngineConfig')}
+          headerType="borderless"
+          headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
+          extra={<Space>
+            <Button block onClick={handleReset}>{t('common.reset')}</Button>
+            <Button type="primary" loading={loading} block onClick={handleSave}>{t('common.save')}</Button>
+          </Space>}
+          className="rb:h-[calc(100vh-76px)]!"
+          bodyClassName="rb:h-[calc(100%-54px)] rb:overflow-y-auto! rb:p-3! rb:pt-0!"
         >
           <Form 
             form={form}
@@ -135,130 +142,152 @@ const EmotionEngine: React.FC = () => {
               lambda_mem: 0.03,
             }}
           >
-            {configList.map(config => {
-              if (config.type === 'slider') {
+            <Flex vertical gap={12}>
+              {configList.map(config => {
+                if (config.type === 'decimal') {
+                  return (
+                    <div key={config.key} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3">
+                      <Flex align="center" gap={4} className="rb:text-[14px] rb:font-medium rb:leading-5 rb:mb-2">
+                        {t(`emotionEngine.${config.key}`)}
+                        <Tooltip title={t(`emotionEngine.${config.key}_desc`)}>
+                          <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
+                        </Tooltip>
+                      </Flex>
+                      <Form.Item
+                        name={config.key}
+                        extra={<DescWrapper
+                          desc={<>
+                            <span className="rb:text-[12px]">{t(`forgettingEngine.range`)}: {config.range?.join('-')}</span> | <span>{t(`forgettingEngine.type`)}: {config.type}</span>
+                          </>}
+                        />}
+                        className="rb:mb-0!"
+                      >
+                        <RbSlider
+                          max={config.max}
+                          min={config.min}
+                          step={config.step}
+                          isInput={true}
+                          prefix={<span className="rb:text-[#5B6167]">{t('emotionEngine.currentValue')}:</span>}
+                          inputClassName="rb:w-[155px]!"
+                        />
+                      </Form.Item>
+                    </div>
+                  )
+                }
+                if (config.type === 'customSelect') {
+                  return (
+                    <div key={config.key} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3">
+                      <LabelWrapper title={t(`emotionEngine.${config.key}`)} className="rb:mb-3">
+                        <DescWrapper desc={t(`emotionEngine.${config.key}_desc`)} className="rb:mt-1" />
+                      </LabelWrapper>
+                      <Form.Item
+                        name={config.key}
+                        className="rb:mb-0!"
+                      >
+                        <CustomSelect
+                          url={config.url as string}
+                          params={config.params}
+                          valueKey='id'
+                          labelKey='name'
+                          hasAll={false}
+                          disabled={!values?.emotion_enabled && config.key !== 'emotion_enabled'}
+                        />
+                      </Form.Item>
+                    </div>
+                  )
+                }
                 return (
-                  <div key={config.key} className=" rb:mb-6">
-                    <div className="rb:text-[14px] rb:font-medium rb:leading-5 rb:mb-2">
-                      {t(`emotionEngine.${config.key}`)}
-                    </div>
-                    <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 ">
-                      {t(`emotionEngine.${config.key}_desc`)}
-                    </div>
-                    <Form.Item
-                      name={config.key}
-                    >
-                      <Slider
-                        disabled={!values?.emotion_enabled && config.key !== 'emotion_enabled'}
-                        tooltip={{ open: false }} max={config.max} min={config.min} step={config.step} style={{ margin: '0' }} />
-                    </Form.Item>
-                    <div className="rb:flex rb:text-[12px] rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5">
-
-                      <>{t('emotionEngine.currentValue')}: {values?.[config.key as keyof ConfigForm] || 0}</>
-                    </div>
-                  </div>
+                  <SwitchFormItem
+                    title={t(`emotionEngine.${config.key}`)}
+                    name={config.key}
+                    desc={<>
+                      {config.hasSubTitle && <div className="rb:mt-1 rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`emotionEngine.${config.key}_subTitle`)}</div>}
+                      <div className="rb:mt-1  rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`emotionEngine.${config.key}_desc`)}</div>
+                    </>}
+                    disabled={!values?.emotion_enabled && config.key !== 'emotion_enabled'}
+                    className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3!"
+                  />
                 )
-              }
-              if (config.type === 'customSelect') {
-                return (
-                  <div key={config.key}>
-                    <div className="rb:text-[14px] rb:font-medium rb:leading-5 rb:mb-2">
-                      {t(`emotionEngine.${config.key}`)}
-                    </div>
-                    <Form.Item
-                      name={config.key}
-                      extra={t(`emotionEngine.${config.key}_desc`)}
-                    >
-                      <CustomSelect
-                        url={config.url as string}
-                        params={config.params}
-                        valueKey='id'
-                        labelKey='name'
-                        hasAll={false}
-                        disabled={!values?.emotion_enabled && config.key !== 'emotion_enabled'}
-                      />
-                    </Form.Item>
-                  </div>
-                )
-              }
-              return (
-                <SwitchFormItem
-                  title={t(`emotionEngine.${config.key}`)}
-                  name={config.key}
-                  desc={<>
-                    {config.hasSubTitle && <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`emotionEngine.${config.key}_subTitle`)}</div>}
-                    <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`emotionEngine.${config.key}_desc`)}</div>
-                  </>}
-                  className="rb:mb-6"
-                  disabled={!values?.emotion_enabled && config.key !== 'emotion_enabled'}
-                />
-              )
-            })}
-            <Row gutter={16} className="rb:mt-3">
-              <Col span={12}>
-                <Button block onClick={handleReset}>{t('common.reset')}</Button>
-              </Col>
-              <Col span={12}>
-                <Button type="primary" loading={loading} block onClick={handleSave}>{t('common.save')}</Button>
-              </Col>
-            </Row>
+              })}
+            </Flex>
           </Form>
         </RbCard>
       </Col>
       <Col span={12}>
         <RbCard
-          title={t('emotionEngine.emotion_min_intensity_description')}
+          title={t('emotionEngine.emotionEngineConfig')}
+          headerType="borderless"
+          headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
+          className="rb:h-[calc(100vh-76px)]!"
+          bodyClassName="rb:h-[calc(100%-54px)] rb:overflow-y-auto! rb:p-3! rb:pt-0!"
         >
-          <div className="rb:font-medium">{t('emotionEngine.question')}</div>
-          <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 rb:mt-2">{t('emotionEngine.answer')}</div>
-          <div className="rb:font-medium rb:mt-4 rb:mb-2">{t('emotionEngine.differentTitle')}</div>
-
-          <Space size={16} direction="vertical" className="rb:w-full">
-            {['low', 'middle', 'high'].map((key, index) => (
-              <Alert
-                key={key} 
-                type={(['warning', 'info', 'success'] as const)[index] as 'warning' | 'info' | 'success'}
-                message={
-                  <div>
-                    <div className="rb:w-full rb:font-medium rb:flex rb:justify-between">
-                      {t(`emotionEngine.${key}_title`)}
-                      <Tag color={(['warning', 'processing', 'success'] as const)[index] as 'warning' | 'processing' | 'success'}>{t(`emotionEngine.${key}_tag`)}</Tag>
-                    </div>
-                    <Space size={8} direction="vertical" className="rb:w-full rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">
-                      <div><span className="rb:font-medium">{t('emotionEngine.advantage')}: </span>{t(`emotionEngine.${key}_advantage`)}</div>
-                      <div><span className="rb:font-medium">{t('emotionEngine.shortcoming')}: </span>{t(`emotionEngine.${key}_shortcoming`)}</div>
-                      <div><span className="rb:font-medium">{t('emotionEngine.scene')}: </span>{t(`emotionEngine.${key}_scene`)}</div>
-                    </Space>
-                  </div>
-                }
-              />
-            ))}
-          </Space>
-
-          <div className="rb:font-medium rb:mt-6 rb:mb-3">{t('emotionEngine.configSuggest')}</div>
-          <Space size={12} direction="vertical" className="rb:w-full">
-            {['first', 'customer_service', 'data_analysis', 'risk_warning'].map(key => (
-              <div className="rb:bg-[#F0F3F8] rb:px-3 rb:py-2.5 rb:rounded-md rb:text-[12px]">{t(`emotionEngine.${key}`)}: {t(`emotionEngine.${key}_desc`)}</div>
-            ))}
-          </Space>
-
-          <div className="rb:font-medium rb:mt-6 rb:mb-3">{t('emotionEngine.actual_case')}</div>
-          <Space size={12} direction="vertical" className="rb:w-full rb:bg-[#F0F3F8] rb:px-3 rb:py-2.5 rb:rounded-md">
-            <div className="rb:bg-white rb:px-3 rb:py-2.5 rb:rounded-md">
-              <span className="rb:font-medium">{t('emotionEngine.user_input')}: </span>
-              {t('emotionEngine.user_input_message')}
-            </div>
-            {['neutral_emotion', 'minor_dissatisfaction', 'expect_improvement'].map((key, index) => (
-              <div className="rb:flex rb:items-center rb:justify-between rb:bg-white rb:px-3 rb:py-2.5 rb:rounded-md">
-                <div className="rb:w-[50%] rb:flex rb:items-center rb:justify-between rb:text-[12px]">
-                  {t(`emotionEngine.${key}`)}
-                  <span>{t('emotionEngine.confidence')}: {key === 'neutral_emotion' ? 0.85 : key === 'minor_dissatisfaction' ? 0.45 : 0.32}</span>
-                </div>
-                
-                <Tag color={(['success', 'warning', 'processing'] as const)[index] as 'warning' | 'processing' | 'success'}>{t(`emotionEngine.${key}_tag`)}</Tag>
+          <Flex vertical gap={24} className="rb:text-[#212332]">
+            <div>
+              <div className="rb:font-medium rb:leading-5 rb:px-1 rb:mb-2.5">{t('emotionEngine.question')}</div>
+              <div className="rb:text-[#5B6167] rb:bg-[#F6F6F6] rb:px-3 rb:py-2.5 rb:font-regular rb:leading-5 rb:rounded-xl">
+                {t('emotionEngine.answer')}
               </div>
-            ))}
-            </Space>
+            </div>
+
+            <div>
+              <div className="rb:font-medium rb:leading-5 rb:px-1 rb:mb-2.5">{t('emotionEngine.differentTitle')}</div>
+
+              <Flex gap={10} vertical>
+                {['low', 'middle', 'high'].map((key, index) => (
+                  <RbAlert
+                    key={key}
+                    color={(['orange', 'blue', 'green'] as const)[index] as 'orange' | 'blue' | 'green'}
+                  >
+                    <Flex gap={10} vertical className=" rb:text-[#5B6167] rb:text-[14px] rb:font-regular rb:leading-5">
+                      <Flex align="center" gap={8}>
+                        <span className="rb:font-medium rb:text-[#212332]">{t(`emotionEngine.${key}_title`)}</span>
+
+                        <span className={clsx("rb:px-1 rb:rounded-sm rb:text-white rb:leading-4.5", ['rb:bg-[#FF5D34]', 'rb:bg-[#155EEF]', 'rb:bg-[#369F21]'][index])}>
+                          {t(`emotionEngine.${key}_tag`)}
+                        </span>
+                      </Flex>
+                      <div><span className="rb:font-medium rb:text-[#212332]">{t('emotionEngine.advantage')}: </span>{t(`emotionEngine.${key}_advantage`)}</div>
+                      <div><span className="rb:font-medium rb:text-[#212332]">{t('emotionEngine.shortcoming')}: </span>{t(`emotionEngine.${key}_shortcoming`)}</div>
+                      <div><span className="rb:font-medium rb:text-[#212332]">{t('emotionEngine.scene')}: </span>{t(`emotionEngine.${key}_scene`)}</div>
+                    </Flex>
+                  </RbAlert>
+                ))}
+              </Flex>
+            </div>
+
+            <div>
+              <div className="rb:font-medium rb:leading-5 rb:px-1 rb:mb-2.5">{t('emotionEngine.configSuggest')}</div>
+              <Flex gap={10} vertical>
+                {['first', 'customer_service', 'data_analysis', 'risk_warning'].map(key => (
+                  <div className="rb:bg-[#F6F6F6] rb:px-3 rb:py-2.5 rb:rounded-xl">{t(`emotionEngine.${key}`)}: {t(`emotionEngine.${key}_desc`)}</div>
+                ))}
+              </Flex>
+            </div>
+
+            <div>
+              <div className="rb:font-medium rb:leading-5 rb:px-1 rb:mb-2.5">{t('emotionEngine.actual_case')}</div>
+
+              <div className="rb:bg-[#F6F6F6] rb:px-3 rb:py-2.5 rb:font-regular rb:leading-5 rb:rounded-xl">
+                <div className="rb:mb-2.5">
+                  <span className="rb:font-medium">{t('emotionEngine.user_input')}: </span>
+                  {t('emotionEngine.user_input_message')}
+                </div>
+
+                <Flex vertical gap={4}>
+                  {['neutral_emotion', 'minor_dissatisfaction', 'expect_improvement'].map((key, index) => (
+                    <Flex gap={28} align="center" justify="space-between" className="rb:bg-white rb:px-3! rb:py-2! rb:rounded-lg">
+                      <Flex align="center" justify="space-between" className="rb:w-[55%]!">
+                        <span className="rb:font-medium">{t(`emotionEngine.${key}`)}</span>
+                        <span>{t('emotionEngine.confidence')}: {key === 'neutral_emotion' ? 0.85 : key === 'minor_dissatisfaction' ? 0.45 : 0.32}</span>
+                      </Flex>
+
+                      <span className={clsx('rb:text-right rb:wrap-break-word rb:flex-1', ['rb:text-[#369F21]', 'rb:text-[#FF5D34]', 'rb:text-[#155EEF]'][index])}>{t(`emotionEngine.${key}_tag`)}</span>
+                    </Flex>
+                  ))}
+                </Flex>
+              </div>
+            </div>
+          </Flex>
         </RbCard>
       </Col>
       {contextHolder}

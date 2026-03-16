@@ -1,13 +1,13 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:33:01 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 18:33:01 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-16 14:58:25
  */
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Row, Col, Progress } from 'antd'
+import { Flex } from 'antd'
 import ReactEcharts from 'echarts-for-react'
 
 import Empty from '@/components/Empty'
@@ -79,96 +79,74 @@ const Health: FC = () => {
     <RbCard
       title={t('statementDetail.health')}
       headerType="borderless"
-      headerClassName="rb:leading-[24px] rb:bg-[#F6F8FC]! rb:min-h-[46px]! rb:border-b! rb:border-b-[#DFE4ED]!"
-      bodyClassName="rb:px-[28px]! rb:py-[16px]!"
+      headerClassName="rb:min-h-[46px]! rb:font-[MiSans-Bold] rb:font-bold"
+      bodyClassName="rb:px-[25px]! rb:pb-[30px]! rb:pt-0!"
     >
       {health?.health_score && health?.health_score > 0
-        ? <>
-          <Row gutter={59}>
-            <Col span={12}>
-              <div className="rb:flex rb:justify-center rb:items-center">
-                <ReactEcharts
-                  option={{
-                    series: [{
-                      type: 'pie',
-                      radius: ['65%', '80%'],
-                      center: ['50%', '50%'],
-                      startAngle: 90,
-                      data: [
-                        { 
-                          value: health.health_score, 
-                          name: health.level, 
-                          itemStyle: { 
-                            color: '#155EEF',
-                            borderRadius: [10, 10, 10, 10]
-                          } 
-                        },
-                        { 
-                          value: 100 - health.health_score, 
-                          name: '', 
-                          itemStyle: { 
-                            color: '#DFE4ED',
-                            borderRadius: [10, 10, 10, 10]
-                          } 
-                        }
-                      ],
-                      label: {
-                        show: true,
-                        position: 'center',
-                        formatter: '{score|' + health.health_score + '}\n{level|' + health.level + '}',
-                        rich: {
-                          score: {
-                            fontSize: 36,
-                            fontWeight: 'bold',
-                            color: '#212332',
-                            lineHeight: 36
-                          },
-                          level: {
-                            fontSize: 14,
-                            color: '#5B6167',
-                            lineHeight: 20
-                          }
-                        }
-                      },
-                      labelLine: { show: false },
-                      emphasis: { disabled: true },
-                      itemStyle: {
-                        borderRadius: 10
-                      }
-                    }]
-                  }}
-                  style={{ height: '200px', width: '200px' }}
-                />
-              </div>
-            </Col>
-            <Col span={12}>
-              {health.dimensions && <div className="rb:space-y-7">
-                <div>
-                  <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167]">
-                    {t('statementDetail.positivity_rate')}
-                    <div className="rb:text-[12px] rb:text-[#155EEF] rb:font-medium">{health.dimensions.positivity_rate.score}%</div>
-                  </div>
-                  <Progress strokeColor="#155EEF" percent={health.dimensions.positivity_rate.score} showInfo={false} />
-                </div>
-                <div>
-                  <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167]">
-                    {t('statementDetail.stability')}
-                    <div className="rb:text-[12px] rb:text-[#155EEF] rb:font-medium">{health.dimensions.stability.score}%</div>
-                  </div>
-                  <Progress strokeColor="#155EEF" percent={health.dimensions.stability.score} showInfo={false} />
-                </div>
-                <div>
-                  <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167]">
-                    {t('statementDetail.resilience')}
-                    <div className="rb:text-[12px] rb:text-[#155EEF] rb:font-medium">{health.dimensions.resilience.score}%</div>
-                  </div>
-                  <Progress strokeColor="#155EEF" percent={health.dimensions.resilience.score} showInfo={false} />
-                </div>
-              </div>}
-            </Col>
-          </Row>
+        ? <Flex vertical align="center" justify="center">
+          <ReactEcharts
+            option={{
+              series: [{
+                type: 'pie',
+                radius: ['75%', '90%'],
+                center: ['50%', '50%'],
+                startAngle: 90,
+                data: [
+                  {
+                    value: health.health_score,
+                    name: health.level,
+                    itemStyle: {
+                      color: '#155EEF',
+                      borderRadius: [10, 10, 10, 10]
+                    }
+                  },
+                  {
+                    value: 100 - health.health_score,
+                    name: '',
+                    itemStyle: {
+                      color: '#DFE4ED',
+                      borderRadius: [10, 10, 10, 10]
+                    }
+                  }
+                ],
+                label: {
+                  show: true,
+                  position: 'center',
+                  formatter: '{score|' + health.health_score + '}\n{level|' + health.level + '}',
+                  rich: {
+                    score: {
+                      fontSize: 36,
+                      fontWeight: 'bold',
+                      color: '#212332',
+                      lineHeight: 36
+                    },
+                    level: {
+                      fontSize: 14,
+                      color: '#5B6167',
+                      lineHeight: 20
+                    }
+                  }
+                },
+                labelLine: { show: false },
+                emphasis: { disabled: true },
+                itemStyle: {
+                  borderRadius: 10
+                }
+              }]
+            }}
+            style={{ height: '180px', width: '180px' }}
+          />
 
-        </>
+          {health.dimensions && <Flex justify="space-between" className="rb:w-full rb:mt-7!">
+            {['positivity_rate', 'stability', 'resilience'].map(key => (
+              <div key={key} className="rb:text-[12px] rb:leading-4.5 rb:text-[#5B6167]">
+                <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[#212332] rb:text-[14px] rb:leading-4.75 rb:mb-1">{health.dimensions[key as keyof typeof health.dimensions].score}%</div>
+                {t(`statementDetail.${key}`)}
+              </div>
+            ))}
+          </Flex>}
+
+        </Flex>
         : <Empty size={88} className="rb:h-full" />
       }
     </RbCard>

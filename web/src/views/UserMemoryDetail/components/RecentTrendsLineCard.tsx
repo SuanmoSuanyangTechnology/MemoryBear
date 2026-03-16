@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:07 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 18:32:07 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-16 11:49:29
  */
 import { type FC, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -26,6 +26,13 @@ interface RecentTrendsLineCardProps {
 
 const Colors = ['#155EEF', '#FF5D34']
 
+const axisLabelConfig = {
+  color: '#5B6167',
+  fontSize: 10,
+  lineHeight: 14,
+  fontFamily: 'PingFangSC, PingFang SC',
+  formatter: '{value}'
+}
 /**
  * RecentTrendsLineCard Component
  * Displays forgetting trends with dual Y-axis line chart
@@ -60,6 +67,9 @@ const RecentTrendsLineCard: FC<RecentTrendsLineCardProps> = ({ chartData, series
     <RbCard
       title={t('forgetDetail.forgettingTrend')}
       headerType="borderless"
+      headerClassName="rb:min-h-[46px]! rb:font-[MiSans-Bold] rb:font-bold"
+      bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-46px)]"
+      className="rb:h-full!"
     >
       {loading
         ? <Loading size={249} />
@@ -92,16 +102,20 @@ const RecentTrendsLineCard: FC<RecentTrendsLineCardProps> = ({ chartData, series
               legend: {
                 bottom: 2,
                 padding: 0,
-                itemGap: 24,
-                itemWidth: 40,
-                itemHeight: 12,
-                borderRadius: 2,
+                itemGap: 8,
+                itemWidth: 12,
+                itemHeight: 6,
+                icon: 'roundRect',
                 orient: 'horizontal',
-                textStyle: {
-                  color: '#5B6167',
-                  fontFamily: 'PingFangSC, PingFang SC',
-                  lineHeight: 16,
-                }
+                textStyle: axisLabelConfig,
+                data: seriesList.map((key, index) => ({
+                  name: key === 'merged_count' ? t('forgetDetail.merged_count') : t('forgetDetail.average_activation'),
+                  itemStyle: {
+                    color: Colors[index] + '14',
+                    borderColor: Colors[index],
+                    borderWidth: 1,
+                  }
+                }))
               },
               grid: {
                 top: 16,
@@ -114,39 +128,29 @@ const RecentTrendsLineCard: FC<RecentTrendsLineCardProps> = ({ chartData, series
                 type: 'category',
                 data: chartData.map(item => item.date),
                 boundaryGap: false,
-                axisLabel: {
-                  color: '#A8A9AA',
-                  fontFamily: 'PingFangSC, PingFang SC'
-                },
+                axisLabel: axisLabelConfig,
                 axisLine: {
                   show: true,
                   lineStyle: {
-                    color: '#EBEBEB'
+                    color: '#DFE4ED'
                   }
                 },
                 splitLine: {
                   show: true,
                   lineStyle: {
-                    color: '#EBEBEB',
+                    color: '#DFE4ED',
                     type: 'solid'
                   }
                 },
                 axisTick: {
-                  show: true,
-                  lineStyle: {
-                    color: '#EBEBEB',
-                    type: 'solid'
-                  }
+                  show: false,
                 }
               },
               yAxis: [
                 {
                   type: 'value',
                   position: 'left',
-                  axisLabel: {
-                    color: Colors[0],
-                    fontFamily: 'PingFangSC, PingFang SC'
-                  },
+                  axisLabel: axisLabelConfig,
                   axisLine: {
                     lineStyle: {
                       color: Colors[0]
@@ -155,14 +159,7 @@ const RecentTrendsLineCard: FC<RecentTrendsLineCardProps> = ({ chartData, series
                   splitLine: {
                     show: true,
                     lineStyle: {
-                      color: '#EBEBEB',
-                      type: 'solid'
-                    }
-                  },
-                  axisTick: {
-                    show: true,
-                    lineStyle: {
-                      color: '#EBEBEB',
+                      color: '#DFE4ED',
                       type: 'solid'
                     }
                   },
@@ -170,11 +167,7 @@ const RecentTrendsLineCard: FC<RecentTrendsLineCardProps> = ({ chartData, series
                 {
                   type: 'value',
                   position: 'right',
-                  axisLabel: {
-                    color: Colors[1],
-                    fontFamily: 'PingFangSC, PingFang SC',
-                    formatter: '{value}'
-                  },
+                  axisLabel: axisLabelConfig,
                   axisLine: {
                     lineStyle: {
                       color: Colors[1]
@@ -183,20 +176,13 @@ const RecentTrendsLineCard: FC<RecentTrendsLineCardProps> = ({ chartData, series
                   splitLine: {
                     show: false,
                   },
-                  axisTick: {
-                    show: true,
-                    lineStyle: {
-                      color: '#EBEBEB',
-                      type: 'solid'
-                    }
-                  },
                   max: 1,
                   min: 0
                 }
               ],
               series: getSeries()
             }}
-            style={{ height: '265px', width: '100%', minWidth: '100%' }}
+            style={{ height: '214px', width: '100%', minWidth: '100%' }}
             notMerge={true}
             lazyUpdate={true}
           />

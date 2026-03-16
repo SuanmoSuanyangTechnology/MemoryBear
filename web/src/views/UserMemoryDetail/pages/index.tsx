@@ -1,15 +1,15 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-01-07 20:37:34 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-04 16:27:14 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-16 11:22:20
  */
-import { type FC, useEffect, useState, useMemo, useRef } from 'react'
+import { type FC, useState, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Dropdown, Button } from 'antd'
+import { Dropdown, Button, Flex, Space } from 'antd'
 
-import PageHeader from '../components/PageHeader'
+import PageHeader from '@/components/Layout/PageHeader'
 import StatementDetail from './StatementDetail'
 import ForgetDetail from './ForgetDetail'
 import ImplicitDetail from './ImplicitDetail'
@@ -18,10 +18,6 @@ import PerceptualDetail from './PerceptualDetail'
 import EpisodicDetail from './EpisodicDetail'
 import ExplicitDetail from './ExplicitDetail'
 import WorkingDetail from './WorkingDetail'
-import {
-  getEndUserProfile,
-} from '@/api/memory'
-import refreshIcon from '@/assets/images/refresh_hover.svg'
 import GraphDetail from './GraphDetail'
 
 /**
@@ -32,25 +28,10 @@ const Detail: FC = () => {
   const { t } = useTranslation()
   const { id, type } = useParams()
   const navigate = useNavigate()
-  const [name, setName] = useState<string>('')
   // Refs for child components that support imperative refresh
   const forgetDetailRef = useRef<{ handleRefresh: () => void }>(null)
   const statementDetailRef = useRef<{ handleRefresh: () => void }>(null)
   const implicitDetailRef = useRef<{ handleRefresh: () => void }>(null)
-
-  useEffect(() => {
-    if (!id) return
-    getData()
-  }, [id])
-  
-  // Fetch end user profile to display the user's name in the header
-  const getData = () => {
-    if (!id) return
-    getEndUserProfile(id).then((res) => {
-      const response = res as { other_name: string; id: string; }
-      setName(response.other_name || response.id) 
-    })
-  }
 
   // Build dropdown menu items for switching between memory types
   const items = useMemo(() => {
@@ -94,29 +75,46 @@ const Detail: FC = () => {
   if (type === 'GRAPH') {
     return <GraphDetail />
   }
+  const handleGoBack = () => {
+    navigate(`/user-memory/neo4j/${id}`, { replace: true })
+  }
 
   return (
     <div className="rb:h-full rb:w-full">
-      <PageHeader 
-        name={name}
-        source="node"
-        operation={
+      <PageHeader
+        title={
           <Dropdown menu={{ items, onClick, selectedKeys: type ? [type] : [] }}>
-            <div className="rb:cursor-pointer rb:group rb:flex rb:items-center rb:gap-1">
-              - {type ? t(`userMemory.${type}`) : ''}
+            <Flex align="center" gap={8} className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-6 rb:cursor-pointer rb:group">
+              {type ? t(`userMemory.${type}`) : ''}
               <div
-                className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/userMemory/up_border.svg')]  rb:transform-[rotate(180deg)] rb:group-hover:transform-[rotate(0deg)]"
+                className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/userMemory/up_border.svg')] rb:group-hover:transform-[rotate(180deg)]"
               ></div>
-            </div>
+            </Flex>
           </Dropdown>
         }
-        extra={['FORGET_MEMORY', 'EMOTIONAL_MEMORY', 'IMPLICIT_MEMORY'].includes(type as string) &&
-          <Button type="primary" ghost size="small" className="rb:h-6! rb:px-2! rb:leading-5.5!" loading={loading} onClick={handleRefresh}>
-            {!loading && <img src={refreshIcon} className="rb:w-4 rb:h-4" /> }
-            {t('common.refresh')}
-          </Button>}
+        extra={
+          <Space size={12}>
+            {['FORGET_MEMORY', 'EMOTIONAL_MEMORY', 'IMPLICIT_MEMORY'].includes(type as string) &&
+              <Button
+                className="rb:px-2! rb:gap-0.5!"
+                loading={loading}
+                icon={<div className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/refresh_dark.svg')]"></div>}
+                onClick={handleRefresh}
+              >
+                {t('common.refresh')}
+              </Button>
+            }
+            <Button
+              className="rb:px-2! rb:gap-0.5!"
+              icon={<div className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/return.svg')]"></div>}
+              onClick={handleGoBack}
+            >
+              {t('common.return')}
+            </Button>
+          </Space>
+        }
       />
-      <div className="rb:h-[calc(100vh-64px)] rb:overflow-y-auto rb:py-3 rb:px-4">
+      <div className="rb:h-[calc(100vh-64px)] rb:overflow-y-auto rb:p-3">
         {type === 'EMOTIONAL_MEMORY' && <StatementDetail ref={statementDetailRef} refresh={handleRefresh} />}
         {type === 'FORGET_MEMORY' && <ForgetDetail ref={forgetDetailRef} />}
         {type === 'IMPLICIT_MEMORY' && <ImplicitDetail ref={implicitDetailRef} refresh={handleRefresh} />}

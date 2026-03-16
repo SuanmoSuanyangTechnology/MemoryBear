@@ -1,20 +1,19 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:12 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 18:32:12 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-16 14:30:25
  */
 import { useEffect, useState, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Row, Col, Skeleton } from 'antd'
+import { Skeleton } from 'antd'
 import * as echarts from 'echarts'
 import 'echarts-wordcloud'
 
 import Empty from '@/components/Empty'
-import RbCard from '@/components/RbCard/Card'
 import { getImplicitPreferences } from '@/api/memory'
-import detailEmpty from '@/assets/images/userMemory/detail_empty.png'
+import RbAlert from '@/components/RbAlert'
 
 /**
  * Preference item structure
@@ -41,7 +40,7 @@ interface PreferenceItem {
 /**
  * Default color palette for categories
  */
-const DEFAULT_COLORS = ['#FF5D34', '#155EEF', '#9C6FFF', '#369F21', '#4DA8FF', '#FF8C00', '#32CD32', '#FF69B4', '#20B2AA', '#DDA0DD']
+const DEFAULT_COLORS = ['#FF8A4C', '#FF5D34', '#155EEF', '#9C6FFF', '#4DA8FF', '#369F21']
 
 /**
  * Generate color mapping for categories
@@ -161,9 +160,6 @@ const Preferences = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => 
     }
   }, [data])
 
-
-  console.log(selectedWord, data)
-
   const detailTitle = useMemo(() => {
     return selectedWord !== null && data[selectedWord].tag_name ? <>{data[selectedWord].tag_name}{t('implicitDetail.preferencesDetail')}</> : ''
   }, [selectedWord, data, t])
@@ -173,48 +169,40 @@ const Preferences = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => 
   }));
   return (
     <>
-      <div className="rb:bg-[rgba(21,94,239,0.12)] rb:px-4 rb:py-2.5 rb:font-medium rb:leading-5 rb:mb-4 rb:mt-6 rb:rounded-md">{t('forgetDetail.overviewTitle')}</div>
-      <Row gutter={16}>
-        <Col span={16}>
-          <RbCard
-            title={t('implicitDetail.preferences')}
-            headerType="borderless"
-            headerClassName="rb:text-[18px]! rb:leading-[24px]"
-            bodyClassName='rb:p-0! rb:pb-3! rb:relative rb:h-[350px]'
-          >
-            {loading
-              ? <Skeleton active className="rb:px-4" />
-              : data && data.length > 0
-              ? <div ref={chartRef} className="rb:mt-6 rb:px-6" style={{ height: '350px' }} />
-              : <Empty size={88} className="rb:h-full" />
-            }
-          </RbCard>
-        </Col>
-        <Col span={8}>
-          <RbCard
-            title={detailTitle}
-            headerType="borderless"
-            height="100%"
-            bodyClassName='rb:p-3! rb:h-[326px]'
-          >
-            {selectedWord === null
-              ? <Empty
-                url={detailEmpty}
-                subTitle={t('implicitDetail.wordEmpty')}
-                className="rb:h-full rb:mx-10 rb:text-center"
-                size={[197.81, 150]}
-              />
-              : <>
-                <div className="rb:leading-5 rb:mb-1 rb:font-medium">{t('implicitDetail.context_details')}</div>
-                <div className="rb:text-[#5B6167] rb:leading-5 rb:font-regular">{data[selectedWord].context_details}</div>
+      <RbAlert color="orange">{t('implicitDetail.preferencesTip')}</RbAlert>
+      <div className="rb-border rb:rounded-xl rb:h-60 rb:my-3">
+        {loading
+          ? <Skeleton active className="rb:px-4" />
+          : data && data.length > 0
+            ? <div ref={chartRef} className="rb:px-3 rb:h-full" />
+            : <Empty size={88} className="rb:h-full" />
+        }
+      </div>
+      <div className="rb:h-[calc(100%-296px)] rb:overflow-y-auto">
+        {selectedWord === null
+          ? <Empty
+            subTitle={t('implicitDetail.wordEmpty')}
+            size={96}
+            className="rb:h-full"
+          />
+          : <>
+            <div className="rb:px-1 rb:pt-1 rb:pb-3 rb:font-medium rb:leading-5">{detailTitle}</div>
+            <div className="rb:bg-[#F6F6F6] rb:rounded-lg rb:px-3 rb:py-2.5">
+              <div className="rb:leading-5 rb:mb-2 rb:font-medium">{t('implicitDetail.context_details')}</div>
+              <div className="rb:leading-5">{data[selectedWord].context_details}</div>
+            </div>
 
-                <div className="rb:leading-5 rb:mt-3 rb:font-medium">{t('implicitDetail.supporting_evidence')}</div>
-                {data[selectedWord].supporting_evidence.map((vo, index) => <div key={index} className="rb:text-[#5B6167] rb:leading-5 rb:font-regular">-{vo}</div>)}
-              </>
-            }
-          </RbCard>
-        </Col>
-      </Row>
+            <div className="rb:bg-[#F6F6F6] rb:rounded-lg rb:px-3 rb:py-2.5 rb:mt-3">
+              <div className="rb:leading-5 rb:mb-2 rb:font-medium">{t('implicitDetail.supporting_evidence')}</div>
+              <ul className="rb:list-disc rb:ml-4">
+                {data[selectedWord].supporting_evidence.map((vo, index) => (
+                  <li key={index} className="rb:text-[#5B6167]">{vo}</li>
+                ))}
+              </ul>
+            </div>
+          </>
+        }
+      </div>
     </>
   )
 })

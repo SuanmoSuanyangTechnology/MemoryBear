@@ -1,19 +1,20 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:33:06 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 18:33:06 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-16 14:05:10
  */
 import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Skeleton, Space, Progress } from 'antd';
+import { Skeleton, Space, Progress, Tooltip, Flex } from 'antd';
 
 import RbCard from '@/components/RbCard/Card'
 import Empty from '@/components/Empty'
 import {
   getImplicitHabits,
 } from '@/api/memory'
+import styles from '../pages/index.module.css'
 
 /**
  * Habits item data structure
@@ -72,40 +73,46 @@ const Habits = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
   }));
 
   return (
-    <>
-      <div className="rb:bg-[rgba(21,94,239,0.12)] rb:px-3 rb:py-2.5 rb:font-medium rb:leading-5 rb:mb-4 rb:mt-6 rb:rounded-md">{t('implicitDetail.habits')}</div>
-      <div className="rb:my-3 rb:text-[#5B6167] rb:leading-5">{t('implicitDetail.habitsSubTitle')}</div>
-      <RbCard>
-        {loading
-          ? <Skeleton active />
-          : data.length === 0
-            ? <Empty size={88} />
-            : <Space size={12} direction="vertical" className="rb:w-full!">
-              {data.map((vo, voIdx) => (
-                <div key={voIdx} className="rb:leading-5 rb:shadow-[inset_3px_0px_0px_0px_#155EEF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:p-3">
-                  <div className="rb:flex rb:items-center rb:justify-between">
-                    <div>
-                      <div className="rb:mb-1">{vo.habit_description}</div>
-                      <div className="rb:mb-1 rb:text-[#5B6167]">{vo.time_context}</div>
-                    </div>
-                    <div className="rb:text-[24px] rb:font-medium">{vo.confidence_level}%</div>
+    <RbCard
+      title={() => (<Space size={4}>
+        {t('implicitDetail.habits')}
+        <Tooltip title={t('implicitDetail.habitsSubTitle')}>
+          <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/userMemory/question.svg')]"></div>
+        </Tooltip>
+      </Space>)}
+      headerType="borderless"
+      headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
+      bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-54px)] rb:overflow-y-auto!"
+      className="rb:h-[calc(100vh-88px)]!"
+    >
+      {loading
+        ? <Skeleton active />
+        : data.length === 0
+          ? <Empty size={88} />
+          : <Flex gap={12} vertical>
+            {data.map((vo, voIdx) => (
+              <div key={voIdx} className="rb:leading-5 rb-border rb:rounded-xl rb:p-3">
+                <Flex gap={30} align="center" justify="space-between">
+                  <div className="rb:flex-1">
+                    <div className="rb:mb-2.5 rb:font-medium rb:text-[#212332]">{vo.habit_description}</div>
+                    <div className="rb:text-[#5B6167]">{vo.time_context}</div>
                   </div>
+                  <Progress type="circle" strokeWidth={10} percent={vo.confidence_level} className={styles.progressCustom} />
+                </Flex>
 
-                  {vo.specific_examples.length > 0 && <>
-                    <div className="rb:mt-3 rb:mb-2">{t('implicitDetail.specific_examples')}</div>
-                    <div className="rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:p-3">
-                      {vo.specific_examples.map((item, index) => (
-                        <div key={index} className="rb:text-[#5B6167] rb:text-[12px] rb:mt-1">- {item}</div>
-                      ))}
-                    </div>
-                  </>}
-                  <Progress percent={vo.confidence_level} showInfo={false} className="rb:mt-3" />
-                </div>
-              ))}
-            </Space>
-        }
-      </RbCard>
-    </>
+                {vo.specific_examples.length > 0 && <div className="rb:bg-[#F6F6F6] rb:rounded-xl rb:py-2.5 rb:px-3 rb:mt-2.5">
+                  <div className="rb:font-medium rb:mb-1">{t('implicitDetail.specific_examples')}</div>
+                  <ul className="rb:list-disc rb:ml-4">
+                    {vo.specific_examples.map((item, index) => (
+                      <li key={index} className="rb:text-[#5B6167]">{item}</li>
+                    ))}
+                  </ul>
+                </div>}
+              </div>
+            ))}
+          </Flex>
+      }
+    </RbCard>
   )
 })
 export default Habits
