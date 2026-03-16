@@ -1,4 +1,5 @@
 from app.core.memory.agent.utils.llm_tools import ReadState, WriteState
+from app.schemas.memory_agent_schema import AgentMemoryDataset
 
 
 def content_input_node(state: ReadState) -> ReadState:
@@ -17,6 +18,9 @@ def content_input_node(state: ReadState) -> ReadState:
 
     content = state['messages'][0].content if state.get('messages') else ''
     # Return content and maintain all state information
+    for pronoun in AgentMemoryDataset.PRONOUN:
+        content = content.replace(pronoun, AgentMemoryDataset.NAME)
+
     return {"data": content}
 
 
@@ -35,4 +39,7 @@ def content_input_write(state: WriteState) -> WriteState:
 
     content = state['messages'][0].content if state.get('messages') else ''
     # Return content and maintain all state information
+    for pronoun in AgentMemoryDataset.PRONOUN:
+        content = content.replace(pronoun, AgentMemoryDataset.NAME)
+
     return {"data": content}
