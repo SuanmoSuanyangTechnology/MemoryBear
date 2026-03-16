@@ -193,7 +193,16 @@ async def get_workspace_end_users(
         await aio_redis_set(cache_key, json.dumps(result), expire=30)
     except Exception as e:
         api_logger.warning(f"Redis 缓存写入失败: {str(e)}")
-    
+
+    # 触发社区聚类补全任务（异步，不阻塞接口响应）
+    # 对有 ExtractedEntity 但无 Community 节点的存量用户自动补跑全量聚类
+    try:
+        from app.tasks import init_community_clustering_for_users
+        init_community_clustering_for_users.delay(end_user_ids=end_user_ids)
+        api_logger.info(f"已触发社区聚类补全任务，候选用户数: {len(end_user_ids)}")
+    except Exception as e:
+        api_logger.warning(f"触发社区聚类补全任务失败（不影响主流程）: {str(e)}")
+
     api_logger.info(f"成功获取 {len(end_users)} 个宿主记录")
     return success(data=result, msg="宿主列表获取成功")
 
@@ -403,14 +412,15 @@ def get_current_user_rag_total_num(
 @router.get("/rag_content", response_model=ApiResponse)
 def get_rag_content(
     end_user_id: str = Query(..., description="宿主ID"),
-    limit: int = Query(15, description="返回记录数"),
+    page: int = Query(1, gt=0, description="页码，从1开始"),
+    pagesize: int = Query(15, gt=0, le=100, description="每页返回记录数"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    获取当前宿主知识库中的chunk内容
+    获取当前宿主知识库中的chunk内容（分页）
     """
-    data = memory_dashboard_service.get_rag_content(end_user_id, limit, db, current_user)
+    data = memory_dashboard_service.get_rag_content(end_user_id, page, pagesize, db, current_user)
     return success(data=data, msg="宿主RAGchunk数据获取成功")
 
 

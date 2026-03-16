@@ -37,6 +37,8 @@ const MarketConfigModal = forwardRef<MarketConfigModalRef, MarketConfigModalProp
   const [loading, setLoading] = useState(false);
   const [currentSource, setCurrentSource] = useState<MarketSource | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
+  const [initialValues, setInitialValues] = useState<{ token: string }>({ token: '' });
+  const formValues = Form.useWatch([], form);
 
   const handleClose = () => {
     setVisible(false);
@@ -44,14 +46,27 @@ const MarketConfigModal = forwardRef<MarketConfigModalRef, MarketConfigModalProp
     setLoading(false);
     setCurrentSource(null);
     setShowApiKey(false);
+    setInitialValues({ token: '' });
   };
 
   const handleOpen = (source: MarketSource) => {
+    console.log('Modal 接收到的数据:', source);
     setCurrentSource(source);
-    form.setFieldsValue({
-      token: source.token || '',
-    });
+    setInitialValues({ token: source.token || '' });
     setVisible(true);
+  };
+
+  const handleAfterOpenChange = (open: boolean) => {
+    if (open && currentSource) {
+      // Modal 完全打开后再设置表单值，使用 setTimeout 确保在下一个事件循环
+      setTimeout(() => {
+        form.setFieldsValue({
+          token: currentSource.token || '',
+        });
+        console.log('Modal 打开后设置表单值:', { token: currentSource.token || '' });
+        console.log('当前表单所有值:', form.getFieldsValue());
+      }, 100);
+    }
   };
 
   const handleSave = () => {
@@ -101,6 +116,9 @@ const MarketConfigModal = forwardRef<MarketConfigModalRef, MarketConfigModalProp
     }
   };
 
+  // 检查是否可以保存：token 字段必须有值
+  const canSave = formValues?.token?.trim().length > 0;
+
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
@@ -113,9 +131,11 @@ const MarketConfigModal = forwardRef<MarketConfigModalRef, MarketConfigModalProp
       title={t('tool.marketConfig', { name: currentSource.name })}
       open={visible}
       onCancel={handleClose}
+      afterOpenChange={handleAfterOpenChange}
       okText={t('tool.marketSaveAndConnect')}
       onOk={handleSave}
       confirmLoading={loading}
+      okButtonProps={{ disabled: !canSave }}
       width={600}
     >
       <div>
@@ -147,8 +167,10 @@ const MarketConfigModal = forwardRef<MarketConfigModalRef, MarketConfigModalProp
         </div>
 
         <Form
+          key={currentSource?.id || 'new'}
           form={form}
           layout="vertical"
+          initialValues={initialValues}
         >
           <FormItem label={t('tool.marketUrl')}>
             <Space.Compact style={{ width: '100%' }}>
@@ -169,22 +191,28 @@ const MarketConfigModal = forwardRef<MarketConfigModalRef, MarketConfigModalProp
             name="token"
             label={
               <span>
-                API Key <span className="rb:text-gray-400 rb:font-normal">({t('tool.marketApiKeyOptional')})</span>
+                API Key
               </span>
             }
+            rules={[
+              { required: true, message: t('tool.marketApiKeyRequired') },
+              { whitespace: true, message: t('tool.marketApiKeyRequired') }
+            ]}
             extra={<span style={{ display: 'inline-block', marginTop: 8 }}>{t('tool.marketApiKeyExtra')}</span>}
           >
-            <Space.Compact style={{ width: '100%' }}>
-              <Input
-                type={showApiKey ? 'text' : 'password'}
-                placeholder={t('tool.marketApiKeyPlaceholder')}
-                autoComplete="off"
-              />
-              <Button
-                icon={showApiKey ? <EyeInvisibleOutlined /> : <EyeOutlined />}
-                onClick={() => setShowApiKey(!showApiKey)}
-              />
-            </Space.Compact>
+            <Input
+              type={showApiKey ? 'text' : 'password'}
+              placeholder={t('tool.marketApiKeyPlaceholder')}
+              autoComplete="off"
+              suffix={
+                <Button
+                  type="text"
+                  size="small"
+                  icon={showApiKey ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+                  onClick={() => setShowApiKey(!showApiKey)}
+                />
+              }
+            />
           </FormItem>
 
           <div className="rb:flex rb:items-center rb:gap-2 rb:p-3 rb:bg-gray-50 rb:rounded rb:text-sm">

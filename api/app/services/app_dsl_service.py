@@ -19,6 +19,7 @@ from app.models.tool_model import ToolConfig as ToolConfigModel
 from app.models.workflow_model import WorkflowConfig
 from app.services.workflow_service import WorkflowService
 from app.core.workflow.adapters.memory_bear.memory_bear_adapter import MemoryBearAdapter
+from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
 
 
 class AppDslService:
@@ -423,9 +424,19 @@ class AppDslService:
         config_id = memory.get("memory_config_id") or memory.get("memory_content")
         if not config_id:
             return memory
-        from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+        try:
+            config_uuid = uuid.UUID(str(config_id))
+        except (ValueError, AttributeError):
+            exists = self.db.query(MemoryConfigModel).filter(
+                MemoryConfigModel.config_id_old == int(config_id),
+                MemoryConfigModel.workspace_id == workspace_id
+            ).first()
+            if not exists:
+                warnings.append(f"记忆配置 '{config_id}' 未匹配，已置空，请导入后手动配置")
+                return {**memory, "memory_config_id": None, "enabled": False}
+            return memory
         exists = self.db.query(MemoryConfigModel).filter(
-            MemoryConfigModel.config_id == config_id,
+            MemoryConfigModel.config_id == config_uuid,
             MemoryConfigModel.workspace_id == workspace_id
         ).first()
         if not exists:

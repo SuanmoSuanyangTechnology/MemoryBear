@@ -5,7 +5,7 @@ Implicit Emotions Storage Repository
 事务由调用方控制，仓储层只使用 flush/refresh
 """
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Generator, Optional
 
 
@@ -177,22 +177,21 @@ class ImplicitEmotionsStorageRepository:
                     if raw is None:
                         continue
                     try:
-                        CST = timezone(timedelta(hours=8))
                         last_done = datetime.fromisoformat(raw)
-                        # last_done 写入时已是 CST naive，直接使用，无需转换
-                        if last_done.tzinfo is not None:
-                            last_done = last_done.astimezone(CST).replace(tzinfo=None)
+                        # last_done 写入时已是 UTC aware（+00:00），确保有 tzinfo
+                        if last_done.tzinfo is None:
+                            last_done = last_done.replace(tzinfo=timezone.utc)
 
                         if updated_at is None:
                             yield end_user_id
                             continue
-                        # updated_at 数据库存的是 UTC naive，转为 CST naive 再比较
+                        # updated_at 数据库存的是 UTC naive，补上 UTC tzinfo 再比较
                         if updated_at.tzinfo is None:
-                            updated_at_cst = updated_at.replace(tzinfo=timezone.utc).astimezone(CST).replace(tzinfo=None)
+                            updated_at_utc = updated_at.replace(tzinfo=timezone.utc)
                         else:
-                            updated_at_cst = updated_at.astimezone(CST).replace(tzinfo=None)
+                            updated_at_utc = updated_at.astimezone(timezone.utc)
 
-                        if last_done > updated_at_cst:
+                        if last_done > updated_at_utc:
                             yield end_user_id
                     except Exception as e:
                         logger.warning(f"解析 last_done 时间戳失败: end_user_id={end_user_id}, raw={raw}, error={e}")

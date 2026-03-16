@@ -2,9 +2,9 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-28 16:48:52
+ * @Last Modified time: 2026-03-16 15:58:10
  */
-import { type FC, useRef, useMemo } from 'react';
+import { type FC, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Layout, Tabs, Dropdown, Button, Flex } from 'antd';
 import type { MenuProps } from 'antd';
@@ -18,9 +18,10 @@ import exportIcon from '@/assets/images/export_hover.svg'
 import deleteIcon from '@/assets/images/delete_hover.svg'
 import type { Application, ApplicationModalRef } from '@/views/ApplicationManagement/types';
 import ApplicationModal from '@/views/ApplicationManagement/components/ApplicationModal'
-import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef } from '../types'
+import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef, FunConfigForm } from '../types'
 import { deleteApplication, appExport } from '@/api/application'
 import CopyModal from './CopyModal'
+import FunConfig from './FunConfig'
 
 const { Header } = Layout;
 
@@ -28,6 +29,11 @@ const { Header } = Layout;
  * Tab keys for application configuration
  */
 const tabKeys = ['arrangement', 'api', 'release', 'statistics']
+const sharingTabKeys = [
+  'test',
+  // 'log',
+  'api'
+]
 
 /**
  * Menu icon mapping
@@ -64,22 +70,23 @@ interface ConfigHeaderProps {
 const ConfigHeader: FC<ConfigHeaderProps> = ({ 
   application, activeTab, handleChangeTab, refresh,
   workflowRef,
+  appRef,
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { id } = useParams();
+  const { id, source } = useParams();
   const applicationModalRef = useRef<ApplicationModalRef>(null);
   const copyModalRef = useRef<CopyModalRef>(null);
 
   /**
    * Format tab items for display
    */
-  const formatTabItems = () => {
-    return tabKeys.map(key => ({
+  const formatTabItems = useMemo(() => {
+    return (source === 'sharing' ? sharingTabKeys : tabKeys).map(key => ({
       key,
       label: t(`application.${key}`),
     }))
-  }
+  }, [source, sharingTabKeys, tabKeys])
   /**
    * Handle menu item click
    */
@@ -90,10 +97,16 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         applicationModalRef.current?.handleOpen(application)
         break;
       case 'copy':
-        copyModalRef.current?.handleOpen()
+        appRef?.current?.handleSave(false)
+          .then(() => {
+            copyModalRef.current?.handleOpen()
+          })
         break;
       case 'export':
-        appExport(application.id, application.name)
+        appRef?.current?.handleSave(false)
+          .then(() => {
+            appExport(application.id, application.name)
+          })
         break;
       case 'delete':
         handleDelete()
@@ -160,6 +173,13 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
     return items
   }, [t, handleClick, application])
 
+  const funConfig = useMemo(() => {
+    return (appRef?.current?.funConfig || { file_type: [] }) as FunConfigForm
+  }, [appRef])
+  const handleSaveFunConfig = useCallback((value: FunConfigForm) => {
+    appRef?.current?.handleSaveFunConfig?.(value)
+  }, [appRef])
+
   console.log('formatMenuItems', formatMenuItems)
   return (
     <>
@@ -170,7 +190,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
           </div>
           
           <div className="rb:max-w-[100%-80px] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{application?.name}</div>
-          <Dropdown 
+          {source !== 'sharing' && <Dropdown 
             menu={{ items: formatMenuItems, onClick: handleClick }} 
             trigger={['click']}
             placement="bottomRight"
@@ -178,19 +198,20 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
             <div 
               className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/edit.svg')] rb:hover:bg-[url('@/assets/images/edit_hover.svg')]" 
             ></div>
-          </Dropdown>
+          </Dropdown>}
         </div>
         
         <div className="rb:flex rb:justify-center">
           <Tabs 
             activeKey={activeTab} 
-            items={formatTabItems()} 
+            items={formatTabItems} 
             onChange={handleChangeTab} 
             className={styles.tabs}
           />
         </div>
         {application?.type === 'workflow'
-        ? <div className="rb:h-8 rb:flex rb:items-center rb:justify-end rb:gap-2.5">
+          ? <div className="rb:h-8 rb:flex rb:items-center rb:justify-end rb:gap-2.5">
+            {/* <FunConfig value={funConfig} refresh={handleSaveFunConfig} /> */}
             <Button onClick={clear}>{t('workflow.clear')}</Button>
             <Button onClick={addvariable}>{t('workflow.addvariable')}</Button>
             <Button onClick={run}>{t('workflow.run')}</Button>
