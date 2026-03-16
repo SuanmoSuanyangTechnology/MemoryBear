@@ -412,14 +412,15 @@ def get_current_user_rag_total_num(
 @router.get("/rag_content", response_model=ApiResponse)
 def get_rag_content(
     end_user_id: str = Query(..., description="宿主ID"),
-    limit: int = Query(15, description="返回记录数"),
+    page: int = Query(1, gt=0, description="页码，从1开始"),
+    pagesize: int = Query(15, gt=0, le=100, description="每页返回记录数"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    获取当前宿主知识库中的chunk内容
+    获取当前宿主知识库中的chunk内容（分页）
     """
-    data = memory_dashboard_service.get_rag_content(end_user_id, limit, db, current_user)
+    data = memory_dashboard_service.get_rag_content(end_user_id, page, pagesize, db, current_user)
     return success(data=data, msg="宿主RAGchunk数据获取成功")
 
 

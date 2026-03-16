@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-28 14:08:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 12:05:46
+ * @Last Modified time: 2026-03-12 17:19:46
  */
 /**
  * UploadModal Component
@@ -63,6 +63,7 @@ const UploadModal = forwardRef<UploadModalRef, UploadModalProps>(({
    * Resets all states and form fields
    */
   const handleClose = () => {
+    refresh()
     setVisible(false);
     form.resetFields();
     setCurrent(0);
@@ -211,7 +212,6 @@ const UploadModal = forwardRef<UploadModalRef, UploadModalProps>(({
               fileSize={100}
               maxCount={1}
               fileType={['yml']}
-              draggerHeight={200}
             />
           </Form.Item>
         </Form>

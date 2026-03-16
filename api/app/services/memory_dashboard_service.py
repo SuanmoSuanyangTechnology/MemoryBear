@@ -535,7 +535,8 @@ def get_users_total_chunk_batch(
 
 def get_rag_content(
     end_user_id: str,
-    limit: int,
+    page: int,
+    pagesize: int,
     db: Session,
     current_user: User
 ) -> dict:
@@ -543,9 +544,9 @@ def get_rag_content(
     先在documents表中查询file_name=='end_user_id'+'.txt'的id和kb_id,
     然后调用/chunks/{kb_id}/{document_id}/chunks接口的相关代码获取所有内容，
     接着对获取的内容进行提取，只要page_content的内容，
-    最后返回数据
+    最后返回分页数据
     """
-    business_logger.info(f"获取RAG内容: end_user_id={end_user_id}, limit={limit}, 操作者: {current_user.username}")
+    business_logger.info(f"获取RAG内容: end_user_id={end_user_id}, page={page}, pagesize={pagesize}, 操作者: {current_user.username}")
     
     try:
         from app.models.document_model import Document
@@ -562,63 +563,76 @@ def get_rag_content(
         if not documents:
             business_logger.warning(f"未找到文件: {file_name}")
             return {
-                "total": 0,
-                "contents": []
+                "page": {
+                    "page": page,
+                    "pagesize": pagesize,
+                    "total": 0,
+                    "hasnext": False,
+                },
+                "items": []
             }
         
         business_logger.info(f"找到 {len(documents)} 个文档记录")
         
-        # 3. 获取所有chunks的page_content
-        all_contents = []
-        total_chunks = 0
+        # 3. 按全局偏移量计算当前页数据
+        # 全局偏移范围：[offset_start, offset_end)
+        offset_start = (page - 1) * pagesize
+        offset_end = offset_start + pagesize
+        
+        global_total = 0    # 所有文档的 chunk 总数
+        page_contents = []  # 当前页的内容
         
         for document in documents:
             try:
-                # 获取知识库信息
                 kb = knowledge_repository.get_knowledge_by_id(db, document.kb_id)
                 if not kb:
                     business_logger.warning(f"知识库不存在: kb_id={document.kb_id}")
                     continue
                 
-                # 初始化向量服务
                 vector_service = ElasticSearchVectorFactory().init_vector(knowledge=kb)
                 
-                # 获取该文档的所有chunks（分页获取）
-                page = 1
-                pagesize = 100  # 每页100条
+                # 先用 pagesize=1 获取该文档的 chunk 总数
+                doc_total, _ = vector_service.search_by_segment(
+                    document_id=str(document.id),
+                    query=None,
+                    pagesize=1,
+                    page=1,
+                    asc=True
+                )
                 
-                while True:
-                    total, items = vector_service.search_by_segment(
+                doc_offset_start = global_total            # 该文档在全局中的起始偏移
+                doc_offset_end = global_total + doc_total  # 该文档在全局中的结束偏移
+                global_total += doc_total
+                
+                # 当前页与该文档无交集，跳过
+                if doc_offset_end <= offset_start or doc_offset_start >= offset_end:
+                    continue
+                
+                # 计算需要从该文档取的局部范围
+                local_start = max(offset_start - doc_offset_start, 0)
+                local_end = min(offset_end - doc_offset_start, doc_total)
+                need_count = local_end - local_start
+                
+                # 换算成 ES 分页参数（ES page 从1开始）
+                es_page = (local_start // pagesize) + 1
+                es_offset_in_page = local_start % pagesize
+                
+                fetched = []
+                while len(fetched) < es_offset_in_page + need_count:
+                    _, items = vector_service.search_by_segment(
                         document_id=str(document.id),
                         query=None,
                         pagesize=pagesize,
-                        page=page,
+                        page=es_page,
                         asc=True
                     )
-                    
                     if not items:
                         break
-                    
-                    # 提取page_content
-                    for item in items:
-                        all_contents.append(item.page_content)
-                        total_chunks += 1
-                        
-                        # # 如果达到limit限制，直接返回
-                        # if limit > 0 and total_chunks >= limit:
-                        #     business_logger.info(f"已达到limit限制: {limit}")
-                        #     return {
-                        #         "total": total_chunks,
-                        #         "contents": all_contents[:limit]
-                        #     }
-                    
-                    # 检查是否还有下一页
-                    if page * pagesize >= total:
-                        break
-                    
-                    page += 1
+                    fetched.extend(items)
+                    es_page += 1
                 
-                business_logger.info(f"文档 {document.id} 获取了 {len(items)} 个chunks")
+                slice_items = fetched[es_offset_in_page: es_offset_in_page + need_count]
+                page_contents.extend([item.page_content for item in slice_items])
                 
             except Exception as e:
                 business_logger.error(f"获取文档 {document.id} 的chunks失败: {str(e)}")
@@ -626,11 +640,16 @@ def get_rag_content(
         
         # 4. 返回结果
         result = {
-            "total": total_chunks,
-            "contents": all_contents[:limit] if limit > 0 else all_contents
+            "page": {
+                "page": page,
+                "pagesize": pagesize,
+                "total": global_total,
+                "hasnext": offset_end < global_total,
+            },
+            "items": page_contents
         }
         
-        business_logger.info(f"成功获取RAG内容: total={total_chunks}, 返回={len(result['contents'])} 条")
+        business_logger.info(f"成功获取RAG内容: total={global_total}, page={page}, 返回={len(page_contents)} 条")
         return result
         
     except Exception as e:
@@ -730,8 +749,8 @@ async def generate_rag_profile(
     if not end_user:
         raise ValueError(f"end_user {end_user_id} 不存在")
 
-    rag_content = get_rag_content(end_user_id, limit, db, current_user)
-    chunks = rag_content.get("contents", [])
+    rag_content = get_rag_content(end_user_id, page=1, pagesize=limit, db=db, current_user=current_user)
+    chunks = rag_content.get("items", [])
 
     if not chunks:
         business_logger.warning(f"未找到chunk内容，无法生产RAG画像: end_user_id={end_user_id}")

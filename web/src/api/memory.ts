@@ -123,8 +123,9 @@ export const getChunkInsight = (end_user_id: string) => {
   return request.get(`/dashboard/chunk_insight`, { end_user_id })
 }
 // RAG User Memory - Storage content
-export const getRagContent = (end_user_id: string) => {
-  return request.get(`/dashboard/rag_content`, { end_user_id, limit: 20 })
+export const getRagContentUrl = '/dashboard/rag_content'
+export const getRagContent = (end_user_id: string, page = 1, pagesize = 20) => {
+  return request.get(getRagContentUrl, { end_user_id, page, pagesize })
 }
 // Emotion distribution analysis
 export const getWordCloud = (end_user_id: string) => {
