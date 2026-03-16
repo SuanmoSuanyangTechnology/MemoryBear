@@ -1136,7 +1136,8 @@ GET_COMMUNITY_MEMBERS = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community {community_id: $community_id})
 RETURN e.id AS id, e.name AS name, e.entity_type AS entity_type,
        e.importance_score AS importance_score, e.activation_value AS activation_value,
-       e.name_embedding AS name_embedding
+       e.name_embedding AS name_embedding,
+       e.aliases AS aliases, e.description AS description
 ORDER BY coalesce(e.activation_value, 0) DESC
 """
 
@@ -1145,7 +1146,8 @@ MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(
 RETURN c.community_id AS community_id,
        e.id AS id, e.name AS name, e.entity_type AS entity_type,
        e.importance_score AS importance_score, e.activation_value AS activation_value,
-       e.name_embedding AS name_embedding
+       e.name_embedding AS name_embedding,
+       e.aliases AS aliases, e.description AS description
 ORDER BY c.community_id, coalesce(e.activation_value, 0) DESC
 """
 
@@ -1167,6 +1169,17 @@ SET c.name             = $name,
     c.summary          = $summary,
     c.core_entities    = $core_entities,
     c.summary_embedding = $summary_embedding,
+    c.updated_at       = datetime()
+RETURN c.community_id AS community_id
+"""
+
+BATCH_UPDATE_COMMUNITY_METADATA = """
+UNWIND $communities AS row
+MATCH (c:Community {community_id: row.community_id, end_user_id: row.end_user_id})
+SET c.name             = row.name,
+    c.summary          = row.summary,
+    c.core_entities    = row.core_entities,
+    c.summary_embedding = row.summary_embedding,
     c.updated_at       = datetime()
 RETURN c.community_id AS community_id
 """

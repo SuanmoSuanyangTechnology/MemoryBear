@@ -18,7 +18,6 @@ from app.core.logging_config import LoggingConfig, get_logger
 from app.core.response_utils import fail
 from app.core.models.scripts.loader import load_models
 from app.db import get_db_context
-from app.repositories.neo4j.index_manager import ensure_indexes
 
 # Initialize logging system
 LoggingConfig.setup_logging()
@@ -61,16 +60,6 @@ async def lifespan(app: FastAPI):
             logger.warning(f"加载预定义模型时出错: {str(e)}")
     else:
         logger.info("预定义模型加载已禁用 (LOAD_MODEL=false)")
-
-    # 确保 Neo4j 索引存在（幂等，多环境安全）
-    try:
-        report = await ensure_indexes()
-        if report["errors"]:
-            logger.warning(f"Neo4j 索引部分创建失败: {report['errors']}")
-        else:
-            logger.info(f"Neo4j 索引检查完成 [{report['uri']}]")
-    except Exception as e:
-        logger.warning(f"Neo4j 索引检查跳过（连接失败）: {e}")
 
     logger.info("应用程序启动完成")
     yield

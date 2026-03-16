@@ -23,6 +23,7 @@ from app.repositories.neo4j.cypher_queries import (
     CHECK_USER_HAS_COMMUNITIES,
     UPDATE_COMMUNITY_MEMBER_COUNT,
     UPDATE_COMMUNITY_METADATA,
+    BATCH_UPDATE_COMMUNITY_METADATA,
 )
 
 logger = logging.getLogger(__name__)
@@ -256,4 +257,26 @@ class CommunityRepository:
             return bool(result)
         except Exception as e:
             logger.error(f"update_community_metadata failed: {e}")
+            return False
+
+    async def batch_update_community_metadata(
+        self,
+        communities: List[Dict],
+    ) -> bool:
+        """批量更新多个社区的元数据。
+
+        Args:
+            communities: 每项包含 community_id, end_user_id, name, summary,
+                         core_entities, summary_embedding
+        """
+        if not communities:
+            return True
+        try:
+            await self.connector.execute_query(
+                BATCH_UPDATE_COMMUNITY_METADATA,
+                communities=communities,
+            )
+            return True
+        except Exception as e:
+            logger.error(f"batch_update_community_metadata failed: {e}")
             return False
