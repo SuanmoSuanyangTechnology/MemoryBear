@@ -109,7 +109,7 @@ class AppService:
 
         return share is not None
 
-    def _validate_app_accessible(self, app: App, workspace_id: Optional[uuid.UUID]) -> None:
+    def  _validate_app_accessible(self, app: App, workspace_id: Optional[uuid.UUID]) -> None:
         """验证应用是否可访问（包括共享应用，用于只读操作）
 
         Args:
@@ -360,6 +360,7 @@ class AppService:
             variables=storage_data.get("variables", []),
             tools=storage_data.get("tools", []),
             skills=storage_data.get("skills", {}),
+            features=storage_data.get("features", {}),
             is_active=True,
             created_at=now,
             updated_at=now,
@@ -1073,6 +1074,7 @@ class AppService:
         # if data.tools is not None:
         agent_cfg.tools = storage_data.get("tools", [])
         agent_cfg.skills = storage_data.get("skills", {})
+        agent_cfg.features = storage_data.get("features", {})
 
         agent_cfg.updated_at = now
 
@@ -1173,6 +1175,7 @@ class AppService:
             variables=[],
             tools=[],
             skills=[],
+            features={},
             is_active=True,
             created_at=now,
             updated_at=now,
@@ -1389,15 +1392,15 @@ class AppService:
 
         return config.config_id
 
-    def _update_endusers_memory_config(
+    def _update_endusers_memory_config_by_workspace(
             self,
-            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
             memory_config_id: uuid.UUID
     ) -> int:
         """批量更新应用下所有终端用户的 memory_config_id
         
         Args:
-            app_id: 应用ID
+            workspace_id: 工作空间ID
             memory_config_id: 新的记忆配置ID
             
         Returns:
@@ -1406,8 +1409,8 @@ class AppService:
         from app.repositories.end_user_repository import EndUserRepository
 
         repo = EndUserRepository(self.db)
-        updated_count = repo.batch_update_memory_config_id(
-            app_id=app_id,
+        updated_count = repo.batch_update_memory_config_id_by_workspace(
+            workspace_id=workspace_id,
             memory_config_id=memory_config_id
         )
 
@@ -1578,11 +1581,15 @@ class AppService:
                 )
 
         if memory_config_id:
-            updated_count = self._update_endusers_memory_config(app_id, memory_config_id)
-            logger.info(
-                f"发布时更新终端用户记忆配置: app_id={app_id}, "
-                f"memory_config_id={memory_config_id}, updated_count={updated_count}"
-            )
+            app = self.db.query(App).filter(App.id == app_id).first()
+            if app:
+                updated_count = self._update_endusers_memory_config_by_workspace(
+                    app.workspace_id, memory_config_id
+                )
+                logger.info(
+                    f"发布时更新终端用户记忆配置: app_id={app_id}, workspace_id={app.workspace_id}, "
+                    f"memory_config_id={memory_config_id}, updated_count={updated_count}"
+                )
 
         # 更新当前发布版本指针
         app.current_release_id = release.id

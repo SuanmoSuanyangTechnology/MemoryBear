@@ -125,6 +125,85 @@ class SkillConfig(BaseModel):
     all_skills: Optional[bool] = Field(default=False, description="是否允许访问所有技能")
 
 
+# ---------- App Features ----------
+
+class FileUploadConfig(BaseModel):
+    """文件上传配置"""
+    enabled: bool = Field(default=False)
+    # 允许的传输方式：local_file / remote_url，默认两种都允许
+    allowed_transfer_methods: List[str] = Field(
+        default=["local_file", "remote_url"],
+        description="允许的传输方式"
+    )
+    # 图片文件：PNG/JPG/JPEG/GIF/WEBP，最大 20MB
+    image_enabled: bool = Field(default=False)
+    image_max_size_mb: int = Field(default=20)
+    image_allowed_extensions: List[str] = Field(
+        default=["png", "jpg", "jpeg", "gif", "webp"]
+    )
+    # 语音文件：MP3/WAV/M4A/OGG/FLAC，最大 50MB
+    audio_enabled: bool = Field(default=False)
+    audio_max_size_mb: int = Field(default=50)
+    audio_allowed_extensions: List[str] = Field(
+        default=["mp3", "wav", "m4a", "ogg", "flac"]
+    )
+    # 通用文件：PDF/DOCX/XLSX/TXT/CSV/JSON，最大 100MB
+    document_enabled: bool = Field(default=False)
+    document_max_size_mb: int = Field(default=100)
+    document_allowed_extensions: List[str] = Field(
+        default=["pdf", "docx", "xlsx", "txt", "csv", "json"]
+    )
+    # 视频文件：MP4/MOV/AVI/WebM，最大 500MB
+    video_enabled: bool = Field(default=False)
+    video_max_size_mb: int = Field(default=500)
+    video_allowed_extensions: List[str] = Field(
+        default=["mp4", "mov", "avi", "webm"]
+    )
+    # 最大文件数量
+    max_file_count: int = Field(default=5, ge=1, le=20)
+
+
+class OpeningStatementConfig(BaseModel):
+    """对话开场白配置"""
+    enabled: bool = Field(default=False)
+    statement: Optional[str] = Field(default=None, description="开场白内容")
+    suggested_questions: List[str] = Field(default_factory=list, description="预设问题列表")
+
+
+class SuggestedQuestionsConfig(BaseModel):
+    """下一步问题建议配置"""
+    enabled: bool = Field(default=False)
+
+
+class TextToSpeechConfig(BaseModel):
+    """文字转语音配置"""
+    enabled: bool = Field(default=False)
+    voice: Optional[str] = Field(default=None, description="语音音色")
+    language: Optional[str] = Field(default=None, description="语言")
+    autoplay: bool = Field(default=False, description="是否自动播放")
+
+
+class CitationConfig(BaseModel):
+    """引用和归属配置"""
+    enabled: bool = Field(default=False)
+
+
+class WebSearchConfig(BaseModel):
+    """联网搜索配置"""
+    enabled: bool = Field(default=False)
+    search_engine: Optional[str] = Field(default=None, description="搜索引擎")
+
+
+class AppFeatures(BaseModel):
+    """应用功能特性配置"""
+    file_upload: FileUploadConfig = Field(default_factory=FileUploadConfig)
+    opening_statement: OpeningStatementConfig = Field(default_factory=OpeningStatementConfig)
+    suggested_questions_after_answer: SuggestedQuestionsConfig = Field(default_factory=SuggestedQuestionsConfig)
+    text_to_speech: TextToSpeechConfig = Field(default_factory=TextToSpeechConfig)
+    citation: CitationConfig = Field(default_factory=CitationConfig)
+    web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+
+
 class ToolOldConfig(BaseModel):
     """工具配置"""
     enabled: bool = Field(default=False, description="是否启用该工具")
@@ -201,6 +280,9 @@ class AgentConfigCreate(BaseModel):
     # 技能配置
     skills: Optional[SkillConfig] = Field(default=dict, description="关联的技能列表")
 
+    # 功能特性
+    features: Optional[AppFeatures] = Field(default=None, description="功能特性配置")
+
 
 class AppCreate(BaseModel):
     name: str
@@ -257,6 +339,9 @@ class AgentConfigUpdate(BaseModel):
 
     # 技能配置
     skills: Optional[SkillConfig] = Field(default=dict, description="关联的技能列表")
+
+    # 功能特性
+    features: Optional[AppFeatures] = Field(default=None, description="功能特性配置")
 
 
 # ---------- Output Schemas ----------
@@ -323,6 +408,8 @@ class AgentConfig(BaseModel):
 
     skills: Optional[SkillConfig] = {}
 
+    features: Optional[AppFeatures] = None
+
     is_active: bool
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -357,6 +444,14 @@ class AgentConfig(BaseModel):
         """处理 None 值，返回空字典"""
         if v is None:
             return {}
+        return v
+
+    @field_validator("features", mode="before")
+    @classmethod
+    def validate_features(cls, v):
+        """处理 None 值，返回默认 AppFeatures"""
+        if v is None:
+            return AppFeatures()
         return v
 
     @field_serializer("created_at", when_used="json")
@@ -500,12 +595,35 @@ class DraftRunRequest(BaseModel):
     files: Optional[List[FileInput]] = Field(default_factory=list, description="附件列表（支持多文件）")
 
 
+class SuggestedQuestion(BaseModel):
+    """建议问题"""
+    content: str
+
+
+class CitationSource(BaseModel):
+    """引用来源"""
+    title: str
+    content: str
+    score: Optional[float] = None
+    kb_id: Optional[str] = None
+
+
 class DraftRunResponse(BaseModel):
     """试运行响应（非流式）"""
     message: str = Field(..., description="AI 回复消息")
     conversation_id: Optional[str] = Field(default=None, description="会话ID（用于多轮对话）")
     usage: Optional[Dict[str, Any]] = Field(default=None, description="Token 使用情况")
     elapsed_time: Optional[float] = Field(default=None, description="耗时（秒）")
+    suggested_questions: List[str] = Field(default_factory=list, description="下一步建议问题")
+    citations: List[CitationSource] = Field(default_factory=list, description="引用来源")
+    audio_url: Optional[str] = Field(default=None, description="TTS 语音URL")
+
+
+class OpeningResponse(BaseModel):
+    """应用开场白响应"""
+    enabled: bool
+    statement: Optional[str] = None
+    suggested_questions: List[str] = Field(default_factory=list)
 
 
 class DraftRunStreamChunk(BaseModel):
