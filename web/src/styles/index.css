@@ -7,12 +7,14 @@
   src: url('@/assets/font/MiSans/MiSans-Bold.woff2') format('woff2');
   font-weight: 700;
   font-style: normal;
-}@font-face {
+}
+@font-face {
   font-family: 'MiSans-Demibold';
   src: url('@/assets/font/MiSans/MiSans-Demibold.woff2') format('woff2');
   font-weight: 700;
   font-style: normal;
-}@font-face {
+}
+@font-face {
   font-family: 'MiSans-ExtraLight';
   src: url('@/assets/font/MiSans/MiSans-ExtraLight.woff2') format('woff2');
   font-weight: 200;
@@ -190,6 +192,35 @@ body {
 .ant-table-wrapper .ant-table-pagination.ant-pagination {
   margin: 24px 0 32px 0;
 }
+.table-header-has-bg.ant-table-wrapper .ant-table-thead>tr>th,
+.table-header-has-bg.ant-table-wrapper .ant-table-thead>tr>td {
+  background-color: #F6F6F6;
+}
+
+.table-header-has-bg.ant-table-wrapper .ant-table,
+.table-header-has-bg.ant-table-wrapper table {
+  border-radius: 0;
+}
+
+.table-header-has-bg.ant-table-wrapper .ant-table-container table>thead>tr:first-child>*:first-child,
+.table-header-has-bg.ant-table-wrapper .ant-table-container table>thead>tr:first-child>*:last-child,
+.table-header-has-bg.ant-table-wrapper .ant-table-container {
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+}
+
+.table-header-has-bg .ant-table-container {
+  border: none;
+}
+
+.table-header-has-bg.ant-table-wrapper .ant-table-cell,
+.table-header-has-bg.ant-table-wrapper .ant-table-thead>tr>th,
+.table-header-has-bg.ant-table-wrapper .ant-table-tbody>tr>th,
+.table-header-has-bg.ant-table-wrapper .ant-table-tbody>tr>td,
+.table-header-has-bg.ant-table-wrapper tfoot>tr>th,
+.table-header-has-bg.ant-table-wrapper tfoot>tr>td {
+  padding: 12px 16px;
+}
 .ant-pagination .ant-pagination-prev .ant-pagination-item-link,
 .ant-pagination .ant-pagination-next .ant-pagination-item-link,
 .ant-pagination .ant-pagination-item:not(.ant-pagination-item-active) {
@@ -314,4 +345,14 @@ body {
 }
 .ant-checkbox .ant-checkbox-inner {
   border-radius: 6px !important;
+}
+.ant-divider {
+  border-block-start-color: #EBEBEB;
+}
+.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item-selected,
+.ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-item-selected,
+.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-submenu-title-selected,
+.ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-submenu-title-selected {
+  color: #FFFFFF;
+  background-color: #171719;
 }

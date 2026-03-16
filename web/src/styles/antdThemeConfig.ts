@@ -137,6 +137,13 @@ export const lightTheme: ThemeConfig = {
     Cascader: {
       optionSelectedBg: '#F6F6F6',
       optionSelectedColor: '#212332'
+    },
+    Statistic: {
+      contentFontSize: 14,
+      titleFontSize: 14
+    },
+    Progress: {
+      remainingColor: '#EBEBEB',
     }
   }
 };

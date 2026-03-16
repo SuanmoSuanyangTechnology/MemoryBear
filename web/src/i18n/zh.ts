@@ -119,6 +119,8 @@ export const zh = {
       memoryRelated: '记忆相关',
       advancedSettings: '高级设置',
       promptHistory: '我的历史',
+      platformManagement: '平台管理',
+      systemSettings: '系统设置',
     },
     knowledgeBase: {
       home: '首页',
@@ -1045,6 +1047,7 @@ export const zh = {
       imageSquareRequired: '请上传正方形比例图片',
       nameInvalid: '不能是空格开头或结尾',
       notAllSpaces: '不能是纯空格',
+      download: '下载',
     },
     model: {
       searchPlaceholder: '搜索模型…',
@@ -2532,6 +2535,7 @@ export const zh = {
       none: '无',
     },
     implicitDetail: {
+      subconscious: '我的潜意识',
       title: '那些塑造了我的无形力量',
       preferences: '我的潜意识偏好',
       preferencesDetail: '的联想网络',
@@ -2552,7 +2556,8 @@ export const zh = {
       context_details: '偏好详情',
       supporting_evidence: '偏好来源',
       specific_examples: '来源',
-      wordEmpty: '点击左侧图表中的节点查看偏好详情',
+      preferencesTip: '提示：点击上方偏好标签查看对应的联想网络',
+      wordEmpty: '暂无可用的联想网络',
       noData: '画像数据不存在，请点击刷新按钮进行初始化',
     },
     shortTermDetail: {
@@ -2581,6 +2586,7 @@ export const zh = {
       section_count: '段落数',
       timeLine: '感知时间线',
       lastInfo: '实时感知仪表盘',
+      playbackSpeed: '播放速度',
     },
     explicitDetail: {
       episodic_memories: '情景记忆',
@@ -2592,6 +2598,7 @@ export const zh = {
       detailed_notes: '详细笔记',
     },
     workingDetail: {
+      conversation: '对话',
       conversationStream: '实时对话流',
       refresh: '刷新',
       successfulTitle: '成功经验',
@@ -2634,10 +2641,10 @@ export const zh = {
       file: '导入文件',
     },
     prompt: {
-      promptDesc: 'Input your original prompt, and AI will help you refine it into a more professional version',
+      promptDesc: '输入您的原始提示词，AI将帮助您优化为更专业的版本',
       editor: '提示词生成器',
       history: '我的历史',
-      historyDesc: 'View and manage your prompt optimization history',
+      historyDesc: '查看和管理您的提示词优化历史',
       historySearchPlaceholder: '按名称搜索',
       model: '模型',
       you: '你',

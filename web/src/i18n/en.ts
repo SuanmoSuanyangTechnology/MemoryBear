@@ -119,6 +119,8 @@ export const en = {
       memoryRelated: 'Memory-Related',
       advancedSettings: 'Advanced Settings',
       promptHistory: 'My history',
+      platformManagement: 'Platform Management',
+      systemSettings: 'System Settings',
     },
     dashboard: {
       total_models: 'Available Models',
@@ -462,6 +464,7 @@ export const en = {
       imageSquareRequired: 'Please upload a square image',
       nameInvalid: 'Name cannot start or end with a space',
       notAllSpaces: 'Cannot be all spaces',
+      download: 'Download',
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -2532,6 +2535,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       none: 'None',
     },
     implicitDetail: {
+      subconscious: 'My Subconscious',
       title: 'The invisible forces that shaped me',
       preferences: 'My Subconscious Preferences',
       preferencesDetail: 'Association Network',
@@ -2552,7 +2556,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       context_details: 'Preference Details',
       supporting_evidence: 'Preference Source',
       specific_examples: 'Source',
-      wordEmpty: 'Click on a node in the left chart to view preference details',
+      preferencesTip: 'Reminder: Click on the preferences above to view the corresponding Lenovo network',
+      wordEmpty: 'There is currently no Lenovo network available',
       noData: 'Portrait data does not exist, please click the refresh button to initialize',
     },
     shortTermDetail: {
@@ -2581,6 +2586,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       section_count: 'Number of Sections',
       timeLine: 'Perception Timeline',
       lastInfo: 'Real-time Perception Dashboard',
+      playbackSpeed: 'Playback Speed',
     },
     explicitDetail: {
       episodic_memories: 'Episodic Memories',
@@ -2592,6 +2598,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       detailed_notes: 'Detailed Notes',
     },
     workingDetail: {
+      conversation: 'Conversation',
       conversationStream: 'Real-time Conversation Stream',
       refresh: 'Refresh',
       successfulTitle: 'Successful Experience',

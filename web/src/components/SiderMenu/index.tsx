@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:25:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-24 11:32:15
+ * @Last Modified time: 2026-03-16 10:51:29
  */
 /**
  * SiderMenu Component
@@ -32,16 +32,9 @@ import logo from '@/assets/images/logo.png'
 import { useUser } from '@/store/user';
 
 // Import SVG files
+// space
 import dashboardIcon from '@/assets/images/menuNew/dashboard.svg';
 import dashboardActiveIcon from '@/assets/images/menuNew/dashboard_active.svg';
-
-import modelIcon from '@/assets/images/menu/model.svg';
-import modelActiveIcon from '@/assets/images/menu/model_active.svg';
-import spaceIcon from '@/assets/images/menu/space.svg';
-import spaceActiveIcon from '@/assets/images/menu/space_active.svg';
-import userIcon from '@/assets/images/menu/user.svg';
-import userActiveIcon from '@/assets/images/menu/user_active.svg';
-
 import applicationIcon from '@/assets/images/menuNew/application.svg';
 import applicationActiveIcon from '@/assets/images/menuNew/application_active.svg';
 import knowledgeIcon from '@/assets/images/menuNew/knowledge.svg';
@@ -58,18 +51,24 @@ import memberIcon from '@/assets/images/menuNew/member.svg';
 import memberActiveIcon from '@/assets/images/menuNew/member_active.svg';
 import ontologyIcon from '@/assets/images/menuNew/ontology.svg'
 import ontologyActiveIcon from '@/assets/images/menuNew/ontology_active.svg'
-
 import spaceConfigIcon from '@/assets/images/menuNew/spaceConfig.svg'
 import spaceConfigActiveIcon from '@/assets/images/menuNew/spaceConfig_active.svg'
 import promptIcon from '@/assets/images/menuNew/prompt.svg'
 import promptActiveIcon from '@/assets/images/menuNew/prompt_active.svg'
 
-import toolIcon from '@/assets/images/menu/tool.png';
-import toolActiveIcon from '@/assets/images/menu/tool_active.png';
-import pricingIcon from '@/assets/images/menu/pricing.svg'
-import pricingActiveIcon from '@/assets/images/menu/pricing_active.svg'
-import skillsIcon from '@/assets/images/menu/skills.svg'
-import skillsActiveIcon from '@/assets/images/menu/skills_active.svg'
+// manage
+import modelIcon from '@/assets/images/menuNew/model.svg';
+import modelActiveIcon from '@/assets/images/menuNew/model_active.svg';
+import spaceIcon from '@/assets/images/menuNew/space.svg';
+import spaceActiveIcon from '@/assets/images/menuNew/space_active.svg';
+import userIcon from '@/assets/images/menuNew/user.svg';
+import userActiveIcon from '@/assets/images/menuNew/user_active.svg';
+import toolIcon from '@/assets/images/menuNew/tool.svg';
+import toolActiveIcon from '@/assets/images/menuNew/tool_active.svg';
+import pricingIcon from '@/assets/images/menuNew/pricing.svg'
+import pricingActiveIcon from '@/assets/images/menuNew/pricing_active.svg'
+import skillsIcon from '@/assets/images/menuNew/skills.svg'
+import skillsActiveIcon from '@/assets/images/menuNew/skills_active.svg'
 
 
 /** Icon path mapping table for menu items (normal and active states) */
