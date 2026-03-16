@@ -518,7 +518,7 @@ class MemoryForgetService:
                 'total_nodes': result['total_nodes'] or 0,
                 'nodes_with_activation': result['nodes_with_activation'] or 0,
                 'nodes_without_activation': result['nodes_without_activation'] or 0,
-                'average_activation_value': result['average_activation'],
+                'average_activation_value': round(result['average_activation'], 2) if result['average_activation'] is not None else None,
                 'low_activation_nodes': result['low_activation_nodes'] or 0,
                 'forgetting_threshold': forgetting_threshold,
                 'timestamp': int(datetime.now().timestamp() * 1000)
