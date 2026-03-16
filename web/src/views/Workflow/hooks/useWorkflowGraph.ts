@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 16:11:01
+ * @Last Modified time: 2026-03-16 18:56:30
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -222,7 +222,7 @@ export const useWorkflowGraph = ({
           for (let i = 0; i < totalPorts; i++) {
             portItems.push({
               group: 'right',
-              id: `CASE${i + 1}`,
+              id: `CASE${i}`,
               args: {
                 x: nodeWidth,
                 y: 30 * i + 42,
@@ -253,7 +253,7 @@ export const useWorkflowGraph = ({
           config.categories.forEach((_category: any, index: number) => {
             portItems.push({
               group: 'right',
-              id: `CASE${index + 1}`,
+              id: `CASE${index}`,
               args: {
                 x: nodeWidth,
                 y: 30 * index + 42,
