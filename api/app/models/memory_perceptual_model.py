@@ -9,7 +9,6 @@ from sqlalchemy.dialects.postgresql import JSONB
 from app.db import Base
 from app.schemas import FileType
 
-
 class PerceptualType(IntEnum):
     VISION = 1
     AUDIO = 2

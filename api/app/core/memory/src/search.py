@@ -238,7 +238,7 @@ def rerank_with_activation(
     
     reranked: Dict[str, List[Dict[str, Any]]] = {}
     
-    for category in ["statements", "chunks", "entities", "summaries"]:
+    for category in ["statements", "chunks", "entities", "summaries", "communities"]:
         keyword_items = keyword_results.get(category, [])
         embedding_items = embedding_results.get(category, [])
         
@@ -281,21 +281,23 @@ def rerank_with_activation(
         for item in items_list:
             item_id = item.get("id") or item.get("uuid") or item.get("chunk_id")
             if item_id and item_id in combined_items:
-                combined_items[item_id]["normalized_activation_value"] = item.get("normalized_activation_value", 0)
+                combined_items[item_id]["normalized_activation_value"] = item.get("normalized_activation_value")
         
         # 步骤 4: 计算基础分数和最终分数
         for item_id, item in combined_items.items():
             bm25_norm = float(item.get("bm25_score", 0) or 0)
             emb_norm = float(item.get("embedding_score", 0) or 0)
-            act_norm = float(item.get("normalized_activation_value", 0) or 0)
+            # normalized_activation_value 为 None 表示该节点无激活值，保留 None 语义
+            raw_act_norm = item.get("normalized_activation_value")
+            act_norm = float(raw_act_norm) if raw_act_norm is not None else None
             
             # 第一阶段：只考虑内容相关性（BM25 + Embedding）
             # alpha 控制 BM25 权重，(1-alpha) 控制 Embedding 权重
             content_score = alpha * bm25_norm + (1 - alpha) * emb_norm
             base_score = content_score  # 第一阶段用内容分数
             
-            # 存储激活度分数供第二阶段使用
-            item["activation_score"] = act_norm
+            # 存储激活度分数供第二阶段使用（None 表示无激活值，不参与激活值排序）
+            item["activation_score"] = act_norm  # 可能为 None
             item["content_score"] = content_score
             item["base_score"] = base_score
             

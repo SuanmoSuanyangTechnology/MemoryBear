@@ -42,6 +42,13 @@ async def create_fulltext_indexes():
             OPTIONS { indexConfig: { `fulltext.analyzer`: 'cjk' } }
         """)
         print("✓ Created: summariesFulltext")
+
+        # 创建 Community 索引
+        await connector.execute_query("""
+            CREATE FULLTEXT INDEX communitiesFulltext IF NOT EXISTS FOR (c:Community) ON EACH [c.name, c.summary]
+            OPTIONS { indexConfig: { `fulltext.analyzer`: 'cjk' } }
+        """)
+        print("✓ Created: communitiesFulltext")
         
         print("\nFull-text indexes created successfully with BM25 support.")
     except Exception as e:
@@ -124,6 +131,18 @@ async def create_vector_indexes():
             }}
         """)
         print("✓ Created: dialogue_embedding_index")
+
+        # Community summary embedding index
+        await connector.execute_query("""
+            CREATE VECTOR INDEX community_summary_embedding_index IF NOT EXISTS
+            FOR (c:Community)
+            ON c.summary_embedding
+            OPTIONS {indexConfig: {
+              `vector.dimensions`: 1024,
+              `vector.similarity_function`: 'cosine'
+            }}
+        """)
+        print("✓ Created: community_summary_embedding_index")
         
         print("\nVector indexes created successfully!")
         print("\nExpected performance improvement:")

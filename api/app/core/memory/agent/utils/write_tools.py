@@ -19,7 +19,7 @@ from app.core.memory.utils.log.logging_utils import log_time
 from app.db import get_db_context
 from app.repositories.neo4j.add_edges import add_memory_summary_statement_edges
 from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
-from app.repositories.neo4j.graph_saver import save_dialog_and_statements_to_neo4j
+from app.repositories.neo4j.graph_saver import save_dialog_and_statements_to_neo4j, schedule_clustering_after_write
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_config_schema import MemoryConfig
 
@@ -171,6 +171,13 @@ async def write(
             )
             if success:
                 logger.info("Successfully saved all data to Neo4j")
+                # 写入成功后，异步触发聚类（不阻塞写入响应）
+                schedule_clustering_after_write(
+                    all_entity_nodes,
+                    config_id=config_id,
+                    llm_model_id=str(memory_config.llm_model_id) if memory_config.llm_model_id else None,
+                    embedding_model_id=str(memory_config.embedding_model_id) if memory_config.embedding_model_id else None,
+                )
                 break
             else:
                 logger.warning("Failed to save some data to Neo4j")

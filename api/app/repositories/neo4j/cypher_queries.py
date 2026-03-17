@@ -1122,21 +1122,33 @@ RETURN e.id AS id,
        CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
+GET_ENTITY_COUNT_FOR_USER = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+RETURN count(e) AS entity_count
+"""
+
+GET_ALL_ENTITY_IDS_FOR_USER = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+RETURN e.id AS id
+"""
+
 GET_COMMUNITY_MEMBERS = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community {community_id: $community_id})
 RETURN e.id AS id, e.name AS name, e.entity_type AS entity_type,
        e.importance_score AS importance_score, e.activation_value AS activation_value,
-       e.name_embedding AS name_embedding
+       e.name_embedding AS name_embedding,
+       e.aliases AS aliases, e.description AS description
 ORDER BY coalesce(e.activation_value, 0) DESC
 """
 
 GET_ALL_COMMUNITY_MEMBERS_BATCH = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community)
-WHERE c.community_id IN $community_ids
 RETURN c.community_id AS community_id,
-       e.id AS id,
+       e.id AS id, e.name AS name, e.entity_type AS entity_type,
+       e.importance_score AS importance_score, e.activation_value AS activation_value,
        e.name_embedding AS name_embedding,
-       e.activation_value AS activation_value
+       e.aliases AS aliases, e.description AS description
+ORDER BY c.community_id, coalesce(e.activation_value, 0) DESC
 """
 
 CHECK_USER_HAS_COMMUNITIES = """
@@ -1153,11 +1165,56 @@ RETURN c.community_id AS community_id, cnt AS member_count
 
 UPDATE_COMMUNITY_METADATA = """
 MATCH (c:Community {community_id: $community_id, end_user_id: $end_user_id})
-SET c.name         = $name,
-    c.summary      = $summary,
-    c.core_entities = $core_entities,
-    c.updated_at   = datetime()
+SET c.name             = $name,
+    c.summary          = $summary,
+    c.core_entities    = $core_entities,
+    c.summary_embedding = $summary_embedding,
+    c.updated_at       = datetime()
 RETURN c.community_id AS community_id
+"""
+
+BATCH_UPDATE_COMMUNITY_METADATA = """
+UNWIND $communities AS row
+MATCH (c:Community {community_id: row.community_id, end_user_id: row.end_user_id})
+SET c.name             = row.name,
+    c.summary          = row.summary,
+    c.core_entities    = row.core_entities,
+    c.summary_embedding = row.summary_embedding,
+    c.updated_at       = datetime()
+RETURN c.community_id AS community_id
+"""
+
+GET_ENTITIES_PAGE = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+OPTIONAL MATCH (e)-[:BELONGS_TO_COMMUNITY]->(c:Community)
+RETURN e.id AS id,
+       e.name AS name,
+       e.name_embedding AS name_embedding,
+       e.activation_value AS activation_value,
+       CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
+ORDER BY e.id
+SKIP $skip LIMIT $limit
+"""
+
+GET_ENTITY_NEIGHBORS_BATCH_FOR_IDS = """
+// 批量拉取指定实体列表的邻居（用于分批全量聚类）
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+WHERE e.id IN $entity_ids
+OPTIONAL MATCH (e)-[:EXTRACTED_RELATIONSHIP]-(nb1:ExtractedEntity {end_user_id: $end_user_id})
+OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(nb2:ExtractedEntity {end_user_id: $end_user_id})
+WHERE nb2.id <> e.id
+WITH e, collect(DISTINCT nb1) + collect(DISTINCT nb2) AS all_neighbors
+UNWIND all_neighbors AS nb
+WITH e, nb WHERE nb IS NOT NULL
+OPTIONAL MATCH (nb)-[:BELONGS_TO_COMMUNITY]->(c:Community)
+RETURN DISTINCT
+    e.id                AS entity_id,
+    nb.id               AS id,
+    nb.name             AS name,
+    nb.name_embedding   AS name_embedding,
+    nb.activation_value AS activation_value,
+    CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
 GET_ALL_ENTITY_NEIGHBORS_BATCH = """
@@ -1185,20 +1242,59 @@ RETURN DISTINCT
     CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
-GET_COMMUNITY_GRAPH_DATA = """
-MATCH (c:Community {end_user_id: $end_user_id})
-MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[b:BELONGS_TO_COMMUNITY]->(c)
-OPTIONAL MATCH (e)-[r:EXTRACTED_RELATIONSHIP]-(e2:ExtractedEntity {end_user_id: $end_user_id})
-RETURN
-    elementId(c)          AS c_id,
-    properties(c)         AS c_props,
-    elementId(e)          AS e_id,
-    properties(e)         AS e_props,
-    elementId(b)          AS b_id,
-    elementId(e2)         AS e2_id,
-    properties(e2)        AS e2_props,
-    elementId(r)          AS r_id,
-    type(r)               AS r_type,
-    properties(r)         AS r_props,
-    startNode(r) = e      AS r_from_e
+
+# Community keyword search: matches name or summary via fulltext index
+SEARCH_COMMUNITIES_BY_KEYWORD = """
+CALL db.index.fulltext.queryNodes("communitiesFulltext", $q) YIELD node AS c, score
+WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
+RETURN c.community_id AS id,
+       c.name AS name,
+       c.summary AS content,
+       c.core_entities AS core_entities,
+       c.member_count AS member_count,
+       c.end_user_id AS end_user_id,
+       c.updated_at AS updated_at,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+# Community 向量检索 ──────────────────────────────────────────────────
+# Community embedding-based search: cosine similarity on Community.summary_embedding
+COMMUNITY_EMBEDDING_SEARCH = """
+CALL db.index.vector.queryNodes('community_summary_embedding_index', $limit * 100, $embedding)
+YIELD node AS c, score
+WHERE c.summary_embedding IS NOT NULL
+  AND ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
+RETURN c.community_id AS id,
+       c.name AS name,
+       c.summary AS content,
+       c.core_entities AS core_entities,
+       c.member_count AS member_count,
+       c.end_user_id AS end_user_id,
+       c.updated_at AS updated_at,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+# Community 展开检索 ──────────────────────────────────────────────────
+# 命中社区后，拉取该社区所有成员实体关联的 Statement 节点（主题→细节两级检索）
+EXPAND_COMMUNITY_STATEMENTS = """
+MATCH (c:Community {community_id: $community_id})
+MATCH (e:ExtractedEntity)-[:BELONGS_TO_COMMUNITY]->(c)
+MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+WHERE s.end_user_id = $end_user_id
+RETURN s.statement AS statement,
+       s.id AS id,
+       s.end_user_id AS end_user_id,
+       s.created_at AS created_at,
+       s.valid_at AS valid_at,
+       s.invalid_at AS invalid_at,
+       COALESCE(s.activation_value, s.importance_score, 0.5) AS activation_value,
+       COALESCE(s.importance_score, 0.5) AS importance_score,
+       e.name AS source_entity,
+       c.name AS community_name
+ORDER BY COALESCE(s.activation_value, 0) DESC
+LIMIT $limit
 """
