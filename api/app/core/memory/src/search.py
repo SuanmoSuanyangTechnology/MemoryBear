@@ -726,9 +726,6 @@ async def run_hybrid_search(
     try:
         keyword_task = None
         embedding_task = None
-
-        keyword_task = None
-        embedding_task = None
         keyword_results: Dict[str, List] = {}
         embedding_results: Dict[str, List] = {}
 
