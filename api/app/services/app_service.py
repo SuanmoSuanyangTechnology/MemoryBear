@@ -7,6 +7,7 @@
 - 应用发布和版本管理
 - 应用回滚
 """
+import copy
 import datetime
 import uuid
 from typing import Annotated, Any, Dict, List, Optional, Tuple
@@ -80,6 +81,8 @@ class AppService:
             )
             raise BusinessException("应用不在指定工作空间中", BizCode.WORKSPACE_NO_ACCESS)
 
+
+
     def _check_app_accessible(self, app: App, workspace_id: Optional[uuid.UUID]) -> bool:
         """检查应用是否可访问（包括共享应用）
 
@@ -126,6 +129,28 @@ class AppService:
             )
             raise BusinessException("应用不可访问", BizCode.WORKSPACE_NO_ACCESS)
 
+    def _unique_app_name(self, name: str, workspace_id: uuid.UUID, app_type: AppType) -> str:
+        """生成唯一应用名称，同时检查本空间自有应用和共享到本空间的应用"""
+        existing = {r[0] for r in self.db.query(App.name).filter(
+            App.workspace_id == workspace_id,
+            App.type == app_type,
+            App.is_active.is_(True)
+        ).all()}
+        shared_names = {r[0] for r in self.db.query(App.name).join(
+            AppShare, AppShare.source_app_id == App.id
+        ).filter(
+            AppShare.target_workspace_id == workspace_id,
+            App.type == app_type,
+            App.is_active.is_(True)
+        ).all()}
+        existing |= shared_names
+        if name not in existing:
+            return name
+        counter = 1
+        while f"{name}({counter})" in existing:
+            counter += 1
+        return f"{name}({counter})"
+
     def _get_share_permission(self, app: App, workspace_id: Optional[uuid.UUID]) -> Optional[str]:
         """获取共享应用的权限
 
@@ -148,11 +173,11 @@ class AppService:
         return share.permission if share else None
 
     def _validate_app_writable(self, app: App, workspace_id: Optional[uuid.UUID]) -> None:
-        """Validate that the app config is writable (owner only).
+        """Validate that the app config is writable.
 
-        Shared apps (both readonly and editable) cannot modify config.
         - Own workspace app: allowed
-        - Any shared app: denied
+        - Shared app with editable permission: allowed
+        - Shared app with readonly permission: denied
 
         Raises:
             BusinessException: when app is not writable
@@ -162,6 +187,11 @@ class AppService:
 
         # Own workspace app, allow
         if app.workspace_id == workspace_id:
+            return
+
+        # Check share permission
+        permission = self._get_share_permission(app, workspace_id)
+        if permission == "editable":
             return
 
         logger.warning(
@@ -506,6 +536,10 @@ class AppService:
         source_workspace_icon = None
         source_app_version = None
         source_app_is_active = None
+        share_id = None
+        shared_by = None
+        shared_by_name = None
+        shared_at = None
 
         if is_shared:
             # 查询共享权限和来源工作空间名称
@@ -517,7 +551,12 @@ class AppService:
             )
             share = self.db.scalars(stmt).first()
             if share:
+                share_id = share.id
                 share_permission = share.permission
+                shared_by = share.shared_by
+                shared_at = share.created_at
+                if share.shared_user:
+                    shared_by_name = share.shared_user.username
                 if share.source_workspace:
                     source_workspace_name = share.source_workspace.name
                     source_workspace_icon = share.source_workspace.icon
@@ -547,6 +586,10 @@ class AppService:
             "source_workspace_icon": source_workspace_icon,
             "source_app_version": source_app_version,
             "source_app_is_active": source_app_is_active,
+            "share_id": share_id,
+            "shared_by": shared_by,
+            "shared_by_name": shared_by_name,
+            "shared_at": shared_at,
             "created_at": app.created_at,
             "updated_at": app.updated_at
         }
@@ -761,6 +804,7 @@ class AppService:
             # 确定新应用名称
             if not new_name:
                 new_name = f"{source_app.name} - 副本"
+            new_name = self._unique_app_name(new_name, target_workspace_id, source_app.type)
 
             now = datetime.datetime.now()
 
@@ -784,6 +828,19 @@ class AppService:
             self.db.add(new_app)
             self.db.flush()
 
+            # 判断是否跨工作空间复制（共享应用复制到自己的工作空间）
+            is_cross_workspace = target_workspace_id != source_app.workspace_id
+
+            # 跨工作空间时，获取目标工作空间的 tenant_id 用于判断模型配置是否可用
+            target_tenant_id = None
+            available_model_ids: set = set()
+            available_kb_ids: set = set()
+            if is_cross_workspace:
+                target_ws = self.db.get(Workspace, target_workspace_id)
+                if not target_ws:
+                    raise ResourceNotFoundException("工作空间", str(target_workspace_id))
+                target_tenant_id = target_ws.tenant_id
+
             # 如果是 agent 类型，复制 AgentConfig
             if source_app.type == AppType.AGENT:
                 source_config = self.db.query(AgentConfig).filter(
@@ -791,16 +848,40 @@ class AppService:
                 ).first()
 
                 if source_config:
+                    if is_cross_workspace:
+                        # Batch-collect and preload all referenced resources
+                        model_ids, kb_ids = self._collect_resource_ids_from_config(
+                            source_config.default_model_config_id,
+                            source_config.knowledge_retrieval,
+                            source_config.tools
+                        )
+                        available_model_ids, available_kb_ids = self._preload_cross_workspace_resources(
+                            target_tenant_id, target_workspace_id, model_ids, kb_ids
+                        )
+                        new_model_config_id = self._is_model_available(
+                            source_config.default_model_config_id, available_model_ids
+                        )
+                        new_knowledge_retrieval = self._clean_knowledge_retrieval(
+                            source_config.knowledge_retrieval, available_kb_ids
+                        )
+                        new_tools = self._clean_tools(
+                            source_config.tools, available_kb_ids
+                        )
+                    else:
+                        new_model_config_id = source_config.default_model_config_id
+                        new_knowledge_retrieval = copy.deepcopy(source_config.knowledge_retrieval) if source_config.knowledge_retrieval else None
+                        new_tools = copy.deepcopy(source_config.tools) if source_config.tools else []
+
                     new_config = AgentConfig(
                         id=uuid.uuid4(),
                         app_id=new_app.id,
                         system_prompt=source_config.system_prompt,
-                        default_model_config_id=source_config.default_model_config_id,
-                        model_parameters=source_config.model_parameters.copy() if source_config.model_parameters else None,
-                        knowledge_retrieval=source_config.knowledge_retrieval.copy() if source_config.knowledge_retrieval else None,
-                        memory=source_config.memory.copy() if source_config.memory else None,
-                        variables=source_config.variables.copy() if source_config.variables else [],
-                        tools=source_config.tools.copy() if source_config.tools else [],
+                        default_model_config_id=new_model_config_id,
+                        model_parameters=copy.deepcopy(source_config.model_parameters) if source_config.model_parameters else None,
+                        knowledge_retrieval=new_knowledge_retrieval,
+                        memory=copy.deepcopy(source_config.memory) if source_config.memory else None,
+                        variables=copy.deepcopy(source_config.variables) if source_config.variables else [],
+                        tools=new_tools,
                         is_active=True,
                         created_at=now,
                         updated_at=now,
@@ -813,14 +894,29 @@ class AppService:
                 ).first()
 
                 if source_config:
+                    if is_cross_workspace:
+                        model_ids, kb_ids = self._collect_resource_ids_from_workflow_nodes(
+                            source_config.nodes
+                        )
+                        available_model_ids, available_kb_ids = self._preload_cross_workspace_resources(
+                            target_tenant_id, target_workspace_id, model_ids, kb_ids
+                        )
+                        new_nodes = self._clean_workflow_nodes_for_cross_workspace(
+                            source_config.nodes or [],
+                            available_model_ids,
+                            available_kb_ids
+                        )
+                    else:
+                        new_nodes = copy.deepcopy(source_config.nodes) if source_config.nodes else []
+
                     new_config = WorkflowConfig(
                         id=uuid.uuid4(),
                         app_id=new_app.id,
-                        nodes=source_config.nodes.copy() if source_config.nodes else [],
-                        edges=source_config.edges.copy() if source_config.edges else [],
-                        variables=source_config.variables.copy() if source_config.variables else [],
-                        execution_config=source_config.execution_config.copy() if source_config.execution_config else {},
-                        triggers=source_config.triggers.copy() if source_config.triggers else [],
+                        nodes=new_nodes,
+                        edges=copy.deepcopy(source_config.edges) if source_config.edges else [],
+                        variables=copy.deepcopy(source_config.variables) if source_config.variables else [],
+                        execution_config=copy.deepcopy(source_config.execution_config) if source_config.execution_config else {},
+                        triggers=copy.deepcopy(source_config.triggers) if source_config.triggers else [],
                         is_active=True,
                         created_at=now,
                         updated_at=now,
@@ -833,17 +929,28 @@ class AppService:
                 ).first()
 
                 if source_config:
+                    if is_cross_workspace:
+                        model_ids = {source_config.default_model_config_id} if source_config.default_model_config_id else set()
+                        available_model_ids, _ = self._preload_cross_workspace_resources(
+                            target_tenant_id, target_workspace_id, model_ids, set()
+                        )
+                        new_model_config_id = self._is_model_available(
+                            source_config.default_model_config_id, available_model_ids
+                        )
+                    else:
+                        new_model_config_id = source_config.default_model_config_id
+
                     new_config = MultiAgentConfig(
                         id=uuid.uuid4(),
                         app_id=new_app.id,
-                        master_agent_id=source_config.master_agent_id,
+                        master_agent_id=source_config.master_agent_id if not is_cross_workspace else None,
                         master_agent_name=source_config.master_agent_name,
-                        default_model_config_id=source_config.default_model_config_id,
+                        default_model_config_id=new_model_config_id,
                         model_parameters=source_config.model_parameters,
                         orchestration_mode=source_config.orchestration_mode,
-                        sub_agents=source_config.sub_agents.copy() if source_config.sub_agents else [],
-                        routing_rules=source_config.routing_rules.copy() if source_config.routing_rules else None,
-                        execution_config=source_config.execution_config.copy() if source_config.execution_config else {},
+                        sub_agents=copy.deepcopy(source_config.sub_agents) if source_config.sub_agents else [],
+                        routing_rules=copy.deepcopy(source_config.routing_rules) if source_config.routing_rules else None,
+                        execution_config=copy.deepcopy(source_config.execution_config) if source_config.execution_config else {},
                         aggregation_strategy=source_config.aggregation_strategy,
                         is_active=True,
                         created_at=now,
@@ -872,6 +979,241 @@ class AppService:
                 extra={"source_app_id": str(app_id), "error": str(e)}
             )
             raise BusinessException(f"应用复制失败: {str(e)}", BizCode.INTERNAL_ERROR, cause=e)
+
+    def _preload_cross_workspace_resources(
+            self,
+            target_tenant_id: Optional[uuid.UUID],
+            target_workspace_id: uuid.UUID,
+            model_config_ids: set,
+            kb_ids: set
+    ) -> tuple:
+        """Batch-load model configs and knowledge bases to avoid N+1 queries.
+
+        Returns:
+            (available_model_ids, available_kb_ids): sets of IDs available in target workspace
+        """
+        from app.models.models_model import ModelConfig as MC
+        from app.models.knowledge_model import Knowledge
+        from app.models.knowledgeshare_model import KnowledgeShare
+
+        # Batch check model configs by tenant
+        available_model_ids: set = set()
+        if model_config_ids and target_tenant_id:
+            stmt = select(MC.id).where(
+                MC.id.in_(model_config_ids),
+                MC.tenant_id == target_tenant_id
+            )
+            available_model_ids = set(self.db.scalars(stmt).all())
+
+        # Batch check knowledge bases
+        available_kb_ids: set = set()
+        if kb_ids:
+            kb_uuids = set()
+            for kid in kb_ids:
+                try:
+                    kb_uuids.add(uuid.UUID(str(kid)))
+                except (ValueError, AttributeError):
+                    pass
+
+            if kb_uuids:
+                # KBs in target workspace
+                stmt = select(Knowledge.id).where(
+                    Knowledge.id.in_(kb_uuids),
+                    Knowledge.workspace_id == target_workspace_id
+                )
+                available_kb_ids.update(self.db.scalars(stmt).all())
+
+                # KBs shared to target workspace
+                remaining = kb_uuids - available_kb_ids
+                if remaining:
+                    stmt = select(KnowledgeShare.source_kb_id).where(
+                        KnowledgeShare.source_kb_id.in_(remaining),
+                        KnowledgeShare.target_workspace_id == target_workspace_id
+                    )
+                    available_kb_ids.update(self.db.scalars(stmt).all())
+
+        return available_model_ids, available_kb_ids
+
+    @staticmethod
+    def _collect_resource_ids_from_config(
+            model_config_id: Optional[uuid.UUID],
+            knowledge_retrieval: Optional[dict],
+            tools: Optional[list]
+    ) -> tuple:
+        """Extract all model config IDs and knowledge base IDs from an app config."""
+        model_ids: set = set()
+        kb_ids: set = set()
+
+        if model_config_id:
+            model_ids.add(model_config_id)
+
+        if knowledge_retrieval and isinstance(knowledge_retrieval, dict):
+            if "kb_ids" in knowledge_retrieval:
+                for kid in knowledge_retrieval.get("kb_ids", []):
+                    if kid:
+                        kb_ids.add(str(kid))
+            if knowledge_retrieval.get("knowledge_id"):
+                kb_ids.add(str(knowledge_retrieval["knowledge_id"]))
+
+        if tools:
+            for tool in tools:
+                if isinstance(tool, dict):
+                    kid = tool.get("knowledge_id") or tool.get("kb_id")
+                    if kid:
+                        kb_ids.add(str(kid))
+
+        return model_ids, kb_ids
+
+    @staticmethod
+    def _collect_resource_ids_from_workflow_nodes(nodes: list) -> tuple:
+        """Extract all model config IDs and knowledge base IDs from workflow nodes."""
+        model_ids: set = set()
+        kb_ids: set = set()
+
+        for node in (nodes or []):
+            if not isinstance(node, dict):
+                continue
+            data = node.get("data", {})
+            if not isinstance(data, dict):
+                continue
+            for key in ("model_config_id", "default_model_config_id"):
+                val = data.get(key)
+                if val:
+                    try:
+                        model_ids.add(uuid.UUID(str(val)))
+                    except (ValueError, AttributeError):
+                        pass
+            kr = data.get("knowledge_retrieval")
+            if isinstance(kr, dict):
+                for kid in kr.get("kb_ids", []):
+                    if kid:
+                        kb_ids.add(str(kid))
+                if kr.get("knowledge_id"):
+                    kb_ids.add(str(kr["knowledge_id"]))
+            if data.get("knowledge_id"):
+                kb_ids.add(str(data["knowledge_id"]))
+            for kid in data.get("kb_ids", []):
+                if kid:
+                    kb_ids.add(str(kid))
+
+        return model_ids, kb_ids
+
+    @staticmethod
+    def _is_model_available(model_config_id: Optional[uuid.UUID], available_model_ids: set) -> Optional[uuid.UUID]:
+        if not model_config_id:
+            return None
+        return model_config_id if model_config_id in available_model_ids else None
+
+    @staticmethod
+    def _is_kb_available(kb_id: Optional[str], available_kb_ids: set) -> Optional[str]:
+        if not kb_id:
+            return None
+        try:
+            return kb_id if uuid.UUID(str(kb_id)) in available_kb_ids else None
+        except (ValueError, AttributeError):
+            return None
+
+    def _clean_knowledge_retrieval(
+            self,
+            knowledge_retrieval: Optional[dict],
+            available_kb_ids: set
+    ) -> Optional[dict]:
+        """Clean knowledge retrieval config, keeping only available KBs."""
+        if not knowledge_retrieval:
+            return None
+
+        cleaned = copy.deepcopy(knowledge_retrieval)
+
+        if "kb_ids" in cleaned and isinstance(cleaned["kb_ids"], list):
+            cleaned["kb_ids"] = [
+                kid for kid in cleaned["kb_ids"]
+                if self._is_kb_available(kid, available_kb_ids)
+            ]
+
+        if "knowledge_id" in cleaned:
+            cleaned["knowledge_id"] = self._is_kb_available(
+                cleaned.get("knowledge_id"), available_kb_ids
+            )
+
+        return cleaned
+
+    def _clean_tools(
+            self,
+            tools: Optional[list],
+            available_kb_ids: set
+    ) -> list:
+        """Clean tools config, keeping built-in tools and tools with available KBs."""
+        if not tools:
+            return []
+
+        cleaned = []
+        for tool in tools:
+            if not isinstance(tool, dict):
+                cleaned.append(tool)
+                continue
+
+            tool_type = tool.get("type", "")
+            if tool_type in ("builtin", "built_in", "system"):
+                cleaned.append(copy.deepcopy(tool))
+                continue
+
+            kb_id = tool.get("knowledge_id") or tool.get("kb_id")
+            if kb_id:
+                if self._is_kb_available(kb_id, available_kb_ids):
+                    cleaned.append(copy.deepcopy(tool))
+                continue
+
+            cleaned.append(copy.deepcopy(tool))
+
+        return cleaned
+
+    def _clean_workflow_nodes_for_cross_workspace(
+            self,
+            nodes: list,
+            available_model_ids: set,
+            available_kb_ids: set
+    ) -> list:
+        """Clean workflow nodes, using pre-loaded resource sets. Uses deepcopy to avoid mutating source."""
+        if not nodes:
+            return []
+
+        cleaned = []
+        for node in nodes:
+            if not isinstance(node, dict):
+                cleaned.append(node)
+                continue
+
+            node_copy = copy.deepcopy(node)
+            data = node_copy.get("data")
+            if not isinstance(data, dict):
+                cleaned.append(node_copy)
+                continue
+
+            for key in ("model_config_id", "default_model_config_id"):
+                if key in data and data[key]:
+                    try:
+                        mid = uuid.UUID(str(data[key]))
+                    except (ValueError, AttributeError):
+                        data[key] = None
+                        continue
+                    data[key] = str(mid) if mid in available_model_ids else None
+
+            if "knowledge_retrieval" in data and data["knowledge_retrieval"]:
+                data["knowledge_retrieval"] = self._clean_knowledge_retrieval(
+                    data["knowledge_retrieval"], available_kb_ids
+                )
+            if "knowledge_id" in data:
+                data["knowledge_id"] = self._is_kb_available(
+                    data.get("knowledge_id"), available_kb_ids
+                )
+            if "kb_ids" in data and isinstance(data["kb_ids"], list):
+                data["kb_ids"] = [
+                    kid for kid in data["kb_ids"]
+                    if self._is_kb_available(kid, available_kb_ids)
+                ]
+
+            cleaned.append(node_copy)
+        return cleaned
 
     def list_apps(
             self,

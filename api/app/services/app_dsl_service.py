@@ -11,6 +11,7 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.models import AgentConfig, MultiAgentConfig
 from app.models.app_model import App, AppType
+from app.models.appshare_model import AppShare
 from app.models.app_release_model import AppRelease
 from app.models.knowledge_model import Knowledge
 from app.models.models_model import ModelConfig
@@ -298,11 +299,22 @@ class AppDslService:
         return new_app, warnings
 
     def _unique_app_name(self, name: str, workspace_id: uuid.UUID, app_type: AppType) -> str:
+        """生成唯一应用名称，同时检查本空间自有应用和共享到本空间的应用"""
+        # 本空间自有应用名
         existing = {r[0] for r in self.db.query(App.name).filter(
             App.workspace_id == workspace_id,
             App.type == app_type,
             App.is_active.is_(True)
         ).all()}
+        # 共享到本空间的应用名
+        shared_names = {r[0] for r in self.db.query(App.name).join(
+            AppShare, AppShare.source_app_id == App.id
+        ).filter(
+            AppShare.target_workspace_id == workspace_id,
+            App.type == app_type,
+            App.is_active.is_(True)
+        ).all()}
+        existing |= shared_names
         if name not in existing:
             return name
         counter = 1
