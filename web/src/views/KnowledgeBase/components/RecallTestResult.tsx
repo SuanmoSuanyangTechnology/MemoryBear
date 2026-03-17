@@ -169,7 +169,7 @@ const RecallTestResult = ({
         return (
           <div
             key={`${item.metadata?.sort_id || index}-${index}`}
-            className={`rb:flex rb:flex-col rb:mb-4 rb:rounded-lg rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:p-4 rb:pt-2 rb:pb-3 rb:relative rb:group ${editable ? 'rb:cursor-pointer rb:transition-all hover:rb:border-[#155EEF] hover:rb:shadow-md' : ''}`}
+            className={`rb:flex rb:flex-col rb:mb-4 rb:rounded-xl rb:bg-[#F6F6F6] rb:p-4 rb:pt-2 rb:pb-3 rb:relative rb:group ${editable ? 'rb:cursor-pointer rb:transition-all hover:rb:border-[#155EEF] hover:rb:shadow-md' : ''}`}
             onClick={(e) => handleItemClick(e, item, index)}
           >
             {editable && (
@@ -183,16 +183,16 @@ const RecallTestResult = ({
                   {scorePercentage.toFixed(1)}% {t('knowledgeBase.similarity')}
                 </span>
               )}
-              <div className={`rb:flex rb:mt-2 rb:flex-col rb:items-end rb:justify-end rb:gap-1 ${!showScore ? 'rb:w-full' : ''}`}>
+              <div className={`rb:flex rb:mt-2 rb:flex rb:items-end rb:justify-end rb:gap-4 ${!showScore ? 'rb:w-full' : ''}`}>
                 <span className='rb:text-gray-800'>
                   <FileOutlined /> {item.metadata?.file_name || '-'}
                 </span>
-                <span className='rb:text-gray-500 rb:text-xs rb:bg-[#F0F3F8] rb:px-1 rb:py-[2px] rb:rounded'>
+                <span className='rb:text-gray-500 rb:text-xs rb:bg-[#DFDFDF] rb:px-1 rb:py-[2px] rb:rounded'>
                   chunk_{item.metadata?.sort_id || index}
                 </span>
               </div>
             </div>
-            <div className='rb:flex rb:text-left rb:px-4 rb:py-3 rb:bg-[#F0F3F8] rb:rounded-lg rb:mt-2'>
+            <div className='rb:flex rb:text-left rb:px-4 rb:py-3 rb:bg-white rb:rounded-lg rb:mt-2'>
               <div className='rb:text-gray-800 rb:text-sm rb:whitespace-pre-wrap rb:break-words rb:w-full'>
                 {(() => {
                   const qaContent = parseQAContent(item.page_content);

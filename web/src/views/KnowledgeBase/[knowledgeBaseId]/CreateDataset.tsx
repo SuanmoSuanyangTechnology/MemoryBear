@@ -2,6 +2,7 @@ import {  useMemo,useRef, useState, useEffect } from 'react';
 import { Button, Flex, Radio, Steps, Modal, Input, Spin, message, Checkbox, Select, Form, Progress} from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import './Private.css';
 import Table, { type TableRef } from '@/components/Table'
 import type { AnyObject } from 'antd/es/_util/type';
 import type { UploadFileResponse,KnowledgeBaseDocumentData } from '@/views/KnowledgeBase/types';
@@ -32,7 +33,7 @@ const { TextArea } = Input;
   };
   const getActiveRadioStyle = (active: boolean): React.CSSProperties => ({
     ...radioWrapperBaseStyle,
-    border: active ? '1px solid #1677ff' : radioWrapperBaseStyle.border,
+    border: active ? '1px solid #171719' : radioWrapperBaseStyle.border,
   });
 
 
@@ -549,7 +550,7 @@ const CreateDataset = () => {
     <>
       {contextHolder}
     
-    <div className='rb:p-6 rb:pt-2 rb:h-full'>
+    <div className='rb:p-3 rb:pt-2 rb:h-full rb:flex rb:flex-col'>
       {/* <Typography.Title level={4} className='rb:!m-0 rb:!mb-4'>
         {t('knowledgeBase.createA') + ' ' + t('knowledgeBase.dataset')}
       </Typography.Title> */}
@@ -557,298 +558,299 @@ const CreateDataset = () => {
           <img src={exitIcon} alt='exit' className='rb:w-4 rb:h-4' />
           <span className='rb:text-gray-500 rb:text-sm'>{t('common.exit')}</span>
       </div>
-      <div className='rb:px-24 rb:py-5  rb:bg-[#FBFDFF] rb:rounded-lg rb:border rb:border-[#DFE4ED]'>
-          <Steps current={current} items={steps} />
+      <div className='rb:px-24 rb:py-5  rb:bg-white rb:rounded-lg'>
+          <Steps current={current} items={steps} className="custom-steps" />
       </div>  
-      
+      <div className='rb:bg-white rb:rounded-lg rb:flex-1 rb:mt-3'>
 
-      {current === 0 && (
-        <div className='rb:flex rb:w-full rb:mt-10'>
-            {source && source === 'local' && (
-                <UploadFiles 
-                  ref={uploadRef}
-                  isCanDrag={true} 
-                  fileSize={100} 
-                  multiple={true} 
-                  maxCount={99} 
-                  fileType={fileType} 
-                  customRequest={handleUpload}
-                  onChange={(fileList) => {
-                    console.log('File list changed:', fileList);
-                  }}
-                  onRemove={async (file) => {
-                      // 如果文件正在上传，取消上传
-                      const fileUid = file.uid;
-                      const abortController = abortControllersRef.current.get(fileUid);
-                      if (abortController) {
-                        abortController.abort();
-                        abortControllersRef.current.delete(fileUid);
-                        console.log('Upload cancelled:', (file as any).name);
-                        // 取消上传后直接返回 true，允许移除文件
-                        return true;
-                      }
-                      
-                      // Only delete server file when file upload was successful (has response.id)
-                      if (file.response?.id) {
-                        try {
-                          await deleteDocument(file.response.id);
-                          setRechunkFileIds(prev => prev.filter(id => id !== file.response.id));
-                          console.log('Server file deleted:', file.response.id);
+        {current === 0 && (
+          <div className='rb:flex rb:w-full rb:p-6'>
+              {source && source === 'local' && (
+                  <UploadFiles 
+                    ref={uploadRef}
+                    isCanDrag={true} 
+                    fileSize={100} 
+                    multiple={true} 
+                    maxCount={99} 
+                    fileType={fileType} 
+                    customRequest={handleUpload}
+                    onChange={(fileList) => {
+                      console.log('File list changed:', fileList);
+                    }}
+                    onRemove={async (file) => {
+                        // 如果文件正在上传，取消上传
+                        const fileUid = file.uid;
+                        const abortController = abortControllersRef.current.get(fileUid);
+                        if (abortController) {
+                          abortController.abort();
+                          abortControllersRef.current.delete(fileUid);
+                          console.log('Upload cancelled:', (file as any).name);
+                          // 取消上传后直接返回 true，允许移除文件
                           return true;
-                        } catch (error) {
-                          console.error('Failed to delete file:', error);
-                          messageApi.error(t('common.deleteFailed') || 'Failed to delete file');
-                          return false; // Don't remove file when deletion fails
                         }
-                      }
-                      
-                      // Also allow removal in other cases (such as failed uploads)
-                      return true;
-                    }} />
-            )}
-            {source && source === 'link' && (
-                <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-40'>
+                        
+                        // Only delete server file when file upload was successful (has response.id)
+                        if (file.response?.id) {
+                          try {
+                            await deleteDocument(file.response.id);
+                            setRechunkFileIds(prev => prev.filter(id => id !== file.response.id));
+                            console.log('Server file deleted:', file.response.id);
+                            return true;
+                          } catch (error) {
+                            console.error('Failed to delete file:', error);
+                            messageApi.error(t('common.deleteFailed') || 'Failed to delete file');
+                            return false; // Don't remove file when deletion fails
+                          }
+                        }
+                        
+                        // Also allow removal in other cases (such as failed uploads)
+                        return true;
+                      }} />
+              )}
+              {source && source === 'link' && (
+                  <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-40'>
 
-                    <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
-                        {t('knowledgeBase.webLink')}
-                    </div>
-                    <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} />
-                    <div className='rb:text-sm rb:text-gray-500 rb:mt-3'>
-                        {t('knowledgeBase.webLinkDesc',{count: 5})}
-                    </div>
-                    <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
-                        {t('knowledgeBase.selectorTutorial')}
-                    </div>
-                    <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
-                </div>
-            )}
-            {source && source === 'text' && (
-                <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-40'>
-                    <Form form={form} layout="vertical">
-                        <Form.Item
-                          name="title"
-                          label={t('knowledgeBase.title')}
-                          rules={[{ required: true, message: t('knowledgeBase.pleaseEnterTitle') }]}
-                        >
-                          <Input placeholder={t('knowledgeBase.pleaseEnterTitle')} />
-                        </Form.Item>
+                      <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
+                          {t('knowledgeBase.webLink')}
+                      </div>
+                      <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} />
+                      <div className='rb:text-sm rb:text-gray-500 rb:mt-3'>
+                          {t('knowledgeBase.webLinkDesc',{count: 5})}
+                      </div>
+                      <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
+                          {t('knowledgeBase.selectorTutorial')}
+                      </div>
+                      <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
+                  </div>
+              )}
+              {source && source === 'text' && (
+                  <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-40'>
+                      <Form form={form} layout="vertical">
+                          <Form.Item
+                            name="title"
+                            label={t('knowledgeBase.title')}
+                            rules={[{ required: true, message: t('knowledgeBase.pleaseEnterTitle') }]}
+                          >
+                            <Input placeholder={t('knowledgeBase.pleaseEnterTitle')} />
+                          </Form.Item>
 
-                        <Form.Item
-                          name="content"
-                          label={t('knowledgeBase.customContent')}
-                          rules={[{ required: true, message: t('knowledgeBase.pleaseEnterContent') }]}
-                        >
-                          <Input.TextArea
-                            placeholder={t('knowledgeBase.pleaseEnterContent')}
-                            rows={8}
-                            showCount
-                            maxLength={5000}
-                          />
-                        </Form.Item>
-                      </Form>
-                    {/* <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
-                        {t('knowledgeBase.customText')}
-                    </div>
-                    <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
-                    <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
-                        {t('knowledgeBase.customContent')}
-                    </div>
-                    <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} /> */}
-                </div>
-            )}
-        </div>
-      )}
+                          <Form.Item
+                            name="content"
+                            label={t('knowledgeBase.customContent')}
+                            rules={[{ required: true, message: t('knowledgeBase.pleaseEnterContent') }]}
+                          >
+                            <Input.TextArea
+                              placeholder={t('knowledgeBase.pleaseEnterContent')}
+                              rows={8}
+                              showCount
+                              maxLength={5000}
+                            />
+                          </Form.Item>
+                        </Form>
+                      {/* <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
+                          {t('knowledgeBase.customText')}
+                      </div>
+                      <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
+                      <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
+                          {t('knowledgeBase.customContent')}
+                      </div>
+                      <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} /> */}
+                  </div>
+              )}
+          </div>
+        )}
 
-      {current === 1 && (
-        <div className='rb:flex rb:flex-col rb:mt-10 rb:px-40'>
-            {rechunkFileIds.length > 0 && (
-              <div className='rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded rb:px-3 rb:py-2 rb:mb-4 rb:text-xs rb:text-gray-600 rb:flex rb:flex-wrap rb:gap-2'>
-                  <span className='rb:text-gray-700 rb:font-medium'>{t('knowledgeBase.rechunking')}:</span>
-                  {rechunkFileIds.map((id) => (
-                    <span key={id} className='rb:px-2 rb:py-0.5 rb:bg-white rb:border rb:border-[#DFE4ED] rb:rounded'>{id}</span>
-                  ))}
-              </div>
-            )}
-            <div className='rb:text-base rb:font-medium rb:text-gray-800 rb:mt-4'>
-                {t('knowledgeBase.fileParsingSettings')}
-            </div>
-            <div className='rb:mt-4'>
-              <div 
-                className={`rb:flex rb:items-center rb:w-full rb:border rb:rounded-lg rb:p-4 rb:cursor-pointer ${
-                  pdfEnhancementEnabled ? 'rb:border-blue-500' : 'rb:border-gray-300'
-                }`}
-                // onClick={() => setPdfEnhancementEnabled(!pdfEnhancementEnabled)}
-              >
-                <Checkbox 
-                  checked={pdfEnhancementEnabled}
-                  onChange={(e) => setPdfEnhancementEnabled(e.target.checked)}
-                  className='rb:mr-3'
-                />
-                <span className='rb:text-base rb:font-medium rb:text-gray-800 rb:pl-[22px]'>
-                  {t('knowledgeBase.pdfEnhancementAnalysis')}
-                </span>
-                {pdfEnhancementEnabled && (
-                <div className='rb:ml-10'>
-                  <Select
-                    value={pdfEnhancementMethod}
-                    onChange={(value) => setPdfEnhancementMethod(value)}
-                    className='rb:w-48'
-                    options={[
-                      { value: 'deepdoc', label: 'DeepDoc' },
-                      { value: 'mineru', label: 'MinerU' },
-                      { value: 'textln', label: 'TextLN' }
-                    ]}
-                  />
+        {current === 1 && (
+          <div className='rb:flex rb:flex-col rb:py-6 rb:px-40'>
+              {rechunkFileIds.length > 0 && (
+                <div className='rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded rb:px-3 rb:py-2 rb:mb-4 rb:text-xs rb:text-gray-600 rb:flex rb:flex-wrap rb:gap-2'>
+                    <span className='rb:text-gray-700 rb:font-medium'>{t('knowledgeBase.rechunking')}:</span>
+                    {rechunkFileIds.map((id) => (
+                      <span key={id} className='rb:px-2 rb:py-0.5 rb:bg-white rb:border rb:border-[#DFE4ED] rb:rounded'>{id}</span>
+                    ))}
                 </div>
               )}
+              <div className='rb:text-base rb:font-medium rb:text-gray-800 rb:mt-4'>
+                  {t('knowledgeBase.fileParsingSettings')}
               </div>
-              
-            </div>
-            <div className='rb:text-base rb:font-medium rb:text-gray-800 rb:mt-6'>
-                {t('knowledgeBase.dataProcessingSettings')}
-            </div>
-            <div className='rb:font-medium rb:text-gray-500 rb:mt-4 rb:mb-3'>
-                {t('knowledgeBase.processingMethod')}
-            </div>
-            <Radio.Group
-                value={processingMethod}
-                onChange={(e) => setProcessingMethod(e.target.value)}
-                style={style}
-            >
-                <Radio value='directBlock' style={getActiveRadioStyle(processingMethod === 'directBlock')}>
-                    <Flex gap='small' vertical>
-                        <span className='rb:text-base rb:font-medium rb:text-gray-800'>
-                            {t('knowledgeBase.directBlock')}
-                        </span>
-                    </Flex>
-                </Radio>
-                <Radio value='qaExtract' style={getActiveRadioStyle(processingMethod === 'qaExtract')}>
-                    <Flex gap='small' vertical>
-                        <span className='rb:text-base rb:font-medium rb:text-gray-800'>
-                        {t('knowledgeBase.qaExtract')}
-                        </span>
-                    </Flex>
-                </Radio>
-            </Radio.Group>
-            <div className='rb:font-medium rb:text-gray-500 rb:mt-4 rb:mb-3'>
-                {t('knowledgeBase.parameterSettings')}
-            </div>
-            <Radio.Group
-                value={parameterSettings}
-                onChange={(e) => setParameterSettings(e.target.value)}
-                style={style}
-            >
-                <Radio value='defaultSettings' style={getActiveRadioStyle(parameterSettings === 'defaultSettings')}>
-                    <Flex gap='small' vertical>
-                        <span className='rb:text-base rb:font-medium rb:text-gray-800'>
-                            {t('knowledgeBase.default')}
-                        </span>
-                        <span className='rb:text-3 rb:text-gray-500'>{t('knowledgeBase.defaultSettings')}</span>
-                    </Flex>
-                </Radio>
-                <Radio value='customSettings' style={getActiveRadioStyle(parameterSettings === 'customSettings')}>
-                    <Flex gap='small' vertical>
-                        <span className='rb:text-base rb:font-medium rb:text-gray-800'>
-                            {t('knowledgeBase.customize')}
-                        </span>
-                        <span className='rb:text-3 rb:text-gray-500'>{t('knowledgeBase.customSettings')}</span>
-                    </Flex>
-                </Radio>
-            </Radio.Group>
-            {parameterSettings === 'customSettings' && ( 
-              <div className='rb:flex rb:flex-col rb:mt-5'> 
-                  <div className='rb:w-full rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
-                      {t('knowledgeBase.delimiter')}
+              <div className='rb:mt-4'>
+                <div 
+                  className={`rb:flex rb:items-center rb:w-full rb:border rb:rounded-lg rb:p-4 rb:cursor-pointer ${
+                    pdfEnhancementEnabled ? 'rb:border-gray-900' : 'rb:border-gray-300'
+                  }`}
+                  // onClick={() => setPdfEnhancementEnabled(!pdfEnhancementEnabled)}
+                >
+                  <Checkbox 
+                    checked={pdfEnhancementEnabled}
+                    onChange={(e) => setPdfEnhancementEnabled(e.target.checked)}
+                    className='rb:mr-3'
+                  />
+                  <span className='rb:text-base rb:font-medium rb:text-gray-800 rb:pl-[22px]'>
+                    {t('knowledgeBase.pdfEnhancementAnalysis')}
+                  </span>
+                  {pdfEnhancementEnabled && (
+                  <div className='rb:ml-10'>
+                    <Select
+                      value={pdfEnhancementMethod}
+                      onChange={(value) => setPdfEnhancementMethod(value)}
+                      className='rb:w-48'
+                      options={[
+                        { value: 'deepdoc', label: 'DeepDoc' },
+                        { value: 'mineru', label: 'MinerU' },
+                        { value: 'textln', label: 'TextLN' }
+                      ]}
+                    />
                   </div>
-                  <DelimiterSelector value={delimiter} onChange={setDelimiter} className='rb:mb-5'/>
-                  <SliderInput label={t('knowledgeBase.suggestedBlockSize')} max={1024} min={1} step={1} value={blockSize} onChange={handleChange} />
+                )}
+                </div>
+                
               </div>
-              
-            )}
-        </div>
-      )}
-
-      {/* 暂时隐藏第三步：数据预览 */}
-      {/* {current === stepIndexMap.dataPreview && (
-        <div className='rb:grid rb:grid-cols-2 rb:rounded-xl rb:border rb:border-[#DFE4ED] rb:h-[calc(100%-160px)] rb:bg-[#FBFDFF] rb:mt-4'>
-            <div className='rb:border-r rb:h-full rb:overflow-hidden rb:border-[#DFE4ED]'>
-                <div className='rb:h-11 rb:w-full rb:text-sm rb:font-medium rb:text-gray-800 rb:px-4 rb:py-3 rb:border-b rb:border-[#DFE4ED]'>
-                    {t('knowledgeBase.fileList')}
-                </div>
-                <div className='rb:flex rb:flex-col rb:h-[calc(100%-44px)] rb:overflow-y-auto'>
-                    {data.map((item, index) => (
-                        <div key={index} className={`rb:h-11 rb:w-full rb:text-sm rb:text-gray-800 rb:px-4 rb:py-3  rb:hover:text-[#155EEF] rb:cursor-pointer ${curSelectedFileId === index ? styles.textBg + ' ' + styles.active : ''}`}
-                            onClick={() => handlePreview(item, index)}>
-                            {item.file_name}
-                        </div>
-                        ))
-                    }
-                    
-                </div>
-            </div>
-            <div className='rb:h-full rb:overflow-hidden'>
-                <div className='rb:flex rb:items-center rb:justify-between rb:h-11 rb:w-full rb:text-sm rb:font-medium rb:text-gray-800 rb:px-4 rb:py-3 rb:border-b rb:border-[#DFE4ED]'>
-                    {t('knowledgeBase.dataPreview')}
-                    <span className='rb:text-sm rb:text-gray-500'>{t('knowledgeBase.maxPreviewChunks', {count: total, max: chunkData.length})}</span>
-                </div>
-                <Spin spinning={previewLoading}>
-                    <div className='rb:flex rb:flex-col rb:h-[calc(100%-44px)] rb:overflow-y-auto'>
-                        {chunkData.length > 0 ? (
-                            chunkData.map((item, index) => (
-                                <div key={index} className='rb:text-sm rb:text-gray-800 rb:px-4 rb:py-3'
-                                    dangerouslySetInnerHTML={{ __html: item.page_content }}
-                                />
-                            ))
-                        ) : (
-                            <NoData title={t('knowledgeBase.noChunksToPreview')} 
-                                subTitle={t('knowledgeBase.clickToPreview')}
-                                image={noDataIcon}
-                            />
-                        )}
+              <div className='rb:text-base rb:font-medium rb:text-gray-800 rb:mt-6'>
+                  {t('knowledgeBase.dataProcessingSettings')}
+              </div>
+              <div className='rb:font-medium rb:text-gray-500 rb:mt-4 rb:mb-3'>
+                  {t('knowledgeBase.processingMethod')}
+              </div>
+              <Radio.Group
+                  value={processingMethod}
+                  onChange={(e) => setProcessingMethod(e.target.value)}
+                  style={style}
+              >
+                  <Radio value='directBlock' style={getActiveRadioStyle(processingMethod === 'directBlock')}>
+                      <Flex gap='small' vertical>
+                          <span className='rb:text-base rb:font-medium rb:text-gray-800'>
+                              {t('knowledgeBase.directBlock')}
+                          </span>
+                      </Flex>
+                  </Radio>
+                  <Radio value='qaExtract' style={getActiveRadioStyle(processingMethod === 'qaExtract')}>
+                      <Flex gap='small' vertical>
+                          <span className='rb:text-base rb:font-medium rb:text-gray-800'>
+                          {t('knowledgeBase.qaExtract')}
+                          </span>
+                      </Flex>
+                  </Radio>
+              </Radio.Group>
+              <div className='rb:font-medium rb:text-gray-500 rb:mt-4 rb:mb-3'>
+                  {t('knowledgeBase.parameterSettings')}
+              </div>
+              <Radio.Group
+                  value={parameterSettings}
+                  onChange={(e) => setParameterSettings(e.target.value)}
+                  style={style}
+              >
+                  <Radio value='defaultSettings' style={getActiveRadioStyle(parameterSettings === 'defaultSettings')}>
+                      <Flex gap='small' vertical>
+                          <span className='rb:text-base rb:font-medium rb:text-gray-800'>
+                              {t('knowledgeBase.default')}
+                          </span>
+                          <span className='rb:text-3 rb:text-gray-500'>{t('knowledgeBase.defaultSettings')}</span>
+                      </Flex>
+                  </Radio>
+                  <Radio value='customSettings' style={getActiveRadioStyle(parameterSettings === 'customSettings')}>
+                      <Flex gap='small' vertical>
+                          <span className='rb:text-base rb:font-medium rb:text-gray-800'>
+                              {t('knowledgeBase.customize')}
+                          </span>
+                          <span className='rb:text-3 rb:text-gray-500'>{t('knowledgeBase.customSettings')}</span>
+                      </Flex>
+                  </Radio>
+              </Radio.Group>
+              {parameterSettings === 'customSettings' && ( 
+                <div className='rb:flex rb:flex-col rb:mt-5'> 
+                    <div className='rb:w-full rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
+                        {t('knowledgeBase.delimiter')}
                     </div>
-                </Spin>
-            </div>
-        </div>
-      )} */}
-
-      {current === 2 && (
-        // <Spin spinning={pollingLoading} tip={t('knowledgeBase.processingDocuments') || '正在处理文档...'}>
-          <div className='rb:text-sm rb:text-gray-500 rb:mt-4 rb:h-[calc(100%-160px)] rb:overflow-y-auto'>
-            {rechunkFileIds.length > 0 ? (
-              <Table
-                ref={tableRef}
-                apiUrl={`/documents/${knowledgeBaseId}/documents`}
-                apiParams={{       
-                    document_ids: rechunkFileIds.join(','),
-                }}
-                columns={columns}
-                rowKey="id"
-              />
-            ) : (
-              <Table
-                ref={tableRef}
-                columns={columns}
-                rowKey="id"
-                initialData={[]}
-              />
-            )}
+                    <DelimiterSelector value={delimiter} onChange={setDelimiter} className='rb:mb-5'/>
+                    <SliderInput label={t('knowledgeBase.suggestedBlockSize')} max={1024} min={1} step={1} value={blockSize} onChange={handleChange} />
+                </div>
+                
+              )}
           </div>
-        // </Spin>
-      )}
-
-      <div className={`rb:flex rb:gap-3 rb:mt-6 ${current === 1 || (source == 'link' && current === 0) || (source == 'text' && current === 0) ? 'rb:pl-40 rb:mt-10' : ''}`}>
-        {current !== 0 && (
-            <Button onClick={handlePrev} disabled={current === 0 || pollingLoading}>
-            {t('common.previous') || 'Prev'}
-            </Button>
         )}
-        <Button 
-          type='primary' 
-          onClick={current === 2 ? handleStartUpload : handleNext}
-          disabled={pollingLoading || (current === 0 && rechunkFileIds.length === 0)}
-        >
-          {current === 2 ? t('knowledgeBase.startUploading') || 'Start Upload' : t('common.next') || 'Next'}
-        </Button>
+
+        {/* 暂时隐藏第三步：数据预览 */}
+        {/* {current === stepIndexMap.dataPreview && (
+          <div className='rb:grid rb:grid-cols-2 rb:rounded-xl rb:border rb:border-[#DFE4ED] rb:h-[calc(100%-160px)] rb:bg-[#FBFDFF] rb:mt-4'>
+              <div className='rb:border-r rb:h-full rb:overflow-hidden rb:border-[#DFE4ED]'>
+                  <div className='rb:h-11 rb:w-full rb:text-sm rb:font-medium rb:text-gray-800 rb:px-4 rb:py-3 rb:border-b rb:border-[#DFE4ED]'>
+                      {t('knowledgeBase.fileList')}
+                  </div>
+                  <div className='rb:flex rb:flex-col rb:h-[calc(100%-44px)] rb:overflow-y-auto'>
+                      {data.map((item, index) => (
+                          <div key={index} className={`rb:h-11 rb:w-full rb:text-sm rb:text-gray-800 rb:px-4 rb:py-3  rb:hover:text-[#155EEF] rb:cursor-pointer ${curSelectedFileId === index ? styles.textBg + ' ' + styles.active : ''}`}
+                              onClick={() => handlePreview(item, index)}>
+                              {item.file_name}
+                          </div>
+                          ))
+                      }
+                      
+                  </div>
+              </div>
+              <div className='rb:h-full rb:overflow-hidden'>
+                  <div className='rb:flex rb:items-center rb:justify-between rb:h-11 rb:w-full rb:text-sm rb:font-medium rb:text-gray-800 rb:px-4 rb:py-3 rb:border-b rb:border-[#DFE4ED]'>
+                      {t('knowledgeBase.dataPreview')}
+                      <span className='rb:text-sm rb:text-gray-500'>{t('knowledgeBase.maxPreviewChunks', {count: total, max: chunkData.length})}</span>
+                  </div>
+                  <Spin spinning={previewLoading}>
+                      <div className='rb:flex rb:flex-col rb:h-[calc(100%-44px)] rb:overflow-y-auto'>
+                          {chunkData.length > 0 ? (
+                              chunkData.map((item, index) => (
+                                  <div key={index} className='rb:text-sm rb:text-gray-800 rb:px-4 rb:py-3'
+                                      dangerouslySetInnerHTML={{ __html: item.page_content }}
+                                  />
+                              ))
+                          ) : (
+                              <NoData title={t('knowledgeBase.noChunksToPreview')} 
+                                  subTitle={t('knowledgeBase.clickToPreview')}
+                                  image={noDataIcon}
+                              />
+                          )}
+                      </div>
+                  </Spin>
+              </div>
+          </div>
+        )} */}
+
+        {current === 2 && (
+          // <Spin spinning={pollingLoading} tip={t('knowledgeBase.processingDocuments') || '正在处理文档...'}>
+            <div className='rb:text-sm rb:text-gray-500 rb:mt-4 rb:h-[calc(100%-160px)] rb:overflow-y-auto rb:px-6 rb:py-6'>
+              {rechunkFileIds.length > 0 ? (
+                <Table
+                  ref={tableRef}
+                  apiUrl={`/documents/${knowledgeBaseId}/documents`}
+                  apiParams={{       
+                      document_ids: rechunkFileIds.join(','),
+                  }}
+                  columns={columns}
+                  rowKey="id"
+                />
+              ) : (
+                <Table
+                  ref={tableRef}
+                  columns={columns}
+                  rowKey="id"
+                  initialData={[]}
+                />
+              )}
+            </div>
+          // </Spin>
+        )}
+
+        <div className={`rb:flex rb:p-6 rb:gap-3 rb:mt-6 ${current === 1 || (source == 'link' && current === 0) || (source == 'text' && current === 0) ? 'rb:pl-40 rb:mt-10' : ''}`}>
+          {current !== 0 && (
+              <Button onClick={handlePrev} disabled={current === 0 || pollingLoading}>
+              {t('common.previous') || 'Prev'}
+              </Button>
+          )}
+          <Button 
+            type='primary' 
+            onClick={current === 2 ? handleStartUpload : handleNext}
+            disabled={pollingLoading || (current === 0 && rechunkFileIds.length === 0)}
+          >
+            {current === 2 ? t('knowledgeBase.startUploading') || 'Start Upload' : t('common.next') || 'Next'}
+          </Button>
+        </div>
       </div>
     </div>
   </>);

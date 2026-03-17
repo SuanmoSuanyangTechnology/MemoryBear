@@ -530,7 +530,7 @@ const Private: FC = () => {
         const document = record as KnowledgeBaseDocumentData;
         return (
           <span
-            className="rb:text-blue-600 rb:cursor-pointer rb:hover:underline"
+            className="rb:text-gray-900 rb:font-medium rb:cursor-pointer rb:hover:underline"
             onClick={() => {
               if (knowledgeBaseId && document.id) {
                 navigate(`/knowledge-base/${knowledgeBaseId}/DocumentDetails`,{
@@ -765,9 +765,9 @@ const Private: FC = () => {
   return (
     <>
     {contextHolder}
-    <div className="rb:flex rb:h-full rb:gap-4">
+    <div className="rb:flex rb:h-full rb:bg-white rb:rounded-xl">
       {folder && (
-        <div className="rb:w-64 rb:flex-shrink-0 rb:h-[calc(100%+40px)] rb:mt-[-16px] rb:border-r rb:border-[#EAECEE] rb:p-4 rb:bg-transparent">
+        <div className="rb:w-64 rb:py-4 rb:flex-shrink-0 rb:h-[calc(100%+40px)] rb:border-r rb:border-[#EAECEE] rb:p-4 rb:bg-transparent">
             <FolderTree
               multiple
               className="customTree"
@@ -783,7 +783,7 @@ const Private: FC = () => {
             />
         </div>
       )}
-      <div className='rb:flex-1 rb:min-w-0'>
+      <div className='rb:flex-1 rb:min-w-0 rb:p-4'>
         <div className="rb:flex rb:items-center rb:justify-between rb:mb-4">
           
           <div className="rb:flex-col">
