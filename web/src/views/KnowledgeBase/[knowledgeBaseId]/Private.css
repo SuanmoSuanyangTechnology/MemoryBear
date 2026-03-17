@@ -16,6 +16,7 @@
 .customTree .ant-tree-node-content-wrapper {
   background: transparent !important;
   background-color: transparent !important;
+  color: #171719 !important;
   height: 40px !important;
   display: flex !important;
   align-items: center !important;
@@ -28,15 +29,18 @@
 
 .customTree.ant-tree.ant-tree-directory .ant-tree-treenode-selected .ant-tree-node-content-wrapper:before,
 .customTree.ant-tree.ant-tree-directory .ant-tree-treenode-selected .ant-tree-node-content-wrapper:hover:before {
-    background: #FFFFFF !important;
+    background: #171719 !important;
 }
 .customTree.ant-tree.ant-tree-directory .ant-tree-treenode-selected .ant-tree-node-content-wrapper, 
 .customTree.ant-tree.ant-tree-directory .ant-tree-treenode-selected .ant-tree-node-content-wrapper:hover{
-    color: #000 !important;
+    color: #FFFFFF !important;
 }
 .customTree.ant-tree.ant-tree-directory .ant-tree-treenode-selected .ant-tree-switcher,
 .customTree.ant-tree.ant-tree-directory .ant-tree-treenode-selected .ant-tree-draggable-icon{
-    color: #000;
+    color: #FFFFFF;
+}
+.customTree.ant-tree.ant-tree-directory .ant-tree-treenode-selected .ant-tree-switcher img {
+    filter: brightness(0) invert(1) !important;
 }
 .customTree .ant-tree-switcher {
   display: flex !important;
@@ -111,3 +115,8 @@
 
 
 
+
+/* Steps 已完成步骤圆内字体颜色 */
+.custom-steps .ant-steps-item-finish .ant-steps-item-icon .ant-steps-icon {
+  color: #FFFFFF !important;
+}

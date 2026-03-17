@@ -240,10 +240,10 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
 
   if (isCanDrag) {
     return (
-      <div className="rb:mb-6 rb:w-full">
+      <div className="rb:mb-6 rb:w-full  rb:border rb:border-dashed rb:border-gray-900 rb:rounded-xl">
         <Dragger {...uploadProps} style={{ height: '270px' }}>
           <div className="rb:flex rb:justify-center rb:flex-col rb:items-center">
-            <div className="rb:size-12 rb:bg-cover rb:bg-[url('@/assets/images/CloudUploadOutlined.png')]"></div>
+            <div className="rb:size-12 rb:bg-cover rb:bg-[url('@/assets/images/CloudUploadOutlined.svg')]"></div>
             {(!isAutoUpload || !hasProgress && (!fileList || !fileList.length)) &&
               <>
                 <div className="rb:text-base rb:text-[14px] rb:font-medium rb:flex rb:items-center rb:mt-2 rb:leading-5">

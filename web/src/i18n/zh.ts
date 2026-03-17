@@ -135,6 +135,7 @@ export const zh = {
       documentInfo: '文档信息',
       documentPreview: '文档预览',
       type: '类型',
+      viewBasicInfo:'查看基本信息',
       permission_id: '权限',
       status: '状态',
       created_at: '创建时间',

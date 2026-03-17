@@ -633,6 +633,7 @@ export const en = {
       documentInfo: 'Document Information',
       documentPreview:'Document Preview',
       type: 'Type',
+      viewBasicInfo: 'View Basic Information',
       permission_id: 'Permission',
       status: 'Status',
       created_at: 'Created At',

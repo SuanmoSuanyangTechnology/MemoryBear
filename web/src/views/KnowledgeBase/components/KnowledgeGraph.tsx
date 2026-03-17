@@ -270,8 +270,8 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
     <Col span={24}>
       <RbCard 
         title={t('knowledgeBase.knowledgeGraph')}
-        headerType="borderless"
-        headerClassName="rb:text-[18px]! rb:leading-[24px]"
+        variant="outlined"
+        headerClassName="rb:text-sm! rb:leading-11 rb:bg-[#FAFAFA]! rb:w-full rb:ml-0! rb:px-3!"
       >
         <div className="rb:h-124 rb:relative">
           {loading ? (
@@ -435,7 +435,7 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
             </>
           )}
         </div>
-        <div className="rb:bg-[#F0F3F8] rb:flex rb:items-center rb:gap-6 rb:rounded-[0px_0px_12px_12px] rb:p-[14px_40px] rb:m-[0_-20px_-16px_-16px]">
+        <div className="rb:bg-[#FAFAFA] rb:border-box rb:border-t rb:border-gray-200 rb:flex rb:items-center rb:justify-between rb:gap-6 rb:rounded-[0px_0px_12px_12px] rb:p-[14px_40px] rb:m-[0_-16px_-20px_-16px]">
           {operations.map((item) => (
             <div key={item.name} className="rb:flex rb:items-center rb:text-[#5B6167] rb:leading-5">
               <img src={item.icon} className="rb:w-5 rb:h-5 rb:mr-1" />
