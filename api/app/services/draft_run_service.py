@@ -386,7 +386,7 @@ class AgentRunService:
         # 校验传输方式
         allowed_methods = fu.get("allowed_transfer_methods", ["local_file", "remote_url"])
         for f in files:
-            if str(f.transfer_method) not in allowed_methods:
+            if f.transfer_method.value not in allowed_methods:
                 raise BusinessException(
                     f"不支持的文件传输方式：{f.transfer_method}，允许的方式：{', '.join(allowed_methods)}",
                     BizCode.BAD_REQUEST
