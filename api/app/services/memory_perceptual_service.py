@@ -5,12 +5,14 @@ from urllib.parse import urlparse, unquote
 
 import json_repair
 from jinja2 import Template
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.models import RedBearLLM, RedBearModelConfig
+from app.models import FileMetadata
 from app.models.memory_perceptual_model import PerceptualType, FileStorageService
 from app.models.prompt_optimizer_model import RoleType
 from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
@@ -245,6 +247,18 @@ class MemoryPerceptualService:
         filename = os.path.basename(path)
         filename = unquote(filename)
         file_ext = os.path.splitext(filename)[1]
+        try:
+            file_id = uuid.UUID(filename)
+            stmt = select(FileMetadata).where(
+                FileMetadata.id == file_id
+            )
+            file = self.db.execute(stmt).scalar_one_or_none()
+
+            if file:
+                filename = file.file_name
+                file_ext = file.file_ext
+        except ValueError:
+            business_logger.debug(f"Remote file, file_id={filename}")
         if not file_ext:
             if file_type == FileType.AUDIO:
                 file_ext = ".mp3"
