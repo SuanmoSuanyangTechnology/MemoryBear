@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:23 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-17 17:02:46 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-17 17:15:14
  */
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -90,10 +90,25 @@ const PerceptualLastInfo: FC<{ type: 'last_visual' | 'last_listen' | 'last_text'
     })
   }
 
-  // const handleDownload = () => {
-  //   if (!data.file_path) return
-  //   window.open(data.file_path, '_blank')
-  // }
+  const handleDownload = async () => {
+    if (!data.file_path) return
+    if (data.file_path.includes('.redbearai.') || data.file_path.includes('.memorybear.')) {
+      try {
+        const res = await fetch(data.file_path)
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = data.file_name || 'download'
+        a.click()
+        URL.revokeObjectURL(url)
+      } catch {
+        window.open(data.file_path, '_blank')
+      }
+    } else {
+      window.open(data.file_path, '_blank')
+    }
+  }
 
   return (
     <RbCard
@@ -121,7 +136,7 @@ const PerceptualLastInfo: FC<{ type: 'last_visual' | 'last_listen' | 'last_text'
                     <source src={data.file_path} />
                   </audio>
                 ) : (
-                  <a className="rb:text-[#5B6167] rb:cursor-pointer" href={data.file_path} target="_blank">{data.file_name}</a>
+                  <div className="rb:text-[#5B6167] rb:cursor-pointer" onClick={handleDownload}>{data.file_name}</div>
                 )
               ) : (
                 <div className="rb:text-[#5B6167]">{t('empty.tableEmpty')}</div>
