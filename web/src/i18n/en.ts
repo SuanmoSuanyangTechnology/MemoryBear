@@ -1771,6 +1771,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       memoryConversationAnalysisEmpty: 'No conversation analysis available.',
       memoryConversationAnalysisEmptySubTitle: 'Conversation analysis will appear here.',
 
+      communities: 'Cluster Communities',
+      summaries: 'Memory Summaries',
       uploadFile: 'Upload File',
       fileType: 'File Type',
       image: 'Image',
