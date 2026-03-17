@@ -425,8 +425,8 @@ class MultimodalService:
             Dict: 根据 provider 返回不同格式的图片内容
         """
         try:
-            url = await self.get_file_url(file)
-            return await strategy.format_image(url, content=file.get_content())
+            # url = await self.get_file_url(file)
+            return await strategy.format_image(file.url, content=file.get_content())
         except Exception as e:
             logger.error(f"处理图片失败: {e}", exc_info=True)
             return {
@@ -476,20 +476,20 @@ class MultimodalService:
             Dict: 根据 provider 返回不同格式的音频内容
         """
         try:
-            url = await self.get_file_url(file)
+            # url = await self.get_file_url(file)
 
             # 如果启用音频转文本且有 API Key
             transcription = None
             if self.enable_audio_transcription and self.audio_api_key:
-                logger.info(f"开始音频转文本: {url}")
+                logger.info(f"开始音频转文本: {file.url}")
                 if self.provider == "dashscope":
-                    transcription = await AudioTranscriptionService.transcribe_dashscope(url, self.audio_api_key)
+                    transcription = await AudioTranscriptionService.transcribe_dashscope(file.url, self.audio_api_key)
                 elif self.provider == "openai":
-                    transcription = await AudioTranscriptionService.transcribe_openai(url, self.audio_api_key)
+                    transcription = await AudioTranscriptionService.transcribe_openai(file.url, self.audio_api_key)
                 else:
                     logger.warning(f"Provider {self.provider} 不支持音频转文本")
 
-            return await strategy.format_audio(file.file_type, url, file.get_content(), transcription)
+            return await strategy.format_audio(file.file_type, file.url, file.get_content(), transcription)
         except Exception as e:
             logger.error(f"处理音频失败: {e}", exc_info=True)
             return {
@@ -509,8 +509,8 @@ class MultimodalService:
             Dict: 根据 provider 返回不同格式的视频内容
         """
         try:
-            url = await self.get_file_url(file)
-            return await strategy.format_video(url)
+            # url = await self.get_file_url(file)
+            return await strategy.format_video(file.url)
         except Exception as e:
             logger.error(f"处理视频失败: {e}", exc_info=True)
             return {
