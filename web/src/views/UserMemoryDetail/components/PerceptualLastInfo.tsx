@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:23 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 17:15:14
+ * @Last Modified time: 2026-03-17 17:36:49
  */
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -92,22 +92,7 @@ const PerceptualLastInfo: FC<{ type: 'last_visual' | 'last_listen' | 'last_text'
 
   const handleDownload = async () => {
     if (!data.file_path) return
-    if (data.file_path.includes('.redbearai.') || data.file_path.includes('.memorybear.')) {
-      try {
-        const res = await fetch(data.file_path)
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = data.file_name || 'download'
-        a.click()
-        URL.revokeObjectURL(url)
-      } catch {
-        window.open(data.file_path, '_blank')
-      }
-    } else {
-      window.open(data.file_path, '_blank')
-    }
+    window.open(data.file_path, '_blank')
   }
 
   return (
