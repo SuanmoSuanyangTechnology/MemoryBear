@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:11:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-13 17:11:14
+ * @Last Modified time: 2026-03-16 18:06:00
  */
 import { type FC, useRef, useState } from 'react'
 import RecordRTC from 'recordrtc'
@@ -19,13 +19,15 @@ interface AudioRecorderProps {
   action?: string;
   /** Additional config passed to the upload request */
   requestConfig?: Record<string, any>;
+  disabled?: boolean;
 }
 
 const AudioRecorder: FC<AudioRecorderProps> = ({
   onRecordingComplete,
   className = '',
   action = fileUploadUrlWithoutApiPrefix,
-  requestConfig = {}
+  requestConfig = {},
+  disabled = false
 }) => {
   // Whether the recorder is currently capturing audio
   const [isRecording, setIsRecording] = useState(false)
@@ -34,6 +36,7 @@ const AudioRecorder: FC<AudioRecorderProps> = ({
 
   /** Request microphone access and start recording */
   const startRecording = async () => {
+    if (disabled) return
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       recorderRef.current = new RecordRTC(stream, {
@@ -49,6 +52,7 @@ const AudioRecorder: FC<AudioRecorderProps> = ({
 
   /** Stop recording, upload the audio blob, then invoke the completion callback */
   const stopRecording = () => {
+    if (disabled) return
     if (recorderRef.current) {
       recorderRef.current.stopRecording(() => {
         const blob = recorderRef.current!.getBlob()
@@ -76,7 +80,7 @@ const AudioRecorder: FC<AudioRecorderProps> = ({
   // swap background image to reflect current state
   return (
     <div
-      className={`rb:size-5.5 rb:cursor-pointer rb:bg-cover ${className} ${
+      className={`rb:size-5.5 rb:bg-cover ${disabled ? 'rb:opacity-65 rb:cursor-not-allowed' : 'rb:cursor-pointer'} ${className} ${
         isRecording
           ? `rb:bg-[url('@/assets/images/conversation/audio_ing.gif')]`
           : `rb:bg-[url('@/assets/images/conversation/audio.svg')]`
