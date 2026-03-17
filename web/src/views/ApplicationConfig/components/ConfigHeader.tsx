@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 15:58:10
+ * @Last Modified time: 2026-03-16 17:04:56
  */
 import { type FC, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -18,10 +18,10 @@ import exportIcon from '@/assets/images/export_hover.svg'
 import deleteIcon from '@/assets/images/delete_hover.svg'
 import type { Application, ApplicationModalRef } from '@/views/ApplicationManagement/types';
 import ApplicationModal from '@/views/ApplicationManagement/components/ApplicationModal'
-import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef, FunConfigForm } from '../types'
+import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef, FeaturesConfigForm } from '../types'
 import { deleteApplication, appExport } from '@/api/application'
 import CopyModal from './CopyModal'
-import FunConfig from './FunConfig'
+import FeaturesConfig from './FeaturesConfig'
 
 const { Header } = Layout;
 
@@ -173,11 +173,11 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
     return items
   }, [t, handleClick, application])
 
-  const funConfig = useMemo(() => {
-    return (appRef?.current?.funConfig || { file_type: [] }) as FunConfigForm
+  const features = useMemo(() => {
+    return (appRef?.current?.features || { file_type: [] }) as FeaturesConfigForm
   }, [appRef])
-  const handleSaveFunConfig = useCallback((value: FunConfigForm) => {
-    appRef?.current?.handleSaveFunConfig?.(value)
+  const handleSaveFeaturesConfig = useCallback((value: FeaturesConfigForm) => {
+    appRef?.current?.handleSaveFeaturesConfig?.(value)
   }, [appRef])
 
   console.log('formatMenuItems', formatMenuItems)
@@ -211,7 +211,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         </div>
         {application?.type === 'workflow'
           ? <div className="rb:h-8 rb:flex rb:items-center rb:justify-end rb:gap-2.5">
-            {/* <FunConfig value={funConfig} refresh={handleSaveFunConfig} /> */}
+            <FeaturesConfig value={features} refresh={handleSaveFeaturesConfig} />
             <Button onClick={clear}>{t('workflow.clear')}</Button>
             <Button onClick={addvariable}>{t('workflow.addvariable')}</Button>
             <Button onClick={run}>{t('workflow.run')}</Button>

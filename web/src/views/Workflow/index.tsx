@@ -61,7 +61,7 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
     graphRef,
     addVariable,
     config,
-    funConfig: config?.funConfig
+    features: config?.features
   }))
   return (
     <div className="rb:h-[calc(100vh-64px)] rb:relative">
@@ -115,6 +115,7 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
       />
       <Chat
         ref={chatRef}
+        data={config}
         graphRef={graphRef}
         appId={config?.app_id as string}
       />

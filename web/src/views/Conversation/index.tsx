@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 12:10:44
+ * @Last Modified time: 2026-03-17 15:39:17
  */
 /**
  * Conversation Page
@@ -14,13 +14,12 @@ import { type FC, useState, useEffect, useRef } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import InfiniteScroll from 'react-infinite-scroll-component';
-import { Flex, Skeleton, Form, Dropdown, type MenuProps, App, Divider } from 'antd'
-import { SettingOutlined } from '@ant-design/icons'
+import { Flex, Skeleton, App } from 'antd'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 
 import { getConversationHistory, sendConversation, getConversationDetail, getShareToken, getExperienceConfig } from '@/api/application'
-import type { HistoryItem, QueryParams, UploadFileListModalRef } from './types'
+import type { HistoryItem } from './types'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
 import { randomString } from '@/utils/common'
@@ -34,20 +33,14 @@ import OnlineIcon from '@/assets/images/conversation/online.svg'
 import OnlineCheckedIcon from '@/assets/images/conversation/onlineChecked.svg'
 import MemoryFunctionCheckedIcon from '@/assets/images/conversation/memoryFunctionChecked.svg'
 import { type SSEMessage } from '@/utils/stream'
-import UploadFiles from './components/FileUpload'
-import AudioRecorder from '@/components/AudioRecorder'
 import { shareFileUploadUrlWithoutApiPrefix } from '@/api/fileStorage'
-import UploadFileListModal from './components/UploadFileListModal'
-import type { VariableConfigModalRef } from '@/views/Workflow/types'
+import ChatToolbar, { type ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import type { Variable } from '@/views/Workflow/components/Properties/VariableList/types'
-import VariableConfigModal from '@/views/Workflow/components/Chat/VariableConfigModal';
+import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
 
-/**
- * Conversation component for shared applications
- */
 const Conversation: FC = () => {
   const { t } = useTranslation()
-  const { message: messageApi } = App.useApp()
+  const { message: messageApi, modal } = App.useApp()
   const { token } = useParams()
   const location = useLocation()
   const searchParams = new URLSearchParams(location.search)
@@ -63,35 +56,20 @@ const Conversation: FC = () => {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<ChatToolbarRef>(null)
   const [shareToken, setShareToken] = useState<string | null>(localStorage.getItem(`shareToken_${token}`))
+  const [fileList, setFileList] = useState<any[]>([])
+  const [webSearch, setWebSearch] = useState(false)
+  const [memory, setMemory] = useState(true)
+  const [features, setFeatures] = useState<FeaturesConfigForm>({} as FeaturesConfigForm)
 
-  const [form] = Form.useForm<QueryParams>()
-  const queryValues = Form.useWatch<QueryParams>([], form)
-
-  const uploadFileListModalRef = useRef<UploadFileListModalRef>(null)
-
-  const variableConfigModalRef = useRef<VariableConfigModalRef>(null)
-  const [variables, setVariables] = useState<Variable[]>([]) // Workflow input variables
-
-  /**
-   * Opens the variable configuration modal
-   */
-  const handleEditVariables = () => {
-    variableConfigModalRef.current?.handleOpen(variables)
-  }
-  /**
-   * Saves updated variable values from the modal
-   */
-  const handleSave = (values: Variable[]) => {
-    setVariables([...values])
-  }
   useEffect(() => {
     const shareToken = localStorage.getItem(`shareToken_${token}`)
     setShareToken(shareToken)
     if (shareToken && shareToken !== '') return
     getShareToken(token as string, userId || randomString(12, false))
       .then(res => {
-        const response = res as { access_token: string  } || {}
+        const response = res as { access_token: string } || {}
         localStorage.setItem(`shareToken_${token}`, response.access_token ?? '')
         setShareToken(response.access_token ?? '')
       })
@@ -102,12 +80,14 @@ const Conversation: FC = () => {
       getHistory()
     }
   }, [token, shareToken, page, hasMore, historyList])
+
   useEffect(() => {
     if (shareToken && token) {
       getExperienceConfig(token)
         .then(res => {
-          const response = res as { variables: Variable[] }
-          setVariables(response.variables || [])
+          const response = res as { variables: Variable[]; features: FeaturesConfigForm }
+          toolbarRef.current?.setVariables(response.variables || [])
+          setFeatures(response.features)
         })
     } else {
       setChatList([])
@@ -118,7 +98,7 @@ const Conversation: FC = () => {
   const groupHistoryByDate = (items: HistoryItem[]): Record<string, HistoryItem[]> => {
     return items.reduce((groups: Record<string, HistoryItem[]>, item) => {
       const date = formatDateTime(item.created_at, 'YYYY-MM-DD')
-      
+
       if (!groups[date]) {
         groups[date] = [];
       }
@@ -129,9 +109,7 @@ const Conversation: FC = () => {
 
   /** Fetch conversation history with pagination */
   const getHistory = (flag: boolean = false) => {
-    if (!token || (pageLoading || !hasMore) && !flag) {
-      return
-    }
+    if (!token || (pageLoading || !hasMore) && !flag) return
     setPageLoading(true);
     getConversationHistory(token, { page: flag ? 1 : page, pagesize: 20 })
       .then(res => {
@@ -154,19 +132,14 @@ const Conversation: FC = () => {
         setHasMore(response.page.hasnext);
         setLoading(false);
       })
-      .finally(() => {
-        setPageLoading(false);
-      })
+      .finally(() => setPageLoading(false))
   }
   /** Switch to different conversation or start new one */
   const handleChangeHistory = (id: string | null) => {
-    if (id !== conversation_id) {
-      setConversationId(id)
-    }
-    if (!id) {
-      setMessage('')
-    }
+    if (id !== conversation_id) setConversationId(id)
+    if (!id) setMessage('')
   }
+
   useEffect(() => {
     if (conversation_id) {
       getConversationDetail(token as string, conversation_id)
@@ -179,43 +152,38 @@ const Conversation: FC = () => {
     }
   }, [conversation_id])
 
-  /** Add user message to chat */
   const addUserMessage = (message: string = '', files?: any[]) => {
-    const newUserMessage: ChatItem = {
+    setChatList(prev => [...prev, {
       conversation_id,
       role: 'user',
       content: message,
       created_at: Date.now(),
       files
-    };
-    setChatList(prev => [...prev, newUserMessage])
+    }])
   }
-  /** Add empty assistant message placeholder */
+
   const addAssistantMessage = () => {
-    const newAssistantMessage: ChatItem = {
+    setChatList(prev => [...prev, {
       created_at: Date.now(),
       role: 'assistant',
-      content: '',
-    }
-    setChatList(prev => [...prev, newAssistantMessage])
+      content: ''
+    }])
   }
-  /** Update assistant message with streaming content */
-  const updateAssistantMessage = (content: string = '') => {
-    if (!content) return
-    if (streamLoading) {
-      setStreamLoading(false)
-    }
 
+  const updateAssistantMessage = (content: string = '', audio_url?: string) => {
+    if (!content && !audio_url) return
+    if (streamLoading) setStreamLoading(false)
     setChatList(prev => {
       const lastList = [...prev]
       const lastIndex = lastList.length - 1
       const lastMsg = lastList[lastIndex]
       if (lastMsg?.role === 'assistant') {
         return [
-          ...lastList.slice(0, lastList.length - 1),
+          ...lastList.slice(0, lastIndex),
           {
             ...lastMsg,
-            content: lastMsg.content + content
+            content: lastMsg.content + content,
+            audioUrl: audio_url
           }
         ]
       }
@@ -223,22 +191,17 @@ const Conversation: FC = () => {
     })
   }
 
-  const isNeedVariableConfig = variables.some(vo => vo.required && (vo.value === null || vo.value === undefined || vo.value === ''))
-
   /** Send message and handle streaming response */
   const handleSend = () => {
-    if (!token || !shareToken) {
-      return
-    }
-    const { files = [], ...rest } = queryValues || {}
-    // Validate required variables before sending
+    if (!token || !shareToken) return
+    const files = toolbarRef.current?.getFiles() || []
+    const variables = toolbarRef.current?.getVariables() || []
     let isCanSend = true
     const params: Record<string, any> = {}
     if (variables.length > 0) {
       const needRequired: string[] = []
       variables.forEach(vo => {
         params[vo.name] = vo.value ?? vo.defaultValue
-
         if (vo.required && (params[vo.name] === null || params[vo.name] === undefined || params[vo.name] === '')) {
           isCanSend = false
           needRequired.push(vo.name)
@@ -249,33 +212,34 @@ const Conversation: FC = () => {
         messageApi.error(`${needRequired.join(',')} ${t('workflow.variableRequired')}`)
       }
     }
-    if (!isCanSend) {
-      return
-    }
+    if (!isCanSend) return
+
     setLoading(true)
     setStreamLoading(true)
     addUserMessage(message, files)
     addAssistantMessage()
+    toolbarRef.current?.setFiles([])
+    setFileList([])
 
     let currentConversationId: string | null = null
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach((item) => {
-        switch(item.event) {
+        const { content, conversation_id: curId, audio_url } = item.data as { content: string; conversation_id: string; audio_url?: string; }
+        switch (item.event) {
           case 'start':
           case 'node_start':
-            const { conversation_id: newId } = item.data as { conversation_id: string  }
+            const { conversation_id: newId } = item.data as { conversation_id: string }
             currentConversationId = newId
             break
           case 'message':
-            const { content, conversation_id: curId } = item.data as { content: string; conversation_id: string;  }
-            updateAssistantMessage(content)
-
-            if (curId) {
-              currentConversationId = curId;
-            }
+            updateAssistantMessage(content, audio_url)
+            if (curId) currentConversationId = curId;
             break
           case 'end':
           case 'workflow_end':
+            if (audio_url) {
+              updateAssistantMessage(content, audio_url)
+            }
             setLoading(false)
             if (currentConversationId && currentConversationId !== conversation_id) {
               setConversationId(currentConversationId)
@@ -286,9 +250,9 @@ const Conversation: FC = () => {
       })
     };
 
-    form.setFieldValue('files', [])
     sendConversation({
-      ...rest,
+      web_search: webSearch,
+      memory,
       message: message || '',
       stream: true,
       conversation_id: conversation_id || null,
@@ -315,32 +279,18 @@ const Conversation: FC = () => {
       })
   }
 
-  const fileChange = (file?: any) => {
-    form.setFieldValue('files', [...(queryValues.files || []), file])
-  }
-  const handleRecordingComplete = async (file: any) => {
-    form.setFieldValue('files', [...(queryValues.files || []), {
-      uid: file.file_id,
-      response: { data: file },
-      thumbUrl: file.url,
-      type: file.type
-    }])
-  }
-
-  const handleShowUpload: MenuProps['onClick'] = ({ key }) => {
-    switch(key) {
-      case 'define':
-        uploadFileListModalRef.current?.handleOpen()
-        break
-    }
-  }
-  const addFileList = (fileList?: any[]) => {
-    if (!fileList || fileList.length <= 0) return
-    form.setFieldValue('files', [...(queryValues.files || []), ...fileList])
-  }
-  const updateFileList = (fileList?: any[]) => {
-    console.log('fileList', fileList)
-    form.setFieldValue('files', [...(fileList || [])])
+  const handleChangeMemory = (value: boolean) => {
+    modal.confirm({
+      title: value ? t('memoryConversation.memoryTipTitle') : t('memoryConversation.memoryCancelTipTitle'),
+      okText: t('common.confirm'),
+      cancelText: t('common.cancel'),
+      onOk: () => {
+        setMemory(value)
+      },
+      onCancel: () => {
+        setMemory(!value)
+      }
+    })
   }
 
   return (
@@ -349,8 +299,8 @@ const Conversation: FC = () => {
         <div className="rb:group rb:flex rb:items-center rb:justify-center rb:font-regular rb:cursor-pointer rb:mb-5 rb:border rb:border-[#DFE4ED] rb:hover:border-[#155EEF] rb:hover:text-[#155EEF] rb:rounded-lg rb:py-2.5"
           onClick={() => handleChangeHistory(null)}
         >
-          <div 
-            className="rb:w-5 rb:h-5 rb:cursor-pointer rb:mr-2 rb:bg-cover rb:bg-[url('@/assets/images/conversation/conversation.svg')] rb:group-hover:bg-[url('@/assets/images/conversation/conversation_hover.svg')]" 
+          <div
+            className="rb:w-5 rb:h-5 rb:cursor-pointer rb:mr-2 rb:bg-cover rb:bg-[url('@/assets/images/conversation/conversation.svg')] rb:group-hover:bg-[url('@/assets/images/conversation/conversation_hover.svg')]"
           ></div>
           {t('memoryConversation.startANewConversation')}
         </div>
@@ -365,7 +315,6 @@ const Conversation: FC = () => {
               next={getHistory}
               hasMore={hasMore}
               loader={<Skeleton active />}
-              // endMessage={<Divider plain>It is all, nothing more 🤐</Divider>}
               scrollableTarget="scrollableDiv"
             >
               {Object.entries(groupHistoryList).map(([date, items]) => (
@@ -374,8 +323,8 @@ const Conversation: FC = () => {
                   {items.map(item => (
                     <div key={item.updated_at} className="rb:mb-3">
                       <div className={clsx("rb:p-[8px_13px] rb:rounded-lg rb:leading-5 rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
-                          'rb:bg-[#FFFFFF] rb:shadow-[0px_2px_4px_0px_rgba(0,0,0,0.15)] rb:font-medium rb:hover:bg-[#FFFFFF]!': item.id === conversation_id,
-                        })}
+                        'rb:bg-[#FFFFFF] rb:shadow-[0px_2px_4px_0px_rgba(0,0,0,0.15)] rb:font-medium rb:hover:bg-[#FFFFFF]!': item.id === conversation_id,
+                      })}
                         onClick={() => handleChangeHistory(item.id)}
                       >
                         {item.title}
@@ -391,108 +340,59 @@ const Conversation: FC = () => {
       </div>
 
       <div className="rb:relative rb:h-screen rb:px-4 rb:flex-[1_1_auto]">
-        <div className='rb:w-190  rb:h-screen rb:mx-auto rb:pt-10'>
-        <Chat
-          empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
-          contentClassName={!queryValues?.files?.length ? "rb:h-[calc(100%-144px)]" : "rb:h-[calc(100%-208px)]"}
-          data={chatList}
-          streamLoading={streamLoading}
-          loading={loading}
-          onChange={setMessage}
-          onSend={handleSend}
-          labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
-          fileList={queryValues?.files || []}
-          fileChange={updateFileList}
-        >
-          <Form form={form} initialValues={{ memory: false, web_search: false}}>
-            <Flex justify="space-between" className="rb:flex-1">
-              <Flex gap={8} align="center">
-                <Form.Item name="files" noStyle>
-                  <Dropdown
-                    menu={{
-                      items: [
-                        { key: 'define', label: t('memoryConversation.addRemoteFile') },
-                        {
-                          key: 'upload', label: (
-                            <UploadFiles
-                              action={shareFileUploadUrlWithoutApiPrefix}
-                              onChange={fileChange}
-                              requestConfig={{
-                                headers: {
-                                  'Content-Type': 'multipart/form-data',
-                                  Authorization: `Bearer ${shareToken || ''}`,
-                              }}}
-                            />
-                          )
-                        },
-                      ],
-                      onClick: handleShowUpload
-                    }}
-                  >
-                    <div
-                      className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/link.svg')] rb:hover:bg-[url('@/assets/images/conversation/link_hover.svg')]"
-                    ></div>
-                  </Dropdown>
-                </Form.Item>
-                <Form.Item name="web_search" valuePropName="checked" className="rb:mb-0!">
+        <div className='rb:w-190 rb:h-screen rb:mx-auto rb:pt-10'>
+          <Chat
+            empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320, 180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
+            contentClassName={!fileList.length ? "rb:h-[calc(100%-144px)]" : "rb:h-[calc(100%-208px)]"}
+            data={chatList}
+            streamLoading={streamLoading}
+            loading={loading}
+            onChange={setMessage}
+            onSend={handleSend}
+            labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
+            fileList={fileList}
+            fileChange={(list) => {
+              setFileList(list || [])
+              toolbarRef.current?.setFiles(list || [])
+            }}
+          >
+          <ChatToolbar
+            ref={toolbarRef}
+            features={features}
+            onFilesChange={setFileList}
+            uploadAction={shareFileUploadUrlWithoutApiPrefix}
+            uploadRequestConfig={{
+              headers: {
+                'Content-Type': 'multipart/form-data',
+                Authorization: `Bearer ${shareToken || ''}`,
+              }
+            }}
+            extra={
+              <>
+                {features.web_search?.enabled &&
                   <ButtonCheckbox
                     icon={OnlineIcon}
                     checkedIcon={OnlineCheckedIcon}
+                    checked={webSearch}
+                    onChange={setWebSearch}
                   >
-                    {t(`memoryConversation.web_search`)}
+                    {t('memoryConversation.web_search')}
                   </ButtonCheckbox>
-                </Form.Item>
-                <Form.Item name="memory" valuePropName="checked" className="rb:mb-0!">
-                  <ButtonCheckbox
-                    icon={MemoryFunctionIcon}
-                    checkedIcon={MemoryFunctionCheckedIcon}
-                  >
-                    {t(`memoryConversation.memory`)}
-                  </ButtonCheckbox>
-                </Form.Item>
-                {variables.length > 0 && (
-                  <Form.Item name="variables" className="rb:mb-0!">
-                    <div
-                      className={clsx("rb:flex rb:items-center rb:border rb:rounded-lg rb:px-2 rb:text-[12px] rb:h-6 rb:cursor-pointer rb:hover:bg-[#F0F3F8] rb:text-[#212332]", {
-                        'rb:border-[#FF5D34] rb:text-[#FF5D34]': isNeedVariableConfig,
-                        'rb:border-[#DFE4ED]': !isNeedVariableConfig,
-                      })}
-                      onClick={handleEditVariables}
-                    >
-                      <SettingOutlined className="rb:mr-1" />
-                      {t(`memoryConversation.variableConfig`)}
-                      </div>
-                  </Form.Item>
-                )}
-              </Flex>
-              <Flex align="center">
-                <AudioRecorder
-                  action={shareFileUploadUrlWithoutApiPrefix}
-                  requestConfig={{
-                    headers: {
-                      'Content-Type': 'multipart/form-data',
-                      Authorization: `Bearer ${shareToken || ''}`,
-                    }
-                  }}
-                  onRecordingComplete={handleRecordingComplete}
-                />
-                <Divider type="vertical" className="rb:ml-1.5! rb:mr-3!" />
-              </Flex>
-            </Flex>
-          </Form>
-        </Chat>
+                }
+                <ButtonCheckbox
+                  icon={MemoryFunctionIcon}
+                  checkedIcon={MemoryFunctionCheckedIcon}
+                  checked={memory}
+                  onChange={handleChangeMemory}
+                >
+                  {t('memoryConversation.memory')}
+                </ButtonCheckbox>
+              </>
+            }
+          />
+          </Chat>
         </div>
       </div>
-
-      <UploadFileListModal
-        ref={uploadFileListModalRef}
-        refresh={addFileList}
-      />
-      <VariableConfigModal
-        ref={variableConfigModalRef}
-        refresh={handleSave}
-        variables={variables}
-      />
     </Flex>
   )
 }

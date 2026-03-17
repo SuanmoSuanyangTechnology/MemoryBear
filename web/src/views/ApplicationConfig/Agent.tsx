@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-13 16:58:15
+ * @Last Modified time: 2026-03-17 14:24:29
  */
 import { type FC, type ReactNode, useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import clsx from 'clsx'
@@ -24,7 +24,7 @@ import type {
   AiPromptModalRef,
   Source,
   ChatVariableConfigModalRef,
-  FunConfigForm
+  FeaturesConfigForm
 } from './types'
 import type { Variable } from './components/VariableList/types'
 import type { KnowledgeConfig } from './components/Knowledge/types'
@@ -42,7 +42,7 @@ import ToolList from './components/ToolList/ToolList'
 import SkillList from './components/Skill'
 import ChatVariableConfigModal from './components/ChatVariableConfigModal';
 import type { Skill } from '@/views/Skills/types'
-import FunConfig from './components/FunConfig'
+import FeaturesConfig from './components/FeaturesConfig'
 
 /**
  * Description wrapper component
@@ -356,7 +356,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
 
   useImperativeHandle(ref, () => ({
     handleSave,
-    funConfig: values?.funConfig
+    features: values?.features
   }))
 
   const aiPromptModalRef = useRef<AiPromptModalRef>(null)
@@ -411,8 +411,8 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
     setChatVariables(values?.variables || [])
   }, [values?.variables])
 
-  const handleSaveFunConfig = (value: FunConfigForm) => {
-    form.setFieldValue('funConfig', value)
+  const handleSaveFeaturesConfig = (value: FeaturesConfigForm) => {
+    form.setFieldValue('features', value)
   }
   console.log('agent', values)
   return (
@@ -426,7 +426,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
                 {defaultModel?.name ? <div className="rb:w-4 rb:h-4 rb:bg-[url('@/assets/images/application/model.svg')] rb:group-hover:bg-[url('@/assets/images/application/model_hover.svg')]"></div> : null}
                 {defaultModel?.name || t('application.chooseModel')}
               </Button>
-              {/* <FunConfig value={values?.funConfig as FunConfigForm} refresh={handleSaveFunConfig} /> */}
+              <FeaturesConfig value={values?.features as FeaturesConfigForm} refresh={handleSaveFeaturesConfig} />
               <Button type="primary" onClick={() => handleSave()}>
                 {t('common.save')}
               </Button>
@@ -435,7 +435,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
           <Form form={form}>
             <Form.Item name="default_model_config_id" hidden noStyle></Form.Item>
             <Form.Item name="model_parameters" hidden noStyle></Form.Item>
-            <Form.Item name="funConfig" hidden noStyle></Form.Item>
+            <Form.Item name="features" hidden noStyle></Form.Item>
             <Space size={16} direction="vertical" style={{ width: '100%' }}>
               <Card title={t('application.promptConfiguration')}>
                 <div className="rb:flex rb:items-center rb:justify-between rb:mb-2.75">
@@ -512,7 +512,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
           </div>
           <RbCard height="calc(100vh - 160px)" bodyClassName="rb:p-[0]! rb:h-full rb:overflow-hidden">
             <Chat
-              data={data as Config}
+              data={values as Config}
               chatList={chatList}
               updateChatList={setChatList}
               handleSave={handleSave}

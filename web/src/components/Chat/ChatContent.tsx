@@ -2,13 +2,14 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-06 21:05:52
+ * @Last Modified time: 2026-03-17 14:11:24
  */
-import { type FC, useRef, useEffect } from 'react'
+import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
 import Markdown from '@/components/Markdown'
 import type { ChatContentProps } from './types'
-import { Spin } from 'antd'
+import { Spin, Divider, Space } from 'antd'
+import { SoundOutlined } from '@ant-design/icons'
 
 /**
  * Chat Content Display Component
@@ -28,7 +29,25 @@ const ChatContent: FC<ChatContentProps> = ({
   // Scroll container reference for controlling auto-scroll to bottom
   const scrollContainerRef = useRef<(HTMLDivElement | null)>(null)
   const prevDataLengthRef = useRef(data.length);
-  const isScrolledToBottomRef = useRef(true); // Track if user is scrolled to bottom
+  const isScrolledToBottomRef = useRef(true);
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [playingIndex, setPlayingIndex] = useState<number | null>(null)
+
+  const handlePlay = (index: number, audioUrl: string) => {
+    if (playingIndex === index) {
+      audioRef.current?.pause()
+      setPlayingIndex(null)
+      return
+    }
+    if (audioRef.current) {
+      audioRef.current.pause()
+    }
+    const audio = new Audio(audioUrl)
+    audioRef.current = audio
+    audio.play()
+    setPlayingIndex(index)
+    audio.onended = () => setPlayingIndex(null)
+  }
   
   // Track scroll position to determine if user is at bottom
   useEffect(() => {
@@ -101,6 +120,19 @@ const ChatContent: FC<ChatContentProps> = ({
                   {item.subContent && renderRuntime && renderRuntime(item, index)}
                   {/* Render message content using Markdown component */}
                   <Markdown content={renderRuntime ? item.content ?? '' : item.content ?? errorDesc ?? ''} />
+
+                  {item.audioUrl && <>
+                    <Divider className="rb:my-3!" />
+                    <Space size={12} className="rb:pb-2 rb:pl-1">
+                      {playingIndex !== index
+                        ? <SoundOutlined className="rb:cursor-pointer rb:hover:text-[#155EEF]! rb:size-5.5" onClick={() => handlePlay(index, item.audioUrl!)} />
+                        : <div
+                            className="rb:size-5.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/audio_ing.gif')]"
+                            onClick={() => handlePlay(index, item.audioUrl!)}
+                          />
+                      }
+                    </Space>
+                  </>}
                 </div>
                 {/* Bottom label (such as timestamp, username, etc.) */}
                 {labelPosition === 'bottom' &&
