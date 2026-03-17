@@ -262,17 +262,17 @@ class MemoryPerceptualService:
         }
         if file_type in [FileType.IMAGE, FileType.VIDEO]:
             file_modalities = {
-                "scene": content.get("scene")
+                "scene": content.get("scene", [])
             }
         elif file_type in [FileType.DOCUMENT]:
             file_modalities = {
-                "section_count": content.get("section_count"),
-                "title": content.get("title"),
-                "first_line": content.get("first_line")
+                "section_count": content.get("section_count", 0),
+                "title": content.get("title", ""),
+                "first_line": content.get("first_line", "")
             }
         else:
             file_modalities = {
-                "speaker_count": content.get("speaker_count")
+                "speaker_count": content.get("speaker_count", 0)
             }
         self.repository.create_perceptual_memory(
             end_user_id=uuid.UUID(end_user_id),
@@ -280,7 +280,7 @@ class MemoryPerceptualService:
             file_path=file_url,
             file_name=filename,
             file_ext=file_ext,
-            summary=content.get('summary'),
+            summary=content.get('summary', ""),
             meta_data={
                 "content": file_content,
                 "modalities": file_modalities
