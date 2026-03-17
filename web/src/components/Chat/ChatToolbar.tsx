@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-03-17 14:22:25 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-17 14:22:25 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-17 18:39:49
  */
 // Toolbar component for chat input area, supporting file upload, audio recording, and variable configuration
 import { useRef, forwardRef, useImperativeHandle, type ReactNode, useEffect } from 'react'
@@ -151,8 +151,6 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
     })
   }
 
-  console.log('queryValues', queryValues)
-
   return (
     <Form form={form} initialValues={{ files: [], variables: [] }}>
       <Flex justify="space-between" className="rb:flex-1">
@@ -183,6 +181,7 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
               action={uploadAction}
               requestConfig={uploadRequestConfig}
               onRecordingComplete={handleRecordingComplete}
+              maxSize={file_upload?.audio_max_size_mb}
             />
             <Divider type="vertical" className="rb:ml-1.5! rb:mr-3!" />
           </Flex>

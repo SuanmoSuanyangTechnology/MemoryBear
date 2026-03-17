@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 15:39:17
+ * @Last Modified time: 2026-03-17 18:30:58
  */
 /**
  * Conversation Page
@@ -369,7 +369,7 @@ const Conversation: FC = () => {
             }}
             extra={
               <>
-                {features.web_search?.enabled &&
+                {features?.web_search?.enabled &&
                   <ButtonCheckbox
                     icon={OnlineIcon}
                     checkedIcon={OnlineCheckedIcon}

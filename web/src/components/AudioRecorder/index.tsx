@@ -2,10 +2,12 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:11:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 18:06:00
+ * @Last Modified time: 2026-03-17 18:39:09
  */
 import { type FC, useRef, useState } from 'react'
 import RecordRTC from 'recordrtc'
+import { App } from 'antd'
+import { useTranslation } from 'react-i18next';
 
 import { fileUploadUrlWithoutApiPrefix } from '@/api/fileStorage'
 import { request } from '@/utils/request'
@@ -20,6 +22,7 @@ interface AudioRecorderProps {
   /** Additional config passed to the upload request */
   requestConfig?: Record<string, any>;
   disabled?: boolean;
+  maxSize?: number;
 }
 
 const AudioRecorder: FC<AudioRecorderProps> = ({
@@ -27,8 +30,11 @@ const AudioRecorder: FC<AudioRecorderProps> = ({
   className = '',
   action = fileUploadUrlWithoutApiPrefix,
   requestConfig = {},
-  disabled = false
+  disabled = false,
+  maxSize,
 }) => {
+  const { message } = App.useApp()
+  const { t } = useTranslation();
   // Whether the recorder is currently capturing audio
   const [isRecording, setIsRecording] = useState(false)
   // Holds the RecordRTC instance across renders
@@ -57,6 +63,12 @@ const AudioRecorder: FC<AudioRecorderProps> = ({
       recorderRef.current.stopRecording(() => {
         const blob = recorderRef.current!.getBlob()
         const url = recorderRef.current!.toURL()
+
+        if (maxSize && blob.size > maxSize * 1024 * 1024) {
+          message.error(t('common.fileSizeTip', { size: maxSize }));
+          return
+        }
+
         const formData = new FormData()
         formData.append('file', blob, `recording_${Date.now()}.webm`)
         request
