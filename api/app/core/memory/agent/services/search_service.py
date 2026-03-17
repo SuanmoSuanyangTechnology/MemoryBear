@@ -21,7 +21,7 @@ class SearchService:
         """Initialize the search service."""
         logger.info("SearchService initialized")
     
-    def extract_content_from_result(self, result: dict) -> str:
+    def extract_content_from_result(self, result: dict, node_type: str = "") -> str:
         """
         Extract only meaningful content from search results, dropping all metadata.
         
@@ -30,9 +30,11 @@ class SearchService:
         - Entities: extract 'name' and 'fact_summary' fields
         - Summaries: extract 'content' field
         - Chunks: extract 'content' field
+        - Communities: extract 'content' field (c.summary), prefixed with community name
         
         Args:
             result: Search result dictionary
+            node_type: Hint for node type ("community", "summary", etc.)
             
         Returns:
             Clean content string without metadata
@@ -46,8 +48,21 @@ class SearchService:
         if 'statement' in result and result['statement']:
             content_parts.append(result['statement'])
         
-        # Summaries/Chunks: extract content field
-        if 'content' in result and result['content']:
+        # Community 节点：有 member_count 或 core_entities 字段，或 node_type 明确指定
+        # 用 "[主题：{name}]" 前缀区分，让 LLM 知道这是主题级摘要
+        is_community = (
+            node_type == "community"
+            or 'member_count' in result
+            or 'core_entities' in result
+        )
+        if is_community:
+            name = result.get('name', '')
+            content = result.get('content', '')
+            if content:
+                prefix = f"[主题：{name}] " if name else ""
+                content_parts.append(f"{prefix}{content}")
+        elif 'content' in result and result['content']:
+            # Summaries / Chunks
             content_parts.append(result['content'])
         
         # Entities: extract name and fact_summary (commented out in original)
@@ -99,7 +114,8 @@ class SearchService:
         rerank_alpha: float = 0.4,
         output_path: str = "search_results.json",
         return_raw_results: bool = False,
-        memory_config = None
+        memory_config = None,
+        expand_communities: bool = True,
     ) -> Tuple[str, str, Optional[dict]]:
         """
         Execute hybrid search and return clean content.
@@ -114,6 +130,8 @@ class SearchService:
             output_path: Path to save search results (default: "search_results.json")
             return_raw_results: If True, also return the raw search results as third element (default: False)
             memory_config: Memory configuration object (required)
+            expand_communities: If True, expand community hits to member statements (default: True).
+                                 Set to False for quick-summary paths that only need community-level text.
         
         Returns:
             Tuple of (clean_content, cleaned_query, raw_results)
@@ -165,8 +183,8 @@ class SearchService:
                         if isinstance(category_results, list):
                             answer_list.extend(category_results)
 
-            # 对命中的 community 节点展开其成员 statements
-            if "communities" in include:
+            # 对命中的 community 节点展开其成员 statements（路径 "0"/"1" 需要，路径 "2" 不需要）
+            if expand_communities and "communities" in include:
                 community_results = (
                     answer.get('reranked_results', {}).get('communities', [])
                     if search_type == "hybrid"
@@ -195,11 +213,12 @@ class SearchService:
                     finally:
                         await expand_connector.close()
             
-            # Extract clean content from all results
-            content_list = [
-                self.extract_content_from_result(ans) 
-                for ans in answer_list
-            ]
+            # Extract clean content from all results，按类型传入 node_type 区分 community
+            content_list = []
+            for ans in answer_list:
+                # community 节点有 member_count 或 core_entities 字段
+                ntype = "community" if ('member_count' in ans or 'core_entities' in ans) else ""
+                content_list.append(self.extract_content_from_result(ans, node_type=ntype))
 
             
             # Filter out empty strings and join with newlines

@@ -748,35 +748,42 @@ async def run_hybrid_search(
             
             # 从数据库读取嵌入器配置（按 ID）并构建 RedBearModelConfig
             config_load_start = time.time()
-            with get_db_context() as db:
-                config_service = MemoryConfigService(db)
-                embedder_config_dict = config_service.get_embedder_config(str(memory_config.embedding_model_id))
-            rb_config = RedBearModelConfig(
-                model_name=embedder_config_dict["model_name"],
-                provider=embedder_config_dict["provider"],
-                api_key=embedder_config_dict["api_key"],
-                base_url=embedder_config_dict["base_url"],
-                type="llm"
-            )
-            config_load_time = time.time() - config_load_start
-            logger.info(f"[PERF] Config loading took {config_load_time:.4f}s")
-
-            # Init embedder
-            embedder_init_start = time.time()
-            embedder = OpenAIEmbedderClient(model_config=rb_config)
-            embedder_init_time = time.time() - embedder_init_start
-            logger.info(f"[PERF] Embedder init took {embedder_init_time:.4f}s")
-            
-            embedding_task = asyncio.create_task(
-                search_graph_by_embedding(
-                    connector=connector,
-                    embedder_client=embedder,
-                    query_text=query_text,
-                    end_user_id=end_user_id,
-                    limit=limit,
-                    include=include,
+            try:
+                with get_db_context() as db:
+                    config_service = MemoryConfigService(db)
+                    embedder_config_dict = config_service.get_embedder_config(str(memory_config.embedding_model_id))
+                rb_config = RedBearModelConfig(
+                    model_name=embedder_config_dict["model_name"],
+                    provider=embedder_config_dict["provider"],
+                    api_key=embedder_config_dict["api_key"],
+                    base_url=embedder_config_dict["base_url"],
+                    type="llm"
                 )
-            )
+                config_load_time = time.time() - config_load_start
+                logger.info(f"[PERF] Config loading took {config_load_time:.4f}s")
+
+                # Init embedder
+                embedder_init_start = time.time()
+                embedder = OpenAIEmbedderClient(model_config=rb_config)
+                embedder_init_time = time.time() - embedder_init_start
+                logger.info(f"[PERF] Embedder init took {embedder_init_time:.4f}s")
+                
+                embedding_task = asyncio.create_task(
+                    search_graph_by_embedding(
+                        connector=connector,
+                        embedder_client=embedder,
+                        query_text=query_text,
+                        end_user_id=end_user_id,
+                        limit=limit,
+                        include=include,
+                    )
+                )
+            except Exception as emb_init_err:
+                logger.warning(
+                    f"[PERF] Embedding search skipped due to init error "
+                    f"(embedding_model_id={memory_config.embedding_model_id}): {emb_init_err}"
+                )
+                embedding_task = None
 
         if keyword_task:
             keyword_results = await keyword_task
