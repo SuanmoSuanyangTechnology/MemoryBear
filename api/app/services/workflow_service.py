@@ -868,6 +868,14 @@ class WorkflowService:
                 return node.get("config", {}).get("variables", [])
         raise BusinessException("workflow config error - start node not found")
 
+    @staticmethod
+    def is_memory_enable(config: dict) -> bool:
+        nodes = config.get("nodes", [])
+        for node in nodes:
+            if node.get("type") in [NodeType.MEMORY_READ, NodeType.MEMORY_WRITE]:
+                return True
+        return False
+
 
 # ==================== 依赖注入函数 ====================
 

@@ -661,6 +661,7 @@ async def config_query(
         content = {
             "app_type": release.app.type,
             "variables": workflow_service.get_start_node_variables(release.config),
+            "memory":  workflow_service.is_memory_enable(release.config),
             "features": release.config.get("features")
         }
     elif release.app.type == AppType.AGENT:
