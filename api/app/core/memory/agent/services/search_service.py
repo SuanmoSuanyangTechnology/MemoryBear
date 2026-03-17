@@ -13,6 +13,72 @@ from app.core.memory.utils.data.text_utils import escape_lucene_query
 
 logger = get_agent_logger(__name__)
 
+# 需要从展开结果中过滤的字段（含 Neo4j DateTime，不可 JSON 序列化）
+_EXPAND_FIELDS_TO_REMOVE = {
+    'invalid_at', 'valid_at', 'chunk_id_from_rel', 'entity_ids',
+    'expired_at', 'created_at', 'chunk_id', 'apply_id',
+    'user_id', 'statement_ids', 'updated_at', 'chunk_ids', 'fact_summary'
+}
+
+
+def _clean_expand_fields(obj):
+    """递归过滤展开结果中不可序列化的字段（DateTime 等）。"""
+    if isinstance(obj, dict):
+        return {k: _clean_expand_fields(v) for k, v in obj.items() if k not in _EXPAND_FIELDS_TO_REMOVE}
+    if isinstance(obj, list):
+        return [_clean_expand_fields(i) for i in obj]
+    return obj
+
+
+async def expand_communities_to_statements(
+    community_results: List[dict],
+    end_user_id: str,
+    existing_content: str = "",
+    limit: int = 10,
+) -> Tuple[List[dict], List[str]]:
+    """
+    社区展开 helper：给定命中的 community 列表，拉取关联 Statement。
+
+    - 对展开结果去重（过滤已在 existing_content 中出现的文本）
+    - 过滤不可序列化字段
+    - 返回 (cleaned_expanded_stmts, new_texts)
+      - cleaned_expanded_stmts: 可直接写回 raw_results 的列表
+      - new_texts: 去重后新增的 statement 文本列表，用于追加到 clean_content
+    """
+    community_ids = [r.get("id") for r in community_results if r.get("id")]
+    if not community_ids or not end_user_id:
+        return [], []
+
+    from app.repositories.neo4j.graph_search import search_graph_community_expand
+    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+    connector = Neo4jConnector()
+    try:
+        result = await search_graph_community_expand(
+            connector=connector,
+            community_ids=community_ids,
+            end_user_id=end_user_id,
+            limit=limit,
+        )
+    except Exception as e:
+        logger.warning(f"[expand_communities] 社区展开检索失败，跳过: {e}")
+        return [], []
+    finally:
+        await connector.close()
+
+    expanded_stmts = result.get("expanded_statements", [])
+    if not expanded_stmts:
+        return [], []
+
+    existing_lines = set(existing_content.splitlines())
+    new_texts = [
+        s["statement"] for s in expanded_stmts
+        if s.get("statement") and s["statement"] not in existing_lines
+    ]
+    cleaned = _clean_expand_fields(expanded_stmts)
+    logger.info(f"[expand_communities] 展开 {len(expanded_stmts)} 条 statements，新增 {len(new_texts)} 条，community_ids={community_ids}")
+    return cleaned, new_texts
+
 
 class SearchService:
     """Service for executing hybrid search and processing results."""
@@ -190,28 +256,11 @@ class SearchService:
                     if search_type == "hybrid"
                     else answer.get('communities', [])
                 )
-                community_ids = [
-                    r.get("id") for r in community_results if r.get("id")
-                ]
-                if community_ids and end_user_id:
-                    from app.repositories.neo4j.graph_search import search_graph_community_expand
-                    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-                    expand_connector = Neo4jConnector()
-                    try:
-                        expand_result = await search_graph_community_expand(
-                            connector=expand_connector,
-                            community_ids=community_ids,
-                            end_user_id=end_user_id,
-                            limit=10,
-                        )
-                        expanded_stmts = expand_result.get("expanded_statements", [])
-                        if expanded_stmts:
-                            answer_list.extend(expanded_stmts)
-                            logger.info(f"社区展开检索追加 {len(expanded_stmts)} 条 statements")
-                    except Exception as e:
-                        logger.warning(f"社区展开检索失败，跳过: {e}")
-                    finally:
-                        await expand_connector.close()
+                cleaned_stmts, new_texts = await expand_communities_to_statements(
+                    community_results=community_results,
+                    end_user_id=end_user_id,
+                )
+                answer_list.extend(cleaned_stmts)
             
             # Extract clean content from all results，按类型传入 node_type 区分 community
             content_list = []

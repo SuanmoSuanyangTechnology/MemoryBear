@@ -409,59 +409,24 @@ async def retrieve(state: ReadState) -> ReadState:
                             reranked = results_dict.get('reranked_results', {})
                             community_hits = reranked.get('communities', [])
                             if not community_hits:
-                                # 兼容非 hybrid 路径
                                 community_hits = results_dict.get('communities', [])
-                            community_ids = [c.get('id') for c in community_hits if c.get('id')]
-                            if community_ids:
-                                from app.repositories.neo4j.graph_search import search_graph_community_expand
-                                from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-                                expand_connector = Neo4jConnector()
-                                try:
-                                    expand_result = await search_graph_community_expand(
-                                        connector=expand_connector,
-                                        community_ids=community_ids,
-                                        end_user_id=end_user_id,
-                                        limit=10,
-                                    )
-                                    expanded_stmts = expand_result.get('expanded_statements', [])
-                                    if expanded_stmts:
-                                        # 去重：过滤掉直接检索已经包含的 statement 文本
-                                        existing_lines = set(clean_content.splitlines())
-                                        expanded_texts = [
-                                            s['statement'] for s in expanded_stmts
-                                            if s.get('statement') and s['statement'] not in existing_lines
-                                        ]
-                                        if expanded_texts:
-                                            clean_content = clean_content + '\n' + '\n'.join(expanded_texts)
-                                        # 暂存展开结果，稍后写回 raw_results['results']
-                                        _expanded_stmts_to_write = expanded_stmts
-                                        logger.info(
-                                            f"[Retrieve] 社区展开追加 {len(expanded_stmts)} 条 statements，"
-                                            f"community_ids={community_ids}"
-                                        )
-                                except Exception as expand_err:
-                                    logger.warning(f"[Retrieve] 社区展开检索失败，跳过: {expand_err}")
-                                finally:
-                                    await expand_connector.close()
+                            if community_hits:
+                                from app.core.memory.agent.services.search_service import expand_communities_to_statements
+                                _expanded_stmts_to_write, new_texts = await expand_communities_to_statements(
+                                    community_results=community_hits,
+                                    end_user_id=end_user_id,
+                                    existing_content=clean_content,
+                                )
+                                if new_texts:
+                                    clean_content = clean_content + '\n' + '\n'.join(new_texts)
                         except Exception as parse_err:
                             logger.warning(f"[Retrieve] 解析社区命中结果失败，跳过展开: {parse_err}")
 
                         try:
                             raw_results = raw_results['results']
-                            # 写回展开结果，过一遍字段清洗去掉 DateTime 等不可序列化字段
+                            # 写回展开结果，接口返回中可见（已在 helper 中清洗过字段）
                             if _expanded_stmts_to_write and isinstance(raw_results, dict):
-                                _fields_to_remove = {
-                                    'invalid_at', 'valid_at', 'chunk_id_from_rel', 'entity_ids',
-                                    'expired_at', 'created_at', 'chunk_id', 'apply_id',
-                                    'user_id', 'statement_ids', 'updated_at', 'chunk_ids', 'fact_summary'
-                                }
-                                def _clean(obj):
-                                    if isinstance(obj, dict):
-                                        return {k: _clean(v) for k, v in obj.items() if k not in _fields_to_remove}
-                                    if isinstance(obj, list):
-                                        return [_clean(i) for i in obj]
-                                    return obj
-                                raw_results.setdefault('reranked_results', {})['expanded_statements'] = _clean(_expanded_stmts_to_write)
+                                raw_results.setdefault('reranked_results', {})['expanded_statements'] = _expanded_stmts_to_write
                         except Exception:
                             raw_results = []
 

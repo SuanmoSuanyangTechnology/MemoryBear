@@ -348,8 +348,8 @@ async def Input_Summary(state: ReadState) -> ReadState:
             if raw_results and isinstance(raw_results, dict):
                 reranked = raw_results.get('reranked_results', {})
                 community_hits = reranked.get('communities', [])
-                logger.info(f"[Input_Summary] community 命中数: {len(community_hits)}, "
-                            f"summary 命中数: {len(reranked.get('summaries', []))}")
+                logger.debug(f"[Input_Summary] community 命中数: {len(community_hits)}, "
+                             f"summary 命中数: {len(reranked.get('summaries', []))}")
         else:
             retrieval_knowledge, retrieve_info, question, raw_results = await rag_knowledge(state, data)
     except Exception as e:

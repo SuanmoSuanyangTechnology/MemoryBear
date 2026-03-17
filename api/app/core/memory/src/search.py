@@ -727,6 +727,11 @@ async def run_hybrid_search(
         keyword_task = None
         embedding_task = None
 
+        keyword_task = None
+        embedding_task = None
+        keyword_results: Dict[str, List] = {}
+        embedding_results: Dict[str, List] = {}
+
         if search_type in ["keyword", "hybrid"]:
             # Keyword-based search
             logger.info("[PERF] Starting keyword search...")
