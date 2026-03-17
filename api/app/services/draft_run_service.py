@@ -388,7 +388,7 @@ class AgentRunService:
         for f in files:
             if f.transfer_method.value not in allowed_methods:
                 raise BusinessException(
-                    f"不支持的文件传输方式：{f.transfer_method}，允许的方式：{', '.join(allowed_methods)}",
+                    f"不支持的文件传输方式：{f.transfer_method.value}，允许的方式：{', '.join(allowed_methods)}",
                     BizCode.BAD_REQUEST
                 )
 
