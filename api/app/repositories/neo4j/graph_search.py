@@ -305,6 +305,7 @@ async def search_graph(
     results = {}
     for key, result in zip(task_keys, task_results):
         if isinstance(result, Exception):
+            logger.warning(f"search_graph: {key} 关键词查询异常: {result}")
             results[key] = []
         else:
             results[key] = result
@@ -361,7 +362,11 @@ async def search_graph_by_embedding(
     print(f"[PERF] Embedding generation took: {embed_time:.4f}s")
     
     if not embeddings or not embeddings[0]:
-        return {"statements": [], "chunks": [], "entities": [], "summaries": []}
+        logger.warning(
+            f"search_graph_by_embedding: embedding 生成失败或为空，"
+            f"query='{query_text[:50]}', end_user_id={end_user_id}，向量检索跳过"
+        )
+        return {"statements": [], "chunks": [], "entities": [], "summaries": [], "communities": []}
     embedding = embeddings[0]
 
     # Prepare tasks for parallel execution
@@ -435,6 +440,7 @@ async def search_graph_by_embedding(
     
     for key, result in zip(task_keys, task_results):
         if isinstance(result, Exception):
+            logger.warning(f"search_graph_by_embedding: {key} 向量查询异常: {result}")
             results[key] = []
         else:
             results[key] = result
