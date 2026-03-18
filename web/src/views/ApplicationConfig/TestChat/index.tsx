@@ -193,7 +193,10 @@ const TestChat: FC<TestChatProps> = ({
       formatParams(message, conversationId, files, params),
       handleStreamMessage
     )
-      .catch(() => setLoading(false))
+      .catch(() => {
+        updateErrorAssistantMessage(0)
+        setLoading(false)
+      })
       .finally(() => {
         setLoading(false)
         setStreamLoading(false)
@@ -243,11 +246,12 @@ const TestChat: FC<TestChatProps> = ({
       handleWorkflowStreamMessage
     )
       .catch((error) => {
+        const errorInfo = JSON.parse(error.message)
         setChatList(prev => {
           const newList = [...prev]
           const lastIndex = newList.length - 1
           if (lastIndex >= 0) {
-            newList[lastIndex] = { ...newList[lastIndex], status: 'failed', content: null, subContent: error.error }
+            newList[lastIndex] = { ...newList[lastIndex], status: 'failed', content: null, subContent: errorInfo.error }
           }
           return newList
         })

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 15:05:21
+ * @Last Modified time: 2026-03-18 14:34:20
  */
 /**
  * Workflow Chat Component
@@ -359,7 +359,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
     setStreamLoading(true)
     draftRun(appId, data, handleStreamMessage)
       .catch((error) => {
-        console.log('draftRun error', error)
+        const errorInfo = JSON.parse(error.message)
         setChatList(prev => {
           const newList = [...prev]
           const lastIndex = newList.length - 1
@@ -368,7 +368,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
               ...newList[lastIndex],
               status: 'failed',
               content: null,
-              subContent: error.error
+              subContent: errorInfo.error
             }
           }
           return newList
