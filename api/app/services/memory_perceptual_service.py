@@ -5,12 +5,14 @@ from urllib.parse import urlparse, unquote
 
 import json_repair
 from jinja2 import Template
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.models import RedBearLLM, RedBearModelConfig
+from app.models import FileMetadata
 from app.models.memory_perceptual_model import PerceptualType, FileStorageService
 from app.models.prompt_optimizer_model import RoleType
 from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
@@ -245,6 +247,18 @@ class MemoryPerceptualService:
         filename = os.path.basename(path)
         filename = unquote(filename)
         file_ext = os.path.splitext(filename)[1]
+        try:
+            file_id = uuid.UUID(filename)
+            stmt = select(FileMetadata).where(
+                FileMetadata.id == file_id
+            )
+            file = self.db.execute(stmt).scalar_one_or_none()
+
+            if file:
+                filename = file.file_name
+                file_ext = file.file_ext
+        except ValueError:
+            business_logger.debug(f"Remote file, file_id={filename}")
         if not file_ext:
             if file_type == FileType.AUDIO:
                 file_ext = ".mp3"
@@ -262,17 +276,17 @@ class MemoryPerceptualService:
         }
         if file_type in [FileType.IMAGE, FileType.VIDEO]:
             file_modalities = {
-                "scene": content.get("scene")
+                "scene": content.get("scene", [])
             }
         elif file_type in [FileType.DOCUMENT]:
             file_modalities = {
-                "section_count": content.get("section_count"),
-                "title": content.get("title"),
-                "first_line": content.get("first_line")
+                "section_count": content.get("section_count", 0),
+                "title": content.get("title", ""),
+                "first_line": content.get("first_line", "")
             }
         else:
             file_modalities = {
-                "speaker_count": content.get("speaker_count")
+                "speaker_count": content.get("speaker_count", 0)
             }
         self.repository.create_perceptual_memory(
             end_user_id=uuid.UUID(end_user_id),
@@ -280,7 +294,7 @@ class MemoryPerceptualService:
             file_path=file_url,
             file_name=filename,
             file_ext=file_ext,
-            summary=content.get('summary'),
+            summary=content.get('summary', ""),
             meta_data={
                 "content": file_content,
                 "modalities": file_modalities

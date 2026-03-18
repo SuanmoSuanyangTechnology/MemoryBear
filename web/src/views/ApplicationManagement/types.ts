@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 09:55:52
+ * @Last Modified time: 2026-03-18 10:50:27
  */
 /**
  * Type definitions for Application Management
@@ -16,6 +16,7 @@ export interface Query {
   search: string;
   type?: string;
   shared_only?: boolean;
+  include_shared?: boolean;
 }
 
 /**

@@ -4,10 +4,10 @@
  * @Author: yujiangping
  * @Date: 2026-03-16 19:01:12
  * @LastEditors: yujiangping
- * @LastEditTime: 2026-03-16 19:17:47
+ * @LastEditTime: 2026-03-17 16:19:45
  */
 import { useState, useEffect, useRef, useCallback, type FC } from 'react';
-import { Spin, Alert, Button, Table, InputNumber } from 'antd';
+import { Spin, Alert, Button, Table, InputNumber, Image } from 'antd';
 import {
   ReloadOutlined,
   DownloadOutlined,
@@ -21,12 +21,10 @@ import { cookieUtils } from '@/utils/request';
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import * as pdfjsLib from 'pdfjs-dist';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 
 // 设置 pdf.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.mjs',
-  import.meta.url,
-).toString();
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 interface DocumentPreviewProps {
   fileUrl: string;
@@ -65,9 +63,12 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
   const [pptCurrentPage, setPptCurrentPage] = useState(1);
   const [pptTotalPages, setPptTotalPages] = useState(0);
 
+  // 图片状态
+  const [imageBlobUrl, setImageBlobUrl] = useState<string>('');
+
   // 支持预览的文件类型
   const previewableTypes = [
-    '.pdf', '.txt', '.md',
+    '.pdf', '.txt', '.md', '.csv',
     '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp',
     '.doc', '.docx', '.xls', '.xlsx',
     '.ppt', '.pptx',
@@ -90,7 +91,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
   };
   const isPdfFile = () => getFileExtension() === '.pdf';
   const isWordFile = () => ['.doc', '.docx'].includes(getFileExtension());
-  const isExcelFile = () => ['.xls', '.xlsx'].includes(getFileExtension());
+  const isExcelFile = () => ['.xls', '.xlsx', '.csv'].includes(getFileExtension());
   const isPptFile = () => ['.ppt', '.pptx'].includes(getFileExtension());
   const isPreviewable = () => previewableTypes.includes(getFileExtension());
 
@@ -227,6 +228,28 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
     }
   }, [fileUrl]);
 
+  // ========== 图片加载逻辑 ==========
+  const loadImageFile = async () => {
+    setLoading(true);
+    setError(false);
+    setErrorMessage('');
+    try {
+      const arrayBuffer = await fetchFileBuffer(fileUrl);
+      const ext = getFileExtension().replace('.', '');
+      const mimeMap: Record<string, string> = {
+        jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+        gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp', svg: 'image/svg+xml',
+      };
+      const blob = new Blob([arrayBuffer], { type: mimeMap[ext] || 'image/png' });
+      const url = URL.createObjectURL(blob);
+      setImageBlobUrl(url);
+      setLoading(false);
+    } catch (err: any) {
+      console.error('加载图片文件失败:', err);
+      handleError(err.message || '图片加载失败');
+    }
+  };
+
   // ========== 文本/Word/Excel 加载逻辑 ==========
   const loadTextFile = async () => {
     setLoading(true);
@@ -274,12 +297,42 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
     }
   };
 
+  const isCsvFile = () => getFileExtension() === '.csv';
+
   const loadExcelFile = async () => {
     setLoading(true);
     setError(false);
     setErrorMessage('');
     try {
       const arrayBuffer = await fetchFileBuffer(fileUrl);
+
+      // CSV 文件需要处理编码问题（可能是 GBK/GB2312）
+      if (isCsvFile()) {
+        let csvText: string;
+        // 先尝试 UTF-8 解码
+        const utf8Text = new TextDecoder('utf-8').decode(arrayBuffer);
+        // 检测是否有乱码特征（常见的 GBK 被错误解析为 UTF-8 的替换字符）
+        if (utf8Text.includes('\uFFFD') || /[\x80-\xff]/.test(utf8Text.slice(0, 200))) {
+          // 尝试 GBK 解码
+          try {
+            csvText = new TextDecoder('gbk').decode(arrayBuffer);
+          } catch {
+            csvText = utf8Text;
+          }
+        } else {
+          csvText = utf8Text;
+        }
+        const workbook = XLSX.read(csvText, { type: 'string' });
+        const sheets = workbook.SheetNames.map(sheetName => {
+          const worksheet = workbook.Sheets[sheetName];
+          const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+          return { sheetName, data };
+        });
+        setExcelData(sheets);
+        setLoading(false);
+        return;
+      }
+
       const workbook = XLSX.read(arrayBuffer, { type: 'array' });
       const sheets = workbook.SheetNames.map(sheetName => {
         const worksheet = workbook.Sheets[sheetName];
@@ -311,7 +364,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
     else if (isExcelFile()) loadExcelFile();
     else if (isPdfFile()) loadPdfFile();
     else if (isPptFile()) loadPptFile();
-    else if (isImageFile()) setLoading(false);
+    else if (isImageFile()) loadImageFile();
   }, [fileUrl]);
 
   // PDF 翻页/缩放后重新渲染
@@ -412,11 +465,11 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
       {/* 图片预览 */}
       {isImageFile() && !error && !loading && (
         <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-gray-50 rb:flex rb:items-center rb:justify-center">
-          <img
-            src={fileUrl}
+          <Image
+            src={imageBlobUrl}
             alt={fileName || '图片预览'}
-            className="rb:max-w-full rb:max-h-full rb:object-contain"
-            onError={() => handleError('图片加载失败')}
+            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+            onError={() => handleError('图片渲染失败')}
           />
         </div>
       )}

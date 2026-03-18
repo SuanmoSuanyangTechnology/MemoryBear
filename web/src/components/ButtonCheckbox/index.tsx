@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:01:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-12 14:59:38
+ * @Last Modified time: 2026-03-17 15:35:34
  */
 
 /**
@@ -63,9 +63,9 @@ const ButtonCheckbox: FC<ButtonCheckboxProps> = ({
       align="center"
       justify={cicle ? 'center' : 'start'}
       gap={4}
-      className={clsx("rb:flex rb:items-center rb:cursor-pointer rb:border rb:hover:bg-[#F6F6F6]", {
+      className={clsx("rb:flex rb:items-center rb:cursor-pointer rb:px-2! rb:border rb:hover:bg-[#F6F6F6]", {
         'rb:size-7 rb:rounded-[14px] rb:border-[0.5px] rb:border-[#EBEBEB]': cicle,
-        'rb:rounded-lg rb:px-2 rb:text-[12px] rb:h-6': !cicle,
+        'rb:rounded-lg rb:text-[12px] rb:h-6': !cicle,
         // Checked state: blue background and border
         "rb:bg-[rgba(21,94,239,0.06)] rb:border-[rgba(21,94,239,0.25)] rb:hover:bg-[rgba(21,94,239,0.06)] rb:text-[#155EEF]": checked,
         // Unchecked state: gray border and dark text

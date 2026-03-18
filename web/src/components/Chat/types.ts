@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:45:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-12 13:57:51
+ * @Last Modified time: 2026-03-17 13:46:24
  */
 import { type ReactNode } from 'react'
 
@@ -24,6 +24,7 @@ export interface ChatItem {
   subContent?: Record<string, any>[];
   files?: any[];
   error?: string;
+  audioUrl?: string;
 }
 
 /**
