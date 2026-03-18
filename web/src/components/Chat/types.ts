@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:45:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 13:46:24
+ * @Last Modified time: 2026-03-18 20:47:42
  */
 import { type ReactNode } from 'react'
 
@@ -22,9 +22,11 @@ export interface ChatItem {
   created_at?: number | string;
   status?: string;
   subContent?: Record<string, any>[];
-  files?: any[];
   error?: string;
-  audioUrl?: string;
+  meta_data?: {
+    audio_url?: string;
+    files?: any[];
+  },
 }
 
 /**

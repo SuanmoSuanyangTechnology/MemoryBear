@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 14:42:31
+ * @Last Modified time: 2026-03-18 20:32:54
  */
 /**
  * File Upload Component
@@ -71,6 +71,12 @@ const transform_file_type = {
 
   'application/vnd.ms-powerpoint': 'document/ppt',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'document/pptx',
+
+  'application/vnd.ms-excel': 'document/xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'document/xlsx',
+  'text/csv': 'document/csv',
+
+  'application/json': 'document/json'
 }
 // Mapping of file extensions to MIME types
 const ALL_FILE_TYPE: {
@@ -87,6 +93,13 @@ const ALL_FILE_TYPE: {
 
   ppt: 'application/vnd.ms-powerpoint',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+
+  csv: 'text/csv',
+
+  json: 'application/json',
 
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',

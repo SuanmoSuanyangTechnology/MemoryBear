@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 15:35:05
+ * @Last Modified time: 2026-03-18 20:54:00
  */
 /**
  * Conversation Page
@@ -160,7 +160,9 @@ const Conversation: FC = () => {
       role: 'user',
       content: message,
       created_at: Date.now(),
-      files
+      meta_data: {
+        files
+      },
     }])
   }
 
@@ -185,7 +187,7 @@ const Conversation: FC = () => {
           {
             ...lastMsg,
             content: lastMsg.content + content,
-            audioUrl: audio_url
+            meta_data: { audio_url }
           }
         ]
       }
