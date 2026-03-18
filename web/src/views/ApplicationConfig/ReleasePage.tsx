@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:41 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 14:30:41
+ * @Last Modified time: 2026-03-18 20:01:31
  */
 import { type FC, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -71,7 +71,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
   }
   const handleExport = () => {
     if (!selectedVersion) return
-    appExport(data.id, data.name, {release_version: selectedVersion.id})
+    appExport(data.id, data.name, { release_id: selectedVersion.id})
   }
   return (
     <div className="rb:flex rb:h-[calc(100vh-64px)]">
