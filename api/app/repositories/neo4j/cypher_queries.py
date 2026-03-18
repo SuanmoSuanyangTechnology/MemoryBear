@@ -1242,6 +1242,24 @@ RETURN DISTINCT
     CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
+GET_COMMUNITY_GRAPH_DATA = """
+MATCH (c:Community {end_user_id: $end_user_id})
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[b:BELONGS_TO_COMMUNITY]->(c)
+OPTIONAL MATCH (e)-[r:EXTRACTED_RELATIONSHIP]-(e2:ExtractedEntity {end_user_id: $end_user_id})
+RETURN
+    elementId(c)          AS c_id,
+    properties(c)         AS c_props,
+    elementId(e)          AS e_id,
+    properties(e)         AS e_props,
+    elementId(b)          AS b_id,
+    elementId(e2)         AS e2_id,
+    properties(e2)        AS e2_props,
+    elementId(r)          AS r_id,
+    type(r)               AS r_type,
+    properties(r)         AS r_props,
+    startNode(r) = e      AS r_from_e
+"""
+
 
 # Community keyword search: matches name or summary via fulltext index
 SEARCH_COMMUNITIES_BY_KEYWORD = """
