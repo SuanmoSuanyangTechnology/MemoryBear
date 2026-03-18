@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 18:10:47
+ * @Last Modified time: 2026-03-18 19:35:57
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, InputNumber, Flex, Switch, Row, Col, Radio } from 'antd';
@@ -80,7 +80,7 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
   const handleOpen = (values?: FileUpload) => {
     setVisible(true);
     if (values) {
-      const methods = values.allowed_transfer_methods
+      const methods = values.allowed_transfer_methods || ['local_file', 'remote_url']
       const transferMethod = Array.isArray(methods)
         ? methods.length === 2 ? 'both' : methods[0]
         : methods
