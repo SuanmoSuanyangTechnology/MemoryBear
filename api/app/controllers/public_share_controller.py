@@ -219,6 +219,7 @@ def list_conversations(
     app_service = AppService(db)
     app = app_service._get_app_or_404(share.app_id)
     new_end_user = end_user_repo.get_or_create_end_user(
+        app_id=share.app_id,
         workspace_id=app.workspace_id,
         other_id=other_id
     )
@@ -315,6 +316,7 @@ async def chat(
         app = app_service._get_app_or_404(share.app_id)
         workspace_id = app.workspace_id
         new_end_user = end_user_repo.get_or_create_end_user(
+            app_id=share.app_id,
             workspace_id=workspace_id,
             other_id=other_id,
             original_user_id=user_id

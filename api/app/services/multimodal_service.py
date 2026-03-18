@@ -14,9 +14,13 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 
+import csv
+import json
+
 import PyPDF2
 import httpx
 import magic
+import openpyxl
 from docx import Document
 from sqlalchemy.orm import Session
 
@@ -39,6 +43,13 @@ DOC_MIME = [
     'application/msword',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 ]
+XLSX_MIME = [
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
+    'application/zip'
+]
+CSV_MIME = ['text/csv', 'application/csv']
+JSON_MIME = ['application/json']
 
 
 class MultimodalFormatStrategy(ABC):
@@ -577,6 +588,12 @@ class MultimodalService:
                 return await self._extract_pdf_text(file_content)
             elif file_mime_type in DOC_MIME:
                 return await self._extract_word_text(file_content)
+            elif file_mime_type in XLSX_MIME:
+                return await self._extract_xlsx_text(file_content)
+            elif file_mime_type in CSV_MIME:
+                return await self._extract_csv_text(file_content)
+            elif file_mime_type in JSON_MIME:
+                return await self._extract_json_text(file_content)
             else:
                 return f"[Unsupported file type: {file_mime_type}]"
         except Exception as e:
@@ -602,7 +619,6 @@ class MultimodalService:
     async def _extract_word_text(file_content: bytes) -> str:
         """提取 Word 文档文本"""
         try:
-            # 使用 BytesIO 读取 Word 文档
             word_file = io.BytesIO(file_content)
             doc = Document(word_file)
             text_parts = [paragraph.text for paragraph in doc.paragraphs]
@@ -610,6 +626,42 @@ class MultimodalService:
         except Exception as e:
             logger.error(f"提取 Word 文本失败: {e}")
             return f"[Word 提取失败: {str(e)}]"
+
+    @staticmethod
+    async def _extract_xlsx_text(file_content: bytes) -> str:
+        """提取 Excel 文本"""
+        try:
+            wb = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True, data_only=True)
+            parts = []
+            for sheet in wb.worksheets:
+                parts.append(f"[Sheet: {sheet.title}]")
+                for row in sheet.iter_rows(values_only=True):
+                    parts.append('\t'.join('' if v is None else str(v) for v in row))
+            return '\n'.join(parts)
+        except Exception as e:
+            logger.error(f"提取 Excel 文本失败: {e}")
+            return f"[Excel 提取失败: {str(e)}]"
+
+    @staticmethod
+    async def _extract_csv_text(file_content: bytes) -> str:
+        """提取 CSV 文本"""
+        try:
+            text = file_content.decode('utf-8-sig')
+            reader = csv.reader(io.StringIO(text))
+            return '\n'.join('\t'.join(row) for row in reader)
+        except Exception as e:
+            logger.error(f"提取 CSV 文本失败: {e}")
+            return f"[CSV 提取失败: {str(e)}]"
+
+    @staticmethod
+    async def _extract_json_text(file_content: bytes) -> str:
+        """提取 JSON 文本"""
+        try:
+            data = json.loads(file_content.decode('utf-8'))
+            return json.dumps(data, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"提取 JSON 文本失败: {e}")
+            return f"[JSON 提取失败: {str(e)}]"
 
 
 def get_multimodal_service(db: Session) -> MultimodalService:
