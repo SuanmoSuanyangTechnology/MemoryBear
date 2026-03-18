@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:19:13 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-13 17:26:57
+ * @Last Modified time: 2026-03-18 10:47:17
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Checkbox, App, Form } from 'antd';
@@ -147,6 +147,7 @@ const AppSharingModal = forwardRef<AppSharingModalRef, AppSharingModalProps>(({ 
                   <Checkbox
                     checked={isShared || selectedIds.includes(space.id)}
                     disabled={isShared} // already-shared workspaces cannot be unselected
+                    onClick={(e) => e.stopPropagation()}
                     onChange={() => handleToggle(space.id, isShared)}
                   />
                   <span className="rb:flex-1 rb:text-sm">{space.name}</span>
