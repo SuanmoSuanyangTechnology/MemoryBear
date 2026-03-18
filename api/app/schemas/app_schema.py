@@ -525,6 +525,13 @@ class AppRelease(BaseModel):
         return int(dt.timestamp() * 1000) if dt else None
 
 
+# ---------- App Copy Schema ----------
+
+class CopyAppRequest(BaseModel):
+    """复制应用请求"""
+    new_name: Optional[str] = Field(None, description="新应用名称，不填则使用原名称-副本")
+
+
 # ---------- App Share Schemas ----------
 
 class AppShareCreate(BaseModel):

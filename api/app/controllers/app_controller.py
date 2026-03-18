@@ -193,7 +193,7 @@ def delete_app(
 @cur_workspace_access_guard()
 def copy_app(
         app_id: uuid.UUID,
-        new_name: Optional[str] = None,
+        payload: app_schema.CopyAppRequest = None,
         db: Session = Depends(get_db),
         current_user=Depends(get_current_user),
 ):
@@ -205,6 +205,7 @@ def copy_app(
     - 不影响原应用
     """
     workspace_id = current_user.current_workspace_id
+    new_name = payload.new_name if payload else None
     logger.info(
         "用户请求复制应用",
         extra={
