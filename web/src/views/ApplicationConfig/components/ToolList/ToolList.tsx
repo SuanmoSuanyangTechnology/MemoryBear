@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:26:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 15:53:06
+ * @Last Modified time: 2026-03-18 14:01:13
  */
 /**
  * Tool List Component
@@ -107,7 +107,10 @@ const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => 
   }
   /** Add new tool to list */
   const updateTools = (tool: ToolOption) => {
-    const list = [...toolList, tool]
+    const list = [...toolList, {
+      ...tool,
+      is_active: true,
+    }]
     setToolList(list)
     onChange && onChange(list)
   }
