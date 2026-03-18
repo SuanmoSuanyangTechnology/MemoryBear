@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:26:03 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:26:03 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-18 14:01:13
  */
 /**
  * Tool List Component
@@ -22,6 +22,7 @@ import type {
 import Empty from '@/components/Empty'
 import ToolModal from './ToolModal'
 import { getToolMethods, getToolDetail } from '@/api/tools'
+import Tag from '@/components/Tag'
 
 /**
  * Tool list management component
@@ -42,23 +43,25 @@ const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => 
               getToolMethods(item.tool_id)
             ])
 
+            console.log('toolDetail', toolDetail)
             switch ((toolDetail as any).tool_type) {
               case 'mcp':
                 const mcpFilterItem = (methods as any[]).find(vo => vo.name === item.operation)
                 return {
                   ...item,
+                  is_active: (toolDetail as any).is_active,
                   label: mcpFilterItem?.description,
                   method_id: mcpFilterItem?.method_id,
                   value: mcpFilterItem?.name,
                   description: mcpFilterItem?.description,
                   parameters: mcpFilterItem?.parameters
                 }
-                break
               case 'builtin':
                 if ((methods as any[]).length > 1) {
                   const builtinFilterItem = (methods as any[]).find(vo => vo.name === item.operation)
                   return {
                     ...item,
+                    is_active: (toolDetail as any).is_active,
                     label: builtinFilterItem?.description,
                     method_id: builtinFilterItem?.method_id,
                     value: builtinFilterItem?.name,
@@ -68,17 +71,18 @@ const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => 
                 }
                 return {
                   ...item,
+                  is_active: (toolDetail as any).is_active,
                   label: (methods as any[])[0]?.description,
                   method_id: (methods as any[])[0]?.method_id,
                   value: (methods as any[])[0]?.name,
                   description: (methods as any[])[0]?.description,
                   parameters: (methods as any[])[0]?.parameters
                 }
-                break
               default:
                 const customFilterItem = (methods as any[]).find(vo => vo.method_id === item.operation)
                 return {
                   ...item,
+                  is_active: (toolDetail as any).is_active,
                   label: customFilterItem?.name,
                   method_id: customFilterItem?.method_id,
                   value: customFilterItem?.name,
@@ -103,7 +107,10 @@ const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => 
   }
   /** Add new tool to list */
   const updateTools = (tool: ToolOption) => {
-    const list = [...toolList, tool]
+    const list = [...toolList, {
+      ...tool,
+      is_active: true,
+    }]
     setToolList(list)
     onChange && onChange(list)
   }
@@ -127,6 +134,7 @@ const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => 
     setToolList([...list])
     onChange && onChange(list)
   }
+  console.log('toolList', toolList)
   return (
     <Card 
       title={t('application.toolConfiguration')}
@@ -143,8 +151,13 @@ const ToolList: FC<{ value?: ToolOption[]; onChange?: (config: ToolOption[]) => 
             renderItem={(item, index) => (
               <List.Item>
                 <div key={index} className="rb:flex rb:items-center rb:justify-between rb:p-[12px_16px] rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
-                  <div className="rb:font-medium rb:leading-4">
-                    {item.label}
+                  <div>
+                    <div className="rb:font-medium rb:leading-4">
+                      {item.label}
+                    </div>
+                    <Tag color={item.is_active ? 'success' : 'error'} className="rb:mt-1">
+                      {item.is_active ? t('common.enable') : t('common.deleted')}
+                    </Tag>
                   </div>
                   <Space size={12}>
                     <div 

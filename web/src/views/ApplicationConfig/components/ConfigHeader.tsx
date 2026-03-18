@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 15:58:10
+ * @Last Modified time: 2026-03-18 15:40:53
  */
 import { type FC, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -18,10 +18,10 @@ import exportIcon from '@/assets/images/export_hover.svg'
 import deleteIcon from '@/assets/images/delete_hover.svg'
 import type { Application, ApplicationModalRef } from '@/views/ApplicationManagement/types';
 import ApplicationModal from '@/views/ApplicationManagement/components/ApplicationModal'
-import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef, FunConfigForm } from '../types'
+import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef, FeaturesConfigForm } from '../types'
 import { deleteApplication, appExport } from '@/api/application'
 import CopyModal from './CopyModal'
-import FunConfig from './FunConfig'
+import FeaturesConfig from './FeaturesConfig'
 
 const { Header } = Layout;
 
@@ -61,6 +61,10 @@ interface ConfigHeaderProps {
   workflowRef: React.RefObject<WorkflowRef>
   /** App component ref (Agent/Cluster/Workflow) */
   appRef?: React.RefObject<AgentRef | ClusterRef | WorkflowRef>
+  /** Features config from parent state */
+  features?: FeaturesConfigForm;
+  /** Callback to update features in parent */
+  onFeaturesChange?: (value: FeaturesConfigForm) => void;
 }
 
 /**
@@ -71,6 +75,8 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
   application, activeTab, handleChangeTab, refresh,
   workflowRef,
   appRef,
+  features,
+  onFeaturesChange,
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -173,14 +179,10 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
     return items
   }, [t, handleClick, application])
 
-  const funConfig = useMemo(() => {
-    return (appRef?.current?.funConfig || { file_type: [] }) as FunConfigForm
-  }, [appRef])
-  const handleSaveFunConfig = useCallback((value: FunConfigForm) => {
-    appRef?.current?.handleSaveFunConfig?.(value)
-  }, [appRef])
-
-  console.log('formatMenuItems', formatMenuItems)
+  const handleSaveFeaturesConfig = useCallback((value: FeaturesConfigForm) => {
+    appRef?.current?.handleSaveFeaturesConfig?.(value)
+    onFeaturesChange?.(value)
+  }, [appRef, onFeaturesChange])
   return (
     <>
       <Header className="rb:w-full rb:h-16 rb:grid rb:grid-cols-3 rb:p-[16px_16px_16px_24px]! rb:border-b rb:border-[#EAECEE] rb:leading-8">
@@ -211,7 +213,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         </div>
         {application?.type === 'workflow'
           ? <div className="rb:h-8 rb:flex rb:items-center rb:justify-end rb:gap-2.5">
-            {/* <FunConfig value={funConfig} refresh={handleSaveFunConfig} /> */}
+            <FeaturesConfig source={application?.type} value={features} refresh={handleSaveFeaturesConfig} />
             <Button onClick={clear}>{t('workflow.clear')}</Button>
             <Button onClick={addvariable}>{t('workflow.addvariable')}</Button>
             <Button onClick={run}>{t('workflow.run')}</Button>

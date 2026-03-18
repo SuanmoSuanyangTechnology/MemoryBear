@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-13 17:01:04
+ * @Last Modified time: 2026-03-16 17:42:12
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
@@ -78,7 +78,7 @@ export interface Config extends MultiAgentConfig {
   updated_at: number;
   skills?: SkillConfigForm | null;
 
-  funConfig?: FunConfigForm;
+  features?: FeaturesConfigForm;
 }
 
 /**
@@ -129,8 +129,8 @@ export interface AgentRef {
    * @param flag - Whether to show success message
    */
   handleSave: (flag?: boolean) => Promise<unknown>;
-  funConfig: Config['funConfig'];
-  handleSaveFunConfig?: (value: FunConfigForm) => void;
+  features: Config['features'];
+  handleSaveFeaturesConfig?: (value: FeaturesConfigForm) => void;
 }
 
 /**
@@ -142,8 +142,8 @@ export interface ClusterRef {
    * @param flag - Whether to show success message
    */
   handleSave: (flag?: boolean) => Promise<unknown>;
-  funConfig: Config['funConfig'];
-  handleSaveFunConfig?: (value: FunConfigForm) => void;
+  features: Config['features'];
+  handleSaveFeaturesConfig?: (value: FeaturesConfigForm) => void;
 }
 
 /**
@@ -162,8 +162,8 @@ export interface WorkflowRef {
   /** Add variable */
   addVariable: () => void;
   config: WorkflowConfig | null;
-  funConfig: WorkflowConfig['funConfig'];
-  handleSaveFunConfig?: (value: FunConfigForm) => void;
+  features: WorkflowConfig['features'];
+  handleSaveFeaturesConfig?: (value: FeaturesConfigForm) => void;
 }
 
 /**
@@ -416,17 +416,55 @@ export interface FileTypeConfig {
   maxCount: number;
   maxSize: number;
 }
-export interface FunConfigForm {
-  enabled: boolean;
-  fileTypes: FileTypeConfig[]
-  uploadType: 'local' | 'url' | 'both';
+interface FileSetttings {
+  image_enabled: boolean;
+  image_max_size_mb: number;
+  image_allowed_extensions: string[];
+  audio_enabled: boolean;
+  audio_max_size_mb: number;
+  audio_allowed_extensions: string[];
+  document_enabled: boolean;
+  document_max_size_mb: number;
+  document_allowed_extensions: string[];
+  video_enabled: boolean;
+  video_max_size_mb: number;
+  video_allowed_extensions: string[];
+  max_file_count: number;
+  allowed_transfer_methods: string[] | string;
+}
+export type FeaturesConfigForm = {
+  file_upload: FileSetttings & {
+    enabled: boolean;
+    settings?: FileSetttings
+  };
+  opening_statement: {
+    enabled: boolean;
+    statement: string | null;
+    suggested_questions: string[];
+  };
+  suggested_questions_after_answer: {
+    enabled: boolean;
+  };
+  text_to_speech: {
+    enabled: boolean;
+    voice: string | null;
+    language: string | null;
+    autoplay: boolean;
+  };
+  citation: {
+    enabled: boolean;
+  };
+  web_search: {
+    enabled: boolean;
+    search_engine: string | null;
+  };
 }
 /**
  * Function config modal ref methods
  */
-export interface FunConfigModalRef {
+export interface FeaturesConfigModalRef {
   /** Open function config modal */
-  handleOpen: (value: FunConfigForm) => void;
+  handleOpen: (value: FeaturesConfigForm) => void;
 }
 
 /**
