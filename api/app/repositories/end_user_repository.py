@@ -66,7 +66,8 @@ class EndUserRepository:
             raise
 
     def get_or_create_end_user(
-        self, 
+        self,
+        app_id: uuid.UUID,
         workspace_id: uuid.UUID,
         other_id: str,
         original_user_id: Optional[str] = None
@@ -74,6 +75,7 @@ class EndUserRepository:
         """获取或创建终端用户
         
         Args:
+            app_id: 应用ID
             workspace_id: 工作空间ID
             other_id: 第三方ID
             original_user_id: 原始用户ID (存储到 other_id)
@@ -92,10 +94,14 @@ class EndUserRepository:
             
             if end_user:
                 db_logger.debug(f"找到现有终端用户: 应用ID {workspace_id}、第三方ID {other_id}")
+                end_user.app_id=app_id
+                self.db.commit()
+                self.db.refresh(end_user)
                 return end_user
             
             # 创建新用户
             end_user = EndUser(
+                app_id=app_id,
                 workspace_id=workspace_id,
                 other_id=other_id
             )

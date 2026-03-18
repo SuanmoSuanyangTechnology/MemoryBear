@@ -537,6 +537,7 @@ async def draft_run(
         # 先获取 app 的 workspace_id
         end_user_repo = EndUserRepository(db)
         new_end_user = end_user_repo.get_or_create_end_user(
+            app_id=app_id,
             workspace_id=app.workspace_id,
             other_id=str(current_user.id),
         )
@@ -869,6 +870,7 @@ async def draft_run_compare(
         # 先获取 app 的 workspace_id
         end_user_repo = EndUserRepository(db)
         new_end_user = end_user_repo.get_or_create_end_user(
+            app_id=app_id,
             workspace_id=app.workspace_id,
             other_id=str(current_user.id),
         )

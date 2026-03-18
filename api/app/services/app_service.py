@@ -2062,7 +2062,8 @@ class AppService:
                 )
 
         if memory_config_id:
-            updated_count = self._update_endusers_memory_config(app_id, memory_config_id)
+
+            updated_count = self._update_endusers_memory_config_by_workspace(app.workspace_id, memory_config_id)
             logger.info(
                 f"回滚时更新终端用户记忆配置: app_id={app_id}, version={version}, "
                 f"memory_config_id={memory_config_id}, updated_count={updated_count}"
