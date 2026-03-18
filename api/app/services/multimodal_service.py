@@ -588,7 +588,7 @@ class MultimodalService:
                 return await self._extract_pdf_text(file_content)
             elif file_mime_type in DOC_MIME:
                 return await self._extract_word_text(file_content)
-            elif file_mime_type in XLSX_MIME:
+            elif file_mime_type in XLSX_MIME and file.file_type.endswith(("xlsx", "xls")):
                 return await self._extract_xlsx_text(file_content)
             elif file_mime_type in CSV_MIME:
                 return await self._extract_csv_text(file_content)
