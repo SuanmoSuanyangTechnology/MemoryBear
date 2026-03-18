@@ -2,9 +2,9 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 11:20:45
+ * @Last Modified time: 2026-03-18 16:15:43
  */
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, App, Flex, Row, Col, Collapse } from 'antd';
 import clsx from 'clsx';
@@ -59,7 +59,8 @@ const MySharing: React.FC = () => {
     });
   };
 
-  const handleCancelOne = (item: MySharedOutItem) => {
+  const handleCancelOne = (item: MySharedOutItem, e: MouseEvent) => {
+    e.stopPropagation()
     modal.confirm({
       title: t('application.confirmAppCancelShareDesc', { app: item.source_app_name, workspace: item.target_workspace_name }),
       okText: t('common.confirm'),
@@ -73,6 +74,11 @@ const MySharing: React.FC = () => {
       }
     });
   };
+    /** Navigate to application configuration page */
+  const handleEdit = (item: MySharedOutItem) => {
+    let url = `/#/application/config/${item.source_app_id}`
+    window.open(url);
+  }
 
   return (
     <Flex vertical gap={12} className="rb:h-[calc(100vh-148px)]! rb:overflow-y-auto!">
@@ -108,10 +114,10 @@ const MySharing: React.FC = () => {
               children: (
                 <Row gutter={[12, 12]}>
                   {items.map(item => (
-                    <Col key={item.id} span={6} className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-3! rb:px-4! rb:relative">
+                    <Col key={item.id} span={6} className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-3! rb:px-4! rb:relative rb:cursor-pointer" onClick={() => handleEdit(item)}>
                       <div
                         className="rb:absolute rb:top-3 rb:right-3 rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/close.svg')]"
-                        onClick={() => handleCancelOne(item)}
+                        onClick={(e) => handleCancelOne(item, e)}
                       />
                       <Flex gap={8} align="center">
                         <div className="rb:size-7 rb:rounded-lg rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[14px] rb:text-white">

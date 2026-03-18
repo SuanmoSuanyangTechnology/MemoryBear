@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 12:07:03
+ * @Last Modified time: 2026-03-18 16:08:17
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -12,10 +12,11 @@ import { Graph, Node, MiniMap, Snapline, Clipboard, Keyboard, type Edge } from '
 import { register } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 
-import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode, noteNode, notesConfig } from '../constant';
+import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode, notesConfig } from '../constant';
 import type { WorkflowConfig, NodeProperties, ChatVariable } from '../types';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
 import { useUser } from '@/store/user';
+import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types'
 
 /**
  * Props for useWorkflowGraph hook
@@ -25,6 +26,8 @@ export interface UseWorkflowGraphProps {
   containerRef: React.RefObject<HTMLDivElement>;
   /** Reference to the minimap container element */
   miniMapRef: React.RefObject<HTMLDivElement>;
+  /** Callback when features config is loaded */
+  onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void;
 }
 
 /**
@@ -67,6 +70,7 @@ export interface UseWorkflowGraphReturn {
   setChatVariables: React.Dispatch<React.SetStateAction<ChatVariable[]>>;
 
   handleAddNotes: () => void;
+  handleSaveFeaturesConfig: (value: FeaturesConfigForm) => void;
 }
 
 /**
@@ -78,6 +82,7 @@ export interface UseWorkflowGraphReturn {
 export const useWorkflowGraph = ({
   containerRef,
   miniMapRef,
+  onFeaturesLoad,
 }: UseWorkflowGraphProps): UseWorkflowGraphReturn => {
   // Hooks
   const { id } = useParams();
@@ -115,6 +120,7 @@ export const useWorkflowGraph = ({
         })
         setChatVariables(initChatVariables)
         setConfig({ ...rest, variables: initChatVariables })
+        onFeaturesLoad?.(rest.features)
       })
   }
 
@@ -132,7 +138,7 @@ export const useWorkflowGraph = ({
     if (nodes.length) {
       const nodeList = nodes.map(node => {
         const { id, type, name, position, config = {} } = node
-        let nodeLibraryConfig = [...nodeLibrary, { nodes: [unknownNode, notesConfig] }]
+        let nodeLibraryConfig: NodeProperties | undefined = [...nodeLibrary, { nodes: [unknownNode, notesConfig] }]
           .flatMap(category => category.nodes)
           .find(n => n.type === type)
         nodeLibraryConfig = JSON.parse(JSON.stringify({ config: {}, ...nodeLibraryConfig })) as NodeProperties
@@ -994,6 +1000,9 @@ export const useWorkflowGraph = ({
       }) || [];
       const edges = graphRef.current?.getEdges() || []
 
+
+      console.log('config', config)
+
       const params = {
         ...config,
         variables: chatVariables.map(v => {
@@ -1187,6 +1196,9 @@ export const useWorkflowGraph = ({
       data: { ...cleanNodeData },
     });
   }
+  const handleSaveFeaturesConfig = (value?: FeaturesConfigForm) => {
+    setConfig(prev => prev ? { ...prev, features: value } as WorkflowConfig : prev)
+  }
 
   return {
     config,
@@ -1206,6 +1218,7 @@ export const useWorkflowGraph = ({
     handleSave,
     chatVariables,
     setChatVariables,
-    handleAddNotes
+    handleAddNotes,
+    handleSaveFeaturesConfig
   };
 };
