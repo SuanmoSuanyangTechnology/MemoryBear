@@ -4,7 +4,7 @@
  * @Author: yujiangping
  * @Date: 2026-03-16 19:01:12
  * @LastEditors: yujiangping
- * @LastEditTime: 2026-03-18 18:24:27
+ * @LastEditTime: 2026-03-18 18:35:53
  */
 import { useState, useEffect, useRef, useCallback, type FC } from 'react';
 import { Spin, Alert, Button, Table, InputNumber, Image } from 'antd';
@@ -286,7 +286,20 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
     setError(false);
     setErrorMessage('');
     try {
+      // .doc 旧格式 mammoth 不支持，使用 Office Online Viewer
+      if (getFileExtension() === '.doc') {
+        setHtmlContent('');
+        setLoading(false);
+        return;
+      }
       const arrayBuffer = await fetchFileBuffer(fileUrl);
+      // 校验是否为有效的 docx（ZIP 格式，前两字节为 PK）
+      const header = new Uint8Array(arrayBuffer.slice(0, 4));
+      if (header[0] !== 0x50 || header[1] !== 0x4B) {
+        // 不是 ZIP/docx 格式，可能是 HTML 错误页或 JSON 响应
+        const text = new TextDecoder().decode(arrayBuffer.slice(0, 200));
+        throw new Error(`文件内容不是有效的 docx 格式: ${text.substring(0, 100)}`);
+      }
       const result = await mammoth.convertToHtml({ arrayBuffer });
       setHtmlContent(result.value);
       setLoading(false);
@@ -491,12 +504,22 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
 
       {/* Word 预览 */}
       {isWordFile() && !error && !loading && (
-        <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-white rb:p-6 rb:rounded rb:border rb:border-gray-200">
-          <div
-            className="rb:prose rb:max-w-none"
-            dangerouslySetInnerHTML={{ __html: htmlContent }}
-          />
-        </div>
+        getFileExtension() === '.doc' ? (
+          /* .doc 旧格式前端无法解析，提示下载 */
+          <div className="rb:w-full rb:flex-1 rb:flex rb:items-center rb:justify-center rb:bg-gray-50">
+            <div className="rb:text-center">
+              <p className="rb:text-gray-600 rb:mb-4">.doc 格式暂不支持在线预览，请下载后查看</p>
+              <Button icon={<DownloadOutlined />} type="primary" onClick={handleDownload}>下载文件</Button>
+            </div>
+          </div>
+        ) : (
+          <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-white rb:p-6 rb:rounded rb:border rb:border-gray-200">
+            <div
+              className="rb:prose rb:max-w-none"
+              dangerouslySetInnerHTML={{ __html: htmlContent }}
+            />
+          </div>
+        )
       )}
 
       {/* Excel 预览 */}
