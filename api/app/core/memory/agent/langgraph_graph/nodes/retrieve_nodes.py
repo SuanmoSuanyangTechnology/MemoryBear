@@ -155,7 +155,7 @@ async def clean_databases(data) -> str:
         # Process reranked results
         reranked = results.get('reranked_results', {})
         if reranked:
-            for category in ['summaries', 'statements', 'chunks', 'entities']:
+            for category in ['summaries', 'communities', 'statements', 'chunks', 'entities']:
                 items = reranked.get(category, [])
                 if isinstance(items, list):
                     content_list.extend(items)
@@ -169,11 +169,18 @@ async def clean_databases(data) -> str:
             elif isinstance(time_search, list):
                 content_list.extend(time_search)
 
-        # Extract text content
+        # Extract text content，对 community 按 name 去重（多次 tool 调用会产生重复）
         text_parts = []
+        seen_community_names = set()
         for item in content_list:
             if isinstance(item, dict):
-                text = item.get('statement') or item.get('content', '')
+                # community 节点用 name 去重
+                if 'member_count' in item or 'core_entities' in item:
+                    community_name = item.get('name') or item.get('id', '')
+                    if community_name in seen_community_names:
+                        continue
+                    seen_community_names.add(community_name)
+                text = item.get('statement') or item.get('content') or item.get('summary', '')
                 if text:
                     text_parts.append(text)
             elif isinstance(item, str):
@@ -354,7 +361,11 @@ async def retrieve(state: ReadState) -> ReadState:
     )
 
     time_retrieval_tool = create_time_retrieval_tool(end_user_id)
-    search_params = {"end_user_id": end_user_id, "return_raw_results": True}
+    search_params = {
+        "end_user_id": end_user_id,
+        "return_raw_results": True,
+        "include": ["summaries", "statements", "chunks", "entities", "communities"],
+    }
     hybrid_retrieval = create_hybrid_retrieval_tool_sync(memory_config, **search_params)
     agent = create_agent(
         llm,
@@ -390,8 +401,32 @@ async def retrieve(state: ReadState) -> ReadState:
                         raw_results = tool_results['content']
                         clean_content = await clean_databases(raw_results)
 
+                        # 社区展开：从 tool 返回结果中提取命中的 community，
+                        # 沿 BELONGS_TO_COMMUNITY 关系拉取关联 Statement 追加到 clean_content
+                        _expanded_stmts_to_write = []
+                        try:
+                            results_dict = raw_results.get('results', {}) if isinstance(raw_results, dict) else {}
+                            reranked = results_dict.get('reranked_results', {})
+                            community_hits = reranked.get('communities', [])
+                            if not community_hits:
+                                community_hits = results_dict.get('communities', [])
+                            if community_hits:
+                                from app.core.memory.agent.services.search_service import expand_communities_to_statements
+                                _expanded_stmts_to_write, new_texts = await expand_communities_to_statements(
+                                    community_results=community_hits,
+                                    end_user_id=end_user_id,
+                                    existing_content=clean_content,
+                                )
+                                if new_texts:
+                                    clean_content = clean_content + '\n' + '\n'.join(new_texts)
+                        except Exception as parse_err:
+                            logger.warning(f"[Retrieve] 解析社区命中结果失败，跳过展开: {parse_err}")
+
                         try:
                             raw_results = raw_results['results']
+                            # 写回展开结果，接口返回中可见（已在 helper 中清洗过字段）
+                            if _expanded_stmts_to_write and isinstance(raw_results, dict):
+                                raw_results.setdefault('reranked_results', {})['expanded_statements'] = _expanded_stmts_to_write
                         except Exception:
                             raw_results = []
 
