@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 10:00:10
+ * @Last Modified time: 2026-03-18 12:07:03
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -593,13 +593,6 @@ export const useWorkflowGraph = ({
     if (!graphRef.current) return false;
     const selectedNodes = graphRef.current.getNodes().filter(node => node.getData()?.isSelected);
     if (selectedNodes.length) {
-      selectedNodes.forEach(node => {
-        const data = node.getData();
-        node.setData({
-          ...data,
-          id: `${(data.type as string).replace(/-/g, '_')}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        });
-      });
       graphRef.current.copy(selectedNodes);
     }
     return false;
@@ -610,7 +603,14 @@ export const useWorkflowGraph = ({
    */
   const parseEvent = () => {
     if (!graphRef.current?.isClipboardEmpty()) {
-      graphRef.current?.paste({ offset: 32 });
+      const pastedNodes = graphRef.current?.paste({ offset: 32 }) ?? [];
+      pastedNodes.forEach(cell => {
+        if (cell.isNode()) {
+          const data = cell.getData();
+          const newId = `${(data.type as string).replace(/-/g, '_')}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          cell.setData({ ...data, id: newId });
+        }
+      });
       blankClick();
     }
     return false;
@@ -761,8 +761,23 @@ export const useWorkflowGraph = ({
         createEdge() {
           return graphRef.current?.createEdge(edgeAttrs);
         },
-        validateConnection({ sourceCell, targetCell, targetMagnet }) {
+        validateConnection({ sourceCell, targetCell, sourceMagnet, targetMagnet }) {
           if (!targetMagnet) return false;
+
+          // Only allow right port → left port connections
+          const getPortGroup = (magnet: Element) => {
+            let el: Element | null = magnet;
+            while (el) {
+              const group = el.getAttribute('port-group');
+              if (group) return group;
+              el = el.parentElement;
+            }
+            return null;
+          };
+          const sourceGroup = sourceMagnet ? getPortGroup(sourceMagnet) : null;
+          const targetGroup = targetMagnet ? getPortGroup(targetMagnet) : null;
+
+          if (sourceGroup === 'left' || targetGroup === 'right') return false;
           
           // Node cannot connect to itself
           if (sourceCell?.id === targetCell?.id) return false;
