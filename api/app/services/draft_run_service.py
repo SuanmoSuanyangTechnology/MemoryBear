@@ -374,7 +374,7 @@ class AgentRunService:
             files: Optional[List[FileInput]]
     ) -> None:
         """校验上传文件是否符合 file_upload 配置"""
-        if not files:
+        if not files or not features_config:
             return
         fu = features_config.get("file_upload", {})
         if not (isinstance(fu, dict) and fu.get("enabled")):
