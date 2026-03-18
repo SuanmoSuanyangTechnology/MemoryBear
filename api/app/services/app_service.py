@@ -1453,8 +1453,11 @@ class AppService:
         cfg = release.config or {}
         now = release.created_at or datetime.datetime.now()
         from app.models.workflow_model import WorkflowConfig as WorkflowConfigModel
+        # 查出源应用真实的 WorkflowConfig id，供 workflow_executions 外键使用
+        real_config = WorkflowConfigRepository(self.db).get_by_app_id(release.app_id)
+        real_id = real_config.id if real_config else uuid.uuid4()
         wf_cfg = WorkflowConfigModel(
-            id=uuid.uuid4(),
+            id=real_id,
             app_id=release.app_id,
             nodes=cfg.get("nodes", []),
             edges=cfg.get("edges", []),
