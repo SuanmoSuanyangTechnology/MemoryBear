@@ -558,18 +558,29 @@ async def draft_run(
         service._check_agent_config(app_id)
 
         # 2. 获取 Agent 配置
-        stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
-        agent_cfg = db.scalars(stmt).first()
-        if not agent_cfg:
-            raise BusinessException("Agent 配置不存在", BizCode.AGENT_CONFIG_MISSING)
+        # 共享应用：从最新发布版本读配置快照，而非草稿
+        is_shared = app.workspace_id != workspace_id
+        if is_shared:
+            if not app.current_release_id:
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
+            release = db.get(AppRelease, app.current_release_id)
+            if not release:
+                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+            agent_cfg = service._agent_config_from_release(release)
+            model_config = db.get(ModelConfig, release.default_model_config_id) if release.default_model_config_id else None
+        else:
+            stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
+            agent_cfg = db.scalars(stmt).first()
+            if not agent_cfg:
+                raise BusinessException("Agent 配置不存在", BizCode.AGENT_CONFIG_MISSING)
 
-        # 3. 获取模型配置
-        model_config = None
-        if agent_cfg.default_model_config_id:
-            model_config = db.get(ModelConfig, agent_cfg.default_model_config_id)
-            if not model_config:
-                from app.core.exceptions import ResourceNotFoundException
-                raise ResourceNotFoundException("模型配置", str(agent_cfg.default_model_config_id))
+            # 3. 获取模型配置
+            model_config = None
+            if agent_cfg.default_model_config_id:
+                model_config = db.get(ModelConfig, agent_cfg.default_model_config_id)
+                if not model_config:
+                    from app.core.exceptions import ResourceNotFoundException
+                    raise ResourceNotFoundException("模型配置", str(agent_cfg.default_model_config_id))
 
         # 流式返回
         if payload.stream:
@@ -725,7 +736,18 @@ async def draft_run(
             msg="多 Agent 任务执行成功"
         )
     elif app.type == AppType.WORKFLOW:  # 工作流
-        config = workflow_service.check_config(app_id)
+        # 共享应用：从最新发布版本读配置快照，而非草稿
+        is_shared = app.workspace_id != workspace_id
+        if is_shared:
+            if not app.current_release_id:
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
+            from app.models import AppRelease
+            release = db.get(AppRelease, app.current_release_id)
+            if not release:
+                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+            config = service._workflow_config_from_release(release)
+        else:
+            config = workflow_service.check_config(app_id)
         # 3. 流式返回
         if payload.stream:
             logger.debug(
