@@ -59,22 +59,22 @@ class MultimodalFormatStrategy(ABC):
         self.file = file
 
     @abstractmethod
-    async def format_image(self, url: str, content: bytes | None = None) -> Dict[str, Any]:
+    async def format_image(self, url: str, content: bytes | None = None) -> tuple[bool, Dict[str, Any]]:
         """格式化图片"""
         pass
 
     @abstractmethod
-    async def format_document(self, file_name: str, text: str) -> Dict[str, Any]:
+    async def format_document(self, file_name: str, text: str) -> tuple[bool, Dict[str, Any]]:
         """格式化文档"""
         pass
 
     @abstractmethod
-    async def format_audio(self, file_type: str, url: str, content: bytes | None = None) -> Dict[str, Any]:
+    async def format_audio(self, file_type: str, url: str, content: bytes | None = None) -> tuple[bool, Dict[str, Any]]:
         """格式化音频"""
         pass
 
     @abstractmethod
-    async def format_video(self, url: str) -> Dict[str, Any]:
+    async def format_video(self, url: str) -> tuple[bool, Dict[str, Any]]:
         """格式化视频"""
         pass
 
@@ -82,16 +82,16 @@ class MultimodalFormatStrategy(ABC):
 class DashScopeFormatStrategy(MultimodalFormatStrategy):
     """通义千问策略"""
 
-    async def format_image(self, url: str, content: bytes | None = None) -> Dict[str, Any]:
+    async def format_image(self, url: str, content: bytes | None = None) -> tuple[bool, Dict[str, Any]]:
         """通义千问图片格式：{"type": "image", "image": "url"}"""
-        return {
+        return True, {
             "type": "image",
             "image": url
         }
 
-    async def format_document(self, file_name: str, text: str) -> Dict[str, Any]:
+    async def format_document(self, file_name: str, text: str) -> tuple[bool, Dict[str, Any]]:
         """通义千问文档格式"""
-        return {
+        return True, {
             "type": "text",
             "text": f"<document name=\"{file_name}\">\n{text}\n</document>"
         }
@@ -102,26 +102,26 @@ class DashScopeFormatStrategy(MultimodalFormatStrategy):
             url: str,
             content: bytes | None = None,
             transcription: Optional[str] = None
-    ) -> Dict[str, Any]:
+    ) -> tuple[bool, Dict[str, Any]]:
         """
         通义千问音频格式
         - 原生支持: qwen-audio 系列
         - 其他模型: 需要转录为文本
         """
         if transcription:
-            return {
+            return True, {
                 "type": "text",
                 "text": f"<audio url=\"{url}\">\ntext_transcription:{transcription}\n</audio>"
             }
         # 通义千问音频格式：{"type": "audio", "audio": "url"}
-        return {
+        return True, {
             "type": "audio",
             "audio": url
         }
 
-    async def format_video(self, url: str) -> Dict[str, Any]:
+    async def format_video(self, url: str) -> tuple[bool, Dict[str, Any]]:
         """通义千问视频格式（qwen-vl 系列原生支持）"""
-        return {
+        return True, {
             "type": "video",
             "video": url
         }
@@ -130,7 +130,7 @@ class DashScopeFormatStrategy(MultimodalFormatStrategy):
 class BedrockFormatStrategy(MultimodalFormatStrategy):
     """Bedrock/Anthropic 策略"""
 
-    async def format_image(self, url: str, content: bytes | None = None) -> Dict[str, Any]:
+    async def format_image(self, url: str, content: bytes | None = None) -> tuple[bool, Dict[str, Any]]:
         """
         Bedrock/Anthropic 格式: base64 编码
         {"type": "image", "source": {"type": "base64", "media_type": "...", "data": "..."}}
@@ -153,7 +153,7 @@ class BedrockFormatStrategy(MultimodalFormatStrategy):
 
         logger.info(f"图片编码完成: media_type={media_type}, size={len(base64_data)}")
 
-        return {
+        return True, {
             "type": "image",
             "source": {
                 "type": "base64",
@@ -162,13 +162,13 @@ class BedrockFormatStrategy(MultimodalFormatStrategy):
             }
         }
 
-    async def format_document(self, file_name: str, text: str) -> Dict[str, Any]:
+    async def format_document(self, file_name: str, text: str) -> tuple[bool, Dict[str, Any]]:
         """Bedrock/Anthropic 文档格式（需要 base64 编码）"""
         # Bedrock 文档需要 base64 编码
         text_bytes = text.encode('utf-8')
         base64_text = base64.b64encode(text_bytes).decode('utf-8')
 
-        return {
+        return True, {
             "type": "document",
             "source": {
                 "type": "base64",
@@ -182,24 +182,24 @@ class BedrockFormatStrategy(MultimodalFormatStrategy):
             url: str,
             content: bytes | None = None,
             transcription: Optional[str] = None
-    ) -> Dict[str, Any]:
+    ) -> tuple[bool, Dict[str, Any]]:
         """
         Bedrock/Anthropic 音频格式
         不支持原生音频，必须转录为文本
         """
         if transcription:
-            return {
+            return True, {
                 "type": "text",
                 "text": f"[音频转录]\n{transcription}"
             }
-        return {
+        return False, {
             "type": "text",
             "text": "[音频文件：Bedrock 不支持原生音频，请启用音频转文本功能]"
         }
 
-    async def format_video(self, url: str) -> Dict[str, Any]:
+    async def format_video(self, url: str) -> tuple[bool, Dict[str, Any]]:
         """Bedrock/Anthropic 视频格式"""
-        return {
+        return False, {
             "type": "text",
             "text": f"<video url=\"{url}\">\n[视频文件，当前 provider 暂不支持]\n</video>"
         }
@@ -208,18 +208,18 @@ class BedrockFormatStrategy(MultimodalFormatStrategy):
 class OpenAIFormatStrategy(MultimodalFormatStrategy):
     """OpenAI 策略"""
 
-    async def format_image(self, url: str, content: bytes | None = None) -> Dict[str, Any]:
+    async def format_image(self, url: str, content: bytes | None = None) -> tuple[bool, Dict[str, Any]]:
         """OpenAI 格式: {"type": "image_url", "image_url": {"url": "..."}}"""
-        return {
+        return True, {
             "type": "image_url",
             "image_url": {
                 "url": url
             }
         }
 
-    async def format_document(self, file_name: str, text: str) -> Dict[str, Any]:
+    async def format_document(self, file_name: str, text: str) -> tuple[bool, Dict[str, Any]]:
         """OpenAI 文档格式"""
-        return {
+        return True, {
             "type": "text",
             "text": f"<document name=\"{file_name}\">\n{text}\n</document>"
         }
@@ -230,14 +230,14 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
             url: str,
             content: bytes | None = None,
             transcription: Optional[str] = None
-    ) -> Dict[str, Any]:
+    ) -> tuple[bool, Dict[str, Any]]:
         """
         OpenAI 音频格式
         - gpt-4o-audio 系列支持原生音频（需要 base64 编码）
         - 其他模型使用转录文本
         """
         if transcription:
-            return {
+            return True, {
                 "type": "text",
                 "text": f"<audio url=\"{url}\">\n{transcription}\n</audio>"
             }
@@ -266,7 +266,7 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
             # supported_ext = {"wav", "mp3", "mp4", "ogg", "flac", "webm", "m4a", "wave", "x-m4a"}
             file_ext = "wav" if not file_ext else file_ext
 
-            return {
+            return True, {
                 "type": "input_audio",
                 "input_audio": {
                     "data": f"data:;base64,{base64_audio}",
@@ -275,14 +275,14 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
             }
         except Exception as e:
             logger.error(f"下载音频失败: {e}")
-            return {
+            return False, {
                 "type": "text",
                 "text": f"[音频处理失败: {str(e)}]"
             }
 
-    async def format_video(self, url: str) -> Dict[str, Any]:
+    async def format_video(self, url: str) -> tuple[bool, Dict[str, Any]]:
         """OpenAI 视频格式"""
-        return {
+        return True, {
             "type": "video_url",
             "video_url": {
                 "url": url
@@ -377,21 +377,25 @@ class MultimodalService:
                 file.url = await self.get_file_url(file)
             try:
                 if file.type == FileType.IMAGE and "vision" in self.capability:
-                    content = await self._process_image(file, strategy)
+                    is_support, content = await self._process_image(file, strategy)
                     result.append(content)
-                    self.write_perceptual_memory(end_user_id, file.type, file.url, content)
+                    if is_support:
+                        self.write_perceptual_memory(end_user_id, file.type, file.url, content)
                 elif file.type == FileType.DOCUMENT:
-                    content = await self._process_document(file, strategy)
+                    is_support, content = await self._process_document(file, strategy)
                     result.append(content)
-                    self.write_perceptual_memory(end_user_id, file.type, file.url, content)
+                    if is_support:
+                        self.write_perceptual_memory(end_user_id, file.type, file.url, content)
                 elif file.type == FileType.AUDIO and "audio" in self.capability:
-                    content = await self._process_audio(file, strategy)
+                    is_support, content = await self._process_audio(file, strategy)
                     result.append(content)
-                    self.write_perceptual_memory(end_user_id, file.type, file.url, content)
+                    if is_support:
+                        self.write_perceptual_memory(end_user_id, file.type, file.url, content)
                 elif file.type == FileType.VIDEO and "video" in self.capability:
-                    content = await self._process_video(file, strategy)
+                    is_support, content = await self._process_video(file, strategy)
                     result.append(content)
-                    self.write_perceptual_memory(end_user_id, file.type, file.url, content)
+                    if is_support:
+                        self.write_perceptual_memory(end_user_id, file.type, file.url, content)
                 else:
                     logger.warning(f"不支持的文件类型: {file.type}")
             except Exception as e:
@@ -424,7 +428,7 @@ class MultimodalService:
         if end_user_id and self.api_config:
             write_perceptual_memory.delay(end_user_id, self.api_config.model_dump(), file_type, file_url, file_message)
 
-    async def _process_image(self, file: FileInput, strategy) -> Dict[str, Any]:
+    async def _process_image(self, file: FileInput, strategy) -> tuple[bool, Dict[str, Any]]:
         """
         处理图片文件
         
@@ -440,12 +444,12 @@ class MultimodalService:
             return await strategy.format_image(file.url, content=file.get_content())
         except Exception as e:
             logger.error(f"处理图片失败: {e}", exc_info=True)
-            return {
+            return False, {
                 "type": "text",
                 "text": f"[图片处理失败: {str(e)}]"
             }
 
-    async def _process_document(self, file: FileInput, strategy) -> Dict[str, Any]:
+    async def _process_document(self, file: FileInput, strategy) -> tuple[bool, Dict[str, Any]]:
         """
         处理文档文件（PDF、Word 等）
         
@@ -457,7 +461,7 @@ class MultimodalService:
             Dict: 根据 provider 返回不同格式的文档内容
         """
         if file.transfer_method == TransferMethod.REMOTE_URL:
-            return {
+            return True, {
                 "type": "text",
                 "text": f"<document url=\"{file.url}\">\n{await self._extract_document_text(file)}\n</document>"
             }
@@ -475,7 +479,7 @@ class MultimodalService:
             # 使用策略格式化文档
             return await strategy.format_document(file_name, text)
 
-    async def _process_audio(self, file: FileInput, strategy) -> Dict[str, Any]:
+    async def _process_audio(self, file: FileInput, strategy) -> tuple[bool, Dict[str, Any]]:
         """
         处理音频文件
         
@@ -503,12 +507,12 @@ class MultimodalService:
             return await strategy.format_audio(file.file_type, file.url, file.get_content(), transcription)
         except Exception as e:
             logger.error(f"处理音频失败: {e}", exc_info=True)
-            return {
+            return False, {
                 "type": "text",
                 "text": f"[音频处理失败: {str(e)}]"
             }
 
-    async def _process_video(self, file: FileInput, strategy) -> Dict[str, Any]:
+    async def _process_video(self, file: FileInput, strategy) -> tuple[bool, Dict[str, Any]]:
         """
         处理视频文件
         
@@ -524,7 +528,7 @@ class MultimodalService:
             return await strategy.format_video(file.url)
         except Exception as e:
             logger.error(f"处理视频失败: {e}", exc_info=True)
-            return {
+            return False, {
                 "type": "text",
                 "text": f"[视频处理失败: {str(e)}]"
             }
