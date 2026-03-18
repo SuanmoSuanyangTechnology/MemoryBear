@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-13 17:36:16
+ * @Last Modified time: 2026-03-18 10:44:32
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -107,7 +107,7 @@ const MySharing: React.FC = () => {
                 {items.map(item => (
                   <Col key={item.id} span={6} className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-3! rb:px-4! rb:relative">
                     <div
-                      className="rb:absolute rb:top-3 rb:right-3 rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/close.svg')]"
+                      className="rb:absolute rb:top-3 rb:right-3 rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/close.svg')]"
                       onClick={() => handleCancelOne(item)}
                     />
                     <Flex gap={8} align="center">
