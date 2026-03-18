@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 14:34:20
+ * @Last Modified time: 2026-03-18 19:31:28
  */
 /**
  * Workflow Chat Component
@@ -63,8 +63,11 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
    */
   const handleOpen = () => {
     setOpen(true)
-    if (data?.features) setFeatures(data.features)
   }
+
+  useEffect(() => {
+    if (data?.features && open) setFeatures(data.features)
+  }, [open, data?.features])
 
   useEffect(() => {
     if (open && graphRef.current && toolbarRef.current) {
