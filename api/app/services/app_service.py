@@ -1609,6 +1609,7 @@ class AppService:
                 variables=[var.model_dump() for var in data.variables] if data.variables else [],
                 execution_config=data.execution_config.model_dump() if data.execution_config else {},
                 triggers=[trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
+                features=data.features or {},
                 is_active=True,
                 created_at=now,
                 updated_at=now
@@ -1622,6 +1623,7 @@ class AppService:
             workflow_cfg.variables = [var.model_dump() for var in data.variables] if data.variables else []
             workflow_cfg.execution_config = data.execution_config.model_dump() if data.execution_config else {}
             workflow_cfg.triggers = [trigger.model_dump() for trigger in data.triggers] if data.triggers else []
+            workflow_cfg.features = data.features or {}
             workflow_cfg.updated_at = now
 
         self.db.commit()
@@ -1875,7 +1877,8 @@ class AppService:
                 "edges": workflow_cfg.edges,
                 "variables": workflow_cfg.variables,
                 "execution_config": workflow_cfg.execution_config,
-                "triggers": workflow_cfg.triggers
+                "triggers": workflow_cfg.triggers,
+                "features": workflow_cfg.features or {}
             }
 
             is_valid, errors = WorkflowValidator.validate_for_publish(config)
