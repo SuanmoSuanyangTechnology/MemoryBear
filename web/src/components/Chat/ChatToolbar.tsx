@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-17 14:22:25 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 18:39:49
+ * @Last Modified time: 2026-03-18 15:55:13
  */
 // Toolbar component for chat input area, supporting file upload, audio recording, and variable configuration
 import { useRef, forwardRef, useImperativeHandle, type ReactNode, useEffect } from 'react'
@@ -120,7 +120,10 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
 
   // Build dropdown menu items based on allowed transfer methods
   const fileMenus: MenuProps['items'] = []
-  if (file_upload?.allowed_transfer_methods?.includes('remote_url')) {
+  const enabledTypes = ['image', 'document', 'video', 'audio'].filter(
+    type => file_upload?.[`${type}_enabled` as keyof FeaturesConfigForm['file_upload']]
+  )
+  if (file_upload?.allowed_transfer_methods?.includes('remote_url') && enabledTypes.length > 0) {
     fileMenus.push({
       key: 'url',
       label: t('memoryConversation.addRemoteFile'),
@@ -133,9 +136,6 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
       }
     })
   }
-  const enabledTypes = ['image', 'document', 'video', 'audio'].filter(
-    type => file_upload?.[`${type}_enabled` as keyof FeaturesConfigForm['file_upload']]
-  )
   if (file_upload?.allowed_transfer_methods?.includes('local_file') && enabledTypes.length > 0) {
     fileMenus.push({
       key: 'upload',
@@ -155,7 +155,7 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
     <Form form={form} initialValues={{ files: [], variables: [] }}>
       <Flex justify="space-between" className="rb:flex-1">
         <Flex gap={8} align="center">
-          <Form.Item name="files" noStyle hidden={!file_upload?.enabled}>
+          <Form.Item name="files" noStyle hidden={!file_upload?.enabled || fileMenus.length === 0}>
             <Dropdown menu={{ items: fileMenus }}>
               <div className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/link.svg')] rb:hover:bg-[url('@/assets/images/conversation/link_hover.svg')]" />
             </Dropdown>

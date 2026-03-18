@@ -38,7 +38,7 @@ const MAX_LENGTH = 5;
  * Multi-agent cluster configuration component
  * Manages multi-agent orchestration, sub-agents, and collaboration modes
  */
-const Cluster = forwardRef<ClusterRef>((_props, ref) => {
+const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void }>(({ onFeaturesLoad }, ref) => {
   const { t } = useTranslation()
   const { message } = App.useApp()
   const [form] = Form.useForm()
@@ -131,6 +131,7 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
       } else {
         setSubAgents(sub_agents)
       }
+      onFeaturesLoad?.(response.features)
     })
   }
   /**

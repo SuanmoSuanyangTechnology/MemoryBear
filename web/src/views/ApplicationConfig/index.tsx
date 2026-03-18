@@ -37,6 +37,7 @@ const ApplicationConfig: React.FC = () => {
   // State
   const [application, setApplication] = useState<Application | null>(null);
   const [activeTab, setActiveTab] = useState('arrangement');
+  const [features, setFeatures] = useState<import('./types').FeaturesConfigForm | undefined>(undefined);
 
   useEffect(() => {
     setActiveTab(source === 'sharing' ? 'test' : 'arrangement')
@@ -114,10 +115,12 @@ const ApplicationConfig: React.FC = () => {
         refresh={getApplicationInfo}
         appRef={application?.type === 'agent' ? agentRef : application?.type === 'multi_agent' ? clusterRef : application?.type === 'workflow' ? workflowRef : undefined}
         workflowRef={workflowRef}
+        features={features}
+        onFeaturesChange={setFeatures}
       />
-      {activeTab === 'arrangement' && application?.type === 'agent' && <Agent ref={agentRef} />}
-      {activeTab === 'arrangement' && application?.type === 'multi_agent' && <Cluster ref={clusterRef} />}
-      {activeTab === 'arrangement' && application?.type === 'workflow' && <Workflow ref={workflowRef} />}
+      {activeTab === 'arrangement' && application?.type === 'agent' && <Agent ref={agentRef} onFeaturesLoad={setFeatures} />}
+      {activeTab === 'arrangement' && application?.type === 'multi_agent' && <Cluster ref={clusterRef} onFeaturesLoad={setFeatures} />}
+      {activeTab === 'arrangement' && application?.type === 'workflow' && <Workflow ref={workflowRef} onFeaturesLoad={setFeatures} />}
       {activeTab === 'api' && <Api application={application} />}
       {activeTab === 'release' && <ReleasePage data={application as Application} refresh={getApplicationInfo} />}
       {activeTab === 'statistics' && <Statistics application={application} />}

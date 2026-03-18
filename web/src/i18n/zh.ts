@@ -776,7 +776,7 @@ export const zh = {
       singleMaxSize: '单文件最大大小',
       unix: '个',
       text_to_speech: '文字转语音',
-      text_to_speech_desc: '文本可以转换成语言',
+      text_to_speech_desc: '文本可以转换成语音',
 
       apps: '我的应用',
       sharing: '共享',

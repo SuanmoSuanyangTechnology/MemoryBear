@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 11:20:45
+ * @Last Modified time: 2026-03-18 15:58:36
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -73,6 +73,11 @@ const MySharing: React.FC = () => {
       }
     });
   };
+    /** Navigate to application configuration page */
+  const handleEdit = (item: MySharedOutItem) => {
+    let url = `/#/application/config/${item.source_app_id}`
+    window.open(url);
+  }
 
   return (
     <Flex vertical gap={12} className="rb:h-[calc(100vh-148px)]! rb:overflow-y-auto!">
@@ -108,7 +113,7 @@ const MySharing: React.FC = () => {
               children: (
                 <Row gutter={[12, 12]}>
                   {items.map(item => (
-                    <Col key={item.id} span={6} className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-3! rb:px-4! rb:relative">
+                    <Col key={item.id} span={6} className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-3! rb:px-4! rb:relative" onClick={() => handleEdit(item)}>
                       <div
                         className="rb:absolute rb:top-3 rb:right-3 rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/close.svg')]"
                         onClick={() => handleCancelOne(item)}

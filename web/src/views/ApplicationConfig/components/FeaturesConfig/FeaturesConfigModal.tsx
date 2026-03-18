@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 18:31:58
+ * @Last Modified time: 2026-03-18 15:38:14
  */
 /**
  * Copy Application Modal
@@ -18,9 +18,11 @@ import type { FeaturesConfigModalRef, FeaturesConfigForm } from '../../types'
 import RbModal from '@/components/RbModal'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import FileUploadSettingModal from './FileUploadSettingModal'
+import type { Application } from '@/views/ApplicationManagement/types';
 
 interface FeaturesConfigModalProps {
   refresh: (value: FeaturesConfigForm) => void;
+  source?: Application['type'];
 }
 
 /**
@@ -28,6 +30,7 @@ interface FeaturesConfigModalProps {
  */
 const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigModalProps>(({
   refresh,
+  source,
 }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
@@ -44,6 +47,7 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
   /** Open modal */
   const handleOpen = (initValue: FeaturesConfigForm) => {
     setVisible(true);
+    console.log('initValue', initValue)
     form.setFieldsValue(initValue)
   };
   /** Copy application with new name */
@@ -66,7 +70,6 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
     handleClose
   }));
 
-  console.log('settings values', values)
   return (
     <>
       <RbModal
@@ -81,20 +84,22 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
           layout="vertical"
         >
           <Flex vertical gap={12}>
-            <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
-              <SwitchFormItem
-                title={t(`memoryConversation.web_search`)}
-                name={['web_search', "enabled"]}
-              />
-            </div>
+            {source !== 'workflow' && <>
+              <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
+                <SwitchFormItem
+                  title={t(`memoryConversation.web_search`)}
+                  name={['web_search', "enabled"]}
+                />
+              </div>
 
-            <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
-              <SwitchFormItem
-                title={t('application.text_to_speech')}
-                name={['text_to_speech', "enabled"]}
-                desc={t('application.text_to_speech_desc')}
-              />
-            </div>
+              <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
+                <SwitchFormItem
+                  title={t('application.text_to_speech')}
+                  name={['text_to_speech', "enabled"]}
+                  desc={t('application.text_to_speech_desc')}
+                />
+              </div>
+            </>}
 
             <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
               <SwitchFormItem
