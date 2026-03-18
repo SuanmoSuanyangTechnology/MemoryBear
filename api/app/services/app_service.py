@@ -1426,6 +1426,47 @@ class AppService:
         logger.info("Agent 配置更新成功", extra={"app_id": str(app_id)})
         return agent_cfg
 
+    def _agent_config_from_release(self, release: "AppRelease") -> "AgentConfig":
+        """从发布版本快照重建 AgentConfig 对象（不入库，仅用于运行）"""
+        cfg = release.config or {}
+        now = release.created_at or datetime.datetime.now()
+        agent_cfg = AgentConfig(
+            id=uuid.uuid4(),
+            app_id=release.app_id,
+            system_prompt=cfg.get("system_prompt", ""),
+            default_model_config_id=release.default_model_config_id,
+            model_parameters=cfg.get("model_parameters"),
+            knowledge_retrieval=cfg.get("knowledge_retrieval"),
+            memory=cfg.get("memory", {}),
+            variables=cfg.get("variables", []),
+            tools=cfg.get("tools", []),
+            skills=cfg.get("skills", {}),
+            features=cfg.get("features", {}),
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        )
+        return agent_cfg
+
+    def _workflow_config_from_release(self, release: "AppRelease") -> "WorkflowConfig":
+        """从发布版本快照重建 WorkflowConfig 对象（不入库，仅用于运行）"""
+        cfg = release.config or {}
+        now = release.created_at or datetime.datetime.now()
+        from app.models.workflow_model import WorkflowConfig as WorkflowConfigModel
+        wf_cfg = WorkflowConfigModel(
+            id=uuid.uuid4(),
+            app_id=release.app_id,
+            nodes=cfg.get("nodes", []),
+            edges=cfg.get("edges", []),
+            variables=cfg.get("variables", []),
+            execution_config=cfg.get("execution_config", {}),
+            triggers=cfg.get("triggers", []),
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        )
+        return wf_cfg
+
     def get_agent_config(
             self,
             *,
@@ -1456,6 +1497,15 @@ class AppService:
 
         # 只读操作，允许访问共享应用
         self._validate_app_accessible(app, workspace_id)
+
+        # 共享应用：返回最新发布版本的配置快照，而非草稿
+        if workspace_id and app.workspace_id != workspace_id:
+            if not app.current_release_id:
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
+            release = self.db.get(AppRelease, app.current_release_id)
+            if not release:
+                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+            return self._agent_config_from_release(release)
 
         stmt = select(AgentConfig).where(
             AgentConfig.app_id == app_id,
@@ -1555,6 +1605,16 @@ class AppService:
 
         # 只读操作，允许访问共享应用
         self._validate_app_accessible(app, workspace_id)
+
+        # 共享应用：返回最新发布版本的配置快照，而非草稿
+        if workspace_id and app.workspace_id != workspace_id:
+            if not app.current_release_id:
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.CONFIG_MISSING)
+            release = self.db.get(AppRelease, app.current_release_id)
+            if not release:
+                raise BusinessException("发布版本不存在", BizCode.CONFIG_MISSING)
+            return self._workflow_config_from_release(release)
+
         repo = WorkflowConfigRepository(self.db)
         config = repo.get_by_app_id(app_id)
         if config:
@@ -1609,6 +1669,7 @@ class AppService:
                 variables=[var.model_dump() for var in data.variables] if data.variables else [],
                 execution_config=data.execution_config.model_dump() if data.execution_config else {},
                 triggers=[trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
+                features=data.features or {},
                 is_active=True,
                 created_at=now,
                 updated_at=now
@@ -1622,6 +1683,7 @@ class AppService:
             workflow_cfg.variables = [var.model_dump() for var in data.variables] if data.variables else []
             workflow_cfg.execution_config = data.execution_config.model_dump() if data.execution_config else {}
             workflow_cfg.triggers = [trigger.model_dump() for trigger in data.triggers] if data.triggers else []
+            workflow_cfg.features = data.features or {}
             workflow_cfg.updated_at = now
 
         self.db.commit()
@@ -1875,7 +1937,8 @@ class AppService:
                 "edges": workflow_cfg.edges,
                 "variables": workflow_cfg.variables,
                 "execution_config": workflow_cfg.execution_config,
-                "triggers": workflow_cfg.triggers
+                "triggers": workflow_cfg.triggers,
+                "features": workflow_cfg.features or {}
             }
 
             is_valid, errors = WorkflowValidator.validate_for_publish(config)
@@ -2062,7 +2125,8 @@ class AppService:
                 )
 
         if memory_config_id:
-            updated_count = self._update_endusers_memory_config(app_id, memory_config_id)
+
+            updated_count = self._update_endusers_memory_config_by_workspace(app.workspace_id, memory_config_id)
             logger.info(
                 f"回滚时更新终端用户记忆配置: app_id={app_id}, version={version}, "
                 f"memory_config_id={memory_config_id}, updated_count={updated_count}"

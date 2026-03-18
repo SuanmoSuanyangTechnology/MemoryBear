@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:19:13 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-13 17:26:57
+ * @Last Modified time: 2026-03-18 16:03:46
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Checkbox, App, Form } from 'antd';
@@ -78,7 +78,7 @@ const AppSharingModal = forwardRef<AppSharingModalRef, AppSharingModalProps>(({ 
    */
   const handleToggle = (id: string, isShared: boolean) => {
     if (isShared) return;
-    const prev = form.getFieldValue('target_workspace_ids') as string[] ?? [];
+    const prev: string[] = form.getFieldValue('target_workspace_ids') ?? [];
     form.setFieldValue(
       'target_workspace_ids',
       prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
@@ -135,10 +135,16 @@ const AppSharingModal = forwardRef<AppSharingModalRef, AppSharingModalProps>(({ 
 
         {/* Target space: scrollable list of workspaces with checkbox selection */}
         <Form.Item
-          name="target_workspace_ids"
           label={t('application.selectTargetSpace')}
-          rules={[{ required: true, message: t('common.pleaseSelect') }]}
+          required
         >
+          <Form.Item
+            name="target_workspace_ids"
+            noStyle
+            rules={[{ required: true, message: t('common.pleaseSelect') }]}
+          >
+            <input type="hidden" />
+          </Form.Item>
           <div className="rb:rounded-lg rb:border rb:border-[#EBEBEB] rb:divide-y rb:divide-[#EBEBEB] rb:max-h-50 rb:overflow-y-auto">
             {spaceList.map(space => {
               const isShared = sharedIds.includes(space.id);
@@ -146,11 +152,11 @@ const AppSharingModal = forwardRef<AppSharingModalRef, AppSharingModalProps>(({ 
                 <div key={space.id} className="rb:flex rb:items-center rb:gap-2 rb:px-4 rb:py-3 rb:cursor-pointer" onClick={() => handleToggle(space.id, isShared)}>
                   <Checkbox
                     checked={isShared || selectedIds.includes(space.id)}
-                    disabled={isShared} // already-shared workspaces cannot be unselected
+                    disabled={isShared}
+                    onClick={(e) => e.stopPropagation()}
                     onChange={() => handleToggle(space.id, isShared)}
                   />
                   <span className="rb:flex-1 rb:text-sm">{space.name}</span>
-                  {/* Badge shown when the app is already shared with this workspace */}
                   {isShared && (
                     <span className="rb:text-xs rb:text-[#5B6167]">{t('application.alreadyShared')}</span>
                   )}

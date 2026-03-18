@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:47 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 10:28:04
+ * @Last Modified time: 2026-03-18 15:50:31
  */
 /**
  * Upload File List Modal Component
@@ -115,7 +115,6 @@ const UploadFileListModal = forwardRef<UploadFileListModalRef, UploadFileListMod
                   <FormItem
                     {...restField}
                     name={[name, 'type']}
-                    initialValue="image"
                     className="rb:mb-0!"
                   >
                     <Select

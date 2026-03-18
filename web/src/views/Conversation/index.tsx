@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 15:39:17
+ * @Last Modified time: 2026-03-18 15:35:05
  */
 /**
  * Conversation Page
@@ -60,6 +60,7 @@ const Conversation: FC = () => {
   const [shareToken, setShareToken] = useState<string | null>(localStorage.getItem(`shareToken_${token}`))
   const [fileList, setFileList] = useState<any[]>([])
   const [webSearch, setWebSearch] = useState(false)
+  const [isHasMemory, setIsHasMemory] = useState(false)
   const [memory, setMemory] = useState(true)
   const [features, setFeatures] = useState<FeaturesConfigForm>({} as FeaturesConfigForm)
 
@@ -85,9 +86,10 @@ const Conversation: FC = () => {
     if (shareToken && token) {
       getExperienceConfig(token)
         .then(res => {
-          const response = res as { variables: Variable[]; features: FeaturesConfigForm }
+          const response = res as { variables: Variable[]; features: FeaturesConfigForm; app_type: string; memory?: boolean; }
           toolbarRef.current?.setVariables(response.variables || [])
           setFeatures(response.features)
+          setIsHasMemory((response.app_type === 'workflow' && response.memory) || (response.app_type !== 'workflow'))
         })
     } else {
       setChatList([])
@@ -369,7 +371,7 @@ const Conversation: FC = () => {
             }}
             extra={
               <>
-                {features.web_search?.enabled &&
+                {features?.web_search?.enabled &&
                   <ButtonCheckbox
                     icon={OnlineIcon}
                     checkedIcon={OnlineCheckedIcon}
@@ -379,14 +381,16 @@ const Conversation: FC = () => {
                     {t('memoryConversation.web_search')}
                   </ButtonCheckbox>
                 }
-                <ButtonCheckbox
-                  icon={MemoryFunctionIcon}
-                  checkedIcon={MemoryFunctionCheckedIcon}
-                  checked={memory}
-                  onChange={handleChangeMemory}
-                >
-                  {t('memoryConversation.memory')}
-                </ButtonCheckbox>
+                {isHasMemory &&
+                  <ButtonCheckbox
+                    icon={MemoryFunctionIcon}
+                    checkedIcon={MemoryFunctionCheckedIcon}
+                    checked={memory}
+                    onChange={handleChangeMemory}
+                  >
+                    {t('memoryConversation.memory')}
+                  </ButtonCheckbox>
+                }
               </>
             }
           />

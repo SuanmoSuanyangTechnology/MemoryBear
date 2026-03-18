@@ -129,7 +129,7 @@ const SelectWrapper: FC<{ title: string, desc: string, name: string | string[], 
  * Agent configuration component
  * Manages single agent configuration including prompts, knowledge, memory, variables, and tools
  */
-const Agent = forwardRef<AgentRef>((_props, ref) => {
+const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void }>(({ onFeaturesLoad }, ref) => {
   const { t } = useTranslation()
   const { id } = useParams();
   const { message } = App.useApp()
@@ -200,6 +200,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         ...response,
         tools: allTools
       })
+      onFeaturesLoad?.(response.features)
     }).finally(() => {
       setLoading(false)
     })
