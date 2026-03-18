@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 15:27:57
+ * @Last Modified time: 2026-03-18 20:52:33
  */
 /**
  * Chat debugging component for application testing
@@ -92,7 +92,9 @@ const Chat: FC<ChatProps> = ({
       role: 'user',
       content: message,
       created_at: Date.now(),
-      files
+      meta_data: {
+        files
+      },
     };
     updateChatList(prev => prev.map(item => ({
       ...item,
@@ -142,7 +144,7 @@ const Chat: FC<ChatProps> = ({
               {
                 ...lastMsg,
                 content: lastMsg.content + (content || ''),
-                audioUrl: audio_url
+                meta_data: { audio_url }
               }
             ]
           }

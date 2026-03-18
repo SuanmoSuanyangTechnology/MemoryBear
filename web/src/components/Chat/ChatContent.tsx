@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 14:11:24
+ * @Last Modified time: 2026-03-18 20:48:03
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -33,7 +33,7 @@ const ChatContent: FC<ChatContentProps> = ({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [playingIndex, setPlayingIndex] = useState<number | null>(null)
 
-  const handlePlay = (index: number, audioUrl: string) => {
+  const handlePlay = (index: number, audio_url: string) => {
     if (playingIndex === index) {
       audioRef.current?.pause()
       setPlayingIndex(null)
@@ -42,7 +42,7 @@ const ChatContent: FC<ChatContentProps> = ({
     if (audioRef.current) {
       audioRef.current.pause()
     }
-    const audio = new Audio(audioUrl)
+    const audio = new Audio(audio_url)
     audioRef.current = audio
     audio.play()
     setPlayingIndex(index)
@@ -108,6 +108,48 @@ const ChatContent: FC<ChatContentProps> = ({
                     {labelFormat(item)}
                   </div>
                 }
+                {item.meta_data?.files && item.meta_data?.files.length > 0 && <div>
+                  {item.meta_data?.files?.map((file) => {
+                    if (file.type.includes('image')) {
+                      return (
+                        <div key={file.url || file.uid} className={`rb:inline-block rb:group rb:relative rb:rounded-lg ${contentClassNames}`}>
+                          <img src={file.url} alt={file.name} className="rb:w-full rb:max-w-80 rb:rounded-lg rb:object-cover rb:cursor-pointer" />
+                        </div>
+                      )
+                    }
+                    if (file.type.includes('video')) {
+                      return (
+                        <div key={file.url || file.uid} className="rb:w-45 rb:h-16 rb:inline-block rb:group rb:relative rb:rounded-lg">
+                          <video src={file.url} controls className="rb:w-45 rb:h-16 rb:rounded-lg rb:object-cover rb:cursor-pointer" />
+                        </div>
+                      )
+                    }
+                    if (file.type.includes('audio')) {
+                      return (
+                        <div key={file.url || file.uid} className="rb:w-45 rb:h-16 rb:inline-flex rb:items-center rb:group rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:py-2 rb:px-2.5 rb:gap-2">
+                          <audio src={file.url} controls className="rb:w-45 rb:h-16" />
+                        </div>
+                      )
+                    }
+                    return (
+                      <div key={file.url || file.uid} className="rb:w-45 rb:text-[12px] rb:gap-2.5 rb:flex rb:items-center rb:group rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:py-2 rb:px-2.5">
+                        {(file.type.includes('doc') || file.type.includes('docx') || file.type.includes('word') || file.type.includes('wordprocessingml.document')) && <div
+                          className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/word_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/word.svg')]"
+                        ></div>}
+                        {(file.type.includes('pdf')) && <div
+                          className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/pdf_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/pdf.svg')]"
+                        ></div>}
+                        {(file.type.includes('excel') || file.type.includes('spreadsheetml.sheet') || file.type.includes('csv')) && <div
+                          className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/excel_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/excel.svg')]"
+                        ></div>}
+                        <div className="rb:flex-1 rb:w-32.5">
+                          <div className="rb:leading-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.name}</div>
+                          <div className="rb:leading-3.5 rb:mt-0.5 rb:text-[#5B6167] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.type} · {file.size}</div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>}
                 {/* Message bubble */}
                 <div className={clsx('rb:border rb:text-left rb:rounded-lg rb:mt-1.5 rb:leading-4.5 rb:p-[10px_12px_2px_12px] rb:inline-block rb:max-w-130 rb:wrap-break-word', contentClassNames, {
                   // Error message style (content is null and not assistant message)
@@ -121,14 +163,14 @@ const ChatContent: FC<ChatContentProps> = ({
                   {/* Render message content using Markdown component */}
                   <Markdown content={renderRuntime ? item.content ?? '' : item.content ?? errorDesc ?? ''} />
 
-                  {item.audioUrl && <>
+                  {item.meta_data?.audio_url && <>
                     <Divider className="rb:my-3!" />
                     <Space size={12} className="rb:pb-2 rb:pl-1">
                       {playingIndex !== index
-                        ? <SoundOutlined className="rb:cursor-pointer rb:hover:text-[#155EEF]! rb:size-5.5" onClick={() => handlePlay(index, item.audioUrl!)} />
+                        ? <SoundOutlined className="rb:cursor-pointer rb:hover:text-[#155EEF]! rb:size-5.5" onClick={() => handlePlay(index, item.meta_data?.audio_url!)} />
                         : <div
                             className="rb:size-5.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/audio_ing.gif')]"
-                            onClick={() => handlePlay(index, item.audioUrl!)}
+                            onClick={() => handlePlay(index, item.meta_data?.audio_url!)}
                           />
                       }
                     </Space>

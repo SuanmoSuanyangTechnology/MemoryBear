@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 19:31:28
+ * @Last Modified time: 2026-03-18 20:46:35
  */
 /**
  * Workflow Chat Component
@@ -151,10 +151,14 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
 
     setLoading(true)
     const message = msg
+    const files = toolbarRef.current?.getFiles() || []
     setChatList(prev => [...prev, {
       role: 'user',
       content: message,
       created_at: Date.now(),
+      meta_data: {
+        files
+      },
     }])
     setChatList(prev => [...prev, {
       role: 'assistant',
@@ -338,7 +342,6 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
       })
     }
 
-    const files = toolbarRef.current?.getFiles() || []
     setMessage(undefined)
     toolbarRef.current?.setFiles([])
     setFileList([])
