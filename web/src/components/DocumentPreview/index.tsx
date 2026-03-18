@@ -4,7 +4,7 @@
  * @Author: yujiangping
  * @Date: 2026-03-16 19:01:12
  * @LastEditors: yujiangping
- * @LastEditTime: 2026-03-18 18:15:29
+ * @LastEditTime: 2026-03-18 18:24:27
  */
 import { useState, useEffect, useRef, useCallback, type FC } from 'react';
 import { Spin, Alert, Button, Table, InputNumber, Image } from 'antd';
@@ -23,7 +23,7 @@ import * as XLSX from 'xlsx';
 import * as pdfjsLib from 'pdfjs-dist';
 
 // 设置 pdf.js worker - 使用 CDN 避免 Vite 打包动态 import 问题
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs';
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
 
 interface DocumentPreviewProps {
   fileUrl: string;
