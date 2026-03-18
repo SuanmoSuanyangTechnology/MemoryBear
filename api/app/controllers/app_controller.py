@@ -520,7 +520,7 @@ async def draft_run(
     # 提前验证和准备（在流式响应开始前完成）
     from app.services.app_service import AppService
     from app.services.multi_agent_service import MultiAgentService
-    from app.models import AgentConfig, ModelConfig
+    from app.models import AgentConfig, ModelConfig, AppRelease
     from sqlalchemy import select
     from app.core.exceptions import BusinessException
     from app.services.draft_run_service import AgentRunService
@@ -742,7 +742,6 @@ async def draft_run(
         if is_shared:
             if not app.current_release_id:
                 raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
-            from app.models import AppRelease
             release = db.get(AppRelease, app.current_release_id)
             if not release:
                 raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
