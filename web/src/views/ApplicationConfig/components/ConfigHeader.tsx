@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 15:40:53
+ * @Last Modified time: 2026-03-18 21:25:23
  */
 import { type FC, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -183,6 +183,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
     appRef?.current?.handleSaveFeaturesConfig?.(value)
     onFeaturesChange?.(value)
   }, [appRef, onFeaturesChange])
+  
   return (
     <>
       <Header className="rb:w-full rb:h-16 rb:grid rb:grid-cols-3 rb:p-[16px_16px_16px_24px]! rb:border-b rb:border-[#EAECEE] rb:leading-8">
@@ -211,9 +212,9 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
             className={styles.tabs}
           />
         </div>
-        {application?.type === 'workflow'
+        {application?.type === 'workflow' && source !== 'sharing'
           ? <div className="rb:h-8 rb:flex rb:items-center rb:justify-end rb:gap-2.5">
-            <FeaturesConfig source={application?.type} value={features} refresh={handleSaveFeaturesConfig} />
+            <FeaturesConfig source={application?.type} value={features as FeaturesConfigForm} refresh={handleSaveFeaturesConfig} />
             <Button onClick={clear}>{t('workflow.clear')}</Button>
             <Button onClick={addvariable}>{t('workflow.addvariable')}</Button>
             <Button onClick={run}>{t('workflow.run')}</Button>
