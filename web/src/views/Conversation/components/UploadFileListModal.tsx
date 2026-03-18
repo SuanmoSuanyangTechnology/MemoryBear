@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:47 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 15:50:31
+ * @Last Modified time: 2026-03-18 21:10:01
  */
 /**
  * Upload File List Modal Component
@@ -120,16 +120,16 @@ const UploadFileListModal = forwardRef<UploadFileListModalRef, UploadFileListMod
                     <Select
                       placeholder={t('memoryConversation.fileType')}
                       options={fileTypeOptions}
-                      className="rb:w-30"
+                      className="rb:w-30!"
                     />
                   </FormItem>
                   <FormItem
                     {...restField}
                     name={[name, 'url']}
                     rules={[{ required: true, message: t('common.pleaseEnter') }]}
-                    className="rb:mb-0!"
+                    className="rb:mb-0! rb:flex-1!"
                   >
-                    <Input placeholder={t('memoryConversation.fileUrl')} className="rb:w-82.5!" />
+                    <Input placeholder={t('memoryConversation.fileUrl')} />
                   </FormItem>
                   <div
                     className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/delete.svg')] rb:hover:bg-[url('@/assets/images/delete_hover.svg')]"
