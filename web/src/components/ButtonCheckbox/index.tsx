@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:01:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 15:35:34
+ * @Last Modified time: 2026-03-19 13:41:26
  */
 
 /**
@@ -42,7 +42,8 @@ const ButtonCheckbox: FC<ButtonCheckboxProps> = ({
   icon,
   checkedIcon,
   children,
-  cicle = false
+  cicle = false,
+  disabled,
 }) => {
   // Listen to value changes and trigger side effects via onValueChange callback
   useEffect(() => {
@@ -70,6 +71,7 @@ const ButtonCheckbox: FC<ButtonCheckboxProps> = ({
         "rb:bg-[rgba(21,94,239,0.06)] rb:border-[rgba(21,94,239,0.25)] rb:hover:bg-[rgba(21,94,239,0.06)] rb:text-[#155EEF]": checked,
         // Unchecked state: gray border and dark text
         "rb:border-[#DFE4ED] rb:text-[#212332]": !checked,
+        "rb:opacity-65 rb:cursor-not-allowed!": disabled
       })} 
       onClick={handleChange}
     >
