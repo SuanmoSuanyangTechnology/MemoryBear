@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:11 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 14:22:20
+ * @Last Modified time: 2026-03-19 15:38:38
  */
 /**
  * Result Component
@@ -16,7 +16,6 @@ import { useTranslation } from 'react-i18next'
 import { Space, Button, Progress, Form, Input, Flex } from 'antd'
 import { ExclamationCircleFilled, LoadingOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
-import ResultCard from './ResultCard'
 import type { AnyObject } from 'antd/es/_util/type';
 
 import Card from './Card'
@@ -29,6 +28,7 @@ import Markdown from '@/components/Markdown'
 import { groupDataByType } from '../constant'
 import Empty from '@/components/Empty'
 import NoDataIcon from '@/assets/images/empty/noData.png'
+import ResultCard from '@/components/RbCard/ResultCard'
 
 /** Result metric mapping */
 const resultObj = {

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 13:36:20
+ * @Last Modified time: 2026-03-19 17:35:14
  */
 import { type FC, useEffect, useMemo, useState } from 'react'
 import { Flex, Input, Form } from 'antd'
@@ -77,7 +77,7 @@ const ChatInput: FC<ChatInputProps> = ({
 
   return (
     <div className={`rb:absolute rb:bottom-3 rb:left-0 rb:right-0 rb:w-full ${className}`}>
-      <Flex vertical justify="space-between" className={clsx("rb-border rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.1)] rb:rounded-xl rb:min-h-30", {
+      <Flex vertical justify="space-between" className={clsx("rb-border rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)] rb:rounded-3xl rb:min-h-30", {
         ' rb:border-[#171719]!': isFocus
       })}>
         {previewFileList.length > 0 && <div className="rb:overflow-x-auto rb:max-w-full"><Flex gap={14} className="rb:mx-3! rb:mt-3! rb:w-max!">
@@ -142,7 +142,8 @@ const ChatInput: FC<ChatInputProps> = ({
               </Flex>
             )
           })}
-        </Flex></div>}
+        </Flex>
+        </div>}
         {/* Message input form */}
         <Form form={form} layout="vertical">
           <Form.Item name="message" noStyle>

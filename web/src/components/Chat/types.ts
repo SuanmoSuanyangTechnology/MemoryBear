@@ -53,6 +53,7 @@ export interface ChatProps {
   fileList?: any[];
   /** Attachment update */
   fileChange?: (fileList: any[]) => void;
+  className?: string;
 }
 
 /**

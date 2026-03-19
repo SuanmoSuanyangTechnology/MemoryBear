@@ -1714,6 +1714,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       fileUrl: 'File URL',
       addRemoteFile: 'Add Remote File',
       variableConfig: 'Variable Configuration',
+
+      chatTitle: 'Red Bear Space',
     },
     login: {
       title: 'Red Bear Memory Science',

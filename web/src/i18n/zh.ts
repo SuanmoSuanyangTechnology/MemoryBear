@@ -1710,6 +1710,8 @@ export const zh = {
       fileUrl: '文件链接',
       addRemoteFile: '添加远程文件',
       variableConfig: '变量配置',
+
+      chatTitle: '记忆熊空间',
     },
     login: {
       title: '红熊记忆科学',

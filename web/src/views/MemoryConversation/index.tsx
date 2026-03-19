@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:09:03 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:09:03 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-19 16:00:39
  */
 /**
  * Memory Conversation Page
@@ -12,48 +12,39 @@
 
 import { type FC, type ReactNode, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Col, Row, App, Skeleton, Space, Select, Flex } from 'antd'
+import { Col, Row, App, Skeleton, Select, Segmented, Tooltip, Flex } from 'antd'
 import dayjs from 'dayjs'
 import type { AnyObject } from 'antd/es/_util/type';
-import clsx from 'clsx'
 
 import ConversationEmptyIcon from '@/assets/images/conversation/conversationEmpty.svg'
 import AnalysisEmptyIcon from '@/assets/images/conversation/analysisEmpty.png'
-import Card from './components/Card'
 import { readService, getUserMemoryList } from '@/api/memory'
 import Empty from '@/components/Empty'
 import Markdown from '@/components/Markdown'
 import type { Data } from '@/views/UserMemory/types'
 import Chat from '@/components/Chat'
-import MemoryFunctionIcon from '@/assets/images/conversation/memoryFunction.svg'
-import OnlineIcon from '@/assets/images/conversation/online.svg'
-import DeepThinkingIcon from '@/assets/images/conversation/deepThinking.svg'
-import ButtonCheckbox from '@/components/ButtonCheckbox'
-import DeepThinkingCheckedIcon from '@/assets/images/conversation/deepThinkingChecked.svg'
-import OnlineCheckedIcon from '@/assets/images/conversation/onlineChecked.svg'
-import MemoryFunctionCheckedIcon from '@/assets/images/conversation/memoryFunctionChecked.svg'
 import type { ChatItem } from '@/components/Chat/types'
+import RbCard from '@/components/RbCard/Card';
+import styles from './index.module.css'
+import ResultCard from '@/components/RbCard/ResultCard'
 
 
 /** Search mode configuration */
 const searchSwitchList = [
   {
-    icon: DeepThinkingIcon,
-    checkedIcon: DeepThinkingCheckedIcon,
+    icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/conversation/deepThinking.svg')]"></div>,
     value: '0',
-    label: 'deepThinking'
+    key: 'deepThinking'
   },
   {
-    icon: MemoryFunctionIcon,
-    checkedIcon: MemoryFunctionCheckedIcon,
+    icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/conversation/normalReply.svg')]"></div>,
     value: '1',
-    label: 'normalReply'
+    key: 'normalReply'
   },
   {
-    icon: OnlineIcon,
-    checkedIcon: OnlineCheckedIcon,
+    icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/conversation/quickReply.svg')]"></div>,
     value: '2',
-    label: 'quickReply'
+    key: 'quickReply'
   },
 ]
 
@@ -105,7 +96,7 @@ export interface LogItem {
  * Content wrapper component for analysis items
  */
 const ContentWrapper: FC<{ children: ReactNode }> = ({ children }) => (
-  <div className="rb:p-3 rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
+  <div className="rb:px-3 rb:py-2.5 rb:bg-white rb:rounded-xl">
     {children}
   </div>
 )
@@ -120,6 +111,7 @@ const MemoryConversation: FC = () => {
   const [userList, setUserList] = useState<Data[]>([])
   const [search_switch, setSearchSwitch] = useState('0')
   const [msg, setMsg] = useState<string>('')
+  const [expandedLogs, setExpandedLogs] = useState<Record<number, boolean>>({})
 
   /** Load user list on mount */
   useEffect(() => {
@@ -139,6 +131,7 @@ const MemoryConversation: FC = () => {
     }
     setChatData(prev => [...prev, { content: msg, created_at: new Date().getTime(), role: 'user' }])
     setLoading(true)
+    setExpandedLogs({})
     readService({
       message: msg,
       end_user_id: userId,
@@ -149,6 +142,7 @@ const MemoryConversation: FC = () => {
         const response = res as { answer: string; intermediate_outputs: LogItem[] }
         setChatData(prev => [...prev, { content: response.answer || '-', created_at: new Date().getTime(), role: 'assistant' }])
         setLogs(response.intermediate_outputs)
+        setExpandedLogs(Object.fromEntries(response.intermediate_outputs.map((_, i) => [i, true])))
       })
       .finally(() => {
         setLoading(false)
@@ -175,46 +169,51 @@ const MemoryConversation: FC = () => {
             placeholder={t('memoryConversation.searchPlaceholder')}
             style={{ width: '100%', marginBottom: '16px' }}
             onChange={setUserId}
+            variant="borderless"
+            className="rb:bg-white rb:rounded-lg"
           />
         </Col>
       </Row>
-      <Row gutter={16} className="rb:h-[calc(100vh-152px)] rb:overflow-hidden">
+      <Row gutter={16}>
         <Col span={12}>
-          <Card 
+          <RbCard 
             title={t('memoryConversation.conversationContent')}
-            bodyClassName="rb:pb-[0]!"
+            headerType="borderless"
+            headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:font-bold"
+            bodyClassName="rb:px-3! rb:py-0! rb:h-[calc(100%-52px)]!"
+            className="rb:h-[calc(100vh-124px)]!"
           >
             <Chat
               empty={
                 <Empty url={ConversationEmptyIcon} className="rb:h-full" size={[140, 100]} title={t('memoryConversation.conversationContentEmpty')} isNeedSubTitle={false} />
               }
-              contentClassName='rb:h-[calc(100vh-362px)]'
+              className="rb:pt-0!"
+              contentClassName='rb:h-[calc(100%-144px)]'
               data={chatData}
               onChange={setMsg}
               onSend={handleSend}
               loading={loading}
               labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
             >
-              <Flex gap={8}>
-                {searchSwitchList.map(item => (
-                  <ButtonCheckbox
-                    key={item.value}
-                    icon={item.icon}
-                    checkedIcon={item.checkedIcon}
-                    checked={search_switch === item.value}
-                    onChange={() => handleChange(item.value)}
-                  >
-                    {t(`memoryConversation.${item.label}`)}
-                  </ButtonCheckbox>
-                ))}
-              </Flex>
+              <Segmented
+                options={searchSwitchList.map(item => ({
+                  ...item,
+                  icon: <Tooltip title={t(`memoryConversation.${item.key}`)}>{item.icon}</Tooltip>
+                }))}
+                shape="round"
+                className={styles.segmented}
+                onChange={handleChange}
+              />
             </Chat>
-          </Card>
+          </RbCard>
         </Col>
         <Col span={12}>
-          <Card 
+          <RbCard 
             title={t('memoryConversation.memoryConversationAnalysis')}
-            bodyClassName='rb:overflow-auto'
+            headerType="borderless"
+            headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:font-bold"
+            bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-52px)]! rb:overflow-y-auto!"
+            className="rb:h-[calc(100vh-124px)]!"
           >
             {loading ?
               <Skeleton active />
@@ -226,98 +225,98 @@ const MemoryConversation: FC = () => {
                 subTitle={t('memoryConversation.memoryConversationAnalysisEmptySubTitle')}
                 size={[270, 170]}
               />
-            : <Space size={12} direction="vertical" style={{width: '100%'}}>
+              : <Flex gap={12} vertical>
                 {logs.map((log, logIndex) => (
-                  <div key={logIndex}
-                    className={clsx(
-                      `rb:p-[16px_24px] rb:rounded-lg`,
-                      'rb:border rb:border-[#DFE4ED]',
-                      {
-                        'rb:shadow-[inset_4px_0px_0px_0px_#155EEF]': logIndex % 3 === 0,
-                        'rb:shadow-[inset_4px_0px_0px_0px_#369F21]': logIndex % 3 === 1,
-                        'rb:shadow-[inset_4px_0px_0px_0px_#9C6FFF]': logIndex % 3 === 2,
-                      }
-                    )}
+                  <ResultCard
+                    key={logIndex}
+                    title={log.title}
+                    isMiSans={false}
+                    bodyClassName={`rb:p-3! rb:pt-0! ${!!expandedLogs[logIndex] ? 'rb:pb-3!' : 'rb:pb-0!'}`}
+                    expanded={!!expandedLogs[logIndex]}
+                    handleExpand={() => setExpandedLogs(prev => ({ ...prev, [logIndex]: !prev[logIndex] }))}
+                    extra={log.type === 'verification' && <div className="rb-border rb:rounded-lg rb:py-1 rb:px-2 rb:text-[12px] rb:font-medium rb:leading-4.5 rb:text-[#FF5D34]">{log.result}</div>}
                   >
-                    <div className="rb:text-[16px] rb:font-medium rb:leading-5.5 rb:mb-6">{log.title}</div>
-                    {log.type === 'problem_split' && Array.isArray(log.data) && log.data.length > 0 
-                      ? <Space size={12} direction="vertical" style={{width: '100%'}}>
-                        {log.data.map(vo => (
-                          <ContentWrapper key={vo.id}>
-                            <>
-                              <div className="rb:font-medium rb:text-[#212332]">{vo.id}. {vo.question}</div>
-                              <div className="rb:mt-2 rb:text-[12px] rb:text-[#5B6167]">{vo.reason}</div>
-                            </>
-                          </ContentWrapper>
-                        ))}
-                      </Space>
-                      : log.type === 'problem_extension' && log.data && Object.keys(log.data).length > 0 
-                      ? <Space size={12} direction="vertical" style={{width: '100%'}}>
-                        {Object.keys(log.data).map((key: string) => (
-                          <ContentWrapper key={key}>
-                            <>
-                              <div className="rb:font-medium rb:text-[#212332]">{key}</div>
-                              {(log.data as Record<string, string[]>)[key].map((item, index) => (
-                                <div key={index} className="rb:mt-2 rb:text-[#5B6167] rb:text-[12px]">{item}</div>
+                  {log.type === 'problem_split' && Array.isArray(log.data) && log.data.length > 0 
+                    ? <Flex gap={12} vertical>
+                      {log.data.map(vo => (
+                        <ContentWrapper key={vo.id}>
+                          <>
+                            <div className="rb:font-medium rb:text-[#212332]">{vo.id}. {vo.question}</div>
+                            <div className="rb:mt-2 rb:text-[12px] rb:text-[#5B6167]">{vo.reason}</div>
+                          </>
+                        </ContentWrapper>
+                      ))}
+                    </Flex>
+                    : log.type === 'problem_extension' && log.data && Object.keys(log.data).length > 0 
+                    ? <Flex gap={12} vertical>
+                      {Object.keys(log.data).map((key: string) => (
+                        <ContentWrapper key={key}>
+                          <>
+                            <div className="rb:font-medium rb:text-[#212332]">{key}</div>
+                            {(log.data as Record<string, string[]>)[key].map((item, index) => (
+                              <div key={index} className="rb:mt-2 rb:text-[#5B6167] rb:text-[12px]">{item}</div>
+                            ))}
+                          </>
+                        </ContentWrapper>
+                      ))}
+                      </Flex>
+                    : log.type === 'search_result' && log.raw_results
+                    ? <ContentWrapper>
+                      <div className="rb:font-medium rb:text-[#212332] rb:mb-2">{log.query}</div>
+                        <div className='rb:mt-2 rb:text-[12px] rb:text-[#5B6167]'>
+                          {typeof log.raw_results === 'string'
+                            ? <Markdown content={log.raw_results} />
+                            : <>
+                              {log.raw_results.reranked_results?.statements.length > 0 && log.raw_results.reranked_results?.statements.map((item: { statement: string }, index: number) => (
+                                <div key={index}>{item.statement}</div>
                               ))}
-                            </>
-                          </ContentWrapper>
-                        ))}
-                      </Space>
-                      : log.type === 'search_result' && log.raw_results
-                      ? <ContentWrapper>
-                        <div className="rb:font-medium rb:text-[#212332] rb:mb-2">{log.query}</div>
-                          <div className='rb:mt-2 rb:text-[12px] rb:text-[#5B6167]'>
-                            {typeof log.raw_results === 'string'
-                              ? <Markdown content={log.raw_results} />
-                              : <>
-                                {log.raw_results.reranked_results?.statements.length > 0 && log.raw_results.reranked_results?.statements.map((item: { statement: string }, index: number) => (
-                                  <div key={index}>{item.statement}</div>
-                                ))}
-                                {log.raw_results.reranked_results?.summaries.length > 0 && log.raw_results.reranked_results?.summaries.map((item: { content: string }, index: number) => (
-                                  <div key={index}>{item.content}</div>
-                                ))}
-                              </> 
-                            }
-                          </div>
-                        </ContentWrapper>
-                      : log.type === 'retrieval_summary' && log.summary
-                      ? <ContentWrapper><div className="rb:text-[12px] rb:text-[#5B6167]">{log.summary}</div></ContentWrapper>
-                      : log.type === 'verification'
-                      ? <ContentWrapper>
-                        <div className="rb:font-medium rb:text-[#212332]">{log.query}</div>
-                        <div className="rb:mt-2 rb:text-[12px] rb:text-[#5B6167]">{log.reason}</div>
-                        <div className="rb:mt-2 rb:text-[12px] rb:text-[#5B6167]">{log.result}</div>
+                              {log.raw_results.reranked_results?.summaries.length > 0 && log.raw_results.reranked_results?.summaries.map((item: { content: string }, index: number) => (
+                                <div key={index}>{item.content}</div>
+                              ))}
+                            </> 
+                          }
+                        </div>
                       </ContentWrapper>
-                      : log.type === 'output_type'
-                      ? <ContentWrapper>
+                    : log.type === 'retrieval_summary' && log.summary
+                    ? <ContentWrapper>
+                      <div className="rb:text-[12px] rb:text-[#5B6167]">{log.summary}</div>
+                    </ContentWrapper>
+                    : log.type === 'verification'
+                    ? <ContentWrapper>
+                      <div className="rb:font-medium rb:text-[#212332]">{log.query}</div>
+                      <div className="rb:mt-2 rb:text-[12px] rb:text-[#5B6167]">{log.reason}</div>
+                      <div className="rb:mt-2 rb:text-[12px] rb:text-[#5B6167]">{log.result}</div>
+                    </ContentWrapper>
+                    : log.type === 'output_type'
+                    ? <ContentWrapper>
+                      <div className="rb:font-medium rb:text-[#212332] rb:mb-2">{log.query}</div>
+                      <div className="rb:text-[12px] rb:text-[#5B6167]">{log.summary}</div>
+                    </ContentWrapper>
+                    : log.type === 'input_summary' && log.raw_results
+                    ? <ContentWrapper>
                         <div className="rb:font-medium rb:text-[#212332] rb:mb-2">{log.query}</div>
-                        <div className="rb:text-[12px] rb:text-[#5B6167]">{log.summary}</div>
+                        <div className="rb:font-medium rb:text-[12px] rb:text-[#5B6167] rb:mb-2">{log.summary}</div>
+                        <div className='rb:mt-2 rb:text-[12px] rb:text-[#5B6167]'>
+                          {typeof log.raw_results === 'string'
+                            ? <Markdown content={log.raw_results} />
+                            : <>
+                              {log.raw_results.reranked_results?.statements.length > 0 && log.raw_results.reranked_results?.statements.map((item: { statement: string; } , index: number) => (
+                                <div key={index}>{item.statement}</div>
+                              ))}
+                              {log.raw_results.reranked_results?.summaries.length > 0 && log.raw_results.reranked_results?.summaries.map((item: { content: string; }, index: number) => (
+                                <div key={index}>{item.content}</div>
+                              ))}
+                            </> 
+                          }
+                        </div>
                       </ContentWrapper>
-                      : log.type === 'input_summary' && log.raw_results
-                      ? <ContentWrapper>
-                          <div className="rb:font-medium rb:text-[#212332] rb:mb-2">{log.query}</div>
-                          <div className="rb:font-medium rb:text-[12px] rb:text-[#5B6167] rb:mb-2">{log.summary}</div>
-                          <div className='rb:mt-2 rb:text-[12px] rb:text-[#5B6167]'>
-                            {typeof log.raw_results === 'string'
-                              ? <Markdown content={log.raw_results} />
-                              : <>
-                                {log.raw_results.reranked_results?.statements.length > 0 && log.raw_results.reranked_results?.statements.map((item: { statement: string; } , index: number) => (
-                                  <div key={index}>{item.statement}</div>
-                                ))}
-                                {log.raw_results.reranked_results?.summaries.length > 0 && log.raw_results.reranked_results?.summaries.map((item: { content: string; }, index: number) => (
-                                  <div key={index}>{item.content}</div>
-                                ))}
-                              </> 
-                            }
-                          </div>
-                        </ContentWrapper>
-                      : null
-                    }
-                  </div>
+                    : null
+                  }
+                </ResultCard>
                 ))}
-              </Space>}
-          </Card>
+              </Flex>
+            }
+          </RbCard>
         </Col>
       </Row>
     </>

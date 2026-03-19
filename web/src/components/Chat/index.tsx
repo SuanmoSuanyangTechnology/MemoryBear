@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:09 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-06 21:05:09 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-19 14:57:56
  */
 import { type FC } from 'react'
 import ChatInput from './ChatInput'
@@ -25,10 +25,11 @@ const Chat: FC<ChatProps> = ({
   labelFormat,
   errorDesc,
   fileList,
-  fileChange
+  fileChange,
+  className
 }) => {
   return (
-    <div className="rb:h-full rb:relative rb:pt-2">
+    <div className={`rb:h-full rb:relative rb:pt-2 ${className}`}>
       {/* Chat content display area */}
       <ChatContent
         classNames={contentClassName}
