@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 15:18:20
+ * @Last Modified time: 2026-03-19 20:19:14
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, InputNumber, Flex, Switch, Row, Col, Radio } from 'antd';
@@ -82,26 +82,25 @@ const defaultValues: FileUpload = {
     "mp3",
     "wav",
     "m4a",
-    "ogg",
-    "flac"
   ],
   document_enabled: false,
   document_max_size_mb: 100,
   document_allowed_extensions: [
     "pdf",
     "docx",
+    "doc",
     "xlsx",
+    "xls",
     "txt",
     "csv",
-    "json"
+    "json",
+    "md",
   ],
   video_enabled: false,
   video_max_size_mb: 100,
   video_allowed_extensions: [
     "mp4",
     "mov",
-    "avi",
-    "webm"
   ],
   max_file_count: 5,
   allowed_transfer_methods: 'both'
