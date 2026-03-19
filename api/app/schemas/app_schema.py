@@ -139,25 +139,25 @@ class FileUploadConfig(BaseModel):
     image_enabled: bool = Field(default=False)
     image_max_size_mb: int = Field(default=20)
     image_allowed_extensions: List[str] = Field(
-        default=["png", "jpg", "jpeg", "gif", "webp"]
+        default=["png", "jpg", "jpeg"]
     )
     # 语音文件：MP3/WAV/M4A/OGG/FLAC，最大 50MB
     audio_enabled: bool = Field(default=False)
     audio_max_size_mb: int = Field(default=50)
     audio_allowed_extensions: List[str] = Field(
-        default=["mp3", "wav", "m4a", "ogg", "flac"]
+        default=["mp3", "wav", "m4a"]
     )
     # 通用文件：PDF/DOCX/XLSX/TXT/CSV/JSON，最大 100MB
     document_enabled: bool = Field(default=False)
     document_max_size_mb: int = Field(default=100)
     document_allowed_extensions: List[str] = Field(
-        default=["pdf", "docx", "xlsx", "txt", "csv", "json"]
+        default=["pdf", "docx", "xlsx", "txt", "csv", "json", "md"]
     )
     # 视频文件：MP4/MOV/AVI/WebM，最大 500MB
     video_enabled: bool = Field(default=False)
     video_max_size_mb: int = Field(default=500)
     video_allowed_extensions: List[str] = Field(
-        default=["mp4", "mov", "avi", "webm"]
+        default=["mp4", "mov"]
     )
     # 最大文件数量
     max_file_count: int = Field(default=5, ge=1, le=20)

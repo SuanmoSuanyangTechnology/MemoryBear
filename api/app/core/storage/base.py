@@ -7,7 +7,7 @@ file operations across different storage backends.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 
 class StorageBackend(ABC):
@@ -39,6 +39,26 @@ class StorageBackend(ABC):
 
         Raises:
             StorageUploadError: If the upload operation fails.
+        """
+        pass
+
+    @abstractmethod
+    async def upload_stream(
+        self,
+        file_key: str,
+        stream: AsyncIterator[bytes],
+        content_type: Optional[str] = None,
+    ) -> int:
+        """
+        Upload a file from an async byte stream.
+
+        Args:
+            file_key: Unique identifier for the file.
+            stream: Async iterator yielding bytes chunks.
+            content_type: Optional MIME type of the file.
+
+        Returns:
+            Total bytes written.
         """
         pass
 

@@ -5,8 +5,9 @@ This module provides a storage backend that stores files on Aliyun Object
 Storage Service (OSS) using the oss2 SDK.
 """
 
+import io
 import logging
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 import oss2
 from oss2.exceptions import NoSuchKey, OssError
@@ -125,10 +126,39 @@ class OSSStorage(StorageBackend):
                 cause=e,
             )
 
+    async def upload_stream(
+        self,
+        file_key: str,
+        stream: AsyncIterator[bytes],
+        content_type: Optional[str] = None,
+    ) -> int:
+        """Upload from async stream to OSS. Returns total bytes written."""
+        buf = io.BytesIO()
+        try:
+            async for chunk in stream:
+                buf.write(chunk)
+            content = buf.getvalue()
+            headers = {"Content-Type": content_type} if content_type else None
+            self.bucket.put_object(file_key, content, headers=headers)
+            logger.info(f"File stream uploaded to OSS successfully: {file_key}")
+            return len(content)
+        except OssError as e:
+            logger.error(f"OSS error stream uploading file {file_key}: {e}")
+            raise StorageUploadError(
+                message=f"Failed to stream upload file to OSS: {e.message}",
+                file_key=file_key,
+                cause=e,
+            )
+        except Exception as e:
+            logger.error(f"Failed to stream upload file to OSS {file_key}: {e}")
+            raise StorageUploadError(
+                message=f"Failed to stream upload file to OSS: {e}",
+                file_key=file_key,
+                cause=e,
+            )
+
     async def download(self, file_key: str) -> bytes:
         """
-        Download a file from OSS.
-
         Args:
             file_key: Unique identifier for the file in the storage system.
 
