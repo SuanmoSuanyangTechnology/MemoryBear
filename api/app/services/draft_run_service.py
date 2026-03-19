@@ -820,7 +820,6 @@ class AgentRunService:
                 conversation_id=conversation_id,
                 max_history=memory_config.get("max_history", 10)
             )
-            print(history)
 
             # 6. 处理多模态文件
             processed_files = None

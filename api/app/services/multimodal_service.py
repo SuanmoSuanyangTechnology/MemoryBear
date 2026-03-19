@@ -713,7 +713,8 @@ class MultimodalService:
 
         # 1. 自动检测文件编码
         detect = chardet.detect(file_content)
-        encoding = detect.get("encoding", "utf-8").lower()
+        encoding = detect.get("encoding") or "utf-8"
+        encoding = encoding.lower()
 
         # 2. 兼容常见中文编码
         compatible_encodings = ["utf-8", "gbk", "gb18030", "gb2312", "ascii", "latin-1"]
