@@ -1204,6 +1204,25 @@ RETURN
     startNode(r) = e      AS r_from_e
 """
 
+CHECK_COMMUNITY_IS_COMPLETE = """
+MATCH (c:Community {community_id: $community_id, end_user_id: $end_user_id})
+RETURN (
+    c.name IS NOT NULL AND c.name <> '' AND
+    c.summary IS NOT NULL AND c.summary <> '' AND
+    c.core_entities IS NOT NULL
+) AS is_complete
+"""
+
+CHECK_COMMUNITY_IS_COMPLETE_WITH_EMBEDDING = """
+MATCH (c:Community {community_id: $community_id, end_user_id: $end_user_id})
+RETURN (
+    c.name IS NOT NULL AND c.name <> '' AND
+    c.summary IS NOT NULL AND c.summary <> '' AND
+    c.core_entities IS NOT NULL AND
+    c.summary_embedding IS NOT NULL
+) AS is_complete
+"""
+
 GET_INCOMPLETE_COMMUNITIES = """
 MATCH (c:Community {end_user_id: $end_user_id})
 WHERE c.name IS NULL OR c.summary IS NULL OR c.core_entities IS NULL
@@ -1213,8 +1232,9 @@ RETURN c.community_id AS community_id
 
 GET_INCOMPLETE_COMMUNITIES_WITH_EMBEDDING = """
 MATCH (c:Community {end_user_id: $end_user_id})
-WHERE c.name IS NULL OR c.summary IS NULL OR c.core_entities IS NULL
-   OR c.name = '' OR c.summary = ''
-   OR c.summary_embedding IS NULL
+WHERE c.name IS NULL OR c.name = ''
+   OR c.summary IS NULL OR c.summary = ''
+   OR c.core_entities IS NULL
+   OR (c.summary_embedding IS NULL AND c.summary IS NOT NULL AND c.summary <> '(empty)')
 RETURN c.community_id AS community_id
 """

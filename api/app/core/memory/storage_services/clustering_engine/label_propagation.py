@@ -425,6 +425,12 @@ class LabelPropagationEngine:
         - name / summary：若有 llm_model_id 则调用 LLM 生成，否则用实体名称拼接兜底
         """
         try:
+            # 先检查属性是否已完整，完整则跳过，避免重复生成
+            check_embedding = bool(self.embedding_model_id)
+            if await self.repo.is_community_complete(community_id, end_user_id, check_embedding=check_embedding):
+                logger.debug(f"[Clustering] 社区 {community_id} 属性已完整，跳过生成")
+                return
+
             members = await self.repo.get_community_members(community_id, end_user_id)
             if not members:
                 return

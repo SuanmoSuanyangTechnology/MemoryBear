@@ -21,6 +21,8 @@ from app.repositories.neo4j.cypher_queries import (
     UPDATE_COMMUNITY_METADATA,
     GET_INCOMPLETE_COMMUNITIES,
     GET_INCOMPLETE_COMMUNITIES_WITH_EMBEDDING,
+    CHECK_COMMUNITY_IS_COMPLETE,
+    CHECK_COMMUNITY_IS_COMPLETE_WITH_EMBEDDING,
 )
 
 logger = logging.getLogger(__name__)
@@ -186,6 +188,16 @@ class CommunityRepository:
         except Exception as e:
             logger.error(f"get_incomplete_communities failed: {e}")
             return []
+
+    async def is_community_complete(self, community_id: str, end_user_id: str, check_embedding: bool = False) -> bool:
+        """检查单个社区节点的属性是否完整。"""
+        try:
+            query = CHECK_COMMUNITY_IS_COMPLETE_WITH_EMBEDDING if check_embedding else CHECK_COMMUNITY_IS_COMPLETE
+            result = await self.connector.execute_query(query, community_id=community_id, end_user_id=end_user_id)
+            return result[0]["is_complete"] if result else False
+        except Exception as e:
+            logger.error(f"is_community_complete failed: {e}")
+            return False
 
     async def update_community_metadata(
         self,
