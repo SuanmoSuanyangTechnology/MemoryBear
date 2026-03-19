@@ -2820,17 +2820,6 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
         result = loop.run_until_complete(_run())
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
-
-        # 所有用户均完整（无需初始化也无失败），写入 Redis 标记，1小时内不再重复投递
-        if workspace_id and result.get("initialized", 0) == 0 and result.get("failed", 0) == 0:
-            try:
-                _r = get_sync_redis_client()
-                if _r:
-                    _r.set(f"community_cluster:done:workspace:{workspace_id}", "1", ex=3600)
-                    logger.info(f"[CommunityCluster] 工作空间 {workspace_id} 数据完整，已写入完成标记（1小时有效）")
-            except Exception as e:
-                logger.warning(f"[CommunityCluster] 写入完成标记失败: {e}")
-
         return result
 
     except Exception as e:
