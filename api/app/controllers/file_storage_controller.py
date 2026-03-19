@@ -172,7 +172,6 @@ async def upload_file_with_share_token(
     
     # Get share and release info from share_token
     service = ReleaseShareService(db)
-    share_info = service.get_shared_release_info(share_token=share_data.share_token)
     
     # Get share object to access app_id
     share = service.repo.get_by_share_token(share_data.share_token)
@@ -499,7 +498,7 @@ async def get_file_url(
         )
 
 
-@router.get("/files/{file_id}/permanent-url", response_model=ApiResponse)
+@router.get("/files/{file_id}/public-url", response_model=ApiResponse)
 async def get_permanent_file_url(
     file_id: uuid.UUID,
     db: Session = Depends(get_db),
