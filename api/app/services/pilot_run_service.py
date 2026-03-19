@@ -121,7 +121,7 @@ async def run_pilot_extraction(
                     "pruning_scene": memory_config.pruning_scene,
                     "pruning_threshold": memory_config.pruning_threshold,
                     "scene_id": str(memory_config.scene_id) if memory_config.scene_id else None,
-                    "ontology_classes": memory_config.ontology_classes,
+                    "ontology_class_infos": memory_config.ontology_classes,
                 }
                 config = PruningConfig(**pruning_config_dict)
                 
