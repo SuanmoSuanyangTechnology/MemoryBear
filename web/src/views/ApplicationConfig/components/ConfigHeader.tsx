@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 21:25:23
+ * @Last Modified time: 2026-03-19 17:13:54
  */
 import { type FC, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -212,7 +212,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
             className={styles.tabs}
           />
         </div>
-        {application?.type === 'workflow' && source !== 'sharing'
+        {application?.type === 'workflow' && source !== 'sharing' && activeTab === 'arrangement'
           ? <div className="rb:h-8 rb:flex rb:items-center rb:justify-end rb:gap-2.5">
             <FeaturesConfig source={application?.type} value={features as FeaturesConfigForm} refresh={handleSaveFeaturesConfig} />
             <Button onClick={clear}>{t('workflow.clear')}</Button>
