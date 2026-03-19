@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-17 14:22:25 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 15:55:13
+ * @Last Modified time: 2026-03-19 18:59:37
  */
 // Toolbar component for chat input area, supporting file upload, audio recording, and variable configuration
 import { useRef, forwardRef, useImperativeHandle, type ReactNode, useEffect } from 'react'
@@ -85,10 +85,18 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
 
   // Append newly uploaded file to the file list when upload is complete
   const fileChange = (file?: any) => {
-    if (file?.status !== 'done') return
-    const files = [...(queryValues?.files || []), file]
-    form.setFieldValue('files', files)
-    onFilesChange?.(files)
+    console.log('file', file)
+    const lastFiles = form.getFieldValue('files') || [];
+    const index = lastFiles.findIndex((item: any) => item.uid === file.uid)
+    if (index > -1) {
+      lastFiles[index] = file
+    } else {
+      lastFiles.push(file)
+    }
+    form.setFieldValue('files', [...lastFiles])
+    onFilesChange?.([...lastFiles])
+
+    console.log('lastFiles', lastFiles)
   }
 
   // Append recorded audio file to the file list and notify parent
