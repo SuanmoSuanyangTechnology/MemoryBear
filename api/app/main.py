@@ -506,10 +506,13 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         404: "errors.common.not_found",
         405: "errors.common.method_not_allowed",
         409: "errors.common.conflict",
+        413: "errors.common.payload_too_large",
         422: "errors.common.validation_failed",
         429: "errors.common.too_many_requests",
         500: "errors.common.internal_error",
+        502: "errors.common.bad_gateway",
         503: "errors.common.service_unavailable",
+        504: "errors.common.gateway_timeout",
     }
     
     # 如果有对应的翻译键，使用翻译
@@ -534,7 +537,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     
     return JSONResponse(
         status_code=exc.status_code,
-        content=fail(code=exc.status_code, msg=translated_message, error=translated_message)
+        content=fail(code=exc.status_code, msg=translated_message, error=exc.detail)
     )
 
 

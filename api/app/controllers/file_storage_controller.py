@@ -91,7 +91,7 @@ async def upload_file(
 
     if file_size > settings.MAX_FILE_SIZE:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=f"The file size exceeds the {settings.MAX_FILE_SIZE} byte limit"
         )
 

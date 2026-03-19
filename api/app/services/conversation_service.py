@@ -291,7 +291,7 @@ class ConversationService:
         history = [
             {
                 "role": msg.role,
-                "content": msg.content
+                "content": [{"type": "text", "text": msg.content}] + msg.meta_data.get("files", [])
             }
             for msg in messages
         ]
