@@ -293,7 +293,7 @@ class ConversationService:
         history = [
             {
                 "role": msg.role,
-                "content": [{"type": "text", "text": msg.content}] + msg.meta_data.get("files", [])
+                "content": [{"type": "text", "text": msg.content}] + (msg.meta_data.get("files", []) if msg.meta_data else [])
             }
             for msg in messages
         ]

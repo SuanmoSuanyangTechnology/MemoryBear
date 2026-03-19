@@ -264,7 +264,7 @@ class SharedChatService:
                 limit=memory_config.get("max_history", 10)
             )
             history = [
-                {"role": msg.role, "content": [{"type": "text", "text": msg.content}] + msg.meta_data.get("files", [])}
+                {"role": msg.role, "content": [{"type": "text", "text": msg.content}] + (msg.meta_data.get("files", []) if msg.meta_data else [])}
                 for msg in messages
             ]
 
@@ -472,7 +472,7 @@ class SharedChatService:
                     limit=memory_config.get("max_history", 10)
                 )
                 history = [
-                    {"role": msg.role, "content": [{"type": "text", "text": msg.content}] + msg.meta_data.get("files", [])}
+                    {"role": msg.role, "content": [{"type": "text", "text": msg.content}] + (msg.meta_data.get("files", []) if msg.meta_data else [])}
                     for msg in messages
                 ]
 
