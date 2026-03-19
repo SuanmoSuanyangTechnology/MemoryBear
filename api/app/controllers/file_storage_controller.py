@@ -172,7 +172,6 @@ async def upload_file_with_share_token(
     
     # Get share and release info from share_token
     service = ReleaseShareService(db)
-    share_info = service.get_shared_release_info(share_token=share_data.share_token)
     
     # Get share object to access app_id
     share = service.repo.get_by_share_token(share_data.share_token)
@@ -499,6 +498,51 @@ async def get_file_url(
         )
 
 
+@router.get("/files/{file_id}/public-url", response_model=ApiResponse)
+async def get_permanent_file_url(
+    file_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    storage_service: FileStorageService = Depends(get_file_storage_service),
+):
+    """
+    获取文件的永久公开 URL（无过期时间）。
+
+    - 本地存储：返回 API 永久访问地址（基于 FILE_LOCAL_SERVER_URL 配置）
+    - 远程存储（OSS/S3）：返回 bucket 公读地址（需 bucket 已配置公共读权限）
+    """
+    file_metadata = db.query(FileMetadata).filter(FileMetadata.id == file_id).first()
+    if not file_metadata:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The file does not exist")
+
+    if file_metadata.status != "completed":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"File upload not completed, status: {file_metadata.status}")
+
+    file_key = file_metadata.file_key
+    storage = storage_service.storage
+
+    try:
+        if isinstance(storage, LocalStorage):
+            url = f"{settings.FILE_LOCAL_SERVER_URL}/storage/permanent/{file_id}"
+        else:
+            url = await storage.get_permanent_url(file_key)
+            if not url:
+                raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                                    detail="Permanent URL not supported for current storage backend")
+
+        api_logger.info(f"Generated permanent URL: file_id={file_id}")
+        return success(
+            data={"url": url, "expires_in": None, "permanent": True, "file_name": file_metadata.file_name},
+            msg="Permanent file URL generated successfully"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        api_logger.error(f"Failed to generate permanent URL: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"Failed to generate permanent URL: {str(e)}")
+
+
 @router.get("/public/{file_id}", response_model=Any)
 async def public_download_file(
     request: Request,
@@ -641,14 +685,18 @@ async def permanent_download_file(
             media_type=file_metadata.content_type or "application/octet-stream"
         )
     else:
-        # For remote storage, redirect to presigned URL with long expiration
+        # For remote storage, use permanent public URL (requires bucket public read)
         try:
-            # Use a very long expiration (7 days max for most cloud providers)
+            permanent_url = await storage.get_permanent_url(file_key)
+            if permanent_url:
+                api_logger.info(f"Redirecting to permanent public URL: file_key={file_key}")
+                return RedirectResponse(url=permanent_url, status_code=status.HTTP_302_FOUND)
+            # Fallback: long-lived presigned URL
             presigned_url = await storage_service.get_file_url(file_key, expires=604800)
             presigned_url = _match_scheme(request, presigned_url)
             return RedirectResponse(url=presigned_url, status_code=status.HTTP_302_FOUND)
         except Exception as e:
-            api_logger.error(f"Failed to get presigned URL: {e}")
+            api_logger.error(f"Failed to get permanent URL: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to retrieve file: {str(e)}"
