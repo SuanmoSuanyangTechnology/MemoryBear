@@ -821,15 +821,11 @@ export const useWorkflowGraph = ({
           
           // Node cannot connect to itself
           if (sourceCell?.id === targetCell?.id) return false;
-          
-          const sourceType = sourceCell?.getData()?.type;
+
           const targetType = targetCell?.getData()?.type;
           
           // Start node cannot be connection target
           if (targetType === 'start') return false;
-          
-          // End node cannot be connection source
-          if (sourceType === 'end') return false;
           
           // Get source node and target node parent IDs
           const sourceParentId = sourceCell?.getData()?.cycle;
