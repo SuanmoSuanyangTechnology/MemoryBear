@@ -37,6 +37,7 @@ from app.services.model_parameter_merger import ModelParameterMerger
 from app.services.model_service import ModelApiKeyService
 from app.services.multimodal_service import MultimodalService
 from app.services.tool_service import ToolService
+from app.schemas import FileType
 
 logger = get_business_logger()
 
@@ -636,7 +637,13 @@ class AgentRunService:
 
             ModelApiKeyService.record_api_key_usage(self.db, api_key_config.get("api_key_id"))
 
-            # 9. 保存会话消息
+            # 9. 生成 TTS audio_url（在保存消息前生成，以便一并存入 meta_data）
+            audio_url = await self._generate_tts(
+                features_config, result["content"], api_key_config,
+                tenant_id=tenant_id, workspace_id=workspace_id
+            ) if not sub_agent else None
+
+            # 10. 保存会话消息
             if not sub_agent:
                 await self._save_conversation_message(
                     conversation_id=conversation_id,
@@ -650,7 +657,9 @@ class AgentRunService:
                             "completion_tokens": 0,
                             "total_tokens": 0
                         })
-                    }
+                    },
+                    files=files,
+                    audio_url=audio_url
                 )
 
             response = {
@@ -666,10 +675,7 @@ class AgentRunService:
                     features_config, result["content"], api_key_config, effective_params
                 ) if not sub_agent else [],
                 "citations": self._filter_citations(features_config, result.get("citations", [])),
-                "audio_url": await self._generate_tts(
-                    features_config, result["content"], api_key_config,
-                    tenant_id=tenant_id, workspace_id=workspace_id
-                ) if not sub_agent else None,
+                "audio_url": audio_url,
             }
 
             logger.info(
@@ -878,7 +884,13 @@ class AgentRunService:
                     "total_tokens": total_tokens
                 })
 
-            # 10. 保存会话消息
+            # 10. 生成 audio_url（在保存消息前生成，以便一并存入 meta_data）
+            stream_audio_url = await self._generate_tts(
+                features_config, full_content, api_key_config,
+                tenant_id=tenant_id, workspace_id=workspace_id
+            ) if not sub_agent else None
+
+            # 11. 保存会话消息
             if not sub_agent:
                 await self._save_conversation_message(
                     conversation_id=conversation_id,
@@ -888,10 +900,12 @@ class AgentRunService:
                     user_id=user_id,
                     meta_data={
                         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens}
-                    }
+                    },
+                    files=files,
+                    audio_url=stream_audio_url
                 )
 
-            # 11. 发送结束事件（包含 suggested_questions 和 tts）
+            # 12. 发送结束事件（包含 suggested_questions 和 tts）
             end_data: Dict[str, Any] = {
                 "conversation_id": conversation_id,
                 "elapsed_time": elapsed_time,
@@ -901,10 +915,7 @@ class AgentRunService:
                 end_data["suggested_questions"] = await self._generate_suggested_questions(
                     features_config, full_content, api_key_config, effective_params
                 )
-                end_data["audio_url"] = await self._generate_tts(
-                    features_config, full_content, api_key_config,
-                    tenant_id=tenant_id, workspace_id=workspace_id
-                )
+                end_data["audio_url"] = stream_audio_url
                 end_data["citations"] = self._filter_citations(features_config, [])
             yield self._format_sse_event("end", end_data)
 
@@ -1143,7 +1154,9 @@ class AgentRunService:
             assistant_message: str,
             meta_data: dict,
             app_id: Optional[uuid.UUID] = None,
-            user_id: Optional[str] = None
+            user_id: Optional[str] = None,
+            files: Optional[List[FileInput]] = None,
+            audio_url: Optional[str] = None
     ) -> None:
         """保存会话消息（会话已通过 _ensure_conversation 确保存在）
 
@@ -1162,13 +1175,26 @@ class AgentRunService:
             conv_uuid = uuid.UUID(conversation_id)
 
             # 保存消息（会话已经存在）
+            human_meta = {
+                "files": []
+            }
+            if files:
+                for f in files:
+                    # url = await MultimodalService(self.db).get_file_url(f)
+                    human_meta["files"].append({
+                        "type": FileType.IMAGE,
+                        "url": f.url
+                    })
             # 保存用户消息
             conversation_service.add_message(
                 conversation_id=conv_uuid,
                 role="user",
-                content=user_message
+                content=user_message,
+                meta_data=human_meta
             )
-            # 保存助手消息
+            # 保存助手消息（含 audio_url）
+            if audio_url:
+                meta_data["audio_url"] = audio_url
             conversation_service.add_message(
                 conversation_id=conv_uuid,
                 role="assistant",

@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-03-13 17:27:52 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-03-18 20:54:35 
+ */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { App } from 'antd'
@@ -116,7 +122,9 @@ const TestChat: FC<TestChatProps> = ({
       role: 'user',
       content: message,
       created_at: Date.now(),
-      files
+      meta_data: {
+        files
+      },
     }])
   }
 
@@ -136,7 +144,7 @@ const TestChat: FC<TestChatProps> = ({
       const lastMsg = newList[newList.length - 1]
       if (lastMsg.role === 'assistant') {
         lastMsg.content += content;
-        lastMsg.audioUrl = audio_url
+        lastMsg.meta_data = {audio_url}
       }
       return newList
     })
@@ -428,7 +436,7 @@ const TestChat: FC<TestChatProps> = ({
           status,
           error,
           content: newList[lastIndex].content === '' ? null : newList[lastIndex].content,
-          audioUrl: audio_url
+          meta_data: { audio_url: audio_url }
         }
       }
       return newList

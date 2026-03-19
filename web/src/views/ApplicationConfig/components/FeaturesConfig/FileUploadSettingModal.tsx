@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 18:10:47
+ * @Last Modified time: 2026-03-18 20:29:28
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, InputNumber, Flex, Switch, Row, Col, Radio } from 'antd';
@@ -27,22 +27,22 @@ const fileTypeOptions = [
   {
     type: 'document',
     icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/txt.svg')]"></div>,
-    formats: 'TXT, MD, MDX, MARKDOWN, PDF, DOC, DOCX',
+    formats: 'TXT, PDF, DOC, DOCX, XLSX, CSV, JSON',
   },
   {
     type: 'image',
     icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/image.svg')]"></div>,
-    formats: 'JPG, JPEG, PNG, GIF, WEBP, SVG',
+    formats: 'JPG, JPEG, PNG, GIF, WEBP',
   },
   {
     type: 'audio',
     icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/audio.svg')]"></div>,
-    formats: 'MP3, M4A, WAV, AMR, MPGA',
+    formats: 'MP3, M4A, WAV, OGG, FLAC',
   },
   {
     type: 'video',
     icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/video.svg')]"></div>,
-    formats: 'MP4, MOV, MPEG, WEBM',
+    formats: 'MP4, MOV, AVI, WEBM',
   },
 ];
 
@@ -80,7 +80,7 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
   const handleOpen = (values?: FileUpload) => {
     setVisible(true);
     if (values) {
-      const methods = values.allowed_transfer_methods
+      const methods = values.allowed_transfer_methods || ['local_file', 'remote_url']
       const transferMethod = Array.isArray(methods)
         ? methods.length === 2 ? 'both' : methods[0]
         : methods
