@@ -111,6 +111,20 @@ def get_knowledge_by_id(db: Session, knowledge_id: uuid.UUID) -> Knowledge | Non
         raise
 
 
+def get_knowledges_by_parent_id(db: Session, parent_id: uuid.UUID) -> list[Knowledge]:
+    db_logger.debug(f"Query knowledge bases based on parent ID: parent_id={parent_id}")
+    try:
+        knowledges = db.query(Knowledge).filter(Knowledge.parent_id == parent_id).all()
+        if knowledges:
+            db_logger.debug(f"Knowledge bases query successful: count={len(knowledges)} (parent_id: {parent_id})")
+        else:
+            db_logger.debug(f"No knowledge bases found for given parent: parent_id={parent_id}")
+        return knowledges
+    except Exception as e:
+        db_logger.error(f"Failed to query the knowledge bases based on parent ID: parent_id={parent_id} - {str(e)}")
+        raise
+
+
 def get_knowledge_by_name(db: Session, name: str, workspace_id: uuid.UUID) -> Knowledge | None:
     db_logger.debug(f"Query knowledge base based on name and workspace_id: name={name}, workspace_id={workspace_id}")
 
