@@ -585,6 +585,7 @@ class AppChatService:
             app_id: uuid.UUID,
             release_id: uuid.UUID,
             workspace_id: uuid.UUID,
+            files: Optional[List[FileInput]] = None,
             user_id: Optional[str] = None,
             variables: Optional[Dict[str, Any]] = None,
             web_search: bool = False,
@@ -598,7 +599,8 @@ class AppChatService:
             variables=variables,
             conversation_id=str(conversation_id),
             stream=True,
-            user_id=user_id
+            user_id=user_id,
+            files=files
         )
         return await self.workflow_service.run(
             app_id=app_id,

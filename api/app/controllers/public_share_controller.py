@@ -13,7 +13,6 @@ from app.core.logging_config import get_business_logger
 from app.core.response_utils import success, fail
 from app.db import get_db, get_db_read
 from app.dependencies import get_share_user_id, ShareTokenData
-from app.models.app_model import App
 from app.models.app_model import AppType
 from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
@@ -618,11 +617,11 @@ async def chat(
 
         # 多 Agent 非流式返回
         result = await app_chat_service.workflow_chat(
-
             message=payload.message,
             conversation_id=conversation.id,  # 使用已创建的会话 ID
             user_id=end_user_id,  # 转换为字符串
             variables=payload.variables,
+            files=payload.files,
             config=config,
             web_search=payload.web_search,
             memory=payload.memory,
