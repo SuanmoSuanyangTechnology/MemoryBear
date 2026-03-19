@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 14:31:20
+ * @Last Modified time: 2026-03-19 14:59:34
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, InputNumber, Flex, Switch, Row, Col, Radio } from 'antd';
@@ -127,7 +127,7 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
 
         <div className="rb:text-[12px] rb:text-[#5B6167] rb:mb-1">{t('application.maxCount')}</div>
         <Form.Item label={t('application.maxCount')} name="max_file_count">
-          <InputNumber min={1} max={100} precision={0} className="rb:w-full!" placeholder={t('common.pleaseEnter')} />
+          <InputNumber min={1} max={20} precision={0} className="rb:w-full!" placeholder={t('common.pleaseEnter')} />
         </Form.Item>
 
         <Form.Item label={t('application.supportedTypes')}>
