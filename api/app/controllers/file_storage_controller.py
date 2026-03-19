@@ -685,18 +685,14 @@ async def permanent_download_file(
             media_type=file_metadata.content_type or "application/octet-stream"
         )
     else:
-        # For remote storage, use permanent public URL (requires bucket public read)
+        # For remote storage, redirect to presigned URL with long expiration
         try:
-            permanent_url = await storage.get_permanent_url(file_key)
-            if permanent_url:
-                api_logger.info(f"Redirecting to permanent public URL: file_key={file_key}")
-                return RedirectResponse(url=permanent_url, status_code=status.HTTP_302_FOUND)
-            # Fallback: long-lived presigned URL
+            # Use a very long expiration (7 days max for most cloud providers)
             presigned_url = await storage_service.get_file_url(file_key, expires=604800)
             presigned_url = _match_scheme(request, presigned_url)
             return RedirectResponse(url=presigned_url, status_code=status.HTTP_302_FOUND)
         except Exception as e:
-            api_logger.error(f"Failed to get permanent URL: {e}")
+            api_logger.error(f"Failed to get presigned URL: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to retrieve file: {str(e)}"
