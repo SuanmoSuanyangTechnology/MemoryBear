@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 20:29:28
+ * @Last Modified time: 2026-03-19 09:59:42
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, InputNumber, Flex, Switch, Row, Col, Radio } from 'antd';
@@ -112,7 +112,6 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
       open={visible}
       onCancel={handleClose}
       onOk={handleSave}
-      width={600}
     >
       <Form form={form} layout="vertical" initialValues={defaultValues}>
         <Form.Item

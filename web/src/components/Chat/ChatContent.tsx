@@ -2,14 +2,19 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 20:48:03
+ * @Last Modified time: 2026-03-19 10:06:31
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
 import Markdown from '@/components/Markdown'
 import type { ChatContentProps } from './types'
-import { Spin, Divider, Space } from 'antd'
+import { Spin, Divider, Space, Image, Flex } from 'antd'
 import { SoundOutlined } from '@ant-design/icons'
+
+
+const getFileUrl = (file: any) => {
+  return file.thumbUrl || file.url || (file.originFileObj ? URL.createObjectURL(file.originFileObj) : undefined)
+}
 
 /**
  * Chat Content Display Component
@@ -88,6 +93,10 @@ const ChatContent: FC<ChatContentProps> = ({
       }
     }, 0);
   }, [data])
+
+  const handleDownload = (file: any) => {
+    window.open(getFileUrl(file), '_blank')
+  }
   return (
     <div ref={scrollContainerRef} className={clsx("rb:relative rb:overflow-y-auto", classNames)}>
       {data.length === 0 
@@ -108,31 +117,31 @@ const ChatContent: FC<ChatContentProps> = ({
                     {labelFormat(item)}
                   </div>
                 }
-                {item.meta_data?.files && item.meta_data?.files.length > 0 && <div>
+                {item.meta_data?.files && item.meta_data?.files.length > 0 && <Flex vertical align="end">
                   {item.meta_data?.files?.map((file) => {
                     if (file.type.includes('image')) {
                       return (
                         <div key={file.url || file.uid} className={`rb:inline-block rb:group rb:relative rb:rounded-lg ${contentClassNames}`}>
-                          <img src={file.url} alt={file.name} className="rb:w-full rb:max-w-80 rb:rounded-lg rb:object-cover rb:cursor-pointer" />
+                          <Image src={getFileUrl(file)} alt={file.name} className="rb:w-full rb:max-w-80 rb:rounded-lg rb:object-cover rb:cursor-pointer" />
                         </div>
                       )
                     }
                     if (file.type.includes('video')) {
                       return (
-                        <div key={file.url || file.uid} className="rb:w-45 rb:h-16 rb:inline-block rb:group rb:relative rb:rounded-lg">
-                          <video src={file.url} controls className="rb:w-45 rb:h-16 rb:rounded-lg rb:object-cover rb:cursor-pointer" />
+                        <div key={file.url || file.uid} className="rb:inline-block rb:group rb:relative rb:rounded-lg">
+                          <video src={getFileUrl(file)} controls className="rb:max-w-80 rb:rounded-lg rb:object-cover rb:cursor-pointer" />
                         </div>
                       )
                     }
                     if (file.type.includes('audio')) {
                       return (
-                        <div key={file.url || file.uid} className="rb:w-45 rb:h-16 rb:inline-flex rb:items-center rb:group rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:py-2 rb:px-2.5 rb:gap-2">
-                          <audio src={file.url} controls className="rb:w-45 rb:h-16" />
+                        <div key={file.url || file.uid} className="rb:inline-flex rb:items-center rb:group rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:py-2 rb:px-2.5 rb:gap-2">
+                          <audio src={getFileUrl(file)} controls className="rb:max-w-80" />
                         </div>
                       )
                     }
                     return (
-                      <div key={file.url || file.uid} className="rb:w-45 rb:text-[12px] rb:gap-2.5 rb:flex rb:items-center rb:group rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:py-2 rb:px-2.5">
+                      <Flex gap={10} align="center" key={file.url || file.uid} className="rb:w-45 rb:text-[12px] rb:group rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:py-2! rb:px-2.5! rb:cursor-pointer" onClick={() => handleDownload(file)}>
                         {(file.type.includes('doc') || file.type.includes('docx') || file.type.includes('word') || file.type.includes('wordprocessingml.document')) && <div
                           className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/word_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/word.svg')]"
                         ></div>}
@@ -146,10 +155,10 @@ const ChatContent: FC<ChatContentProps> = ({
                           <div className="rb:leading-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.name}</div>
                           <div className="rb:leading-3.5 rb:mt-0.5 rb:text-[#5B6167] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.type} · {file.size}</div>
                         </div>
-                      </div>
+                      </Flex>
                     )
                   })}
-                </div>}
+                </Flex>}
                 {/* Message bubble */}
                 <div className={clsx('rb:border rb:text-left rb:rounded-lg rb:mt-1.5 rb:leading-4.5 rb:p-[10px_12px_2px_12px] rb:inline-block rb:max-w-130 rb:wrap-break-word', contentClassNames, {
                   // Error message style (content is null and not assistant message)
