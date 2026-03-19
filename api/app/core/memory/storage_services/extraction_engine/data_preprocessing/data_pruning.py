@@ -523,12 +523,10 @@ class SemanticPruner:
                 3. 两次豁免均未命中 → 删除
 
         第三层（strict，阈值 [0.6, 0.9]）：
-            保留标准：场景相关性优先，豁免权极度收窄。
+            保留标准：场景相关性优先，无任何豁免。
             - 填充消息 → 删除（最高优先级）
             - 场景相关消息 → 保留
-            - 场景无关消息 → 直接删除，仅保留一个例外：
-                LLM 同时将该消息放入 preserve_keywords（自相矛盾时以情感标记为准）→ 保留
-            注意：strict 模式下情感词兜底不再生效，场景相关性是最终裁决标准。
+            - 场景无关消息 → 直接删除，preserve_keywords 和情感词在此模式下均不生效
 
         至少保留 1 条消息（兜底取第一条）。
         """
@@ -563,14 +561,10 @@ class SemanticPruner:
 
             if is_scene_unrelated:
                 if mode == "strict":
-                    # strict：场景无关 → 删除
-                    # 唯一例外：LLM 同时将该消息标记为 preserve_keywords，
-                    # 说明 LLM 自相矛盾（既认为场景无关又认为值得保留），以 preserve_keywords 为准
-                    if extraction.preserve_keywords and self._msg_matches_tokens(m, extraction.preserve_keywords):
-                        self._log(f"  [保护-情感] '{msg_text[:40]}' → preserve_keywords 兜底保护，保留")
-                    else:
-                        to_delete_ids.add(id(m))
-                        self._log(f"  [场景无关-严格] '{msg_text[:40]}' → 删除")
+                    # strict：场景无关直接删除，不做任何豁免
+                    # 场景相关性是唯一裁决标准，preserve_keywords 在此模式下不生效
+                    to_delete_ids.add(id(m))
+                    self._log(f"  [场景无关-严格] '{msg_text[:40]}' → 删除")
                 elif mode == "semantic":
                     # semantic：场景无关但有内容价值 → 保留
                     # 豁免第一层：命中 scene_preserve_tokens（关键词/结构化信息保护）
@@ -720,13 +714,29 @@ class SemanticPruner:
         self._log(
             f"[剪枝-数据集] 对话总数={len(dialogs)} 场景={self.config.pruning_scene} 删除比例={proportion} 开关={self.config.pruning_switch} 模式=消息级独立判断"
         )
-        
+
         pruning_mode = self._get_pruning_mode()
         self._log(f"[剪枝-数据集] 阈值={proportion} → 剪枝阶段={pruning_mode}")
-        
+
         result: List[DialogData] = []
         total_original_msgs = 0
         total_deleted_msgs = 0
+
+        # 统计对象：直接收集结构化数据，无需事后正则解析
+        stats = {
+            "scene": self.config.pruning_scene,
+            "dialog_total": len(dialogs),
+            "deletion_ratio": proportion,
+            "enabled": self.config.pruning_switch,
+            "pruning_mode": pruning_mode,
+            "related_count": 0,
+            "unrelated_count": 0,
+            "related_indices": [],
+            "unrelated_indices": [],
+            "total_deleted_messages": 0,
+            "remaining_dialogs": 0,
+            "dialogs": [],
+        }
 
         # 并发执行所有对话的 LLM 抽取（获取 preserve_keywords 等保护信息）
         semaphore = asyncio.Semaphore(self.max_concurrent)
@@ -749,6 +759,8 @@ class SemanticPruner:
 
             # 相关对话：根据阶段决定处理力度
             if extraction.is_related:
+                stats["related_count"] += 1
+                stats["related_indices"].append(d_idx)
                 kept = self._apply_related_dialog_pruning(
                     msgs, extraction, f"对话 {d_idx+1}", pruning_mode
                 )
@@ -756,7 +768,17 @@ class SemanticPruner:
                 total_deleted_msgs += deleted_count
                 dd.context.msgs = kept
                 result.append(dd)
+                stats["dialogs"].append({
+                    "index": d_idx + 1,
+                    "is_related": True,
+                    "total_messages": original_count,
+                    "deleted": deleted_count,
+                    "kept": len(kept),
+                })
                 continue
+
+            stats["unrelated_count"] += 1
+            stats["unrelated_indices"].append(d_idx)
 
             # 从 LLM 抽取结果中获取所有需要保留的 token
             preserve_tokens = self._build_preserve_tokens(extraction)
@@ -792,16 +814,16 @@ class SemanticPruner:
 
             # important_msgs 仅用于日志统计
             important_msgs = llm_protected_msgs
-            
+
             # 计算删除配额
             delete_target = int(original_count * proportion)
             if proportion > 0 and original_count > 0 and delete_target == 0:
                 delete_target = 1
-            
+
             # 确保至少保留1条消息
             max_deletable = max(0, original_count - 1)
             delete_target = min(delete_target, max_deletable)
-            
+
             # 删除策略：优先删填充消息，再按出现顺序删其余可删消息
             to_delete_indices = set()
             deleted_details = []
@@ -819,62 +841,65 @@ class SemanticPruner:
                     break
                 to_delete_indices.add(idx)
                 deleted_details.append(f"[{idx}] 可删: '{msg.msg[:50]}'")
-            
+
             # 执行删除
             kept_msgs = []
             for idx, m in enumerate(msgs):
                 if idx not in to_delete_indices:
                     kept_msgs.append(m)
-            
+
             # 确保至少保留1条
             if not kept_msgs and msgs:
                 kept_msgs = [msgs[0]]
-            
+
             dd.context.msgs = kept_msgs
             deleted_count = original_count - len(kept_msgs)
             total_deleted_msgs += deleted_count
-            
+
             # 输出删除详情
             if deleted_details:
                 self._log(f"[剪枝-删除详情] 对话 {d_idx+1} 删除了以下消息:")
                 for detail in deleted_details:
                     self._log(f"  {detail}")
-            
+
             # ========== 问答对统计（已注释） ==========
             # qa_info = f"，问答对={len(qa_pairs)}" if qa_pairs else ""
             # ========================================
-            
+
             self._log(
                 f"[剪枝-对话] 对话 {d_idx+1} 总消息={original_count} "
                 f"(保护={len(important_msgs)} 填充={len(filler_msgs)} 可删={len(deletable_msgs)}) "
                 f"删除={deleted_count} 保留={len(kept_msgs)}"
             )
-            
-            result.append(dd)
-        
-        self._log(f"[剪枝-数据集] 剩余对话数={len(result)}")
 
-        # 补充统计日志（供 _parse_logs_to_structured 正则解析）
-        related_count = sum(1 for ex in extraction_results if ex.is_related)
-        unrelated_count = len(dialogs) - related_count
-        related_indices = [str(i) for i, ex in enumerate(extraction_results) if ex.is_related]
-        unrelated_indices = [str(i) for i, ex in enumerate(extraction_results) if not ex.is_related]
-        self._log(f"[剪枝-数据集] 相关对话数={related_count} 不相关对话数={unrelated_count}")
-        self._log(
-            f"[剪枝-数据集] 相关对话：第[{', '.join(related_indices)}]段；"
-            f"不相关对话：第[{', '.join(unrelated_indices)}]段"
-        )
+            stats["dialogs"].append({
+                "index": d_idx + 1,
+                "is_related": False,
+                "total_messages": original_count,
+                "protected": len(important_msgs),
+                "fillers": len(filler_msgs),
+                "deletable": len(deletable_msgs),
+                "deleted": deleted_count,
+                "kept": len(kept_msgs),
+            })
+
+            result.append(dd)
+
+        # 补全统计对象
+        stats["total_deleted_messages"] = total_deleted_msgs
+        stats["remaining_dialogs"] = len(result)
+
+        self._log(f"[剪枝-数据集] 剩余对话数={len(result)}")
+        self._log(f"[剪枝-数据集] 相关对话数={stats['related_count']} 不相关对话数={stats['unrelated_count']}")
         self._log(f"[剪枝-数据集] 总删除 {total_deleted_msgs} 条")
 
-        # 保存日志
+        # 直接序列化统计对象，无需正则解析
         try:
             from app.core.config import settings
             settings.ensure_memory_output_dir()
             log_output_path = settings.get_memory_output_path("pruned_terminal.json")
-            sanitized_logs = [self._sanitize_log_line(l) for l in self.run_logs]
-            payload = self._parse_logs_to_structured(sanitized_logs)
             with open(log_output_path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False, indent=2)
+                json.dump(stats, f, ensure_ascii=False, indent=2)
         except Exception as e:
             self._log(f"[剪枝-数据集] 保存终端输出日志失败：{e}")
 
@@ -882,7 +907,7 @@ class SemanticPruner:
         if not result:
             print("警告: 语义剪枝后数据集为空，已回退为未剪枝数据以避免流程中断")
             return dialogs
-        
+
         return result
 
     def _log(self, msg: str) -> None:
@@ -894,113 +919,4 @@ class SemanticPruner:
             pass
         print(msg)
 
-    def _sanitize_log_line(self, line: str) -> str:
-        """移除行首的方括号标签前缀，例如 [剪枝-数据集] 或 [剪枝-对话]。"""
-        try:
-            return re.sub(r"^\[[^\]]+\]\s*", "", line)
-        except Exception:
-            return line
 
-    def _parse_logs_to_structured(self, logs: List[str]) -> dict:
-        """将已去前缀的日志列表解析为结构化 JSON，便于数据对接。"""
-        summary = {
-            "scene": self.config.pruning_scene,
-            "dialog_total": None,
-            "deletion_ratio": None,
-            "enabled": None,
-            "related_count": None,
-            "unrelated_count": None,
-            "related_indices": [],
-            "unrelated_indices": [],
-            "total_deleted_messages": None,
-            "remaining_dialogs": None,
-        }
-        dialogs = []
-
-        # 解析函数
-        def parse_int(value: str) -> Optional[int]:
-            try:
-                return int(value)
-            except Exception:
-                return None
-
-        def parse_float(value: str) -> Optional[float]:
-            try:
-                return float(value)
-            except Exception:
-                return None
-
-        def parse_indices(s: str) -> List[int]:
-            s = s.strip()
-            if not s:
-                return []
-            parts = [p.strip() for p in s.split(",") if p.strip()]
-            out: List[int] = []
-            for p in parts:
-                try:
-                    out.append(int(p))
-                except Exception:
-                    pass
-            return out
-
-        # 正则
-        re_header = re.compile(r"对话总数=(\d+)\s+场景=([^\s]+)\s+删除比例=([0-9.]+)\s+开关=(True|False)")
-        re_counts = re.compile(r"相关对话数=(\d+)\s+不相关对话数=(\d+)")
-        re_indices = re.compile(r"相关对话：第\[(.*?)\]段；不相关对话：第\[(.*?)\]段")
-        re_dialog = re.compile(r"对话\s+(\d+)\s+总消息=(\d+).*?删除=(\d+)\s+保留=(\d+)\b")
-        re_total_del = re.compile(r"总删除\s+(\d+)\s+条")
-        re_remaining = re.compile(r"剩余对话数=(\d+)")
-
-        for line in logs:
-            # 第一行：总览
-            m = re_header.search(line)
-            if m:
-                summary["dialog_total"] = parse_int(m.group(1))
-                # 顶层 scene 依配置，这里不覆盖，但也可校验 m.group(2)
-                summary["deletion_ratio"] = parse_float(m.group(3))
-                summary["enabled"] = True if m.group(4) == "True" else False
-                continue
-
-            # 第二行：相关/不相关数量
-            m = re_counts.search(line)
-            if m:
-                summary["related_count"] = parse_int(m.group(1))
-                summary["unrelated_count"] = parse_int(m.group(2))
-                continue
-
-            # 第三行：相关/不相关索引
-            m = re_indices.search(line)
-            if m:
-                summary["related_indices"] = parse_indices(m.group(1))
-                summary["unrelated_indices"] = parse_indices(m.group(2))
-                continue
-
-            # 对话级统计
-            m = re_dialog.search(line)
-            if m:
-                dialogs.append({
-                    "index": parse_int(m.group(1)),
-                    "total_messages": parse_int(m.group(2)),
-                    "deleted": parse_int(m.group(3)),
-                    "kept": parse_int(m.group(4)),
-                })
-                continue
-
-            # 全局删除总数
-            m = re_total_del.search(line)
-            if m:
-                summary["total_deleted_messages"] = parse_int(m.group(1))
-                continue
-
-            # 剩余对话数
-            m = re_remaining.search(line)
-            if m:
-                summary["remaining_dialogs"] = parse_int(m.group(1))
-                continue
-
-        return {
-            "scene": summary["scene"],
-            "timestamp": datetime.now().isoformat(),
-            "summary": {k: v for k, v in summary.items() if k != "scene"},
-            "dialogs": dialogs,
-        }
