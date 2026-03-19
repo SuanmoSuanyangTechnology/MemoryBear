@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 10:35:21
+ * @Last Modified time: 2026-03-19 10:37:01
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -59,8 +59,8 @@ const ChatContent: FC<ChatContentProps> = ({
     const handleScroll = () => {
       if (scrollContainerRef.current) {
         const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
-        // Consider user is at bottom if within 20px of the bottom
-        isScrolledToBottomRef.current = scrollHeight - scrollTop - clientHeight < 20;
+        // Consider user is at bottom if within 100px of the bottom
+        isScrolledToBottomRef.current = scrollHeight - scrollTop - clientHeight < 100;
       }
     };
     
@@ -88,6 +88,7 @@ const ChatContent: FC<ChatContentProps> = ({
         // Auto-scroll if data length changed OR user is currently at bottom
         if (data.length !== prevDataLengthRef.current || isScrolledToBottomRef.current) {
           scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+          isScrolledToBottomRef.current = true;
         }
         prevDataLengthRef.current = data.length;
       }
