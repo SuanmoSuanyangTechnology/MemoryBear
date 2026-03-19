@@ -622,30 +622,71 @@ class MultimodalService:
 
     @staticmethod
     async def _extract_word_text(file_content: bytes) -> str:
-        """提取 Word 文档文本"""
+        """提取 Word 文档文本（支持 .docx 和旧版 .doc）"""
+        # 先尝试 docx（ZIP 格式）
+        if file_content[:2] == b'PK':
+            try:
+                word_file = io.BytesIO(file_content)
+                doc = Document(word_file)
+                return '\n'.join(p.text for p in doc.paragraphs)
+            except Exception as e:
+                logger.error(f"提取 docx 文本失败: {e}")
+                return f"[docx 提取失败: {str(e)}]"
+
+        # 旧版 .doc（OLE2 格式）
         try:
-            word_file = io.BytesIO(file_content)
-            doc = Document(word_file)
-            text_parts = [paragraph.text for paragraph in doc.paragraphs]
-            return '\n'.join(text_parts)
+            import olefile
+            ole = olefile.OleFileIO(io.BytesIO(file_content))
+            if not ole.exists('WordDocument'):
+                return "[doc 提取失败: 未找到 WordDocument 流]"
+            # 读取 WordDocument 流，提取可见 ASCII/Unicode 文本
+            stream = ole.openstream('WordDocument').read()
+            # Word Binary Format: 文本在流中以 UTF-16-LE 编码存储
+            # 简单提取：过滤出可打印字符段
+            try:
+                text = stream.decode('utf-16-le', errors='ignore')
+            except Exception:
+                text = stream.decode('latin-1', errors='ignore')
+            # 过滤控制字符，保留可打印内容
+            import re
+            text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+            text = re.sub(r' +', ' ', text).strip()
+            ole.close()
+            return text
         except Exception as e:
-            logger.error(f"提取 Word 文本失败: {e}")
-            return f"[Word 提取失败: {str(e)}]"
+            logger.error(f"提取 doc 文本失败: {e}")
+            return f"[doc 提取失败: {str(e)}]"
 
     @staticmethod
     async def _extract_xlsx_text(file_content: bytes) -> str:
-        """提取 Excel 文本"""
+        """提取 Excel 文本（支持 .xlsx 和旧版 .xls）"""
+        # xlsx（ZIP 格式）
+        if file_content[:2] == b'PK':
+            try:
+                wb = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True, data_only=True)
+                parts = []
+                for sheet in wb.worksheets:
+                    parts.append(f"[Sheet: {sheet.title}]")
+                    for row in sheet.iter_rows(values_only=True):
+                        parts.append('\t'.join('' if v is None else str(v) for v in row))
+                return '\n'.join(parts)
+            except Exception as e:
+                logger.error(f"提取 xlsx 文本失败: {e}")
+                return f"[xlsx 提取失败: {str(e)}]"
+
+        # xls（OLE2/BIFF 格式）
         try:
-            wb = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True, data_only=True)
+            import xlrd
+            wb = xlrd.open_workbook(file_contents=file_content)
             parts = []
-            for sheet in wb.worksheets:
-                parts.append(f"[Sheet: {sheet.title}]")
-                for row in sheet.iter_rows(values_only=True):
-                    parts.append('\t'.join('' if v is None else str(v) for v in row))
+            for sheet in wb.sheets():
+                parts.append(f"[Sheet: {sheet.name}]")
+                for row_idx in range(sheet.nrows):
+                    parts.append('\t'.join(str(sheet.cell_value(row_idx, col)) for col in range(sheet.ncols)))
             return '\n'.join(parts)
         except Exception as e:
-            logger.error(f"提取 Excel 文本失败: {e}")
-            return f"[Excel 提取失败: {str(e)}]"
+            logger.error(f"提取 xls 文本失败: {e}")
+            return f"[xls 提取失败: {str(e)}]"
 
     async def _extract_csv_text(self, file_content: bytes) -> str:
         """提取 CSV 文本"""
