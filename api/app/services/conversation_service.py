@@ -119,25 +119,27 @@ class ConversationService:
 
     def get_user_conversations(
             self,
-            user_id: uuid.UUID
-    ) -> list[Conversation]:
+            user_id: uuid.UUID,
+            page: int = 1,
+            page_size: int = 20
+    ) -> tuple[list[Conversation], int]:
         """
-        Retrieve recent conversations for a specific user
-
-        This method delegates persistence logic to the repository layer and
-        applies service-level defaults (e.g. recent conversation limit).
+        Retrieve recent conversations for a specific user with pagination.
 
         Args:
             user_id (uuid.UUID): Unique identifier of the user.
+            page (int): Page number (1-based). Defaults to 1.
+            page_size (int): Number of items per page. Defaults to 20.
 
         Returns:
-            list[Conversation]: A list of recent conversation entities.
+            tuple[list[Conversation], int]: A list of recent conversation entities and total count.
         """
-        conversations = self.conversation_repo.get_conversation_by_user_id(
+        conversations, total = self.conversation_repo.get_conversation_by_user_id(
             user_id,
-            limit=10
+            page=page,
+            page_size=page_size
         )
-        return conversations
+        return conversations, total
 
     def list_conversations(
             self,
