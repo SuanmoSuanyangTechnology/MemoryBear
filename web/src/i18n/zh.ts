@@ -1562,6 +1562,7 @@ export const zh = {
       summary: '摘要',
       core_entities: '核心实体',
       communityDetailEmptyDesc: '点击左侧图表中的社区查看详情',
+      communityLoadingTip: '社区图谱生成中',
     },
     space: {
       createSpace: '创建空间',
