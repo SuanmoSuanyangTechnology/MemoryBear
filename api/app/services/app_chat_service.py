@@ -191,7 +191,7 @@ class AppChatService:
             for f in files:
                 # url = await MultimodalService(self.db).get_file_url(f)
                 human_meta["files"].append({
-                    "type": FileType.IMAGE,
+                    "type": f.type,
                     "url": f.url
                 })
 
@@ -342,9 +342,17 @@ class AppChatService:
                 processed_files = await multimodal_service.process_files(user_id, files)
                 logger.info(f"处理了 {len(processed_files)} 个文件")
 
-            # 流式调用 Agent（支持多模态）
+            # 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
             total_tokens = 0
+
+            text_queue: asyncio.Queue = asyncio.Queue()
+            stream_audio_url, tts_task = await self.agent_service._generate_tts_streaming(
+                features_config, api_key_obj,
+                text_queue=text_queue,
+                tenant_id=tenant_id, workspace_id=workspace_id
+            )
+
             async for chunk in agent.chat_stream(
                     message=message,
                     history=history,
@@ -354,17 +362,20 @@ class AppChatService:
                     user_rag_memory_id=user_rag_memory_id,
                     config_id=config_id,
                     memory_flag=memory_flag,
-                    files=processed_files  # 传递处理后的文件
+                    files=processed_files
             ):
                 if isinstance(chunk, int):
                     total_tokens = chunk
                 else:
                     full_content += chunk
-                    # 发送消息块事件
                     yield f"event: message\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+                    if tts_task is not None:
+                        await text_queue.put(chunk)
+
+            if tts_task is not None:
+                await text_queue.put(None)
 
             elapsed_time = time.time() - start_time
-
             ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
 
             # 发送结束事件（包含 suggested_questions、tts、citations）
@@ -376,12 +387,6 @@ class AppChatService:
                     {"model_name": api_key_obj.model_name, "api_key": api_key_obj.api_key,
                      "api_base": api_key_obj.api_base}, {}
                 )
-            stream_audio_url = await self.agent_service._generate_tts(
-                features_config, full_content,
-                {"model_name": api_key_obj.model_name, "api_key": api_key_obj.api_key,
-                 "api_base": api_key_obj.api_base, "provider": api_key_obj.provider},
-                tenant_id=tenant_id, workspace_id=workspace_id
-            )
             end_data["audio_url"] = stream_audio_url
             end_data["citations"] = self.agent_service._filter_citations(features_config, [])
 
@@ -399,7 +404,7 @@ class AppChatService:
                 for f in files:
                     # url = await MultimodalService(self.db).get_file_url(f)
                     human_meta["files"].append({
-                        "type": FileType.IMAGE,
+                        "type": f.type,
                         "url": f.url
                     })
 
