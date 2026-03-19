@@ -69,11 +69,13 @@ class LabelPropagationEngine:
         connector: Neo4jConnector,
         config_id: Optional[str] = None,
         llm_model_id: Optional[str] = None,
+        embedding_model_id: Optional[str] = None,
     ):
         self.connector = connector
         self.repo = CommunityRepository(connector)
         self.config_id = config_id
         self.llm_model_id = llm_model_id
+        self.embedding_model_id = embedding_model_id
 
     # ──────────────────────────────────────────────────────────────────────────
     # 公开接口
@@ -468,12 +470,28 @@ class LabelPropagationEngine:
                 except Exception as e:
                     logger.warning(f"[Clustering] LLM 生成社区元数据失败，使用兜底值: {e}")
 
+            # 生成 summary_embedding
+            summary_embedding: Optional[List[float]] = None
+            if self.embedding_model_id and summary:
+                try:
+                    from app.db import get_db_context
+                    from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+
+                    with get_db_context() as db:
+                        embedder = MemoryClientFactory(db).get_embedder_client(self.embedding_model_id)
+                        vectors = await embedder.response([summary])
+                        if vectors:
+                            summary_embedding = vectors[0]
+                except Exception as e:
+                    logger.warning(f"[Clustering] 社区 {community_id} 生成 summary_embedding 失败: {e}")
+
             await self.repo.update_community_metadata(
                 community_id=community_id,
                 end_user_id=end_user_id,
                 name=name,
                 summary=summary,
                 core_entities=core_entities,
+                summary_embedding=summary_embedding,
             )
             logger.debug(f"[Clustering] 社区 {community_id} 元数据已更新: name={name}")
         except Exception as e:
