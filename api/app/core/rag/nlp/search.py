@@ -146,7 +146,7 @@ def _retrieve_for_knowledge(
             return results, chat_model, embedding_model
 
     # Folder 类型：递归处理子知识库
-    if db_knowledge.type == knowledge_model.KnowledgeType.Folder:
+    if db_knowledge.type == knowledge_model.KnowledgeType.FOLDER:
         children = knowledge_repository.get_knowledges_by_parent_id(db=db, parent_id=db_knowledge.id)
         for child in children:
             if not (child and child.chunk_num > 0 and child.status == 1):
