@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 14:59:34
+ * @Last Modified time: 2026-03-19 15:18:20
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, InputNumber, Flex, Switch, Row, Col, Radio } from 'antd';
@@ -27,22 +27,43 @@ const fileTypeOptions = [
   {
     type: 'document',
     icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/txt.svg')]"></div>,
-    formats: 'TXT, PDF, DOC, DOCX, XLSX, CSV, JSON',
+    formats: [
+      "pdf",
+      "docx",
+      "doc",
+      "xlsx",
+      "xls",
+      "txt",
+      "csv",
+      "json",
+      "md",
+    ],
   },
   {
     type: 'image',
     icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/image.svg')]"></div>,
-    formats: 'JPG, JPEG, PNG, GIF, WEBP',
+    formats: [
+      "png",
+      "jpg",
+      "jpeg"
+    ],
   },
   {
     type: 'audio',
     icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/audio.svg')]"></div>,
-    formats: 'MP3, M4A, WAV, OGG, FLAC',
+    formats: [
+      "mp3",
+      "wav",
+      "m4a",
+    ],
   },
   {
     type: 'video',
     icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/video.svg')]"></div>,
-    formats: 'MP4, MOV, AVI, WEBM',
+    formats: [
+      "mp4",
+      "mov",
+    ],
   },
 ];
 
@@ -50,16 +71,38 @@ const defaultValues: FileUpload = {
   enabled: false,
   image_enabled: false,
   image_max_size_mb: 20,
-  image_allowed_extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'],
+  image_allowed_extensions: [
+    "png",
+    "jpg",
+    "jpeg"
+  ],
   audio_enabled: false,
   audio_max_size_mb: 50,
-  audio_allowed_extensions: ['mp3', 'wav', 'm4a', 'ogg', 'flac'],
+  audio_allowed_extensions: [
+    "mp3",
+    "wav",
+    "m4a",
+    "ogg",
+    "flac"
+  ],
   document_enabled: false,
   document_max_size_mb: 100,
-  document_allowed_extensions: ['pdf', 'docx', 'xlsx', 'txt', 'csv', 'json'],
+  document_allowed_extensions: [
+    "pdf",
+    "docx",
+    "xlsx",
+    "txt",
+    "csv",
+    "json"
+  ],
   video_enabled: false,
   video_max_size_mb: 100,
-  video_allowed_extensions: ['mp4', 'mov', 'avi', 'webm'],
+  video_allowed_extensions: [
+    "mp4",
+    "mov",
+    "avi",
+    "webm"
+  ],
   max_file_count: 5,
   allowed_transfer_methods: 'both'
 }
@@ -149,7 +192,7 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
                       <Flex align="center" justify="space-between">
                         <Flex vertical>
                           <div className="rb:font-medium">{t(`application.${option.type}`)}</div>
-                          <div className="rb:text-[12px] rb:text-[#5B6167]">{option.formats}</div>
+                          <div className="rb:text-[12px] rb:text-[#5B6167]">{option.formats.map(item => item.toUpperCase()).join(', ')}</div>
                         </Flex>
                         <Form.Item name={enabledKey} valuePropName="checked" noStyle>
                           <Switch />
