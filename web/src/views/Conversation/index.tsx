@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 20:54:00
+ * @Last Modified time: 2026-03-19 12:30:41
  */
 /**
  * Conversation Page
@@ -63,6 +63,7 @@ const Conversation: FC = () => {
   const [isHasMemory, setIsHasMemory] = useState(false)
   const [memory, setMemory] = useState(true)
   const [features, setFeatures] = useState<FeaturesConfigForm>({} as FeaturesConfigForm)
+  const [config, setConfig] = useState<Record<string, any>>({})
 
   useEffect(() => {
     const shareToken = localStorage.getItem(`shareToken_${token}`)
@@ -88,6 +89,7 @@ const Conversation: FC = () => {
         .then(res => {
           const response = res as { variables: Variable[]; features: FeaturesConfigForm; app_type: string; memory?: boolean; }
           toolbarRef.current?.setVariables(response.variables || [])
+          setConfig(response)
           setFeatures(response.features)
           setIsHasMemory((response.app_type === 'workflow' && response.memory) || (response.app_type !== 'workflow'))
         })
@@ -284,6 +286,7 @@ const Conversation: FC = () => {
   }
 
   const handleChangeMemory = (value: boolean) => {
+    if (config.app_type === 'workflow') return;
     modal.confirm({
       title: value ? t('memoryConversation.memoryTipTitle') : t('memoryConversation.memoryCancelTipTitle'),
       okText: t('common.confirm'),
@@ -388,6 +391,7 @@ const Conversation: FC = () => {
                     icon={MemoryFunctionIcon}
                     checkedIcon={MemoryFunctionCheckedIcon}
                     checked={memory}
+                    disabled={config.app_type === 'workflow'}
                     onChange={handleChangeMemory}
                   >
                     {t('memoryConversation.memory')}
