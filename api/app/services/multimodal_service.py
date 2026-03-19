@@ -41,7 +41,8 @@ TEXT_MIME = ['text/plain', 'text/x-markdown']
 PDF_MIME = ['application/pdf']
 DOC_MIME = [
     'application/msword',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/zip'
 ]
 XLSX_MIME = [
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -590,7 +591,7 @@ class MultimodalService:
                 return file_content.decode("utf-8")
             elif file_mime_type in PDF_MIME:
                 return await self._extract_pdf_text(file_content)
-            elif file_mime_type in DOC_MIME:
+            elif file_mime_type in DOC_MIME and file.file_type.endswith(('docx', 'doc')):
                 return await self._extract_word_text(file_content)
             elif file_mime_type in XLSX_MIME and file.file_type.endswith(("xlsx", "xls")):
                 return await self._extract_xlsx_text(file_content)
