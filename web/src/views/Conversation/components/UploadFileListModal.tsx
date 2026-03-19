@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:47 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 21:10:01
+ * @Last Modified time: 2026-03-19 20:27:40
  */
 /**
  * Upload File List Modal Component
@@ -116,6 +116,9 @@ const UploadFileListModal = forwardRef<UploadFileListModalRef, UploadFileListMod
                     {...restField}
                     name={[name, 'type']}
                     className="rb:mb-0!"
+                    rules={[
+                      { required: true, message: t('common.pleaseSelect') }
+                    ]}
                   >
                     <Select
                       placeholder={t('memoryConversation.fileType')}
