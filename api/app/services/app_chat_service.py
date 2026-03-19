@@ -124,7 +124,7 @@ class AppChatService:
             limit=10
         )
         history = [
-            {"role": msg.role, "content": msg.content}
+            {"role": msg.role, "content": [{"type": "text", "text": msg.content}] + msg.meta_data.get("files", [])}
             for msg in messages
         ]
 
@@ -188,12 +188,7 @@ class AppChatService:
             "audio_url": None
         }
         if files:
-            for f in files:
-                # url = await MultimodalService(self.db).get_file_url(f)
-                human_meta["files"].append({
-                    "type": f.type,
-                    "url": f.url
-                })
+            human_meta["files"].extend(processed_files)
 
         # 保存消息
         if audio_url:
@@ -322,7 +317,7 @@ class AppChatService:
                     limit=memory_config.get("max_history", 10)
                 )
                 history = [
-                    {"role": msg.role, "content": msg.content}
+                    {"role": msg.role, "content": [{"type": "text", "text": msg.content}] + msg.meta_data.get("files", [])}
                     for msg in messages
                 ]
 

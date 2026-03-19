@@ -658,7 +658,7 @@ class AgentRunService:
                             "total_tokens": 0
                         })
                     },
-                    files=files,
+                    files=processed_files,
                     audio_url=audio_url
                 )
 
@@ -820,6 +820,7 @@ class AgentRunService:
                 conversation_id=conversation_id,
                 max_history=memory_config.get("max_history", 10)
             )
+            print(history)
 
             # 6. 处理多模态文件
             processed_files = None
@@ -904,7 +905,7 @@ class AgentRunService:
                     meta_data={
                         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens}
                     },
-                    files=files,
+                    files=processed_files,
                     audio_url=stream_audio_url
                 )
 
@@ -1182,12 +1183,7 @@ class AgentRunService:
                 "files": []
             }
             if files:
-                for f in files:
-                    # url = await MultimodalService(self.db).get_file_url(f)
-                    human_meta["files"].append({
-                        "type": f.type,
-                        "url": f.url
-                    })
+                human_meta["files"].extend(files)
             # 保存用户消息
             conversation_service.add_message(
                 conversation_id=conv_uuid,

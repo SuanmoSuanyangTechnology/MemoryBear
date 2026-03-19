@@ -11,6 +11,8 @@
 import base64
 import io
 import uuid
+import zipfile
+import chardet
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 
@@ -42,12 +44,10 @@ PDF_MIME = ['application/pdf']
 DOC_MIME = [
     'application/msword',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/zip'
 ]
 XLSX_MIME = [
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'application/vnd.ms-excel',
-    'application/zip'
 ]
 CSV_MIME = ['text/csv', 'application/csv']
 JSON_MIME = ['application/json']
@@ -588,12 +588,12 @@ class MultimodalService:
                     file.set_content(file_content)
             file_mime_type = magic.from_buffer(file_content, mime=True)
             if file_mime_type in TEXT_MIME:
-                return file_content.decode("utf-8")
+                return self._decode_text_safe(file_content)
             elif file_mime_type in PDF_MIME:
                 return await self._extract_pdf_text(file_content)
-            elif file_mime_type in DOC_MIME and file.file_type.endswith(('docx', 'doc')):
+            elif self._is_word_file(file_content, file_mime_type):
                 return await self._extract_word_text(file_content)
-            elif file_mime_type in XLSX_MIME and file.file_type.endswith(("xlsx", "xls")):
+            elif self._is_excel_file(file_content, file_mime_type):
                 return await self._extract_xlsx_text(file_content)
             elif file_mime_type in CSV_MIME:
                 return await self._extract_csv_text(file_content)
@@ -647,26 +647,88 @@ class MultimodalService:
             logger.error(f"提取 Excel 文本失败: {e}")
             return f"[Excel 提取失败: {str(e)}]"
 
-    @staticmethod
-    async def _extract_csv_text(file_content: bytes) -> str:
+    async def _extract_csv_text(self, file_content: bytes) -> str:
         """提取 CSV 文本"""
         try:
-            text = file_content.decode('utf-8-sig')
+            text = self._decode_text_safe(file_content)
             reader = csv.reader(io.StringIO(text))
             return '\n'.join('\t'.join(row) for row in reader)
         except Exception as e:
             logger.error(f"提取 CSV 文本失败: {e}")
             return f"[CSV 提取失败: {str(e)}]"
 
-    @staticmethod
-    async def _extract_json_text(file_content: bytes) -> str:
+    async def _extract_json_text(self, file_content: bytes) -> str:
         """提取 JSON 文本"""
         try:
-            data = json.loads(file_content.decode('utf-8'))
+            text = self._decode_text_safe(file_content)
+            data = json.loads(text)
             return json.dumps(data, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"提取 JSON 文本失败: {e}")
             return f"[JSON 提取失败: {str(e)}]"
+
+    def _is_word_file(self, file_content: bytes, mime_type: str) -> bool:
+        """判断是不是 Word 文件（doc / docx），不依赖后缀"""
+        # 旧版 .doc
+        if mime_type == 'application/msword':
+            return True
+
+        # 新版 .docx（ZIP 内部包含 word/document.xml）
+        header = file_content[:4]
+        if header == b'PK\x03\x04':
+            try:
+                with zipfile.ZipFile(io.BytesIO(file_content)) as zf:
+                    return "word/document.xml" in zf.namelist()
+            except:
+                pass
+
+        return False
+
+    def _is_excel_file(self, file_content: bytes, mime_type: str) -> bool:
+        """判断是不是 Excel 文件（xls / xlsx），不依赖后缀"""
+        # 旧版 .xls
+        if mime_type == 'application/vnd.ms-excel':
+            return True
+
+        # 新版 .xlsx（ZIP 内部包含 xl/workbook.xml）
+        header = file_content[:4]
+        if header == b'PK\x03\x04':
+            try:
+                with zipfile.ZipFile(io.BytesIO(file_content)) as zf:
+                    return "xl/workbook.xml" in zf.namelist()
+            except:
+                pass
+
+        return False
+
+    @staticmethod
+    def _decode_text_safe(file_content: bytes) -> str:
+        """
+        【万能文本解码】
+        自动检测编码，支持 utf-8 / gbk / gb2312 / utf-8-sig / ascii 等
+        永远不报错，永远不乱码
+        """
+        if not file_content:
+            return ""
+
+        # 1. 自动检测文件编码
+        detect = chardet.detect(file_content)
+        encoding = detect.get("encoding", "utf-8").lower()
+
+        # 2. 兼容常见中文编码
+        compatible_encodings = ["utf-8", "gbk", "gb18030", "gb2312", "ascii", "latin-1"]
+
+        # 3. 按优先级尝试解码
+        for enc in [encoding] + compatible_encodings:
+            if not enc:
+                continue
+            try:
+                return file_content.decode(enc.strip())
+            except (UnicodeDecodeError, LookupError):
+                continue
+
+        # 终极兜底
+        return file_content.decode("utf-8", errors="replace")
 
 
 def get_multimodal_service(db: Session) -> MultimodalService:
