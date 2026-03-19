@@ -167,7 +167,7 @@ class SemanticPruner:
             # 规则1：确认词 + 感谢词（如"好的谢谢"、"嗯谢谢"）
             for cp in _confirm_prefixes:
                 for ts in _thanks_suffixes:
-                    if t == cp + ts or t == cp + "，" + ts or t == cp + "，" + ts:
+                    if t == cp + ts or t == cp + "，" + ts or t == cp + "," + ts:
                         return True
 
             # 规则2：称呼前缀 + 问候（如"同学你好"、"老师好"）
@@ -760,7 +760,7 @@ class SemanticPruner:
             # 相关对话：根据阶段决定处理力度
             if extraction.is_related:
                 stats["related_count"] += 1
-                stats["related_indices"].append(d_idx)
+                stats["related_indices"].append(d_idx + 1)
                 kept = self._apply_related_dialog_pruning(
                     msgs, extraction, f"对话 {d_idx+1}", pruning_mode
                 )
@@ -778,7 +778,7 @@ class SemanticPruner:
                 continue
 
             stats["unrelated_count"] += 1
-            stats["unrelated_indices"].append(d_idx)
+            stats["unrelated_indices"].append(d_idx + 1)
 
             # 从 LLM 抽取结果中获取所有需要保留的 token
             preserve_tokens = self._build_preserve_tokens(extraction)
