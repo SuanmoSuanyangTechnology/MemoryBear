@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:47 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 20:27:40
+ * @Last Modified time: 2026-03-19 20:32:32
  */
 /**
  * Upload File List Modal Component
@@ -129,7 +129,10 @@ const UploadFileListModal = forwardRef<UploadFileListModalRef, UploadFileListMod
                   <FormItem
                     {...restField}
                     name={[name, 'url']}
-                    rules={[{ required: true, message: t('common.pleaseEnter') }]}
+                    rules={[
+                      { required: true, message: t('common.pleaseEnter') },
+                      { type: 'url'}
+                    ]}
                     className="rb:mb-0! rb:flex-1!"
                   >
                     <Input placeholder={t('memoryConversation.fileUrl')} />
