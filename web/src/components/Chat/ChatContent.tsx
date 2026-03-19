@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 10:37:01
+ * @Last Modified time: 2026-03-19 13:38:20
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -118,7 +118,7 @@ const ChatContent: FC<ChatContentProps> = ({
                     {labelFormat(item)}
                   </div>
                 }
-                {item.meta_data?.files && item.meta_data?.files.length > 0 && <Flex vertical align="end">
+                {item.meta_data?.files && item.meta_data?.files.length > 0 && <Flex gap={8} vertical align="end">
                   {item.meta_data?.files?.map((file) => {
                     if (file.type.includes('image')) {
                       return (

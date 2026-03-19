@@ -1564,6 +1564,7 @@ export const en = {
       summary: 'Summary',
       core_entities: 'Core Entities',
       communityDetailEmptyDesc: 'Click on a community in the chart on the left to view details',
+      communityLoadingTip: 'Generating community graph',
     },
     space: {
       createSpace: 'Create Space',
