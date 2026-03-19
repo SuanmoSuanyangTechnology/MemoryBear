@@ -1548,7 +1548,7 @@ export const en = {
       Meaning: 'Meaning',
 
       exampleMemoryExtractionResults: 'Example Memory Extraction Results',
-      exampleMemoryExtractionResultsSubTitle: '(from a technology conference)',
+      exampleMemoryExtractionResultsSubTitle: 'from a technology conference',
 
       extractTheNumberOfEntities: 'Extract the number of entities',
       extractTheNumberOfEntitiesDesc: 'Merge after deduplication: {{num}} (exact: {{exact}}, fuzzy: {{fuzzy}}, LLM: {{llm}})',
@@ -1670,7 +1670,12 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       disagreementCase: 'Disagreement Case',
       Pruned: 'Pruned',
       pruning: 'Pruning',
-      pruning_desc: 'Text pruning {{count}} fragments'
+      pruning_desc: 'Text pruning {{count}} fragments',
+
+      processData: 'Process Data',
+      finalResult: 'Final Result',
+      chunking: 'Chunking',
+      dataStatistics: 'Data Statistics',
     },
     memoryConversation: {
       searchPlaceholder: 'Enter user ID...',

@@ -77,7 +77,7 @@ const Habits = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
       title={() => (<Space size={4}>
         {t('implicitDetail.habits')}
         <Tooltip title={t('implicitDetail.habitsSubTitle')}>
-          <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/userMemory/question.svg')]"></div>
+          <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/question.svg')]"></div>
         </Tooltip>
       </Space>)}
       headerType="borderless"

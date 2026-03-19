@@ -178,7 +178,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
           'rb:border-[#d1d5db] rb:bg-[#FCFCFD] rb:text-[#374151]': !data.isSelected
         })}
       >
-        <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/workflow/node_plus.png')]"></div>
+        <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/workflow/node_plus.png')]"></div>
         {data.label}
       </Flex>
     </Popover>

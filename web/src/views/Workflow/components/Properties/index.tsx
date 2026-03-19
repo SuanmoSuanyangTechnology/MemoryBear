@@ -434,7 +434,7 @@ const Properties: FC<PropertiesProps> = ({
           <Dropdown
             menu={{
               items: [
-                { key: 'delete', icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/common/delete_dark.svg')]"></div>, label: <Flex>{t('common.delete')}</Flex> },
+                { key: 'delete', icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/delete_dark.svg')]"></div>, label: <Flex>{t('common.delete')}</Flex> },
                 // { key: 'copy', icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"></div>, label: t('common.copy') }
               ],
               onClick: handleClick
@@ -834,7 +834,7 @@ const Properties: FC<PropertiesProps> = ({
               <Flex align="center" className="rb:font-medium rb:cursor-pointer" onClick={handleToggle}>
                 {t('workflow.config.output')}
                 <div
-                  className={clsx("rb:size-3 rb:bg-cover rb:bg-[url('src/assets/images/common/caret_right_outlined.svg')]", {
+                  className={clsx("rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/caret_right_outlined.svg')]", {
                     'rb:rotate-90': !outputCollapsed
                   })}
                 ></div>

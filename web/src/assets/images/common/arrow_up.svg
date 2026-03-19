@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>下拉</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="记忆管理-记忆提取引擎-2" transform="translate(-806, -166)">
+            <g id="文本" transform="translate(252, 154)">
+                <g id="下拉" transform="translate(562, 20) scale(1, -1) translate(-562, -20)translate(554, 12)">
+                    <rect id="矩形" opacity="0.236839658" fill-rule="nonzero" x="0" y="0" width="16" height="16"></rect>
+                    <polyline id="路径" stroke="#5B6167" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" points="12 6 8 10 4 6"></polyline>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

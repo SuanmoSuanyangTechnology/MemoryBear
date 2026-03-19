@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:00:20 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-04 10:03:35
+ * @Last Modified time: 2026-03-16 15:43:42
  */
 /**
  * Line Chart Component
@@ -84,7 +84,7 @@ const SeriesConfig = {
 /**
  * Chart color palette
  */
-const Colors = ['#155EEF', '#4DA8FF', '#FFB048']
+const Colors = ['#155EEF', '#4DA8FF', '#369F21']
 
 
 /**
@@ -228,8 +228,8 @@ const LineChart: FC<LineCardProps> = ({ config }) => {
             grid: {
               left: 4,
               right: '2%',
-              bottom: 60,
-              top: 32,
+              bottom: 48,
+              top: 8,
               containLabel: true
             },
             xAxis: {
@@ -243,7 +243,7 @@ const LineChart: FC<LineCardProps> = ({ config }) => {
                 show: true,
               },
               axisTick: {
-                show: true
+                show: false
               },
               axisLabel: {
                 color: '#5B6167'
@@ -268,7 +268,7 @@ const LineChart: FC<LineCardProps> = ({ config }) => {
               ...initialData || []
             ]
           }}
-          style={{ height: '450px', width: '100%' }}
+          style={{ height: '400px', width: '100%' }}
           opts={{ renderer: 'canvas' }}
           notMerge={true}
           lazyUpdate={true}

@@ -1546,7 +1546,7 @@ export const zh = {
       Meaning: '含义',
 
       exampleMemoryExtractionResults: '示例记忆提取结果',
-      exampleMemoryExtractionResultsSubTitle: '（来自技术会议）',
+      exampleMemoryExtractionResultsSubTitle: '来自技术会议',
 
       extractTheNumberOfEntities: '提取实体数量',
       extractTheNumberOfEntitiesDesc: '去重后合并：{{num}}（精确：{{exact}}，模糊：{{fuzzy}}，LLM：{{llm}}）',
@@ -1666,7 +1666,12 @@ export const zh = {
       disagreementCase: '不一致案例',
       Pruned: '已剪枝',
       pruning: '剪枝',
-      pruning_desc: '文本剪枝{{count}}个片段'
+      pruning_desc: '文本剪枝{{count}}个片段',
+
+      processData: '处理数据',
+      finalResult: '最终结果',
+      chunking: '分块',
+      dataStatistics: '数据统计',
     },
     memoryConversation: {
       chatEmpty:'有什么我可以帮您的吗？',

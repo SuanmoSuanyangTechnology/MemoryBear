@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:53:44 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-16 15:01:27 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-16 15:23:18
  */
 /**
  * User Memory Page
@@ -104,7 +104,7 @@ export default function UserMemory() {
                     title={<Flex gap={4}>
                       <div className="rb:size-6 rb:text-center rb:font-semibold rb:leading-6 rb:rounded-md rb:text-white rb:bg-[#155EEF]">{name[0]}</div>
                       
-                      <Tooltip title={name || '-'}><div className={`rb:w-full rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap`}>{name || '-'}</div></Tooltip>
+                      <Tooltip title={name || '-'}><div className={`rb:flex-1 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap`}>{name || '-'}</div></Tooltip>
                     </Flex>}
                     headerType="border"
                     headerClassName="rb:h-[48px]! rb:mx-4!"

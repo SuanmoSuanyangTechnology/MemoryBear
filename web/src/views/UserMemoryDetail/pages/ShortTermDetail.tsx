@@ -110,7 +110,7 @@ const ShortTermDetail: FC = () => {
           title={() => (<Space size={4}>
             {t('shortTermDetail.shortTermTitle')}
             <Tooltip title={t('shortTermDetail.shortTermSubTitle')}>
-              <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/userMemory/question.svg')]"></div>
+              <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/question.svg')]"></div>
             </Tooltip>
           </Space>)}
           headerType="borderless"
@@ -194,7 +194,7 @@ const ShortTermDetail: FC = () => {
           title={() => (<Space size={4}>
             {t('shortTermDetail.longTermTitle')}
             <Tooltip title={t('shortTermDetail.longTermTitleSubTitle')}>
-              <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/userMemory/question.svg')]"></div>
+              <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/question.svg')]"></div>
             </Tooltip>
           </Space>)}
           headerType="borderless"

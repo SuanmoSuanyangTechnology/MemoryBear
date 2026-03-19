@@ -248,7 +248,7 @@ const CaseList: FC<CaseListProps> = ({
                                   <Form.Item name={[caseField.name, 'logical_operator']} noStyle >
                                     <Space size={2} className="rb:cursor-pointer rb:text-[#155EEF] rb:leading-4.5 rb:font-medium rb-border rb:py-px! rb:px-1! rb:rounded-sm" onClick={() => handleChangeLogicalOperator(caseIndex)}>
                                       {logicalOperator}
-                                      <div className="rb:size-3 rb:bg-cover rb:bg-[url('src/assets/images/workflow/refresh_active.svg')]"></div>
+                                      <div className="rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/workflow/refresh_active.svg')]"></div>
                                     </Space>
                                   </Form.Item>
                                 </div>

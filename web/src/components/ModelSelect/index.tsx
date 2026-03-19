@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-07 16:49:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-07 17:14:57
+ * @Last Modified time: 2026-03-18 10:12:23
  */
 import { useEffect, useState, type FC } from 'react';
 import { Select, Flex, Space } from 'antd';
@@ -19,11 +19,13 @@ interface ModelSelectProps extends SelectProps {
   /** Extra query params passed to getModelList */
   params?: Query;
   placeholder?: string;
+  fontClassName?: string;
 }
 
 const ModelSelect: FC<ModelSelectProps> = ({
   params,
   placeholder,
+  fontClassName,
   ...props
 }) => {
   const { t } = useTranslation();
@@ -48,7 +50,7 @@ const ModelSelect: FC<ModelSelectProps> = ({
     return (
       <Flex align="center" gap={8}>
         {logo && <img src={logo} className="rb:size-5 rb:rounded-md" alt="" />}
-        <div className="rb:flex-1 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{item.name}</div>
+        <div className={`rb:flex-1 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap ${fontClassName}`}>{item.name}</div>
       </Flex>
     );
   };

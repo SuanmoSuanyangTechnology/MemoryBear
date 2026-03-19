@@ -27,7 +27,7 @@ const NodeTools: FC<{ node: Node }> = ({
       <Dropdown
         menu={{
           items: [
-            { key: 'delete', icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/common/delete_dark.svg')]"></div>, label: <Flex>{t('common.delete')}</Flex>},
+            { key: 'delete', icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/delete_dark.svg')]"></div>, label: <Flex>{t('common.delete')}</Flex>},
             // { key: 'copy', icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"></div>, label: t('common.copy') }
           ],
           onClick: handleClick
