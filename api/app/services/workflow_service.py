@@ -636,30 +636,33 @@ class WorkflowService:
                 final_messages = result.get("messages", [])[init_message_length:]
                 human_message = ""
                 assistant_message = ""
+                human_meta = {
+                    "files": []
+                }
                 for message in final_messages:
                     if message["role"] == "user":
                         if isinstance(message["content"], str):
                             human_message += message["content"]
                         elif isinstance(message["content"], list):
                             for file in message["content"]:
-                                if file.get("type") == FileType.IMAGE:
-                                    human_message += f"![image]({file.get('url', '')})"
-                                else:
-                                    human_message += f"[{file.get('type')}]({file.get('url', '')})"
+                                human_meta["files"].append({
+                                    "type": file.get("type"),
+                                    "url": file.get("url")
+                                })
                     if message["role"] == "assistant":
                         assistant_message = message["content"]
                 self.conversation_service.add_message(
                     conversation_id=conversation_id_uuid,
                     role="user",
                     content=human_message,
-                    meta_data=None
+                    meta_data=human_meta
                 )
                 self.conversation_service.add_message(
                     message_id=message_id,
                     conversation_id=conversation_id_uuid,
                     role="assistant",
                     content=assistant_message,
-                    meta_data={"usage": token_usage}
+                    meta_data={"usage": token_usage, "audio_url": None}
                 )
                 self.update_execution_status(
                     execution.execution_id,
