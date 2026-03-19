@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:30:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 12:06:27
+ * @Last Modified time: 2026-03-19 20:02:35
  */
 import { useEffect, useState } from 'react';
 import { Popover } from 'antd';
@@ -226,10 +226,6 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
         const sourceNodeData = sourceNode?.getData();
         const isChildOfLoop = sourceNodeData?.cycle && graph?.getNodes().find((n: any) => n.getData()?.id === sourceNodeData.cycle && n.getData()?.type === 'loop');
         const isChildOfIteration = sourceNodeData?.cycle && graph?.getNodes().find((n: any) => n.getData()?.id === sourceNodeData.cycle && n.getData()?.type === 'iteration');
-        
-        const sourcePortInfo = sourceNode?.getPorts().find((p: any) => p.id === sourcePort);
-        const sourcePortGroup = sourcePortInfo?.group || sourcePort;
-        const isLeftPort = sourcePortGroup === 'left';
 
         let filteredNodes;
         if (isChildOfLoop) {
@@ -243,10 +239,6 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
           filteredNodes = category.nodes.filter(nodeType =>
             nodeType.type !== 'start' && nodeType.type !== 'cycle-start' && nodeType.type !== 'break'
           );
-        }
-
-        if (isLeftPort) {
-          filteredNodes = filteredNodes.filter(nodeType => nodeType.type !== 'end');
         }
         
         if (filteredNodes.length === 0) return null;

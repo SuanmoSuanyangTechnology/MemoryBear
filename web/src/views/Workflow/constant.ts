@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 09:59:56
+ * @Last Modified time: 2026-03-19 20:00:42
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -820,15 +820,6 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     ports: {
       groups: {right: { position: 'right', markup: portMarkup, attrs: portAttrs }},
       items: [{ group: 'right' }],
-    },
-  },
-  end: {
-    width: nodeWidth,
-    height: 64,
-    shape: 'normal-node',
-    ports: {
-      groups: {left: { position: 'left', markup: portMarkup, attrs: portAttrs }},
-      items: [{ group: 'left' }],
     },
   },
   'cycle-start': {
