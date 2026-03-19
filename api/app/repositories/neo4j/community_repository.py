@@ -19,6 +19,8 @@ from app.repositories.neo4j.cypher_queries import (
     CHECK_USER_HAS_COMMUNITIES,
     UPDATE_COMMUNITY_MEMBER_COUNT,
     UPDATE_COMMUNITY_METADATA,
+    GET_INCOMPLETE_COMMUNITIES,
+    GET_INCOMPLETE_COMMUNITIES_WITH_EMBEDDING,
 )
 
 logger = logging.getLogger(__name__)
@@ -170,6 +172,21 @@ class CommunityRepository:
             logger.error(f"refresh_member_count failed: {e}")
             return 0
 
+    async def get_incomplete_communities(self, end_user_id: str, check_embedding: bool = False) -> List[str]:
+        """查询该用户下属性不完整的 Community 节点 ID 列表。
+
+        Args:
+            end_user_id: 用户 ID
+            check_embedding: 为 True 时额外检查 summary_embedding 是否缺失（仅当用户有 embedding 模型配置时传 True）
+        """
+        try:
+            query = GET_INCOMPLETE_COMMUNITIES_WITH_EMBEDDING if check_embedding else GET_INCOMPLETE_COMMUNITIES
+            result = await self.connector.execute_query(query, end_user_id=end_user_id)
+            return [row["community_id"] for row in result]
+        except Exception as e:
+            logger.error(f"get_incomplete_communities failed: {e}")
+            return []
+
     async def update_community_metadata(
         self,
         community_id: str,
@@ -177,8 +194,9 @@ class CommunityRepository:
         name: str,
         summary: str,
         core_entities: List[str],
+        summary_embedding: Optional[List[float]] = None,
     ) -> bool:
-        """更新社区的名称、摘要和核心实体列表。"""
+        """更新社区的名称、摘要、核心实体列表及 summary_embedding。"""
         try:
             result = await self.connector.execute_query(
                 UPDATE_COMMUNITY_METADATA,
@@ -187,6 +205,7 @@ class CommunityRepository:
                 name=name,
                 summary=summary,
                 core_entities=core_entities,
+                summary_embedding=summary_embedding,
             )
             return bool(result)
         except Exception as e:
