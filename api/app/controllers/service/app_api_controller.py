@@ -280,6 +280,7 @@ async def chat(
             memory=memory,
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
+            files=payload.files,
             app_id=app.id,
             workspace_id=workspace_id,
             release_id=app.current_release.id
