@@ -23,6 +23,17 @@ from app.core.workflow.utils.expression_evaluator import evaluate_condition
 
 logger = logging.getLogger(__name__)
 
+# Regex to split output into:
+#    - variable placeholders: {{ ... }}
+#    - normal literal text
+#
+# Example:
+#   "Hello {{user.name}}!" ->
+#   ["Hello ", "{{user.name}}", "!"]
+_OUTPUT_PATTERN = re.compile(r'\{\{.*?}}|[^{}]+')
+# Strict variable format: {{ node_id.field_name }}
+_VARIABLE_PATTERN = re.compile(r'\{\{\s*[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+\s*}}')
+
 
 class GraphBuilder:
     def __init__(
@@ -41,17 +52,20 @@ class GraphBuilder:
         self.end_node_ids = []
         self.node_map = {node["id"]: node for node in self.nodes}
         self.end_node_map: dict[str, StreamOutputConfig] = {}
-        self._find_upstream_branch_node = lru_cache(
+        self._find_upstream_activation_dep = lru_cache(
             maxsize=len(self.nodes) * 2
-        )(self._find_upstream_branch_node)
+        )(self._find_upstream_activation_dep)
         if variable_pool:
             self.variable_pool = variable_pool
         else:
             self.variable_pool = VariablePool()
+        self._reverse_adj: dict[str, list[dict]] = defaultdict(list)
 
         self.graph = StateGraph(WorkflowState)
         self.add_nodes()
         self.add_edges()
+        self._reverse_adj: dict[str, list[dict]] = defaultdict(list)
+        self._build_reverse_adj()
         self._analyze_end_node_output()
         # EDGES MUST BE ADDED AFTER NODES ARE ADDED.
 
@@ -87,60 +101,48 @@ class GraphBuilder:
             result[node[0]].append(node[1])
         return result
 
-    def _find_upstream_branch_node(self, target_node: str) -> tuple[bool, tuple[tuple[str, str]]]:
-        """
-        Recursively find all upstream branch (control) nodes that influence the execution
-        of the given target node.
+    def _build_reverse_adj(self):
+        for edge in self.edges:
+            self._reverse_adj[edge.get("target")].append({
+                "id": edge["source"], "branch": edge.get("label")
+            })
 
-        This method walks upstream along the workflow graph starting from `target_node`.
-        It distinguishes between:
-          - branch nodes (node types listed in `BRANCH_NODES`)
-          - non-branch nodes (ordinary processing nodes)
+    def _find_upstream_activation_dep(
+            self,
+            target_node: str
+    ) -> tuple[tuple[tuple[str, str]], tuple[str]]:
+        """Find upstream dependencies that affect the activation of a target node.
 
-        Traversal rules:
-        1. For each immediate upstream node:
-           - If it is a branch node, it is recorded as an affecting control node.
-           - If it is a non-branch node, the traversal continues recursively upstream.
-        2. If ANY upstream path reaches a START / CYCLE_START node without encountering
-           a branch node, the traversal is considered invalid:
-           - `has_branch` will be False
-           - no branch nodes are returned.
-        3. Only when ALL upstream non-branch paths eventually lead to at least one
-           branch node will `has_branch` be True.
+        Walks upstream along the workflow graph from the target node, collecting
+        two types of dependencies:
+            - Branch control nodes: upstream branch nodes (e.g. if-else) whose
+              routing outcome determines whether the target node executes.
+            - Output nodes: upstream END nodes that must complete their output
+              before the target node can activate.
 
-        Special case:
-        - If `target_node` has no upstream nodes AND its type is START or CYCLE_START,
-          it is considered directly reachable from the workflow entry, and therefore
-          has no controlling branch nodes.
+        The traversal terminates early and returns empty tuples if any upstream
+        path reaches START/CYCLE_START without encountering a branch or output
+        node, indicating the target node is directly reachable and should be
+        activated immediately.
 
         Args:
-            target_node (str):
-                The identifier of the node whose upstream control branches
-                are to be resolved.
+            target_node: The ID of the node whose upstream activation
+                dependencies are to be resolved.
 
         Returns:
-            tuple[bool, tuple[tuple[str, str]]]:
-                - has_branch (bool):
-                    True if every upstream path from `target_node` encounters
-                    at least one branch node.
-                    False if any path reaches a start node without a branch.
-                - branch_nodes (tuple[tuple[str, str]]):
-                    A deduplicated tuple of `(branch_node_id, branch_label)` pairs
-                    representing all branch nodes that can influence `target_node`.
-                    Returns an empty tuple if `has_branch` is False.
+            A tuple of two elements:
+                - A deduplicated tuple of (branch_node_id, branch_label) pairs
+                  representing upstream branch control dependencies. Empty if
+                  any clean path to START exists.
+                - A deduplicated tuple of upstream output node IDs that must
+                  complete before this node activates.
         """
-        source_nodes = [
-            {
-                "id": edge.get("source"),
-                "branch": edge.get("label")
-            }
-            for edge in self.edges
-            if edge.get("target") == target_node
-        ]
-        if not source_nodes and self.get_node_type(target_node) in [NodeType.START, NodeType.CYCLE_START]:
-            return False, tuple()
+        source_nodes = self._reverse_adj[target_node]
+        if not source_nodes or self.get_node_type(target_node) in [NodeType.START, NodeType.CYCLE_START]:
+            return tuple(), tuple()
 
         branch_nodes = []
+        output_nodes = []
         non_branch_nodes = []
 
         for node_info in source_nodes:
@@ -149,19 +151,23 @@ class GraphBuilder:
                     (node_info["id"], node_info["branch"])
                 )
             else:
+                if self.get_node_type(node_info["id"]) == NodeType.END:
+                    output_nodes.append(node_info["id"])
                 non_branch_nodes.append(node_info["id"])
 
         has_branch = True
         for node_id in non_branch_nodes:
-            node_has_branch, nodes = self._find_upstream_branch_node(node_id)
-            has_branch = has_branch and node_has_branch
-            if not has_branch:
-                break
-            branch_nodes.extend(nodes)
-        if not has_branch:
-            branch_nodes = []
+            upstream_control_nodes, upstream_output_nodes = self._find_upstream_activation_dep(node_id)
+            if not upstream_control_nodes:
+                if not upstream_output_nodes and node_id not in output_nodes:
+                    return tuple(), tuple()
+                branch_nodes = []
+                has_branch = False
+            if has_branch:
+                branch_nodes.extend(upstream_control_nodes)
+            output_nodes.extend(upstream_output_nodes)
 
-        return has_branch, tuple(set(branch_nodes))
+        return tuple(set(branch_nodes)), tuple(set(output_nodes))
 
     def _analyze_end_node_output(self):
         """
@@ -195,42 +201,33 @@ class GraphBuilder:
             if not output:
                 continue
 
-            # Regex to split output into:
-            #    - variable placeholders: {{ ... }}
-            #    - normal literal text
-            #
-            # Example:
-            #   "Hello {{user.name}}!" ->
-            #   ["Hello ", "{{user.name}}", "!"]
-            pattern = r'\{\{.*?\}\}|[^{}]+'
-
-            # Strict variable format: {{ node_id.field_name }}
-            variable_pattern_string = r'\{\{\s*[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+\s*\}\}'
-            variable_pattern = re.compile(variable_pattern_string)
-
             # Split output into ordered segments
-            output_template = list(re.findall(pattern, output))
+            output_template = list(_OUTPUT_PATTERN.findall(output))
 
             # Determine whether each segment is literal text
             #    True  -> literal (can be directly output)
             #    False -> variable placeholder (needs runtime value)
             output_flag = [
-                not bool(variable_pattern.match(item))
+                not bool(_VARIABLE_PATTERN.match(item))
                 for item in output_template
             ]
 
             # Stream mode: output activation depends on upstream branch nodes
             if self.stream:
                 # Find upstream branch nodes that can control this End node
-                has_branch, control_nodes = self._find_upstream_branch_node(end_node_id)
-
+                upstream_control_nodes, upstream_output_nodes = self._find_upstream_activation_dep(end_node_id)
+                activate = not bool(upstream_control_nodes) and not bool(upstream_output_nodes)
                 # Build StreamOutputConfig for this End node
                 self.end_node_map[end_node_id] = StreamOutputConfig(
+                    id=end_node_id,
                     # If there is no upstream branch, output is active immediately
-                    activate=not has_branch,
+                    activate=activate,
 
                     # Branch nodes that control activation of this End node
-                    control_nodes=self._merge_control_nodes(control_nodes),
+                    control_nodes=self._merge_control_nodes(upstream_control_nodes),
+                    upstream_output_nodes=list(upstream_output_nodes),
+                    control_resolved=not bool(upstream_control_nodes),
+                    output_resolved=not bool(upstream_output_nodes),
 
                     # Convert output segments into OutputContent objects
                     outputs=list(
@@ -249,14 +246,16 @@ class GraphBuilder:
                     cursor=0
                 )
                 logger.info(f"[Stream Analysis] end_id: {end_node_id}, "
-                            f"activate: {not has_branch}, "
-                            f"control_nodes: {control_nodes},"
+                            f"activate: {activate}, "
+                            f"control_nodes: {upstream_control_nodes},"
+                            f"ref_outputs: {upstream_output_nodes},"
                             f"output: {output_template},"
                             f"output_activate: {output_flag}")
 
             # Non-stream mode: all outputs are activated by default
             else:
                 self.end_node_map[end_node_id] = StreamOutputConfig(
+                    id=end_node_id,
                     activate=True,
                     control_nodes={},
                     outputs=list(
@@ -269,7 +268,10 @@ class GraphBuilder:
                             for output_string, activate in zip(output_template, output_flag)
                         ]
                     ),
-                    cursor=0
+                    cursor=0,
+                    upstream_output_nodes=[],
+                    control_resolved=True,
+                    output_resolved=True,
                 )
 
     def add_nodes(self):
