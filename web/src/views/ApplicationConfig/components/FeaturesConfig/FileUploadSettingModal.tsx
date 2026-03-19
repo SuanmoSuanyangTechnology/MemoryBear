@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 09:59:42
+ * @Last Modified time: 2026-03-19 14:31:20
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, InputNumber, Flex, Switch, Row, Col, Radio } from 'antd';
@@ -58,7 +58,7 @@ const defaultValues: FileUpload = {
   document_max_size_mb: 100,
   document_allowed_extensions: ['pdf', 'docx', 'xlsx', 'txt', 'csv', 'json'],
   video_enabled: false,
-  video_max_size_mb: 500,
+  video_max_size_mb: 100,
   video_allowed_extensions: ['mp4', 'mov', 'avi', 'webm'],
   max_file_count: 5,
   allowed_transfer_methods: 'both'
@@ -161,7 +161,7 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
                     <Flex align="center" gap={12} className="rb:mt-3! rb:pt-3! rb:border-t rb:border-[#DFE4ED]">
                       <div>{t('application.singleMaxSize')}: </div>
                       <Form.Item name={sizeKey} noStyle>
-                        <InputNumber min={1} max={500} suffix="MB" className="rb:flex-1" />
+                        <InputNumber min={1} max={100} suffix="MB" className="rb:flex-1" />
                       </Form.Item>
                       <Form.Item name={`${option.type}_allowed_extensions`} hidden />
                     </Flex>
