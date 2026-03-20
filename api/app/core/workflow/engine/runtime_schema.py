@@ -12,14 +12,26 @@ class ExecutionContext(BaseModel):
     execution_id: str
     workspace_id: str
     user_id: str
+    memory_storage_type: str
+    user_rag_memory_id: str
     checkpoint_config: RunnableConfig
 
     @classmethod
-    def create(cls, execution_id: str, workspace_id: str, user_id: str):
+    def create(
+            cls,
+            execution_id: str,
+            workspace_id: str,
+            user_id: str,
+            memory_storage_type: str,
+            user_rag_memory_id: str
+    ):
         return cls(
             execution_id=execution_id,
             workspace_id=workspace_id,
             user_id=user_id,
+            memory_storage_type=memory_storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+
             checkpoint_config=RunnableConfig(
                 configurable={
                     "thread_id": uuid.uuid4(),
