@@ -16,6 +16,7 @@ from app.core.workflow.variable.base_variable import VariableType, FileObject
 from app.db import get_db_read
 from app.models import ModelConfig, ModelApiKey, LoadBalanceStrategy
 from app.schemas import FileInput
+from app.schemas.model_schema import ModelInfo
 from app.services.multimodal_service import MultimodalService
 
 logger = logging.getLogger(__name__)
@@ -620,11 +621,12 @@ class BaseNode(ABC):
 
     @staticmethod
     async def process_message(
-            provider: str,
-            is_omni: bool,
+            api_config: ModelInfo,
             content: str | dict | FileObject,
+            end_user_id: str,
             enable_file=False
     ) -> list | str | None:
+        provider = api_config.provider
         if isinstance(content, dict):
             content = FileObject(
                 type=content.get("type"),
@@ -643,7 +645,7 @@ class BaseNode(ABC):
             if content.content_cache.get(provider):
                 return content.content_cache[provider]
             with get_db_read() as db:
-                multimodel_service = MultimodalService(db, provider, is_omni=is_omni)
+                multimodel_service = MultimodalService(db, api_config=api_config)
                 file_obj = FileInput(
                     type=content.type,
                     url=content.url,
@@ -653,7 +655,8 @@ class BaseNode(ABC):
                 )
                 file_obj.set_content(content.get_content())
                 message = await multimodel_service.process_files(
-                    [file_obj]
+                    end_user_id,
+                    [file_obj],
                 )
                 content.set_content(file_obj.get_content())
                 if message:

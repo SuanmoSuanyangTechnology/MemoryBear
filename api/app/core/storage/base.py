@@ -7,7 +7,7 @@ file operations across different storage backends.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 
 class StorageBackend(ABC):
@@ -39,6 +39,26 @@ class StorageBackend(ABC):
 
         Raises:
             StorageUploadError: If the upload operation fails.
+        """
+        pass
+
+    @abstractmethod
+    async def upload_stream(
+        self,
+        file_key: str,
+        stream: AsyncIterator[bytes],
+        content_type: Optional[str] = None,
+    ) -> int:
+        """
+        Upload a file from an async byte stream.
+
+        Args:
+            file_key: Unique identifier for the file.
+            stream: Async iterator yielding bytes chunks.
+            content_type: Optional MIME type of the file.
+
+        Returns:
+            Total bytes written.
         """
         pass
 
@@ -101,3 +121,18 @@ class StorageBackend(ABC):
             URL for accessing the file.
         """
         pass
+
+    async def get_permanent_url(self, file_key: str) -> Optional[str]:
+        """
+        Get a permanent public URL for the file (no expiration).
+
+        Returns None by default; remote storage backends should override this
+        if the bucket is configured for public read access.
+
+        Args:
+            file_key: Unique identifier for the file in the storage system.
+
+        Returns:
+            A permanent public URL, or None if not supported.
+        """
+        return None

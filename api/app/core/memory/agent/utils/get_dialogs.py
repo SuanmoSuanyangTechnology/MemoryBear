@@ -84,7 +84,7 @@ async def get_chunked_dialogs(
                             pruning_scene=memory_config.pruning_scene or "education",
                             pruning_threshold=memory_config.pruning_threshold,
                             scene_id=str(memory_config.scene_id) if memory_config.scene_id else None,
-                            ontology_classes=memory_config.ontology_classes,
+                            ontology_class_infos=memory_config.ontology_class_infos,
                         )
                         logger.info(f"[剪枝] 加载配置: switch={pruning_config.pruning_switch}, scene={pruning_config.pruning_scene}, threshold={pruning_config.pruning_threshold}")
                         

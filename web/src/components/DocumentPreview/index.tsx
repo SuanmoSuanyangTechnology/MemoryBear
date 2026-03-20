@@ -1,10 +1,29 @@
-import { useState, useEffect, type FC } from 'react';
-import { Spin, Alert, Button, Table } from 'antd';
-import { ReloadOutlined, DownloadOutlined } from '@ant-design/icons';
+/*
+ * @Description: 
+ * @Version: 0.0.1
+ * @Author: yujiangping
+ * @Date: 2026-03-16 19:01:12
+ * @LastEditors: yujiangping
+ * @LastEditTime: 2026-03-20 12:12:20
+ */
+import { useState, useEffect, useRef, useCallback, type FC } from 'react';
+import { Spin, Alert, Button, Table, InputNumber, Image } from 'antd';
+import {
+  ReloadOutlined,
+  DownloadOutlined,
+  LeftOutlined,
+  RightOutlined,
+  ZoomInOutlined,
+  ZoomOutOutlined,
+} from '@ant-design/icons';
 import RbMarkdown from '../Markdown';
 import { cookieUtils } from '@/utils/request';
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
+import * as pdfjsLib from 'pdfjs-dist';
+
+// 设置 pdf.js worker - 使用 CDN 避免 Vite 打包动态 import 问题
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
 
 interface DocumentPreviewProps {
   fileUrl: string;
@@ -30,11 +49,30 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
   const [htmlContent, setHtmlContent] = useState<string>('');
   const [excelData, setExcelData] = useState<{ sheetName: string; data: any[][] }[]>([]);
 
+  // PDF 状态
+  const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
+  const [pdfCurrentPage, setPdfCurrentPage] = useState(1);
+  const [pdfTotalPages, setPdfTotalPages] = useState(0);
+  const [pdfScale, setPdfScale] = useState(1.5);
+  const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
+  const pdfRenderingRef = useRef(false);
+
+  // PPT 状态
+  const [pptSlides, setPptSlides] = useState<string[]>([]);
+  const [pptCurrentPage, setPptCurrentPage] = useState(1);
+  const [pptTotalPages, setPptTotalPages] = useState(0);
+
+  // 图片状态
+  const [imageBlobUrl, setImageBlobUrl] = useState<string>('');
+
   // 支持预览的文件类型
-  const previewableTypes = ['.pdf', '.txt', '.md', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.doc', '.docx', '.xls', '.xlsx'];
-  // PPT 暂不支持
-  const downloadOnlyTypes = ['.ppt', '.pptx'];
-  
+  const previewableTypes = [
+    '.pdf', '.txt', '.md', '.csv',
+    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp',
+    '.doc', '.docx', '.xls', '.xlsx',
+    '.ppt', '.pptx',
+  ];
+
   const getFileExtension = () => {
     if (fileExt) {
       return fileExt.toLowerCase().startsWith('.') ? fileExt.toLowerCase() : `.${fileExt.toLowerCase()}`;
@@ -43,7 +81,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
     const match = name.match(/\.([^.]+)$/);
     return match ? `.${match[1].toLowerCase()}` : '';
   };
-  
+
   const isTextFile = () => getFileExtension() === '.txt';
   const isMarkdownFile = () => getFileExtension() === '.md';
   const isImageFile = () => {
@@ -52,9 +90,31 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
   };
   const isPdfFile = () => getFileExtension() === '.pdf';
   const isWordFile = () => ['.doc', '.docx'].includes(getFileExtension());
-  const isExcelFile = () => ['.xls', '.xlsx'].includes(getFileExtension());
+  const isExcelFile = () => ['.xls', '.xlsx', '.csv'].includes(getFileExtension());
+  const isPptFile = () => ['.ppt', '.pptx'].includes(getFileExtension());
   const isPreviewable = () => previewableTypes.includes(getFileExtension());
-  const isDownloadOnly = () => downloadOnlyTypes.includes(getFileExtension());
+
+  const getRequestUrl = (url: string) => {
+    if (url.includes('devapi.mem.redbearai.com')) {
+      const parsed = new URL(url);
+      return parsed.pathname;
+    }
+    return url;
+  };
+
+  const fetchFileBuffer = async (url: string): Promise<ArrayBuffer> => {
+    const requestUrl = getRequestUrl(url);
+    const response = await fetch(requestUrl, {
+      credentials: 'include',
+      headers: {
+        'Authorization': `Bearer ${cookieUtils.get('authToken') || ''}`,
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    return response.arrayBuffer();
+  };
 
   const handleDownload = () => {
     const link = document.createElement('a');
@@ -65,73 +125,154 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
     document.body.removeChild(link);
   };
 
-  const handleLoad = () => {
-    setLoading(false);
-    setError(false);
-  };
-
   const handleError = (msg?: string) => {
     setLoading(false);
     setError(true);
     if (msg) setErrorMessage(msg);
   };
 
-  const handleRetry = () => {
+  // ========== PDF 渲染逻辑 ==========
+  const renderPdfPage = useCallback(async (doc: pdfjsLib.PDFDocumentProxy, pageNum: number, scale: number) => {
+    if (pdfRenderingRef.current || !pdfCanvasRef.current) return;
+    pdfRenderingRef.current = true;
+    try {
+      const page = await doc.getPage(pageNum);
+      const viewport = page.getViewport({ scale });
+      const canvas = pdfCanvasRef.current;
+      const context = canvas.getContext('2d');
+      if (!context) return;
+
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = viewport.width * dpr;
+      canvas.height = viewport.height * dpr;
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
+      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      await page.render({ canvasContext: context, viewport }).promise;
+    } finally {
+      pdfRenderingRef.current = false;
+    }
+  }, []);
+
+  const loadPdfFile = useCallback(async () => {
     setLoading(true);
     setError(false);
     setErrorMessage('');
-    
-    if (isTextFile() || isMarkdownFile()) {
-      loadTextFile();
-    } else if (isWordFile()) {
-      loadWordFile();
-    } else if (isExcelFile()) {
-      loadExcelFile();
-    } else {
-      const iframe = document.querySelector(`iframe[title="${fileName || '文档预览'}"]`) as HTMLIFrameElement;
-      if (iframe) {
-        iframe.src = iframe.src;
-      }
+    try {
+      const arrayBuffer = await fetchFileBuffer(fileUrl);
+      const doc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      setPdfDoc(doc);
+      setPdfTotalPages(doc.numPages);
+      setPdfCurrentPage(1);
+      await renderPdfPage(doc, 1, pdfScale);
+      setLoading(false);
+    } catch (err: any) {
+      console.error('加载 PDF 文件失败:', err);
+      handleError(err.message || '加载 PDF 文件失败');
+    }
+  }, [fileUrl, pdfScale, renderPdfPage]);
+
+  const handlePdfPageChange = async (page: number) => {
+    if (!pdfDoc || page < 1 || page > pdfTotalPages) return;
+    setPdfCurrentPage(page);
+    await renderPdfPage(pdfDoc, page, pdfScale);
+  };
+
+  const handlePdfZoom = async (delta: number) => {
+    const newScale = Math.max(0.5, Math.min(3, pdfScale + delta));
+    setPdfScale(newScale);
+    if (pdfDoc) {
+      await renderPdfPage(pdfDoc, pdfCurrentPage, newScale);
     }
   };
 
+  // ========== PPT/PPTX 预览逻辑（转 PDF 后用 pdfjs 渲染每页为图片） ==========
+  const loadPptFile = useCallback(async () => {
+    setLoading(true);
+    setError(false);
+    setErrorMessage('');
+    try {
+      const arrayBuffer = await fetchFileBuffer(fileUrl);
+      // 尝试用 pdfjs 直接加载（某些服务端会返回转换后的 PDF）
+      // 如果失败，则使用 Office Online Viewer 作为 fallback
+      try {
+        const doc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        // 成功解析为 PDF，逐页渲染为图片
+        const slides: string[] = [];
+        for (let i = 1; i <= doc.numPages; i++) {
+          const page = await doc.getPage(i);
+          const viewport = page.getViewport({ scale: 2 });
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d');
+          if (!context) continue;
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          await page.render({ canvasContext: context, viewport }).promise;
+          slides.push(canvas.toDataURL('image/png'));
+        }
+        setPptSlides(slides);
+        setPptTotalPages(slides.length);
+        setPptCurrentPage(1);
+        setLoading(false);
+      } catch {
+        // 不是 PDF 格式，使用 Office Online Viewer
+        setPptSlides([]);
+        setPptTotalPages(0);
+        setLoading(false);
+      }
+    } catch (err: any) {
+      console.error('加载 PPT 文件失败:', err);
+      handleError(err.message || '加载 PPT 文件失败');
+    }
+  }, [fileUrl]);
+
+  // ========== 图片加载逻辑 ==========
+  const loadImageFile = async () => {
+    setLoading(true);
+    setError(false);
+    setErrorMessage('');
+    try {
+      const arrayBuffer = await fetchFileBuffer(fileUrl);
+      const ext = getFileExtension().replace('.', '');
+      const mimeMap: Record<string, string> = {
+        jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+        gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp', svg: 'image/svg+xml',
+      };
+      const blob = new Blob([arrayBuffer], { type: mimeMap[ext] || 'image/png' });
+      const url = URL.createObjectURL(blob);
+      setImageBlobUrl(url);
+      setLoading(false);
+    } catch (err: any) {
+      console.error('加载图片文件失败:', err);
+      handleError(err.message || '图片加载失败');
+    }
+  };
+
+  // ========== 文本/Word/Excel 加载逻辑 ==========
   const loadTextFile = async () => {
     setLoading(true);
     setError(false);
     setErrorMessage('');
     try {
-      let requestUrl = fileUrl;
-      
-      if (fileUrl.includes('devapi.mem.redbearai.com')) {
-        const url = new URL(fileUrl);
-        requestUrl = url.pathname;
-      }
-      
+      const requestUrl = getRequestUrl(fileUrl);
       const response = await fetch(requestUrl, {
         credentials: 'include',
         headers: {
           'Authorization': `Bearer ${cookieUtils.get('authToken') || ''}`,
         },
       });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       const contentType = response.headers.get('Content-Type') || '';
-      
       if (contentType.startsWith('image/')) {
         handleError('文件实际是图片类型，但被标记为文本文件');
         return;
       }
-      
       const text = await response.text();
-      
       if (text.startsWith('\x89PNG') || text.startsWith('�PNG')) {
         handleError('文件内容是图片，但扩展名是文本');
         return;
       }
-      
       setTextContent(text);
       setLoading(false);
     } catch (err: any) {
@@ -145,25 +286,20 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
     setError(false);
     setErrorMessage('');
     try {
-      let requestUrl = fileUrl;
-      
-      if (fileUrl.includes('devapi.mem.redbearai.com')) {
-        const url = new URL(fileUrl);
-        requestUrl = url.pathname;
+      // .doc 旧格式 mammoth 不支持，使用 Office Online Viewer
+      if (getFileExtension() === '.doc') {
+        setHtmlContent('');
+        setLoading(false);
+        return;
       }
-      
-      const response = await fetch(requestUrl, {
-        credentials: 'include',
-        headers: {
-          'Authorization': `Bearer ${cookieUtils.get('authToken') || ''}`,
-        },
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const arrayBuffer = await fetchFileBuffer(fileUrl);
+      // 校验是否为有效的 docx（ZIP 格式，前两字节为 PK）
+      const header = new Uint8Array(arrayBuffer.slice(0, 4));
+      if (header[0] !== 0x50 || header[1] !== 0x4B) {
+        // 不是 ZIP/docx 格式，可能是 HTML 错误页或 JSON 响应
+        const text = new TextDecoder().decode(arrayBuffer.slice(0, 200));
+        throw new Error(`文件内容不是有效的 docx 格式: ${text.substring(0, 100)}`);
       }
-      
-      const arrayBuffer = await response.arrayBuffer();
       const result = await mammoth.convertToHtml({ arrayBuffer });
       setHtmlContent(result.value);
       setLoading(false);
@@ -173,38 +309,105 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
     }
   };
 
+  const [csvTruncated, setCsvTruncated] = useState(false);
+
+  const isCsvFile = () => getFileExtension() === '.csv';
+
+  // CSV 预览大小限制：1MB
+  const CSV_PREVIEW_SIZE = 1 * 1024 * 1024;
+  // 最大预览行数
+  const MAX_PREVIEW_ROWS = 500;
+
+  const fetchFileBufferWithLimit = async (url: string, maxBytes?: number): Promise<ArrayBuffer> => {
+    const requestUrl = getRequestUrl(url);
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${cookieUtils.get('authToken') || ''}`,
+    };
+    if (maxBytes) {
+      headers['Range'] = `bytes=0-${maxBytes - 1}`;
+    }
+    const response = await fetch(requestUrl, {
+      credentials: 'include',
+      headers,
+    });
+    if (!response.ok && response.status !== 206) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    return response.arrayBuffer();
+  };
+
   const loadExcelFile = async () => {
     setLoading(true);
     setError(false);
     setErrorMessage('');
+    setCsvTruncated(false);
     try {
-      let requestUrl = fileUrl;
-      
-      if (fileUrl.includes('devapi.mem.redbearai.com')) {
-        const url = new URL(fileUrl);
-        requestUrl = url.pathname;
+      // CSV 文件需要处理编码问题（可能是 GBK/GB2312），且大文件只取前 1MB
+      if (isCsvFile()) {
+        let arrayBuffer: ArrayBuffer;
+        let truncated = false;
+        try {
+          // 先尝试 Range 请求只取前 1MB
+          arrayBuffer = await fetchFileBufferWithLimit(fileUrl, CSV_PREVIEW_SIZE);
+          // 如果返回的数据刚好等于限制大小，说明可能被截断了
+          if (arrayBuffer.byteLength >= CSV_PREVIEW_SIZE) {
+            truncated = true;
+          }
+        } catch {
+          // Range 请求不支持时，全量获取后截断
+          const fullBuffer = await fetchFileBuffer(fileUrl);
+          if (fullBuffer.byteLength > CSV_PREVIEW_SIZE) {
+            arrayBuffer = fullBuffer.slice(0, CSV_PREVIEW_SIZE);
+            truncated = true;
+          } else {
+            arrayBuffer = fullBuffer;
+          }
+        }
+
+        let csvText: string;
+        const utf8Text = new TextDecoder('utf-8').decode(arrayBuffer);
+        if (utf8Text.includes('\uFFFD') || /[\x80-\xff]/.test(utf8Text.slice(0, 200))) {
+          try {
+            csvText = new TextDecoder('gbk').decode(arrayBuffer);
+          } catch {
+            csvText = utf8Text;
+          }
+        } else {
+          csvText = utf8Text;
+        }
+
+        // 如果被截断，去掉最后一行不完整的数据
+        if (truncated) {
+          const lastNewline = csvText.lastIndexOf('\n');
+          if (lastNewline > 0) {
+            csvText = csvText.substring(0, lastNewline);
+          }
+        }
+
+        const workbook = XLSX.read(csvText, { type: 'string' });
+        const sheets = workbook.SheetNames.map(sheetName => {
+          const worksheet = workbook.Sheets[sheetName];
+          let data = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+          // 限制最大行数
+          if (data.length > MAX_PREVIEW_ROWS + 1) {
+            data = data.slice(0, MAX_PREVIEW_ROWS + 1); // +1 保留表头
+            truncated = true;
+          }
+          return { sheetName, data };
+        });
+        setCsvTruncated(truncated);
+        setExcelData(sheets);
+        setLoading(false);
+        return;
       }
-      
-      const response = await fetch(requestUrl, {
-        credentials: 'include',
-        headers: {
-          'Authorization': `Bearer ${cookieUtils.get('authToken') || ''}`,
-        },
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const arrayBuffer = await response.arrayBuffer();
+
+      const arrayBuffer = await fetchFileBuffer(fileUrl);
       const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-      
-      const sheets = workbook.SheetNames.map(sheetName => {
+      const sheets = workbook.SheetNames.map((sheetName: string) => {
         const worksheet = workbook.Sheets[sheetName];
         const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
         return { sheetName, data };
       });
-      
       setExcelData(sheets);
       setLoading(false);
     } catch (err: any) {
@@ -213,40 +416,72 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
     }
   };
 
+  const handleRetry = () => {
+    setLoading(true);
+    setError(false);
+    setErrorMessage('');
+    if (isTextFile() || isMarkdownFile()) loadTextFile();
+    else if (isWordFile()) loadWordFile();
+    else if (isExcelFile()) loadExcelFile();
+    else if (isPdfFile()) loadPdfFile();
+    else if (isPptFile()) loadPptFile();
+  };
+
   useEffect(() => {
-    if (isTextFile() || isMarkdownFile()) {
-      loadTextFile();
-    } else if (isWordFile()) {
-      loadWordFile();
-    } else if (isExcelFile()) {
-      loadExcelFile();
-    }
+    if (isTextFile() || isMarkdownFile()) loadTextFile();
+    else if (isWordFile()) loadWordFile();
+    else if (isExcelFile()) loadExcelFile();
+    else if (isPdfFile()) loadPdfFile();
+    else if (isPptFile()) loadPptFile();
+    else if (isImageFile()) loadImageFile();
   }, [fileUrl]);
 
-  // PPT 文件只提供下载
-  if (isDownloadOnly()) {
-    return (
-      <div className={`rb:relative rb:flex rb:items-center rb:justify-center rb:bg-gray-50 rb:rounded rb:border rb:border-gray-200 ${className}`} style={{ width, height }}>
-        <Alert
-          message="PowerPoint 文档预览"
-          description={
-            <div className="rb:text-center">
-              <p className="rb:mb-4">PPT 文件暂不支持在线预览，请下载后查看</p>
-              <Button 
-                type="primary" 
-                icon={<DownloadOutlined />} 
-                onClick={handleDownload}
-              >
-                下载文件
-              </Button>
-            </div>
-          }
-          type="info"
-          showIcon
+  // PDF 翻页/缩放后重新渲染
+  useEffect(() => {
+    if (pdfDoc && isPdfFile()) {
+      renderPdfPage(pdfDoc, pdfCurrentPage, pdfScale);
+    }
+  }, [pdfCurrentPage, pdfScale, pdfDoc]);
+
+  // ========== 分页控制栏组件 ==========
+  const PaginationBar = ({
+    currentPage,
+    totalPages,
+    onPageChange,
+    extraControls,
+  }: {
+    currentPage: number;
+    totalPages: number;
+    onPageChange: (page: number) => void;
+    extraControls?: React.ReactNode;
+  }) => (
+    <div className="rb:flex rb:items-center rb:justify-center rb:gap-3 rb:py-2 rb:px-4 rb:bg-white rb:border-t rb:border-gray-200 rb:select-none">
+      <Button
+        size="small"
+        icon={<LeftOutlined />}
+        disabled={currentPage <= 1}
+        onClick={() => onPageChange(currentPage - 1)}
+      />
+      <span className="rb:text-sm rb:text-gray-600 rb:flex rb:items-center rb:gap-1">
+        <InputNumber
+          size="small"
+          min={1}
+          max={totalPages}
+          value={currentPage}
+          onChange={(val) => val && onPageChange(val)}
+          style={{ width: 56 }}
         />
-      </div>
-    );
-  }
+        <span>/ {totalPages}</span>
+      </span>
+      <Button
+        size="small"
+        icon={<RightOutlined />}
+        disabled={currentPage >= totalPages}
+        onClick={() => onPageChange(currentPage + 1)}
+      />
+      {extraControls}
+    </div>
+  );
 
   if (!isPreviewable()) {
     return (
@@ -260,13 +495,13 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
   }
 
   return (
-    <div className={`rb:relative ${className}`} style={{ width, height }}>
+    <div className={`rb:relative rb:flex rb:flex-col ${className}`} style={{ width, height }}>
       {loading && (
         <div className="rb:absolute rb:inset-0 rb:flex rb:items-center rb:justify-center rb:bg-gray-50 rb:z-10">
           <Spin size="large" tip="加载文档预览中..." />
         </div>
       )}
-      
+
       {error && (
         <div className="rb:absolute rb:inset-0 rb:flex rb:items-center rb:justify-center rb:bg-gray-50 rb:z-10">
           <Alert
@@ -275,9 +510,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
               <div>
                 <p className="rb:mb-2">无法加载文档预览</p>
                 {errorMessage && (
-                  <p className="rb:text-sm rb:text-red-600 rb:mb-3">
-                    错误详情：{errorMessage}
-                  </p>
+                  <p className="rb:text-sm rb:text-red-600 rb:mb-3">错误详情：{errorMessage}</p>
                 )}
                 <p className="rb:text-sm rb:text-gray-600 rb:mb-3">可能的原因：</p>
                 <ul className="rb:list-disc rb:pl-5 rb:text-sm rb:text-gray-600 rb:mb-3">
@@ -287,12 +520,8 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
                   <li>网络连接问题</li>
                 </ul>
                 <div className="rb:mt-4 rb:flex rb:gap-2">
-                  <Button icon={<ReloadOutlined />} onClick={handleRetry}>
-                    重试
-                  </Button>
-                  <Button icon={<DownloadOutlined />} onClick={handleDownload}>
-                    下载文件
-                  </Button>
+                  <Button icon={<ReloadOutlined />} onClick={handleRetry}>重试</Button>
+                  <Button icon={<DownloadOutlined />} onClick={handleDownload}>下载文件</Button>
                 </div>
               </div>
             }
@@ -301,43 +530,63 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
           />
         </div>
       )}
-      
+
+      {/* 图片预览 */}
       {isImageFile() && !error && !loading && (
-        <div className="rb:w-full rb:h-full rb:overflow-auto rb:bg-gray-50 rb:flex rb:items-center rb:justify-center">
-          <img 
-            src={fileUrl} 
-            alt={fileName || '图片预览'} 
-            className="rb:max-w-full rb:max-h-full rb:object-contain"
-            onError={() => handleError('图片加载失败')}
+        <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-gray-50 rb:flex rb:items-center rb:justify-center">
+          <Image
+            src={imageBlobUrl}
+            alt={fileName || '图片预览'}
+            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+            onError={() => handleError('图片渲染失败')}
           />
         </div>
       )}
 
+      {/* Markdown 预览 */}
       {isMarkdownFile() && !error && !loading && (
-        <div className="rb:w-full rb:h-full rb:overflow-auto rb:bg-white rb:p-6 rb:rounded rb:border rb:border-gray-200">
+        <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-white rb:p-6 rb:rounded rb:border rb:border-gray-200">
           <RbMarkdown content={textContent} />
         </div>
       )}
 
+      {/* 文本预览 */}
       {isTextFile() && !error && !loading && (
-        <div className="rb:w-full rb:h-full rb:overflow-auto rb:bg-white rb:p-4 rb:rounded rb:border rb:border-gray-200">
+        <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-white rb:p-4 rb:rounded rb:border rb:border-gray-200">
           <pre className="rb:whitespace-pre-wrap rb:text-sm rb:text-gray-800 rb:font-mono">
             {textContent}
           </pre>
         </div>
       )}
 
+      {/* Word 预览 */}
       {isWordFile() && !error && !loading && (
-        <div className="rb:w-full rb:h-full rb:overflow-auto rb:bg-white rb:p-6 rb:rounded rb:border rb:border-gray-200">
-          <div 
-            className="rb:prose rb:max-w-none"
-            dangerouslySetInnerHTML={{ __html: htmlContent }}
-          />
-        </div>
+        getFileExtension() === '.doc' ? (
+          /* .doc 旧格式前端无法解析，提示下载 */
+          <div className="rb:w-full rb:flex-1 rb:flex rb:items-center rb:justify-center rb:bg-gray-50">
+            <div className="rb:text-center">
+              <p className="rb:text-gray-600 rb:mb-4">.doc 格式暂不支持在线预览，请下载后查看</p>
+              <Button icon={<DownloadOutlined />} type="primary" onClick={handleDownload}>下载文件</Button>
+            </div>
+          </div>
+        ) : (
+          <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-white rb:p-6 rb:rounded rb:border rb:border-gray-200">
+            <div
+              className="rb:prose rb:max-w-none"
+              dangerouslySetInnerHTML={{ __html: htmlContent }}
+            />
+          </div>
+        )
       )}
 
+      {/* Excel/CSV 预览 */}
       {isExcelFile() && !error && !loading && (
-        <div className="rb:w-full rb:h-full rb:overflow-auto rb:bg-white rb:p-4 rb:rounded rb:border rb:border-gray-200">
+        <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-white rb:p-4 rb:rounded rb:border rb:border-gray-200">
+          {csvTruncated && (
+            <div className="rb:mb-3 rb:px-3 rb:py-2 rb:bg-yellow-50 rb:border rb:border-yellow-200 rb:rounded rb:text-sm rb:text-yellow-700">
+              文件较大，仅预览前 {MAX_PREVIEW_ROWS} 行数据
+            </div>
+          )}
           {excelData.map((sheet, index) => (
             <div key={index} className="rb:mb-6">
               <h3 className="rb:text-lg rb:font-semibold rb:mb-3">{sheet.sheetName}</h3>
@@ -354,6 +603,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
                   scroll={{ x: 'max-content' }}
                   size="small"
                   bordered
+                  virtual
                 />
               )}
             </div>
@@ -361,17 +611,84 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
         </div>
       )}
 
+      {/* PDF 预览 - 带分页和缩放 */}
       {isPdfFile() && !error && !loading && (
-        <iframe
-          src={fileUrl}
-          width="100%"
-          height="100%"
-          title={fileName || 'PDF 预览'}
-          className="rb:border-0"
-          style={{ border: 'none' }}
-          onLoad={handleLoad}
-          onError={handleError}
-        />
+        <>
+          <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-gray-100 rb:flex rb:justify-center rb:p-4">
+            <canvas ref={pdfCanvasRef} className="rb:shadow-lg" />
+          </div>
+          {pdfTotalPages > 0 && (
+            <PaginationBar
+              currentPage={pdfCurrentPage}
+              totalPages={pdfTotalPages}
+              onPageChange={handlePdfPageChange}
+              extraControls={
+                <div className="rb:flex rb:items-center rb:gap-1 rb:ml-4">
+                  <Button
+                    size="small"
+                    icon={<ZoomOutOutlined />}
+                    disabled={pdfScale <= 0.5}
+                    onClick={() => handlePdfZoom(-0.25)}
+                  />
+                  <span className="rb:text-sm rb:text-gray-600 rb:min-w-[48px] rb:text-center">
+                    {Math.round(pdfScale * 100)}%
+                  </span>
+                  <Button
+                    size="small"
+                    icon={<ZoomInOutlined />}
+                    disabled={pdfScale >= 3}
+                    onClick={() => handlePdfZoom(0.25)}
+                  />
+                </div>
+              }
+            />
+          )}
+        </>
+      )}
+
+      {/* PPT/PPTX 预览 */}
+      {isPptFile() && !error && !loading && (
+        <>
+          {pptSlides.length > 0 ? (
+            /* 本地渲染模式（服务端返回了可解析的格式） */
+            <>
+              <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-gray-100 rb:flex rb:justify-center rb:items-center rb:p-4">
+                <img
+                  src={pptSlides[pptCurrentPage - 1]}
+                  alt={`Slide ${pptCurrentPage}`}
+                  className="rb:max-w-full rb:max-h-full rb:object-contain rb:shadow-lg"
+                />
+              </div>
+              <PaginationBar
+                currentPage={pptCurrentPage}
+                totalPages={pptTotalPages}
+                onPageChange={(page) => {
+                  if (page >= 1 && page <= pptTotalPages) setPptCurrentPage(page);
+                }}
+              />
+            </>
+          ) : (
+            /* Office Online Viewer fallback */
+            <div className="rb:w-full rb:flex-1 rb:flex rb:flex-col">
+              <iframe
+                src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(fileUrl)}`}
+                width="100%"
+                height="100%"
+                title={fileName || 'PPT 预览'}
+                className="rb:border-0 rb:flex-1"
+                style={{ border: 'none' }}
+                onLoad={() => setLoading(false)}
+                onError={() => handleError('PPT 在线预览加载失败')}
+              />
+              <div className="rb:flex rb:items-center rb:justify-center rb:gap-3 rb:py-2 rb:px-4 rb:bg-white rb:border-t rb:border-gray-200">
+                <span className="rb:text-sm rb:text-gray-500">使用 Office Online 预览</span>
+                <Button size="small" icon={<DownloadOutlined />} onClick={handleDownload}>
+                  下载文件
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

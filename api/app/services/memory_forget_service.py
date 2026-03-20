@@ -518,7 +518,7 @@ class MemoryForgetService:
                 'total_nodes': result['total_nodes'] or 0,
                 'nodes_with_activation': result['nodes_with_activation'] or 0,
                 'nodes_without_activation': result['nodes_without_activation'] or 0,
-                'average_activation_value': result['average_activation'],
+                'average_activation_value': round(result['average_activation'], 2) if result['average_activation'] is not None else None,
                 'low_activation_nodes': result['low_activation_nodes'] or 0,
                 'forgetting_threshold': forgetting_threshold,
                 'timestamp': int(datetime.now().timestamp() * 1000)
@@ -619,7 +619,7 @@ class MemoryForgetService:
                     recent_trends.append({
                         'date': date_str,
                         'merged_count': record.merged_count,
-                        'average_activation': record.average_activation_value,
+                        'average_activation': round(record.average_activation_value, 2) if record.average_activation_value is not None else None,
                         'total_nodes': record.total_nodes,
                         'execution_time': int(record.execution_time.timestamp() * 1000)
                     })

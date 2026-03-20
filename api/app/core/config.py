@@ -97,6 +97,7 @@ class Settings:
 
     # File Upload
     MAX_FILE_SIZE: int = int(os.getenv("MAX_FILE_SIZE", "52428800"))
+    MAX_FILE_COUNT: int = int(os.getenv("MAX_FILE_COUNT", "20"))
     FILE_PATH: str = os.getenv("FILE_PATH", "/files")
     FILE_URL_EXPIRES: int = int(os.getenv("FILE_URL_EXPIRES", "3600"))
 
@@ -161,6 +162,44 @@ class Settings:
     # Supported values: "zh" (Chinese), "en" (English)
     # This controls the language used for memory summary titles and other generated content
     DEFAULT_LANGUAGE: str = os.getenv("DEFAULT_LANGUAGE", "zh")
+
+    # ========================================================================
+    # Internationalization (i18n) Configuration
+    # ========================================================================
+    # Default language for API responses
+    I18N_DEFAULT_LANGUAGE: str = os.getenv("I18N_DEFAULT_LANGUAGE", "zh")
+    
+    # Supported languages (comma-separated)
+    I18N_SUPPORTED_LANGUAGES: list[str] = [
+        lang.strip()
+        for lang in os.getenv("I18N_SUPPORTED_LANGUAGES", "zh,en").split(",")
+        if lang.strip()
+    ]
+    
+    # Core locales directory (community edition)
+    # Use absolute path to work from any working directory
+    I18N_CORE_LOCALES_DIR: str = os.getenv(
+        "I18N_CORE_LOCALES_DIR",
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "locales")
+    )
+    
+    # Premium locales directory (enterprise edition, optional)
+    I18N_PREMIUM_LOCALES_DIR: Optional[str] = os.getenv("I18N_PREMIUM_LOCALES_DIR", None)
+    
+    # Enable translation cache
+    I18N_ENABLE_TRANSLATION_CACHE: bool = os.getenv("I18N_ENABLE_TRANSLATION_CACHE", "true").lower() == "true"
+    
+    # LRU cache size for hot translations
+    I18N_LRU_CACHE_SIZE: int = int(os.getenv("I18N_LRU_CACHE_SIZE", "1000"))
+    
+    # Enable hot reload of translation files
+    I18N_ENABLE_HOT_RELOAD: bool = os.getenv("I18N_ENABLE_HOT_RELOAD", "false").lower() == "true"
+    
+    # Fallback language when translation is missing
+    I18N_FALLBACK_LANGUAGE: str = os.getenv("I18N_FALLBACK_LANGUAGE", "zh")
+    
+    # Log missing translations
+    I18N_LOG_MISSING_TRANSLATIONS: bool = os.getenv("I18N_LOG_MISSING_TRANSLATIONS", "true").lower() == "true"
 
     # Logging settings
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

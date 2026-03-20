@@ -218,3 +218,54 @@ class TenantService:
             limit=limit,
             is_active=is_active
         )
+
+    def get_tenant_language_config(self, tenant_id: uuid.UUID) -> Optional[dict]:
+        """获取租户语言配置"""
+        tenant = self.tenant_repo.get_tenant_by_id(tenant_id)
+        if not tenant:
+            raise BusinessException("租户不存在", code=BizCode.TENANT_NOT_FOUND)
+        
+        return {
+            "default_language": tenant.default_language,
+            "supported_languages": tenant.supported_languages
+        }
+    
+    def update_tenant_language_config(
+        self, 
+        tenant_id: uuid.UUID, 
+        default_language: str,
+        supported_languages: list
+    ) -> Optional[dict]:
+        """更新租户语言配置"""
+        # 检查租户是否存在
+        tenant = self.tenant_repo.get_tenant_by_id(tenant_id)
+        if not tenant:
+            raise BusinessException("租户不存在", code=BizCode.TENANT_NOT_FOUND)
+        
+        # 验证默认语言在支持的语言列表中
+        if default_language not in supported_languages:
+            raise BusinessException(
+                "默认语言必须在支持的语言列表中",
+                code=BizCode.VALIDATION_FAILED
+            )
+        
+        try:
+            # 更新语言配置
+            tenant.default_language = default_language
+            tenant.supported_languages = supported_languages
+            self.db.commit()
+            self.db.refresh(tenant)
+            
+            business_logger.info(
+                f"更新租户语言配置成功: {tenant.name} (ID: {tenant.id}), "
+                f"默认语言: {default_language}, 支持语言: {supported_languages}"
+            )
+            
+            return {
+                "default_language": tenant.default_language,
+                "supported_languages": tenant.supported_languages
+            }
+        except Exception as e:
+            self.db.rollback()
+            business_logger.error(f"更新租户语言配置失败: {str(e)}")
+            raise BusinessException(f"更新租户语言配置失败: {str(e)}", code=BizCode.DB_ERROR)

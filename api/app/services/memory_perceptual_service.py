@@ -1,19 +1,29 @@
+import os
 import uuid
 from typing import Dict, Any, Optional
+from urllib.parse import urlparse, unquote
 
+import json_repair
+from jinja2 import Template
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
+from app.core.models import RedBearLLM, RedBearModelConfig
+from app.models import FileMetadata
 from app.models.memory_perceptual_model import PerceptualType, FileStorageService
+from app.models.prompt_optimizer_model import RoleType
 from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
+from app.schemas import FileType
 from app.schemas.memory_perceptual_schema import (
     PerceptualQuerySchema,
     PerceptualTimelineResponse,
     PerceptualMemoryItem,
     AudioModal, Content, VideoModal, TextModal
 )
+from app.schemas.model_schema import ModelInfo
 
 business_logger = get_business_logger()
 
@@ -99,7 +109,7 @@ class MemoryPerceptualService:
                 "keywords": content.keywords,
                 "topic": content.topic,
                 "domain": content.domain,
-                "created_time": int(memory.created_time.timestamp()*1000),
+                "created_time": int(memory.created_time.timestamp() * 1000),
                 **detail
             }
 
@@ -108,7 +118,8 @@ class MemoryPerceptualService:
             return result
 
         except Exception as e:
-            business_logger.error(f"Failed to fetch latest {perceptual_type.name.lower()} memory: {str(e)}")
+            business_logger.error(f"Failed to fetch latest {perceptual_type.name.lower()} memory: {str(e)}",
+                                  exc_info=True)
             raise BusinessException(f"Failed to fetch latest {perceptual_type.name.lower()} memory: {str(e)}",
                                     BizCode.DB_ERROR)
 
@@ -138,7 +149,7 @@ class MemoryPerceptualService:
             for memory in memories:
                 meta_data = memory.meta_data or {}
                 content = meta_data.get("content", {})
-                
+
                 # 安全地提取 content 字段，提供默认值
                 if content:
                     content_obj = Content(**content)
@@ -149,7 +160,7 @@ class MemoryPerceptualService:
                     topic = "Unknown"
                     domain = "Unknown"
                     keywords = []
-                
+
                 memory_item = PerceptualMemoryItem(
                     id=memory.id,
                     perceptual_type=PerceptualType(memory.perceptual_type),
@@ -161,7 +172,7 @@ class MemoryPerceptualService:
                     topic=topic,
                     domain=domain,
                     keywords=keywords,
-                    created_time=int(memory.created_time.timestamp()*1000),
+                    created_time=int(memory.created_time.timestamp() * 1000),
                     storage_service=FileStorageService(memory.storage_service),
                 )
                 memory_items.append(memory_item)
@@ -183,3 +194,110 @@ class MemoryPerceptualService:
         except Exception as e:
             business_logger.error(f"Failed to fetch perceptual memory timeline: {str(e)}")
             raise BusinessException(f"Failed to fetch perceptual memory timeline: {str(e)}", BizCode.DB_ERROR)
+
+    async def generate_perceptual_memory(
+            self,
+            end_user_id: str,
+            model_config: ModelInfo,
+            file_type: str,
+            file_url: str,
+            file_message: dict,
+    ):
+        memories = self.repository.get_by_url(file_url)
+        if memories:
+            business_logger.info(f"Perceptual memory already exists: {file_url}")
+            if end_user_id not in [memory.end_user_id for memory in memories]:
+                business_logger.info(f"Copy perceptual memory end_user_id: {end_user_id}")
+                memory_cache = memories[0]
+                self.repository.create_perceptual_memory(
+                    end_user_id=uuid.UUID(end_user_id),
+                    perceptual_type=PerceptualType(memory_cache.perceptual_type),
+                    file_path=memory_cache.file_path,
+                    file_name=memory_cache.file_name,
+                    file_ext=memory_cache.file_ext,
+                    summary=memory_cache.summary,
+                    meta_data=memory_cache.meta_data
+                )
+                self.db.commit()
+
+            return
+        llm = RedBearLLM(RedBearModelConfig(
+            model_name=model_config.model_name,
+            provider=model_config.provider,
+            api_key=model_config.api_key,
+            base_url=model_config.api_base,
+            is_omni=model_config.is_omni
+        ), type=model_config.model_type)
+        try:
+            prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prompt')
+            with open(os.path.join(prompt_path, 'perceptual_summary_system.jinja2'), 'r', encoding='utf-8') as f:
+                opt_system_prompt = f.read()
+            rendered_system_message = Template(opt_system_prompt).render(file_type=file_type, language='zh')
+        except FileNotFoundError:
+            raise BusinessException(message="System prompt template not found", code=BizCode.NOT_FOUND)
+        messages = [
+            {"role": RoleType.SYSTEM.value, "content": [{"type": "text", "text": rendered_system_message}]},
+            {"role": RoleType.USER.value, "content": [
+                {"type": "text", "text": "Summarize the following file"}, file_message
+            ]}
+        ]
+        result = await llm.ainvoke(messages)
+        content = json_repair.repair_json(result.content, return_objects=True)
+        path = urlparse(file_url).path
+        filename = os.path.basename(path)
+        filename = unquote(filename)
+        file_ext = os.path.splitext(filename)[1]
+        try:
+            file_id = uuid.UUID(filename)
+            stmt = select(FileMetadata).where(
+                FileMetadata.id == file_id
+            )
+            file = self.db.execute(stmt).scalar_one_or_none()
+
+            if file:
+                filename = file.file_name
+                file_ext = file.file_ext
+        except ValueError:
+            business_logger.debug(f"Remote file, file_id={filename}")
+        if not file_ext:
+            if file_type == FileType.AUDIO:
+                file_ext = ".mp3"
+            elif file_type == FileType.VIDEO:
+                file_ext = ".mp4"
+            elif file_type == FileType.DOCUMENT:
+                file_ext = ".txt"
+            elif file_type == FileType.IMAGE:
+                file_ext = ".jpg"
+            filename += file_ext
+        file_content = {
+            "keywords": content.get("keywords", []),
+            "topic": content.get("topic"),
+            "domain": content.get("domain")
+        }
+        if file_type in [FileType.IMAGE, FileType.VIDEO]:
+            file_modalities = {
+                "scene": content.get("scene", [])
+            }
+        elif file_type in [FileType.DOCUMENT]:
+            file_modalities = {
+                "section_count": content.get("section_count", 0),
+                "title": content.get("title", ""),
+                "first_line": content.get("first_line", "")
+            }
+        else:
+            file_modalities = {
+                "speaker_count": content.get("speaker_count", 0)
+            }
+        self.repository.create_perceptual_memory(
+            end_user_id=uuid.UUID(end_user_id),
+            perceptual_type=PerceptualType.trans_from_file_type(file_type),
+            file_path=file_url,
+            file_name=filename,
+            file_ext=file_ext,
+            summary=content.get('summary', ""),
+            meta_data={
+                "content": file_content,
+                "modalities": file_modalities
+            }
+        )
+        self.db.commit()

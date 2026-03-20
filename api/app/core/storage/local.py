@@ -11,6 +11,7 @@ from typing import Optional
 
 import aiofiles
 import aiofiles.os
+from typing import AsyncIterator
 
 from app.core.storage.base import StorageBackend
 from app.core.storage_exceptions import (
@@ -178,6 +179,36 @@ class LocalStorage(StorageBackend):
         """
         full_path = self._get_full_path(file_key)
         return full_path.exists()
+
+    async def upload_stream(
+        self,
+        file_key: str,
+        stream: AsyncIterator[bytes],
+        content_type: Optional[str] = None,
+    ) -> int:
+        """
+        Upload a file from an async byte stream to the local file system.
+
+        Returns:
+            Total bytes written.
+        """
+        full_path = self._get_full_path(file_key)
+        try:
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            total = 0
+            async with aiofiles.open(full_path, "wb") as f:
+                async for chunk in stream:
+                    await f.write(chunk)
+                    total += len(chunk)
+            logger.info(f"File stream uploaded successfully: {file_key}")
+            return total
+        except Exception as e:
+            logger.error(f"Failed to stream upload file {file_key}: {e}")
+            raise StorageUploadError(
+                message=f"Failed to stream upload file: {e}",
+                file_key=file_key,
+                cause=e,
+            )
 
     async def get_url(self, file_key: str, expires: int = 3600) -> str:
         """
