@@ -1770,6 +1770,8 @@ export const zh = {
       memoryConversationAnalysisEmpty: '目前没有可用的对话分析内容',
       memoryConversationAnalysisEmptySubTitle: '输入您的用户ID后，点击"测试记忆"查看对话记忆',
 
+      communities: '聚类社区',
+      summaries: '记忆摘要',
       uploadFile: '上传文件',
       fileType: '文件类型',
       image: '图片',

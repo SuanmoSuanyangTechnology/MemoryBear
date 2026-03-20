@@ -13,9 +13,14 @@ from app.repositories.neo4j.cypher_queries import (
     ENTITY_LEAVE_ALL_COMMUNITIES,
     GET_ENTITY_NEIGHBORS,
     GET_ALL_ENTITIES_FOR_USER,
+    GET_ENTITY_COUNT_FOR_USER,
+    GET_ALL_ENTITY_IDS_FOR_USER,
+    GET_ENTITIES_PAGE,
     GET_COMMUNITY_MEMBERS,
+    GET_COMMUNITY_RELATIONSHIPS,
     GET_ALL_COMMUNITY_MEMBERS_BATCH,
     GET_ALL_ENTITY_NEIGHBORS_BATCH,
+    GET_ENTITY_NEIGHBORS_BATCH_FOR_IDS,
     CHECK_USER_HAS_COMMUNITIES,
     UPDATE_COMMUNITY_MEMBER_COUNT,
     UPDATE_COMMUNITY_METADATA,
@@ -23,6 +28,7 @@ from app.repositories.neo4j.cypher_queries import (
     GET_INCOMPLETE_COMMUNITIES_WITH_EMBEDDING,
     CHECK_COMMUNITY_IS_COMPLETE,
     CHECK_COMMUNITY_IS_COMPLETE_WITH_EMBEDDING,
+    BATCH_UPDATE_COMMUNITY_METADATA,
 )
 
 logger = logging.getLogger(__name__)
@@ -114,10 +120,69 @@ class CommunityRepository:
             logger.error(f"get_all_entities failed: {e}")
             return []
 
+    async def get_entity_count(self, end_user_id: str) -> int:
+        """仅返回用户实体总数，不加载实体数据。"""
+        try:
+            result = await self.connector.execute_query(
+                GET_ENTITY_COUNT_FOR_USER,
+                end_user_id=end_user_id,
+            )
+            return result[0]["entity_count"] if result else 0
+        except Exception as e:
+            logger.error(f"get_entity_count failed: {e}")
+            return 0
+
+    async def get_all_entity_ids(self, end_user_id: str) -> List[str]:
+        """仅返回用户所有实体 ID 列表，不加载 embedding 等大字段。"""
+        try:
+            result = await self.connector.execute_query(
+                GET_ALL_ENTITY_IDS_FOR_USER,
+                end_user_id=end_user_id,
+            )
+            return [r["id"] for r in result]
+        except Exception as e:
+            logger.error(f"get_all_entity_ids failed: {e}")
+            return []
+
+    async def get_entities_page(
+        self, end_user_id: str, skip: int, limit: int
+    ) -> List[Dict]:
+        """分页拉取实体，用于全量聚类分批处理。"""
+        try:
+            return await self.connector.execute_query(
+                GET_ENTITIES_PAGE,
+                end_user_id=end_user_id,
+                skip=skip,
+                limit=limit,
+            )
+        except Exception as e:
+            logger.error(f"get_entities_page failed: {e}")
+            return []
+
+    async def get_entity_neighbors_for_ids(
+        self, entity_ids: List[str], end_user_id: str
+    ) -> Dict[str, List[Dict]]:
+        """批量拉取指定实体列表的邻居，返回 {entity_id: [neighbors]}。"""
+        try:
+            rows = await self.connector.execute_query(
+                GET_ENTITY_NEIGHBORS_BATCH_FOR_IDS,
+                entity_ids=entity_ids,
+                end_user_id=end_user_id,
+            )
+            result: Dict[str, List[Dict]] = {}
+            for row in rows:
+                eid = row["entity_id"]
+                neighbor = {k: v for k, v in row.items() if k != "entity_id"}
+                result.setdefault(eid, []).append(neighbor)
+            return result
+        except Exception as e:
+            logger.error(f"get_entity_neighbors_for_ids failed: {e}")
+            return {}
+
     async def get_community_members(
         self, community_id: str, end_user_id: str
     ) -> List[Dict]:
-        """查询社区成员列表。"""
+        """查询社区成员列表（含 example 字段）。"""
         try:
             return await self.connector.execute_query(
                 GET_COMMUNITY_MEMBERS,
@@ -126,6 +191,20 @@ class CommunityRepository:
             )
         except Exception as e:
             logger.error(f"get_community_members failed: {e}")
+            return []
+
+    async def get_community_relationships(
+        self, community_id: str, end_user_id: str
+    ) -> List[Dict]:
+        """查询社区内实体间的关系三元组（subject, predicate, object）。"""
+        try:
+            return await self.connector.execute_query(
+                GET_COMMUNITY_RELATIONSHIPS,
+                community_id=community_id,
+                end_user_id=end_user_id,
+            )
+        except Exception as e:
+            logger.error(f"get_community_relationships failed: {e}")
             return []
 
     async def get_all_community_members_batch(
@@ -222,4 +301,26 @@ class CommunityRepository:
             return bool(result)
         except Exception as e:
             logger.error(f"update_community_metadata failed: {e}")
+            return False
+
+    async def batch_update_community_metadata(
+        self,
+        communities: List[Dict],
+    ) -> bool:
+        """批量更新多个社区的元数据。
+
+        Args:
+            communities: 每项包含 community_id, end_user_id, name, summary,
+                         core_entities, summary_embedding
+        """
+        if not communities:
+            return True
+        try:
+            await self.connector.execute_query(
+                BATCH_UPDATE_COMMUNITY_METADATA,
+                communities=communities,
+            )
+            return True
+        except Exception as e:
+            logger.error(f"batch_update_community_metadata failed: {e}")
             return False
