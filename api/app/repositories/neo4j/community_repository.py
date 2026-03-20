@@ -17,6 +17,7 @@ from app.repositories.neo4j.cypher_queries import (
     GET_ALL_ENTITY_IDS_FOR_USER,
     GET_ENTITIES_PAGE,
     GET_COMMUNITY_MEMBERS,
+    GET_COMMUNITY_RELATIONSHIPS,
     GET_ALL_COMMUNITY_MEMBERS_BATCH,
     GET_ALL_ENTITY_NEIGHBORS_BATCH,
     GET_ENTITY_NEIGHBORS_BATCH_FOR_IDS,
@@ -177,7 +178,7 @@ class CommunityRepository:
     async def get_community_members(
         self, community_id: str, end_user_id: str
     ) -> List[Dict]:
-        """查询社区成员列表。"""
+        """查询社区成员列表（含 example 字段）。"""
         try:
             return await self.connector.execute_query(
                 GET_COMMUNITY_MEMBERS,
@@ -186,6 +187,20 @@ class CommunityRepository:
             )
         except Exception as e:
             logger.error(f"get_community_members failed: {e}")
+            return []
+
+    async def get_community_relationships(
+        self, community_id: str, end_user_id: str
+    ) -> List[Dict]:
+        """查询社区内实体间的关系三元组（subject, predicate, object）。"""
+        try:
+            return await self.connector.execute_query(
+                GET_COMMUNITY_RELATIONSHIPS,
+                community_id=community_id,
+                end_user_id=end_user_id,
+            )
+        except Exception as e:
+            logger.error(f"get_community_relationships failed: {e}")
             return []
 
     async def get_all_community_members_batch(

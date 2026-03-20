@@ -439,15 +439,17 @@ class LabelPropagationEngine:
 
     @staticmethod
     def _build_entity_lines(members: List[Dict]) -> List[str]:
-        """将实体列表格式化为 prompt 行，包含 name、aliases、description。"""
+        """将实体列表格式化为 prompt 行，包含 name、aliases、description、example。"""
         lines = []
         for m in members:
             m_name = m.get("name", "")
             aliases = m.get("aliases") or []
             description = m.get("description") or ""
+            example = m.get("example") or ""
             aliases_str = f"（别名：{'、'.join(aliases)}）" if aliases else ""
             desc_str = f"：{description}" if description else ""
-            lines.append(f"- {m_name}{aliases_str}{desc_str}")
+            example_str = f"（示例：{example}）" if example else ""
+            lines.append(f"- {m_name}{aliases_str}{desc_str}{example_str}")
         return lines
 
     async def _generate_community_metadata(
@@ -481,11 +483,24 @@ class LabelPropagationEngine:
             core_entities = [m["name"] for m in sorted_members[:CORE_ENTITY_LIMIT] if m.get("name")]
 
             entity_list_str = "\n".join(self._build_entity_lines(members))
+
+            # 方案四：注入社区内实体间关系三元组
+            relationships = await self.repo.get_community_relationships(cid, end_user_id)
+            rel_lines = [
+                f"- {r['subject']} → {r['predicate']} → {r['object']}"
+                for r in relationships
+                if r.get("subject") and r.get("predicate") and r.get("object")
+            ]
+            rel_section = (
+                f"\n实体间关系：\n" + "\n".join(rel_lines)
+                if rel_lines else ""
+            )
+
             prompt = (
-                f"以下是一组语义相关的实体：\n{entity_list_str}\n\n"
+                f"以下是一组语义相关的实体：\n{entity_list_str}{rel_section}\n\n"
                 f"请为这组实体所代表的主题：\n"
                 f"1. 起一个简洁的中文名称（不超过10个字）\n"
-                f"2. 写一句话摘要（不超过50个字）\n\n"
+                f"2. 写一句话摘要（不超过80个字）\n\n"
                 f"严格按以下格式输出，不要有其他内容：\n"
                 f"名称：<名称>\n摘要：<摘要>"
             )
