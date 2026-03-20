@@ -309,57 +309,21 @@ class MemoryConfigRepository:
 
         Returns:
             Optional[MemoryConfig]: 更新后的配置对象，不存在则返回None
-
-        Raises:
-            ValueError: 没有字段需要更新时抛出
         """
         db_logger.debug(f"更新萃取配置: config_id={update.config_id}")
 
         try:
-            db_config = db.query(MemoryConfig).filter(MemoryConfig.config_id == update.config_id).first()
+            stmt = select(MemoryConfig).where(MemoryConfig.config_id == update.config_id)
+            db_config = db.execute(stmt).scalar_one_or_none()
             if not db_config:
                 db_logger.warning(f"记忆配置不存在: config_id={update.config_id}")
                 return None
 
-            # 更新字段映射
-            field_mapping = {
-                # 模型选择
-                "llm_id": "llm_id",
-                "embedding_id": "embedding_id",
-                "rerank_id": "rerank_id",
-                # 记忆萃取引擎
-                "enable_llm_dedup_blockwise": "enable_llm_dedup_blockwise",
-                "enable_llm_disambiguation": "enable_llm_disambiguation",
-                "deep_retrieval": "deep_retrieval",
-                "t_type_strict": "t_type_strict",
-                "t_name_strict": "t_name_strict",
-                "t_overall": "t_overall",
-                "state": "state",
-                "chunker_strategy": "chunker_strategy",
-                # 句子提取
-                "statement_granularity": "statement_granularity",
-                "include_dialogue_context": "include_dialogue_context",
-                "max_context": "max_context",
-                # 剪枝配置
-                "pruning_enabled": "pruning_enabled",
-                "pruning_scene": "pruning_scene",
-                "pruning_threshold": "pruning_threshold",
-                # 自我反思配置
-                "enable_self_reflexion": "enable_self_reflexion",
-                "iteration_period": "iteration_period",
-                "reflexion_range": "reflexion_range",
-                "baseline": "baseline",
-            }
+            update_data = update.model_dump(exclude_unset=True)
+            update_data.pop("config_id", None)
 
-            has_update = False
-            for api_field, db_field in field_mapping.items():
-                value = getattr(update, api_field, None)
-                if value is not None:
-                    setattr(db_config, db_field, value)
-                    has_update = True
-
-            if not has_update:
-                raise ValueError("No fields to update")
+            for field, value in update_data.items():
+                setattr(db_config, field, value)
 
             db.commit()
             db.refresh(db_config)
