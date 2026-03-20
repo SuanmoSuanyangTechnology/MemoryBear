@@ -1,6 +1,8 @@
 import React, { useState, type FC, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { Spin, Flex } from 'antd';
+
 import type { CommunityD3Node, CommunityGraphData, RawCommunityGraphData, RawCommunityNode } from '@/components/D3Graph/types'
 import { buildCommunityGraphData } from '@/components/D3Graph/utils'
 import CommunityGraph from '@/components/D3Graph/CommunityGraph'
@@ -40,14 +42,17 @@ const NodeTooltip: FC<{ node: CommunityD3Node }> = ({ node }) => {
 
 const CommunityNetwork: FC<{ onSelectCommunity?: (node: RawCommunityNode) => void }> = ({ onSelectCommunity }) => {
   const { id } = useParams()
+  const { t } = useTranslation()
   const [graphData, setGraphData] = useState<CommunityGraphData | null>(null)
   const [empty, setEmpty] = useState(false)
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (!id) return
     const controller = new AbortController()
     setEmpty(false)
     setGraphData(null)
+    setLoading(true)
     getMemoryCommunityGraph(id, { signal: controller.signal }).then(res => {
       const raw = res as RawCommunityGraphData
       if (!raw.nodes?.length) { setEmpty(true); return }
@@ -55,8 +60,17 @@ const CommunityNetwork: FC<{ onSelectCommunity?: (node: RawCommunityNode) => voi
       if (!built) { setEmpty(true); return }
       setGraphData(built)
     }).catch((e) => { if (e?.code !== 'ERR_CANCELED') setEmpty(true) })
+      .finally(() => setLoading(false))
     return () => controller.abort()
   }, [id])
+
+  if (loading) {
+    return <Flex align="center" justify="center" className="rb:w-full rb:h-full">
+      <Spin tip={t('userMemory.communityLoadingTip')} size="large">
+        <div className="rb:w-64 rb:h-64" />
+      </Spin>
+      </Flex>
+  }
 
   return (
     <CommunityGraph

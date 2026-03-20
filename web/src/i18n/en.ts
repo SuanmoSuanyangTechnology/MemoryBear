@@ -460,6 +460,7 @@ export const en = {
       nameInvalid: 'Name cannot start or end with a space',
       notAllSpaces: 'Cannot be all spaces',
       view: 'View',
+      callbackUrlInvalid: 'Please enter a valid URL',
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -1564,6 +1565,7 @@ export const en = {
       summary: 'Summary',
       core_entities: 'Core Entities',
       communityDetailEmptyDesc: 'Click on a community in the chart on the left to view details',
+      communityLoadingTip: 'Generating community graph',
     },
     space: {
       createSpace: 'Create Space',

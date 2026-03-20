@@ -1153,10 +1153,11 @@ RETURN c.community_id AS community_id, cnt AS member_count
 
 UPDATE_COMMUNITY_METADATA = """
 MATCH (c:Community {community_id: $community_id, end_user_id: $end_user_id})
-SET c.name         = $name,
-    c.summary      = $summary,
-    c.core_entities = $core_entities,
-    c.updated_at   = datetime()
+SET c.name             = $name,
+    c.summary          = $summary,
+    c.core_entities    = $core_entities,
+    c.summary_embedding = $summary_embedding,
+    c.updated_at       = datetime()
 RETURN c.community_id AS community_id
 """
 
@@ -1201,4 +1202,39 @@ RETURN
     type(r)               AS r_type,
     properties(r)         AS r_props,
     startNode(r) = e      AS r_from_e
+"""
+
+CHECK_COMMUNITY_IS_COMPLETE = """
+MATCH (c:Community {community_id: $community_id, end_user_id: $end_user_id})
+RETURN (
+    c.name IS NOT NULL AND c.name <> '' AND
+    c.summary IS NOT NULL AND c.summary <> '' AND
+    c.core_entities IS NOT NULL
+) AS is_complete
+"""
+
+CHECK_COMMUNITY_IS_COMPLETE_WITH_EMBEDDING = """
+MATCH (c:Community {community_id: $community_id, end_user_id: $end_user_id})
+RETURN (
+    c.name IS NOT NULL AND c.name <> '' AND
+    c.summary IS NOT NULL AND c.summary <> '' AND
+    c.core_entities IS NOT NULL AND
+    c.summary_embedding IS NOT NULL
+) AS is_complete
+"""
+
+GET_INCOMPLETE_COMMUNITIES = """
+MATCH (c:Community {end_user_id: $end_user_id})
+WHERE c.name IS NULL OR c.summary IS NULL OR c.core_entities IS NULL
+   OR c.name = '' OR c.summary = ''
+RETURN c.community_id AS community_id
+"""
+
+GET_INCOMPLETE_COMMUNITIES_WITH_EMBEDDING = """
+MATCH (c:Community {end_user_id: $end_user_id})
+WHERE c.name IS NULL OR c.name = ''
+   OR c.summary IS NULL OR c.summary = ''
+   OR c.core_entities IS NULL
+   OR (c.summary_embedding IS NULL AND c.summary IS NOT NULL AND c.summary <> '(empty)')
+RETURN c.community_id AS community_id
 """

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-13 17:07:54
+ * @Last Modified time: 2026-03-18 20:01:29
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
@@ -137,7 +137,7 @@ export const getExperienceConfig = (share_token: string) => {
   })
 }
 // Export application
-export const appExport = (app_id: string, appName: string, data?: { release_version: string }) => {
+export const appExport = (app_id: string, appName: string, data?: { release_id: string }) => {
   return request.getDownloadFile(`/apps/${app_id}/export`, `${appName}.yml`, data)
 }
 // Import application

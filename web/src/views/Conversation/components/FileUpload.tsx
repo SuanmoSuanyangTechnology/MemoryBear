@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 14:42:31
+ * @Last Modified time: 2026-03-19 18:38:41
  */
 /**
  * File Upload Component
@@ -23,7 +23,7 @@
 import { useState, useEffect, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { Upload, Progress, App } from 'antd';
 import type { UploadProps, UploadFile } from 'antd';
-import type { UploadProps as RcUploadProps } from 'antd/es/upload/interface';
+import type { UploadProps as RcUploadProps, RcFile, UploadFileStatus } from 'antd/es/upload/interface';
 import { useTranslation } from 'react-i18next';
 
 import { request } from '@/utils/request'
@@ -71,6 +71,12 @@ const transform_file_type = {
 
   'application/vnd.ms-powerpoint': 'document/ppt',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'document/pptx',
+
+  'application/vnd.ms-excel': 'document/xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'document/xlsx',
+  'text/csv': 'document/csv',
+
+  'application/json': 'document/json'
 }
 // Mapping of file extensions to MIME types
 const ALL_FILE_TYPE: {
@@ -87,6 +93,13 @@ const ALL_FILE_TYPE: {
 
   ppt: 'application/vnd.ms-powerpoint',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+
+  csv: 'text/csv',
+
+  json: 'application/json',
 
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
@@ -208,17 +221,29 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
    */
   const handleCustomRequest: RcUploadProps['customRequest'] = async (options) => {
     const { file, onSuccess, onError } = options;
-    
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      
-      const response = await request.uploadFile(action, formData, requestConfig);
-
-      onSuccess?.({data: response});
-    } catch (error) {
-      onError?.(error as Error);
+    if (typeof file === 'string') return;
+    const rcFile = file as RcFile;
+    const formData = new FormData();
+    formData.append('file', rcFile);
+    const fileVo: UploadFile = {
+      uid: rcFile.uid,
+      name: rcFile.name,
+      status: 'uploading' as UploadFileStatus,
+      percent: 0,
+      type: rcFile.type,
+      originFileObj: rcFile,
+      thumbUrl: URL.createObjectURL(rcFile)
     }
+    onChange?.(fileVo)
+    request.uploadFile(action, formData, requestConfig)
+      .then(res => {
+        onSuccess?.({ data: res });
+      })
+      .catch((error) => {
+        onError?.(error as Error);
+        fileVo.status = 'error'
+        onChange?.(fileVo)
+      })
   };
 
   /**

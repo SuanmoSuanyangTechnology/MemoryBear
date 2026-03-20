@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:41 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 14:30:41
+ * @Last Modified time: 2026-03-18 20:57:24
  */
 import { type FC, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -71,7 +71,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
   }
   const handleExport = () => {
     if (!selectedVersion) return
-    appExport(data.id, data.name, {release_version: selectedVersion.id})
+    appExport(data.id, data.name, { release_id: selectedVersion.id})
   }
   return (
     <div className="rb:flex rb:h-[calc(100vh-64px)]">
@@ -132,7 +132,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                 {data?.type !== 'multi_agent' && <Button onClick={handleExport}>{t('common.export')}</Button>}
                 {data.current_release_id !== selectedVersion.id && <Button onClick={handleRollback}>{t('application.willRollToThisVersion')}</Button>}
                 <Button type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</Button>
-                <Button type="primary" ghost onClick={() => appSharingModalRef.current?.handleOpen()}>{t('application.sharing')}</Button>
+                {data?.type !== 'multi_agent' && <Button type="primary" ghost onClick={() => appSharingModalRef.current?.handleOpen()}>{t('application.sharing')}</Button>}
               </>}
               <Button type="primary" onClick={() => releaseModalRef.current?.handleOpen()}>{t('application.release')}</Button>
             </Space>

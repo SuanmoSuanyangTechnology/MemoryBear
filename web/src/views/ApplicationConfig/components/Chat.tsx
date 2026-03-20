@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 15:27:57
+ * @Last Modified time: 2026-03-18 20:52:33
  */
 /**
  * Chat debugging component for application testing
@@ -92,7 +92,9 @@ const Chat: FC<ChatProps> = ({
       role: 'user',
       content: message,
       created_at: Date.now(),
-      files
+      meta_data: {
+        files
+      },
     };
     updateChatList(prev => prev.map(item => ({
       ...item,
@@ -142,7 +144,7 @@ const Chat: FC<ChatProps> = ({
               {
                 ...lastMsg,
                 content: lastMsg.content + (content || ''),
-                audioUrl: audio_url
+                meta_data: { audio_url }
               }
             ]
           }
@@ -189,7 +191,7 @@ const Chat: FC<ChatProps> = ({
       .then(() => {
         const message = msg
         if (!message?.trim()) return
-        const files = toolbarRef.current?.getFiles() || []
+        const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
         // Validate required variables before sending
         let isCanSend = true
         const params: Record<string, any> = {}
@@ -350,7 +352,7 @@ const Chat: FC<ChatProps> = ({
       .then(() => {
         const message = msg
         if (!message || message.trim() === '') return
-        const files = toolbarRef.current?.getFiles() || []
+        const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
         addUserMessage(message, files)
         setMessage(undefined)
         toolbarRef.current?.setFiles([])

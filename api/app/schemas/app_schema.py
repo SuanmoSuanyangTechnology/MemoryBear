@@ -139,28 +139,36 @@ class FileUploadConfig(BaseModel):
     image_enabled: bool = Field(default=False)
     image_max_size_mb: int = Field(default=20)
     image_allowed_extensions: List[str] = Field(
-        default=["png", "jpg", "jpeg", "gif", "webp"]
+        default=["png", "jpg", "jpeg"]
     )
     # 语音文件：MP3/WAV/M4A/OGG/FLAC，最大 50MB
     audio_enabled: bool = Field(default=False)
     audio_max_size_mb: int = Field(default=50)
     audio_allowed_extensions: List[str] = Field(
-        default=["mp3", "wav", "m4a", "ogg", "flac"]
+        default=["mp3", "wav", "m4a"]
     )
     # 通用文件：PDF/DOCX/XLSX/TXT/CSV/JSON，最大 100MB
     document_enabled: bool = Field(default=False)
-    document_max_size_mb: int = Field(default=100)
+    document_max_size_mb: int = Field(default=50)
     document_allowed_extensions: List[str] = Field(
-        default=["pdf", "docx", "xlsx", "txt", "csv", "json"]
+        default=["pdf", "docx", "doc", "xlsx", "xls", "txt", "csv", "json", "md"]
     )
     # 视频文件：MP4/MOV/AVI/WebM，最大 500MB
     video_enabled: bool = Field(default=False)
-    video_max_size_mb: int = Field(default=500)
+    video_max_size_mb: int = Field(default=50)
     video_allowed_extensions: List[str] = Field(
-        default=["mp4", "mov", "avi", "webm"]
+        default=["mp4"]
     )
     # 最大文件数量
-    max_file_count: int = Field(default=5, ge=1, le=20)
+    max_file_count: int = Field(default=5, ge=1)
+
+    @field_validator("max_file_count")
+    @classmethod
+    def validate_max_file_count(cls, v: int) -> int:
+        from app.core.config import settings
+        if v > settings.MAX_FILE_COUNT:
+            raise ValueError(f"max_file_count 不能超过 {settings.MAX_FILE_COUNT}")
+        return v
 
 
 class OpeningStatementConfig(BaseModel):

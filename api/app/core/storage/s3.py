@@ -5,8 +5,9 @@ This module provides a storage backend that stores files on AWS S3
 using the boto3 SDK.
 """
 
+import io
 import logging
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError, BotoCoreError
@@ -174,6 +175,62 @@ class S3Storage(StorageBackend):
                 cause=e,
             )
 
+    async def upload_stream(
+        self,
+        file_key: str,
+        stream: AsyncIterator[bytes],
+        content_type: Optional[str] = None,
+    ) -> int:
+        """Upload from async stream to S3 via multipart upload. Returns total bytes written."""
+        extra_args = {"ContentType": content_type} if content_type else {}
+        mpu = self.client.create_multipart_upload(
+            Bucket=self.bucket_name, Key=file_key, **extra_args
+        )
+        upload_id = mpu["UploadId"]
+        parts = []
+        part_number = 1
+        buf = io.BytesIO()
+        total = 0
+        min_part_size = 5 * 1024 * 1024  # S3 最小分片 5MB
+        try:
+            async for chunk in stream:
+                buf.write(chunk)
+                total += len(chunk)
+                if buf.tell() >= min_part_size:
+                    buf.seek(0)
+                    resp = self.client.upload_part(
+                        Bucket=self.bucket_name, Key=file_key,
+                        UploadId=upload_id, PartNumber=part_number, Body=buf.read()
+                    )
+                    parts.append({"PartNumber": part_number, "ETag": resp["ETag"]})
+                    part_number += 1
+                    buf = io.BytesIO()
+            # 上传剩余数据（最后一片可小于 5MB）
+            remaining = buf.getvalue()
+            if remaining:
+                resp = self.client.upload_part(
+                    Bucket=self.bucket_name, Key=file_key,
+                    UploadId=upload_id, PartNumber=part_number, Body=remaining
+                )
+                parts.append({"PartNumber": part_number, "ETag": resp["ETag"]})
+            self.client.complete_multipart_upload(
+                Bucket=self.bucket_name, Key=file_key,
+                UploadId=upload_id,
+                MultipartUpload={"Parts": parts}
+            )
+            logger.info(f"File stream uploaded to S3 successfully: {file_key}")
+            return total
+        except Exception as e:
+            self.client.abort_multipart_upload(
+                Bucket=self.bucket_name, Key=file_key, UploadId=upload_id
+            )
+            logger.error(f"Failed to stream upload file to S3 {file_key}: {e}")
+            raise StorageUploadError(
+                message=f"Failed to stream upload file to S3: {e}",
+                file_key=file_key,
+                cause=e,
+            )
+
     async def download(self, file_key: str) -> bytes:
         """
         Download a file from S3.
@@ -321,3 +378,12 @@ class S3Storage(StorageBackend):
             logger.error(f"Failed to generate presigned URL for {file_key}: {e}")
             # Return a basic URL format as fallback
             return f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{file_key}"
+
+    async def get_permanent_url(self, file_key: str) -> str:
+        """
+        Get a permanent public URL for the file (requires bucket public read).
+
+        Returns:
+            A permanent URL in the format: https://{bucket}.s3.{region}.amazonaws.com/{file_key}
+        """
+        return f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{file_key}"

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 10:50:33
+ * @Last Modified time: 2026-03-18 21:00:12
  */
 /**
  * Application Management Page
@@ -143,7 +143,7 @@ const ApplicationManagement: React.FC = () => {
               <Form.Item name="type" noStyle>
                 <Select
                   placeholder={t('application.applicationType')}
-                  options={types.map((type) => ({
+                  options={(activeTab === 'sharing' ? types.filter(type => type !== 'multi_agent') : types).map((type) => ({
                     value: type,
                     label: t(`application.${type}`),
                   }))}
@@ -185,6 +185,7 @@ const ApplicationManagement: React.FC = () => {
         <PageScrollList<Application, Query>
           ref={scrollListRef}
           url={getApplicationListUrl}
+          needLoading={false}
           query={{ ...query, shared_only: activeTab === 'sharing', include_shared: activeTab !== 'apps' }}
           renderItem={(item) => (
             <RbCard

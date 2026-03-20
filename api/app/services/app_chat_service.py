@@ -24,6 +24,7 @@ from app.services.model_service import ModelApiKeyService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
 from app.services.multimodal_service import MultimodalService
 from app.services.workflow_service import WorkflowService
+from app.schemas import FileType
 
 logger = get_business_logger()
 
@@ -123,7 +124,7 @@ class AppChatService:
             limit=10
         )
         history = [
-            {"role": msg.role, "content": msg.content}
+            {"role": msg.role, "content": [{"type": "text", "text": msg.content}] + (msg.meta_data.get("files", []) if msg.meta_data else [])}
             for msg in messages
         ]
 
@@ -156,20 +157,6 @@ class AppChatService:
             files=processed_files  # 传递处理后的文件
         )
 
-        # 保存消息
-        message_id = self.conversation_service.save_conversation_messages(
-            conversation_id=conversation_id,
-            user_message=message,
-            assistant_message=result["content"],
-            meta_data={
-                "usage": result.get("usage", {
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0
-                })
-            }
-        )
-
         ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
 
         elapsed_time = time.time() - start_time
@@ -190,6 +177,35 @@ class AppChatService:
              "api_base": api_key_obj.api_base, "provider": api_key_obj.provider},
             tenant_id=tenant_id, workspace_id=workspace_id
         )
+
+        # 构建用户消息内容（含多模态文件）
+        human_meta = {
+            "files": []
+        }
+        assistant_meta = {
+            "model": api_key_obj.model_name,
+            "usage": result.get("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}),
+            "audio_url": None
+        }
+        if processed_files:
+            human_meta["files"].extend(processed_files)
+
+        # 保存消息
+        if audio_url:
+            assistant_meta["audio_url"] = audio_url
+        self.conversation_service.add_message(
+            conversation_id=conversation_id,
+            role="user",
+            content=message,
+            meta_data=human_meta
+        )
+        ai_message = self.conversation_service.add_message(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=result["content"],
+            meta_data=assistant_meta
+        )
+        message_id = ai_message.id
 
         return {
             "conversation_id": conversation_id,
@@ -301,7 +317,7 @@ class AppChatService:
                     limit=memory_config.get("max_history", 10)
                 )
                 history = [
-                    {"role": msg.role, "content": msg.content}
+                    {"role": msg.role, "content": [{"type": "text", "text": msg.content}] + (msg.meta_data.get("files", []) if msg.meta_data else [])}
                     for msg in messages
                 ]
 
@@ -321,9 +337,17 @@ class AppChatService:
                 processed_files = await multimodal_service.process_files(user_id, files)
                 logger.info(f"处理了 {len(processed_files)} 个文件")
 
-            # 流式调用 Agent（支持多模态）
+            # 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
             total_tokens = 0
+
+            text_queue: asyncio.Queue = asyncio.Queue()
+            stream_audio_url, tts_task = await self.agent_service._generate_tts_streaming(
+                features_config, api_key_obj,
+                text_queue=text_queue,
+                tenant_id=tenant_id, workspace_id=workspace_id
+            )
+
             async for chunk in agent.chat_stream(
                     message=message,
                     history=history,
@@ -333,35 +357,20 @@ class AppChatService:
                     user_rag_memory_id=user_rag_memory_id,
                     config_id=config_id,
                     memory_flag=memory_flag,
-                    files=processed_files  # 传递处理后的文件
+                    files=processed_files
             ):
                 if isinstance(chunk, int):
                     total_tokens = chunk
                 else:
                     full_content += chunk
-                    # 发送消息块事件
                     yield f"event: message\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+                    if tts_task is not None:
+                        await text_queue.put(chunk)
+
+            if tts_task is not None:
+                await text_queue.put(None)
 
             elapsed_time = time.time() - start_time
-
-            # 保存消息
-            self.conversation_service.add_message(
-                conversation_id=conversation_id,
-                role="user",
-                content=message
-            )
-
-            self.conversation_service.add_message(
-                message_id=message_id,
-                conversation_id=conversation_id,
-                role="assistant",
-                content=full_content,
-                meta_data={
-                    "model": api_key_obj.model_name,
-                    "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens}
-                }
-            )
-
             ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
 
             # 发送结束事件（包含 suggested_questions、tts、citations）
@@ -373,13 +382,37 @@ class AppChatService:
                     {"model_name": api_key_obj.model_name, "api_key": api_key_obj.api_key,
                      "api_base": api_key_obj.api_base}, {}
                 )
-            end_data["audio_url"] = await self.agent_service._generate_tts(
-                features_config, full_content,
-                {"model_name": api_key_obj.model_name, "api_key": api_key_obj.api_key,
-                 "api_base": api_key_obj.api_base, "provider": api_key_obj.provider},
-                tenant_id=tenant_id, workspace_id=workspace_id
-            )
+            end_data["audio_url"] = stream_audio_url
             end_data["citations"] = self.agent_service._filter_citations(features_config, [])
+
+            # 保存消息
+            human_meta = {
+                "files":[]
+            }
+            assistant_meta = {
+                "model": api_key_obj.model_name,
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                "audio_url": None
+            }
+
+            if processed_files:
+                human_meta["files"].extend(processed_files)
+
+            if stream_audio_url:
+                assistant_meta["audio_url"] = stream_audio_url
+            self.conversation_service.add_message(
+                conversation_id=conversation_id,
+                role="user",
+                content=message,
+                meta_data=human_meta
+            )
+            self.conversation_service.add_message(
+                message_id=message_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=full_content,
+                meta_data=assistant_meta
+            )
             yield f"event: end\ndata: {json.dumps(end_data, ensure_ascii=False)}\n\n"
 
             logger.info(
@@ -585,6 +618,7 @@ class AppChatService:
             app_id: uuid.UUID,
             release_id: uuid.UUID,
             workspace_id: uuid.UUID,
+            files: Optional[List[FileInput]] = None,
             user_id: Optional[str] = None,
             variables: Optional[Dict[str, Any]] = None,
             web_search: bool = False,
@@ -598,7 +632,8 @@ class AppChatService:
             variables=variables,
             conversation_id=str(conversation_id),
             stream=True,
-            user_id=user_id
+            user_id=user_id,
+            files=files
         )
         return await self.workflow_service.run(
             app_id=app_id,

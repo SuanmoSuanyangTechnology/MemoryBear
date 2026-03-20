@@ -90,27 +90,27 @@ class ConversationRepository:
             self,
             user_id: uuid.UUID,
             workspace_id: uuid.UUID = None,
-            limit: int = 10,
-            is_activate: bool = True
-    ) -> list[Conversation]:
+            is_activate: bool = True,
+            page: int = 1,
+            page_size: int = 20
+    ) -> tuple[list[Conversation], int]:
         """
-        Retrieve recent conversations for a specific user.
+        Retrieve recent conversations for a specific user with pagination.
 
         This method queries conversations associated with the given user ID,
         optionally scoped to a specific workspace. Results are ordered by the
-        most recently updated conversations and limited to a fixed number.
+        most recently updated conversations.
 
         Args:
             user_id (uuid.UUID): Unique identifier of the user.
             workspace_id (uuid.UUID, optional): Workspace scope for the query.
                 If provided, only conversations under this workspace will be returned.
-            limit (int): Maximum number of conversations to return.
-                Defaults to 10.
-            is_activate (bool): Convsersation State limit
+            is_activate (bool): Conversation State limit.
+            page (int): Page number (1-based). Defaults to 1.
+            page_size (int): Number of items per page. Defaults to 20.
 
         Returns:
-            list[Conversation]: A list of conversation entities ordered by
-            last updated time (descending).
+            tuple[list[Conversation], int]: A list of conversation entities and total count.
         """
         logger.info(f"Fetching conversation by user_id: {user_id}")
 
@@ -122,18 +122,25 @@ class ConversationRepository:
         if workspace_id:
             stmt = stmt.where(Conversation.workspace_id == workspace_id)
 
-        stmt = stmt.order_by(desc(Conversation.updated_at))
-        stmt = stmt.limit(limit)
+        # Calculate total count
+        total = int(self.db.execute(
+            select(func.count()).select_from(stmt.subquery())
+        ).scalar_one())
 
-        convsersations = list(self.db.scalars(stmt).all())
+        # Apply ordering and pagination
+        stmt = stmt.order_by(desc(Conversation.updated_at))
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+
+        conversations = list(self.db.scalars(stmt).all())
         logger.info(
             "Conversation fetched successfully",
             extra={
                 "user_id": str(user_id),
                 "workspace_id": str(workspace_id),
+                "total": total,
             }
         )
-        return convsersations
+        return conversations, total
 
     def list_conversations(
             self,

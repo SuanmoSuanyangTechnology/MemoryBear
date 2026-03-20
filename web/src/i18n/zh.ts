@@ -1093,6 +1093,7 @@ export const zh = {
       nameInvalid: '不能是空格开头或结尾',
       notAllSpaces: '不能是纯空格',
       view: '查看',
+      callbackUrlInvalid: '请输入有效的 URL',
     },
     model: {
       searchPlaceholder: '搜索模型…',
@@ -1562,6 +1563,7 @@ export const zh = {
       summary: '摘要',
       core_entities: '核心实体',
       communityDetailEmptyDesc: '点击左侧图表中的社区查看详情',
+      communityLoadingTip: '社区图谱生成中',
     },
     space: {
       createSpace: '创建空间',
