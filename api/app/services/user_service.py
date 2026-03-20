@@ -78,18 +78,7 @@ def create_user(db: Session, user: UserCreate) -> User:
     business_logger.info(f"创建用户: {user.username}, email: {user.email}")
     
     try:
-        # 检查用户名是否已存在
-        business_logger.debug(f"检查用户名是否已存在: {user.username}")
-        db_user_by_username = user_repository.get_user_by_username(db, username=user.username)
-        if db_user_by_username:
-            business_logger.warning(f"用户名已存在: {user.username}")
-            raise BusinessException(
-                "用户名已存在", 
-                code=BizCode.DUPLICATE_NAME,
-                context={"username": user.username, "email": user.email}
-            )
-        
-        # 检查邮箱是否已注册
+        # 检查邮箱是否已注册（邮箱保持唯一）
         business_logger.debug(f"检查邮箱是否已注册: {user.email}")
         db_user_by_email = user_repository.get_user_by_email(db, email=user.email)
         if db_user_by_email:
@@ -164,22 +153,7 @@ def create_superuser(db: Session, user: UserCreate, current_user: User) -> User:
         )
     
     try:
-        # 检查用户名是否已存在
-        business_logger.debug(f"检查用户名是否已存在: {user.username}")
-        db_user_by_username = user_repository.get_user_by_username(db, username=user.username)
-        if db_user_by_username:
-            business_logger.warning(f"用户名已存在: {user.username}")
-            raise BusinessException(
-                "用户名已存在", 
-                code=BizCode.DUPLICATE_NAME,
-                context={
-                    "username": user.username,
-                    "email": user.email,
-                    "created_by": str(current_user.id)
-                }
-            )
-        
-        # 检查邮箱是否已注册
+        # 检查邮箱是否已注册（邮箱保持唯一）
         business_logger.debug(f"检查邮箱是否已注册: {user.email}")
         db_user_by_email = user_repository.get_user_by_email(db, email=user.email)
         if db_user_by_email:
