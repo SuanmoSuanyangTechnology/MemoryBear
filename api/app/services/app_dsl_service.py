@@ -271,6 +271,7 @@ class AppDslService:
                 variables=cfg.get("variables", []),
                 tools=self._resolve_tools(cfg.get("tools", []), tenant_id, warnings),
                 skills=self._resolve_skills(cfg.get("skills", {}), tenant_id, warnings),
+                features=cfg.get("features", {}),
                 is_active=True,
                 created_at=now,
                 updated_at=now,
@@ -311,6 +312,7 @@ class AppDslService:
                 edges=[e.model_dump() for e in result.edges],
                 variables=[v.model_dump() for v in result.variables],
                 execution_config=wf.get("execution_config", {}),
+                features=wf.get("features", {}),
                 triggers=wf.get("triggers", []),
                 validate=False,
             )
