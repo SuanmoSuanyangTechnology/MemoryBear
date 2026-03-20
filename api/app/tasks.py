@@ -1073,9 +1073,15 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
 
 
 @celery_app.task(name="app.core.memory.agent.write_message", bind=True)
-def write_message_task(self, end_user_id: str, message: list[dict], config_id: str | int, storage_type: str,
-                       user_rag_memory_id: str,
-                       language: str = "zh") -> Dict[str, Any]:
+def write_message_task(
+        self,
+        end_user_id: str,
+        message: list[dict],
+        config_id: str | int,
+        storage_type: str,
+        user_rag_memory_id: str,
+        language: str = "zh"
+) -> Dict[str, Any]:
     """Celery task to process a write message via MemoryAgentService.
     Args:
         end_user_id: Group ID for the memory agent (also used as end_user_id)
@@ -1105,14 +1111,11 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
         try:
             with get_db_context() as db:
                 actual_config_id = resolve_config_id(config_id, db)
-            print(100 * '-')
-            print(actual_config_id)
-            print(100 * '-')
-            logger.info(
-                f"[CELERY WRITE] Converted config_id to UUID: {actual_config_id} (type: {type(actual_config_id).__name__})")
+            logger.info(f"[CELERY WRITE] Converted config_id to UUID: {actual_config_id} "
+                        f"(type: {type(actual_config_id).__name__})")
         except (ValueError, AttributeError) as e:
-            logger.error(
-                f"[CELERY WRITE] Invalid config_id format: {config_id} (type: {type(config_id).__name__}), error: {e}")
+            logger.error(f"[CELERY WRITE] Invalid config_id format: {config_id} "
+                         f"(type: {type(config_id).__name__}), error: {e}")
             return {
                 "status": "FAILURE",
                 "error": f"Invalid config_id format: {config_id} - {str(e)}",
@@ -1151,8 +1154,8 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
         result = loop.run_until_complete(_run())
         elapsed_time = time.time() - start_time
 
-        logger.info(
-            f"[CELERY WRITE] Task completed successfully - elapsed_time={elapsed_time:.2f}s, task_id={self.request.id}")
+        logger.info(f"[CELERY WRITE] Task completed successfully "
+                    f"- elapsed_time={elapsed_time:.2f}s, task_id={self.request.id}")
 
         # 记录该用户最后一次 write_message 成功的时间，供时间轴筛选使用
         try:
@@ -1167,7 +1170,6 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
                 )
         except Exception as _e:
             logger.warning(f"[CELERY WRITE] 写入 last_done 时间戳失败（不影响主流程）: {_e}")
-
         return {
             "status": "SUCCESS",
             "result": result,
@@ -2672,7 +2674,7 @@ def write_perceptual_memory(
     ignore_result=False,
     max_retries=0,
     acks_late=False,
-    time_limit=7200,   # 2小时硬超时
+    time_limit=7200,  # 2小时硬超时
     soft_time_limit=6900,
 )
 def init_community_clustering_for_users(self, end_user_ids: List[str], workspace_id: Optional[str] = None) -> Dict[str, Any]:
@@ -2787,7 +2789,8 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
                         embedding_model_id=embedding_model_id,
                     )
 
-                    logger.info(f"[CommunityCluster] 用户 {end_user_id} 有 {len(entities)} 个实体，开始全量聚类，llm_model_id={llm_model_id}")
+                    logger.info(
+                        f"[CommunityCluster] 用户 {end_user_id} 有 {len(entities)} 个实体，开始全量聚类，llm_model_id={llm_model_id}")
                     await engine.full_clustering(end_user_id)
                     initialized += 1
                     logger.info(f"[CommunityCluster] 用户 {end_user_id} 聚类完成")
@@ -2810,12 +2813,6 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
         }
 
     try:
-        try:
-            import nest_asyncio
-            nest_asyncio.apply()
-        except ImportError:
-            pass
-
         loop = set_asyncio_event_loop()
         result = loop.run_until_complete(_run())
         result["elapsed_time"] = time.time() - start_time
