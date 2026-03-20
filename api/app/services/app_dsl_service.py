@@ -110,6 +110,7 @@ class AppDslService:
                 "nodes": config.nodes if config else [],
                 "execution_config": config.execution_config if config else {},
                 "triggers": config.triggers if config else [],
+                "features": config.features if config else {},
             } if config else {}
             dsl = {**meta, "app": app_meta, "workflow": config_data}
 
@@ -124,6 +125,7 @@ class AppDslService:
                 "variables": config.variables if config else [],
                 "tools": self._enrich_tools(config.tools) if config else [],
                 "skills": config.skills if config else {},
+                "features": config.features if config else {},
             } if config else {}
             dsl = {**meta, "app": app_meta, "agent_config": config_data}
 
@@ -250,6 +252,7 @@ class AppDslService:
                 variables=cfg.get("variables", []),
                 tools=self._resolve_tools(cfg.get("tools", []), tenant_id, warnings),
                 skills=cfg.get("skills", {}),
+                features=cfg.get("features", {}),
                 is_active=True,
                 created_at=now,
                 updated_at=now,
@@ -291,6 +294,7 @@ class AppDslService:
                 variables=[v.model_dump() for v in result.variables],
                 execution_config=wf.get("execution_config", {}),
                 triggers=wf.get("triggers", []),
+                features=wf.get("features", {}),
                 validate=False,
             )
 

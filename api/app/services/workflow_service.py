@@ -56,6 +56,7 @@ class WorkflowService:
             variables: list[dict[str, Any]] | None = None,
             execution_config: dict[str, Any] | None = None,
             triggers: list[dict[str, Any]] | None = None,
+            features: dict[str, Any] | None = None,
             validate: bool = True
     ) -> WorkflowConfig:
         """创建工作流配置
@@ -101,7 +102,8 @@ class WorkflowService:
             edges=edges,
             variables=variables,
             execution_config=execution_config,
-            triggers=triggers
+            triggers=triggers,
+            features=features
         )
 
         logger.info(f"创建工作流配置成功: app_id={app_id}, config_id={config.id}")

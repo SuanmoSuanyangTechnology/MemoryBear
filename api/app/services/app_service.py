@@ -796,7 +796,8 @@ class AppService:
         try:
             # 获取源应用
             source_app = self._get_app_or_404(app_id)
-            self._validate_app_accessible(source_app, workspace_id)
+            # 只读共享不允许复制，需要可编辑权限或本空间应用
+            self._validate_app_writable(source_app, workspace_id)
 
             # 确定目标工作空间
             target_workspace_id = workspace_id or source_app.workspace_id
@@ -840,12 +841,17 @@ class AppService:
                 if not target_ws:
                     raise ResourceNotFoundException("工作空间", str(target_workspace_id))
                 target_tenant_id = target_ws.tenant_id
+                source_ws = self.db.get(Workspace, source_app.workspace_id)
+                source_tenant_id = source_ws.tenant_id if source_ws else None
+            else:
+                source_tenant_id = None
 
             # 如果是 agent 类型，复制 AgentConfig
             if source_app.type == AppType.AGENT:
                 source_config = self.db.query(AgentConfig).filter(
-                    AgentConfig.app_id == source_app.id
-                ).first()
+                    AgentConfig.app_id == source_app.id,
+                    AgentConfig.is_active.is_(True)
+                ).order_by(AgentConfig.updated_at.desc()).first()
 
                 if source_config:
                     if is_cross_workspace:
@@ -867,10 +873,17 @@ class AppService:
                         new_tools = self._clean_tools(
                             source_config.tools, available_kb_ids
                         )
+                        # 同 tenant 跨空间时 skill_ids 仍可用；跨 tenant 时清空
+                        if source_tenant_id and source_tenant_id == target_tenant_id:
+                            new_skills = copy.deepcopy(source_config.skills) if source_config.skills else {}
+                        else:
+                            s = source_config.skills or {}
+                            new_skills = {"enabled": s.get("enabled", False), "skill_ids": [], "all_skills": False}
                     else:
                         new_model_config_id = source_config.default_model_config_id
                         new_knowledge_retrieval = copy.deepcopy(source_config.knowledge_retrieval) if source_config.knowledge_retrieval else None
                         new_tools = copy.deepcopy(source_config.tools) if source_config.tools else []
+                        new_skills = copy.deepcopy(source_config.skills) if source_config.skills else {}
 
                     new_config = AgentConfig(
                         id=uuid.uuid4(),
@@ -882,7 +895,7 @@ class AppService:
                         memory=copy.deepcopy(source_config.memory) if source_config.memory else None,
                         variables=copy.deepcopy(source_config.variables) if source_config.variables else [],
                         tools=new_tools,
-                        skills=copy.deepcopy(source_config.skills) if source_config.skills else {},
+                        skills=new_skills,
                         features=copy.deepcopy(source_config.features) if source_config.features else {},
                         is_active=True,
                         created_at=now,
@@ -892,8 +905,9 @@ class AppService:
 
             elif source_app.type == AppType.WORKFLOW:
                 source_config = self.db.query(WorkflowConfig).filter(
-                    WorkflowConfig.app_id == source_app.id
-                ).first()
+                    WorkflowConfig.app_id == source_app.id,
+                    WorkflowConfig.is_active.is_(True)
+                ).order_by(WorkflowConfig.updated_at.desc()).first()
 
                 if source_config:
                     if is_cross_workspace:

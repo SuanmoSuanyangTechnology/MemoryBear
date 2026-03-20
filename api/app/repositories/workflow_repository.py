@@ -43,7 +43,8 @@ class WorkflowConfigRepository:
         edges: list[dict[str, Any]],
         variables: list[dict[str, Any]] | None = None,
         execution_config: dict[str, Any] | None = None,
-        triggers: list[dict[str, Any]] | None = None
+        triggers: list[dict[str, Any]] | None = None,
+        features: dict[str, Any] | None = None
     ) -> WorkflowConfig:
         """创建或更新工作流配置
         
@@ -71,6 +72,8 @@ class WorkflowConfigRepository:
                 existing.execution_config = execution_config
             if triggers is not None:
                 existing.triggers = triggers
+            if features is not None:
+                existing.features = features
             self.db.commit()
             self.db.refresh(existing)
             return existing
@@ -82,7 +85,8 @@ class WorkflowConfigRepository:
                 edges=edges,
                 variables=variables or [],
                 execution_config=execution_config or {},
-                triggers=triggers or []
+                triggers=triggers or [],
+                features=features or {}
             )
             self.db.add(config)
             self.db.commit()
