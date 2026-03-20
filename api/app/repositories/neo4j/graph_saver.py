@@ -304,7 +304,6 @@ async def save_dialog_and_statements_to_neo4j(
 
 def schedule_clustering_after_write(
     entity_nodes: List,
-    config_id: Optional[str] = None,
     llm_model_id: Optional[str] = None,
     embedding_model_id: Optional[str] = None,
 ) -> None:
@@ -325,13 +324,12 @@ def schedule_clustering_after_write(
     end_user_id = entity_nodes[0].end_user_id
     new_entity_ids = [e.id for e in entity_nodes]
     logger.info(f"[Clustering] 准备触发聚类，实体数: {len(new_entity_ids)}, end_user_id: {end_user_id}")
-    asyncio.create_task(_trigger_clustering(new_entity_ids, end_user_id, config_id=config_id, llm_model_id=llm_model_id, embedding_model_id=embedding_model_id))
+    asyncio.create_task(_trigger_clustering(new_entity_ids, end_user_id, llm_model_id=llm_model_id, embedding_model_id=embedding_model_id))
 
 
 async def _trigger_clustering(
     new_entity_ids: List[str],
     end_user_id: str,
-    config_id: Optional[str] = None,
     llm_model_id: Optional[str] = None,
     embedding_model_id: Optional[str] = None,
 ) -> None:
@@ -343,7 +341,7 @@ async def _trigger_clustering(
         from app.core.memory.storage_services.clustering_engine import LabelPropagationEngine
         logger.info(f"[Clustering] 开始聚类，end_user_id={end_user_id}, 实体数={len(new_entity_ids)}")
         connector = Neo4jConnector()
-        engine = LabelPropagationEngine(connector, config_id=config_id, llm_model_id=llm_model_id, embedding_model_id=embedding_model_id)
+        engine = LabelPropagationEngine(connector, llm_model_id=llm_model_id, embedding_model_id=embedding_model_id)
         await engine.run(end_user_id=end_user_id, new_entity_ids=new_entity_ids)
         logger.info(f"[Clustering] 聚类完成，end_user_id={end_user_id}")
     except Exception as e:

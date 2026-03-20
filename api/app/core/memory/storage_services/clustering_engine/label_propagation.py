@@ -69,13 +69,11 @@ class LabelPropagationEngine:
     def __init__(
         self,
         connector: Neo4jConnector,
-        config_id: Optional[str] = None,
         llm_model_id: Optional[str] = None,
         embedding_model_id: Optional[str] = None,
     ):
         self.connector = connector
         self.repo = CommunityRepository(connector)
-        self.config_id = config_id
         self.llm_model_id = llm_model_id
         self.embedding_model_id = embedding_model_id
 
