@@ -227,7 +227,8 @@ class EmbeddingGenerator:
 
         # 打印前几个嵌入向量的维度
         for i in range(min(5, len(embeddings))):
-            print(f"实体 '{entity_texts[i]}' 嵌入向量维度: {len(embeddings[i])}")
+            print(f"实体 '{entity_texts[i]}' "
+                  f"嵌入向量维度: {len(embeddings[i])}")
 
         # 将嵌入向量赋值给实体
         for ent, emb in zip(entity_refs, embeddings):
