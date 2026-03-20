@@ -43,6 +43,7 @@ class WorkflowConfigRepository:
         edges: list[dict[str, Any]],
         variables: list[dict[str, Any]] | None = None,
         execution_config: dict[str, Any] | None = None,
+        features: dict[str, Any] | None = None,
         triggers: list[dict[str, Any]] | None = None
     ) -> WorkflowConfig:
         """创建或更新工作流配置
@@ -53,6 +54,7 @@ class WorkflowConfigRepository:
             edges: 边列表
             variables: 变量列表
             execution_config: 执行配置
+            features: 功能特性
             triggers: 触发器列表
         
         Returns:
@@ -82,6 +84,7 @@ class WorkflowConfigRepository:
                 edges=edges,
                 variables=variables or [],
                 execution_config=execution_config or {},
+                features=features or {},
                 triggers=triggers or []
             )
             self.db.add(config)

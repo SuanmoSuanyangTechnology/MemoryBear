@@ -16,6 +16,7 @@ from app.models.app_release_model import AppRelease
 from app.models.knowledge_model import Knowledge
 from app.models.models_model import ModelConfig
 from app.models.tool_model import ToolConfig as ToolConfigModel
+from app.models.skill_model import Skill
 from app.models.workflow_model import WorkflowConfig
 from app.services.workflow_service import WorkflowService
 from app.core.workflow.adapters.memory_bear.memory_bear_adapter import MemoryBearAdapter
@@ -84,7 +85,9 @@ class AppDslService:
             if "knowledge_retrieval" in cfg:
                 enriched["knowledge_retrieval"] = self._enrich_knowledge_retrieval(cfg["knowledge_retrieval"])
             if "tools" in cfg:
-                enriched["tools"] = self._enrich_tools(cfg["tools"])
+                enriched["tools"] = self._enrich_tools(cfg.get("tools"))
+            if "skills" in cfg:
+                enriched["skills"] = self._enrich_skills(cfg.get("skills"))
             return enriched
         if app_type == AppType.MULTI_AGENT:
             enriched = {**cfg}
@@ -108,6 +111,7 @@ class AppDslService:
                 "variables": config.variables if config else [],
                 "edges": config.edges if config else [],
                 "nodes": config.nodes if config else [],
+                "features": config.features if config else {},
                 "execution_config": config.execution_config if config else {},
                 "triggers": config.triggers if config else [],
             } if config else {}
@@ -123,7 +127,8 @@ class AppDslService:
                 "memory": config.memory if config else None,
                 "variables": config.variables if config else [],
                 "tools": self._enrich_tools(config.tools) if config else [],
-                "skills": config.skills if config else {},
+                "skills": self._enrich_skills(config.skills) if config else {},
+                "features": config.features if config else {}
             } if config else {}
             dsl = {**meta, "app": app_meta, "agent_config": config_data}
 
@@ -184,6 +189,22 @@ class AppDslService:
 
     def _enrich_tools(self, tools: list) -> list:
         return [{**t, "_ref": self._tool_ref(t.get("tool_id"))} for t in (tools or [])]
+
+    def _skill_ref(self, skill_id) -> Optional[dict]:
+        if not skill_id:
+            return None
+        s = self.db.query(Skill).filter(Skill.id == skill_id).first()
+        return {"id": str(skill_id), "name": s.name} if s else {"id": str(skill_id)}
+
+    def _enrich_skills(self, skills: Optional[dict]) -> Optional[dict]:
+        if not skills:
+            return skills
+        skill_ids = skills.get("skill_ids", [])
+        enriched_ids = [
+            {"id": sid, "_ref": self._skill_ref(sid)}
+            for sid in (skill_ids or [])
+        ]
+        return {**skills, "skill_ids": enriched_ids}
 
     def _agent_ref(self, agent_id) -> Optional[dict]:
         if not agent_id:
@@ -249,7 +270,8 @@ class AppDslService:
                 memory=self._resolve_memory(cfg.get("memory"), workspace_id, warnings),
                 variables=cfg.get("variables", []),
                 tools=self._resolve_tools(cfg.get("tools", []), tenant_id, warnings),
-                skills=cfg.get("skills", {}),
+                skills=self._resolve_skills(cfg.get("skills", {}), tenant_id, warnings),
+                features=cfg.get("features", {}),
                 is_active=True,
                 created_at=now,
                 updated_at=now,
@@ -290,6 +312,7 @@ class AppDslService:
                 edges=[e.model_dump() for e in result.edges],
                 variables=[v.model_dump() for v in result.variables],
                 execution_config=wf.get("execution_config", {}),
+                features=wf.get("features", {}),
                 triggers=wf.get("triggers", []),
                 validate=False,
             )
@@ -443,6 +466,46 @@ class AppDslService:
             warnings.append(f"记忆配置 '{config_id}' 未匹配，已置空，请导入后手动配置")
             return {**memory, "memory_config_id": None, "enabled": False}
         return memory
+
+    def _resolve_skills(self, skills: Optional[dict], tenant_id: uuid.UUID, warnings: list) -> dict:
+        if not skills:
+            return skills or {}
+        resolved_ids = []
+        for entry in (skills.get("skill_ids") or []):
+            # entry 可能是 {"id": "...", "_ref": {...}} 或直接是字符串
+            if isinstance(entry, dict):
+                ref = entry.get("_ref") or ({"name": None, "id": entry.get("id")} if entry.get("id") else None)
+                skill_id = self._resolve_skill(ref, tenant_id, warnings)
+            else:
+                skill_id = self._resolve_skill({"id": str(entry)}, tenant_id, warnings)
+            if skill_id:
+                resolved_ids.append(str(skill_id))
+        return {**{k: v for k, v in skills.items() if k != "skill_ids"}, "skill_ids": resolved_ids}
+
+    def _resolve_skill(self, ref: Optional[dict], tenant_id: uuid.UUID, warnings: list) -> Optional[str]:
+        if not ref:
+            return None
+        # 先按 id 匹配
+        if ref.get("id"):
+            try:
+                s = self.db.query(Skill).filter(
+                    Skill.id == uuid.UUID(str(ref["id"])),
+                    Skill.tenant_id == tenant_id
+                ).first()
+                if s:
+                    return str(s.id)
+            except Exception:
+                pass
+        # 再按名称匹配
+        if ref.get("name"):
+            s = self.db.query(Skill).filter(
+                Skill.name == ref["name"],
+                Skill.tenant_id == tenant_id
+            ).first()
+            if s:
+                return str(s.id)
+        warnings.append(f"未找到技能: {ref}")
+        return None
 
     def _resolve_tools(self, tools: list, tenant_id: uuid.UUID, warnings: list) -> list:
         result = []

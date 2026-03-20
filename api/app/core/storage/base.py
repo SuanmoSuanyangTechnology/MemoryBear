@@ -121,3 +121,18 @@ class StorageBackend(ABC):
             URL for accessing the file.
         """
         pass
+
+    async def get_permanent_url(self, file_key: str) -> Optional[str]:
+        """
+        Get a permanent public URL for the file (no expiration).
+
+        Returns None by default; remote storage backends should override this
+        if the bucket is configured for public read access.
+
+        Args:
+            file_key: Unique identifier for the file in the storage system.
+
+        Returns:
+            A permanent public URL, or None if not supported.
+        """
+        return None
