@@ -409,7 +409,9 @@ async def execute_workflow(
         input_data: dict[str, Any],
         execution_id: str,
         workspace_id: str,
-        user_id: str
+        user_id: str,
+        memory_storage_type: str,
+        user_rag_memory_id: str
 ) -> dict[str, Any]:
     """
     Execute a workflow (convenience function, non-streaming).
@@ -420,6 +422,8 @@ async def execute_workflow(
         execution_id (str): Execution ID.
         workspace_id (str): Workspace ID.
         user_id (str): User ID.
+        user_rag_memory_id: rag knowledge db id
+        memory_storage_type: neo4j / rag
 
     Returns:
         dict: Workflow execution result.
@@ -427,7 +431,9 @@ async def execute_workflow(
     execution_context = ExecutionContext.create(
         execution_id=execution_id,
         workspace_id=workspace_id,
-        user_id=user_id
+        user_id=user_id,
+        memory_storage_type=memory_storage_type,
+        user_rag_memory_id=user_rag_memory_id
     )
     executor = WorkflowExecutor(
         workflow_config=workflow_config,
@@ -441,7 +447,9 @@ async def execute_workflow_stream(
         input_data: dict[str, Any],
         execution_id: str,
         workspace_id: str,
-        user_id: str
+        user_id: str,
+        memory_storage_type: str,
+        user_rag_memory_id: str
 ):
     """
     Execute a workflow in streaming mode (convenience function).
@@ -452,6 +460,8 @@ async def execute_workflow_stream(
         execution_id (str): Execution ID.
         workspace_id (str): Workspace ID.
         user_id (str): User ID.
+        user_rag_memory_id: rag knowledge db id
+        memory_storage_type: neo4j / rag
 
     Yields:
         dict: Streaming workflow events, e.g. node start, node end, chunk messages, workflow end.
@@ -459,7 +469,9 @@ async def execute_workflow_stream(
     execution_context = ExecutionContext.create(
         execution_id=execution_id,
         workspace_id=workspace_id,
-        user_id=user_id
+        user_id=user_id,
+        memory_storage_type=memory_storage_type,
+        user_rag_memory_id=user_rag_memory_id
     )
     executor = WorkflowExecutor(
         workflow_config=workflow_config,

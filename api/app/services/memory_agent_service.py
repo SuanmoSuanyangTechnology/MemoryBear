@@ -267,8 +267,16 @@ class MemoryAgentService:
             logger.info("Log streaming completed, cleaning up resources")
             # LogStreamer uses context manager for file handling, so cleanup is automatic
 
-    async def write_memory(self, end_user_id: str, messages: list[dict], config_id: Optional[uuid.UUID] | int,
-                           db: Session, storage_type: str, user_rag_memory_id: str, language: str = "zh") -> str:
+    async def write_memory(
+            self,
+            end_user_id: str,
+            messages: list[dict],
+            config_id: Optional[uuid.UUID] | int,
+            db: Session,
+            storage_type: str,
+            user_rag_memory_id: str,
+            language: str = "zh"
+    ) -> str:
         """
         Process write operation with config_id
 
@@ -297,8 +305,8 @@ class MemoryAgentService:
                 config_id = connected_config.get("memory_config_id")
             logger.info(f"Resolved config from end_user: config_id={config_id}, workspace_id={workspace_id}")
             if config_id is None and workspace_id is None:
-                raise ValueError(
-                    f"No memory configuration found for end_user {end_user_id}. Please ensure the user has a connected memory configuration.")
+                raise ValueError(f"No memory configuration found for end_user {end_user_id}. "
+                                 f"Please ensure the user has a connected memory configuration.")
         except Exception as e:
             if "No memory configuration found" in str(e):
                 raise  # Re-raise our specific error
@@ -338,8 +346,8 @@ class MemoryAgentService:
             if storage_type == "rag":
                 # For RAG storage, convert messages to single string
                 message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
-                result = await write_rag(end_user_id, message_text, user_rag_memory_id)
-                return result
+                await write_rag(end_user_id, message_text, user_rag_memory_id)
+                return "success"
             else:
                 async with make_write_graph() as graph:
                     config = {"configurable": {"thread_id": end_user_id}}

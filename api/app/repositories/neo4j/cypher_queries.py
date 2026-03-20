@@ -709,7 +709,6 @@ SET r.end_user_id = e.end_user_id,
 RETURN elementId(r) AS uuid
 """
 
-
 # Entity Merge Query
 MERGE_ENTITIES = """
 MATCH (canonical:ExtractedEntity {id: $canonical_id})
@@ -829,9 +828,8 @@ neo4j_query_all = """
                 other as entity2
                           """
 
-
 '''针对当前节点下扩长的句子，实体和总结'''
-Memory_Timeline_ExtractedEntity="""
+Memory_Timeline_ExtractedEntity = """
 MATCH (n)-[r1]-(e)-[r2]-(ms)
 WHERE elementId(n) = $id
   AND (ms:ExtractedEntity OR ms:MemorySummary)
@@ -869,7 +867,7 @@ RETURN
 
 
 """
-Memory_Timeline_MemorySummary=""" 
+Memory_Timeline_MemorySummary = """ 
 MATCH (n)-[r1]-(e)-[r2]-(ms)
 WHERE elementId(n) =$id
   AND (ms:MemorySummary OR ms:ExtractedEntity)
@@ -904,7 +902,7 @@ RETURN
     }
   ) AS statement;
 """
-Memory_Timeline_Statement="""
+Memory_Timeline_Statement = """
 MATCH (n)
 WHERE elementId(n) = $id
 
@@ -947,7 +945,7 @@ RETURN
 """
 
 '''针对当前节点，主要获取更加完整的句子节点'''
-Memory_Space_Emotion_Statement="""
+Memory_Space_Emotion_Statement = """
 MATCH (n)
 WHERE elementId(n) = $id
 RETURN
@@ -957,7 +955,7 @@ RETURN
   n.statement         AS statement;
 
 """
-Memory_Space_Emotion_MemorySummary="""
+Memory_Space_Emotion_MemorySummary = """
 MATCH (n)-[]-(e)
 WHERE elementId(n) = $id
   AND EXISTS {
@@ -970,7 +968,7 @@ RETURN DISTINCT
   e.emotion_type      AS emotion_type,
   e.statement         AS statement;
 """
-Memory_Space_Emotion_ExtractedEntity="""
+Memory_Space_Emotion_ExtractedEntity = """
 MATCH (n)-[]-(e)
 WHERE elementId(n) = $id
   AND EXISTS {
@@ -985,18 +983,18 @@ RETURN DISTINCT
 
 '''获取实体'''
 
-Memory_Space_User="""
+Memory_Space_User = """
 MATCH (n)-[r]->(m)
 WHERE n.end_user_id = $end_user_id  AND m.name="用户" 
 return DISTINCT elementId(m) as id
 """
-Memory_Space_Entity="""
+Memory_Space_Entity = """
 MATCH (n)-[]-(m)
 WHERE elementId(m) = $id AND  m.entity_type = "Person"
 RETURN
 DISTINCT m.name as name,m.end_user_id as end_user_id
 """
-Memory_Space_Associative="""
+Memory_Space_Associative = """
 MATCH (u)-[]-(x)-[]-(h)
 WHERE elementId(u) = $user_id
   AND elementId(h) = $id
@@ -1059,7 +1057,6 @@ Graph_Node_query = """
                 LIMIT $limit
 
             """
-
 
 # ============================================================
 # Community 节点 & BELONGS_TO_COMMUNITY 边
