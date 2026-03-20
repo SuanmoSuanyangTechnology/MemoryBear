@@ -158,7 +158,7 @@ class LoopRuntime:
         self.variable_pool.variables["conv"].update(
             self.child_variable_pool.variables["conv"]
         )
-        loop_vars = self.child_variable_pool.get_node_output(self.node_id, defalut={}, strict=False)
+        loop_vars = self.child_variable_pool.get_node_output(self.node_id, default={}, strict=False)
         loopstate["node_outputs"][self.node_id] = loop_vars
 
     def evaluate_conditional(self) -> bool:
@@ -261,4 +261,4 @@ class LoopRuntime:
             idx += 1
 
         logger.info(f"loop node {self.node_id}: execution completed")
-        return self.child_variable_pool.get_node_output(self.node_id) | {"__child_state": child_state}
+        return self.child_variable_pool.get_node_output(self.node_id, default={}, strict=False) | {"__child_state": child_state}
