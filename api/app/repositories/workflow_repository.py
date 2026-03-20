@@ -84,7 +84,7 @@ class WorkflowConfigRepository:
                 edges=edges,
                 variables=variables or [],
                 execution_config=execution_config or {},
-                feaeatures=features or {},
+                features=features or {},
                 triggers=triggers or []
             )
             self.db.add(config)
