@@ -312,6 +312,7 @@ class AppDslService:
                 edges=[e.model_dump() for e in result.edges],
                 variables=[v.model_dump() for v in result.variables],
                 execution_config=wf.get("execution_config", {}),
+                features=wf.get("features", {}),
                 triggers=wf.get("triggers", []),
                 features=wf.get("features", {}),
                 validate=False,

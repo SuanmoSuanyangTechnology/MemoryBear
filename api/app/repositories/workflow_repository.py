@@ -54,6 +54,7 @@ class WorkflowConfigRepository:
             edges: 边列表
             variables: 变量列表
             execution_config: 执行配置
+            features: 功能特性
             triggers: 触发器列表
         
         Returns:
