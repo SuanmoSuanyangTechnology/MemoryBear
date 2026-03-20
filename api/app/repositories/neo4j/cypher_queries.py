@@ -1146,7 +1146,8 @@ GET_COMMUNITY_RELATIONSHIPS = """
 MATCH (e1:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community {community_id: $community_id})
 MATCH (e2:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c)
 MATCH (e1)-[r:EXTRACTED_RELATIONSHIP]->(e2)
-RETURN e1.name AS subject, r.predicate AS predicate, e2.name AS object, r.statement AS statement
+RETURN e1.name AS subject, r.predicate AS predicate, e2.name AS object
+ORDER BY e1.name, r.predicate, e2.name
 LIMIT 20
 """
 
