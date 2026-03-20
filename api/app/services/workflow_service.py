@@ -25,7 +25,7 @@ from app.repositories.workflow_repository import (
     WorkflowExecutionRepository,
     WorkflowNodeExecutionRepository
 )
-from app.schemas import DraftRunRequest, FileInput, FileType
+from app.schemas import DraftRunRequest, FileInput
 from app.services.conversation_service import ConversationService
 from app.services.multi_agent_service import convert_uuids_to_str
 from app.services.multimodal_service import MultimodalService
