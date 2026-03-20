@@ -360,13 +360,13 @@ class AppChatService:
 
                 # 处理 meta_data 中的 files
                 if msg.meta_data and msg.meta_data.get("files"):
-                    files = msg.meta_data.get("files", [])
+                    history_files = msg.meta_data.get("files", [])
                     # 使用 MultimodalService 处理文件
                     multimodal_service = MultimodalService(self.db, api_config=model_info)
 
                     # 将 files 转换为 FileInput 格式
                     file_inputs = []
-                    for file in files:
+                    for file in history_files:
                         from app.schemas.app_schema import FileInput, TransferMethod
                         file_input = FileInput(
                             type=file.get("type"),
