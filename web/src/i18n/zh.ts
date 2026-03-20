@@ -1799,6 +1799,8 @@ export const zh = {
       chatTitle: '记忆熊空间',
       memoryCancelTipTitle: '确定关闭对话记忆功能吗？关闭后对话将不会保存到记忆库中',
       memoryTipTitle: '确定打开对话记忆功能吗？打开后对话将会保存到记忆库中',
+      stopAudioRecorder: '停止录音',
+      startAudioRecorder: '开始录音',
     },
     login: {
       title: '红熊记忆科学',

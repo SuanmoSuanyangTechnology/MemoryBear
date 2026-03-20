@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 20:46:45
+ * @Last Modified time: 2026-03-20 15:39:33
  */
 import { type FC, useEffect, useMemo, useState } from 'react'
 import { Flex, Input, Form } from 'antd'
@@ -77,85 +77,95 @@ const ChatInput: FC<ChatInputProps> = ({
 
   return (
     <div className={`rb:absolute rb:bottom-3 rb:left-0 rb:right-0 rb:w-full ${className}`}>
-      <Flex vertical justify="space-between" className={clsx("rb-border rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)] rb:rounded-3xl rb:min-h-30", {
+      <Flex gap={0} vertical justify="space-between" className={clsx("rb-border rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)] rb:rounded-3xl rb:min-h-30", {
         ' rb:border-[#171719]!': isFocus
       })}>
-        {previewFileList.length > 0 && <div className="rb:overflow-x-auto rb:max-w-full"><Flex gap={14} className="rb:mx-3! rb:mt-3! rb:w-max!">
-          {previewFileList.map((file) => {
-            if (file.type.includes('image')) {
+        {previewFileList.length > 0 && <div className="rb:overflow-x-auto rb:max-w-full">
+          <Flex gap={14} className="rb:mx-3! rb:mt-3! rb:w-max! rb:mb-2!">
+            {previewFileList.map((file) => {
+              if (file.type.includes('image')) {
+                return (
+                  <div key={file.url || file.uid} className="rb:inline-block rb:group rb:relative rb:rounded-lg rb:bg-[#F6F6F6] rb:border rb:border-[#F6F6F6]">
+                    <img src={file.url} alt={file.name} className="rb:size-12! rb:rounded-lg rb:object-cover" />
+                    <div
+                      className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')]"
+                      onClick={() => handleDelete(file)}
+                    ></div>
+                  </div>
+                )
+              }
+              if (file.type.includes('video')) {
+                return (
+                  <div key={file.url || file.uid} className="rb:w-45 rb:h-12 rb:inline-block rb:group rb:relative rb:rounded-lg rb:border rb:border-[#F6F6F6]">
+                    <video src={file.url} controls className="rb:w-45 rb:h-12 rb:rounded-lg rb:object-cover" />
+                    <div
+                      className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')]"
+                      onClick={() => handleDelete(file)}
+                    ></div>
+                  </div>
+                )
+              }
+              if (file.type.includes('audio')) {
+                return (
+                  <div key={file.url || file.uid} className="rb:w-45 rb:h-12 rb:inline-flex rb:items-center rb:group rb:relative rb:rounded-lg rb:bg-[#F6F6F6] rb:py-2 rb:px-2.5 rb:gap-2 rb:border rb:border-[#F6F6F6]">
+                    <audio src={file.url} controls className="rb:w-45 rb:h-12" />
+                    <div
+                      className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')]"
+                      onClick={() => handleDelete(file)}
+                    ></div>
+                  </div>
+                )
+              }
               return (
-                <div key={file.url || file.uid} className="rb:inline-block rb:group rb:relative rb:rounded-lg">
-                  <img src={file.url} alt={file.name} className="rb:size-12! rb:rounded-lg rb:object-cover rb:cursor-pointer" />
+                <Flex
+                  key={file.url || file.uid}
+                  align="center"
+                  gap={10}
+                  className="rb:w-45 rb:text-[12px] rb:group rb:relative rb:rounded-lg rb:bg-[#F6F6F6] rb:py-2! rb:px-2.5! rb:border rb:border-[#F6F6F6]"
+                >
                   <div
-                    className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')] rb:hover:bg-[url('@/assets/images/conversation/delete_hover.svg')]"
+                    className={clsx(
+                      "rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/pdf_disabled.svg')]", 
+                      file.type.includes('pdf')
+                      ? "rb:bg-[url('src/assets/images/file/pdf.svg')]"
+                      : (file.type.includes('excel') || file.type.includes('spreadsheetml.sheet'))
+                      ? "rb:bg-[url('src/assets/images/file/excel.svg')]"
+                      : file.type.includes('csv')
+                      ? "rb:bg-[url('src/assets/images/file/csv.svg')]"
+                      : file.type.includes('html')
+                      ? "rb:bg-[url('src/assets/images/file/html.svg')]"
+                      : file.type.includes('json')
+                      ? "rb:bg-[url('src/assets/images/file/json.svg')]"
+                      : file.type.includes('ppt')
+                      ? "rb:bg-[url('src/assets/images/file/ppt.svg')]"
+                      : file.type.includes('text')
+                      ? "rb:bg-[url('src/assets/images/file/txt.svg')]"
+                      : file.type.includes('markdown')
+                      ? "rb:bg-[url('src/assets/images/file/md.svg')]"
+                      : (file.type.includes('doc') || file.type.includes('docx') || file.type.includes('word') || file.type.includes('wordprocessingml.document'))
+                      ? "rb:bg-[url('src/assets/images/file/word.svg')]"
+                      : null
+                    )}
+                  ></div>
+                  <div className="rb:flex-1 rb:w-32.5">
+                    <div className="rb:leading-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.name}</div>
+                    <div className="rb:leading-3.5 rb:mt-0.5 rb:text-[#5B6167] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.type.split('/')[file.type.split('/').length - 1]} · {file.size}</div>
+                  </div>
+                  <div
+                    className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')]"
                     onClick={() => handleDelete(file)}
                   ></div>
-                </div>
+                </Flex>
               )
-            }
-            if (file.type.includes('video')) {
-              return (
-                <div key={file.url || file.uid} className="rb:w-45 rb:h-16 rb:inline-block rb:group rb:relative rb:rounded-lg">
-                  <video src={file.url} controls className="rb:w-45 rb:h-16 rb:rounded-lg rb:object-cover rb:cursor-pointer" />
-                  <div
-                    className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')] rb:hover:bg-[url('@/assets/images/conversation/delete_hover.svg')]"
-                    onClick={() => handleDelete(file)}
-                  ></div>
-                </div>
-              )
-            }
-            if (file.type.includes('audio')) {
-              return (
-                <div key={file.url || file.uid} className="rb:w-45 rb:h-16 rb:inline-flex rb:items-center rb:group rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:py-2 rb:px-2.5 rb:gap-2">
-                  <audio src={file.url} controls className="rb:w-45 rb:h-16" />
-                  <div
-                    className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')] rb:hover:bg-[url('@/assets/images/conversation/delete_hover.svg')]"
-                    onClick={() => handleDelete(file)}
-                  ></div>
-                </div>
-              )
-            }
-            return (
-              <Flex
-                key={file.url || file.uid}
-                align="center"
-                gap={10}
-                className="rb:w-45 rb:text-[12px] rb:group rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:py-2! rb:px-2.5!"
-              >
-                {file.type.includes('pdf')
-                  ? <div
-                    className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/pdf_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/pdf.svg')]"
-                  ></div>
-                  : (file.type.includes('excel') || file.type.includes('spreadsheetml.sheet') || file.type.includes('csv'))
-                  ? <div
-                    className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/excel_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/excel.svg')]"
-                  ></div>
-                  : (file.type.includes('doc') || file.type.includes('docx') || file.type.includes('word') || file.type.includes('wordprocessingml.document'))
-                  ? <div
-                    className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/word_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/word.svg')]"
-                  ></div>
-                  : null
-                }
-                <div className="rb:flex-1 rb:w-32.5">
-                  <div className="rb:leading-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.name}</div>
-                  <div className="rb:leading-3.5 rb:mt-0.5 rb:text-[#5B6167] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.type} · {file.size}</div>
-                </div>
-                <div
-                  className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')] rb:hover:bg-[url('@/assets/images/conversation/delete_hover.svg')]"
-                  onClick={() => handleDelete(file)}
-                ></div>
-              </Flex>
-            )
-          })}
-        </Flex>
+            })}
+          </Flex>
         </div>}
         {/* Message input form */}
         <Form form={form} layout="vertical">
           <Form.Item name="message" noStyle>
             <Input.TextArea
-              className="rb:m-[10px_12px_10px_12px]! rb:p-0! rb:w-[calc(100%-24px)]! rb:flex-[1_1_auto]"
+              className="rb:m-[10px_12px_10px_12px]! rb:p-0! rb:w-[calc(100%-24px)]! rb:flex-[1_1_auto] rb:h-15! rb:resize-none! rb:rounded-none!"
               variant="borderless"
-              autoSize={{ minRows: 2, maxRows: 2 }}
               onChange={(e) => onChange?.(e.target.value)}
               onKeyDown={(e) => {
                 // Enter to send, Shift+Enter for new line
@@ -171,17 +181,21 @@ const ChatInput: FC<ChatInputProps> = ({
         </Form>
 
         {/* Bottom action area */}
-        <Flex align="center" justify="space-between" className="rb:mx-2.5! rb:mt-0! rb:mb-2.5!">
+        <Flex align="center" justify="space-between" gap={8} className="rb:mx-2.5! rb:mb-2.5!">
           {/* Child component content (such as buttons) */}
           <div className="rb:flex-1">{children}</div>
-          <Flex align="center">
-            {/* Send button - display different icons based on state */}
-            {loading
-              ? <div className="rb:size-7 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/loading.svg')]"></div>
-              : !values || !values?.message || values?.message?.trim() === ''
-                ? <div className="rb:size-7 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/sendDisabled.svg')]"></div>
-                : <div className="rb:size-7 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/send.svg')]" onClick={handleSend}></div>
-            }
+          <Flex align="center" justify="center"
+            className={clsx('rb:size-7 rb:rounded-full rb:shadow-[0px 2px 12px 0px rgba(23,23,25,0.1)]', {
+              'rb:cursor-not-allowed rb:bg-[#F6F6F6]': loading || !values || !values?.message || values?.message?.trim() === '',
+              'rb:cursor-pointer rb:bg-[#171719]': !loading && !(!values || !values?.message || values?.message?.trim() === '')
+            })}
+            onClick={handleSend}
+          >
+            <div className={clsx("rb:size-4 rb:bg-cover", {
+              "rb:bg-[url('@/assets/images/conversation/loading.svg')]": loading,
+              "rb:bg-[url('@/assets/images/conversation/sendDisabled.svg')]": !loading && (!values || !values?.message || values?.message?.trim() === ''),
+              "rb:bg-[url('@/assets/images/conversation/send.svg')]": !loading && !(!values || !values?.message || values?.message?.trim() === '')
+            })}></div>
           </Flex>
         </Flex>
       </Flex>

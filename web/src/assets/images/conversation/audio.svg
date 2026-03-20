@@ -1,17 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-    <title>编组 15</title>
-    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
-        <g id="红熊空间-记忆对话-默认对话" transform="translate(-745, -726)" stroke="#212332">
-            <g id="聊天页面" transform="translate(258, 128)">
-                <g id="输入框" transform="translate(16, 512)">
-                    <g id="编组-7" transform="translate(471, 86)">
-                        <g id="语音" transform="translate(4, 4)">
-                            <g id="编组-8" transform="translate(4, 2.25)">
-                                <line x1="4" y1="9" x2="4" y2="11.0054105" id="路径-46"></line>
-                                <line x1="2" y1="11.0054105" x2="5.995474" y2="11.0054105" id="路径-48" stroke-linecap="round"></line>
-                                <rect id="矩形" x="2" y="0" width="4" height="7" rx="2"></rect>
-                                <path d="M8,4 L8,5 C8,7.209139 6.209139,9 4,9 C1.790861,9 0,7.209139 0,5 L0,4" id="路径" stroke-linecap="round" stroke-linejoin="round"></path>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>语音</title>
+    <defs>
+        <filter x="-2.6%" y="-14.2%" width="105.3%" height="131.7%" filterUnits="objectBoundingBox" id="filter-1">
+            <feOffset dx="0" dy="2" in="SourceAlpha" result="shadowOffsetOuter1"></feOffset>
+            <feGaussianBlur stdDeviation="6" in="shadowOffsetOuter1" result="shadowBlurOuter1"></feGaussianBlur>
+            <feColorMatrix values="0 0 0 0 0.0901960784   0 0 0 0 0.0901960784   0 0 0 0 0.0980392157  0 0 0 0.12 0" type="matrix" in="shadowBlurOuter1" result="shadowMatrixOuter1"></feColorMatrix>
+            <feMerge>
+                <feMergeNode in="shadowMatrixOuter1"></feMergeNode>
+                <feMergeNode in="SourceGraphic"></feMergeNode>
+            </feMerge>
+        </filter>
+    </defs>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="多模态对话" transform="translate(-1181, -742)" stroke="#171719" stroke-width="1.1">
+            <g id="输入框" filter="url(#filter-1)" transform="translate(540, 656)">
+                <g id="编组-18" transform="translate(485, 80)">
+                    <g id="编组-10" transform="translate(150, 0)">
+                        <g id="编组-15" transform="translate(6, 6)">
+                            <g id="编组-8" transform="translate(4, 2)">
+                                <line x1="4" y1="9.38688799" x2="4" y2="11.4785062" id="路径-46"></line>
+                                <line x1="2" y1="11.4785062" x2="5.995474" y2="11.4785062" id="路径-48" stroke-linecap="round"></line>
+                                <rect id="矩形" x="2" y="0" width="4" height="7.30091288" rx="2"></rect>
+                                <path d="M8,4.17195022 L8,5.21493777 C8,7.51904225 6.209139,9.38688799 4,9.38688799 C1.790861,9.38688799 0,7.51904225 0,5.21493777 L0,4.17195022" id="路径" stroke-linecap="round" stroke-linejoin="round"></path>
                             </g>
                         </g>
                     </g>

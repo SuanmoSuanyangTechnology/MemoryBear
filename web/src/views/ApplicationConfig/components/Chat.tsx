@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 11:38:45
+ * @Last Modified time: 2026-03-20 15:40:44
  */
 /**
  * Chat debugging component for application testing
@@ -14,8 +14,7 @@ import { type FC, useEffect, useState, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom'
 import clsx from 'clsx'
-import { App, Flex } from 'antd';
-import { SettingOutlined } from '@ant-design/icons'
+import { App, Flex, Tooltip } from 'antd';
 
 import ChatIcon from '@/assets/images/application/chat.png'
 import DebuggingEmpty from '@/assets/images/application/debuggingEmpty.png'
@@ -84,7 +83,7 @@ const Chat: FC<ChatProps> = ({
     setIsCluster(source === 'multi_agent')
     toolbarRef.current?.setFiles([])
     setMessage(undefined)
-  }, [source])
+  }, [source, toolbarRef.current])
 
   /** Add user message to all chat lists */
   const addUserMessage = (message: string, files: any[]) => {
@@ -428,7 +427,7 @@ const Chat: FC<ChatProps> = ({
     updateChatList(chatList.filter((_, voIndex) => voIndex !== index))
   }
   const isHasLabel = useMemo(() => chatList.some(item => item.label), [chatList])
-
+  const isNeedVariableConfig = useMemo(() => chatVariables?.some(vo => vo.required && !vo.value), [chatVariables])
   return (
     <Flex vertical className="rb:relative rb:h-full">
       {chatList.length === 0
@@ -461,9 +460,11 @@ const Chat: FC<ChatProps> = ({
                 <ChatContent
                   classNames={{
                     'rb:mb-3 rb:mt-5': isHasLabel,
-                    'rb:mb-3': !isHasLabel,
-                    'rb:h-[calc(100vh-292px)]': isCluster,
-                    'rb:h-[calc(100vh-353px)]': !isCluster,
+                    'rb:mb-0!': !isHasLabel,
+                    'rb:h-[calc(100vh-297px)]': isCluster && (!fileList || fileList.length === 0),
+                    'rb:h-[calc(100vh-365px)]': !isCluster && (!fileList || fileList.length === 0),
+                    'rb:h-[calc(100vh-362px)]': isCluster && fileList?.length > 0,
+                    'rb:h-[calc(100vh-433px)]': !isCluster && fileList?.length > 0,
                     "rb:pr-4": index !== chatList.length - 1 && chatList.length > 1,
                     "rb:pl-4": index !== 0 && chatList.length > 1,
                   }} 
@@ -492,10 +493,10 @@ const Chat: FC<ChatProps> = ({
               </Flex>
             ))}
           </div>
-          <div className="rb:relative rb:flex rb:items-center rb:gap-2.5 rb:mt-4 rb:mb-1">
+          <div className="rb:relative rb:flex rb:items-center rb:gap-2.5 rb:mt-4">
             <ChatInput
               message={message}
-              className="rb:relative!"
+              className="rb:relative! rb:bottom-0!"
               loading={loading}
               fileChange={(list) => {
                 setFileList(list || [])
@@ -509,19 +510,20 @@ const Chat: FC<ChatProps> = ({
                 ref={toolbarRef}
                 features={features}
                 onFilesChange={setFileList}
-                extra={
-                  chatVariables && chatVariables.length > 0 ? (
-                    <div
-                      className={clsx('rb:flex rb:items-center rb:border rb:rounded-lg rb:px-2 rb:text-[12px] rb:h-6 rb:cursor-pointer rb:hover:bg-[#F0F3F8] rb:text-[#212332]', {
-                        'rb:border-[#FF5D34] rb:text-[#FF5D34]': chatVariables.some(vo => vo.required && !vo.value),
-                        'rb:border-[#DFE4ED]': !chatVariables.some(vo => vo.required && !vo.value),
-                      })}
-                      onClick={handleEditVariables}
-                    >
-                      <SettingOutlined className="rb:mr-1" />
-                      {t('memoryConversation.variableConfig')}
-                    </div>
-                  ) : null
+                leftExtra={
+                  chatVariables && chatVariables.length > 0 ?(
+                    <Tooltip title={t('memoryConversation.variableConfig')}>
+                      <Flex justify="center" align="center"
+                        className={clsx("rb:size-7 rb:border rb:cursor-pointer rb:hover:bg-[#F6F6F6] rb:rounded-full rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]", {
+                          'rb:border-[#FF5D34]': isNeedVariableConfig,
+                          'rb:border-[#EBEBEB]': !isNeedVariableConfig,
+                        })}
+                        onClick={handleEditVariables}
+                      >
+                        <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/conversation/variables.svg')]" />
+                      </Flex>
+                    </Tooltip>
+                  ): null
                 }
               />
             </ChatInput>

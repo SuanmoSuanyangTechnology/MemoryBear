@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:00 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 11:45:16
+ * @Last Modified time: 2026-03-20 12:14:43
  */
 /**
  * Relationship Network Component
@@ -13,8 +13,9 @@
 import React, { type FC, useEffect, useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Space, Tabs, Flex, Divider } from 'antd'
+import { Space, Flex, Divider, type SegmentedProps } from 'antd'
 import dayjs from 'dayjs'
+import clsx from 'clsx'
 
 import RbCard from '@/components/RbCard/Card'
 import type { GraphData, StatementNodeProperties, ExtractedEntityNodeProperties } from '../types'
@@ -25,6 +26,7 @@ import {
 import Tag from '@/components/Tag'
 import GraphNetworkChart, { type Node, type Edge } from '@/components/Charts/GraphNetworkChart'
 import CommunityNetwork from './CommunityNetwork'
+import PageTabs from '@/components/PageTabs'
 
 const RelationshipNetwork: FC = () => {
   const { t } = useTranslation()
@@ -35,7 +37,7 @@ const RelationshipNetwork: FC = () => {
   const [selectedNode, setSelectedNode] = useState<Node | RawCommunityNode | null>(null)
   // const [fullScreen, setFullScreen] = useState<boolean>(false)
   const navigate = useNavigate()
-  const [activeTab, setActiveTab] = useState('relationshipNetwork')
+  const [activeTab, setActiveTab] = useState<SegmentedProps['value']>('relationshipNetwork')
 
   console.log('categories', categories)
   const edgeAbortRef = useRef<AbortController | null>(null)
@@ -137,7 +139,7 @@ const RelationshipNetwork: FC = () => {
     })
     navigate(`/user-memory/detail/${id}/GRAPH?${params.toString()}`)
   }
-  const handleChangeTab = (tab: string) => {
+  const handleChangeTab = (tab: SegmentedProps['value']) => {
     if (tab === 'communityNetwork') {
       edgeAbortRef.current?.abort()
     } else {
@@ -149,14 +151,17 @@ const RelationshipNetwork: FC = () => {
 
   return (
     <div className="rb:flex-1 rb:relative">
-      <Tabs
-        activeKey={activeTab}
-        onChange={handleChangeTab}
-        items={['relationshipNetwork', 'communityNetwork'].map(key => ({
-          key,
-          label: t(`userMemory.${key}`)
-        }))}
-      />
+      <div className="rb:absolute rb:z-111 rb:bottom-10 rb:left-[calc(50%-96px)] rb:transition-transform-[translateX(-50%]">
+        <PageTabs
+          value={activeTab}
+          options={['relationshipNetwork', 'communityNetwork'].map(value => ({
+            value,
+            label: t(`userMemory.${value}`)
+          }))}
+          onChange={handleChangeTab}
+          className=""
+        />
+      </div>
       {activeTab === 'communityNetwork'
         ? <CommunityNetwork onSelectCommunity={community => setSelectedNode(community)} />
         : <GraphNetworkChart
@@ -174,12 +179,18 @@ const RelationshipNetwork: FC = () => {
           className="rb:absolute! rb:top-4 rb:right-0 rb:w-100! rb:bg-white!"
           headerType="borderless"
           headerClassName="rb:min-h-[60px]!"
-          bodyClassName='rb:px-5! rb:pb-[76px]! rb:pt-0! rb:h-auto!'
+          bodyClassName={clsx('rb:px-5! rb:pt-0! rb:h-auto!', {
+            'rb:pb-[76px]!': activeTab !== 'communityNetwork',
+            'rb:pb-3!': activeTab === 'communityNetwork',
+          })}
           extra={<div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/close.svg')]" onClick={() => setSelectedNode(null)}></div>}
         >
-          <div className="rb:max-h-[calc(100vh-269px)] rb:overflow-auto">
+          <div className={clsx("rb:max-h-[calc(100vh-269px)] rb:overflow-auto", {
+            'rb:max-h-[calc(100vh-269px)]': activeTab !== 'communityNetwork',
+            'rb:max-h-[calc(100vh-205px)]': activeTab == 'communityNetwork',
+          })}>
             {(selectedNode as RawCommunityNode).properties.community_id
-              ? <div className="rb:p-3 rb:pt-0">
+              ? <div>
                 <div className="rb:font-medium rb:text-[#212332] rb:text-[16px] rb:leading-5.5 rb:pl-1">
                   {(selectedNode as RawCommunityNode).properties.name}
                 </div>
@@ -274,9 +285,9 @@ const RelationshipNetwork: FC = () => {
               </>}
           </div>
 
-          <Flex align="center" justify="center" className="rb:absolute rb:bottom-3 rb:left-6 rb:right-6 rb:border rb:border-[#171719] rb:rounded-xl rb:h-11 rb:font-medium rb:leading-5 rb:cursor-pointer" onClick={handleViewAll}>
+          {activeTab !== 'communityNetwork' && <Flex align="center" justify="center" className="rb:absolute rb:bottom-3 rb:left-6 rb:right-6 rb:border rb:border-[#171719] rb:rounded-xl rb:h-11 rb:font-medium rb:leading-5 rb:cursor-pointer" onClick={handleViewAll}>
             {t('userMemory.completeMemory')}
-          </Flex>
+          </Flex>}
         </RbCard>
       }
     </div>

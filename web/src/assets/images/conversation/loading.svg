@@ -1,13 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg width="20px" height="20px" viewBox="0 0 20 20" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-    <title>编组 5</title>
-    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
-        <g id="红熊空间-记忆对话-交互-2" transform="translate(-558, -337)">
-            <g id="输入框" transform="translate(45, 180)">
-                <g id="编组-7" transform="translate(471, 155)">
-                    <g id="编组-5" transform="translate(42, 2)">
-                        <circle id="椭圆形" stroke="#212332" stroke-width="1.5" cx="10" cy="10" r="9.25"></circle>
-                        <rect id="矩形" fill="#212332" x="6.5" y="6.5" width="7" height="7" rx="2"></rect>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 14</title>
+    <defs>
+        <filter x="-3.4%" y="-9.4%" width="106.8%" height="121.1%" filterUnits="objectBoundingBox" id="filter-1">
+            <feOffset dx="0" dy="2" in="SourceAlpha" result="shadowOffsetOuter1"></feOffset>
+            <feGaussianBlur stdDeviation="6" in="shadowOffsetOuter1" result="shadowBlurOuter1"></feGaussianBlur>
+            <feColorMatrix values="0 0 0 0 0.0901960784   0 0 0 0 0.0901960784   0 0 0 0 0.0980392157  0 0 0 0.1 0" type="matrix" in="shadowBlurOuter1" result="shadowMatrixOuter1"></feColorMatrix>
+            <feMerge>
+                <feMergeNode in="shadowMatrixOuter1"></feMergeNode>
+                <feMergeNode in="SourceGraphic"></feMergeNode>
+            </feMerge>
+        </filter>
+    </defs>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="记忆验证-交互" transform="translate(-593, -349)">
+            <g id="输入框1" filter="url(#filter-1)" transform="translate(67, 203)">
+                <g id="编组-14" transform="translate(520, 140)">
+                    <g id="编组-5" transform="translate(6, 6)">
+                        <circle id="椭圆形" stroke="#171719" cx="8" cy="8" r="7.5"></circle>
+                        <rect id="矩形" fill="#171719" x="5" y="5" width="6" height="6" rx="2"></rect>
                     </g>
                 </g>
             </g>

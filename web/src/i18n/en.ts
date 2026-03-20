@@ -1803,6 +1803,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       chatTitle: 'Red Bear Space',
       memoryCancelTipTitle: 'Are you sure you want to disable conversation memory? Conversations will no longer be saved to the memory store.',
       memoryTipTitle: 'Are you sure you want to enable conversation memory? Conversations will be saved to the memory store.',
+      stopAudioRecorder: 'Stop Recording',
+      startAudioRecorder: 'Start Recording',
     },
     login: {
       title: 'Red Bear Memory Science',

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg width="28px" height="28px" viewBox="0 0 28 28" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-    <title>发送-2</title>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>发送-2@2x</title>
     <defs>
-        <filter x="-2.5%" y="-17.7%" width="105.0%" height="139.6%" filterUnits="objectBoundingBox" id="filter-1">
+        <filter x="-3.4%" y="-14.2%" width="106.8%" height="131.7%" filterUnits="objectBoundingBox" id="filter-1">
             <feOffset dx="0" dy="2" in="SourceAlpha" result="shadowOffsetOuter1"></feOffset>
             <feGaussianBlur stdDeviation="6" in="shadowOffsetOuter1" result="shadowBlurOuter1"></feGaussianBlur>
             <feColorMatrix values="0 0 0 0 0.0901960784   0 0 0 0 0.0901960784   0 0 0 0 0.0980392157  0 0 0 0.1 0" type="matrix" in="shadowBlurOuter1" result="shadowMatrixOuter1"></feColorMatrix>
@@ -12,15 +12,16 @@
             </feMerge>
         </filter>
     </defs>
-    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
-        <g id="应用管理-Agent-配置-3" transform="translate(-1374, -734)">
-            <g id="编组-12" transform="translate(632, 76)">
-                <g id="输入框" filter="url(#filter-1)" transform="translate(16, 600)">
-                    <g id="发送-2" transform="translate(726, 58)">
-                        <circle id="椭圆形" fill="#F6F6F6" cx="14" cy="14" r="14"></circle>
-                        <g id="编组-50" transform="translate(9.5455, 8.9091)" stroke="#A8A9AA" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
-                            <polyline id="路径" points="0 4.45454545 4.45454545 0 8.90909091 4.45454545"></polyline>
-                            <line x1="4.45454545" y1="0.442246469" x2="4.45454545" y2="11.2604283" id="路径-49"></line>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="记忆验证" transform="translate(-787, -742)" stroke="#A8A9AA" stroke-width="1.5">
+            <g id="编组-16" transform="translate(252, 108)">
+                <g id="输入框" filter="url(#filter-1)" transform="translate(11, 548)">
+                    <g id="发送-2" transform="translate(518, 80)">
+                        <g id="编组-50" transform="translate(6, 6)">
+                            <g id="编组-14" transform="translate(4, 3)">
+                                <polyline id="路径" points="0 4 4 0 8 4"></polyline>
+                                <line x1="4" y1="-1.65043138e-17" x2="4" y2="10" id="路径-49"></line>
+                            </g>
                         </g>
                     </g>
                 </g>

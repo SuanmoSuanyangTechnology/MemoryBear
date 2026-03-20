@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 21:32:05
+ * @Last Modified time: 2026-03-20 15:38:36
  */
 /**
  * Conversation Page
@@ -14,7 +14,7 @@ import { type FC, useState, useEffect, useRef } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import InfiniteScroll from 'react-infinite-scroll-component';
-import { Flex, Skeleton, App } from 'antd'
+import { Flex, Skeleton, App, Tooltip } from 'antd'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 
@@ -26,11 +26,6 @@ import { randomString } from '@/utils/common'
 import ChatEmpty from '@/assets/images/empty/chatEmpty.png'
 import Chat from '@/components/Chat'
 import type { ChatItem } from '@/components/Chat/types'
-import ButtonCheckbox from '@/components/ButtonCheckbox'
-import MemoryFunctionIcon from '@/assets/images/conversation/memoryFunction.svg'
-import OnlineIcon from '@/assets/images/conversation/online.svg'
-import OnlineCheckedIcon from '@/assets/images/conversation/onlineChecked.svg'
-import MemoryFunctionCheckedIcon from '@/assets/images/conversation/memoryFunctionChecked.svg'
 import { type SSEMessage } from '@/utils/stream'
 import { shareFileUploadUrlWithoutApiPrefix } from '@/api/fileStorage'
 import ChatToolbar, { type ChatToolbarRef } from '@/components/Chat/ChatToolbar'
@@ -284,8 +279,9 @@ const Conversation: FC = () => {
       })
   }
 
-  const handleChangeMemory = (value: boolean) => {
+  const handleChangeMemory = () => {
     if (config.app_type === 'workflow') return;
+    let value = !memory
     modal.confirm({
       title: value ? t('memoryConversation.memoryTipTitle') : t('memoryConversation.memoryCancelTipTitle'),
       okText: t('common.confirm'),
@@ -354,10 +350,10 @@ const Conversation: FC = () => {
       </div>
 
       <div className="rb:relative rb:h-screen rb:px-4 rb:flex-[1_1_auto]">
-        <div className='rb:w-190  rb:h-screen rb:mx-auto rb:pt-10'>
+        <div className='rb:w-190  rb:h-screen rb:mx-auto rb:pt-10 rb:pb-3'>
           <Chat
             empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
-            contentClassName={!fileList.length ? "rb:h-[calc(100%-144px)]" : "rb:h-[calc(100%-208px)]"}
+            contentClassName={!fileList.length ? "rb:h-[calc(100%-144px)] rb:w-full" : "rb:h-[calc(100%-208px)] rb:w-full"}
             data={chatList}
             streamLoading={streamLoading}
             loading={loading}
@@ -381,30 +377,43 @@ const Conversation: FC = () => {
                 Authorization: `Bearer ${shareToken || ''}`,
               }
             }}
-            extra={
-              <>
+            rightExtra={
+              <Flex align="center" justify="end" gap={8}>
                 {features?.web_search?.enabled &&
-                  <ButtonCheckbox
-                    icon={OnlineIcon}
-                    checkedIcon={OnlineCheckedIcon}
-                    checked={webSearch}
-                    onChange={setWebSearch}
-                  >
-                    {t('memoryConversation.web_search')}
-                  </ButtonCheckbox>
+                  <Tooltip title={t('memoryConversation.web_search')}>
+                    <Flex justify="center" align="center"
+                      className={clsx("rb:size-7 rb:border rb:cursor-pointer rb:hover:bg-[#F6F6F6] rb:rounded-full rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]", {
+                        'rb:bg-[rgba(21,94,239,0.06)] rb:border-[rgba(21,94,239,0.25)]': webSearch,
+                        'rb:border-[#EBEBEB]': !webSearch,
+                      })}
+                      onClick={() => setWebSearch(prev => !prev)}
+                    >
+                      <div className={clsx("rb:size-4 rb:bg-cover", {
+                        "rb:bg-[url('@/assets/images/conversation/online.svg')]": !webSearch,
+                        "rb:bg-[url('@/assets/images/conversation/onlineChecked.svg')]": webSearch
+                      })} />
+                    </Flex>
+                  </Tooltip>
                 }
                 {isHasMemory &&
-                  <ButtonCheckbox
-                    icon={MemoryFunctionIcon}
-                    checkedIcon={MemoryFunctionCheckedIcon}
-                    checked={memory}
-                    disabled={config.app_type === 'workflow'}
-                    onChange={handleChangeMemory}
-                  >
-                    {t('memoryConversation.memory')}
-                  </ButtonCheckbox>
+                  <Tooltip title={t('memoryConversation.memory')}>
+                    <Flex justify="center" align="center"
+                      className={clsx("rb:size-7 rb:border rb:hover:bg-[#F6F6F6] rb:rounded-full rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]", {
+                        'rb:bg-[rgba(21,94,239,0.06)] rb:border-[rgba(21,94,239,0.25)]': memory,
+                        'rb:border-[#EBEBEB]': !memory,
+                        'rb:cursor-pointer': config.app_type !== 'workflow',
+                        'rb:cursor-not-allowed rb:opacity-65': config.app_type === 'workflow',
+                      })}
+                      onClick={handleChangeMemory}
+                    >
+                      <div className={clsx("rb:size-4 rb:bg-cover", {
+                        "rb:bg-[url('@/assets/images/conversation/memoryFunction.svg')]": !memory,
+                        "rb:bg-[url('@/assets/images/conversation/memoryFunctionChecked.svg')]": memory
+                      })} />
+                    </Flex>
+                  </Tooltip>
                 }
-              </>
+              </Flex>
             }
           />
           </Chat>

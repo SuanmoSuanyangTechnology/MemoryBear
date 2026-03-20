@@ -1,5 +1,5 @@
 .page-tabs:global(.ant-segmented) {
-  background-color: rgba(91, 97, 103, 0.08);
+  background-color: #F6F6F6;
   padding: 4px;
 }
 .page-tabs:global(.ant-segmented .ant-segmented-item-label) {

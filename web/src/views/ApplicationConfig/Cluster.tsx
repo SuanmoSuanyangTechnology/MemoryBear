@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:33 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 21:03:01
+ * @Last Modified time: 2026-03-20 15:16:25
  */
 import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -197,7 +197,7 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
   return (
     <>
       {loading && <Spin fullscreen></Spin>}
-      <Row className="rb:h-[calc(100vh-88px)]" gutter={12}>
+      <Row className="rb:h-[calc(100vh-89px)]" gutter={12}>
         <Col span={12} className="rb:h-full rb:overflow-x-auto rb:border-r rb:border-[#DFE4ED]">
           <Form form={form} layout="vertical">
             <Flex gap={16} vertical>

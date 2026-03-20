@@ -3,7 +3,7 @@ import type { CommunityD3Node, D3Link, HullDatum, CommunityGraphData, RawCommuni
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
 
-export const GRAPH_COLORS = ['#155EEF', '#369F21', '#4DA8FF', '#FF5D34', '#9C6FFF', '#FF8A4C', '#8BAEF7', '#FFB048']
+export const GRAPH_COLORS = ['#171719', '#155EEF', '#369F21', '#4DA8FF', '#FF5D34', '#9C6FFF', '#FF8A4C', '#8BAEF7', '#FFB048']
 export const colorAt = (i: number) => GRAPH_COLORS[i % GRAPH_COLORS.length]
 
 export function connectionToRadius(connections: number): number {
@@ -336,7 +336,6 @@ export function initCommunityGraph(
   const svg = d3.select(container).append('svg')
     .attr('width', width).attr('height', height)
     .style('width', '100%').style('height', '100%')
-    .style('background', '#F6F8FC')
 
   const g = svg.append('g')
 

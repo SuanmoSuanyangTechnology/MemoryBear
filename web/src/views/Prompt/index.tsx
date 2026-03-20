@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:44:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-07 17:15:05
+ * @Last Modified time: 2026-03-20 13:52:09
  */
 /**
  * Prompt Editor Component
@@ -72,7 +72,7 @@ const Prompt: FC = () => {
 
   /** Send message to AI for prompt optimization */
   const handleSend = () => {
-    if (!promptSession) return
+    if (!promptSession || loading || !values.message || values.message.trim() == '') return
     if (!values.model_id) {
       message.warning(t('common.selectPlaceholder', { title: t('prompt.model') }))
       return
@@ -216,12 +216,19 @@ const Prompt: FC = () => {
                     onBlur={handleBlur}
                   />
                 </Form.Item>
-                {loading
-                  ? <div className="rb:size-7 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/loading.svg')]"></div>
-                  : !values || !values?.message || values?.message?.trim() === ''
-                    ? <div className="rb:size-7 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/sendDisabled.svg')]"></div>
-                    : <div className="rb:size-7 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/send.svg')]" onClick={handleSend}></div>
-                }
+                <Flex align="center" justify="center"
+                  className={clsx('rb:size-7 rb:rounded-full rb:shadow-[0px 2px 12px 0px rgba(23,23,25,0.1)]', {
+                    'rb:cursor-not-allowed rb:bg-[#F6F6F6]': loading || !values || !values?.message || values?.message?.trim() === '',
+                    'rb:cursor-pointer rb:bg-[#171719]': !loading && !(!values || !values?.message || values?.message?.trim() === '')
+                  })}
+                  onClick={handleSend}
+                >
+                  <div className={clsx("rb:size-4 rb:bg-cover", {
+                    "rb:bg-[url('@/assets/images/conversation/loading.svg')]": loading,
+                    "rb:bg-[url('@/assets/images/conversation/sendDisabled.svg')]": !loading && (!values || !values?.message || values?.message?.trim() === ''),
+                    "rb:bg-[url('@/assets/images/conversation/send.svg')]": !loading && !(!values || !values?.message || values?.message?.trim() === '')
+                  })}></div>
+                </Flex>
               </Flex>
 
             </RbCard>
