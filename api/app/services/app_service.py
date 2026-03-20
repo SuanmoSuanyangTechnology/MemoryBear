@@ -902,6 +902,7 @@ class AppService:
                         edges=copy.deepcopy(source_config.edges) if source_config.edges else [],
                         variables=copy.deepcopy(source_config.variables) if source_config.variables else [],
                         execution_config=copy.deepcopy(source_config.execution_config) if source_config.execution_config else {},
+                        features=copy.deepcopy(source_config.features) if source_config.features else {},
                         triggers=copy.deepcopy(source_config.triggers) if source_config.triggers else [],
                         is_active=True,
                         created_at=now,
