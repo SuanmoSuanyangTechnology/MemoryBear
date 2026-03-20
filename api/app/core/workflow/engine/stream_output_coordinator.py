@@ -363,7 +363,7 @@ class StreamOutputCoordinator:
                     logger.warning(f"[STREAM] Failed to evaluate segment: {current_segment.literal}, error: {e}")
 
             if final_chunk:
-                logger.info(f"[STREAM] StreamOutput Node:{self.activate_end}, chunk:{final_chunk}")
+                logger.info(f"[STREAM] StreamOutput Node:{self.activate_end}, chunk_length:{len(final_chunk)}")
                 yield {
                     "event": "message",
                     "data": {
