@@ -418,6 +418,71 @@ class MultimodalService:
         logger.info(f"成功处理 {len(result)}/{len(files)} 个文件，provider={self.provider}")
         return result
 
+    async def history_process_files(
+            self,
+            files: Optional[List[FileInput]],
+    ) -> List[Dict[str, Any]]:
+        """
+        处理文件列表，返回 LLM 可用的格式
+
+        Args:
+            files: 文件输入列表
+
+        Returns:
+            List[Dict]: LLM 可用的内容格式列表（根据 provider 返回不同格式）
+        """
+        if not files:
+            return []
+
+        # 获取对应的策略
+        # dashscope 的 omni 模型使用 OpenAI 兼容格式
+        if self.provider == "dashscope" and self.is_omni:
+            strategy_class = OpenAIFormatStrategy
+        else:
+            strategy_class = PROVIDER_STRATEGIES.get(self.provider)
+            if not strategy_class:
+                logger.warning(f"未找到 provider '{self.provider}' 的策略，使用默认策略")
+                strategy_class = DashScopeFormatStrategy
+
+        result = []
+        for idx, file in enumerate(files):
+            strategy = strategy_class(file)
+            if not file.url:
+                file.url = await self.get_file_url(file)
+            try:
+                if file.type == FileType.IMAGE and "vision" in self.capability:
+                    is_support, content = await self._process_image(file, strategy)
+                    result.append(content)
+                elif file.type == FileType.DOCUMENT:
+                    is_support, content = await self._process_document(file, strategy)
+                    result.append(content)
+                elif file.type == FileType.AUDIO and "audio" in self.capability:
+                    is_support, content = await self._process_audio(file, strategy)
+                    result.append(content)
+                elif file.type == FileType.VIDEO and "video" in self.capability:
+                    is_support, content = await self._process_video(file, strategy)
+                    result.append(content)
+                else:
+                    logger.warning(f"不支持的文件类型: {file.type}")
+            except Exception as e:
+                logger.error(
+                    f"处理文件失败",
+                    extra={
+                        "file_index": idx,
+                        "file_type": file.type,
+                        "error": str(e)
+                    },
+                    exc_info=True
+                )
+                # 继续处理其他文件，不中断整个流程
+                result.append({
+                    "type": "text",
+                    "text": f"[文件处理失败: {str(e)}]"
+                })
+
+        logger.info(f"成功处理 {len(result)}/{len(files)} 个文件，provider={self.provider}")
+        return result
+
     def write_perceptual_memory(
             self,
             end_user_id: str,
