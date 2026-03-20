@@ -19,7 +19,10 @@
  * @component
  */
 import { forwardRef, useImperativeHandle, useState, useMemo } from 'react';
-import { Form, Input, Select, Button, Flex } from 'antd';
+import { Form, Input, Select,
+  // Button,
+  Flex
+} from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { UploadFileListModalRef } from '../types'
@@ -105,9 +108,11 @@ const UploadFileListModal = forwardRef<UploadFileListModalRef, UploadFileListMod
       onOk={handleSave}
       confirmLoading={loading}
     >
-      <Form form={form} layout="vertical">
+      <Form form={form} layout="vertical" initialValues={{ files: [{ type: undefined, url: undefined }] }}>
         <Form.List name="files">
-          {(fields, { add, remove }) => (
+          {(fields,
+            // { add, remove }
+          ) => (
             <>
               {/* Render each file entry with type selector and URL input */}
               {fields.map(({ key, name, ...restField }) => (
@@ -131,23 +136,23 @@ const UploadFileListModal = forwardRef<UploadFileListModalRef, UploadFileListMod
                     name={[name, 'url']}
                     rules={[
                       { required: true, message: t('common.pleaseEnter') },
-                      { type: 'url'}
+                      { type: 'url', message: t('common.callbackUrlInvalid') },
                     ]}
                     className="rb:mb-0! rb:flex-1!"
                   >
                     <Input placeholder={t('memoryConversation.fileUrl')} />
                   </FormItem>
-                  <div
+                  {/* <div
                     className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/delete.svg')] rb:hover:bg-[url('@/assets/images/delete_hover.svg')]"
                     onClick={() => remove(name)}
-                  ></div>
+                  ></div> */}
                 </Flex>
               ))}
-              <Form.Item noStyle>
+              {/* <Form.Item noStyle>
                 <Button type="dashed" onClick={() => add()} block>
                   + {t('common.add')}
                 </Button>
-              </Form.Item>
+              </Form.Item> */}
             </>
           )}
         </Form.List>

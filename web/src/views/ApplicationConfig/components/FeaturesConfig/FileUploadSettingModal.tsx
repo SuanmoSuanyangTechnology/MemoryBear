@@ -102,7 +102,7 @@ const defaultValues: FileUpload = {
     "mp4",
     "mov",
   ],
-  max_file_count: 5,
+  max_file_count: 1,
   allowed_transfer_methods: 'both'
 }
 
@@ -167,8 +167,8 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
           </Radio.Group>
         </Form.Item>
 
-        <div className="rb:text-[12px] rb:text-[#5B6167] rb:mb-1">{t('application.maxCount')}</div>
-        <Form.Item label={t('application.maxCount')} name="max_file_count">
+        {/* <div className="rb:text-[12px] rb:text-[#5B6167] rb:mb-1">{t('application.maxCount')}</div> */}
+        <Form.Item label={t('application.maxCount')} name="max_file_count" hidden>
           <InputNumber min={1} max={20} precision={0} className="rb:w-full!" placeholder={t('common.pleaseEnter')} />
         </Form.Item>
 
