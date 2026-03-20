@@ -59,7 +59,6 @@ class GraphBuilder:
             self.variable_pool = variable_pool
         else:
             self.variable_pool = VariablePool()
-        self._reverse_adj: dict[str, list[dict]] = defaultdict(list)
 
         self.graph = StateGraph(WorkflowState)
         self.add_nodes()
@@ -138,8 +137,10 @@ class GraphBuilder:
                   complete before this node activates.
         """
         source_nodes = self._reverse_adj[target_node]
-        if not source_nodes or self.get_node_type(target_node) in [NodeType.START, NodeType.CYCLE_START]:
-            return tuple(), tuple()
+        if not source_nodes:
+            if self.get_node_type(target_node) in [NodeType.START, NodeType.CYCLE_START]:
+                return tuple(), tuple()
+            raise RuntimeError(f"Node {target_node} is not reachable from the Start node")
 
         branch_nodes = []
         output_nodes = []

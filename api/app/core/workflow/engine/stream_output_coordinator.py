@@ -264,6 +264,9 @@ class StreamOutputCoordinator:
             end_node_map: dict[str, StreamOutputConfig]
     ):
         self.end_outputs = end_node_map
+        self.processed_outputs = []
+        self.activate_end = None
+        self.output_queue = Queue()
 
     @property
     def current_activate_end_info(self):
