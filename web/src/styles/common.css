@@ -3,3 +3,12 @@
 .rb-border-r { border-right: 1px solid #DFE4ED; }
 .rb-border-b { border-bottom: 1px solid #DFE4ED; }
 .rb-border-l { border-left: 1px solid #DFE4ED; }
+
+/* 隐藏滚动条但保留滚动功能 */
+div {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+div::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Opera */
+}
