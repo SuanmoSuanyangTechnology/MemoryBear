@@ -856,13 +856,13 @@ class AppService:
                 if source_config:
                     if is_cross_workspace:
                         # Batch-collect and preload all referenced resources
-                        model_ids, kb_ids = self._collect_resource_ids_from_config(
+                        model_ids, kb_ids, tool_ids = self._collect_resource_ids_from_config(
                             source_config.default_model_config_id,
                             source_config.knowledge_retrieval,
                             source_config.tools
                         )
-                        available_model_ids, available_kb_ids = self._preload_cross_workspace_resources(
-                            target_tenant_id, target_workspace_id, model_ids, kb_ids
+                        available_model_ids, available_kb_ids, available_tool_ids = self._preload_cross_workspace_resources(
+                            target_tenant_id, target_workspace_id, model_ids, kb_ids, tool_ids
                         )
                         new_model_config_id = self._is_model_available(
                             source_config.default_model_config_id, available_model_ids
@@ -871,7 +871,7 @@ class AppService:
                             source_config.knowledge_retrieval, available_kb_ids
                         )
                         new_tools = self._clean_tools(
-                            source_config.tools, available_kb_ids
+                            source_config.tools, available_kb_ids, available_tool_ids
                         )
                         # 同 tenant 跨空间时 skill_ids 仍可用；跨 tenant 时清空
                         if source_tenant_id and source_tenant_id == target_tenant_id:
@@ -914,7 +914,7 @@ class AppService:
                         model_ids, kb_ids = self._collect_resource_ids_from_workflow_nodes(
                             source_config.nodes
                         )
-                        available_model_ids, available_kb_ids = self._preload_cross_workspace_resources(
+                        available_model_ids, available_kb_ids, _ = self._preload_cross_workspace_resources(
                             target_tenant_id, target_workspace_id, model_ids, kb_ids
                         )
                         new_nodes = self._clean_workflow_nodes_for_cross_workspace(
@@ -948,7 +948,7 @@ class AppService:
                 if source_config:
                     if is_cross_workspace:
                         model_ids = {source_config.default_model_config_id} if source_config.default_model_config_id else set()
-                        available_model_ids, _ = self._preload_cross_workspace_resources(
+                        available_model_ids, _, _ = self._preload_cross_workspace_resources(
                             target_tenant_id, target_workspace_id, model_ids, set()
                         )
                         new_model_config_id = self._is_model_available(
@@ -1002,16 +1002,18 @@ class AppService:
             target_tenant_id: Optional[uuid.UUID],
             target_workspace_id: uuid.UUID,
             model_config_ids: set,
-            kb_ids: set
+            kb_ids: set,
+            tool_ids: set = None
     ) -> tuple:
-        """Batch-load model configs and knowledge bases to avoid N+1 queries.
+        """Batch-load model configs, knowledge bases and tools to avoid N+1 queries.
 
         Returns:
-            (available_model_ids, available_kb_ids): sets of IDs available in target workspace
+            (available_model_ids, available_kb_ids, available_tool_ids): sets of IDs available in target workspace
         """
         from app.models.models_model import ModelConfig as MC
         from app.models.knowledge_model import Knowledge
         from app.models.knowledgeshare_model import KnowledgeShare
+        from app.models.tool_model import ToolConfig as TC
 
         # Batch check model configs by tenant
         available_model_ids: set = set()
@@ -1049,7 +1051,24 @@ class AppService:
                     )
                     available_kb_ids.update(self.db.scalars(stmt).all())
 
-        return available_model_ids, available_kb_ids
+        # Batch check tools by tenant
+        available_tool_ids: set = set()
+        if tool_ids and target_tenant_id:
+            tool_uuids = set()
+            for tid in tool_ids:
+                try:
+                    tool_uuids.add(uuid.UUID(str(tid)))
+                except (ValueError, AttributeError):
+                    pass
+            if tool_uuids:
+                stmt = select(TC.id).where(
+                    TC.id.in_(tool_uuids),
+                    TC.tenant_id == target_tenant_id,
+                    TC.is_active.is_(True)
+                )
+                available_tool_ids = {str(i) for i in self.db.scalars(stmt).all()}
+
+        return available_model_ids, available_kb_ids, available_tool_ids
 
     @staticmethod
     def _collect_resource_ids_from_config(
@@ -1057,9 +1076,10 @@ class AppService:
             knowledge_retrieval: Optional[dict],
             tools: Optional[list]
     ) -> tuple:
-        """Extract all model config IDs and knowledge base IDs from an app config."""
+        """Extract all model config IDs, knowledge base IDs and tool IDs from an app config."""
         model_ids: set = set()
         kb_ids: set = set()
+        tool_ids: set = set()
 
         if model_config_id:
             model_ids.add(model_config_id)
@@ -1078,8 +1098,11 @@ class AppService:
                     kid = tool.get("knowledge_id") or tool.get("kb_id")
                     if kid:
                         kb_ids.add(str(kid))
+                    tid = tool.get("tool_id")
+                    if tid:
+                        tool_ids.add(str(tid))
 
-        return model_ids, kb_ids
+        return model_ids, kb_ids, tool_ids
 
     @staticmethod
     def _collect_resource_ids_from_workflow_nodes(nodes: list) -> tuple:
@@ -1157,9 +1180,10 @@ class AppService:
     def _clean_tools(
             self,
             tools: Optional[list],
-            available_kb_ids: set
+            available_kb_ids: set,
+            available_tool_ids: set = None
     ) -> list:
-        """Clean tools config, keeping built-in tools and tools with available KBs."""
+        """Clean tools config for cross-workspace copy, keeping only available tools."""
         if not tools:
             return []
 
@@ -1169,11 +1193,15 @@ class AppService:
                 cleaned.append(tool)
                 continue
 
-            tool_type = tool.get("type", "")
-            if tool_type in ("builtin", "built_in", "system"):
+            tool_id = tool.get("tool_id")
+            if tool_id:
+                # 有 tool_id 的工具，判断在目标 tenant 是否可用
+                if available_tool_ids is not None and tool_id not in available_tool_ids:
+                    continue
                 cleaned.append(copy.deepcopy(tool))
                 continue
 
+            # 没有 tool_id 的工具（如知识库工具），判断 kb_id 是否可用
             kb_id = tool.get("knowledge_id") or tool.get("kb_id")
             if kb_id:
                 if self._is_kb_available(kb_id, available_kb_ids):
