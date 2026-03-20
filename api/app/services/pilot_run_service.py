@@ -120,7 +120,8 @@ async def run_pilot_extraction(
                     "pruning_switch": memory_config.pruning_enabled,
                     "pruning_scene": memory_config.pruning_scene,
                     "pruning_threshold": memory_config.pruning_threshold,
-                    "llm_model_id": str(memory_config.llm_model_id),
+                    "scene_id": str(memory_config.scene_id) if memory_config.scene_id else None,
+                    "ontology_class_infos": memory_config.ontology_class_infos,
                 }
                 config = PruningConfig(**pruning_config_dict)
                 
@@ -231,9 +232,11 @@ async def run_pilot_extraction(
                 "chunker_strategy": memory_config.chunker_strategy,
             }
             
-            # 添加剪枝统计信息
-            if pruning_stats:
-                preprocessing_summary["pruning"] = pruning_stats
+            # 添加剪枝统计信息（始终包含 pruning 字段，确保前端不会因字段缺失报错）
+            preprocessing_summary["pruning"] = pruning_stats if pruning_stats else {
+                "enabled": memory_config.pruning_enabled,
+                "deleted_count": 0,
+            }
             
             await progress_callback("text_preprocessing_complete", "预处理文本完成（剪枝 + 分块）", preprocessing_summary)
 

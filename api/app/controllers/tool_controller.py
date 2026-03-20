@@ -3,8 +3,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+
+from app.core.error_codes import BizCode
 from app.schemas.tool_schema import (
-    ToolCreateRequest, ToolUpdateRequest, ToolExecuteRequest, ParseSchemaRequest, CustomToolTestRequest
+    ToolCreateRequest, ToolUpdateRequest, ToolExecuteRequest, ParseSchemaRequest,
+    CustomToolTestRequest, ToolActiveUpdate
 )
 
 from app.core.response_utils import success
@@ -14,6 +17,7 @@ from app.models import User
 from app.models.tool_model import ToolType, ToolStatus, AuthType
 from app.services.tool_service import ToolService
 from app.schemas.response_schema import ApiResponse
+from app.core.exceptions import BusinessException
 
 router = APIRouter(prefix="/tools", tags=["Tool System"])
 
@@ -103,7 +107,7 @@ async def create_tool(
                 val = getattr(request, key, None)
                 if val is not None:
                     request.config[key] = val
-        tool_id = service.create_tool(
+        tool_id = await service.create_tool(
             name=request.name,
             tool_type=request.tool_type,
             tenant_id=current_user.tenant_id,
@@ -113,6 +117,8 @@ async def create_tool(
             tags=request.tags
         )
         return success(data={"tool_id": tool_id}, msg="工具创建成功")
+    except BusinessException as e:
+        raise HTTPException(status_code=400, detail=e.message)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -153,12 +159,36 @@ async def delete_tool(
         current_user: User = Depends(get_current_user),
         service: ToolService = Depends(get_tool_service)
 ):
-    """删除工具"""
+    """删除工具（逻辑删除，is_active=False）"""
     try:
         success_flag = service.delete_tool(tool_id, current_user.tenant_id)
         if not success_flag:
             raise HTTPException(status_code=404, detail="工具不存在")
         return success(msg="工具删除成功")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/{tool_id}/active", response_model=ApiResponse)
+async def set_tool_active(
+        tool_id: str,
+        request: ToolActiveUpdate,
+        current_user: User = Depends(get_current_user),
+        service: ToolService = Depends(get_tool_service)
+):
+    """设置工具可用状态（启用/禁用）
+
+    - is_active=true: 启用工具
+    - is_active=false: 禁用工具（等同于删除，但可恢复）
+    """
+    try:
+        success_flag = service.set_tool_active(tool_id, current_user.tenant_id, request.is_active)
+        if not success_flag:
+            raise HTTPException(status_code=404, detail="工具不存在")
+        action = "启用" if request.is_active else "禁用"
+        return success(msg=f"工具已{action}")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -222,8 +252,10 @@ async def sync_mcp_tools(
     try:
         result = await service.sync_mcp_tools(tool_id, current_user.tenant_id)
         if not result.get("success", False):
-            raise HTTPException(status_code=400, detail=result.get("message", "同步失败"))
+            raise BusinessException(result.get("message", "工具列表同步失败"), BizCode.BAD_REQUEST)
         return success(data=result, msg="MCP工具列表同步完成")
+    except BusinessException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -246,8 +278,10 @@ async def test_tool_connection(
             # 普通连接测试
             result = await service.test_connection(tool_id, current_user.tenant_id)
         if result["success"] is False:
-            raise HTTPException(status_code=400, detail=result["message"])
+            raise BusinessException(result["message"], BizCode.SERVICE_UNAVAILABLE)
         return success(data=result, msg="连接测试完成")
+    except BusinessException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

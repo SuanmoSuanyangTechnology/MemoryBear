@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:01:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-11 10:53:27
+ * @Last Modified time: 2026-03-19 20:45:13
  */
 
 /**
@@ -32,6 +32,7 @@ interface ButtonCheckboxProps extends Omit<RadioGroupProps, 'onChange'> {
   checkedIcon?: string;
   /** Button content */
   children?: ReactNode
+  cicle?: boolean;
 }
 
 const ButtonCheckbox: FC<ButtonCheckboxProps> = ({
@@ -41,6 +42,8 @@ const ButtonCheckbox: FC<ButtonCheckboxProps> = ({
   icon,
   checkedIcon,
   children,
+  cicle = false,
+  disabled,
 }) => {
   // Listen to value changes and trigger side effects via onValueChange callback
   useEffect(() => {
@@ -57,18 +60,21 @@ const ButtonCheckbox: FC<ButtonCheckboxProps> = ({
   }
   
   return (
-    <Flex
+    <Flex 
       align="center"
+      justify={cicle ? 'center' : 'start'}
+      gap={4}
       className={clsx("rb:border rb:rounded-lg rb:px-2! rb:text-[12px] rb:h-6 rb:cursor-pointer", {
         // Checked state: blue background and border
         "rb:bg-[#FAFAFA] rb:border-[#171719]": checked,
         // Unchecked state: gray border and dark text
         "rb:border-[#EBEBEB] rb:text-[#212332] rb:hover:bg-[#F0F3F8]": !checked,
+        "rb:opacity-65 rb:cursor-not-allowed!": disabled
       })} 
       onClick={handleChange}
     >
       {/* Display unchecked icon when not checked */}
-      {icon && !checked && <img src={icon} className="rb:w-4 rb:h-4 rb:mr-1" />}
+      {icon && !checked && <img src={icon} className="rb:size-4" />}
       {/* Display checked icon when checked */}
       {checkedIcon && checked && <img src={checkedIcon} className="rb:w-4 rb:h-4 rb:mr-1" />}
       {children}

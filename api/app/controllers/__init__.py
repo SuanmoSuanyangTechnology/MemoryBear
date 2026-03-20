@@ -16,6 +16,7 @@ from . import (
     file_controller,
     file_storage_controller,
     home_page_controller,
+    i18n_controller,
     implicit_memory_controller,
     knowledge_controller,
     knowledgeshare_controller,
@@ -94,5 +95,6 @@ manager_router.include_router(memory_working_controller.router)
 manager_router.include_router(file_storage_controller.router)
 manager_router.include_router(ontology_controller.router)
 manager_router.include_router(skill_controller.router)
+manager_router.include_router(i18n_controller.router)
 
 __all__ = ["manager_router"]

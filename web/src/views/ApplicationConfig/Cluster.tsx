@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:33 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-07 17:11:54
+ * @Last Modified time: 2026-03-19 21:03:01
  */
 import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -18,7 +18,8 @@ import type {
   ChatData,
   SubAgentItem,
   ClusterRef,
-  ModelConfigModalRef
+  ModelConfigModalRef,
+  FeaturesConfigForm
 } from './types'
 import Chat from './components/Chat'
 import RbCard from '@/components/RbCard/Card'
@@ -28,13 +29,14 @@ import RadioGroupCard from '@/components/RadioGroupCard'
 import ModelSelect from '@/components/ModelSelect'
 import ModelConfigModal from './components/ModelConfigModal'
 import type { Application } from '@/views/ApplicationManagement/types'
+// import FeaturesConfig from './components/FeaturesConfig'
 
 const MAX_LENGTH = 5;
 /**
  * Multi-agent cluster configuration component
  * Manages multi-agent orchestration, sub-agents, and collaboration modes
  */
-const Cluster = forwardRef<ClusterRef>((_props, ref) => {
+const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void }>(({ onFeaturesLoad }, ref) => {
   const { t } = useTranslation()
   const { message } = App.useApp()
   const [form] = Form.useForm()
@@ -129,6 +131,7 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
       } else {
         setSubAgents(sub_agents)
       }
+      onFeaturesLoad?.(response.features)
     })
     .finally(() => {
       setLoading(false)
@@ -167,7 +170,8 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
     setSubAgents(prev => prev.filter(item => item.agent_id !== agent.agent_id))
   }
   useImperativeHandle(ref, () => ({
-    handleSave
+    handleSave,
+    features: data?.features
   }))
 
   const modelConfigModalRef = useRef<ModelConfigModalRef>(null)
@@ -186,6 +190,9 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
       model_parameters: values
     })
   }
+  // const handleSaveFeaturesConfig = (value: FeaturesConfigForm) => {
+  //   form.setFieldValue('features', value)
+  // }
 
   return (
     <>
@@ -195,10 +202,12 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
           <Form form={form} layout="vertical">
             <Flex gap={16} vertical>
               <Flex align="center" justify="end" className="rb:p-3! rb:bg-white rb:rounded-xl">
+                {/* <FeaturesConfig value={values?.features as FeaturesConfigForm} refresh={handleSaveFeaturesConfig} /> */}
                 <Button type="primary" onClick={() => handleSave()}>
                   {t('common.save')}
                 </Button>
               </Flex>
+              <Form.Item name="features" hidden noStyle></Form.Item>
               <Card title={t('application.collaboration')}>
                 <Form.Item
                   name="orchestration_mode"
@@ -216,73 +225,73 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
                 </Form.Item>
               </Card>
 
-              <Card
-                title={<>
-                  {t('application.subAgentsManagement')}
-                  <span className="rb:font-medium rb:font-[PingFangSC,PingFang_SC]! rb:text-[14px]!"> ({subAgents.length}/{MAX_LENGTH})</span>
-                </>}
-                extra={<Button className="rb:py-0! rb:px-2! rb:h-6!" disabled={subAgents.length >= MAX_LENGTH} onClick={() => handleSubAgentModal()}>+ {t('application.addSubAgent')}</Button>}
-              >
-                {subAgents.length === 0
-                  ? <div className="rb-border rb:rounded-xl rb:pt-4 rb:pb-6"><Empty size={88} /></div>
-                  : <Flex vertical gap={12}>
-                    {subAgents.map((agent, index) => (
-                      <Flex key={index} align="center" justify="space-between"
-                        className="rb:w-full! rb-border rb:rounded-xl rb:py-2.5! rb:pl-4! rb:pr-3!"
-                      >
-                        <Flex justify="center" vertical className="rb:max-w-[calc(100%-60px)]">
-                          <div>
-                            <span className="rb:text-[#212332] rb:leading-5">{agent.name}</span>
-                            <Tag color={agent.is_active ? 'success' : 'warning'} className="rb:ml-2">
-                              {agent.is_active ? t('common.enable') : t('common.deleted')}
-                            </Tag>
-                          </div>
-                          {agent.role && <div className="rb:font-regular rb:leading-5 rb:text-[#5B6167] rb:text-[12px] rb:mt-1">{agent.role || '-'}</div>}
-                          {agent.capabilities && <Flex wrap gap={8} className="rb:mt-2.5!">
-                            {agent.capabilities.map((tag, tagIndex) => <Tag key={tagIndex} color="dark" className="rb:py-0!">{tag}</Tag>)}
-                          </Flex>}
-                        </Flex>
-
-                        <Space>
-                          <div
-                            className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]"
-                            onClick={() => handleSubAgentModal(agent)}
-                          ></div>
-                          <div
-                            className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]"
-                            onClick={() => handleDeleteSubAgent(agent)}
-                          ></div>
-                        </Space>
-                      </Flex>
-                    ))}
-                  </Flex>
-                }
-              </Card>
-
-              {values?.orchestration_mode !== 'collaboration' && <Card title={t('application.masterConfig')}>
-                <Form.Item
-                  label={<span className="rb:text-[#5B6167]">{t('application.model')}</span>}
-                  required={true}
-                  className="rb:mb-4!"
+                <Card
+                  title={<>
+                    {t('application.subAgentsManagement')}
+                    <span className="rb:font-medium rb:font-[PingFangSC,PingFang_SC]! rb:text-[14px]!"> ({subAgents.length}/{MAX_LENGTH})</span>
+                  </>}
+                  extra={<Button className="rb:py-0! rb:px-2! rb:h-6!" disabled={subAgents.length >= MAX_LENGTH} onClick={() => handleSubAgentModal()}>+ {t('application.addSubAgent')}</Button>}
                 >
-                  <Flex align="center" gap={12}>
-                    <Form.Item name="default_model_config_id" noStyle>
-                      <ModelSelect
-                        params={{ type: 'llm,chat' }}
-                        className="rb:w-full!"
-                      />
-                    </Form.Item>
-                    <Form.Item name="model_parameters" noStyle>
-                      <Button
-                        className="rb:w-33"
-                        icon={<div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/application/set.svg')]"></div>}
-                        onClick={handleEditModelConfig}
-                      >{t('application.modelConfig')}</Button>
-                    </Form.Item>
-                  </Flex>
+                  {subAgents.length === 0
+                    ? <div className="rb-border rb:rounded-xl rb:pt-4 rb:pb-6"><Empty size={88} /></div>
+                    : <Flex vertical gap={12}>
+                      {subAgents.map((agent, index) => (
+                        <Flex key={index} align="center" justify="space-between"
+                          className="rb:w-full! rb-border rb:rounded-xl rb:py-2.5! rb:pl-4! rb:pr-3!"
+                        >
+                          <Flex justify="center" vertical className="rb:max-w-[calc(100%-60px)]">
+                            <div>
+                              <span className="rb:text-[#212332] rb:leading-5">{agent.name}</span>
+                              <Tag color={agent.is_active ? 'success' : 'warning'} className="rb:ml-2">
+                                {agent.is_active ? t('common.enable') : t('common.deleted')}
+                              </Tag>
+                            </div>
+                            {agent.role && <div className="rb:font-regular rb:leading-5 rb:text-[#5B6167] rb:text-[12px] rb:mt-1">{agent.role || '-'}</div>}
+                            {agent.capabilities && <Flex wrap gap={8} className="rb:mt-2.5!">
+                              {agent.capabilities.map((tag, tagIndex) => <Tag key={tagIndex} color="dark" className="rb:py-0!">{tag}</Tag>)}
+                            </Flex>}
+                          </Flex>
+
+                          <Space>
+                            <div
+                              className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]"
+                              onClick={() => handleSubAgentModal(agent)}
+                            ></div>
+                            <div
+                              className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]"
+                              onClick={() => handleDeleteSubAgent(agent)}
+                            ></div>
+                          </Space>
+                        </Flex>
+                      ))}
+                    </Flex>
+                  }
+                </Card>
+
+                {values?.orchestration_mode !== 'collaboration' && <Card title={t('application.masterConfig')}>
+                  <Form.Item
+                    label={<span className="rb:text-[#5B6167]">{t('application.model')}</span>}
+                    required={true}
+                    className="rb:mb-4!"
+                  >
+                    <Flex align="center" gap={12}>
+                      <Form.Item name="default_model_config_id" noStyle>
+                        <ModelSelect
+                          params={{ type: 'llm,chat' }}
+                          className="rb:w-full!"
+                        />
+                      </Form.Item>
+                      <Form.Item name="model_parameters" noStyle>
+                        <Button
+                          className="rb:w-33"
+                          icon={<div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/application/set.svg')]"></div>}
+                          onClick={handleEditModelConfig}
+                        >{t('application.modelConfig')}</Button>
+                      </Form.Item>
+                    </Flex>
                 </Form.Item>
                 <Form.Item
-                  name={['execution_config',"sub_agent_execution_mode"]}
+                  name={['execution_config', "sub_agent_execution_mode"]}
                   label={<span className="rb:text-[#5B6167]">{t('application.orchestrationMode')}</span>}
                   className="rb:mb-4!"
                 >
@@ -291,6 +300,7 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
                       value: type,
                       label: t(`application.${type}`),
                     }))}
+                    placeholder={t('common.pleaseSelect')}
                   />
                 </Form.Item>
                 <Form.Item
@@ -303,6 +313,7 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
                       value: type,
                       label: t(`application.${type}`),
                     }))}
+                    placeholder={t('common.pleaseSelect')}
                   />
                 </Form.Item>
               </Card>}

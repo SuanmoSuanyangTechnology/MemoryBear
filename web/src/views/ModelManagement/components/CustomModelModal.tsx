@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 11:31:43
+ * @Last Modified time: 2026-03-11 15:08:24
  */
 /**
  * Custom Model Modal
@@ -11,7 +11,7 @@
  */
 
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
-import { Form, Input, App, Checkbox } from 'antd';
+import { Form, Input, App, Checkbox, Button } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { CustomModelForm, ModelListItem, CustomModelModalRef, CustomModelModalProps } from '../types';
@@ -35,6 +35,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   const [isEdit, setIsEdit] = useState(false);
   const [form] = Form.useForm<CustomModelForm>();
   const [loading, setLoading] = useState(false)
+  const [abortController, setAbortController] = useState<AbortController | null>(null)
   const modelType = Form.useWatch(['type'], form);
   const isOmni = Form.useWatch(['is_omni'], form);
 
@@ -46,6 +47,8 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
 
   /** Close modal and reset state */
   const handleClose = () => {
+    abortController?.abort()
+    setAbortController(null)
     setModel({} as ModelListItem);
     form.resetFields();
     setLoading(false)
@@ -73,8 +76,10 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   /** Update or create custom model */
   const handleUpdate = (data: CustomModelForm) => {
     setLoading(true)
+    const controller = new AbortController()
+    setAbortController(controller)
     const { type, provider, ...rest} = data
-    const res = isEdit ? updateCustomModel(model.id, rest) : addCustomModel(data)
+    const res = isEdit ? updateCustomModel(model.id, rest, controller.signal) : addCustomModel(data, controller.signal)
 
     res.then(() => {
       refresh?.(isEdit)
@@ -124,15 +129,15 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   useImperativeHandle(ref, () => ({
     handleOpen,
   }));
-  console.log('modelType', modelType)
   return (
     <RbModal
       title={isEdit ? `${model.name} - ${t('modelNew.modelConfiguration')}` : t('modelNew.createCustomModel')}
       open={visible}
       onCancel={handleClose}
-      okText={t(`common.${isEdit ? 'save' : 'create'}`)}
-      onOk={handleSave}
-      confirmLoading={loading}
+      footer={[
+        <Button key="cancel" onClick={handleClose}>{t('common.cancel')}</Button>,
+        <Button key="confirm" type="primary" loading={loading} onClick={handleSave}>{t(`common.${isEdit ? 'save' : 'create'}`)}</Button>,
+      ]}
     >
       <Form
         form={form}

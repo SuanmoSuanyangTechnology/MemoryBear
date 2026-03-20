@@ -1,10 +1,12 @@
 import uuid
+import io
 from typing import Optional, Annotated
 
 import yaml
 from fastapi import APIRouter, Depends, Path, Form, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from urllib.parse import quote
 
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
@@ -25,6 +27,7 @@ from app.services.app_service import AppService
 from app.services.app_statistics_service import AppStatisticsService
 from app.services.workflow_import_service import WorkflowImportService
 from app.services.workflow_service import WorkflowService, get_workflow_service
+from app.services.app_dsl_service import AppDslService
 
 router = APIRouter(prefix="/apps", tags=["Apps"])
 logger = get_business_logger()
@@ -50,6 +53,7 @@ def list_apps(
         status: str | None = None,
         search: str | None = None,
         include_shared: bool = True,
+        shared_only: bool = False,
         page: int = 1,
         pagesize: int = 10,
         ids: Optional[str] = None,
@@ -81,6 +85,7 @@ def list_apps(
         status=status,
         search=search,
         include_shared=include_shared,
+        shared_only=shared_only,
         page=page,
         pagesize=pagesize,
     )
@@ -88,6 +93,37 @@ def list_apps(
     items = [service._convert_to_schema(app, workspace_id) for app in items_orm]
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
     return success(data=PageData(page=meta, items=items))
+
+
+@router.get("/my-shared-out", summary="列出本工作空间主动分享出去的记录")
+@cur_workspace_access_guard()
+def list_my_shared_out(
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """列出本工作空间主动分享给其他工作空间的所有记录（我的共享）"""
+    workspace_id = current_user.current_workspace_id
+    service = app_service.AppService(db)
+    shares = service.list_my_shared_out(workspace_id=workspace_id)
+    data = [app_schema.AppShare.model_validate(s) for s in shares]
+    return success(data=data)
+
+
+@router.delete("/share/{target_workspace_id}", summary="取消对某工作空间的所有应用分享")
+@cur_workspace_access_guard()
+def unshare_all_apps_to_workspace(
+        target_workspace_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """Cancel all app shares from current workspace to a target workspace."""
+    workspace_id = current_user.current_workspace_id
+    service = app_service.AppService(db)
+    count = service.unshare_all_apps_to_workspace(
+        target_workspace_id=target_workspace_id,
+        workspace_id=workspace_id
+    )
+    return success(msg=f"已取消 {count} 个应用的分享", data={"count": count})
 
 
 @router.get("/{app_id}", summary="获取应用详情")
@@ -158,6 +194,7 @@ def delete_app(
 def copy_app(
         app_id: uuid.UUID,
         new_name: Optional[str] = None,
+        payload: app_schema.CopyAppRequest = None,
         db: Session = Depends(get_db),
         current_user=Depends(get_current_user),
 ):
@@ -169,6 +206,8 @@ def copy_app(
     - 不影响原应用
     """
     workspace_id = current_user.current_workspace_id
+    # body takes precedence over query param for backward compatibility
+    new_name = (payload.new_name if payload else None) or new_name
     logger.info(
         "用户请求复制应用",
         extra={
@@ -216,6 +255,27 @@ def get_agent_config(
     # 配置总是存在（不存在时返回默认模板）
     cfg = enrich_agent_config(cfg)
     return success(data=app_schema.AgentConfig.model_validate(cfg))
+
+
+@router.get("/{app_id}/opening", summary="获取应用开场白配置")
+@cur_workspace_access_guard()
+def get_opening(
+        app_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """返回开场白文本和预设问题，供前端对话界面初始化时展示"""
+    workspace_id = current_user.current_workspace_id
+    cfg = app_service.get_agent_config(db, app_id=app_id, workspace_id=workspace_id)
+    features = cfg.features or {}
+    if hasattr(features, "model_dump"):
+        features = features.model_dump()
+    opening = features.get("opening_statement", {})
+    return success(data=app_schema.OpeningResponse(
+        enabled=opening.get("enabled", False),
+        statement=opening.get("statement"),
+        suggested_questions=opening.get("suggested_questions", []),
+    ))
 
 
 @router.post("/{app_id}/publish", summary="发布应用（生成不可变快照）")
@@ -299,7 +359,8 @@ def share_app(
         app_id=app_id,
         target_workspace_ids=payload.target_workspace_ids,
         user_id=current_user.id,
-        workspace_id=workspace_id
+        workspace_id=workspace_id,
+        permission=payload.permission
     )
 
     data = [app_schema.AppShare.model_validate(s) for s in shares]
@@ -330,6 +391,32 @@ def unshare_app(
     return success(msg="应用分享已取消")
 
 
+@router.patch("/{app_id}/share/{target_workspace_id}", summary="更新共享权限")
+@cur_workspace_access_guard()
+def update_share_permission(
+        app_id: uuid.UUID,
+        target_workspace_id: uuid.UUID,
+        payload: app_schema.UpdateSharePermissionRequest,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """更新共享权限（readonly <-> editable）
+
+    - 只能修改自己工作空间应用的共享权限
+    """
+    workspace_id = current_user.current_workspace_id
+
+    service = app_service.AppService(db)
+    share = service.update_share_permission(
+        app_id=app_id,
+        target_workspace_id=target_workspace_id,
+        permission=payload.permission,
+        workspace_id=workspace_id
+    )
+
+    return success(data=app_schema.AppShare.model_validate(share))
+
+
 @router.get("/{app_id}/shares", summary="列出应用的分享记录")
 @cur_workspace_access_guard()
 def list_app_shares(
@@ -351,6 +438,46 @@ def list_app_shares(
 
     data = [app_schema.AppShare.model_validate(s) for s in shares]
     return success(data=data)
+
+
+@router.delete("/shared/{source_workspace_id}", summary="批量移除某来源工作空间的所有共享应用")
+@cur_workspace_access_guard()
+def remove_all_shared_apps_from_workspace(
+        source_workspace_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """Remove all shared apps from a specific source workspace (recipient operation)."""
+    workspace_id = current_user.current_workspace_id
+    service = app_service.AppService(db)
+    count = service.remove_all_shared_apps_from_workspace(
+        source_workspace_id=source_workspace_id,
+        workspace_id=workspace_id
+    )
+    return success(msg=f"已移除 {count} 个共享应用", data={"count": count})
+
+
+@router.delete("/{app_id}/shared", summary="移除共享给我的应用")
+@cur_workspace_access_guard()
+def remove_shared_app(
+        app_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """被共享者从自己的工作空间移除共享应用
+
+    - 不会删除源应用，只删除共享记录
+    - 只能移除共享给自己工作空间的应用
+    """
+    workspace_id = current_user.current_workspace_id
+
+    service = app_service.AppService(db)
+    service.remove_shared_app(
+        app_id=app_id,
+        workspace_id=workspace_id
+    )
+
+    return success(msg="已移除共享应用")
 
 
 @router.post("/{app_id}/draft/run", summary="试运行 Agent（使用当前草稿配置）")
@@ -393,7 +520,7 @@ async def draft_run(
     # 提前验证和准备（在流式响应开始前完成）
     from app.services.app_service import AppService
     from app.services.multi_agent_service import MultiAgentService
-    from app.models import AgentConfig, ModelConfig
+    from app.models import AgentConfig, ModelConfig, AppRelease
     from sqlalchemy import select
     from app.core.exceptions import BusinessException
     from app.services.draft_run_service import AgentRunService
@@ -410,11 +537,12 @@ async def draft_run(
     service._validate_app_accessible(app, workspace_id)
 
     if payload.user_id is None:
+        # 先获取 app 的 workspace_id
         end_user_repo = EndUserRepository(db)
         new_end_user = end_user_repo.get_or_create_end_user(
             app_id=app_id,
+            workspace_id=app.workspace_id,
             other_id=str(current_user.id),
-            original_user_id=str(current_user.id)  # Save original user_id to other_id
         )
         payload.user_id = str(new_end_user.id)
 
@@ -431,18 +559,29 @@ async def draft_run(
         service._check_agent_config(app_id)
 
         # 2. 获取 Agent 配置
-        stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
-        agent_cfg = db.scalars(stmt).first()
-        if not agent_cfg:
-            raise BusinessException("Agent 配置不存在", BizCode.AGENT_CONFIG_MISSING)
+        # 共享应用：从最新发布版本读配置快照，而非草稿
+        is_shared = app.workspace_id != workspace_id
+        if is_shared:
+            if not app.current_release_id:
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
+            release = db.get(AppRelease, app.current_release_id)
+            if not release:
+                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+            agent_cfg = service._agent_config_from_release(release)
+            model_config = db.get(ModelConfig, release.default_model_config_id) if release.default_model_config_id else None
+        else:
+            stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
+            agent_cfg = db.scalars(stmt).first()
+            if not agent_cfg:
+                raise BusinessException("Agent 配置不存在", BizCode.AGENT_CONFIG_MISSING)
 
-        # 3. 获取模型配置
-        model_config = None
-        if agent_cfg.default_model_config_id:
-            model_config = db.get(ModelConfig, agent_cfg.default_model_config_id)
-            if not model_config:
-                from app.core.exceptions import ResourceNotFoundException
-                raise ResourceNotFoundException("模型配置", str(agent_cfg.default_model_config_id))
+            # 3. 获取模型配置
+            model_config = None
+            if agent_cfg.default_model_config_id:
+                model_config = db.get(ModelConfig, agent_cfg.default_model_config_id)
+                if not model_config:
+                    from app.core.exceptions import ResourceNotFoundException
+                    raise ResourceNotFoundException("模型配置", str(agent_cfg.default_model_config_id))
 
         # 流式返回
         if payload.stream:
@@ -598,7 +737,17 @@ async def draft_run(
             msg="多 Agent 任务执行成功"
         )
     elif app.type == AppType.WORKFLOW:  # 工作流
-        config = workflow_service.check_config(app_id)
+        # 共享应用：从最新发布版本读配置快照，而非草稿
+        is_shared = app.workspace_id != workspace_id
+        if is_shared:
+            if not app.current_release_id:
+                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
+            release = db.get(AppRelease, app.current_release_id)
+            if not release:
+                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
+            config = service._workflow_config_from_release(release)
+        else:
+            config = workflow_service.check_config(app_id)
         # 3. 流式返回
         if payload.stream:
             logger.debug(
@@ -741,6 +890,16 @@ async def draft_run_compare(
         raise BusinessException("只有 Agent 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
     service._validate_app_accessible(app, workspace_id)
 
+    if payload.user_id is None:
+        # 先获取 app 的 workspace_id
+        end_user_repo = EndUserRepository(db)
+        new_end_user = end_user_repo.get_or_create_end_user(
+            app_id=app_id,
+            workspace_id=app.workspace_id,
+            other_id=str(current_user.id),
+        )
+        payload.user_id = str(new_end_user.id)
+
     # 2. 获取 Agent 配置
     from sqlalchemy import select
     from app.models import AgentConfig
@@ -786,6 +945,13 @@ async def draft_run_compare(
             "conversation_id": model_item.conversation_id  # 传递每个模型的 conversation_id
         })
 
+    # 从 features 中读取功能开关（与 draft_run 保持一致）
+    features_config: dict = agent_cfg.features or {}
+    if hasattr(features_config, 'model_dump'):
+        features_config = features_config.model_dump()
+    web_search_feature = features_config.get("web_search", {})
+    web_search = isinstance(web_search_feature, dict) and web_search_feature.get("enabled", False)
+
     # 流式返回
     if payload.stream:
         async def event_generator():
@@ -797,11 +963,11 @@ async def draft_run_compare(
                     message=payload.message,
                     workspace_id=workspace_id,
                     conversation_id=payload.conversation_id,
-                    user_id=payload.user_id or str(current_user.id),
+                    user_id=payload.user_id,
                     variables=payload.variables,
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
-                    web_search=True,
+                    web_search=web_search,
                     memory=True,
                     parallel=payload.parallel,
                     timeout=payload.timeout or 60,
@@ -828,11 +994,11 @@ async def draft_run_compare(
         message=payload.message,
         workspace_id=workspace_id,
         conversation_id=payload.conversation_id,
-        user_id=payload.user_id or str(current_user.id),
+        user_id=payload.user_id,
         variables=payload.variables,
         storage_type=storage_type,
         user_rag_memory_id=user_rag_memory_id,
-        web_search=True,
+        web_search=web_search,
         memory=True,
         parallel=payload.parallel,
         timeout=payload.timeout or 60,
@@ -1010,3 +1176,57 @@ def get_workspace_api_statistics(
     )
 
     return success(data=result)
+
+
+@router.get("/{app_id}/export", summary="导出应用配置为 YAML 文件")
+@cur_workspace_access_guard()
+async def export_app(
+        app_id: uuid.UUID,
+        db: Annotated[Session, Depends(get_db)],
+        current_user: Annotated[User, Depends(get_current_user)],
+        release_id: Optional[uuid.UUID] = None
+):
+    """导出 agent / multi_agent / workflow 应用配置为 YAML 文件流。
+    release_id: 指定发布版本id，不传则导出当前草稿配置。
+    """
+    yaml_str, filename = AppDslService(db).export_dsl(app_id, release_id)
+    encoded = quote(filename, safe=".")
+    yaml_bytes = yaml_str.encode("utf-8")
+    file_stream = io.BytesIO(yaml_bytes)
+    file_stream.seek(0)
+    return StreamingResponse(
+        file_stream,
+        media_type="application/octet-stream; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={encoded}",
+                 "Content-Length": str(len(yaml_bytes))}
+    )
+
+
+@router.post("/import", summary="从 YAML 文件导入应用")
+@cur_workspace_access_guard()
+async def import_app(
+        file: UploadFile = File(...),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """从 YAML 文件导入 agent / multi_agent / workflow 应用。
+    跨空间/跨租户导入时，模型/工具/知识库会按名称匹配，匹配不到则置空并返回 warnings。
+    """
+    if not file.filename.lower().endswith((".yaml", ".yml")):
+        return fail(msg="仅支持 YAML 文件", code=BizCode.BAD_REQUEST)
+
+    raw = (await file.read()).decode("utf-8")
+    dsl = yaml.safe_load(raw)
+    if not dsl or "app" not in dsl:
+        return fail(msg="YAML 格式无效，缺少 app 字段", code=BizCode.BAD_REQUEST)
+
+    new_app, warnings = AppDslService(db).import_dsl(
+        dsl=dsl,
+        workspace_id=current_user.current_workspace_id,
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
+    )
+    return success(
+        data={"app": app_schema.App.model_validate(new_app), "warnings": warnings},
+        msg="应用导入成功" + ("，但部分资源需手动配置" if warnings else "")
+    )

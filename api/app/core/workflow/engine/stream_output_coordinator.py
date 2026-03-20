@@ -5,7 +5,7 @@
 import re
 from typing import AsyncGenerator
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from app.core.logging_config import get_logger
 from app.core.workflow.engine.variable_pool import VariablePool
@@ -52,10 +52,11 @@ class OutputContent(BaseModel):
         )
     )
 
-    _SCOPE: str | None = None
+    _SCOPE: str | None = PrivateAttr(default=None)
 
-    def get_scope(self) -> str:
-        self._SCOPE = SCOPE_PATTERN.findall(self.literal)[0]
+    def get_scope(self) -> str | None:
+        matches = SCOPE_PATTERN.findall(self.literal)
+        self._SCOPE = matches[0] if matches else None
         return self._SCOPE
 
     def depends_on_scope(self, scope: str) -> bool:
@@ -68,6 +69,8 @@ class OutputContent(BaseModel):
         Returns:
             bool: True if this segment references the given scope.
         """
+        if not self.is_variable:
+            return False
         if self._SCOPE:
             return self._SCOPE == scope
         return self.get_scope() == scope
@@ -152,7 +155,7 @@ class StreamOutputConfig(BaseModel):
         """
 
         # Case 1: resolve control branch dependency
-        if scope in self.control_nodes.keys():
+        if scope in self.control_nodes:
             if status is None:
                 raise RuntimeError("[Stream Output] Control node activation status not provided")
             if status in self.control_nodes[scope]:

@@ -25,6 +25,7 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
         const textContent = root.getTextContent();
         if (textContent !== prevValueRef.current) {
           isUserInputRef.current = true;
+          prevValueRef.current = textContent;
         }
       });
     });
@@ -33,7 +34,13 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
   }, [editor]);
 
   useEffect(() => {
-    if ((value !== prevValueRef.current || enableLineNumbers !== prevEnableLineNumbersRef.current) && !isUserInputRef.current) {
+    if (value !== prevValueRef.current || enableLineNumbers !== prevEnableLineNumbersRef.current) {
+      // Skip reset if the change was triggered by user input (avoid cursor jump)
+      if (isUserInputRef.current && enableLineNumbers === prevEnableLineNumbersRef.current) {
+        prevValueRef.current = value;
+        isUserInputRef.current = false;
+        return;
+      }
       queueMicrotask(() => {
         editor.update(() => {
         const root = $getRoot();

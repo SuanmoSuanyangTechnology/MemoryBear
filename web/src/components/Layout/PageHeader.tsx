@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-10 11:08:27 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-24 15:25:14
+ * @Last Modified time: 2026-03-20 11:47:43
  */
 /*
  * PageHeader Component
@@ -43,7 +43,7 @@ const PageHeader: FC<ConfigHeaderProps> = ({
 }) => {
   return (
     // Main header container: full width, 64px height, flex layout with space between
-    <Header className="rb:w-full rb:h-16 rb:flex rb:items-center rb:justify-between rb:gap-6 rb:px-4! rb:bg-[#FFFFFF]!">
+    <Header className={`"rb:w-full rb:h-16 rb:grid rb:grid-cols-${extra && centerContent ? '3' : ((extra && !centerContent) || (!extra && centerContent)) ? '2': 1} rb:gap-6 rb:px-4! rb:bg-[#FFFFFF]!"`}>
       <Flex align="center" gap={8}>
         {avatarUrl
           ? <img src={avatarUrl} alt={avatarUrl} className="rb:size-8 rb:rounded-lg rb:mr-2" />
@@ -58,9 +58,11 @@ const PageHeader: FC<ConfigHeaderProps> = ({
         {operation}
       </Flex>
 
-      {centerContent}
+      {centerContent && <Flex align="center">
+        {centerContent}
+      </Flex>}
       {/* Right section: Extra content (buttons, filters, etc.) */}
-      <Flex align="center" gap={12}>
+      <Flex align="center" justify="end" gap={12}>
         {extra}
       </Flex>
     </Header>

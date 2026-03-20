@@ -2,11 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-03 12:08:42
+ * @Last Modified time: 2026-03-19 20:42:23
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
-import type { Config } from '@/views/ApplicationConfig/types'
+import type { Config, AppSharingForm } from '@/views/ApplicationConfig/types'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
 import type { QueryParams } from '@/views/Conversation/types'
 import type { WorkflowConfig } from '@/views/Workflow/types'
@@ -113,8 +113,8 @@ export const getShareToken = (share_token: string, user_id: string) => {
   return request.post(`/public/share/${share_token}/token`, { user_id })
 }
 // Copy application
-export const copyApplication = (app_id: string, new_name: string) => {
-  return request.post(`/apps/${app_id}/copy?new_name=${new_name}`)
+export const copyApplication = (app_id: string, new_name?: string) => {
+  return request.post(`/apps/${app_id}/copy`, { new_name })
 }
 // Data statistics
 export const getAppStatistics = (app_id: string, data: { start_date: number; end_date: number; }) => {
@@ -140,3 +140,33 @@ export const getExperienceConfig = (share_token: string) => {
 export const getWorkspaceApiStatistics = (data: { start_date: number; end_date: number; }) => {
   return request.get(`/apps/workspace/api-statistics`, data)
 }
+// Export application
+export const appExport = (app_id: string, appName: string, data?: { release_id: string }) => {
+  return request.getDownloadFile(`/apps/${app_id}/export`, `${appName}.yml`, data)
+}
+// Import application
+export const appImport = (formData: FormData) => {
+  return request.uploadFile(`/apps/import`, formData)
+}
+
+// Share application
+export const appSharing = (app_id: string, data: AppSharingForm) => {
+  return request.post(`/apps/${app_id}/share`, data)
+}
+// Get my shared application records
+export const mySharedOutList = () => {
+  return request.get(`/apps/my-shared-out`)
+}
+// Get sharing records for a specific application
+export const getAppShares = (app_id: string) => {
+  return request.get(`/apps/${app_id}/shares`)
+}
+// Cancel a single share (source side operation)
+export const cancelShare = (app_id: string, target_workspace_id?: string) => {
+  return request.delete(`/apps/${app_id}/share/${target_workspace_id}`)
+}
+// Cancel all shares under a workspace (source side operation)
+export const cancelSpaceShare = (target_workspace_id?: string) => {
+  return request.delete(`/apps/share/${target_workspace_id}`)
+}
+

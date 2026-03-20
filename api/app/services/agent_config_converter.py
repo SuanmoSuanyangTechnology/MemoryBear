@@ -51,6 +51,9 @@ class AgentConfigConverter:
 
         if hasattr(config, "skills") and config.skills:
             result["skills"] = config.skills.model_dump()
+
+        if hasattr(config, "features") and config.features:
+            result["features"] = config.features.model_dump()
         
         return result
     

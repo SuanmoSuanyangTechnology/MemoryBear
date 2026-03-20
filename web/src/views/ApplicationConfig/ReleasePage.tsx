@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:41 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-03 19:02:43
+ * @Last Modified time: 2026-03-19 21:10:38
  */
 import { type FC, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -11,10 +11,11 @@ import { Space, Input, Form, App, Flex } from 'antd';
 
 import Tag, { type TagProps } from './components/Tag'
 import RbCard from '@/components/RbCard/Card'
-import { getReleaseList, rollbackRelease } from '@/api/application'
+import { getReleaseList, rollbackRelease, appExport } from '@/api/application'
 import ReleaseModal from './components/ReleaseModal'
 import ReleaseShareModal from './components/ReleaseShareModal'
-import type { Release, ReleaseModalRef, ReleaseShareModalRef } from './types'
+import AppSharingModal from './components/AppSharingModal'
+import type { Release, ReleaseModalRef, ReleaseShareModalRef, AppSharingModalRef } from './types'
 import type { Application } from '@/views/ApplicationManagement/types'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
@@ -41,6 +42,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
   const { message } = App.useApp()
   const releaseModalRef = useRef<ReleaseModalRef>(null)
   const releaseShareModalRef = useRef<ReleaseShareModalRef>(null)
+  const appSharingModalRef = useRef<AppSharingModalRef>(null)
   const [selectedVersion, setSelectedVersion] = useState<Release | null>(null);
   const [releaseList, setReleaseList] = useState<Release[]>([])
 
@@ -68,6 +70,10 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
       getData()
       message.success(t('common.operateSuccess'))
     })
+  }
+  const handleExport = () => {
+    if (!selectedVersion) return
+    appExport(data.id, data.name, { release_id: selectedVersion.id})
   }
   return (
     <Flex gap={12}>
@@ -125,9 +131,10 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
 
             <Space size={10}>
               {selectedVersion && <>
-                {/* <RbButton>{t('application.exportDSLFile')}</RbButton> */}
+                {data?.type !== 'multi_agent' && <RbButton onClick={handleExport}>{t('common.export')}</RbButton>}
                 {data.current_release_id !== selectedVersion.id && <RbButton onClick={handleRollback}>{t('application.willRollToThisVersion')}</RbButton>}
-                <RbButton onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</RbButton>
+                <RbButton type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</RbButton>
+                {data?.type !== 'multi_agent' && <RbButton type="primary" ghost onClick={() => appSharingModalRef.current?.handleOpen()}>{t('application.sharing')}</RbButton>}
               </>}
               <RbButton type="primary" onClick={() => releaseModalRef.current?.handleOpen()}>{t('application.release')}</RbButton>
             </Space>
@@ -182,6 +189,11 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
       />
       <ReleaseShareModal
         ref={releaseShareModalRef}
+        version={selectedVersion}
+      />
+      <AppSharingModal
+        ref={appSharingModalRef}
+        appId={data.id}
         version={selectedVersion}
       />
     </Flex>

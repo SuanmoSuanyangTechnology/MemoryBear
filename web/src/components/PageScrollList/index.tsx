@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:18:19 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 13:51:01
+ * @Last Modified time: 2026-03-19 20:47:34
  */
 /**
  * PageScrollList Component
@@ -62,8 +62,8 @@ const heightClass = 'rb:h-[calc(100vh-124px)]!';
 
 /** Infinite scroll list component with pagination support */
 const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
-  renderItem, 
-  query, 
+  renderItem,
+  query,
   url,
   column = 4,
   className = '',
@@ -71,68 +71,70 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
 }: PageScrollListProps<T, Q>, ref: React.Ref<PageScrollListRef>) => {
   /** Expose refresh method to parent component */
   useImperativeHandle(ref, () => ({
-    refresh,
+    refresh: () => {
+      pageRef.current = 1;
+      loadingRef.current = false;
+      setHasMore(true);
+      setData([]);
+      loadMoreData(true);
+    },
   }));
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<T[]>([]);
-  const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef(1);
+  const loadingRef = useRef(false);
+  const hasMoreRef = useRef(true);
 
   /** Load more data from API with pagination */
-  const loadMoreData = (flag?: boolean) => {
-    if (!flag && (loading || !hasMore)) {
-      return;
-    }
+  const loadMoreData = (reset?: boolean) => {
+    if (loadingRef.current || (!reset && !hasMoreRef.current)) return;
+    loadingRef.current = true;
     setLoading(true);
+    const currentPage = reset ? 1 : pageRef.current;
     request.get(url, {
-      page: page,
+      page: currentPage,
       pagesize: PAGE_SIZE,
-      ...(query||{}),
+      ...(query || {}),
     })
       .then((res) => {
         const response = res as ApiResponse<T>;
         const results = Array.isArray(response.items) ? response.items : Array.isArray(response) ? response as T[] : [];
-        // Replace data if flag is true, otherwise append
-        if (flag) {
-          setData(results);
-        } else {
-          setData(data.concat(results));
-        }
-        setPage(response.page.page + 1);
+        pageRef.current = response.page.page + 1;
+        setData(prev => reset ? results : [...prev, ...results]);
+        hasMoreRef.current = response.page?.hasnext;
         setHasMore(response.page?.hasnext);
-        setLoading(false);
-        console.log(`${results.length} more items loaded!`);
       })
       .catch(() => {
-        setLoading(false);
+        hasMoreRef.current = false;
         setHasMore(false);
-        console.error('Failed to load data');
       })
       .finally(() => {
+        loadingRef.current = false;
         setLoading(false);
+        // 内容不足以填满容器时，主动继续加载
+        setTimeout(() => {
+          const el = scrollRef.current;
+          console.log(el, el?.scrollHeight, el?.clientHeight, hasMoreRef.current)
+          if (el && hasMoreRef.current && el.scrollHeight <= el.clientHeight) {
+            loadMoreData();
+          }
+        }, 0);
       });
   };
 
-  /** Reset list to initial state and reload data */
-  const refresh = () => {
-    setPage(1);
+  /** Reset and reload when query parameters change */
+  const queryKey = JSON.stringify(query);
+  useEffect(() => {
+    pageRef.current = 1;
+    loadingRef.current = false;
+    hasMoreRef.current = true;
     setHasMore(true);
     setData([]);
-  }
+    loadMoreData(true);
+  }, [queryKey]);
 
-  /** Refresh when query parameters change */
-  useEffect(() => {
-    refresh()
-  }, [query]);
-
-  /** Load initial data when list is reset */
-  useEffect(() => {
-    if (page === 1 && hasMore && data.length === 0) {
-      loadMoreData(true);
-    }
-  }, [page, hasMore, data])
-  
   return (
     <>
       <div
@@ -142,7 +144,7 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
       >
         <InfiniteScroll
           dataLength={data.length}
-          next={loadMoreData}
+          next={() => loadMoreData()}
           hasMore={hasMore}
           loader={loading && needLoading ? <PageLoading className={heightClass} /> : false}
           // endMessage={<Divider plain>It is all, nothing more 🤐</Divider>}

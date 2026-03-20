@@ -23,7 +23,7 @@ class SimpleMCPClient:
     def __init__(self, server_url: str, connection_config: Dict[str, Any] = None):
         self.server_url = server_url
         self.connection_config = connection_config or {}
-        self.timeout = self.connection_config.get("timeout", 30)
+        self.timeout = self.connection_config.get("timeout", 10)
         
         # 确定连接类型
         self.is_websocket = server_url.startswith(("ws://", "wss://"))
@@ -53,6 +53,7 @@ class SimpleMCPClient:
             else:
                 await self._connect_http()
         except Exception as e:
+            await self.disconnect()
             logger.error(f"MCP连接失败: {self.server_url}, 错误: {e}")
             raise MCPConnectionError(f"连接失败: {e}")
     

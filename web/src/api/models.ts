@@ -41,12 +41,12 @@ export const deleteCompositeModel = (model_id: string) => {
   return request.delete(`/models/composite/${model_id}`)
 }
 // Create API keys for all matching models by provider
-export const updateProviderApiKeys = (data: KeyConfigModalForm) => {
-  return request.post('/models/provider/apikeys', data)
+export const updateProviderApiKeys = (data: KeyConfigModalForm, signal?: AbortSignal) => {
+  return request.post('/models/provider/apikeys', data, { signal })
 }
 // Create model API key
-export const addModelApiKey = (model_id: string, data: MultiKeyForm) => {
-  return request.post(`/models/${model_id}/apikeys`, data)
+export const addModelApiKey = (model_id: string, data: MultiKeyForm, signal?: AbortSignal) => {
+  return request.post(`/models/${model_id}/apikeys`, data, { signal })
 }
 // Delete model API key
 export const deleteModelApiKey = (api_key_id: string) => {
@@ -65,10 +65,10 @@ export const addModelPlaza = (model_base_id: string) => {
   return request.post(`/models/model_plaza/${model_base_id}/add`)
 }
 // Create custom model
-export const addCustomModel = (data: CustomModelForm) => {
-  return request.post('/models', data)
+export const addCustomModel = (data: CustomModelForm, signal?: AbortSignal) => {
+  return request.post('/models', data, { signal })
 }
 // Update custom model
-export const updateCustomModel = (model_base_id: string, data: CustomModelForm) => {
-  return request.put(`/models/${model_base_id}`, data)
+export const updateCustomModel = (model_base_id: string, data: CustomModelForm, signal?: AbortSignal) => {
+  return request.put(`/models/${model_base_id}`, data, { signal })
 }

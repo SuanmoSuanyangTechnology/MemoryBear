@@ -5,8 +5,9 @@ This module provides a storage backend that stores files on AWS S3
 using the boto3 SDK.
 """
 
+import io
 import logging
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError, BotoCoreError
@@ -35,6 +36,19 @@ class S3Storage(StorageBackend):
         bucket_name: The name of the S3 bucket.
         region: The AWS region.
     """
+    AMAZON_S3_ENDPOINT_MAP = {
+        "us-east-1": "https://s3.us-east-1.amazonaws.com",  # 特殊：无地域后缀
+        "us-east-2": "https://s3.us-east-2.amazonaws.com",
+        "us-west-1": "https://s3.us-west-1.amazonaws.com",
+        "us-west-2": "https://s3.us-west-2.amazonaws.com",
+        "ap-east-1": "https://s3.ap-east-1.amazonaws.com",  # 香港
+        "ap-southeast-1": "https://s3.ap-southeast-1.amazonaws.com",  # 新加坡
+        "ap-southeast-2": "https://s3.ap-southeast-2.amazonaws.com",  # 悉尼
+        "ap-northeast-1": "https://s3.ap-northeast-1.amazonaws.com",  # 东京
+        "eu-central-1": "https://s3.eu-central-1.amazonaws.com",  # 法兰克福
+        "eu-west-1": "https://s3.eu-west-1.amazonaws.com",  # 爱尔兰
+        # 可根据需要扩展其他地域
+    }
 
     def __init__(
         self,
@@ -42,6 +56,7 @@ class S3Storage(StorageBackend):
         access_key_id: str,
         secret_access_key: str,
         bucket_name: str,
+        endpoint_url: Optional[str] = None
     ):
         """
         Initialize the S3Storage backend.
@@ -51,6 +66,7 @@ class S3Storage(StorageBackend):
             access_key_id: The AWS access key ID.
             secret_access_key: The AWS secret access key.
             bucket_name: The name of the S3 bucket.
+            endpoint_url: The complete URL to use for the constructed client.
 
         Raises:
             StorageConfigError: If any required configuration is missing.
@@ -69,10 +85,19 @@ class S3Storage(StorageBackend):
         self.region = region
         self.bucket_name = bucket_name
 
+        if not endpoint_url:
+            # 优先匹配内置映射表（解决特殊地域）
+            if region in self.AMAZON_S3_ENDPOINT_MAP:
+                endpoint_url = self.AMAZON_S3_ENDPOINT_MAP[region]
+            # 兜底：通用拼接（适配未配置的新地域）
+            else:
+                endpoint_url = f"https://s3.{region}.amazonaws.com"
+
         try:
             self.client = boto3.client(
                 "s3",
                 region_name=region,
+                endpoint_url=endpoint_url,
                 aws_access_key_id=access_key_id,
                 aws_secret_access_key=secret_access_key,
             )
@@ -146,6 +171,62 @@ class S3Storage(StorageBackend):
             logger.error(f"Failed to upload file to S3 {file_key}: {e}")
             raise StorageUploadError(
                 message=f"Failed to upload file to S3: {e}",
+                file_key=file_key,
+                cause=e,
+            )
+
+    async def upload_stream(
+        self,
+        file_key: str,
+        stream: AsyncIterator[bytes],
+        content_type: Optional[str] = None,
+    ) -> int:
+        """Upload from async stream to S3 via multipart upload. Returns total bytes written."""
+        extra_args = {"ContentType": content_type} if content_type else {}
+        mpu = self.client.create_multipart_upload(
+            Bucket=self.bucket_name, Key=file_key, **extra_args
+        )
+        upload_id = mpu["UploadId"]
+        parts = []
+        part_number = 1
+        buf = io.BytesIO()
+        total = 0
+        min_part_size = 5 * 1024 * 1024  # S3 最小分片 5MB
+        try:
+            async for chunk in stream:
+                buf.write(chunk)
+                total += len(chunk)
+                if buf.tell() >= min_part_size:
+                    buf.seek(0)
+                    resp = self.client.upload_part(
+                        Bucket=self.bucket_name, Key=file_key,
+                        UploadId=upload_id, PartNumber=part_number, Body=buf.read()
+                    )
+                    parts.append({"PartNumber": part_number, "ETag": resp["ETag"]})
+                    part_number += 1
+                    buf = io.BytesIO()
+            # 上传剩余数据（最后一片可小于 5MB）
+            remaining = buf.getvalue()
+            if remaining:
+                resp = self.client.upload_part(
+                    Bucket=self.bucket_name, Key=file_key,
+                    UploadId=upload_id, PartNumber=part_number, Body=remaining
+                )
+                parts.append({"PartNumber": part_number, "ETag": resp["ETag"]})
+            self.client.complete_multipart_upload(
+                Bucket=self.bucket_name, Key=file_key,
+                UploadId=upload_id,
+                MultipartUpload={"Parts": parts}
+            )
+            logger.info(f"File stream uploaded to S3 successfully: {file_key}")
+            return total
+        except Exception as e:
+            self.client.abort_multipart_upload(
+                Bucket=self.bucket_name, Key=file_key, UploadId=upload_id
+            )
+            logger.error(f"Failed to stream upload file to S3 {file_key}: {e}")
+            raise StorageUploadError(
+                message=f"Failed to stream upload file to S3: {e}",
                 file_key=file_key,
                 cause=e,
             )

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:09:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 16:00:39
+ * @Last Modified time: 2026-03-20 10:22:08
  */
 /**
  * Memory Conversation Page
@@ -83,7 +83,7 @@ export interface LogItem {
   type: string;
   title: string;
   data?: DataItem[] | AnyObject;
-  raw_results?: string | AnyObject;
+  raw_results?: string | Record<string, AnyObject>;
   summary?: string;
   query?: string;
   reason?: string;
@@ -236,47 +236,50 @@ const MemoryConversation: FC = () => {
                     handleExpand={() => setExpandedLogs(prev => ({ ...prev, [logIndex]: !prev[logIndex] }))}
                     extra={log.type === 'verification' && <div className="rb-border rb:rounded-lg rb:py-1 rb:px-2 rb:text-[12px] rb:font-medium rb:leading-4.5 rb:text-[#FF5D34]">{log.result}</div>}
                   >
-                  {log.type === 'problem_split' && Array.isArray(log.data) && log.data.length > 0 
-                    ? <Flex gap={12} vertical>
-                      {log.data.map(vo => (
-                        <ContentWrapper key={vo.id}>
-                          <>
-                            <div className="rb:font-medium rb:text-[#212332]">{vo.id}. {vo.question}</div>
-                            <div className="rb:mt-2 rb:text-[12px] rb:text-[#5B6167]">{vo.reason}</div>
-                          </>
-                        </ContentWrapper>
-                      ))}
-                    </Flex>
-                    : log.type === 'problem_extension' && log.data && Object.keys(log.data).length > 0 
-                    ? <Flex gap={12} vertical>
-                      {Object.keys(log.data).map((key: string) => (
-                        <ContentWrapper key={key}>
-                          <>
-                            <div className="rb:font-medium rb:text-[#212332]">{key}</div>
-                            {(log.data as Record<string, string[]>)[key].map((item, index) => (
-                              <div key={index} className="rb:mt-2 rb:text-[#5B6167] rb:text-[12px]">{item}</div>
-                            ))}
-                          </>
-                        </ContentWrapper>
-                      ))}
+                    {log.type === 'problem_split' && Array.isArray(log.data) && log.data.length > 0 
+                      ? <Flex gap={12} vertical>
+                        {log.data.map(vo => (
+                          <ContentWrapper key={vo.id}>
+                            <>
+                              <div className="rb:font-medium rb:text-[#212332]">{vo.id}. {vo.question}</div>
+                              <div className="rb:mt-2 rb:text-[12px] rb:text-[#5B6167]">{vo.reason}</div>
+                            </>
+                          </ContentWrapper>
+                        ))}
                       </Flex>
-                    : log.type === 'search_result' && log.raw_results
-                    ? <ContentWrapper>
-                      <div className="rb:font-medium rb:text-[#212332] rb:mb-2">{log.query}</div>
-                        <div className='rb:mt-2 rb:text-[12px] rb:text-[#5B6167]'>
-                          {typeof log.raw_results === 'string'
-                            ? <Markdown content={log.raw_results} />
-                            : <>
-                              {log.raw_results.reranked_results?.statements.length > 0 && log.raw_results.reranked_results?.statements.map((item: { statement: string }, index: number) => (
-                                <div key={index}>{item.statement}</div>
+                      : log.type === 'problem_extension' && log.data && Object.keys(log.data).length > 0 
+                      ? <Flex gap={12} vertical>
+                        {Object.keys(log.data).map((key: string) => (
+                          <ContentWrapper key={key}>
+                            <>
+                              <div className="rb:font-medium rb:text-[#212332]">{key}</div>
+                              {(log.data as Record<string, string[]>)[key].map((item, index) => (
+                                <div key={index} className="rb:mt-2 rb:text-[#5B6167] rb:text-[12px]">{item}</div>
                               ))}
-                              {log.raw_results.reranked_results?.summaries.length > 0 && log.raw_results.reranked_results?.summaries.map((item: { content: string }, index: number) => (
-                                <div key={index}>{item.content}</div>
+                            </>
+                          </ContentWrapper>
+                        ))}
+                      </Flex>
+                      : log.type === 'search_result' && log.raw_results && typeof log.raw_results !== 'string'
+                      ? <ContentWrapper>
+                          <div className="rb:font-medium rb:text-[#212332] rb:mb-2">{log.query}</div>
+                          {(log.raw_results.reranked_results as AnyObject)?.communities?.length > 0 && <>
+                            <div className="rb:font-medium rb:text-[#212332] rb:text-[12px]">{t('memoryConversation.communities')}</div>
+                            <ul className='rb:mt-2 rb:text-[12px] rb:text-[#5B6167] rb:list-disc rb:pl-4'>
+                                {((log.raw_results.reranked_results as AnyObject)?.communities as { content: string }[]).map((item, index: number) => (
+                                <li key={index}>{item.content}</li>
                               ))}
-                            </> 
-                          }
-                        </div>
-                      </ContentWrapper>
+                            </ul>
+                          </>}
+                          {(log.raw_results.reranked_results as AnyObject)?.summaries?.length > 0 && <>
+                            <div className="rb:font-medium rb:text-[#212332] rb:text-[12px]">{t('memoryConversation.summaries')}</div>
+                            <ul className='rb:mt-2 rb:text-[12px] rb:text-[#5B6167] rb:list-disc rb:pl-4'>
+                              {((log.raw_results.reranked_results as AnyObject)?.summaries as { content: string }[]).map((item, index: number) => (
+                                <li key={index}>{item.content}</li>
+                              ))}
+                            </ul>
+                          </>}
+                        </ContentWrapper>
                     : log.type === 'retrieval_summary' && log.summary
                     ? <ContentWrapper>
                       <div className="rb:text-[12px] rb:text-[#5B6167]">{log.summary}</div>
@@ -310,9 +313,9 @@ const MemoryConversation: FC = () => {
                           }
                         </div>
                       </ContentWrapper>
-                    : null
-                  }
-                </ResultCard>
+                      : null
+                    }
+                  </ResultCard>
                 ))}
               </Flex>
             }

@@ -1,6 +1,7 @@
 {#
   对话级抽取与相关性判定模板（用于剪枝加速）
-  输入：pruning_scene, is_builtin_scene, ontology_classes, dialog_text, language
+  输入：pruning_scene, ontology_class_infos, dialog_text, language
+    - ontology_class_infos: List[{class_name: str, class_description: str}]
   输出：严格 JSON（不要包含任何多余文本），字段：
     - is_related: bool，是否与所选场景相关
     - times: [string]，从对话中抽取的时间相关文本（日期、时间、时间段、有效期等）
@@ -9,64 +10,103 @@
     - contacts: [string]，联系方式（电话/手机号/邮箱/微信/QQ等）
     - addresses: [string]，地址/地点相关文本
     - keywords: [string]，其它有助于保留的重要关键词（与场景强相关的术语）
+    - preserve_keywords: [string]，必须保留的情绪/兴趣/爱好/个人偏好相关词或短语片段
 
   要求：
   - 必须只输出上述 JSON，且键名一致；不得输出解释、前后缀；不得包含注释。
-  - times/ids/amounts/contacts/addresses/keywords 仅抽取原文片段或规范化后的简单字符串。
+  - times/ids/amounts/contacts/addresses/keywords/preserve_keywords 仅抽取原文片段或规范化后的简单字符串。
   - 仅输出上述键；避免多余解释或字段。
 #}
 
-{# ── 内置场景的固定说明 ── #}
-{% set builtin_scene_instructions = {
-  'education': {
-    'zh': '教育场景：教学、课程、考试、作业、老师/学生互动、学习资源、学校管理等。',
-    'en': 'Education Scenario: Teaching, courses, exams, homework, teacher/student interaction, learning resources, school management, etc.'
-  },
-  'online_service': {
-    'zh': '在线客服场景：客户咨询、问题排查、服务工单、售后支持、订单/退款、工单升级等。',
-    'en': 'Online Service Scenario: Customer inquiries, troubleshooting, service tickets, after-sales support, orders/refunds, ticket escalation, etc.'
-  },
-  'outbound': {
-    'zh': '外呼场景：电话外呼、邀约、调研问卷、线索跟进、对话脚本、回访记录等。',
-    'en': 'Outbound Scenario: Outbound calls, invitations, survey questionnaires, lead follow-up, call scripts, follow-up records, etc.'
-  }
-} %}
-
-{# ── 确定最终使用的场景说明 ── #}
-{% if is_builtin_scene %}
-  {# 内置专门场景：使用固定说明 #}
-  {% set scene_key = pruning_scene %}
-  {% if scene_key not in builtin_scene_instructions %}{% set scene_key = 'education' %}{% endif %}
-  {% set instruction = builtin_scene_instructions[scene_key][language] if language in ['zh', 'en'] else builtin_scene_instructions[scene_key]['zh'] %}
-  {% set custom_types_str = '' %}
-{% else %}
-  {# 自定义场景：使用场景名称 + 本体类型列表构建说明 #}
-  {% if ontology_classes and ontology_classes | length > 0 %}
-    {% if language == 'en' %}
-      {% set custom_types_str = ontology_classes | join(', ') %}
-      {% set instruction = 'Custom scene "' ~ pruning_scene ~ '": The dialogue is related to this scene if it involves any of the following entity types: ' ~ custom_types_str ~ '.' %}
-    {% else %}
-      {% set custom_types_str = ontology_classes | join('、') %}
-      {% set instruction = '自定义场景「' ~ pruning_scene ~ '」：对话涉及以下任意实体类型时视为相关：' ~ custom_types_str ~ '。' %}
-    {% endif %}
+{# ── 确定场景说明 ── #}
+{% if ontology_class_infos and ontology_class_infos | length > 0 %}
+  {% if language == 'en' %}
+    {% set instruction = 'Scene "' ~ pruning_scene ~ '": The dialogue is relevant if it involves any of the following entity types.' %}
   {% else %}
-    {# 无本体类型时退化为通用说明 #}
-    {% if language == 'en' %}
-      {% set instruction = 'Custom scene "' ~ pruning_scene ~ '": Determine whether the dialogue content is relevant to this scene based on overall context.' %}
-    {% else %}
-      {% set instruction = '自定义场景「' ~ pruning_scene ~ '」：根据对话整体内容判断是否与该场景相关。' %}
-    {% endif %}
-    {% set custom_types_str = '' %}
+    {% set instruction = '场景「' ~ pruning_scene ~ '」：对话涉及以下任意实体类型时视为相关。' %}
+  {% endif %}
+{% else %}
+  {% if language == 'en' %}
+    {% set instruction = 'Scene "' ~ pruning_scene ~ '": Determine whether the dialogue content is relevant to this scene based on overall context.' %}
+  {% else %}
+    {% set instruction = '场景「' ~ pruning_scene ~ '」：根据对话整体内容判断是否与该场景相关。' %}
   {% endif %}
 {% endif %}
 
 {% if language == "zh" %}
-请在下方对话全文基础上，按该场景进行一次性抽取并判定相关性：
+你是一个对话内容分析助手。请对下方对话全文进行一次性分析，完成两项任务：
+1. 判断对话是否与指定场景相关；
+2. 从对话中抽取所有需要保留的重要信息片段。
+
 场景说明：{{ instruction }}
-{% if not is_builtin_scene and custom_types_str %}
-重要提示：只要对话中出现与上述实体类型（{{ custom_types_str }}）相关的内容，即判定为相关（is_related=true）。
+
+{% if ontology_class_infos and ontology_class_infos | length > 0 %}
+【本场景实体类型定义】
+以下实体类型定义了本场景中哪些内容是重要的。
+凡是与以下任意类型相关的内容，都必须保留，并将关键词/短语提取到 keywords 字段：
+
+{% for info in ontology_class_infos %}
+- {{ info.class_name }}：{{ info.class_description }}
+{% endfor %}
+
+重要提示：只要对话中出现与上述任意实体类型相关的内容，即判定为相关（is_related=true）。
 {% endif %}
 
+---
+【必须保留的内容（不可删除）】
+以下类型的内容无论是否与场景直接相关，都必须保留，请将其关键词/短语抽取到对应字段：
+- 时间信息：日期、时间点、时间段、有效期 → times 字段
+- 编号信息：学号、工号、订单号、申请号、账号、ID → ids 字段
+- 金额信息：价格、费用、金额（含货币符号或单位，如"100元"、"¥200"）→ amounts 字段（注意：考试分数、成绩分数不属于金额，不要放入此字段）
+- 联系方式：电话、手机号、邮箱、微信、QQ → contacts 字段
+- 地址信息：地点、地址、位置 → addresses 字段
+- 场景关键词：与**当前场景**强相关的专业术语、事件名称 → keywords 字段（注意：只放与当前场景直接相关的词，跨场景的内容不要放入此字段）
+- **情绪与情感**：喜悦、悲伤、愤怒、焦虑、开心、难过、委屈、兴奋、害怕、担心、压力、感动等情绪表达 → preserve_keywords 字段
+- **兴趣与爱好**：喜欢、热爱、爱好、擅长、享受、沉迷、着迷、讨厌某事物等个人偏好表达 → preserve_keywords 字段
+- **个人情感态度**：对人际关系、情感状态的明确表达（如"我跟室友闹矛盾了"、"我都快抑郁了"）→ preserve_keywords 字段
+- 注意：学业目标（如"我想考研"）、成绩（如"87分"）、学科偏好（如"喜欢数学"）属于学业信息，不属于情绪/情感，不要放入 preserve_keywords 字段
+
+【场景无关内容标记】
+请从对话中识别出与当前场景（{{ pruning_scene }}）**既不相关、也无语义关联**的消息片段，将其原文（或关键片段）提取到 scene_unrelated_snippets 字段。
+判断标准：
+- 与场景实体类型完全无关
+- 与场景话题没有因果/时间/情境上的关联（例如：不是"因为上课所以累"这种关联）
+- 纯粹是另一个话题的内容（如在教育场景中讨论购物、娱乐等）
+注意：有情绪/感受表达的消息即使话题不同，也可能有语义关联，请谨慎标记。
+
+**重要：scene_unrelated_snippets 必须认真填写，不能为空数组。**
+如果对话中存在与场景无关的内容，必须将其原文片段提取出来。
+
+示例（场景=在线教育）：
+- "我最近心情很差，跟室友闹矛盾了" → 与教育场景无关，加入 scene_unrelated_snippets
+- "她总是很晚回来吵到我睡觉" → 与教育场景无关，加入 scene_unrelated_snippets
+- "对，我都快抑郁了" → 与教育场景无关，加入 scene_unrelated_snippets
+- "期末考试12月25日" → 与教育场景相关，不加入 scene_unrelated_snippets
+- "我上次高数作业87分" → 与教育场景相关，不加入 scene_unrelated_snippets
+- "我的目标是考研" → 与教育场景相关，不加入 scene_unrelated_snippets
+
+示例（场景=情感陪伴）：
+- "我最近心情很差，跟室友闹矛盾了" → 与情感陪伴场景相关（情绪+关系），不加入 scene_unrelated_snippets
+- "对，我都快抑郁了" → 与情感陪伴场景相关（情绪），不加入 scene_unrelated_snippets
+- "期末考试12月25日，3号教学楼201室" → 与情感陪伴场景无关（教育信息），加入 scene_unrelated_snippets
+- "我上次高数作业87分，这次能考好吗" → 与情感陪伴场景无关（学业信息），加入 scene_unrelated_snippets
+- "我的目标是考研，想读应用数学" → 与情感陪伴场景无关（学业目标），加入 scene_unrelated_snippets
+
+【可以删除的内容】
+以下类型的内容属于低价值信息，可以在剪枝时删除：
+- 纯寒暄问候：如"你好"、"在吗"、"拜拜"、"嗯"、"好的"、"哦"等无实质内容的短语
+- 纯表情/符号：如"[微笑]"、"😊"、"哈哈"等
+- 重复确认：如"对对对"、"是的是的"、"嗯嗯嗯"等无新增信息的重复
+- 无意义填充：如"啊"、"呢"、"嘛"等语气词单独成句
+
+**注意：即使消息很短，只要包含情绪、兴趣、爱好、个人观点等有价值信息，就必须保留，不得删除。**
+例如：
+- "我好开心呀" → 包含情绪（开心），必须保留，preserve_keywords 中加入"开心"
+- "好喜欢打羽毛球呀" → 包含兴趣爱好（喜欢打羽毛球），必须保留，preserve_keywords 中加入"喜欢打羽毛球"
+- "我好难过" → 包含情绪（难过），必须保留，preserve_keywords 中加入"难过"
+- "太好啦！看到你开心，我也跟着心情亮起来" → 包含情绪，必须保留，preserve_keywords 中加入"开心"
+
+---
 对话全文：
 """
 {{ dialog_text }}
@@ -80,15 +120,65 @@
   "amounts": [<string>...],
   "contacts": [<string>...],
   "addresses": [<string>...],
-  "keywords": [<string>...]
+  "keywords": [<string>...],
+  "preserve_keywords": [<string>...],
+  "scene_unrelated_snippets": [<string>...]
 }
 {% else %}
-Based on the full dialogue below, perform one-time extraction and relevance determination according to this scenario:
+You are a dialogue content analysis assistant. Please analyze the full dialogue below in one pass and complete two tasks:
+1. Determine whether the dialogue is relevant to the specified scene;
+2. Extract all important information fragments that must be preserved.
+
 Scenario Description: {{ instruction }}
-{% if not is_builtin_scene and custom_types_str %}
-Important: If the dialogue contains content related to any of the entity types above ({{ custom_types_str }}), mark it as relevant (is_related=true).
+
+{% if ontology_class_infos and ontology_class_infos | length > 0 %}
+[Scene Entity Type Definitions]
+The following entity types define what content is important in this scene.
+Content related to ANY of these types must be preserved and extracted into the keywords field:
+
+{% for info in ontology_class_infos %}
+- {{ info.class_name }}: {{ info.class_description }}
+{% endfor %}
+
+Important: If the dialogue contains content related to any of the entity types above, mark it as relevant (is_related=true).
 {% endif %}
 
+---
+[MUST PRESERVE (cannot be deleted)]
+The following types of content must always be preserved regardless of scene relevance. Extract their keywords/phrases into the corresponding fields:
+- Time information: dates, time points, durations, expiry dates → times field
+- ID information: student IDs, employee IDs, order numbers, application numbers, account IDs → ids field
+- Amount information: prices, fees, amounts (with currency symbols or units, e.g., "$100", "¥200") → amounts field (Note: exam scores and grades are NOT amounts, do not put them here)
+- Contact information: phone numbers, emails, WeChat, QQ → contacts field
+- Address information: locations, addresses, places → addresses field
+- Scene keywords: professional terms and event names strongly related to **the current scene** → keywords field (Note: only put terms directly related to the current scene; cross-scene content should not be placed here)
+- **Emotions and feelings**: joy, sadness, anger, anxiety, happiness, sadness, excitement, fear, worry, stress, being moved, etc. → preserve_keywords field
+- **Interests and hobbies**: likes, loves, hobbies, good at, enjoys, obsessed with, hates something, personal preferences → preserve_keywords field
+- **Personal emotional attitudes**: clear expressions about interpersonal relationships or emotional states (e.g., "I had a fight with my roommate", "I'm almost depressed") → preserve_keywords field
+- Note: Academic goals (e.g., "I want to pursue a master's degree"), grades (e.g., "87 points"), and subject preferences (e.g., "I like math") are academic information, NOT emotions/feelings — do not put them in preserve_keywords
+
+[Scene-Unrelated Content Marking]
+Please identify message snippets in the dialogue that are **neither relevant to nor semantically associated with** the current scene ({{ pruning_scene }}), and extract their original text (or key fragments) into the scene_unrelated_snippets field.
+Criteria:
+- Completely unrelated to the scene's entity types
+- No causal/temporal/contextual association with the scene topic (e.g., "feeling tired because of class" IS associated)
+- Purely belongs to a different topic (e.g., discussing shopping or entertainment in an education scene)
+Note: Messages with emotional/feeling expressions may still have semantic association even if the topic differs — mark carefully.
+
+[CAN BE DELETED]
+The following types of content are low-value and can be removed during pruning:
+- Pure greetings: e.g., "hello", "are you there", "bye", "ok", "yeah" — short phrases with no substantive content
+- Pure emojis/symbols: e.g., "[smile]", "😊", "haha"
+- Repetitive confirmations: e.g., "yes yes yes", "right right", "uh huh" — repetitions with no new information
+- Meaningless fillers: standalone interjections like "ah", "well", "hmm"
+
+**Note: Even if a message is short, if it contains emotions, interests, hobbies, or personal opinions, it MUST be preserved.**
+Examples:
+- "I'm so happy!" → contains emotion (happy), must preserve; add "happy" to preserve_keywords
+- "I love playing badminton!" → contains interest (love playing badminton), must preserve; add "love playing badminton" to preserve_keywords
+- "I feel so sad" → contains emotion (sad), must preserve; add "sad" to preserve_keywords
+
+---
 Full Dialogue:
 """
 {{ dialog_text }}
@@ -102,6 +192,8 @@ Output strict JSON only (fixed keys, order doesn't matter):
   "amounts": [<string>...],
   "contacts": [<string>...],
   "addresses": [<string>...],
-  "keywords": [<string>...]
+  "keywords": [<string>...],
+  "preserve_keywords": [<string>...],
+  "scene_unrelated_snippets": [<string>...]
 }
 {% endif %}

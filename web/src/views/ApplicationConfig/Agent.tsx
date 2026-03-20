@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 10:28:59
+ * @Last Modified time: 2026-03-20 11:36:49
  */
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import { useTranslation } from 'react-i18next'
@@ -22,7 +22,8 @@ import type {
   MemoryConfig,
   AiPromptModalRef,
   Source,
-  ChatVariableConfigModalRef
+  ChatVariableConfigModalRef,
+  FeaturesConfigForm
 } from './types'
 import type { Variable } from './components/VariableList/types'
 import type { KnowledgeConfig } from './components/Knowledge/types'
@@ -41,12 +42,13 @@ import ChatVariableConfigModal from './components/ChatVariableConfigModal';
 import type { Skill } from '@/views/Skills/types'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import DescWrapper from '@/components/FormItem/DescWrapper'
+import FeaturesConfig from './components/FeaturesConfig'
 
 /**
  * Agent configuration component
  * Manages single agent configuration including prompts, knowledge, memory, variables, and tools
  */
-const Agent = forwardRef<AgentRef>((_props, ref) => {
+const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void }>(({ onFeaturesLoad }, ref) => {
   const { t } = useTranslation()
   const { id } = useParams();
   const { message } = App.useApp()
@@ -117,6 +119,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
         ...response,
         tools: allTools
       })
+      onFeaturesLoad?.(response.features)
     }).finally(() => {
       setLoading(false)
     })
@@ -272,7 +275,8 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
   }, [modelList, values?.default_model_config_id])
 
   useImperativeHandle(ref, () => ({
-    handleSave
+    handleSave,
+    features: values?.features
   }))
 
   const aiPromptModalRef = useRef<AiPromptModalRef>(null)
@@ -326,6 +330,10 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
   useEffect(() => {
     setChatVariables(values?.variables || [])
   }, [values?.variables])
+
+  const handleSaveFeaturesConfig = (value: FeaturesConfigForm) => {
+    form.setFieldValue('features', value)
+  }
   console.log('values', values)
   return (
     <>
@@ -339,13 +347,16 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
                   {defaultModel?.name ? <div className="rb:size-4 rb:bg-[url('@/assets/images/application/model.svg')]"></div> : null}
                   {defaultModel?.name || t('application.chooseModel')}
                 </Button>
-                <Button type="primary" onClick={() => handleSave()}>
-                  {t('common.save')}
-                </Button>
+                <Space size={12}>
+                  <FeaturesConfig value={values?.features as FeaturesConfigForm} refresh={handleSaveFeaturesConfig} />
+                  <Button type="primary" onClick={() => handleSave()}>
+                    {t('common.save')}
+                  </Button>
+                </Space>
               </Flex>
               <Form.Item name="default_model_config_id" hidden noStyle></Form.Item>
               <Form.Item name="model_parameters" hidden noStyle></Form.Item>
-
+              <Form.Item name="features" hidden noStyle></Form.Item>
               <Card
                 title={t('application.promptConfiguration')}
                 extra={
@@ -364,25 +375,25 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
                   <span className="rb:font-regular rb:text-[#5B6167]"> ({t('application.configurationDesc')})</span>
                 </div>
 
-                <Form.Item name="system_prompt" className="rb:mb-0!">
-                  <Input.TextArea
-                    placeholder={t('application.promptPlaceholder')}
-                    styles={{
-                      textarea: {
-                        minHeight: '200px',
-                        borderRadius: '8px',
-                        padding: '12px'
-                      },
-                    }}
-                  />
+                  <Form.Item name="system_prompt" className="rb:mb-0!">
+                    <Input.TextArea
+                      placeholder={t('application.promptPlaceholder')}
+                      styles={{
+                        textarea: {
+                          minHeight: '200px',
+                          borderRadius: '8px',
+                          padding: '12px'
+                        },
+                      }}
+                    />
+                  </Form.Item>
+                </Card>
+
+                <Form.Item name="knowledge_retrieval" noStyle>
+                  <Knowledge />
                 </Form.Item>
-              </Card>
 
-              <Form.Item name="knowledge_retrieval" noStyle>
-                <Knowledge />
-              </Form.Item>
-
-              {/* Memory Configuration */}
+                {/* Memory Configuration */}
               <Card title={t('application.memoryConfiguration')}>
                 <Flex gap={16} vertical className="rb:bg-[#FAFAFA] rb:rounded-xl rb:p-3!">
                   <SwitchFormItem
@@ -403,6 +414,7 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
                       hasAll={false}
                       valueKey='config_id'
                       labelKey="config_name"
+                      disabled={!values?.memory?.enabled}
                     />
                   </Form.Item>
                 </Flex>
@@ -428,9 +440,6 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
             title={t('application.debuggingAndPreview')}
             extra={
               <Space size={10}>
-                <Button type="primary" ghost onClick={handleOpenVariableConfig}>
-                  {t('application.variableConfig')}
-                </Button>
                 <Button type="primary" ghost onClick={handleAddModel}>
                   + {t('application.addModel')}
                 </Button>
@@ -441,14 +450,15 @@ const Agent = forwardRef<AgentRef>((_props, ref) => {
             headerClassName="rb:h-[56px]! rb:leading-[22px]!"
             titleClassName="rb:font-[MiSans-Bold] rb:font-bold"
             bodyClassName="rb:p-4! rb:pt-0!"
-            className="rb:h-full"
+            className="rb:h-full!"
           >
             <Chat
-              data={data as Config}
+              data={values as Config}
               chatList={chatList}
               updateChatList={setChatList}
               handleSave={handleSave}
               chatVariables={chatVariables}
+              handleEditVariables={handleOpenVariableConfig}
             />
           </RbCard>
         </Col>

@@ -4,7 +4,7 @@
  * @Author: yujiangping
  * @Date: 2025-11-10 18:52:55
  * @LastEditors: yujiangping
- * @LastEditTime: 2025-12-03 18:44:58
+ * @LastEditTime: 2026-03-09 16:34:51
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Switch } from 'antd';
@@ -50,34 +50,38 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
     setSpaceList(filteredItems as SpaceItem[]);
   }
   const handleShare = async() => {
-
     // Get all data with checked = true
     const checkedItems = spaceList.filter(item => item.is_active);
-    debugger
     // Get currently selected item (corresponding to curIndex)
     const selectedItem = curIndex !== -1 ? spaceList[curIndex] : null;
     if(!selectedItem){
       messageApi.error(t('knowledgeBase.selectSpace'));
       return;
     }
-    const payload = {
-      source_kb_id: kbId ?? '',
-      target_workspace_id: selectedItem?.id ?? '',
-    }
-    const respose = await shareKnowledgeBase(payload)
-    if(respose){
-      messageApi.success(t('knowledgeBase.shareSuccess'));
-    }else{
-      messageApi.error(t('knowledgeBase.shareFailed'));
-    }
-    // Call parent component's callback function with selected data
-    onShare?.({
-      checkedItems,
-      selectedItem
-    });
     
-    // Close modal after sharing
-    handleClose();
+    setLoading(true);
+    try {
+      const payload = {
+        source_kb_id: kbId ?? '',
+        target_workspace_id: selectedItem?.id ?? '',
+      }
+      const respose = await shareKnowledgeBase(payload)
+      if(respose){
+        messageApi.success(t('knowledgeBase.shareSuccess'));
+      }else{
+        messageApi.error(t('knowledgeBase.shareFailed'));
+      }
+      // Call parent component's callback function with selected data
+      onShare?.({
+        checkedItems,
+        selectedItem
+      });
+      
+      // Close modal after sharing
+      handleClose();
+    } finally {
+      setLoading(false);
+    }
   }
   const handleClick = (index: number, checked: boolean) => {
     if (!checked) return;

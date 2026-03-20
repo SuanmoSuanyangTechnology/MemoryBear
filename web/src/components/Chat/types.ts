@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:45:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-06 21:05:09 
+ * @Last Modified time: 2026-03-19 20:47:12
  */
 import { type ReactNode } from 'react'
 
@@ -22,8 +22,11 @@ export interface ChatItem {
   created_at?: number | string;
   status?: string;
   subContent?: Record<string, any>[];
-  files?: any[];
   error?: string;
+  meta_data?: {
+    audio_url?: string;
+    files?: any[];
+  },
 }
 
 /**
@@ -54,6 +57,7 @@ export interface ChatProps {
   /** Attachment update */
   fileChange?: (fileList: any[]) => void;
   className?: string;
+  renderRuntime?: (item: ChatItem, index: number) => ReactNode;
 }
 
 /**

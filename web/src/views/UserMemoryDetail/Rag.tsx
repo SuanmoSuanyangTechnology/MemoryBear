@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:11 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 11:38:17
+ * @Last Modified time: 2026-03-20 11:27:53
  */
 /**
  * RAG User Memory Detail View
@@ -12,7 +12,8 @@
 
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Row, Col, Skeleton, Flex } from 'antd'
+import { Row, Col, Skeleton, Spin, Flex, Tooltip } from 'antd'
+import { LoadingOutlined } from '@ant-design/icons';
 import { useParams } from 'react-router-dom'
 
 import aboutUs from '@/assets/images/userMemory/aboutUs.svg'
@@ -23,6 +24,7 @@ import {
   getChunkSummaryTag,
   getUserProfile,
   getChunkInsight,
+  generateRagProfile
 } from '@/api/memory'
 import Empty from '@/components/Empty'
 import ConversationMemory from './components/ConversationMemory'
@@ -96,6 +98,20 @@ const Rag: FC = () => {
     })
   }
   const name = loading.detail ? '' : data?.name && data?.name !== '' ? data.name : id
+
+  const [refreshLoading, setRefreshLoading] = useState(false)
+  const handleRefresh = () => {
+    if (refreshLoading || !id) return
+    setRefreshLoading(true)
+    generateRagProfile(id as string)
+      .then(() => {
+        getSummary()
+        getInsightReport()
+      })
+      .finally(() => {
+        setRefreshLoading(false)
+      })
+  }
   return (
     <Row gutter={[16, 16]}>
       <Col span={8}>
@@ -104,9 +120,22 @@ const Rag: FC = () => {
         >
           <Flex align="center" gap={12} className="rb:mb-6!">
             <div className="rb:size-12 rb:text-center rb:font-semibold rb:text-[28px] rb:leading-12 rb:rounded-xl rb:text-white rb:bg-[#155EEF]">{name?.[0]}</div>
-            <div className="rb:text-[16px] rb:font-semibold rb:leading-6 rb:line-clamp-2 rb:flex-1">
-              {name}
-            </div>
+            <Flex justify="space-between">
+              <div className="rb:text-[16px] rb:font-semibold rb:leading-6 rb:line-clamp-2 rb:flex-1">
+                {name}
+              </div>
+              <Tooltip title={t('common.refresh')}>
+                {refreshLoading
+                  ? <Spin indicator={<LoadingOutlined spin />} />
+                  : (
+                    <div
+                      className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/refresh.svg')]"
+                      onClick={handleRefresh}
+                    ></div>
+                  )
+                }
+              </Tooltip>
+            </Flex>
           </Flex>
 
           {/* About Me */}

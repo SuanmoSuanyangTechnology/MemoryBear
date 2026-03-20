@@ -18,14 +18,16 @@ from sqlalchemy.orm import Session
 from app.celery_app import celery_app
 from app.core.agent.agent_middleware import AgentMiddleware
 from app.core.agent.langchain_agent import LangChainAgent
+from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_db_context
-from app.models import AgentConfig, ModelConfig
+from app.models import AgentConfig, ModelConfig, ModelType
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput
+from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
 from app.services import task_service
 from app.services.conversation_service import ConversationService
@@ -35,6 +37,7 @@ from app.services.model_parameter_merger import ModelParameterMerger
 from app.services.model_service import ModelApiKeyService
 from app.services.multimodal_service import MultimodalService
 from app.services.tool_service import ToolService
+from app.schemas import FileType
 
 logger = get_business_logger()
 
@@ -97,7 +100,7 @@ def create_long_term_memory_tool(
         **重要：如果用户的问题可以直接回答，不要调用此工具。只在确实需要历史信息时才使用。**
 
         Args:
-            question: 需要检索的问题（保持原问题的核心语义，使用清晰的关键词）
+            question: 需要检索的问题（保持原问题的核心语义，使用清晰的关键词，第三人称描述的偏好、行为通常指用户本人，比如（我，本人，在下，自己，咱，鄙人，吴，余）通指用户）
 
         Returns:
             检索到的历史记忆内容
@@ -261,9 +264,12 @@ class AgentRunService:
 
     def load_tools_config(self, tools_config, web_search, tenant_id) -> list:
         """加载工具配置"""
-        if not tools_config:
-            return []
         tools = []
+        if web_search:
+            search_tool = create_web_search_tool({})
+            tools.append(search_tool)
+        if not tools_config:
+            return tools
         tool_service = ToolService(self.db)
 
         if tools_config and isinstance(tools_config, list):
@@ -272,24 +278,15 @@ class AgentRunService:
                     # 根据工具名称查找工具实例
                     tool_instance = tool_service.get_tool_instance(tool_config.get("tool_id", ""), tenant_id)
                     if tool_instance:
-                        if tool_instance.name == "baidu_search_tool" and not web_search:
-                            continue
                         # 转换为LangChain工具
                         langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
                         tools.append(langchain_tool)
-        elif tools_config and isinstance(tools_config, dict):
-            web_search_choice = tools_config.get("web_search", {})
-            web_search_enable = web_search_choice.get("enabled", False)
-            if web_search and web_search_enable:
-                search_tool = create_web_search_tool({})
-                tools.append(search_tool)
-
-                logger.debug(
-                    "已添加网络搜索工具",
-                    extra={
-                        "tool_count": len(tools)
-                    }
-                )
+        logger.debug(
+            "已添加网络搜索工具",
+            extra={
+                "tool_count": len(tools)
+            }
+        )
         return tools
 
     def load_skill_config(
@@ -372,6 +369,86 @@ class AgentRunService:
                 )
         return tools, bool(memory_config.get("enabled"))
 
+    @staticmethod
+    def _validate_file_upload(
+            features_config: Dict[str, Any],
+            files: Optional[List[FileInput]]
+    ) -> None:
+        """校验上传文件是否符合 file_upload 配置"""
+        if not files or not features_config:
+            return
+        fu = features_config.get("file_upload", {})
+        if not (isinstance(fu, dict) and fu.get("enabled")):
+            raise BusinessException("该应用未开启文件上传功能", BizCode.BAD_REQUEST)
+        max_count = fu.get("max_file_count", 5)
+        if len(files) > max_count:
+            raise BusinessException(f"文件数量超过限制（最多 {max_count} 个）", BizCode.BAD_REQUEST)
+
+        # 校验传输方式
+        allowed_methods = fu.get("allowed_transfer_methods", ["local_file", "remote_url"])
+        for f in files:
+            if f.transfer_method.value not in allowed_methods:
+                raise BusinessException(
+                    f"不支持的文件传输方式：{f.transfer_method.value}，允许的方式：{', '.join(allowed_methods)}",
+                    BizCode.BAD_REQUEST
+                )
+
+        # 各类型对应的开关和大小限制配置键
+        type_cfg = {
+            "image":    ("image_enabled",    "image_max_size_mb",    20,  "图片"),
+            "audio":    ("audio_enabled",    "audio_max_size_mb",    50,  "音频"),
+            "document": ("document_enabled", "document_max_size_mb", 100, "文档"),
+            "video":    ("video_enabled",    "video_max_size_mb",    500, "视频"),
+        }
+
+        for f in files:
+            ftype = str(f.type)  # 如 "image", "audio", "document", "video"
+            cfg = type_cfg.get(ftype)
+            if cfg is None:
+                continue
+            enabled_key, size_key, default_max_mb, label = cfg
+
+            # 校验类型开关
+            if not fu.get(enabled_key):
+                raise BusinessException(f"该应用未开启{label}文件上传", BizCode.BAD_REQUEST)
+
+            # 校验文件大小（仅当内容已加载时）
+            content = f.get_content()
+            if content is not None:
+                max_mb = fu.get(size_key, default_max_mb)
+                size_mb = len(content) / (1024 * 1024)
+                if size_mb > max_mb:
+                    raise BusinessException(
+                        f"{label}文件大小超过限制（最大 {max_mb}MB，当前 {size_mb:.1f}MB）",
+                        BizCode.BAD_REQUEST
+                    )
+
+    @staticmethod
+    def _inject_opening_statement(
+            features_config: Dict[str, Any],
+            system_prompt: str,
+            is_new_conversation: bool
+    ) -> str:
+        """首轮对话时将开场白注入 system_prompt"""
+        if not is_new_conversation:
+            return system_prompt
+        opening = features_config.get("opening_statement", {})
+        if not (isinstance(opening, dict) and opening.get("enabled") and opening.get("statement")):
+            return system_prompt
+        statement = opening["statement"]
+        return f"{system_prompt}\n\n[对话开场白]\n{statement}"
+
+    @staticmethod
+    def _filter_citations(
+            features_config: Dict[str, Any],
+            citations: List[Any]
+    ) -> List[Any]:
+        """根据 citation 开关决定是否返回引用来源"""
+        citation_cfg = features_config.get("citation", {})
+        if isinstance(citation_cfg, dict) and citation_cfg.get("enabled"):
+            return citations
+        return []
+
     async def run(
             self,
             *,
@@ -414,6 +491,15 @@ class AgentRunService:
         skills_config: dict | None = agent_config.skills
         knowledge_retrieval_config: dict | None = agent_config.knowledge_retrieval
         memory_config: dict | None = agent_config.memory
+        features_config: dict = agent_config.features or {}
+
+        # 从 features 中读取功能开关（优先级高于参数默认值）
+        web_search_feature = features_config.get("web_search", {})
+        if not isinstance(web_search_feature, dict) or not web_search_feature.get("enabled"):
+            web_search = False
+
+        # file_upload 校验
+        self._validate_file_upload(features_config, files)
 
         try:
             # 1. 获取 API Key 配置
@@ -447,6 +533,10 @@ class AgentRunService:
 
             # 3. 处理系统提示词（支持变量替换）
             system_prompt = system_prompt.get_text_content() or "你是一个专业的AI助手"
+
+            # opening_statement：首轮对话注入开场白
+            is_new_conversation = not conversation_id
+            system_prompt = self._inject_opening_statement(features_config, system_prompt, is_new_conversation)
 
             # 4. 准备工具列表
             tools = []
@@ -490,20 +580,27 @@ class AgentRunService:
             )
 
             # 6. 加载历史消息
-            history = []
-            if memory_config and memory_config.get("enabled"):
-                history = await self._load_conversation_history(
-                    conversation_id=conversation_id,
-                    max_history=agent_config.memory.get("max_history", 10)
-                )
+            history = await self._load_conversation_history(
+                conversation_id=conversation_id,
+                max_history=10
+            )
 
             # 6. 处理多模态文件
             processed_files = None
             if files:
                 # 获取 provider 信息
+                model_info = ModelInfo(
+                    model_name=api_key_config["model_name"],
+                    provider=api_key_config["provider"],
+                    api_key=api_key_config["api_key"],
+                    api_base=api_key_config["api_base"],
+                    capability=api_key_config["capability"],
+                    is_omni=api_key_config["is_omni"],
+                    model_type=ModelType.LLM
+                )
                 provider = api_key_config.get("provider", "openai")
-                multimodal_service = MultimodalService(self.db, provider=provider, is_omni=api_key_config.get("is_omni", False))
-                processed_files = await multimodal_service.process_files(files)
+                multimodal_service = MultimodalService(self.db, model_info)
+                processed_files = await multimodal_service.process_files(user_id, files)
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
 
             # 7. 知识库检索
@@ -540,8 +637,14 @@ class AgentRunService:
 
             ModelApiKeyService.record_api_key_usage(self.db, api_key_config.get("api_key_id"))
 
-            # 9. 保存会话消息
-            if not sub_agent and memory_config and memory_config.get("enabled"):
+            # 9. 生成 TTS audio_url（在保存消息前生成，以便一并存入 meta_data）
+            audio_url = await self._generate_tts(
+                features_config, result["content"], api_key_config,
+                tenant_id=tenant_id, workspace_id=workspace_id
+            ) if not sub_agent else None
+
+            # 10. 保存会话消息
+            if not sub_agent:
                 await self._save_conversation_message(
                     conversation_id=conversation_id,
                     user_message=message,
@@ -554,7 +657,9 @@ class AgentRunService:
                             "completion_tokens": 0,
                             "total_tokens": 0
                         })
-                    }
+                    },
+                    files=files,
+                    audio_url=audio_url
                 )
 
             response = {
@@ -565,7 +670,12 @@ class AgentRunService:
                     "completion_tokens": 0,
                     "total_tokens": 0
                 }),
-                "elapsed_time": elapsed_time
+                "elapsed_time": elapsed_time,
+                "suggested_questions": await self._generate_suggested_questions(
+                    features_config, result["content"], api_key_config, effective_params
+                ) if not sub_agent else [],
+                "citations": self._filter_citations(features_config, result.get("citations", [])),
+                "audio_url": audio_url,
             }
 
             logger.info(
@@ -620,6 +730,15 @@ class AgentRunService:
         skills_config: dict | None = agent_config.skills
         knowledge_retrieval_config: dict | None = agent_config.knowledge_retrieval
         memory_config: dict | None = agent_config.memory
+        features_config: dict = agent_config.features or {}
+
+        # 从 features 中读取功能开关
+        web_search_feature = features_config.get("web_search", {})
+        if not (isinstance(web_search_feature, dict) and web_search_feature.get("enabled")):
+            web_search = False
+
+        # file_upload 校验
+        self._validate_file_upload(features_config, files)
 
         start_time = time.time()
 
@@ -648,6 +767,10 @@ class AgentRunService:
 
             # 3. 处理系统提示词（支持变量替换）
             system_prompt = system_prompt.get_text_content() or "你是一个专业的AI助手"
+
+            # opening_statement：首轮对话注入开场白
+            is_new_conversation = not conversation_id
+            system_prompt = self._inject_opening_statement(features_config, system_prompt, is_new_conversation)
 
             # 4. 准备工具列表
             tools = []
@@ -688,24 +811,32 @@ class AgentRunService:
                 conversation_id=conversation_id,
                 app_id=agent_config.app_id,
                 workspace_id=workspace_id,
-                user_id=user_id
+                user_id=user_id,
+                sub_agent=sub_agent
             )
 
             # 6. 加载历史消息
-            history = []
-            if memory_config and memory_config.get("enabled"):
-                history = await self._load_conversation_history(
-                    conversation_id=conversation_id,
-                    max_history=memory_config.get("max_history", 10)
-                )
+            history = await self._load_conversation_history(
+                conversation_id=conversation_id,
+                max_history=memory_config.get("max_history", 10)
+            )
 
             # 6. 处理多模态文件
             processed_files = None
             if files:
                 # 获取 provider 信息
+                model_info = ModelInfo(
+                    model_name=api_key_config["model_name"],
+                    provider=api_key_config["provider"],
+                    api_key=api_key_config["api_key"],
+                    api_base=api_key_config["api_base"],
+                    capability=api_key_config["capability"],
+                    is_omni=api_key_config["is_omni"],
+                    model_type=ModelType.LLM
+                )
                 provider = api_key_config.get("provider", "openai")
-                multimodal_service = MultimodalService(self.db, provider=provider, is_omni=api_key_config.get("is_omni", False))
-                processed_files = await multimodal_service.process_files(files)
+                multimodal_service = MultimodalService(self.db, model_info)
+                processed_files = await multimodal_service.process_files(user_id, files)
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
 
             # 7. 知识库检索
@@ -721,9 +852,18 @@ class AgentRunService:
             # 兼容新旧字段名：优先使用 memory_config_id，回退到 memory_content
             config_id = memory_config_.get("memory_config_id") or memory_config_.get("memory_content", None)
 
-            # 9. 流式调用 Agent（支持多模态）
+            # 9. 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
             total_tokens = 0
+
+            # 启动流式 TTS（文本边输出边合成）
+            text_queue: asyncio.Queue = asyncio.Queue()
+            stream_audio_url, tts_task = await self._generate_tts_streaming(
+                features_config, api_key_config,
+                text_queue=text_queue,
+                tenant_id=tenant_id, workspace_id=workspace_id
+            ) if not sub_agent else (None, None)
+
             async for chunk in agent.chat_stream(
                     message=message,
                     history=history,
@@ -733,28 +873,28 @@ class AgentRunService:
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
                     memory_flag=memory_flag,
-                    files=processed_files  # 传递处理后的文件
+                    files=processed_files
             ):
                 if isinstance(chunk, int):
                     total_tokens = chunk
                 else:
                     full_content += chunk
-                    # 发送消息块事件
-                    yield self._format_sse_event("message", {
-                        "content": chunk
-                    })
+                    yield self._format_sse_event("message", {"content": chunk})
+                    if tts_task is not None:
+                        await text_queue.put(chunk)
+
+            # 文本结束，通知 TTS
+            if tts_task is not None:
+                await text_queue.put(None)
 
             elapsed_time = time.time() - start_time
-
             ModelApiKeyService.record_api_key_usage(self.db, api_key_config.get("api_key_id"))
 
             if sub_agent:
-                yield self._format_sse_event("sub_usage", {
-                    "total_tokens": total_tokens
-                })
+                yield self._format_sse_event("sub_usage", {"total_tokens": total_tokens})
 
-            # 10. 保存会话消息
-            if not sub_agent and memory_config and memory_config.get("enabled"):
+            # 11. 保存会话消息
+            if not sub_agent:
                 await self._save_conversation_message(
                     conversation_id=conversation_id,
                     user_message=message,
@@ -763,15 +903,24 @@ class AgentRunService:
                     user_id=user_id,
                     meta_data={
                         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens}
-                    }
+                    },
+                    files=files,
+                    audio_url=stream_audio_url
                 )
 
-            # 11. 发送结束事件
-            yield self._format_sse_event("end", {
+            # 12. 发送结束事件（包含 suggested_questions 和 tts）
+            end_data: Dict[str, Any] = {
                 "conversation_id": conversation_id,
                 "elapsed_time": elapsed_time,
                 "message_length": len(full_content)
-            })
+            }
+            if not sub_agent:
+                end_data["suggested_questions"] = await self._generate_suggested_questions(
+                    features_config, full_content, api_key_config, effective_params
+                )
+                end_data["audio_url"] = stream_audio_url
+                end_data["citations"] = self._filter_citations(features_config, [])
+            yield self._format_sse_event("end", end_data)
 
             logger.info(
                 "流式试运行完成",
@@ -840,7 +989,8 @@ class AgentRunService:
             "api_key": api_key.api_key,
             "api_base": api_key.api_base,
             "api_key_id": api_key.id,
-            "is_omni": api_key.is_omni
+            "is_omni": api_key.is_omni,
+            "capability": api_key.capability
         }
 
     async def _ensure_conversation(
@@ -848,7 +998,8 @@ class AgentRunService:
             conversation_id: Optional[str],
             app_id: uuid.UUID,
             workspace_id: uuid.UUID,
-            user_id: Optional[str]
+            user_id: Optional[str],
+            sub_agent: bool = False
     ) -> str:
         """确保会话存在（创建或验证）
 
@@ -909,20 +1060,36 @@ class AgentRunService:
             conv_uuid = uuid.UUID(conversation_id)
             conversation = conversation_service.get_conversation(conv_uuid)
 
-            # 验证会话属于当前工作空间
-            if conversation.workspace_id != workspace_id:
-                logger.warning(
-                    "会话不属于当前工作空间",
-                    extra={
-                        "conversation_id": conversation_id,
-                        "conversation_workspace_id": str(conversation.workspace_id),
-                        "current_workspace_id": str(workspace_id)
-                    }
-                )
-                raise BusinessException(
-                    "会话不属于当前工作空间",
-                    BizCode.PERMISSION_DENIED
-                )
+            # 验证会话属于当前工作空间（或属于共享应用的源工作空间）
+            # sub_agent 内部调用时跳过校验，已在上层验证过
+            if not sub_agent and conversation.workspace_id != workspace_id:
+                # 检查是否是共享应用的会话（被共享者 workspace 访问源应用）
+                from app.models import AppShare
+                from sqlalchemy import select as sa_select
+                share = self.db.scalars(
+                    sa_select(AppShare).where(
+                        AppShare.source_app_id == app_id,
+                        AppShare.target_workspace_id == workspace_id
+                    )
+                ).first()
+
+                # 情况2：sub_agent 内部调用时，workspace_id 是源应用的 workspace，
+                # 而会话是被共享者创建的，只要会话属于同一个 app 即可放行
+                same_app = (conversation.app_id == app_id)
+
+                if not share and not same_app:
+                    logger.warning(
+                        "会话不属于当前工作空间",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "conversation_workspace_id": str(conversation.workspace_id),
+                            "current_workspace_id": str(workspace_id)
+                        }
+                    )
+                    raise BusinessException(
+                        "会话不属于当前工作空间",
+                        BizCode.PERMISSION_DENIED
+                    )
 
             logger.debug(
                 "使用现有会话",
@@ -990,7 +1157,9 @@ class AgentRunService:
             assistant_message: str,
             meta_data: dict,
             app_id: Optional[uuid.UUID] = None,
-            user_id: Optional[str] = None
+            user_id: Optional[str] = None,
+            files: Optional[List[FileInput]] = None,
+            audio_url: Optional[str] = None
     ) -> None:
         """保存会话消息（会话已通过 _ensure_conversation 确保存在）
 
@@ -1009,13 +1178,26 @@ class AgentRunService:
             conv_uuid = uuid.UUID(conversation_id)
 
             # 保存消息（会话已经存在）
+            human_meta = {
+                "files": []
+            }
+            if files:
+                for f in files:
+                    # url = await MultimodalService(self.db).get_file_url(f)
+                    human_meta["files"].append({
+                        "type": f.type,
+                        "url": f.url
+                    })
             # 保存用户消息
             conversation_service.add_message(
                 conversation_id=conv_uuid,
                 role="user",
-                content=user_message
+                content=user_message,
+                meta_data=human_meta
             )
-            # 保存助手消息
+            # 保存助手消息（含 audio_url）
+            if audio_url:
+                meta_data["audio_url"] = audio_url
             conversation_service.add_message(
                 conversation_id=conv_uuid,
                 role="assistant",
@@ -1098,6 +1280,385 @@ class AgentRunService:
             # 对于多 Agent 应用，没有直接的 AgentConfig 是正常的
             logger.debug("获取配置快照失败（可能是多 Agent 应用）", exc_info=True, extra={"error": str(e)})
             return {}
+
+    async def _generate_suggested_questions(
+            self,
+            features_config: Dict[str, Any],
+            assistant_message: str,
+            api_key_config: Dict[str, Any],
+            effective_params: Dict[str, Any]
+    ) -> List[str]:
+        """根据 suggested_questions_after_answer 配置生成下一步建议问题"""
+        sq_config = features_config.get("suggested_questions_after_answer", {})
+        if not isinstance(sq_config, dict) or not sq_config.get("enabled"):
+            return []
+        try:
+            from langchain_openai import ChatOpenAI
+            from langchain_core.messages import HumanMessage, SystemMessage
+            llm = ChatOpenAI(
+                model=api_key_config["model_name"],
+                api_key=api_key_config["api_key"],
+                base_url=api_key_config.get("api_base"),
+                temperature=0.5,
+                max_tokens=200,
+            )
+            prompt = (
+                f"根据以下AI回复，生成3个用户可能继续追问的简短问题，每行一个，不加序号：\n\n{assistant_message}"
+            )
+            resp = await llm.ainvoke([HumanMessage(content=prompt)])
+            lines = [l.strip() for l in resp.content.strip().split("\n") if l.strip()]
+            return lines[:3]
+        except Exception as e:
+            logger.warning(f"生成建议问题失败: {e}")
+            return []
+
+    async def _generate_tts(
+            self,
+            features_config: Dict[str, Any],
+            text: str,
+            api_key_config: Dict[str, Any],
+            tenant_id: Optional[uuid.UUID] = None,
+            workspace_id: Optional[uuid.UUID] = None,
+    ) -> Optional[str]:
+        """先注册文件元数据并返回 audio_url，再后台流式写入音频内容"""
+        tts_config = features_config.get("text_to_speech", {})
+        if not isinstance(tts_config, dict) or not tts_config.get("enabled"):
+            return None
+        if not text or not text.strip():
+            return None
+
+        from app.models.file_metadata_model import FileMetadata
+        from app.services.file_storage_service import FileStorageService, generate_file_key
+
+        provider = api_key_config.get("provider", "openai")
+        api_key = api_key_config.get("api_key")
+        api_base = api_key_config.get("api_base")
+        voice = tts_config.get("voice")
+        file_ext, content_type = ".mp3", "audio/mpeg"
+
+        file_id = uuid.uuid4()
+        file_key = generate_file_key(tenant_id, workspace_id, file_id, file_ext)
+
+        # 先写入 pending 状态的元数据，立即返回 URL
+        db_file = FileMetadata(
+            id=file_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            file_key=file_key,
+            file_name=f"tts_{file_id}{file_ext}",
+            file_ext=file_ext,
+            file_size=0,
+            content_type=content_type,
+            status="pending",
+        )
+        self.db.add(db_file)
+        self.db.commit()
+
+        server_url = settings.FILE_LOCAL_SERVER_URL
+        audio_url = f"{server_url}/storage/permanent/{file_id}"
+
+        # 后台任务：流式生成并写入存储，完成后更新状态
+        async def _stream_to_storage():
+            try:
+                storage_service = FileStorageService()
+                if provider == "dashscope":
+                    stream = self._tts_dashscope_stream(
+                        api_key=api_key,
+                        text=text,
+                        voice=voice or "longxiaochun",
+                        tts_config=tts_config,
+                    )
+                else:
+                    stream = self._tts_openai_stream(
+                        api_key=api_key,
+                        api_base=api_base,
+                        text=text,
+                        voice=voice or "alloy",
+                    )
+
+                total_size = await storage_service.upload_stream(
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                    file_id=file_id,
+                    file_ext=file_ext,
+                    stream=stream,
+                    content_type=content_type,
+                )
+
+                # 更新元数据状态
+                with get_db_context() as bg_db:
+                    record = bg_db.get(FileMetadata, file_id)
+                    if record:
+                        record.status = "completed"
+                        record.file_size = total_size
+                        bg_db.commit()
+                logger.debug(f"TTS 流式写入完成，provider={provider}, file_key={file_key}")
+            except Exception as e:
+                logger.warning(f"TTS 流式写入失败: {e}")
+                with get_db_context() as bg_db:
+                    record = bg_db.get(FileMetadata, file_id)
+                    if record:
+                        record.status = "failed"
+                        bg_db.commit()
+
+        asyncio.create_task(_stream_to_storage())
+        return audio_url
+
+    async def _generate_tts_streaming(
+            self,
+            features_config: Dict[str, Any],
+            api_key_config: Dict[str, Any],
+            text_queue: asyncio.Queue,
+            tenant_id: Optional[uuid.UUID] = None,
+            workspace_id: Optional[uuid.UUID] = None,
+    ) -> tuple[Optional[str], Optional[asyncio.Task]]:
+        """文本流式输入并行合成音频。
+        返回 (audio_url, task)，audio_url 立即可用，task 完成后文件内容就绪。
+        调用方向 text_queue put 文本 chunk，结束时 put None。
+        """
+        tts_config = features_config.get("text_to_speech", {})
+        if not isinstance(tts_config, dict) or not tts_config.get("enabled"):
+            return None, None
+
+        from app.models.file_metadata_model import FileMetadata
+        from app.services.file_storage_service import FileStorageService, generate_file_key
+
+        provider = api_key_config.get("provider", "openai")
+        api_key = api_key_config.get("api_key")
+        api_base = api_key_config.get("api_base")
+        voice = tts_config.get("voice")
+        file_ext, content_type = ".mp3", "audio/mpeg"
+
+        file_id = uuid.uuid4()
+        file_key = generate_file_key(tenant_id, workspace_id, file_id, file_ext)
+
+        db_file = FileMetadata(
+            id=file_id,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            file_key=file_key,
+            file_name=f"tts_{file_id}{file_ext}",
+            file_ext=file_ext,
+            file_size=0,
+            content_type=content_type,
+            status="pending",
+        )
+        self.db.add(db_file)
+        self.db.commit()
+
+        server_url = settings.FILE_LOCAL_SERVER_URL
+        audio_url = f"{server_url}/storage/permanent/{file_id}"
+
+        async def _run():
+            try:
+                storage_service = FileStorageService()
+                if provider == "dashscope":
+                    audio_stream = self._tts_dashscope_stream_from_queue(
+                        api_key=api_key,
+                        voice=voice or "longxiaochun",
+                        tts_config=tts_config,
+                        text_queue=text_queue,
+                    )
+                else:
+                    audio_stream = self._tts_openai_stream_from_queue(
+                        api_key=api_key,
+                        api_base=api_base,
+                        voice=voice or "alloy",
+                        text_queue=text_queue,
+                    )
+                total_size = await storage_service.upload_stream(
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                    file_id=file_id,
+                    file_ext=file_ext,
+                    stream=audio_stream,
+                    content_type=content_type,
+                )
+                with get_db_context() as bg_db:
+                    record = bg_db.get(FileMetadata, file_id)
+                    if record:
+                        record.status = "completed"
+                        record.file_size = total_size
+                        bg_db.commit()
+                logger.debug(f"TTS 流式合成完成，provider={provider}, file_key={file_key}")
+            except Exception as e:
+                logger.warning(f"TTS 流式合成失败: {e}")
+                with get_db_context() as bg_db:
+                    record = bg_db.get(FileMetadata, file_id)
+                    if record:
+                        record.status = "failed"
+                        bg_db.commit()
+
+        task = asyncio.create_task(_run())
+        return audio_url, task
+
+    @staticmethod
+    async def _tts_openai_stream_from_queue(
+            api_key: str,
+            api_base: Optional[str],
+            voice: str,
+            text_queue: asyncio.Queue,
+    ):
+        """OpenAI TTS：收集全部文本后流式合成（OpenAI 不支持增量输入）"""
+        from openai import AsyncOpenAI
+        # 收集全部文本（此时文本流已并行输出，等待时间短）
+        parts = []
+        while True:
+            chunk = await text_queue.get()
+            if chunk is None:
+                break
+            parts.append(chunk)
+        full_text = "".join(parts)
+        if not full_text.strip():
+            return
+        client = AsyncOpenAI(api_key=api_key, base_url=api_base)
+        async with client.audio.speech.with_streaming_response.create(
+            model="tts-1",
+            voice=voice,
+            input=full_text[:4096],
+        ) as response:
+            async for chunk in response.iter_bytes(chunk_size=4096):
+                yield chunk
+
+    @staticmethod
+    async def _tts_dashscope_stream_from_queue(
+            api_key: str,
+            voice: str,
+            tts_config: Dict[str, Any],
+            text_queue: asyncio.Queue,
+    ):
+        """DashScope TTS：文本流式输入，实现真正并行合成"""
+        import dashscope
+        from dashscope.audio.tts_v2 import SpeechSynthesizer, AudioFormat, ResultCallback
+
+        model = tts_config.get("model") or "cosyvoice-v2"
+        is_v2 = model.endswith("-v2")
+        if is_v2 and not voice.endswith("_v2"):
+            voice = voice + "_v2"
+        elif not is_v2 and voice.endswith("_v2"):
+            voice = voice[:-3]
+
+        audio_queue: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_event_loop()
+
+        class _Callback(ResultCallback):
+            def on_data(self, data: bytes):
+                if data:
+                    loop.call_soon_threadsafe(audio_queue.put_nowait, data)
+            def on_complete(self):
+                loop.call_soon_threadsafe(audio_queue.put_nowait, None)
+            def on_error(self, message):
+                loop.call_soon_threadsafe(audio_queue.put_nowait, RuntimeError(str(message)))
+            def on_open(self): pass
+            def on_close(self): pass
+
+        dashscope.api_key = api_key
+        synthesizer = SpeechSynthesizer(
+            model=model,
+            voice=voice,
+            format=AudioFormat.MP3_22050HZ_MONO_256KBPS,
+            callback=_Callback(),
+        )
+
+        async def _feed_text():
+            """从 text_queue 取文本按句子切分后喂给 synthesizer"""
+            import re
+            buf = ""
+            sentence_end = re.compile(r'[\u3002\uff01\uff1f\.!?\n]')
+            while True:
+                chunk = await text_queue.get()
+                if chunk is None:
+                    if buf.strip():
+                        await asyncio.to_thread(synthesizer.streaming_call, buf)
+                    await asyncio.to_thread(synthesizer.streaming_complete)
+                    break
+                buf += chunk
+                # 按句子切分喂入
+                while sentence_end.search(buf):
+                    m = sentence_end.search(buf)
+                    sentence = buf[:m.end()]
+                    buf = buf[m.end():]
+                    await asyncio.to_thread(synthesizer.streaming_call, sentence)
+
+        asyncio.create_task(_feed_text())
+
+        while True:
+            item = await audio_queue.get()
+            if item is None:
+                break
+            if isinstance(item, Exception):
+                raise item
+            yield item
+
+    @staticmethod
+    async def _tts_openai_stream(
+            api_key: str,
+            api_base: Optional[str],
+            text: str,
+            voice: str,
+    ):
+        """OpenAI 兼容 TTS 流式生成，yield bytes chunks"""
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=api_key, base_url=api_base)
+        async with client.audio.speech.with_streaming_response.create(
+            model="tts-1",
+            voice=voice,
+            input=text[:4096],
+        ) as response:
+            async for chunk in response.iter_bytes(chunk_size=4096):
+                yield chunk
+
+    @staticmethod
+    async def _tts_dashscope_stream(
+            api_key: str,
+            text: str,
+            voice: str,
+            tts_config: Dict[str, Any],
+    ):
+        """DashScope TTS 流式生成，yield bytes chunks"""
+        import dashscope
+        from dashscope.audio.tts_v2 import SpeechSynthesizer, AudioFormat, ResultCallback
+
+        model = tts_config.get("model") or "cosyvoice-v2"
+        is_v2 = model.endswith("-v2")
+        if is_v2 and not voice.endswith("_v2"):
+            voice = voice + "_v2"
+        elif not is_v2 and voice.endswith("_v2"):
+            voice = voice[:-3]
+
+        queue: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_event_loop()
+
+        class _Callback(ResultCallback):
+            def on_data(self, data: bytes):
+                if data:
+                    loop.call_soon_threadsafe(queue.put_nowait, data)
+            def on_complete(self):
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+            def on_error(self, message):
+                loop.call_soon_threadsafe(queue.put_nowait, RuntimeError(str(message)))
+            def on_open(self): pass
+            def on_close(self): pass
+
+        def _sync_stream():
+            dashscope.api_key = api_key
+            synthesizer = SpeechSynthesizer(
+                model=model,
+                voice=voice,
+                format=AudioFormat.MP3_22050HZ_MONO_256KBPS,
+                callback=_Callback(),
+            )
+            synthesizer.streaming_call(text[:4096])
+            synthesizer.streaming_complete()
+
+        asyncio.create_task(asyncio.to_thread(_sync_stream))
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            if isinstance(item, Exception):
+                raise item
+            yield item
 
     def _replace_variables(
             self,
@@ -1183,6 +1744,12 @@ class AgentRunService:
             }
         )
 
+        # 提前校验文件上传（与 run() 内部保持一致）
+        features_config: dict = agent_config.features or {}
+        if hasattr(features_config, 'model_dump'):
+            features_config = features_config.model_dump()
+        # self._validate_file_upload(features_config, files)
+
         async def run_single_model(model_info):
             """运行单个模型"""
             try:
@@ -1233,6 +1800,9 @@ class AgentRunService:
                         if elapsed > 0 and usage.get("completion_tokens") else None
                     ),
                     "cost_estimate": self._estimate_cost(usage, model_info["model_config"]),
+                    "audio_url": result.get("audio_url"),
+                    "citations": result.get("citations", []),
+                    "suggested_questions": result.get("suggested_questions", []),
                     "error": None
                 }
 
@@ -1305,7 +1875,12 @@ class AgentRunService:
         )
 
         return {
-            "results": results,
+            "results": [{
+                **r,
+                "audio_url": r.get("audio_url"),
+                "citations": r.get("citations", []),
+                "suggested_questions": r.get("suggested_questions", []),
+            } for r in results],
             "total_elapsed_time": sum(r.get("elapsed_time", 0) for r in results),
             "successful_count": len(successful),
             "failed_count": len(failed),
@@ -1396,6 +1971,12 @@ class AgentRunService:
             extra={"model_count": len(models), "parallel": parallel}
         )
 
+        # 提前校验文件上传
+        # features_config: dict = agent_config.features or {}
+        # if hasattr(features_config, 'model_dump'):
+        #     features_config = features_config.model_dump()
+        # self._validate_file_upload(features_config, files)
+
         # 发送开始事件
         yield self._format_sse_event("compare_start", {
             "conversation_id": conversation_id,
@@ -1427,6 +2008,9 @@ class AgentRunService:
                 start_time = time.time()
                 full_content = ""
                 returned_conversation_id = model_conversation_id
+                audio_url = None
+                citations = []
+                suggested_questions = []
 
                 # 临时修改参数
                 original_params = agent_config.model_parameters
@@ -1480,6 +2064,12 @@ class AgentRunService:
                                     "content": chunk
                                 }))
 
+                            # 从 end 事件中提取 features 输出字段
+                            if event_type == "end" and event_data:
+                                audio_url = event_data.get("audio_url")
+                                citations = event_data.get("citations", [])
+                                suggested_questions = event_data.get("suggested_questions", [])
+
                             if event_type == "error" and event_data:
                                 await event_queue.put(self._format_sse_event("model_error", {
                                     "model_index": idx,
@@ -1505,6 +2095,9 @@ class AgentRunService:
                     "parameters_used": model_info["parameters"],
                     "message": full_content,
                     "elapsed_time": elapsed,
+                    "audio_url": audio_url,
+                    "citations": citations,
+                    "suggested_questions": suggested_questions,
                     "error": None
                 }
 
@@ -1516,6 +2109,9 @@ class AgentRunService:
                     "conversation_id": returned_conversation_id,
                     "elapsed_time": elapsed,
                     "message_length": len(full_content),
+                    "audio_url": audio_url,
+                    "citations": citations,
+                    "suggested_questions": suggested_questions,
                     "timestamp": time.time()
                 }))
 
@@ -1647,8 +2243,11 @@ class AgentRunService:
                 "model_name": r["model_name"],
                 "label": r["label"],
                 "conversation_id": r.get("conversation_id"),
-                "message": r.get("message"),  # 包含完整消息
+                "message": r.get("message"),
                 "elapsed_time": r.get("elapsed_time", 0),
+                "audio_url": r.get("audio_url"),
+                "citations": r.get("citations", []),
+                "suggested_questions": r.get("suggested_questions", []),
                 "error": r.get("error")
             })
 

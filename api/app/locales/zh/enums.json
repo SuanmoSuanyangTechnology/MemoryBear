@@ -1,0 +1,132 @@
+{
+  "workspace_role": {
+    "owner": "所有者",
+    "manager": "管理员",
+    "member": "成员",
+    "guest": "访客"
+  },
+  "workspace_status": {
+    "active": "活跃",
+    "inactive": "未激活",
+    "archived": "已归档",
+    "suspended": "已暂停",
+    "deleted": "已删除"
+  },
+  "invite_status": {
+    "pending": "待处理",
+    "accepted": "已接受",
+    "rejected": "已拒绝",
+    "revoked": "已撤销",
+    "expired": "已过期"
+  },
+  "user_status": {
+    "active": "活跃",
+    "inactive": "未激活",
+    "suspended": "已暂停",
+    "deleted": "已删除",
+    "pending": "待激活"
+  },
+  "tenant_status": {
+    "active": "活跃",
+    "inactive": "未激活",
+    "suspended": "已暂停",
+    "expired": "已过期",
+    "trial": "试用中"
+  },
+  "file_status": {
+    "uploading": "上传中",
+    "processing": "处理中",
+    "completed": "已完成",
+    "failed": "失败",
+    "deleted": "已删除"
+  },
+  "task_status": {
+    "pending": "待处理",
+    "running": "运行中",
+    "completed": "已完成",
+    "failed": "失败",
+    "cancelled": "已取消",
+    "paused": "已暂停"
+  },
+  "priority": {
+    "low": "低",
+    "medium": "中",
+    "high": "高",
+    "urgent": "紧急"
+  },
+  "visibility": {
+    "public": "公开",
+    "private": "私有",
+    "internal": "内部",
+    "shared": "共享"
+  },
+  "permission": {
+    "read": "读取",
+    "write": "写入",
+    "delete": "删除",
+    "admin": "管理",
+    "owner": "所有者"
+  },
+  "notification_type": {
+    "info": "信息",
+    "warning": "警告",
+    "error": "错误",
+    "success": "成功"
+  },
+  "language": {
+    "zh": "中文（简体）",
+    "en": "English",
+    "ja": "日本語",
+    "ko": "한국어",
+    "fr": "Français",
+    "de": "Deutsch",
+    "es": "Español"
+  },
+  "timezone": {
+    "utc": "UTC",
+    "asia_shanghai": "亚洲/上海",
+    "asia_tokyo": "亚洲/东京",
+    "america_new_york": "美洲/纽约",
+    "europe_london": "欧洲/伦敦"
+  },
+  "date_format": {
+    "short": "短日期",
+    "medium": "中等日期",
+    "long": "长日期",
+    "full": "完整日期"
+  },
+  "sort_order": {
+    "asc": "升序",
+    "desc": "降序"
+  },
+  "filter_operator": {
+    "equals": "等于",
+    "not_equals": "不等于",
+    "contains": "包含",
+    "not_contains": "不包含",
+    "starts_with": "开始于",
+    "ends_with": "结束于",
+    "greater_than": "大于",
+    "less_than": "小于",
+    "greater_or_equal": "大于等于",
+    "less_or_equal": "小于等于",
+    "in": "在列表中",
+    "not_in": "不在列表中",
+    "is_null": "为空",
+    "is_not_null": "不为空"
+  },
+  "log_level": {
+    "debug": "调试",
+    "info": "信息",
+    "warning": "警告",
+    "error": "错误",
+    "critical": "严重"
+  },
+  "api_method": {
+    "get": "GET",
+    "post": "POST",
+    "put": "PUT",
+    "patch": "PATCH",
+    "delete": "DELETE"
+  }
+}

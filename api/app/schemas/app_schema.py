@@ -45,10 +45,18 @@ class FileInput(BaseModel):
     url: Optional[str] = Field(None, description="远程URL（remote_url时必填）")
     file_type: Optional[str] = Field(None, description="具体文件格式（如image/jpg、audio/wav、document/docx、video/mp4）")
 
+    _content = None
+
     def __init__(self, **data):
         if "type" in data:
             data['file_type'] = data['type']
         super().__init__(**data)
+
+    def set_content(self, content: bytes):
+        self._content = content
+
+    def get_content(self) -> bytes | None:
+        return self._content
 
     @field_validator("type", mode="before")
     @classmethod
@@ -115,6 +123,85 @@ class SkillConfig(BaseModel):
     enabled: bool = Field(default=True, description="是否启用该技能")
     skill_ids: Optional[list[str]] = Field(default=list, description="技能ID列表")
     all_skills: Optional[bool] = Field(default=False, description="是否允许访问所有技能")
+
+
+# ---------- App Features ----------
+
+class FileUploadConfig(BaseModel):
+    """文件上传配置"""
+    enabled: bool = Field(default=False)
+    # 允许的传输方式：local_file / remote_url，默认两种都允许
+    allowed_transfer_methods: List[str] = Field(
+        default=["local_file", "remote_url"],
+        description="允许的传输方式"
+    )
+    # 图片文件：PNG/JPG/JPEG/GIF/WEBP，最大 20MB
+    image_enabled: bool = Field(default=False)
+    image_max_size_mb: int = Field(default=20)
+    image_allowed_extensions: List[str] = Field(
+        default=["png", "jpg", "jpeg"]
+    )
+    # 语音文件：MP3/WAV/M4A/OGG/FLAC，最大 50MB
+    audio_enabled: bool = Field(default=False)
+    audio_max_size_mb: int = Field(default=50)
+    audio_allowed_extensions: List[str] = Field(
+        default=["mp3", "wav", "m4a"]
+    )
+    # 通用文件：PDF/DOCX/XLSX/TXT/CSV/JSON，最大 100MB
+    document_enabled: bool = Field(default=False)
+    document_max_size_mb: int = Field(default=100)
+    document_allowed_extensions: List[str] = Field(
+        default=["pdf", "docx", "xlsx", "txt", "csv", "json", "md"]
+    )
+    # 视频文件：MP4/MOV/AVI/WebM，最大 500MB
+    video_enabled: bool = Field(default=False)
+    video_max_size_mb: int = Field(default=500)
+    video_allowed_extensions: List[str] = Field(
+        default=["mp4", "mov"]
+    )
+    # 最大文件数量
+    max_file_count: int = Field(default=5, ge=1, le=20)
+
+
+class OpeningStatementConfig(BaseModel):
+    """对话开场白配置"""
+    enabled: bool = Field(default=False)
+    statement: Optional[str] = Field(default=None, description="开场白内容")
+    suggested_questions: List[str] = Field(default_factory=list, description="预设问题列表")
+
+
+class SuggestedQuestionsConfig(BaseModel):
+    """下一步问题建议配置"""
+    enabled: bool = Field(default=False)
+
+
+class TextToSpeechConfig(BaseModel):
+    """文字转语音配置"""
+    enabled: bool = Field(default=False)
+    voice: Optional[str] = Field(default=None, description="语音音色")
+    language: Optional[str] = Field(default=None, description="语言")
+    autoplay: bool = Field(default=False, description="是否自动播放")
+
+
+class CitationConfig(BaseModel):
+    """引用和归属配置"""
+    enabled: bool = Field(default=False)
+
+
+class WebSearchConfig(BaseModel):
+    """联网搜索配置"""
+    enabled: bool = Field(default=False)
+    search_engine: Optional[str] = Field(default=None, description="搜索引擎")
+
+
+class AppFeatures(BaseModel):
+    """应用功能特性配置"""
+    file_upload: FileUploadConfig = Field(default_factory=FileUploadConfig)
+    opening_statement: OpeningStatementConfig = Field(default_factory=OpeningStatementConfig)
+    suggested_questions_after_answer: SuggestedQuestionsConfig = Field(default_factory=SuggestedQuestionsConfig)
+    text_to_speech: TextToSpeechConfig = Field(default_factory=TextToSpeechConfig)
+    citation: CitationConfig = Field(default_factory=CitationConfig)
+    web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
 class ToolOldConfig(BaseModel):
@@ -193,6 +280,9 @@ class AgentConfigCreate(BaseModel):
     # 技能配置
     skills: Optional[SkillConfig] = Field(default=dict, description="关联的技能列表")
 
+    # 功能特性
+    features: Optional[AppFeatures] = Field(default=None, description="功能特性配置")
+
 
 class AppCreate(BaseModel):
     name: str
@@ -250,6 +340,9 @@ class AgentConfigUpdate(BaseModel):
     # 技能配置
     skills: Optional[SkillConfig] = Field(default=dict, description="关联的技能列表")
 
+    # 功能特性
+    features: Optional[AppFeatures] = Field(default=None, description="功能特性配置")
+
 
 # ---------- Output Schemas ----------
 
@@ -269,7 +362,16 @@ class App(BaseModel):
     tags: List[str] = []
     current_release_id: Optional[uuid.UUID] = None
     is_active: bool
-    is_shared: bool = False  # 是否是共享应用（从其他工作空间共享来的）
+    is_shared: bool = False
+    share_permission: Optional[str] = None
+    source_workspace_name: Optional[str] = None  # 共享来源工作空间名称（仅共享应用有值）
+    source_workspace_icon: Optional[str] = None  # 共享来源工作空间图标
+    source_app_version: Optional[str] = None     # 应用版本号
+    source_app_is_active: Optional[bool] = None  # 应用是否生效
+    share_id: Optional[uuid.UUID] = None         # 分享记录ID（取消共享时使用）
+    shared_by: Optional[uuid.UUID] = None        # 分享者用户ID
+    shared_by_name: Optional[str] = None         # 分享者名称
+    shared_at: Optional[datetime.datetime] = None  # 分享时间
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
@@ -279,6 +381,10 @@ class App(BaseModel):
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
+        return int(dt.timestamp() * 1000) if dt else None
+
+    @field_serializer("shared_at", when_used="json")
+    def _serialize_shared_at(self, dt: Optional[datetime.datetime]):
         return int(dt.timestamp() * 1000) if dt else None
 
 
@@ -309,6 +415,8 @@ class AgentConfig(BaseModel):
     tools: Union[List[ToolConfig], Dict[str, ToolOldConfig]] = []
 
     skills: Optional[SkillConfig] = {}
+
+    features: Optional[AppFeatures] = None
 
     is_active: bool
     created_at: datetime.datetime
@@ -344,6 +452,14 @@ class AgentConfig(BaseModel):
         """处理 None 值，返回空字典"""
         if v is None:
             return {}
+        return v
+
+    @field_validator("features", mode="before")
+    @classmethod
+    def validate_features(cls, v):
+        """处理 None 值，返回默认 AppFeatures"""
+        if v is None:
+            return AppFeatures()
         return v
 
     @field_serializer("created_at", when_used="json")
@@ -409,11 +525,24 @@ class AppRelease(BaseModel):
         return int(dt.timestamp() * 1000) if dt else None
 
 
+# ---------- App Copy Schema ----------
+
+class CopyAppRequest(BaseModel):
+    """复制应用请求"""
+    new_name: Optional[str] = Field(None, description="新应用名称，不填则使用原名称-副本")
+
+
 # ---------- App Share Schemas ----------
 
 class AppShareCreate(BaseModel):
     """应用分享请求"""
     target_workspace_ids: List[uuid.UUID] = Field(..., description="目标工作空间ID列表")
+    permission: str = Field(default="readonly", description="权限模式: readonly | editable")
+
+
+class UpdateSharePermissionRequest(BaseModel):
+    """更新共享权限请求"""
+    permission: str = Field(..., description="新权限值: readonly | editable")
 
 
 class AppShare(BaseModel):
@@ -425,8 +554,31 @@ class AppShare(BaseModel):
     source_workspace_id: uuid.UUID
     target_workspace_id: uuid.UUID
     shared_by: uuid.UUID
+    permission: str = "readonly"
     created_at: datetime.datetime
     updated_at: datetime.datetime
+
+    # 关联名称（从 relationship 读取）
+    source_app_name: Optional[str] = None
+    source_app_type: Optional[str] = None
+    source_app_version: Optional[str] = None
+    source_app_is_active: Optional[bool] = None
+    target_workspace_name: Optional[str] = None
+    target_workspace_icon: Optional[str] = None
+
+    @classmethod
+    def model_validate(cls, obj, **kwargs):
+        instance = super().model_validate(obj, **kwargs)
+        if hasattr(obj, 'source_app') and obj.source_app:
+            instance.source_app_name = obj.source_app.name
+            instance.source_app_type = obj.source_app.type
+            instance.source_app_is_active = obj.source_app.is_active
+            release = obj.source_app.current_release
+            instance.source_app_version = release.version_name if release else None
+        if hasattr(obj, 'target_workspace') and obj.target_workspace:
+            instance.target_workspace_name = obj.target_workspace.name
+            instance.target_workspace_icon = obj.target_workspace.icon
+        return instance
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
@@ -458,12 +610,35 @@ class DraftRunRequest(BaseModel):
     files: Optional[List[FileInput]] = Field(default_factory=list, description="附件列表（支持多文件）")
 
 
+class SuggestedQuestion(BaseModel):
+    """建议问题"""
+    content: str
+
+
+class CitationSource(BaseModel):
+    """引用来源"""
+    title: str
+    content: str
+    score: Optional[float] = None
+    kb_id: Optional[str] = None
+
+
 class DraftRunResponse(BaseModel):
     """试运行响应（非流式）"""
     message: str = Field(..., description="AI 回复消息")
     conversation_id: Optional[str] = Field(default=None, description="会话ID（用于多轮对话）")
     usage: Optional[Dict[str, Any]] = Field(default=None, description="Token 使用情况")
     elapsed_time: Optional[float] = Field(default=None, description="耗时（秒）")
+    suggested_questions: List[str] = Field(default_factory=list, description="下一步建议问题")
+    citations: List[CitationSource] = Field(default_factory=list, description="引用来源")
+    audio_url: Optional[str] = Field(default=None, description="TTS 语音URL")
+
+
+class OpeningResponse(BaseModel):
+    """应用开场白响应"""
+    enabled: bool
+    statement: Optional[str] = None
+    suggested_questions: List[str] = Field(default_factory=list)
 
 
 class DraftRunStreamChunk(BaseModel):

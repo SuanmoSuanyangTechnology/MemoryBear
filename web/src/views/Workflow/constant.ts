@@ -2,13 +2,14 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-07 17:10:59
+ * @Last Modified time: 2026-03-20 11:23:17
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
 import ConditionNode from './components/Nodes/ConditionNode';
 import GroupStartNode from './components/Nodes/GroupStartNode';
 import AddNode from './components/Nodes/AddNode'
+import NoteNode from './components/Nodes/NoteNode';
 import type { PortMetadata, GroupMetadata } from '@antv/x6/lib/model/port';
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 
@@ -475,8 +476,79 @@ export const nodeLibrary: NodeLibrary[] = [
     ]
   },
 ];
+
+export const THEME_MAP: Record<string, { outer: string; title: string; bg: string; border: string }> = {
+  blue: {
+    outer: '#2E90FA',
+    title: '#D1E9FF',
+    bg: '#EFF8FF',
+    border: '#84CAFF',
+  },
+  cyan: {
+    outer: '#06AED4',
+    title: '#CFF9FE',
+    bg: '#ECFDFF',
+    border: '#67E3F9',
+  },
+  green: {
+    outer: '#16B364',
+    title: '#D3F8DF',
+    bg: '#EDFCF2',
+    border: '#73E2A3',
+  },
+  yellow: {
+    outer: '#EAAA08',
+    title: '#FEF7C3',
+    bg: '#FEFBE8',
+    border: '#FDE272',
+  },
+  pink: {
+    outer: '#EE46BC',
+    title: '#FCE7F6',
+    bg: '#FDF2FA',
+    border: '#FAA7E0',
+  },
+  violet: {
+    outer: '#875BF7',
+    title: '#ECE9FE',
+    bg: '#F5F3FF',
+    border: '#C3B5FD',
+  },
+}
+
+export const notesConfig = {
+  type: "notes", icon: templateRenderingIcon,
+  config: {
+    text: {
+      type: 'define',
+    },
+    theme: {
+      type: 'define',
+      defaultValue: 'blue',
+    },
+    width: {
+      type: 'define',
+      width: 240,
+    },
+    height: {
+      type: 'define',
+      height: 120,
+    },
+    author: {
+      type: 'define',
+    },
+    show_author: {
+      type: 'define',
+      defaultValue: true
+    }
+  }
+}
 export const unknownNode = {
   type: 'unknown',
+  icon: unknownIcon
+}
+export const noteNode = {
+  type: 'notes',
   icon: unknownIcon
 }
 
@@ -525,6 +597,12 @@ export const nodeRegisterLibrary: ReactShapeConfig[] = [
     width: 100,
     height: 28,
     component: AddNode,
+  },
+  {
+    shape: 'notes-node',
+    width: nodeWidth,
+    height: 120,
+    component: NoteNode,
   },
 ];
 
@@ -658,7 +736,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
         defaultPortItems[0],
         ...(['IF', 'ELSE'].map((_, index) => ({
           group: 'right',
-          id: `CASE${index}`,
+          id: `CASE${index + 1}`,
           args: {
             ...portArgs,
             y: portItemArgsY * index + conditionNodePortItemArgsY,
@@ -677,7 +755,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
         defaultPortItems[0],
         ...(['分类1', '分类2'].map((_text, index) => ({
           group: 'right',
-          id: `CASE${index}`,
+          id: `CASE${index + 1}`,
           args: {
             ...portArgs,
             y: portItemArgsY * index + conditionNodePortItemArgsY,
@@ -758,6 +836,11 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
       items: [defaultPortItems[0]],
     },
   },
+  notes: {
+    width: nodeWidth,
+    height: 120,
+    shape: 'notes-node',
+  }
 }
 
 

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.core.response_utils import success
@@ -149,6 +150,21 @@ async def get_workspace_end_users(
         
         return {uid: {"total": 0} for uid in end_user_ids}
     
+    # 触发按需初始化：为 implicit_emotions_storage 中没有记录的用户异步生成数据
+    try:
+        from app.celery_app import celery_app as _celery_app
+        _celery_app.send_task(
+            "app.tasks.init_implicit_emotions_for_users",
+            kwargs={"end_user_ids": end_user_ids},
+        )
+        _celery_app.send_task(
+            "app.tasks.init_interest_distribution_for_users",
+            kwargs={"end_user_ids": end_user_ids},
+        )
+        api_logger.info(f"已触发按需初始化任务，候选用户数: {len(end_user_ids)}")
+    except Exception as e:
+        api_logger.warning(f"触发按需初始化任务失败（不影响主流程）: {e}")
+
     # 并发执行配置查询和记忆数量查询
     memory_configs_map, memory_nums_map = await asyncio.gather(
         get_memory_configs(),
@@ -177,7 +193,16 @@ async def get_workspace_end_users(
         await aio_redis_set(cache_key, json.dumps(result), expire=30)
     except Exception as e:
         api_logger.warning(f"Redis 缓存写入失败: {str(e)}")
-    
+
+    # 触发社区聚类补全任务（异步，不阻塞接口响应）
+    # 对有 ExtractedEntity 但无 Community 节点的存量用户自动补跑全量聚类
+    try:
+        from app.tasks import init_community_clustering_for_users
+        init_community_clustering_for_users.delay(end_user_ids=end_user_ids)
+        api_logger.info(f"已触发社区聚类补全任务，候选用户数: {len(end_user_ids)}")
+    except Exception as e:
+        api_logger.warning(f"触发社区聚类补全任务失败（不影响主流程）: {str(e)}")
+
     api_logger.info(f"成功获取 {len(end_users)} 个宿主记录")
     return success(data=result, msg="宿主列表获取成功")
 
@@ -387,14 +412,15 @@ def get_current_user_rag_total_num(
 @router.get("/rag_content", response_model=ApiResponse)
 def get_rag_content(
     end_user_id: str = Query(..., description="宿主ID"),
-    limit: int = Query(15, description="返回记录数"),
+    page: int = Query(1, gt=0, description="页码，从1开始"),
+    pagesize: int = Query(15, gt=0, le=100, description="每页返回记录数"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    获取当前宿主知识库中的chunk内容
+    获取当前宿主知识库中的chunk内容（分页）
     """
-    data = memory_dashboard_service.get_rag_content(end_user_id, limit, db, current_user)
+    data = memory_dashboard_service.get_rag_content(end_user_id, page, pagesize, db, current_user)
     return success(data=data, msg="宿主RAGchunk数据获取成功")
 
 
@@ -407,26 +433,18 @@ async def get_chunk_summary_tag(
     current_user: User = Depends(get_current_user),
 ):
     """
-    获取chunk总结、提取的标签和人物形象
-    
+    读取RAG摘要、标签和人物形象（纯读库，不触发生成）。
+
     返回格式：
     {
-        "summary": "chunk内容的总结",
-        "tags": [
-            {"tag": "标签1", "frequency": 5},
-            {"tag": "标签2", "frequency": 3},
-            ...
-        ],
-        "personas": [
-            "产品设计师",
-            "旅行爱好者",
-            "摄影发烧友",
-            ...
-        ]
+        "summary": "用户摘要",
+        "tags": [{"tag": "标签1", "frequency": 5}, ...],
+        "personas": ["产品设计师", ...],
+        "generated": true/false  // false表示尚未生产，请调用 /generate_rag_profile
     }
     """
-    api_logger.info(f"用户 {current_user.username} 请求获取宿主 {end_user_id} 的chunk摘要、标签和人物形象")
-    
+    api_logger.info(f"用户 {current_user.username} 读取宿主 {end_user_id} 的RAG摘要/标签/人物形象")
+
     data = await memory_dashboard_service.get_chunk_summary_and_tags(
         end_user_id=end_user_id,
         limit=limit,
@@ -434,9 +452,8 @@ async def get_chunk_summary_tag(
         db=db,
         current_user=current_user
     )
-    
-    api_logger.info(f"成功获取chunk摘要、{len(data.get('tags', []))} 个标签和 {len(data.get('personas', []))} 个人物形象")
-    return success(data=data, msg="chunk摘要、标签和人物形象获取成功")
+
+    return success(data=data, msg="获取成功")
 
 
 @router.get("/chunk_insight", response_model=ApiResponse)
@@ -447,24 +464,57 @@ async def get_chunk_insight(
     current_user: User = Depends(get_current_user),
 ):
     """
-    获取chunk的洞察内容
-    
+    读取RAG洞察报告（纯读库，不触发生成）。
+
     返回格式：
     {
-        "insight": "对chunk内容的深度洞察分析"
+        "insight": "总体概述",
+        "behavior_pattern": "行为模式",
+        "key_findings": "关键发现",
+        "growth_trajectory": "成长轨迹",
+        "generated": true/false  // false表示尚未生产，请调用 /generate_rag_profile
     }
     """
-    api_logger.info(f"用户 {current_user.username} 请求获取宿主 {end_user_id} 的chunk洞察")
-    
+    api_logger.info(f"用户 {current_user.username} 读取宿主 {end_user_id} 的RAG洞察")
+
     data = await memory_dashboard_service.get_chunk_insight(
         end_user_id=end_user_id,
         limit=limit,
         db=db,
         current_user=current_user
     )
-    
-    api_logger.info("成功获取chunk洞察")
-    return success(data=data, msg="chunk洞察获取成功")
+
+    return success(data=data, msg="获取成功")
+
+
+class GenerateRagProfileRequest(BaseModel):
+    end_user_id: str = Field(..., description="宿主ID")
+    limit: int = Field(15, description="参与生成的chunk数量上限")
+    max_tags: int = Field(10, description="最大标签数量")
+
+
+@router.post("/generate_rag_profile", response_model=ApiResponse)
+async def generate_rag_profile(
+    body: GenerateRagProfileRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    生产接口：为RAG存储模式的宿主全量重新生成完整画像并持久化到end_user表。
+    每次请求都会重新生成，覆盖已有数据。
+    """
+    api_logger.info(f"用户 {current_user.username} 触发RAG画像生产: end_user_id={body.end_user_id}")
+
+    data = await memory_dashboard_service.generate_rag_profile(
+        end_user_id=body.end_user_id,
+        limit=body.limit,
+        max_tags=body.max_tags,
+        db=db,
+        current_user=current_user,
+    )
+
+    api_logger.info(f"RAG画像生产完成: {data}")
+    return success(data=data, msg="RAG画像生产完成")
 
 
 @router.get("/dashboard_data", response_model=ApiResponse)
@@ -553,9 +603,12 @@ async def dashboard_data(
                 )
                 neo4j_data["total_memory"] = total_memory_data.get("total_memory_count", 0)
                 # total_app: 统计当前空间下的所有app数量
-                from app.repositories import app_repository
-                apps_orm = app_repository.get_apps_by_workspace_id(db, workspace_id)
-                neo4j_data["total_app"] = len(apps_orm)
+                # 包含自有app + 被分享给本工作空间的app
+                from app.services import app_service as _app_svc
+                _, total_app = _app_svc.AppService(db).list_apps(
+                    workspace_id=workspace_id, include_shared=True, pagesize=1
+                )
+                neo4j_data["total_app"] = total_app
                 api_logger.info(f"成功获取记忆总量: {neo4j_data['total_memory']}, 应用数量: {neo4j_data['total_app']}")
             except Exception as e:
                 api_logger.warning(f"获取记忆总量失败: {str(e)}")

@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:23 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-16 15:01:50 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-20 11:07:02
  */
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -107,7 +107,7 @@ const PerceptualLastInfo: FC = () => {
     })
   }
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     if (!data.file_path) return
     window.open(data.file_path, '_blank')
   }

@@ -2,9 +2,10 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 10:58:41
+ * @Last Modified time: 2026-03-13 10:48:41
  */
 import { request } from '@/utils/request'
+import type { AxiosRequestConfig } from 'axios'
 import type {
   MemoryFormData,
 } from '@/views/MemoryManagement/types'
@@ -94,8 +95,12 @@ export const updatedEndUserProfile = (values: EndUser) => {
   return request.post(`/memory-storage/updated_end_user/profile`, values)
 }
 // User Memory - Relationship network
-export const getMemorySearchEdges = (end_user_id: string) => {
-  return request.get(`/memory-storage/analytics/graph_data`, { end_user_id })
+export const getMemorySearchEdges = (end_user_id: string, config?: AxiosRequestConfig) => {
+  return request.get(`/memory-storage/analytics/graph_data`, { end_user_id }, config)
+}
+// User Memory - Community graph
+export const getMemoryCommunityGraph = (end_user_id: string, config?: AxiosRequestConfig) => {
+  return request.get(`/memory-storage/analytics/community_graph`, { end_user_id }, config)
 }
 // User Memory - User interest distribution
 export const getInterestDistributionByUser = (end_user_id: string) => {
@@ -118,8 +123,9 @@ export const getChunkInsight = (end_user_id: string) => {
   return request.get(`/dashboard/chunk_insight`, { end_user_id })
 }
 // RAG User Memory - Storage content
-export const getRagContent = (end_user_id: string) => {
-  return request.get(`/dashboard/rag_content`, { end_user_id, limit: 20 })
+export const getRagContentUrl = '/dashboard/rag_content'
+export const getRagContent = (end_user_id: string, page = 1, pagesize = 20) => {
+  return request.get(getRagContentUrl, { end_user_id, page, pagesize })
 }
 // Emotion distribution analysis
 export const getWordCloud = (end_user_id: string) => {
@@ -223,6 +229,10 @@ export const getConversationDetail = (end_user_id: string, conversation_id: stri
 }
 export const forgetTrigger = (data: { max_merge_batch_size: number; min_days_since_access: number; end_user_id: string;}) => {
   return request.post(`/memory/forget-memory/trigger`, data)
+}
+// RAG type - Refresh RAG user summary and memory insight
+export const generateRagProfile = (end_user_id: string) => {
+  return request.post(`/dashboard/generate_rag_profile`, { end_user_id })
 }
 /*************** end User Memory APIs ******************************/
 

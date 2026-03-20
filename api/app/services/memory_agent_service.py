@@ -274,7 +274,7 @@ class MemoryAgentService:
 
         Args:
             end_user_id: Group identifier (also used as end_user_id)
-            message: Message to write
+            messages: Message to write
             config_id: Configuration ID from database
             db: SQLAlchemy database session
             storage_type: Storage type (neo4j or rag)
@@ -1165,6 +1165,7 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
 
     logger.info(f"Getting connected config for end_user: {end_user_id}")
 
+    # TODO: check sources for enduserid, should be one of these three: chat, draft, apikey
     # 1. 获取 end_user 及其 app_id
     end_user = db.query(EndUser).filter(EndUser.id == end_user_id).first()
     if not end_user:
@@ -1179,10 +1180,10 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     if not app:
         logger.warning(f"App not found: {app_id}")
         raise ValueError(f"应用不存在: {app_id}")
-
-    if not app.current_release_id:
-        logger.warning(f"No current release for app: {app_id}")
-        raise ValueError(f"应用未发布: {app_id}")
+    # TODO: temp fix for draft run
+    # if not app.current_release_id:
+    #     logger.warning(f"No current release for app: {app_id}")
+    #     raise ValueError(f"应用未发布: {app_id}")
 
     # 3. 兼容旧数据：如果 memory_config_id 为空，从 AppRelease.config 获取并回填
     memory_config_id_to_use = end_user.memory_config_id
@@ -1223,7 +1224,9 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
 
             if legacy_config_id:
                 # 验证提取的 config_id 是否存在于数据库中
-                from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+                from app.models.memory_config_model import (
+                    MemoryConfig as MemoryConfigModel,
+                )
                 existing_config = db.get(MemoryConfigModel, legacy_config_id)
 
                 if existing_config:
@@ -1257,7 +1260,7 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     result = {
         "end_user_id": str(end_user_id),
         "app_id": str(app_id),
-        "release_id": str(app.current_release_id),
+        "release_id": str(app.current_release_id) if app.current_release_id else None,
         "memory_config_id": memory_config_id,
         "workspace_id": str(app.workspace_id)
     }

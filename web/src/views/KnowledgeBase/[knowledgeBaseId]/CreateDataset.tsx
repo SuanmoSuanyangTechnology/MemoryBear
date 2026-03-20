@@ -83,6 +83,7 @@ const CreateDataset = () => {
   const [form] = Form.useForm<ContentFormData>();
   const [data, setData] = useState<KnowledgeBaseDocumentData[]>([]);
   const [rechunkFileIds, setRechunkFileIds] = useState<string[]>(initialFileIds);
+  const [textFormValid, setTextFormValid] = useState<boolean>(false);
 
   const [pollingLoading, setPollingLoading] = useState<boolean>(false);
   const pollingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -546,8 +547,7 @@ const CreateDataset = () => {
     };
   }, [location.pathname]);
 
-  return (
-    <>
+  return (<>
       {contextHolder}
     
     <div className='rb:p-3 rb:pt-2 rb:h-full rb:flex rb:flex-col'>
@@ -610,58 +610,67 @@ const CreateDataset = () => {
               {source && source === 'link' && (
                   <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-40'>
 
-                      <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
-                          {t('knowledgeBase.webLink')}
-                      </div>
-                      <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} />
-                      <div className='rb:text-sm rb:text-gray-500 rb:mt-3'>
-                          {t('knowledgeBase.webLinkDesc',{count: 5})}
-                      </div>
-                      <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
-                          {t('knowledgeBase.selectorTutorial')}
-                      </div>
-                      <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
-                  </div>
-              )}
-              {source && source === 'text' && (
-                  <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-40'>
-                      <Form form={form} layout="vertical">
-                          <Form.Item
-                            name="title"
-                            label={t('knowledgeBase.title')}
-                            rules={[{ required: true, message: t('knowledgeBase.pleaseEnterTitle') }]}
-                          >
-                            <Input placeholder={t('knowledgeBase.pleaseEnterTitle')} />
-                          </Form.Item>
+                    <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
+                        {t('knowledgeBase.webLink')}
+                    </div>
+                    <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} />
+                    <div className='rb:text-sm rb:text-gray-500 rb:mt-3'>
+                        {t('knowledgeBase.webLinkDesc',{count: 5})}
+                    </div>
+                    <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
+                        {t('knowledgeBase.selectorTutorial')}
+                    </div>
+                    <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
+                </div>
+            )}
+            {source && source === 'text' && (
+                <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-20'>
+                    <Form 
+                      form={form} 
+                      layout="vertical"
+                      onValuesChange={() => {
+                        // 检查表单字段是否都已填写
+                        const values = form.getFieldsValue();
+                        const isValid = !!(values.title?.trim() && values.content?.trim());
+                        setTextFormValid(isValid);
+                      }}
+                    >
+                        <Form.Item
+                          name="title"
+                          label={t('knowledgeBase.title')}
+                          rules={[{ required: true, message: t('knowledgeBase.pleaseEnterTitle') }]}
+                        >
+                          <Input placeholder={t('knowledgeBase.pleaseEnterTitle')} />
+                        </Form.Item>
 
-                          <Form.Item
-                            name="content"
-                            label={t('knowledgeBase.customContent')}
-                            rules={[{ required: true, message: t('knowledgeBase.pleaseEnterContent') }]}
-                          >
-                            <Input.TextArea
-                              placeholder={t('knowledgeBase.pleaseEnterContent')}
-                              rows={8}
-                              showCount
-                              maxLength={5000}
-                            />
-                          </Form.Item>
-                        </Form>
-                      {/* <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
-                          {t('knowledgeBase.customText')}
-                      </div>
-                      <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
-                      <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
-                          {t('knowledgeBase.customContent')}
-                      </div>
-                      <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} /> */}
-                  </div>
-              )}
-          </div>
+                        <Form.Item
+                          name="content"
+                          label={t('knowledgeBase.customContent')}
+                          rules={[{ required: true, message: t('knowledgeBase.pleaseEnterContent') }]}
+                        >
+                          <Input.TextArea
+                            placeholder={t('knowledgeBase.pleaseEnterContent')}
+                            rows={8}
+                            showCount
+                            maxLength={5000}
+                          />
+                        </Form.Item>
+                      </Form>
+                    {/* <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
+                        {t('knowledgeBase.customText')}
+                    </div>
+                    <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
+                    <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
+                        {t('knowledgeBase.customContent')}
+                    </div>
+                    <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} /> */}
+                </div>
+            )}
+        </div>
         )}
 
         {current === 1 && (
-          <div className='rb:flex rb:flex-col rb:py-6 rb:px-40'>
+          <div className='rb:flex rb:flex-col rb:mt-10 rb:px-40'>
               {rechunkFileIds.length > 0 && (
                 <div className='rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded rb:px-3 rb:py-2 rb:mb-4 rb:text-xs rb:text-gray-600 rb:flex rb:flex-wrap rb:gap-2'>
                     <span className='rb:text-gray-700 rb:font-medium'>{t('knowledgeBase.rechunking')}:</span>
@@ -676,7 +685,7 @@ const CreateDataset = () => {
               <div className='rb:mt-4'>
                 <div 
                   className={`rb:flex rb:items-center rb:w-full rb:border rb:rounded-lg rb:p-4 rb:cursor-pointer ${
-                    pdfEnhancementEnabled ? 'rb:border-gray-900' : 'rb:border-gray-300'
+                    pdfEnhancementEnabled ? 'rb:border-blue-500' : 'rb:border-gray-300'
                   }`}
                   // onClick={() => setPdfEnhancementEnabled(!pdfEnhancementEnabled)}
                 >
@@ -836,8 +845,7 @@ const CreateDataset = () => {
             </div>
           // </Spin>
         )}
-
-        <div className={`rb:flex rb:p-6 rb:gap-3 rb:mt-6 ${current === 1 || (source == 'link' && current === 0) || (source == 'text' && current === 0) ? 'rb:pl-40 rb:mt-10' : ''}`}>
+        <div className={`rb:flex rb:p-6 rb:gap-3 rb:mt-6 ${current === 1 || (source == 'link' && current === 0) || (source == 'text' && current === 0) ? 'rb:pl-28 rb:mt-10' : ''}`}>
           {current !== 0 && (
               <Button onClick={handlePrev} disabled={current === 0 || pollingLoading}>
               {t('common.previous') || 'Prev'}
@@ -846,7 +854,11 @@ const CreateDataset = () => {
           <Button 
             type='primary' 
             onClick={current === 2 ? handleStartUpload : handleNext}
-            disabled={pollingLoading || (current === 0 && rechunkFileIds.length === 0)}
+            disabled={
+              pollingLoading || 
+              (current === 0 && source === 'local' && rechunkFileIds.length === 0) ||
+              (current === 0 && source === 'text' && !textFormValid)
+            }
           >
             {current === 2 ? t('knowledgeBase.startUploading') || 'Start Upload' : t('common.next') || 'Next'}
           </Button>

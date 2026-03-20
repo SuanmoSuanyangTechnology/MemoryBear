@@ -1,7 +1,6 @@
-import json
 import os
 from pathlib import Path
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Optional
 
 from dotenv import load_dotenv
 from pydantic import Field, TypeAdapter
@@ -115,6 +114,7 @@ class Settings:
     S3_ACCESS_KEY_ID: str = os.getenv("S3_ACCESS_KEY_ID", "")
     S3_SECRET_ACCESS_KEY: str = os.getenv("S3_SECRET_ACCESS_KEY", "")
     S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME", "")
+    S3_ENDPOINT_URL: str = os.getenv("S3_ENDPOINT_URL", "")
 
     # VOLC ASR settings
     VOLC_APP_KEY: str = os.getenv("VOLC_APP_KEY", "")
@@ -161,6 +161,44 @@ class Settings:
     # Supported values: "zh" (Chinese), "en" (English)
     # This controls the language used for memory summary titles and other generated content
     DEFAULT_LANGUAGE: str = os.getenv("DEFAULT_LANGUAGE", "zh")
+
+    # ========================================================================
+    # Internationalization (i18n) Configuration
+    # ========================================================================
+    # Default language for API responses
+    I18N_DEFAULT_LANGUAGE: str = os.getenv("I18N_DEFAULT_LANGUAGE", "zh")
+    
+    # Supported languages (comma-separated)
+    I18N_SUPPORTED_LANGUAGES: list[str] = [
+        lang.strip()
+        for lang in os.getenv("I18N_SUPPORTED_LANGUAGES", "zh,en").split(",")
+        if lang.strip()
+    ]
+    
+    # Core locales directory (community edition)
+    # Use absolute path to work from any working directory
+    I18N_CORE_LOCALES_DIR: str = os.getenv(
+        "I18N_CORE_LOCALES_DIR",
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "locales")
+    )
+    
+    # Premium locales directory (enterprise edition, optional)
+    I18N_PREMIUM_LOCALES_DIR: Optional[str] = os.getenv("I18N_PREMIUM_LOCALES_DIR", None)
+    
+    # Enable translation cache
+    I18N_ENABLE_TRANSLATION_CACHE: bool = os.getenv("I18N_ENABLE_TRANSLATION_CACHE", "true").lower() == "true"
+    
+    # LRU cache size for hot translations
+    I18N_LRU_CACHE_SIZE: int = int(os.getenv("I18N_LRU_CACHE_SIZE", "1000"))
+    
+    # Enable hot reload of translation files
+    I18N_ENABLE_HOT_RELOAD: bool = os.getenv("I18N_ENABLE_HOT_RELOAD", "false").lower() == "true"
+    
+    # Fallback language when translation is missing
+    I18N_FALLBACK_LANGUAGE: str = os.getenv("I18N_FALLBACK_LANGUAGE", "zh")
+    
+    # Log missing translations
+    I18N_LOG_MISSING_TRANSLATIONS: bool = os.getenv("I18N_LOG_MISSING_TRANSLATIONS", "true").lower() == "true"
 
     # Logging settings
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

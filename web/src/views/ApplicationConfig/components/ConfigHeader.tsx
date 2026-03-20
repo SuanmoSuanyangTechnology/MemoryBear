@@ -2,9 +2,9 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 10:31:08
+ * @Last Modified time: 2026-03-19 21:21:28
  */
-import { type FC, useRef, useMemo } from 'react';
+import { type FC, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Tabs, Dropdown, Button, Flex } from 'antd';
 import type { MenuProps } from 'antd';
@@ -18,16 +18,21 @@ import exportIcon from '@/assets/images/export_hover.svg'
 import deleteIcon from '@/assets/images/delete_hover.svg'
 import type { Application, ApplicationModalRef } from '@/views/ApplicationManagement/types';
 import ApplicationModal from '@/views/ApplicationManagement/components/ApplicationModal'
-import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef } from '../types'
-import { deleteApplication } from '@/api/application'
+import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef, FeaturesConfigForm } from '../types'
+import { deleteApplication, appExport } from '@/api/application'
 import CopyModal from './CopyModal'
 import PageHeader from '@/components/Layout/PageHeader'
-import { exportToYaml } from '@/utils/yamlExport';
+import FeaturesConfig from './FeaturesConfig'
 
 /**
  * Tab keys for application configuration
  */
 const tabKeys = ['arrangement', 'api', 'release', 'statistics']
+const sharingTabKeys = [
+  'test',
+  // 'log',
+  'api'
+]
 
 /**
  * Menu icon mapping
@@ -55,6 +60,10 @@ interface ConfigHeaderProps {
   workflowRef: React.RefObject<WorkflowRef>
   /** App component ref (Agent/Cluster/Workflow) */
   appRef?: React.RefObject<AgentRef | ClusterRef | WorkflowRef>
+  /** Features config from parent state */
+  features?: FeaturesConfigForm;
+  /** Callback to update features in parent */
+  onFeaturesChange?: (value: FeaturesConfigForm) => void;
 }
 
 /**
@@ -64,35 +73,45 @@ interface ConfigHeaderProps {
 const ConfigHeader: FC<ConfigHeaderProps> = ({ 
   application, activeTab, handleChangeTab, refresh,
   workflowRef,
+  appRef,
+  features,
+  onFeaturesChange,
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { id } = useParams();
+  const { id, source } = useParams();
   const applicationModalRef = useRef<ApplicationModalRef>(null);
   const copyModalRef = useRef<CopyModalRef>(null);
 
   /**
    * Format tab items for display
    */
-  const formatTabItems = () => {
-    return tabKeys.map(key => ({
+  const formatTabItems = useMemo(() => {
+    return (source === 'sharing' ? sharingTabKeys : tabKeys).map(key => ({
       key,
       label: t(`application.${key}`),
     }))
-  }
+  }, [source, sharingTabKeys, tabKeys])
   /**
    * Handle menu item click
    */
   const handleClick: MenuProps['onClick'] = ({ key }) => {
+    if (!application) return
     switch (key) {
       case 'edit':
-        applicationModalRef.current?.handleOpen(application as Application)
+        applicationModalRef.current?.handleOpen(application)
         break;
       case 'copy':
-        copyModalRef.current?.handleOpen()
+        appRef?.current?.handleSave(false)
+          .then(() => {
+            copyModalRef.current?.handleOpen()
+          })
         break;
       case 'export':
-        exportToYaml(workflowRef?.current?.config, application?.name ? `${application?.name}.yml` : undefined)
+        appRef?.current?.handleSave(false)
+          .then(() => {
+            appExport(application.id, application.name)
+          })
         break;
       case 'delete':
         handleDelete()
@@ -151,7 +170,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
    * Format dropdown menu items
    */
   const formatMenuItems = useMemo(() => {
-    const items = (application?.type === 'workflow' ? ['edit', 'copy', 'export', 'delete'] : ['edit', 'copy', 'delete']).map(key => ({
+    const items = (application?.type !== 'multi_agent' ? ['edit', 'copy', 'export', 'delete'] : ['edit', 'copy', 'delete']).map(key => ({
       key,
       icon: <img src={menuIcons[key]} className="rb:w-4 rb:h-4 rb:mr-2" />,
       label: t(`common.${key}`),
@@ -159,7 +178,11 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
     return items
   }, [t, handleClick, application])
 
-  console.log('formatMenuItems', formatMenuItems)
+  const handleSaveFeaturesConfig = useCallback((value: FeaturesConfigForm) => {
+    appRef?.current?.handleSaveFeaturesConfig?.(value)
+    onFeaturesChange?.(value)
+  }, [appRef, onFeaturesChange])
+  
   return (
     <>
       <PageHeader
@@ -170,8 +193,8 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
           'rb:bg-[#171719]': application?.type === 'workflow',
         })}
         title={application?.name || ''}
-        operation={<Dropdown
-          menu={{ items: formatMenuItems, onClick: handleClick }} 
+        operation={source !== 'sharing' && <Dropdown
+          menu={{ items: formatMenuItems, onClick: handleClick }}
           trigger={['click']}
           placement="bottomRight"
         >
@@ -182,13 +205,14 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         centerContent={<Flex justify="center" className="rb:h-16!">
           <Tabs
             activeKey={activeTab}
-            items={formatTabItems()}
+            items={formatTabItems}
             onChange={handleChangeTab}
             className={styles.tabs}
           />
         </Flex>}
-        extra={application?.type === 'workflow'
+        extra={application?.type === 'workflow' && source !== 'sharing' && activeTab === 'arrangement'
           ? <Flex align="center" justify="end" gap={10} className="rb:h-8">
+            <FeaturesConfig source={application?.type} value={features as FeaturesConfigForm} refresh={handleSaveFeaturesConfig} />
             <Button onClick={clear}>{t('workflow.clear')}</Button>
             <Button onClick={addvariable}>{t('workflow.addvariable')}</Button>
             <Button onClick={run}>{t('workflow.run')}</Button>

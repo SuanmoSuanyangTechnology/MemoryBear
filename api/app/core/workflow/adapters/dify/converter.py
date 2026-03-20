@@ -8,34 +8,60 @@ from typing import Any
 from urllib.parse import quote
 
 from app.core.workflow.adapters.base_converter import BaseConverter
-from app.core.workflow.adapters.errors import UnsupportVariableType, UnknowModelWarning, ExceptionDefineition, \
+from app.core.workflow.adapters.errors import (
+    UnsupportVariableType,
+    UnknowModelWarning,
+    ExceptionDefineition,
     ExceptionType
-from app.core.workflow.nodes.assigner import AssignerNodeConfig
+)
 from app.core.workflow.nodes.assigner.config import AssignmentItem
 from app.core.workflow.nodes.base_config import VariableDefinition, BaseNodeConfig
-from app.core.workflow.nodes.code import CodeNodeConfig
 from app.core.workflow.nodes.code.config import InputVariable, OutputVariable
-from app.core.workflow.nodes.configs import StartNodeConfig, LLMNodeConfig
-from app.core.workflow.nodes.cycle_graph import LoopNodeConfig, IterationNodeConfig
-from app.core.workflow.nodes.cycle_graph.config import ConditionDetail as LoopConditionDetail, ConditionsConfig, \
+from app.core.workflow.nodes.configs import (
+    StartNodeConfig,
+    LLMNodeConfig,
+    AssignerNodeConfig,
+    CodeNodeConfig,
+    LoopNodeConfig,
+    IterationNodeConfig,
+    EndNodeConfig,
+    HttpRequestNodeConfig,
+    IfElseNodeConfig,
+    JinjaRenderNodeConfig,
+    KnowledgeRetrievalNodeConfig,
+    NoteNodeConfig,
+    ParameterExtractorNodeConfig,
+    QuestionClassifierNodeConfig,
+    VariableAggregatorNodeConfig
+)
+from app.core.workflow.nodes.cycle_graph.config import (
+    ConditionDetail as LoopConditionDetail,
+    ConditionsConfig,
     CycleVariable
-from app.core.workflow.nodes.end import EndNodeConfig
-from app.core.workflow.nodes.enums import ValueInputType, ComparisonOperator, AssignmentOperator, HttpAuthType, \
-    HttpContentType, HttpErrorHandle
-from app.core.workflow.nodes.http_request import HttpRequestNodeConfig
-from app.core.workflow.nodes.http_request.config import HttpAuthConfig, HttpContentTypeConfig, HttpFormData, \
-    HttpTimeOutConfig, HttpRetryConfig, HttpErrorDefaultTamplete, HttpErrorHandleConfig
-from app.core.workflow.nodes.if_else import IfElseNodeConfig
+)
+from app.core.workflow.nodes.enums import (
+    ValueInputType,
+    ComparisonOperator,
+    AssignmentOperator,
+    HttpAuthType,
+    HttpContentType,
+    HttpErrorHandle,
+    NodeType
+)
+from app.core.workflow.nodes.http_request.config import (
+    HttpAuthConfig,
+    HttpContentTypeConfig,
+    HttpFormData,
+    HttpTimeOutConfig,
+    HttpRetryConfig,
+    HttpErrorDefaultTamplete,
+    HttpErrorHandleConfig
+)
 from app.core.workflow.nodes.if_else.config import ConditionDetail, ConditionBranchConfig
-from app.core.workflow.nodes.jinja_render import JinjaRenderNodeConfig
 from app.core.workflow.nodes.jinja_render.config import VariablesMappingConfig
-from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNodeConfig
 from app.core.workflow.nodes.llm.config import MemoryWindowSetting, MessageConfig
-from app.core.workflow.nodes.parameter_extractor import ParameterExtractorNodeConfig
 from app.core.workflow.nodes.parameter_extractor.config import ParamsConfig
-from app.core.workflow.nodes.question_classifier import QuestionClassifierNodeConfig
 from app.core.workflow.nodes.question_classifier.config import ClassifierConfig
-from app.core.workflow.nodes.variable_aggregator import VariableAggregatorNodeConfig
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 
 
@@ -48,24 +74,24 @@ class DifyConverter(BaseConverter):
 
     def __init__(self):
         self.CONFIG_CONVERT_MAP = {
-            "start": self.convert_start_node_config,
-            "llm": self.convert_llm_node_config,
-            "answer": self.convert_end_node_config,
-            "if-else": self.convert_if_else_node_config,
-            "loop": self.convert_loop_node_config,
-            "iteration": self.convert_iteration_node_config,
-            "assigner": self.convert_assigner_node_config,
-            "code": self.convert_code_node_config,
-            "http-request": self.convert_http_node_config,
-            "template-transform": self.convert_jinja_render_node_config,
-            "knowledge-retrieval": self.convert_knowledge_node_config,
-            "parameter-extractor": self.convert_parameter_extractor_node_config,
-            "question-classifier": self.convert_question_classifier_node_config,
-            "variable-aggregator": self.convert_variable_aggregator_node_config,
-            "tool": self.convert_tool_node_config,
-            "loop-start": lambda x: {},
-            "iteration-start": lambda x: {},
-            "loop-end": lambda x: {},
+            NodeType.START: self.convert_start_node_config,
+            NodeType.LLM: self.convert_llm_node_config,
+            NodeType.END: self.convert_end_node_config,
+            NodeType.IF_ELSE: self.convert_if_else_node_config,
+            NodeType.LOOP: self.convert_loop_node_config,
+            NodeType.ITERATION: self.convert_iteration_node_config,
+            NodeType.ASSIGNER: self.convert_assigner_node_config,
+            NodeType.CODE: self.convert_code_node_config,
+            NodeType.HTTP_REQUEST: self.convert_http_node_config,
+            NodeType.JINJARENDER: self.convert_jinja_render_node_config,
+            NodeType.KNOWLEDGE_RETRIEVAL: self.convert_knowledge_node_config,
+            NodeType.PARAMETER_EXTRACTOR: self.convert_parameter_extractor_node_config,
+            NodeType.QUESTION_CLASSIFIER: self.convert_question_classifier_node_config,
+            NodeType.VAR_AGGREGATOR: self.convert_variable_aggregator_node_config,
+            NodeType.TOOL: self.convert_tool_node_config,
+            NodeType.NOTES: self.convert_notes_config,
+            NodeType.CYCLE_START: lambda x: {},
+            NodeType.BREAK: lambda x: {},
         }
 
     def get_node_convert(self, node_type):
@@ -185,6 +211,9 @@ class DifyConverter(BaseConverter):
             "not empty": ComparisonOperator.NOT_EMPTY,
             "start with": ComparisonOperator.START_WITH,
             "end with": ComparisonOperator.END_WITH,
+            "not contains": ComparisonOperator.NOT_CONTAINS,
+            "exists": ComparisonOperator.NOT_EMPTY,
+            "not exists": ComparisonOperator.EMPTY
         }
         return operator_map.get(operator, operator)
 
@@ -364,7 +393,7 @@ class DifyConverter(BaseConverter):
         node_data = node["data"]
         cases = []
         for case in node_data["cases"]:
-            case_id = case["id"]
+            case_id = case.get("id") or case.get("case_id")
             logical_operator = case["logical_operator"]
             conditions = []
             for condition in case["conditions"]:
@@ -540,7 +569,8 @@ class DifyConverter(BaseConverter):
                 ] = self.trans_variable_format(content["value"])
         else:
             if node_data["body"]["data"]:
-                body_content = node_data["body"]["data"][0]["value"]
+                body_content = (node_data["body"]["data"][0].get("value") or
+                                self._process_list_variable_litearl(node_data["body"]["data"][0].get("file")))
             else:
                 body_content = ""
 
@@ -728,3 +758,16 @@ class DifyConverter(BaseConverter):
             detail=f"Please reconfigure the tool node.",
         ))
         return {}
+
+    @staticmethod
+    def convert_notes_config(node: dict):
+        node_data = node["data"]
+        result = NoteNodeConfig.model_construct(
+            author=node_data.get("author", ""),
+            text=node_data.get("text", ""),
+            width=node_data.get("width", 80),
+            height=node_data.get("height", 80),
+            theme=node_data.get("theme", "blue"),
+            show_author=node_data.get("showAuthor", True)
+        ).model_dump()
+        return result

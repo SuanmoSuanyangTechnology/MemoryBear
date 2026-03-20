@@ -78,7 +78,7 @@ class ToolService:
 
     def get_tool_info(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[ToolInfo]:
         """获取工具详情"""
-        config = self.tool_repo.find_by_id_and_tenant(self.db, uuid.UUID(tool_id), tenant_id)
+        config = self.tool_repo.find_by_id_and_tenant_all(self.db, uuid.UUID(tool_id), tenant_id)
         return self._config_to_info(config) if config else None
 
     def _check_name_duplicate(self, name: str, tool_type: ToolType, tenant_id: uuid.UUID, exclude_id: Optional[uuid.UUID] = None):
@@ -93,7 +93,44 @@ class ToolService:
         if query.first():
             raise BusinessException(f"工具名称 '{name}' 已存在", BizCode.DUPLICATE_NAME)
 
-    def create_tool(
+    def _check_mcp_duplicate(self, name: str, tool_type: ToolType, tenant_id: uuid.UUID, config: Dict[str, Any]):
+        """检查MCP工具是否重复：市场来源按market_id+market_config_id+mcp_service_id判断（名称无关），自建按name+tool_type判断"""
+        from app.models.tool_model import MCPSourceChannel
+        source_channel = config.get("source_channel")
+        is_market_source = (
+            source_channel is not None
+            and source_channel != MCPSourceChannel.SELF_HOSTED
+        )
+        if is_market_source:
+            exists = (
+                self.db.query(ToolConfig)
+                .join(MCPToolConfig, MCPToolConfig.id == ToolConfig.id)
+                .filter(
+                    ToolConfig.tenant_id == tenant_id,
+                    ToolConfig.tool_type == tool_type,
+                    MCPToolConfig.source_channel == source_channel,
+                    MCPToolConfig.market_id == config.get("market_id"),
+                    MCPToolConfig.market_config_id == config.get("market_config_id"),
+                    MCPToolConfig.mcp_service_id == config.get("mcp_service_id"),
+                )
+                .first()
+            )
+            if exists:
+                raise BusinessException(f"该MCP服务已添加", BizCode.DUPLICATE_NAME)
+        else:
+            exists = (
+                self.db.query(ToolConfig)
+                .filter(
+                    ToolConfig.name == name,
+                    ToolConfig.tool_type == tool_type,
+                    ToolConfig.tenant_id == tenant_id,
+                )
+                .first()
+            )
+            if exists:
+                raise BusinessException(f"工具 '{name}' 已存在", BizCode.DUPLICATE_NAME)
+
+    async def create_tool(
             self,
             name: str,
             tool_type: ToolType,
@@ -106,7 +143,19 @@ class ToolService:
         """创建工具"""
         if tool_type == ToolType.BUILTIN:
             raise ValueError("内置工具不允许创建")
-        self._check_name_duplicate(name, tool_type, tenant_id)
+
+        cfg = config or {}
+        if tool_type == ToolType.MCP:
+            self._check_mcp_duplicate(name, tool_type, tenant_id, cfg)
+            # 创建前测试连接
+            test_result = await self._test_mcp_connection_by_config(cfg)
+            if not test_result["success"]:
+                raise BusinessException(f"MCP连接测试失败: {test_result['message']}", BizCode.INVALID_PARAMETER)
+            # 将发现的工具列表写回 config
+            if "available_tools" in test_result:
+                cfg["available_tools"] = test_result["available_tools"]
+        else:
+            self._check_name_duplicate(name, tool_type, tenant_id)
 
         try:
             # 创建基础配置
@@ -117,19 +166,22 @@ class ToolService:
                 tool_type=tool_type.value,
                 tenant_id=tenant_id,
                 status=ToolStatus.AVAILABLE.value,
-                config_data=config or {},
+                config_data=cfg,
                 tags=tags
             )
             self.db.add(tool_config)
             self.db.flush()
 
             # 创建类型特定配置
-            self._create_type_config(tool_config, config or {})
+            self._create_type_config(tool_config, cfg)
 
             self.db.commit()
             logger.info(f"工具创建成功: {tool_config.id}")
             return str(tool_config.id)
 
+        except BusinessException:
+            self.db.rollback()
+            raise
         except Exception as e:
             self.db.rollback()
             logger.error(f"创建工具失败: {e}")
@@ -185,7 +237,7 @@ class ToolService:
             return False
 
     def delete_tool(self, tool_id: str, tenant_id: uuid.UUID) -> bool:
-        """删除工具"""
+        """删除工具（逻辑删除）"""
         config = self._get_tool_config(tool_id, tenant_id)
         if not config:
             return False
@@ -194,20 +246,34 @@ class ToolService:
             raise ValueError("内置工具不允许删除")
 
         try:
-            # 删除关联表记录
-            if config.tool_type == ToolType.CUSTOM.value:
-                self.db.query(CustomToolConfig).filter(CustomToolConfig.id == config.id).delete()
-            elif config.tool_type == ToolType.MCP.value:
-                self.db.query(MCPToolConfig).filter(MCPToolConfig.id == config.id).delete()
-            
-            # 删除主表记录（ToolExecution会通过cascade自动删除）
-            self.db.delete(config)
+            config.is_active = False
             self._clear_tool_cache(tool_id)
             self.db.commit()
             return True
         except Exception as e:
             self.db.rollback()
             logger.error(f"删除工具失败: {tool_id}, {e}")
+            return False
+
+    def set_tool_active(self, tool_id: str, tenant_id: uuid.UUID, is_active: bool) -> bool:
+        """设置工具可用状态（启用/禁用）"""
+        # 直接查询，包含 is_active=False 的记录
+        config = self.db.query(ToolConfig).filter(
+            ToolConfig.id == uuid.UUID(tool_id),
+            ToolConfig.tenant_id == tenant_id
+        ).first()
+        if not config:
+            return False
+        if config.tool_type == ToolType.BUILTIN.value:
+            raise ValueError("内置工具不允许修改可用状态")
+        try:
+            config.is_active = is_active
+            self._clear_tool_cache(tool_id)
+            self.db.commit()
+            return True
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"设置工具状态失败: {tool_id}, {e}")
             return False
 
     async def execute_tool(
@@ -326,7 +392,7 @@ class ToolService:
         Returns:
             方法列表或None
         """
-        config = self._get_tool_config(tool_id, tenant_id)
+        config = self._get_tool_config_all(tool_id, tenant_id)
         if not config:
             return None
         
@@ -805,16 +871,20 @@ class ToolService:
             }
 
     def _get_tool_config(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[ToolConfig]:
-        """获取工具配置"""
+        """获取工具配置(仅返回 is_active=True)"""
         return self.tool_repo.find_by_id_and_tenant(self.db, uuid.UUID(tool_id), tenant_id)
 
+    def _get_tool_config_all(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[ToolConfig]:
+        """获取工具配置（返回所有）"""
+        return self.tool_repo.find_by_id_and_tenant_all(self.db, uuid.UUID(tool_id), tenant_id)
+
     def get_tool_instance(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[BaseTool]:
-        """获取工具实例"""
+        """获取工具实例（仅返回 is_active=True 的工具）"""
         if tool_id in self._tool_cache:
             return self._tool_cache[tool_id]
 
         config = self._get_tool_config(tool_id, tenant_id)
-        if not config:
+        if not config or not config.is_active:
             return None
 
         try:
@@ -928,6 +998,7 @@ class ToolService:
             tags=config.tags or [],
             tenant_id=str(config.tenant_id) if config.tenant_id else None,
             config_data=config_data,
+            is_active=config.is_active,
             created_at=config.created_at
         )
 
@@ -1164,6 +1235,27 @@ class ToolService:
         except Exception as e:
             logger.error(f"加载内置工具配置失败: {e}")
             return {}
+
+    async def _test_mcp_connection_by_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """根据配置参数直接测试MCP连接（创建前调用，无需已存在的工具记录）"""
+        server_url = config.get("server_url")
+        if not server_url:
+            return {"success": False, "message": "server_url不能为空"}
+        connection_config = config.get("connection_config") or {}
+        try:
+            test_result = await self.mcp_tool_manager.test_tool_connection(server_url, connection_config)
+            if not test_result["success"]:
+                return test_result
+            success_flag, tools, error = await self.mcp_tool_manager.discover_tools(server_url, connection_config)
+            if not success_flag:
+                return {"success": False, "message": f"获取工具列表失败: {error}"}
+            tool_list = [
+                {tool["name"]: {"description": tool.get("description", ""), "inputSchema": tool.get("inputSchema", {})}}
+                for tool in tools if tool.get("name")
+            ]
+            return {"success": True, "message": "MCP连接测试成功", "available_tools": tool_list}
+        except Exception as e:
+            return {"success": False, "message": f"连接测试异常: {str(e)}"}
 
     async def _test_mcp_connection(self, config: ToolConfig) -> Dict[str, Any]:
         """测试MCP连接并自动同步工具列表"""

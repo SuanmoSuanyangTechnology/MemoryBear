@@ -136,7 +136,7 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
 
   /** Sync edit content when external content changes */
   useEffect(() => {
-    setEditContent(content)
+    setEditContent(prev => prev !== content ? content : prev)
   }, [content])
 
   /** Handle textarea content changes and trigger callback */
