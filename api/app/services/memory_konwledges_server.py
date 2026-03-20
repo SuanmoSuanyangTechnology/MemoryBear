@@ -341,7 +341,7 @@ async def memory_konwledges_up(
     )
     db_document = document_service.create_document(db=db, document=create_document_data, current_user=current_user)
 
-    return success(data=document_schema.Document.model_validate(db_document), msg="custom text upload successful")
+    return db_document
 
 
 async def create_document_chunk(
@@ -350,7 +350,7 @@ async def create_document_chunk(
         create_data: ChunkCreate,
         db: Session,
         current_user: User
-):
+) -> DocumentChunk:
     """
     创建文档块
 
@@ -439,10 +439,10 @@ async def create_document_chunk(
     db_document.chunk_num += 1
     db.commit()
 
-    return success(data=chunk, msg="文档块创建成功")
+    return chunk
 
 
-async def write_rag(end_user_id, message, user_rag_memory_id):
+async def write_rag(end_user_id, message, user_rag_memory_id) -> DocumentChunk:
     """
     将消息写入 RAG 知识库
 
@@ -482,11 +482,11 @@ async def write_rag(end_user_id, message, user_rag_memory_id):
         document = find_document_id_by_kb_and_filename(db=db, kb_id=user_rag_memory_id, file_name=f"{end_user_id}.txt")
         print('======', document)
         api_logger.info(f"查找文档结果: document_id={document}")
+        create_chunks = ChunkCreate(content=message)
         if document is not None:
             # 文档已存在，直接添加新块
             api_logger.info(f"文档已存在，添加新块: document_id={document}")
 
-            create_chunks = ChunkCreate(content=message)
             result = await create_document_chunk(
                 kb_id=kb_uuid,
                 document_id=uuid.UUID(document),
@@ -498,10 +498,17 @@ async def write_rag(end_user_id, message, user_rag_memory_id):
         else:
             # 文档不存在，创建新文档
             api_logger.info(f"文档不存在，创建新文档: end_user_id={end_user_id}")
-            result = await memory_konwledges_up(
+            document = await memory_konwledges_up(
                 kb_id=user_rag_memory_id,
                 parent_id=user_rag_memory_id,
                 create_data=create_data,
+                db=db,
+                current_user=current_user
+            )
+            result = await create_document_chunk(
+                kb_id=kb_uuid,
+                document_id=document.id,
+                create_data=create_chunks,
                 db=db,
                 current_user=current_user
             )
