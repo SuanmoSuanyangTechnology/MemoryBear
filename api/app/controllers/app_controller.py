@@ -57,6 +57,7 @@ def list_apps(
         page: int = 1,
         pagesize: int = 10,
         ids: Optional[str] = None,
+        api_key: Optional[str] = None,
         db: Session = Depends(get_db),
         current_user=Depends(get_current_user),
 ):
@@ -65,9 +66,24 @@ def list_apps(
     - 默认包含本工作空间的应用和分享给本工作空间的应用
     - 设置 include_shared=false 可以只查看本工作空间的应用
     - 当提供 ids 参数时，按逗号分割获取指定应用，不分页
+    - 当提供 api_key 参数时，查找该 API Key 关联的应用
     """
+    from sqlalchemy import select as sa_select
+    from app.models.api_key_model import ApiKey
+
     workspace_id = current_user.current_workspace_id
     service = app_service.AppService(db)
+
+    # 通过 API Key 搜索：精确匹配，将 resource_id 注入 ids 走统一分页流程
+    if api_key:
+        matched_id = db.execute(
+            sa_select(ApiKey.resource_id).where(
+                ApiKey.workspace_id == workspace_id,
+                ApiKey.api_key == api_key,
+                ApiKey.resource_id.isnot(None),
+            )
+        ).scalar_one_or_none()
+        ids = str(matched_id) if matched_id else ""
 
     # 当 ids 存在且不为 None 时，根据 ids 获取应用
     if ids is not None:
