@@ -65,6 +65,7 @@ def get_db_read() -> Generator[Session, None, None]:
             yield db
         finally:
             db.rollback()  # 只读任务无需 commit
+            db.close()
 
 
 def get_pool_status():
