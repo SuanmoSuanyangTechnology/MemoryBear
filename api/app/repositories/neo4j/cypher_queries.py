@@ -1303,6 +1303,7 @@ WHERE c.name IS NULL OR c.name = ''
    OR c.core_entities IS NULL
    OR (c.summary_embedding IS NULL AND c.summary IS NOT NULL AND c.summary <> '(empty)')
 RETURN c.community_id AS community_id
+"""
 
 # Community keyword search: matches name or summary via fulltext index
 SEARCH_COMMUNITIES_BY_KEYWORD = """
