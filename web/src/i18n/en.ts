@@ -460,7 +460,6 @@ export const en = {
       nameInvalid: 'Name cannot start or end with a space',
       notAllSpaces: 'Cannot be all spaces',
       view: 'View',
-      callbackUrlInvalid: 'Please enter a valid URL',
     },
     model: {
       searchPlaceholder: 'search model…',

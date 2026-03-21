@@ -1093,7 +1093,6 @@ export const zh = {
       nameInvalid: '不能是空格开头或结尾',
       notAllSpaces: '不能是纯空格',
       view: '查看',
-      callbackUrlInvalid: '请输入有效的 URL',
     },
     model: {
       searchPlaceholder: '搜索模型…',

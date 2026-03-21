@@ -200,7 +200,7 @@ const Conversation: FC = () => {
   /** Send message and handle streaming response */
   const handleSend = () => {
     if (!token || !shareToken) return
-    const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
+    const files = toolbarRef.current?.getFiles() || []
     const variables = toolbarRef.current?.getVariables() || []
     let isCanSend = true
     const params: Record<string, any> = {}

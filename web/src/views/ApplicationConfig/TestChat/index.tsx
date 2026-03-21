@@ -183,7 +183,7 @@ const TestChat: FC<TestChatProps> = ({
 
   const handleSend = () => {
     if (loading || !application || !message || !message?.trim()) return
-    const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
+    const files = toolbarRef.current?.getFiles() || []
     const variables = toolbarRef.current?.getVariables() || []
     const { isCanSend, params } = buildVariableParams(variables)
     if (!isCanSend) return
@@ -235,7 +235,7 @@ const TestChat: FC<TestChatProps> = ({
 
   const handleWorkflowSend = () => {
     if (loading || !application || !message || !message?.trim()) return
-    const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
+    const files = toolbarRef.current?.getFiles() || []
     const variables = toolbarRef.current?.getVariables() || []
     const { isCanSend, params } = buildVariableParams(variables)
     if (!isCanSend) return

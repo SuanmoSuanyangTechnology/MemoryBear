@@ -21,7 +21,6 @@ from app.models.conversation_model import ConversationDetail
 from app.models.prompt_optimizer_model import RoleType
 from app.repositories.conversation_repository import ConversationRepository, MessageRepository
 from app.schemas.conversation_schema import ConversationOut
-from app.schemas.model_schema import ModelInfo
 from app.services import workspace_service
 from app.services.model_service import ModelConfigService
 
@@ -120,27 +119,25 @@ class ConversationService:
 
     def get_user_conversations(
             self,
-            user_id: uuid.UUID,
-            page: int = 1,
-            page_size: int = 20
-    ) -> tuple[list[Conversation], int]:
+            user_id: uuid.UUID
+    ) -> list[Conversation]:
         """
-        Retrieve recent conversations for a specific user with pagination.
+        Retrieve recent conversations for a specific user
+
+        This method delegates persistence logic to the repository layer and
+        applies service-level defaults (e.g. recent conversation limit).
 
         Args:
             user_id (uuid.UUID): Unique identifier of the user.
-            page (int): Page number (1-based). Defaults to 1.
-            page_size (int): Number of items per page. Defaults to 20.
 
         Returns:
-            tuple[list[Conversation], int]: A list of recent conversation entities and total count.
+            list[Conversation]: A list of recent conversation entities.
         """
-        conversations, total = self.conversation_repo.get_conversation_by_user_id(
+        conversations = self.conversation_repo.get_conversation_by_user_id(
             user_id,
-            page=page,
-            page_size=page_size
+            limit=10
         )
-        return conversations, total
+        return conversations
 
     def list_conversations(
             self,
@@ -270,11 +267,10 @@ class ConversationService:
 
         return messages
 
-    async def get_conversation_history(
+    def get_conversation_history(
             self,
             conversation_id: uuid.UUID,
-            max_history: Optional[int] = None,
-            api_config: Optional[ModelInfo] = None
+            max_history: Optional[int] = None
     ) -> List[dict]:
         """
         Retrieve historical conversation messages formatted as dictionaries.
@@ -282,7 +278,6 @@ class ConversationService:
         Args:
             conversation_id (uuid.UUID): Conversation UUID.
             max_history (Optional[int]): Maximum number of messages to retrieve.
-            api_config (Optional[ModelInfo]): Model API configuration for multimodal processing.
 
         Returns:
             List[dict]: List of message dictionaries with keys 'role' and 'content'.
@@ -293,37 +288,13 @@ class ConversationService:
         )
 
         # 转换为字典格式
-        history = []
-        for msg in messages:
-            content = [{"type": "text", "text": msg.content}]
-            
-            # 处理 meta_data 中的 files
-            if msg.meta_data and msg.meta_data.get("files"):
-                files = msg.meta_data.get("files", [])
-                if api_config:
-                    # 使用 MultimodalService 处理文件
-                    from app.services.multimodal_service import MultimodalService
-                    multimodal_service = MultimodalService(self.db, api_config=api_config)
-                    
-                    # 将 files 转换为 FileInput 格式
-                    file_inputs = []
-                    for file in files:
-                        from app.schemas.app_schema import FileInput, TransferMethod
-                        file_input = FileInput(
-                            type=file.get("type"),
-                            transfer_method=TransferMethod.REMOTE_URL,
-                            url=file.get("url")
-                        )
-                        file_inputs.append(file_input)
-
-                    processed_files = await multimodal_service.history_process_files(files=file_inputs)
-
-                    content.extend(processed_files)
-            
-            history.append({
+        history = [
+            {
                 "role": msg.role,
-                "content": content
-            })
+                "content": msg.content
+            }
+            for msg in messages
+        ]
 
         return history
 
@@ -551,18 +522,9 @@ class ConversationService:
             type=ModelType(model_type)
         )
 
-        conversation_messages = await self.get_conversation_history(
+        conversation_messages = self.get_conversation_history(
             conversation_id=conversation_id,
-            max_history=20,
-            api_config=ModelInfo(
-                model_name=model_name,
-                provider=provider,
-                api_key=api_key,
-                api_base=api_base,
-                capability=api_config.capability,
-                is_omni=api_config.is_omni,
-                model_type=model_type
-            )
+            max_history=20
         )
         if len(conversation_messages) == 0:
             return ConversationOut(

@@ -52,10 +52,6 @@ export const getKnowledgeBaseTypeList = async (): Promise<string[]> => {
   // 如果不是数组，返回空数组
   return [];
 };
-// 获取文件地址
-export const getFileUrl = (fileId: string) => {
-  return `${apiPrefix}/files/${fileId}`;
-};
 // 知识库文档解析类型
 export const getKnowledgeBaseDocumentParseTypeList = async () => {
   const response = await request.get(`${apiPrefix}/knowledges/parsertype`);

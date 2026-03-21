@@ -378,12 +378,3 @@ class S3Storage(StorageBackend):
             logger.error(f"Failed to generate presigned URL for {file_key}: {e}")
             # Return a basic URL format as fallback
             return f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{file_key}"
-
-    async def get_permanent_url(self, file_key: str) -> str:
-        """
-        Get a permanent public URL for the file (requires bucket public read).
-
-        Returns:
-            A permanent URL in the format: https://{bucket}.s3.{region}.amazonaws.com/{file_key}
-        """
-        return f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{file_key}"
