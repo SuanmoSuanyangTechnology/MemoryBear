@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 09:59:56
+ * @Last Modified time: 2026-03-09 13:41:19
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -783,7 +783,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
         { group: 'left' },
         ...(['IF', 'ELSE'].map((text, index) => ({
           group: 'right',
-          id: `CASE${index + 1}`,
+          id: `CASE${index}`,
           args: {
             ...portArgs,
             y: 30 * index + 42,
@@ -803,7 +803,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
         { group: 'left' },
         ...(['分类1', '分类2'].map((text, index) => ({
           group: 'right',
-          id: `CASE${index + 1}`,
+          id: `CASE${index}`,
           args: {
             ...portArgs,
             y: 30 * index + 42,

@@ -27,6 +27,7 @@ class ToolNode(BaseNode):
     def _output_types(self) -> dict[str, VariableType]:
         return {
             "data": VariableType.STRING,
+            "error_code": VariableType.STRING,
             "execution_time": VariableType.NUMBER
         }
 
@@ -47,7 +48,10 @@ class ToolNode(BaseNode):
 
         if not tenant_id:
             logger.error(f"节点 {self.node_id} 缺少租户ID")
-            raise ValueError("缺少租户ID")
+            return {
+                "success": False,
+                "data": "缺少租户ID"
+            }
 
         # 渲染工具参数
         rendered_parameters = {}
@@ -79,8 +83,13 @@ class ToolNode(BaseNode):
             logger.info(f"节点 {self.node_id} 工具执行成功")
             return {
                 "data": result.data if isinstance(result.data, str) else json.dumps(result.data, ensure_ascii=False),
+                "error_code": "",
                 "execution_time": result.execution_time
             }
         else:
             logger.error(f"节点 {self.node_id} 工具执行失败: {result.error}")
-            raise ValueError(f"工具执行失败: {result.error if isinstance(result.error, str) else json.dumps(result.error, ensure_ascii=False)}")
+            return {
+                "data": result.error if isinstance(result.error, str) else json.dumps(result.error, ensure_ascii=False),
+                "error_code": result.error_code,
+                "execution_time": result.execution_time
+            }

@@ -16,7 +16,7 @@ engine = create_engine(
     pool_recycle=settings.DB_POOL_RECYCLE,
     pool_timeout=settings.DB_POOL_TIMEOUT,
     connect_args={
-        "options": "-c timezone=UTC -c statement_timeout=60000"
+        "options": "-c timezone=Asia/Shanghai -c statement_timeout=60000"
     },
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -65,7 +65,6 @@ def get_db_read() -> Generator[Session, None, None]:
             yield db
         finally:
             db.rollback()  # 只读任务无需 commit
-            db.close()
 
 
 def get_pool_status():

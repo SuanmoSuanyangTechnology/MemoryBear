@@ -110,10 +110,7 @@ class ToolConfig(Base):
     # 元数据
     version = Column(String(50), default="1.0.0")
     tags = Column(JSON, default=list)  # 标签列表
-
-    # 逻辑删除标志
-    is_active = Column(Boolean, default=True, server_default='true', nullable=False, index=True, comment="是否可用，False表示已删除")
-
+    
     # 时间戳
     created_at = Column(DateTime, default=datetime.now, nullable=False)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)

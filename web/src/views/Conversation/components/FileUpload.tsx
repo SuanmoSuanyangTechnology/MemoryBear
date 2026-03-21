@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 18:38:41
+ * @Last Modified time: 2026-03-06 12:20:43
  */
 /**
  * File Upload Component
@@ -20,15 +20,14 @@
  * 
  * @component
  */
-import { useState, useEffect, forwardRef, useImperativeHandle, useMemo } from 'react';
+import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Upload, Progress, App } from 'antd';
 import type { UploadProps, UploadFile } from 'antd';
-import type { UploadProps as RcUploadProps, RcFile, UploadFileStatus } from 'antd/es/upload/interface';
+import type { UploadProps as RcUploadProps } from 'antd/es/upload/interface';
 import { useTranslation } from 'react-i18next';
 
 import { request } from '@/utils/request'
 import { fileUploadUrlWithoutApiPrefix } from '@/api/fileStorage'
-import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
 
 interface UploadFilesProps extends Omit<UploadProps, 'onChange'> {
   /** Upload API endpoint */
@@ -49,14 +48,14 @@ interface UploadFilesProps extends Omit<UploadProps, 'onChange'> {
   disabled?: boolean;
   /** File size limit in MB */
   fileSize?: number;
+  /** Allowed file types ['doc', 'xls', 'ppt', 'pdf'] */
+  fileType?: string[];
   /** Auto-upload on file selection, default is true */
   isAutoUpload?: boolean;
   /** Maximum number of files allowed */
   maxCount?: number;
   /** Custom file removal callback */
   onRemove?: (file: UploadFile) => boolean | void | Promise<boolean | void>;
-
-  featureConfig: FeaturesConfigForm['file_upload']
 }
 
 const transform_file_type = {
@@ -71,12 +70,6 @@ const transform_file_type = {
 
   'application/vnd.ms-powerpoint': 'document/ppt',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'document/pptx',
-
-  'application/vnd.ms-excel': 'document/xls',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'document/xlsx',
-  'text/csv': 'document/csv',
-
-  'application/json': 'document/json'
 }
 // Mapping of file extensions to MIME types
 const ALL_FILE_TYPE: {
@@ -93,13 +86,6 @@ const ALL_FILE_TYPE: {
 
   ppt: 'application/vnd.ms-powerpoint',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-
-  xls: 'application/vnd.ms-excel',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-
-  csv: 'text/csv',
-
-  json: 'application/json',
 
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
@@ -144,11 +130,11 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
   onChange,
   disabled = false,
   fileSize = 5,
+  fileType = Object.entries(ALL_FILE_TYPE).map(([key]) => key),
   isAutoUpload = true,
   maxCount = 1,
   onRemove: customOnRemove,
   requestConfig,
-  featureConfig,
   ...props
 }, ref) => {
   const { t } = useTranslation();
@@ -156,37 +142,18 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
   const [fileList, setFileList] = useState<UploadFile[]>(propFileList);
   const [accept, setAccept] = useState<string | undefined>();
 
-  const fileType = useMemo(() => {
-    let types: string[] = [];
-    ['image', 'document', 'video', 'audio'].forEach(type => {
-      if (featureConfig[`${type}_enabled` as keyof FeaturesConfigForm['file_upload']]) {
-        types = types.concat(featureConfig[`${type}_allowed_extensions` as keyof FeaturesConfigForm['file_upload']] as string[])
-      }
-    })
-
-    return types
-  }, [featureConfig])
-
   /**
    * Validates file type and size before upload
    * @returns Upload.LIST_IGNORE to prevent upload, or true to proceed
    */
   const beforeUpload: RcUploadProps['beforeUpload'] = (file) => {
-    // Determine file category and get max size from featureConfig
-    const mimePrefix = file.type?.split('/')[0]
-    const categoryMap: Record<string, keyof FeaturesConfigForm['file_upload']> = {
-      image: 'image_max_size_mb',
-      video: 'video_max_size_mb',
-      audio: 'audio_max_size_mb',
-    }
-    const maxSizeKey = categoryMap[mimePrefix] ?? 'document_max_size_mb'
-    const maxSize = (featureConfig[maxSizeKey] as number) ?? fileSize
-
-    const fileSizeMB = file.size / 1024 / 1024
-    const isLtMaxSize = fileSizeMB < maxSize;
-    if (!isLtMaxSize) {
-      message.error(t('common.fileSizeTip', { size: maxSize }));
-      return Upload.LIST_IGNORE;
+    // Validate file size
+    if (fileSize) {
+      const isLtMaxSize = (file.size / 1024 / 1024) < fileSize;
+      if (!isLtMaxSize) {
+        message.error(t('common.fileSizeTip', { size: fileSize }));
+        return Upload.LIST_IGNORE;
+      }
     }
     // Validate file type
     if (fileType && fileType.length > 0) {
@@ -221,29 +188,17 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
    */
   const handleCustomRequest: RcUploadProps['customRequest'] = async (options) => {
     const { file, onSuccess, onError } = options;
-    if (typeof file === 'string') return;
-    const rcFile = file as RcFile;
-    const formData = new FormData();
-    formData.append('file', rcFile);
-    const fileVo: UploadFile = {
-      uid: rcFile.uid,
-      name: rcFile.name,
-      status: 'uploading' as UploadFileStatus,
-      percent: 0,
-      type: rcFile.type,
-      originFileObj: rcFile,
-      thumbUrl: URL.createObjectURL(rcFile)
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const response = await request.uploadFile(action, formData, requestConfig);
+
+      onSuccess?.({data: response});
+    } catch (error) {
+      onError?.(error as Error);
     }
-    onChange?.(fileVo)
-    request.uploadFile(action, formData, requestConfig)
-      .then(res => {
-        onSuccess?.({ data: res });
-      })
-      .catch((error) => {
-        onError?.(error as Error);
-        fileVo.status = 'error'
-        onChange?.(fileVo)
-      })
   };
 
   /**

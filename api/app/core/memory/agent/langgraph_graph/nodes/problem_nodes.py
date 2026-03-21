@@ -19,39 +19,19 @@ logger = get_agent_logger(__name__)
 
 
 class ProblemNodeService(LLMServiceMixin):
-    """
-    Problem processing node service class
-    
-    Handles problem decomposition and extension operations using LLM services.
-    Inherits from LLMServiceMixin to provide structured LLM calling capabilities.
-    
-    Attributes:
-        template_service: Service for rendering Jinja2 templates
-    """
+    """问题处理节点服务类"""
 
     def __init__(self):
         super().__init__()
         self.template_service = TemplateService(template_root)
 
 
-# Create global service instance
+# 创建全局服务实例
 problem_service = ProblemNodeService()
 
 
 async def Split_The_Problem(state: ReadState) -> ReadState:
-    """
-    Problem decomposition node
-    
-    Breaks down complex user queries into smaller, more manageable sub-problems.
-    Uses LLM to analyze the input and generate structured problem decomposition
-    with question types and reasoning.
-    
-    Args:
-        state: ReadState containing user input and configuration
-        
-    Returns:
-        ReadState: Updated state with problem decomposition results
-    """
+    """问题分解节点"""
     # 从状态中获取数据
     content = state.get('data', '')
     end_user_id = state.get('end_user_id', '')
@@ -84,7 +64,7 @@ async def Split_The_Problem(state: ReadState) -> ReadState:
         # 添加更详细的日志记录
         logger.info(f"Split_The_Problem: 开始处理问题分解，内容长度: {len(content)}")
 
-        # Validate structured response
+        # 验证结构化响应
         if not structured or not hasattr(structured, 'root'):
             logger.warning("Split_The_Problem: 结构化响应为空或格式不正确")
             split_result = json.dumps([], ensure_ascii=False)
@@ -126,7 +106,7 @@ async def Split_The_Problem(state: ReadState) -> ReadState:
             exc_info=True
         )
 
-        # Provide more detailed error information
+        # 提供更详细的错误信息
         error_details = {
             "error_type": type(e).__name__,
             "error_message": str(e),
@@ -136,7 +116,7 @@ async def Split_The_Problem(state: ReadState) -> ReadState:
 
         logger.error(f"Split_The_Problem error details: {error_details}")
 
-        # Create default empty result
+        # 创建默认的空结果
         result = {
             "context": json.dumps([], ensure_ascii=False),
             "original": content,
@@ -150,25 +130,13 @@ async def Split_The_Problem(state: ReadState) -> ReadState:
             }
         }
 
-    # Return updated state including spit_context field
+    # 返回更新后的状态，包含spit_context字段
     return {"spit_data": result}
 
 
 async def Problem_Extension(state: ReadState) -> ReadState:
-    """
-    Problem extension node
-    
-    Extends the decomposed problems from Split_The_Problem node by generating
-    additional related questions and organizing them by original question.
-    Uses LLM to create comprehensive question extensions for better memory retrieval.
-    
-    Args:
-        state: ReadState containing decomposed problems and configuration
-        
-    Returns:
-        ReadState: Updated state with extended problem results
-    """
-    # Get original data and decomposition results
+    """问题扩展节点"""
+    # 获取原始数据和分解结果
     start = time.time()
     content = state.get('data', '')
     data = state.get('spit_data', '')['context']
@@ -214,7 +182,7 @@ async def Problem_Extension(state: ReadState) -> ReadState:
 
         logger.info(f"Problem_Extension: 开始处理问题扩展，问题数量: {len(databasets)}")
 
-        # Validate structured response
+        # 验证结构化响应
         if not response_content or not hasattr(response_content, 'root'):
             logger.warning("Problem_Extension: 结构化响应为空或格式不正确")
             aggregated_dict = {}
@@ -248,7 +216,7 @@ async def Problem_Extension(state: ReadState) -> ReadState:
             exc_info=True
         )
 
-        # Provide more detailed error information
+        # 提供更详细的错误信息
         error_details = {
             "error_type": type(e).__name__,
             "error_message": str(e),

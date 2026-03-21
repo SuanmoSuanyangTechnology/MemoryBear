@@ -8,7 +8,6 @@ from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models import User
-from app.schemas import conversation_schema
 from app.schemas.response_schema import ApiResponse
 from app.services.conversation_service import ConversationService
 
@@ -33,47 +32,35 @@ def get_memory_count(
 @router.get("/{end_user_id}/conversations", response_model=ApiResponse)
 def get_conversations(
         end_user_id: uuid.UUID,
-        page: int = 1,
-        pagesize: int = 20,
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
     """
-    Retrieve conversations for the current user in a specific group with pagination.
+    Retrieve all conversations for the current user in a specific group.
 
     Args:
         end_user_id (UUID): The group identifier.
-        page (int): Page number (1-based). Defaults to 1.
-        pagesize (int): Number of items per page. Defaults to 20.
         current_user (User, optional): The authenticated user.
         db (Session, optional): SQLAlchemy session.
 
     Returns:
-        ApiResponse: Contains a paginated list of conversations.
+        ApiResponse: Contains a list of conversation IDs.
+
+    Notes:
+        - Initializes the ConversationService with the current DB session.
+        - Returns only conversation IDs for lightweight response.
+        - Logs can be added to trace requests in production.
     """
-    page = max(1, page)
-    page_size = max(1, min(pagesize, 100))  # Limit page size between 1 and 100
     conversation_service = ConversationService(db)
-    conversations, total = conversation_service.get_user_conversations(
-        end_user_id,
-        page=page,
-        page_size=page_size
+    conversations = conversation_service.get_user_conversations(
+        end_user_id
     )
-    return success(data={
-        "items": [
-            {
-                "id": conversation.id,
-                "title": conversation.title
-            } for conversation in conversations
-        ],
-        "total": total,
-        "page": {
-            "page": page,
-            "pagesize": page_size,
-            "total": total,
-            "hasnext": (page * page_size) < total
-        },
-    }, msg="get conversations success")
+    return success(data=[
+        {
+            "id": conversation.id,
+            "title": conversation.title
+        } for conversation in conversations
+    ], msg="get conversations success")
 
 
 @router.get("/{end_user_id}/messages", response_model=ApiResponse)
@@ -103,7 +90,11 @@ def get_messages(
         conversation_id,
     )
     messages = [
-        conversation_schema.Message.model_validate(message)
+        {
+            "role": message.role,
+            "content": message.content,
+            "created_at": int(message.created_at.timestamp() * 1000),
+        }
         for message in messages_obj
     ]
     return success(data=messages, msg="get conversation history success")

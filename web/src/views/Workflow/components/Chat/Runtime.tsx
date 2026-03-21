@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-24 17:57:08 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-12 13:39:24
+ * @Last Modified time: 2026-02-28 16:48:09
  */
 /*
  * Runtime Component
@@ -225,13 +225,12 @@ const Runtime: FC<{ item: ChatItem; index: number;}> = ({
                 </div>
               )
               : <>
-                {item.error &&
-                 <div className={clsx("rb:bg-[#FBFDFF] rb:rounded-md rb:py-2 rb:px-3 rb:mb-2 rb:-mt-4", getStatus('failed'))}>
+                {item.error
+                ? <div className={clsx("rb:bg-[#FBFDFF] rb:rounded-md rb:py-2 rb:px-3 ", getStatus('failed'))}>
                   <Markdown content={item.error} />
-                  </div>
-                }
-                {renderChild(item.subContent)}
-              </>
+                  </div> 
+                : renderChild(item.subContent)
+              }</>
           )
         }]}
       />

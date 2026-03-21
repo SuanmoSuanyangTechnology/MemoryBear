@@ -7,13 +7,12 @@
 - 应用发布和版本管理
 - 应用回滚
 """
-import copy
 import datetime
 import uuid
 from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 from fastapi import Depends
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -81,8 +80,6 @@ class AppService:
             )
             raise BusinessException("应用不在指定工作空间中", BizCode.WORKSPACE_NO_ACCESS)
 
-
-
     def _check_app_accessible(self, app: App, workspace_id: Optional[uuid.UUID]) -> bool:
         """检查应用是否可访问（包括共享应用）
 
@@ -105,14 +102,13 @@ class AppService:
         # 2. 检查是否是共享给本工作空间的应用
         stmt = select(AppShare).where(
             AppShare.source_app_id == app.id,
-            AppShare.target_workspace_id == workspace_id,
-            AppShare.is_active.is_(True)
+            AppShare.target_workspace_id == workspace_id
         )
         share = self.db.scalars(stmt).first()
 
         return share is not None
 
-    def  _validate_app_accessible(self, app: App, workspace_id: Optional[uuid.UUID]) -> None:
+    def _validate_app_accessible(self, app: App, workspace_id: Optional[uuid.UUID]) -> None:
         """验证应用是否可访问（包括共享应用，用于只读操作）
 
         Args:
@@ -128,77 +124,6 @@ class AppService:
                 extra={"app_id": str(app.id), "workspace_id": str(workspace_id)}
             )
             raise BusinessException("应用不可访问", BizCode.WORKSPACE_NO_ACCESS)
-
-    def _unique_app_name(self, name: str, workspace_id: uuid.UUID, app_type: AppType) -> str:
-        """生成唯一应用名称，同时检查本空间自有应用和共享到本空间的应用"""
-        existing = {r[0] for r in self.db.query(App.name).filter(
-            App.workspace_id == workspace_id,
-            App.type == app_type,
-            App.is_active.is_(True)
-        ).all()}
-        shared_names = {r[0] for r in self.db.query(App.name).join(
-            AppShare, AppShare.source_app_id == App.id
-        ).filter(
-            AppShare.target_workspace_id == workspace_id,
-            App.type == app_type,
-            App.is_active.is_(True)
-        ).all()}
-        existing |= shared_names
-        if name not in existing:
-            return name
-        counter = 1
-        while f"{name}({counter})" in existing:
-            counter += 1
-        return f"{name}({counter})"
-
-    def _get_share_permission(self, app: App, workspace_id: Optional[uuid.UUID]) -> Optional[str]:
-        """获取共享应用的权限
-
-        Returns:
-            None: 不是共享应用（是本工作空间的应用）
-            'readonly': 只读共享
-            'editable': 可编辑共享
-        """
-        from app.models import AppShare
-
-        if workspace_id is None or app.workspace_id == workspace_id:
-            return None  # 本工作空间的应用，不是共享的
-
-        stmt = select(AppShare).where(
-            AppShare.source_app_id == app.id,
-            AppShare.target_workspace_id == workspace_id,
-            AppShare.is_active.is_(True)
-        )
-        share = self.db.scalars(stmt).first()
-        return share.permission if share else None
-
-    def _validate_app_writable(self, app: App, workspace_id: Optional[uuid.UUID]) -> None:
-        """Validate that the app config is writable.
-
-        - Own workspace app: allowed
-        - Shared app with editable permission: allowed
-        - Shared app with readonly permission: denied
-
-        Raises:
-            BusinessException: when app is not writable
-        """
-        if workspace_id is None:
-            return
-
-        # Own workspace app, allow
-        if app.workspace_id == workspace_id:
-            return
-
-        # Check share permission
-        permission = self._get_share_permission(app, workspace_id)
-        if permission == "editable":
-            return
-
-        logger.warning(
-            "应用写操作被拒",
-            extra={"app_id": str(app.id), "workspace_id": str(workspace_id)}
-        )
-        raise BusinessException("共享应用不可修改配置", BizCode.WORKSPACE_NO_ACCESS)
 
     def _get_app_or_404(self, app_id: uuid.UUID) -> App:
         """获取应用或抛出404异常
@@ -390,7 +315,6 @@ class AppService:
             variables=storage_data.get("variables", []),
             tools=storage_data.get("tools", []),
             skills=storage_data.get("skills", {}),
-            features=storage_data.get("features", {}),
             is_active=True,
             created_at=now,
             updated_at=now,
@@ -530,42 +454,6 @@ class AppService:
         Returns:
             app_schema.App: 应用 Schema
         """
-        is_shared = app.workspace_id != current_workspace_id
-        share_permission = None
-        source_workspace_name = None
-        source_workspace_icon = None
-        source_app_version = None
-        source_app_is_active = None
-        share_id = None
-        shared_by = None
-        shared_by_name = None
-        shared_at = None
-
-        if is_shared:
-            # 查询共享权限和来源工作空间名称
-            from app.models import AppShare
-            stmt = select(AppShare).where(
-                AppShare.source_app_id == app.id,
-                AppShare.target_workspace_id == current_workspace_id,
-                AppShare.is_active.is_(True)
-            )
-            share = self.db.scalars(stmt).first()
-            if share:
-                share_id = share.id
-                share_permission = share.permission
-                shared_by = share.shared_by
-                shared_at = share.created_at
-                if share.shared_user:
-                    shared_by_name = share.shared_user.username
-                if share.source_workspace:
-                    source_workspace_name = share.source_workspace.name
-                    source_workspace_icon = share.source_workspace.icon
-
-        # 版本号和生效状态
-        if app.current_release:
-            source_app_version = app.current_release.version_name
-        source_app_is_active = app.is_active
-
         app_dict = {
             "id": app.id,
             "workspace_id": app.workspace_id,
@@ -580,16 +468,7 @@ class AppService:
             "tags": app.tags or [],
             "current_release_id": app.current_release_id,
             "is_active": app.is_active,
-            "is_shared": is_shared,
-            "share_permission": share_permission,
-            "source_workspace_name": source_workspace_name,
-            "source_workspace_icon": source_workspace_icon,
-            "source_app_version": source_app_version,
-            "source_app_is_active": source_app_is_active,
-            "share_id": share_id,
-            "shared_by": shared_by,
-            "shared_by_name": shared_by_name,
-            "shared_at": shared_at,
+            "is_shared": app.workspace_id != current_workspace_id,  # 判断是否是共享应用
             "created_at": app.created_at,
             "updated_at": app.updated_at
         }
@@ -715,7 +594,7 @@ class AppService:
         logger.info("更新应用", extra={"app_id": str(app_id)})
 
         app = self._get_app_or_404(app_id)
-        self._validate_app_writable(app, workspace_id)
+        self._validate_workspace_access(app, workspace_id)
 
         changed = False
         for field in ["name", "description", "icon", "icon_type", "visibility", "status", "tags"]:
@@ -804,7 +683,6 @@ class AppService:
             # 确定新应用名称
             if not new_name:
                 new_name = f"{source_app.name} - 副本"
-            new_name = self._unique_app_name(new_name, target_workspace_id, source_app.type)
 
             now = datetime.datetime.now()
 
@@ -828,17 +706,6 @@ class AppService:
             self.db.add(new_app)
             self.db.flush()
 
-            # 判断是否跨工作空间复制（共享应用复制到自己的工作空间）
-            is_cross_workspace = target_workspace_id != source_app.workspace_id
-
-            # 跨工作空间时，获取目标工作空间的 tenant_id 用于判断模型配置是否可用
-            target_tenant_id = None
-            if is_cross_workspace:
-                target_ws = self.db.get(Workspace, target_workspace_id)
-                if not target_ws:
-                    raise ResourceNotFoundException("工作空间", str(target_workspace_id))
-                target_tenant_id = target_ws.tenant_id
-
             # 如果是 agent 类型，复制 AgentConfig
             if source_app.type == AppType.AGENT:
                 source_config = self.db.query(AgentConfig).filter(
@@ -846,43 +713,16 @@ class AppService:
                 ).first()
 
                 if source_config:
-                    if is_cross_workspace:
-                        # 跨工作空间：model/tools/skills 属于 tenant 级别直接保留，
-                        # knowledge_bases 属于 workspace 级别需过滤，memory_config 需清空
-                        _, kb_ids = self._collect_resource_ids_from_config(
-                            None, source_config.knowledge_retrieval
-                        )
-                        _, available_kb_ids = self._preload_cross_workspace_resources(
-                            target_tenant_id, target_workspace_id, set(), kb_ids
-                        )
-                        new_model_config_id = source_config.default_model_config_id
-                        new_knowledge_retrieval = self._clean_knowledge_retrieval(
-                            source_config.knowledge_retrieval, available_kb_ids
-                        )
-                        new_tools = copy.deepcopy(source_config.tools) if source_config.tools else []
-                        new_memory = self._clean_memory_cross_workspace(
-                            source_config.memory, target_workspace_id
-                        )
-                        new_skills = copy.deepcopy(source_config.skills) if source_config.skills else {}
-                    else:
-                        new_model_config_id = source_config.default_model_config_id
-                        new_knowledge_retrieval = copy.deepcopy(source_config.knowledge_retrieval) if source_config.knowledge_retrieval else None
-                        new_tools = copy.deepcopy(source_config.tools) if source_config.tools else []
-                        new_memory = copy.deepcopy(source_config.memory) if source_config.memory else None
-                        new_skills = copy.deepcopy(source_config.skills) if source_config.skills else {}
-
                     new_config = AgentConfig(
                         id=uuid.uuid4(),
                         app_id=new_app.id,
                         system_prompt=source_config.system_prompt,
-                        default_model_config_id=new_model_config_id,
-                        model_parameters=copy.deepcopy(source_config.model_parameters) if source_config.model_parameters else None,
-                        knowledge_retrieval=new_knowledge_retrieval,
-                        memory=new_memory,
-                        variables=copy.deepcopy(source_config.variables) if source_config.variables else [],
-                        tools=new_tools,
-                        skills=new_skills,
-                        features=copy.deepcopy(source_config.features) if source_config.features else {},
+                        default_model_config_id=source_config.default_model_config_id,
+                        model_parameters=source_config.model_parameters.copy() if source_config.model_parameters else None,
+                        knowledge_retrieval=source_config.knowledge_retrieval.copy() if source_config.knowledge_retrieval else None,
+                        memory=source_config.memory.copy() if source_config.memory else None,
+                        variables=source_config.variables.copy() if source_config.variables else [],
+                        tools=source_config.tools.copy() if source_config.tools else [],
                         is_active=True,
                         created_at=now,
                         updated_at=now,
@@ -898,12 +738,11 @@ class AppService:
                     new_config = WorkflowConfig(
                         id=uuid.uuid4(),
                         app_id=new_app.id,
-                        nodes=copy.deepcopy(source_config.nodes) if source_config.nodes else [],
-                        edges=copy.deepcopy(source_config.edges) if source_config.edges else [],
-                        variables=copy.deepcopy(source_config.variables) if source_config.variables else [],
-                        execution_config=copy.deepcopy(source_config.execution_config) if source_config.execution_config else {},
-                        features=copy.deepcopy(source_config.features) if source_config.features else {},
-                        triggers=copy.deepcopy(source_config.triggers) if source_config.triggers else [],
+                        nodes=source_config.nodes.copy() if source_config.nodes else [],
+                        edges=source_config.edges.copy() if source_config.edges else [],
+                        variables=source_config.variables.copy() if source_config.variables else [],
+                        execution_config=source_config.execution_config.copy() if source_config.execution_config else {},
+                        triggers=source_config.triggers.copy() if source_config.triggers else [],
                         is_active=True,
                         created_at=now,
                         updated_at=now,
@@ -916,19 +755,17 @@ class AppService:
                 ).first()
 
                 if source_config:
-                    # multi_agent 的 model_config_id/sub_agents/routing_rules 均属于 tenant 级别直接保留
-                    # 跨空间时 master_agent_id（AppRelease）属于源空间，需清空
                     new_config = MultiAgentConfig(
                         id=uuid.uuid4(),
                         app_id=new_app.id,
-                        master_agent_id=source_config.master_agent_id if not is_cross_workspace else None,
+                        master_agent_id=source_config.master_agent_id,
                         master_agent_name=source_config.master_agent_name,
                         default_model_config_id=source_config.default_model_config_id,
-                        model_parameters=copy.deepcopy(source_config.model_parameters) if source_config.model_parameters else None,
+                        model_parameters=source_config.model_parameters,
                         orchestration_mode=source_config.orchestration_mode,
-                        sub_agents=copy.deepcopy(source_config.sub_agents) if source_config.sub_agents else [],
-                        routing_rules=copy.deepcopy(source_config.routing_rules) if source_config.routing_rules else None,
-                        execution_config=copy.deepcopy(source_config.execution_config) if source_config.execution_config else {},
+                        sub_agents=source_config.sub_agents.copy() if source_config.sub_agents else [],
+                        routing_rules=source_config.routing_rules.copy() if source_config.routing_rules else None,
+                        execution_config=source_config.execution_config.copy() if source_config.execution_config else {},
                         aggregation_strategy=source_config.aggregation_strategy,
                         is_active=True,
                         created_at=now,
@@ -958,148 +795,6 @@ class AppService:
             )
             raise BusinessException(f"应用复制失败: {str(e)}", BizCode.INTERNAL_ERROR, cause=e)
 
-    def _preload_cross_workspace_resources(
-            self,
-            target_tenant_id: Optional[uuid.UUID],
-            target_workspace_id: uuid.UUID,
-            model_config_ids: set,
-            kb_ids: set
-    ) -> tuple:
-        """Batch-load model configs and knowledge bases to avoid N+1 queries.
-
-        Returns:
-            (available_model_ids, available_kb_ids): sets of IDs available in target workspace
-        """
-        from app.models.models_model import ModelConfig as MC
-        from app.models.knowledge_model import Knowledge
-        from app.models.knowledgeshare_model import KnowledgeShare
-
-        # Batch check model configs by tenant
-        available_model_ids: set = set()
-        if model_config_ids and target_tenant_id:
-            stmt = select(MC.id).where(
-                MC.id.in_(model_config_ids),
-                MC.tenant_id == target_tenant_id
-            )
-            available_model_ids = set(self.db.scalars(stmt).all())
-
-        # Batch check knowledge bases
-        available_kb_ids: set = set()
-        if kb_ids:
-            kb_uuids = set()
-            for kid in kb_ids:
-                try:
-                    kb_uuids.add(uuid.UUID(str(kid)))
-                except (ValueError, AttributeError):
-                    pass
-
-            if kb_uuids:
-                # KBs in target workspace
-                stmt = select(Knowledge.id).where(
-                    Knowledge.id.in_(kb_uuids),
-                    Knowledge.workspace_id == target_workspace_id
-                )
-                available_kb_ids.update(self.db.scalars(stmt).all())
-
-                # KBs shared to target workspace
-                remaining = kb_uuids - available_kb_ids
-                if remaining:
-                    stmt = select(KnowledgeShare.source_kb_id).where(
-                        KnowledgeShare.source_kb_id.in_(remaining),
-                        KnowledgeShare.target_workspace_id == target_workspace_id
-                    )
-                    available_kb_ids.update(self.db.scalars(stmt).all())
-
-        return available_model_ids, available_kb_ids
-
-    @staticmethod
-    def _collect_resource_ids_from_config(
-            model_config_id: Optional[uuid.UUID],
-            knowledge_retrieval: Optional[dict]
-    ) -> tuple:
-        """Extract all model config IDs and knowledge base IDs from an app config."""
-        model_ids: set = set()
-        kb_ids: set = set()
-
-        if model_config_id:
-            model_ids.add(model_config_id)
-
-        if knowledge_retrieval and isinstance(knowledge_retrieval, dict):
-            if "knowledge_bases" in knowledge_retrieval:
-                for kid in knowledge_retrieval.get("knowledge_bases", []):
-                    kb_ids.add(str(kid.get("kb_id")))
-
-        return model_ids, kb_ids
-
-    @staticmethod
-    def _is_kb_available(kb_id: Optional[str], available_kb_ids: set) -> Optional[str]:
-        if not kb_id:
-            return None
-        try:
-            return kb_id if uuid.UUID(str(kb_id)) in available_kb_ids else None
-        except (ValueError, AttributeError):
-            return None
-
-    def _clean_knowledge_retrieval(
-            self,
-            knowledge_retrieval: Optional[dict],
-            available_kb_ids: set
-    ) -> Optional[dict]:
-        """Clean knowledge retrieval config, keeping only available KBs."""
-        if not knowledge_retrieval:
-            return None
-
-        cleaned = copy.deepcopy(knowledge_retrieval)
-
-        if "knowledge_bases" in cleaned and isinstance(cleaned["knowledge_bases"], list):
-            cleaned["knowledge_bases"] = [
-                kb for kb in cleaned["knowledge_bases"]
-                if self._is_kb_available(kb.get("kb_id"), available_kb_ids)
-            ]
-
-        return cleaned
-
-    def _clean_memory_cross_workspace(
-            self,
-            memory: Optional[dict],
-            target_workspace_id: uuid.UUID
-    ) -> Optional[dict]:
-        """Clear memory_config_id/memory_content if it doesn't belong to target workspace."""
-        if not memory:
-            return None
-
-        from app.models.memory_config_model import MemoryConfig
-
-        cleaned = copy.deepcopy(memory)
-        # 兼容旧字段 memory_content 和新字段 memory_config_id
-        mid = cleaned.get("memory_config_id") or cleaned.get("memory_content")
-        if mid:
-            try:
-                mid_uuid = uuid.UUID(str(mid))
-            except (ValueError, AttributeError):
-                exists = self.db.query(MemoryConfig).filter(
-                    MemoryConfig.config_id_old == int(mid),
-                    MemoryConfig.workspace_id == target_workspace_id
-                ).first()
-                if not exists:
-                    cleaned["memory_config_id"] = None
-                    cleaned.pop("memory_content", None)
-                    cleaned["enabled"] = False
-                return cleaned
-
-            exists = self.db.query(
-                self.db.query(MemoryConfig).filter(
-                    MemoryConfig.config_id == mid_uuid,
-                    MemoryConfig.workspace_id == target_workspace_id
-                ).exists()
-            ).scalar()
-            if not exists:
-                cleaned["memory_config_id"] = None
-                cleaned.pop("memory_content", None)
-                cleaned["enabled"] = False
-
-        return cleaned
-
     def list_apps(
             self,
             *,
@@ -1109,7 +804,6 @@ class AppService:
             status: Optional[str] = None,
             search: Optional[str] = None,
             include_shared: bool = True,
-            shared_only: bool = False,
             page: int = 1,
             pagesize: int = 10,
     ) -> Tuple[List[App], int]:
@@ -1155,24 +849,18 @@ class AppService:
         if search:
             filters.append(func.lower(App.name).like(f"%{search.lower()}%"))
 
-        # shared_only implies include_shared; enforce to avoid confusing API usage
-        if shared_only:
-            include_shared = True
-
         # 基础查询：本工作空间的应用
-        if shared_only:
-            # 只返回共享给本工作空间的应用，不含自有应用
-            shared_app_ids_stmt = (
-                select(AppShare.source_app_id)
-                .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
-            )
-            stmt = select(App).where(App.id.in_(shared_app_ids_stmt))
-        elif include_shared:
+        if include_shared:
             # 查询本工作空间的应用 + 分享给本工作空间的应用
+            # 使用 OR 条件：workspace_id = current OR app_id IN (shared apps)
+
+            # 获取分享给本工作空间的应用ID列表
             shared_app_ids_stmt = (
                 select(AppShare.source_app_id)
-                .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
+                .where(AppShare.target_workspace_id == workspace_id)
             )
+
+            # 构建主查询：本工作空间的应用 OR 分享的应用
             stmt = select(App).where(
                 or_(
                     App.workspace_id == workspace_id,
@@ -1264,7 +952,7 @@ class AppService:
         if app.type != "agent":
             raise BusinessException("只有 Agent 类型应用支持 Agent 配置", BizCode.APP_TYPE_NOT_SUPPORTED)
 
-        self._validate_app_writable(app, workspace_id)
+        self._validate_workspace_access(app, workspace_id)
 
         stmt = select(AgentConfig).where(AgentConfig.app_id == app_id, AgentConfig.is_active.is_(True)).order_by(
             AgentConfig.updated_at.desc())
@@ -1301,7 +989,6 @@ class AppService:
         # if data.tools is not None:
         agent_cfg.tools = storage_data.get("tools", [])
         agent_cfg.skills = storage_data.get("skills", {})
-        agent_cfg.features = storage_data.get("features", {})
 
         agent_cfg.updated_at = now
 
@@ -1310,50 +997,6 @@ class AppService:
 
         logger.info("Agent 配置更新成功", extra={"app_id": str(app_id)})
         return agent_cfg
-
-    def _agent_config_from_release(self, release: "AppRelease") -> "AgentConfig":
-        """从发布版本快照重建 AgentConfig 对象（不入库，仅用于运行）"""
-        cfg = release.config or {}
-        now = release.created_at or datetime.datetime.now()
-        agent_cfg = AgentConfig(
-            id=uuid.uuid4(),
-            app_id=release.app_id,
-            system_prompt=cfg.get("system_prompt", ""),
-            default_model_config_id=release.default_model_config_id,
-            model_parameters=cfg.get("model_parameters"),
-            knowledge_retrieval=cfg.get("knowledge_retrieval"),
-            memory=cfg.get("memory", {}),
-            variables=cfg.get("variables", []),
-            tools=cfg.get("tools", []),
-            skills=cfg.get("skills", {}),
-            features=cfg.get("features", {}),
-            is_active=True,
-            created_at=now,
-            updated_at=now,
-        )
-        return agent_cfg
-
-    def _workflow_config_from_release(self, release: "AppRelease") -> "WorkflowConfig":
-        """从发布版本快照重建 WorkflowConfig 对象（不入库，仅用于运行）"""
-        cfg = release.config or {}
-        now = release.created_at or datetime.datetime.now()
-        from app.models.workflow_model import WorkflowConfig as WorkflowConfigModel
-        # 查出源应用真实的 WorkflowConfig id，供 workflow_executions 外键使用
-        real_config = WorkflowConfigRepository(self.db).get_by_app_id(release.app_id)
-        real_id = real_config.id if real_config else uuid.uuid4()
-        wf_cfg = WorkflowConfigModel(
-            id=real_id,
-            app_id=release.app_id,
-            nodes=cfg.get("nodes", []),
-            edges=cfg.get("edges", []),
-            variables=cfg.get("variables", []),
-            execution_config=cfg.get("execution_config", {}),
-            triggers=cfg.get("triggers", []),
-            is_active=True,
-            created_at=now,
-            updated_at=now,
-        )
-        return wf_cfg
 
     def get_agent_config(
             self,
@@ -1385,15 +1028,6 @@ class AppService:
 
         # 只读操作，允许访问共享应用
         self._validate_app_accessible(app, workspace_id)
-
-        # 共享应用：返回最新发布版本的配置快照，而非草稿
-        if workspace_id and app.workspace_id != workspace_id:
-            if not app.current_release_id:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.AGENT_CONFIG_MISSING)
-            release = self.db.get(AppRelease, app.current_release_id)
-            if not release:
-                raise BusinessException("发布版本不存在", BizCode.AGENT_CONFIG_MISSING)
-            return self._agent_config_from_release(release)
 
         stmt = select(AgentConfig).where(
             AgentConfig.app_id == app_id,
@@ -1455,7 +1089,6 @@ class AppService:
             variables=[],
             tools=[],
             skills=[],
-            features={},
             is_active=True,
             created_at=now,
             updated_at=now,
@@ -1493,16 +1126,6 @@ class AppService:
 
         # 只读操作，允许访问共享应用
         self._validate_app_accessible(app, workspace_id)
-
-        # 共享应用：返回最新发布版本的配置快照，而非草稿
-        if workspace_id and app.workspace_id != workspace_id:
-            if not app.current_release_id:
-                raise BusinessException("该应用尚未发布，无法使用", BizCode.CONFIG_MISSING)
-            release = self.db.get(AppRelease, app.current_release_id)
-            if not release:
-                raise BusinessException("发布版本不存在", BizCode.CONFIG_MISSING)
-            return self._workflow_config_from_release(release)
-
         repo = WorkflowConfigRepository(self.db)
         config = repo.get_by_app_id(app_id)
         if config:
@@ -1540,7 +1163,7 @@ class AppService:
         if app.type != AppType.WORKFLOW:
             raise BusinessException("只有 Workflow 类型应用支持 Workflow 配置", BizCode.APP_TYPE_NOT_SUPPORTED)
 
-        self._validate_app_writable(app, workspace_id)
+        self._validate_workspace_access(app, workspace_id)
 
         # 获取现有配置
         repo = WorkflowConfigRepository(self.db)
@@ -1557,7 +1180,6 @@ class AppService:
                 variables=[var.model_dump() for var in data.variables] if data.variables else [],
                 execution_config=data.execution_config.model_dump() if data.execution_config else {},
                 triggers=[trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
-                features=data.features or {},
                 is_active=True,
                 created_at=now,
                 updated_at=now
@@ -1571,7 +1193,6 @@ class AppService:
             workflow_cfg.variables = [var.model_dump() for var in data.variables] if data.variables else []
             workflow_cfg.execution_config = data.execution_config.model_dump() if data.execution_config else {}
             workflow_cfg.triggers = [trigger.model_dump() for trigger in data.triggers] if data.triggers else []
-            workflow_cfg.features = data.features or {}
             workflow_cfg.updated_at = now
 
         self.db.commit()
@@ -1684,15 +1305,15 @@ class AppService:
 
         return config.config_id
 
-    def _update_endusers_memory_config_by_workspace(
+    def _update_endusers_memory_config(
             self,
-            workspace_id: uuid.UUID,
+            app_id: uuid.UUID,
             memory_config_id: uuid.UUID
     ) -> int:
         """批量更新应用下所有终端用户的 memory_config_id
         
         Args:
-            workspace_id: 工作空间ID
+            app_id: 应用ID
             memory_config_id: 新的记忆配置ID
             
         Returns:
@@ -1701,8 +1322,8 @@ class AppService:
         from app.repositories.end_user_repository import EndUserRepository
 
         repo = EndUserRepository(self.db)
-        updated_count = repo.batch_update_memory_config_id_by_workspace(
-            workspace_id=workspace_id,
+        updated_count = repo.batch_update_memory_config_id(
+            app_id=app_id,
             memory_config_id=memory_config_id
         )
 
@@ -1768,7 +1389,6 @@ class AppService:
                 "variables": agent_cfg.variables or [],
                 "tools": agent_cfg.tools or [],
                 "skills": agent_cfg.skills or {},
-                "features": agent_cfg.features or {}
             }
             # config = AgentConfigConverter.from_storage_format(agent_cfg)
             default_model_config_id = agent_cfg.default_model_config_id
@@ -1825,8 +1445,7 @@ class AppService:
                 "edges": workflow_cfg.edges,
                 "variables": workflow_cfg.variables,
                 "execution_config": workflow_cfg.execution_config,
-                "triggers": workflow_cfg.triggers,
-                "features": workflow_cfg.features or {}
+                "triggers": workflow_cfg.triggers
             }
 
             is_valid, errors = WorkflowValidator.validate_for_publish(config)
@@ -1875,15 +1494,11 @@ class AppService:
                 )
 
         if memory_config_id:
-            app = self.db.query(App).filter(App.id == app_id).first()
-            if app:
-                updated_count = self._update_endusers_memory_config_by_workspace(
-                    app.workspace_id, memory_config_id
-                )
-                logger.info(
-                    f"发布时更新终端用户记忆配置: app_id={app_id}, workspace_id={app.workspace_id}, "
-                    f"memory_config_id={memory_config_id}, updated_count={updated_count}"
-                )
+            updated_count = self._update_endusers_memory_config(app_id, memory_config_id)
+            logger.info(
+                f"发布时更新终端用户记忆配置: app_id={app_id}, "
+                f"memory_config_id={memory_config_id}, updated_count={updated_count}"
+            )
 
         # 更新当前发布版本指针
         app.current_release_id = release.id
@@ -2013,8 +1628,7 @@ class AppService:
                 )
 
         if memory_config_id:
-
-            updated_count = self._update_endusers_memory_config_by_workspace(app.workspace_id, memory_config_id)
+            updated_count = self._update_endusers_memory_config(app_id, memory_config_id)
             logger.info(
                 f"回滚时更新终端用户记忆配置: app_id={app_id}, version={version}, "
                 f"memory_config_id={memory_config_id}, updated_count={updated_count}"
@@ -2040,8 +1654,7 @@ class AppService:
             app_id: uuid.UUID,
             target_workspace_ids: List[uuid.UUID],
             user_id: uuid.UUID,
-            workspace_id: Optional[uuid.UUID] = None,
-            permission: str = "readonly"
+            workspace_id: Optional[uuid.UUID] = None
     ) -> list[AppShare]:
         """分享应用到其他工作空间
 
@@ -2072,14 +1685,6 @@ class AppService:
         app = self._get_app_or_404(app_id)
         self._validate_workspace_access(app, workspace_id)
 
-        # 仅允许 agent 和 workflow 类型共享，multi_agent 不支持
-        from app.models.app_model import AppType
-        if app.type == AppType.MULTI_AGENT:
-            raise BusinessException(
-                "集群 Agent 不支持共享应用功能",
-                BizCode.INVALID_PARAMETER
-            )
-
         # 2. 验证目标工作空间
         for target_ws_id in target_workspace_ids:
             target_ws = self.db.get(Workspace, target_ws_id)
@@ -2101,8 +1706,7 @@ class AppService:
             # 检查是否已经分享过
             stmt = select(AppShare).where(
                 AppShare.source_app_id == app_id,
-                AppShare.target_workspace_id == target_ws_id,
-                AppShare.is_active.is_(True)
+                AppShare.target_workspace_id == target_ws_id
             )
             existing_share = self.db.scalars(stmt).first()
 
@@ -2121,7 +1725,6 @@ class AppService:
                 source_workspace_id=app.workspace_id,
                 target_workspace_id=target_ws_id,
                 shared_by=user_id,
-                permission=permission,
                 created_at=now,
                 updated_at=now
             )
@@ -2181,8 +1784,7 @@ class AppService:
         # 2. 查找分享记录
         stmt = select(AppShare).where(
             AppShare.source_app_id == app_id,
-            AppShare.target_workspace_id == target_workspace_id,
-            AppShare.is_active.is_(True)
+            AppShare.target_workspace_id == target_workspace_id
         )
         share = self.db.scalars(stmt).first()
 
@@ -2196,56 +1798,14 @@ class AppService:
                 f"app_id={app_id}, target_workspace_id={target_workspace_id}"
             )
 
-        # 3. 逻辑删除分享记录
-        share.is_active = False
+        # 3. 删除分享记录
+        self.db.delete(share)
         self.db.commit()
 
         logger.info(
             "应用分享已取消",
             extra={"app_id": str(app_id), "target_workspace_id": str(target_workspace_id)}
         )
-
-    def unshare_all_apps_to_workspace(
-            self,
-            *,
-            target_workspace_id: uuid.UUID,
-            workspace_id: uuid.UUID
-    ) -> int:
-        """Cancel all app shares from current workspace to a target workspace.
-
-        Args:
-            target_workspace_id: Target workspace ID to cancel all shares to
-            workspace_id: Current workspace ID (source)
-
-        Returns:
-            Number of share records deleted
-        """
-        from app.models import AppShare
-
-        logger.info(
-            "取消对目标工作空间的所有应用分享",
-            extra={"target_workspace_id": str(target_workspace_id), "workspace_id": str(workspace_id)}
-        )
-
-        # Query active records first for reliable count
-        id_stmt = select(AppShare.id).where(
-            AppShare.source_workspace_id == workspace_id,
-            AppShare.target_workspace_id == target_workspace_id,
-            AppShare.is_active.is_(True)
-        )
-        ids = list(self.db.scalars(id_stmt).all())
-        count = len(ids)
-
-        if ids:
-            # Soft delete: mark as inactive
-            from sqlalchemy import update as sa_update
-            self.db.execute(
-                sa_update(AppShare).where(AppShare.id.in_(ids)).values(is_active=False)
-            )
-            self.db.commit()
-
-        logger.info("已取消分享记录数", extra={"count": count})
-        return count
 
     def list_app_shares(
             self,
@@ -2276,8 +1836,7 @@ class AppService:
 
         # 查询分享记录
         stmt = select(AppShare).where(
-            AppShare.source_app_id == app_id,
-            AppShare.is_active.is_(True)
+            AppShare.source_app_id == app_id
         ).order_by(AppShare.created_at.desc())
 
         shares = list(self.db.scalars(stmt).all())
@@ -2288,166 +1847,6 @@ class AppService:
         )
 
         return shares
-
-    def remove_shared_app(
-            self,
-            *,
-            app_id: uuid.UUID,
-            workspace_id: uuid.UUID
-    ) -> None:
-        """被共享者从自己的工作空间移除共享应用
-
-        只删除共享记录，不影响源应用。
-
-        Args:
-            app_id: 应用ID
-            workspace_id: 当前工作空间ID（被共享的目标工作空间）
-
-        Raises:
-            ResourceNotFoundException: 当共享记录不存在时
-        """
-        from app.models import AppShare
-
-        logger.info(
-            "移除共享应用",
-            extra={"app_id": str(app_id), "workspace_id": str(workspace_id)}
-        )
-
-        stmt = select(AppShare).where(
-            AppShare.source_app_id == app_id,
-            AppShare.target_workspace_id == workspace_id,
-            AppShare.is_active.is_(True)
-        )
-        share = self.db.scalars(stmt).first()
-
-        if not share:
-            raise ResourceNotFoundException(
-                "共享记录",
-                f"app_id={app_id}, workspace_id={workspace_id}"
-            )
-
-        # Soft delete
-        share.is_active = False
-        self.db.commit()
-
-        logger.info(
-            "共享应用已移除",
-            extra={"app_id": str(app_id), "workspace_id": str(workspace_id)}
-        )
-
-    def remove_all_shared_apps_from_workspace(
-            self,
-            *,
-            source_workspace_id: uuid.UUID,
-            workspace_id: uuid.UUID
-    ) -> int:
-        """Remove all shared apps from a specific source workspace.
-
-        Args:
-            source_workspace_id: The workspace that shared the apps
-            workspace_id: Current workspace ID (recipient)
-
-        Returns:
-            Number of share records deleted
-        """
-        from app.models import AppShare
-
-        logger.info(
-            "批量移除来源工作空间的共享应用",
-            extra={"source_workspace_id": str(source_workspace_id), "workspace_id": str(workspace_id)}
-        )
-
-        # Query active records for reliable count, then soft delete
-        id_stmt = select(AppShare.id).where(
-            AppShare.source_workspace_id == source_workspace_id,
-            AppShare.target_workspace_id == workspace_id,
-            AppShare.is_active.is_(True)
-        )
-        ids = list(self.db.scalars(id_stmt).all())
-        count = len(ids)
-
-        if ids:
-            from sqlalchemy import update as sa_update
-            self.db.execute(
-                sa_update(AppShare).where(AppShare.id.in_(ids)).values(is_active=False)
-            )
-            self.db.commit()
-
-        logger.info("已移除共享记录数", extra={"count": count})
-        return count
-
-    def list_my_shared_out(
-            self,
-            *,
-            workspace_id: uuid.UUID
-    ) -> List[AppShare]:
-        """列出本工作空间主动分享出去的所有记录（我的共享）
-
-        Returns:
-            List[AppShare]: 分享记录列表，含源应用信息
-        """
-        from app.models import AppShare
-
-        stmt = (
-            select(AppShare)
-            .where(
-                AppShare.source_workspace_id == workspace_id,
-                AppShare.is_active.is_(True)
-            )
-            .order_by(AppShare.created_at.desc())
-        )
-        return list(self.db.scalars(stmt).all())
-    def update_share_permission(
-            self,
-            *,
-            app_id: uuid.UUID,
-            target_workspace_id: uuid.UUID,
-            permission: str,
-            workspace_id: Optional[uuid.UUID] = None
-    ) -> "AppShare":
-        """更新共享权限（readonly <-> editable）
-
-        Args:
-            app_id: 应用ID
-            target_workspace_id: 目标工作空间ID
-            permission: 新权限值 readonly | editable
-            workspace_id: 当前工作空间ID（用于权限验证）
-
-        Returns:
-            AppShare: 更新后的共享记录
-        """
-        from app.models import AppShare
-
-        if permission not in ("readonly", "editable"):
-            raise BusinessException("权限值无效，只允许 readonly 或 editable", BizCode.INVALID_PARAMETER)
-
-        app = self._get_app_or_404(app_id)
-        self._validate_workspace_access(app, workspace_id)
-
-        stmt = select(AppShare).where(
-            AppShare.source_app_id == app_id,
-            AppShare.target_workspace_id == target_workspace_id,
-            AppShare.is_active.is_(True)
-        )
-        share = self.db.scalars(stmt).first()
-
-        if not share:
-            raise ResourceNotFoundException(
-                "共享记录",
-                f"app_id={app_id}, target_workspace_id={target_workspace_id}"
-            )
-
-        share.permission = permission
-        share.updated_at = datetime.datetime.now()
-        self.db.commit()
-        self.db.refresh(share)
-
-        logger.info(
-            "共享权限已更新",
-            extra={"app_id": str(app_id), "target_workspace_id": str(target_workspace_id), "permission": permission}
-        )
-        return share
-
 
 # ==================== 向后兼容的函数接口 ====================
 # 保留函数接口以兼容现有代码，但内部使用服务类
@@ -2543,7 +1942,6 @@ def list_apps(
         status: Optional[str] = None,
         search: Optional[str] = None,
         include_shared: bool = True,
-        shared_only: bool = False,
         page: int = 1,
         pagesize: int = 10,
 ) -> Tuple[List[App], int]:
@@ -2556,7 +1954,6 @@ def list_apps(
         status=status,
         search=search,
         include_shared=include_shared,
-        shared_only=shared_only,
         page=page,
         pagesize=pagesize,
     )

@@ -25,7 +25,7 @@ from app.repositories.workflow_repository import (
     WorkflowExecutionRepository,
     WorkflowNodeExecutionRepository
 )
-from app.schemas import DraftRunRequest, FileInput
+from app.schemas import DraftRunRequest, FileInput, FileType
 from app.services.conversation_service import ConversationService
 from app.services.multi_agent_service import convert_uuids_to_str
 from app.services.multimodal_service import MultimodalService
@@ -55,7 +55,6 @@ class WorkflowService:
             edges: list[dict[str, Any]],
             variables: list[dict[str, Any]] | None = None,
             execution_config: dict[str, Any] | None = None,
-            features: dict[str, Any] | None = None,
             triggers: list[dict[str, Any]] | None = None,
             validate: bool = True
     ) -> WorkflowConfig:
@@ -67,7 +66,6 @@ class WorkflowService:
             edges: 边列表
             variables: 变量列表
             execution_config: 执行配置
-            features: 功能特性
             triggers: 触发器列表
             validate: 是否验证配置
 
@@ -83,7 +81,6 @@ class WorkflowService:
             "edges": edges,
             "variables": variables or [],
             "execution_config": execution_config or {},
-            "features": features or {},
             "triggers": triggers or []
         }
 
@@ -104,7 +101,6 @@ class WorkflowService:
             edges=edges,
             variables=variables,
             execution_config=execution_config,
-            features=features,
             triggers=triggers
         )
 
@@ -574,9 +570,6 @@ class WorkflowService:
                 message=f"工作流配置不存在: app_id={app_id}"
             )
 
-        feature_configs = config.features or {}
-        self._validate_file_upload(feature_configs, payload.files)
-
         input_data = {
             "message": payload.message, "variables": payload.variables,
             "conversation_id": payload.conversation_id,
@@ -640,33 +633,30 @@ class WorkflowService:
                 final_messages = result.get("messages", [])[init_message_length:]
                 human_message = ""
                 assistant_message = ""
-                human_meta = {
-                    "files": []
-                }
                 for message in final_messages:
                     if message["role"] == "user":
                         if isinstance(message["content"], str):
                             human_message += message["content"]
                         elif isinstance(message["content"], list):
                             for file in message["content"]:
-                                human_meta["files"].append({
-                                    "type": file.get("type"),
-                                    "url": file.get("url")
-                                })
+                                if file.get("type") == FileType.IMAGE:
+                                    human_message += f"![image]({file.get('url', '')})"
+                                else:
+                                    human_message += f"[{file.get('type')}]({file.get('url', '')})"
                     if message["role"] == "assistant":
                         assistant_message = message["content"]
                 self.conversation_service.add_message(
                     conversation_id=conversation_id_uuid,
                     role="user",
                     content=human_message,
-                    meta_data=human_meta
+                    meta_data=None
                 )
                 self.conversation_service.add_message(
                     message_id=message_id,
                     conversation_id=conversation_id_uuid,
                     role="assistant",
                     content=assistant_message,
-                    meta_data={"usage": token_usage, "audio_url": None}
+                    meta_data={"usage": token_usage}
                 )
                 self.update_execution_status(
                     execution.execution_id,
@@ -747,8 +737,6 @@ class WorkflowService:
                 code=BizCode.CONFIG_MISSING,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
-        feature_configs = config.features or {}
-        self._validate_file_upload(feature_configs, payload.files)
 
         input_data = {
             "message": payload.message, "variables": payload.variables,
@@ -809,33 +797,30 @@ class WorkflowService:
                         final_messages = event.get("data", {}).get("messages", [])[init_message_length:]
                         human_message = ""
                         assistant_message = ""
-                        human_meta = {
-                            "files": []
-                        }
                         for message in final_messages:
                             if message["role"] == "user":
                                 if isinstance(message["content"], str):
                                     human_message += message["content"]
                                 elif isinstance(message["content"], list):
                                     for file in message["content"]:
-                                        human_meta["files"].append({
-                                            "type": file.get("type"),
-                                            "url": file.get("url")
-                                        })
+                                        if file.get("type") == FileType.IMAGE:
+                                            human_message += f"![image]({file.get('url', '')})"
+                                        else:
+                                            human_message += f"[{file.get('type')}]({file.get('url', '')})"
                             if message["role"] == "assistant":
                                 assistant_message = message["content"]
                         self.conversation_service.add_message(
                             conversation_id=conversation_id_uuid,
                             role="user",
                             content=human_message,
-                            meta_data=human_meta
+                            meta_data=None
                         )
                         self.conversation_service.add_message(
                             message_id=message_id,
                             conversation_id=conversation_id_uuid,
                             role="assistant",
                             content=assistant_message,
-                            meta_data={"usage": token_usage, "audio_url": None}
+                            meta_data={"usage": token_usage}
                         )
                         self.update_execution_status(
                             execution.execution_id,
@@ -860,10 +845,7 @@ class WorkflowService:
                     yield event
 
         except Exception as e:
-            logger.error(
-                f"Workflow streaming execution failed: execution_id={execution.execution_id}, error={e}",
-                exc_info=True
-            )
+            logger.error(f"工作流流式执行失败: execution_id={execution.execution_id}, error={e}", exc_info=True)
             self.update_execution_status(
                 execution.execution_id,
                 "failed",
@@ -885,80 +867,6 @@ class WorkflowService:
             if node.get("type") == NodeType.START:
                 return node.get("config", {}).get("variables", [])
         raise BusinessException("workflow config error - start node not found")
-
-    @staticmethod
-    def is_memory_enable(config: dict) -> bool:
-        nodes = config.get("nodes", [])
-        for node in nodes:
-            if node.get("type") in [NodeType.MEMORY_READ, NodeType.MEMORY_WRITE]:
-                return True
-        return False
-
-    @staticmethod
-    def _validate_file_upload(
-            features_config: dict[str, Any],
-            files: Optional[list[FileInput]]
-    ) -> None:
-        """校验上传文件是否符合 file_upload 配置"""
-        if not files:
-            return
-        fu = features_config.get("file_upload")
-        if fu is None:
-            return
-        if not (isinstance(fu, dict) and fu.get("enabled")):
-            raise BusinessException(
-                "The application does not have file upload functionality enabled",
-                BizCode.BAD_REQUEST
-            )
-        max_count = fu.get("max_file_count", 5)
-        if len(files) > max_count:
-            raise BusinessException(
-                f"File count exceeds limit (maximum {max_count} files)",
-                BizCode.BAD_REQUEST
-            )
-
-        # 校验传输方式
-        allowed_methods = fu.get("allowed_transfer_methods", ["local_file", "remote_url"])
-        for f in files:
-            if f.transfer_method.value not in allowed_methods:
-                raise BusinessException(
-                    f"Unsupport file transfer method：{f.transfer_method.value},"
-                    f"allowed method:{', '.join(allowed_methods)}",
-                    BizCode.BAD_REQUEST
-                )
-
-        # 各类型对应的开关和大小限制配置键
-        type_cfg = {
-            "image": ("image_enabled", "image_max_size_mb", 20, "image"),
-            "audio": ("audio_enabled", "audio_max_size_mb", 50, "audio"),
-            "document": ("document_enabled", "document_max_size_mb", 100, "document"),
-            "video": ("video_enabled", "video_max_size_mb", 500, "video"),
-        }
-
-        for f in files:
-            ftype = str(f.type)  # 如 "image", "audio", "document", "video"
-            cfg = type_cfg.get(ftype)
-            if cfg is None:
-                continue
-            enabled_key, size_key, default_max_mb, label = cfg
-
-            # 校验类型开关
-            if not fu.get(enabled_key):
-                raise BusinessException(
-                    f"The application has not enabled {label} file upload",
-                    BizCode.BAD_REQUEST
-                )
-
-            # 校验文件大小（仅当内容已加载时）
-            content = f.get_content()
-            if content is not None:
-                max_mb = fu.get(size_key, default_max_mb)
-                size_mb = len(content) / (1024 * 1024)
-                if size_mb > max_mb:
-                    raise BusinessException(
-                        f"{label} File size exceeds the limit (maximum {max_mb} MB, current {size_mb:.1f} MB)",
-                        BizCode.BAD_REQUEST
-                    )
 
 
 # ==================== 依赖注入函数 ====================

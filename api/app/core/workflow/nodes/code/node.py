@@ -128,7 +128,7 @@ class CodeNode(BaseNode):
         else:
             raise ValueError(f"Unsupported language: {self.typed_config.language}")
 
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient() as client:
             response = await client.post(
                 "http://sandbox:8194/v1/sandbox/run",
                 headers={

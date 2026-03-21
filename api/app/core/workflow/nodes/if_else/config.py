@@ -18,7 +18,7 @@ class ConditionDetail(BaseModel):
     )
 
     right: Any = Field(
-        default=None,
+        ...,
         description="Value to compare with"
     )
 

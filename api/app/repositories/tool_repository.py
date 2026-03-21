@@ -27,7 +27,7 @@ class ToolRepository:
         from app.models.app_model import App
         from app.models.workflow_model import WorkflowConfig
         from app.models.workspace_model import Workspace
-
+        
         result = db.query(Workspace.tenant_id).join(
             App, App.workspace_id == Workspace.id
         ).join(
@@ -35,7 +35,7 @@ class ToolRepository:
         ).filter(
             WorkflowConfig.id == workflow_id
         ).first()
-
+        
         return result[0] if result else None
 
     @staticmethod
@@ -67,19 +67,18 @@ class ToolRepository:
 
     @staticmethod
     def find_by_tenant(
-            db: Session,
-            tenant_id: uuid.UUID,
-            name: Optional[str] = None,
-            tool_type: Optional[ToolType] = None,
-            status: Optional[ToolStatus] = None,
-            is_enabled: Optional[bool] = None
+        db: Session,
+        tenant_id: uuid.UUID,
+        name: Optional[str] = None,
+        tool_type: Optional[ToolType] = None,
+        status: Optional[ToolStatus] = None,
+        is_enabled: Optional[bool] = None
     ) -> List[ToolConfig]:
-        """根据租户查找工具（只返回未删除的）"""
+        """根据租户查找工具"""
         query = db.query(ToolConfig).filter(
-            ToolConfig.tenant_id == tenant_id,
-            ToolConfig.is_active.is_(True)
+            ToolConfig.tenant_id == tenant_id
         )
-
+        
         if name:
             query = query.filter(ToolConfig.name.ilike(f"%{name}%"))
         if tool_type:
@@ -92,17 +91,8 @@ class ToolRepository:
         return query.all()
 
     @staticmethod
-    def find_by_id_and_tenant(db: Session, tool_id: uuid.UUID, tenant_id: uuid.UUID) -> Optional[ToolConfig]:
-        """根据ID和租户查找工具（只返回未删除的）"""
-        return db.query(ToolConfig).filter(
-            ToolConfig.id == tool_id,
-            ToolConfig.tenant_id == tenant_id,
-            ToolConfig.is_active.is_(True)
-        ).first()
-
-    @staticmethod
-    def find_by_id_and_tenant_all(db: Session, tool_id: uuid.UUID, tenant_id: uuid.UUID) -> Optional[ToolConfig]:
-        """根据ID和租户查找工具（返回所有工具包括删除的）"""
+    def find_by_id_and_tenant(db:Session, tool_id: uuid.UUID, tenant_id: uuid.UUID) -> Optional[ToolConfig]:
+        """根据ID和租户查找工具"""
         return db.query(ToolConfig).filter(
             ToolConfig.id == tool_id,
             ToolConfig.tenant_id == tenant_id
@@ -110,26 +100,29 @@ class ToolRepository:
 
     @staticmethod
     def count_by_tenant(db: Session, tenant_id: uuid.UUID) -> int:
-        """统计租户工具数量（只统计未删除的）"""
+        """统计租户工具数量"""
         return db.query(ToolConfig).filter(
-            ToolConfig.tenant_id == tenant_id,
-            ToolConfig.is_active.is_(True)
+            ToolConfig.tenant_id == tenant_id
         ).count()
 
     @staticmethod
     def get_status_statistics(db: Session, tenant_id: uuid.UUID) -> List[tuple]:
         """获取状态统计"""
-        return db.query(ToolConfig.status, func.count(ToolConfig.id).label('count')).filter(
-            ToolConfig.tenant_id == tenant_id,
-            ToolConfig.is_active.is_(True)
+        return db.query(
+            ToolConfig.status,
+            func.count(ToolConfig.id).label('count')
+        ).filter(
+            ToolConfig.tenant_id == tenant_id
         ).group_by(ToolConfig.status).all()
 
     @staticmethod
     def get_type_statistics(db: Session, tenant_id: uuid.UUID) -> List[tuple]:
         """获取类型统计"""
-        return db.query(ToolConfig.tool_type, func.count(ToolConfig.id).label('count')).filter(
-            ToolConfig.tenant_id == tenant_id,
-            ToolConfig.is_active.is_(True)
+        return db.query(
+            ToolConfig.tool_type,
+            func.count(ToolConfig.id).label('count')
+        ).filter(
+            ToolConfig.tenant_id == tenant_id
         ).group_by(ToolConfig.tool_type).all()
 
     @staticmethod
@@ -137,7 +130,6 @@ class ToolRepository:
         """统计租户启用的工具数量"""
         return db.query(ToolConfig).filter(
             ToolConfig.tenant_id == tenant_id,
-            ToolConfig.is_active.is_(True),
             ToolConfig.is_enabled == True
         ).count()
 
@@ -146,8 +138,7 @@ class ToolRepository:
         """检查租户是否已有内置工具"""
         return db.query(ToolConfig).filter(
             ToolConfig.tenant_id == tenant_id,
-            ToolConfig.tool_type == ToolType.BUILTIN.value,
-            ToolConfig.is_active.is_(True)
+            ToolConfig.tool_type == ToolType.BUILTIN.value
         ).count() > 0
 
 
@@ -203,10 +194,10 @@ class ToolExecutionRepository:
 
     @staticmethod
     def find_by_tool_and_tenant(
-            db: Session,
-            tool_id: uuid.UUID,
-            tenant_id: uuid.UUID,
-            limit: int = 100
+        db: Session,
+        tool_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        limit: int = 100
     ) -> List[ToolExecution]:
         """根据工具和租户查找执行记录"""
         return db.query(ToolExecution).join(

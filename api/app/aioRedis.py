@@ -1,11 +1,10 @@
+import os
 import asyncio
 import json
 import logging
 from typing import Dict, Any, Optional
-
 import redis.asyncio as redis
 from redis.asyncio import ConnectionPool
-
 from app.core.config import settings
 
 # 设置日志记录器

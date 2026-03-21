@@ -17,7 +17,6 @@ from app.services.user_memory_service import (
     UserMemoryService,
     analytics_memory_types,
     analytics_graph_data,
-    analytics_community_graph_data,
 )
 from app.services.memory_entity_relationship_service import MemoryEntityService,MemoryEmotion,MemoryInteraction
 from app.schemas.response_schema import ApiResponse
@@ -294,42 +293,6 @@ async def get_graph_data_api(
     except Exception as e:
         api_logger.error(f"图数据查询失败: end_user_id={end_user_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "图数据查询失败", str(e))
-
-
-@router.get("/analytics/community_graph", response_model=ApiResponse)
-async def get_community_graph_data_api(
-    end_user_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    workspace_id = current_user.current_workspace_id
-
-    if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试查询社区图谱但未选择工作空间")
-        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
-
-    api_logger.info(
-        f"社区图谱查询请求: end_user_id={end_user_id}, user={current_user.username}, "
-        f"workspace={workspace_id}"
-    )
-
-    try:
-        result = await analytics_community_graph_data(db=db, end_user_id=end_user_id)
-
-        if "message" in result and result["statistics"]["total_nodes"] == 0:
-            api_logger.warning(f"社区图谱查询返回空结果: {result.get('message')}")
-            return success(data=result, msg=result.get("message", "查询成功"))
-
-        api_logger.info(
-            f"成功获取社区图谱: end_user_id={end_user_id}, "
-            f"nodes={result['statistics']['total_nodes']}, "
-            f"edges={result['statistics']['total_edges']}"
-        )
-        return success(data=result, msg="查询成功")
-
-    except Exception as e:
-        api_logger.error(f"社区图谱查询失败: end_user_id={end_user_id}, error={str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "社区图谱查询失败", str(e))
 
 
 @router.get("/read_end_user/profile", response_model=ApiResponse)

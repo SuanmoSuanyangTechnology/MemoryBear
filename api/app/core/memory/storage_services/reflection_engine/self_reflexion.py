@@ -1,11 +1,11 @@
 """
-Self-Reflection Engine Implementation
+自我反思引擎实现
 
-This module implements the self-reflection functionality of the memory system, including:
-1. Time-based reflection - Triggers reflection based on time cycles
-2. Fact-based reflection - Detects and resolves memory conflicts
-3. Comprehensive reflection - Integrates multiple reflection strategies
-4. Reflection result application - Updates memory database
+该模块实现了记忆系统的自我反思功能，包括：
+1. 基于时间的反思 - 根据时间周期触发反思
+2. 基于事实的反思 - 检测记忆冲突并解决
+3. 综合反思 - 整合多种反思策略
+4. 反思结果应用 - 更新记忆库
 """
 
 import asyncio
@@ -38,7 +38,7 @@ from app.schemas.memory_storage_schema import (
 )
 from pydantic import BaseModel
 
-# Configure logging
+# 配置日志
 _root_logger = logging.getLogger()
 if not _root_logger.handlers:
     logging.basicConfig(
@@ -49,62 +49,35 @@ else:
     _root_logger.setLevel(logging.INFO)
 
 class TranslationResponse(BaseModel):
-    """Translation response model for language conversion"""
+    """翻译响应模型"""
     data: str
-    
 class ReflectionRange(str, Enum):
-    """
-    Reflection range enumeration
-    
-    Defines the scope of data to be included in reflection operations.
-    """
-    PARTIAL = "partial"  # Reflect from retrieval results
-    ALL = "all"  # Reflect from entire database
+    """反思范围枚举"""
+    PARTIAL = "partial"  # 从检索结果中反思
+    ALL = "all"  # 从整个数据库中反思
 
 
 class ReflectionBaseline(str, Enum):
-    """
-    Reflection baseline enumeration
-    
-    Defines the strategy or approach used for reflection operations.
-    """
-    TIME = "TIME"  # Time-based reflection
-    FACT = "FACT"  # Fact-based reflection
-    HYBRID = "HYBRID"  # Hybrid reflection combining multiple strategies
+    """反思基线枚举"""
+    TIME = "TIME"  # 基于时间的反思
+    FACT = "FACT"  # 基于事实的反思
+    HYBRID = "HYBRID"  # 混合反思
 
 
 class ReflectionConfig(BaseModel):
-    """
-    Reflection engine configuration
-    
-    Defines all configuration parameters for the reflection engine including
-    operation modes, model settings, and evaluation criteria.
-    
-    Attributes:
-        enabled: Whether reflection engine is enabled
-        iteration_period: Reflection cycle period (e.g., "3" hours)
-        reflexion_range: Scope of reflection (PARTIAL or ALL)
-        baseline: Reflection strategy (TIME, FACT, or HYBRID)
-        model_id: LLM model identifier for reflection operations
-        end_user_id: User identifier for scoped operations
-        output_example: Example output format for guidance
-        memory_verify: Enable memory verification checks
-        quality_assessment: Enable quality assessment evaluation
-        violation_handling_strategy: Strategy for handling violations
-        language_type: Language type for output ("zh" or "en")
-    """
+    """反思引擎配置"""
     enabled: bool = False
-    iteration_period: str = "3"  # Reflection cycle period
+    iteration_period: str = "3"  # 反思周期
     reflexion_range: ReflectionRange = ReflectionRange.PARTIAL
     baseline: ReflectionBaseline = ReflectionBaseline.TIME
-    model_id: Optional[str] = None  # Model ID
+    model_id: Optional[str] = None  # 模型ID
     end_user_id: Optional[str] = None
-    output_example: Optional[str] = None  # Output example
+    output_example: Optional[str] = None  # 输出示例
 
-    # Evaluation related fields
-    memory_verify: bool = True  # Memory verification
-    quality_assessment: bool = True  # Quality assessment
-    violation_handling_strategy: str = "warn"  # Violation handling strategy
+    # 评估相关字段
+    memory_verify: bool = True  # 记忆验证
+    quality_assessment: bool = True  # 质量评估
+    violation_handling_strategy: str = "warn"  # 违规处理策略
     language_type: str = "zh"
 
     class Config:
@@ -112,21 +85,7 @@ class ReflectionConfig(BaseModel):
 
 
 class ReflectionResult(BaseModel):
-    """
-    Reflection operation result
-    
-    Contains comprehensive information about the outcome of a reflection operation
-    including success status, metrics, and execution details.
-    
-    Attributes:
-        success: Whether the reflection operation succeeded
-        message: Descriptive message about the operation result
-        conflicts_found: Number of conflicts detected during reflection
-        conflicts_resolved: Number of conflicts successfully resolved
-        memories_updated: Number of memory entries updated in database
-        execution_time: Total time taken for the reflection operation
-        details: Additional details about the operation (optional)
-    """
+    """反思结果"""
     success: bool
     message: str
     conflicts_found: int = 0
@@ -138,22 +97,9 @@ class ReflectionResult(BaseModel):
 
 class ReflectionEngine:
     """
-    Self-Reflection Engine
-    
-    Responsible for executing memory system self-reflection operations including
-    conflict detection, conflict resolution, and memory updates. Supports multiple
-    reflection strategies and provides comprehensive result tracking.
-    
-    The engine can operate in different modes:
-    - Time-based: Reflects on memories within specific time periods
-    - Fact-based: Detects and resolves factual conflicts in memories
-    - Hybrid: Combines multiple reflection strategies
-    
-    Attributes:
-        config: Reflection engine configuration
-        neo4j_connector: Neo4j database connector
-        llm_client: Language model client for analysis
-        Various function handlers for data processing and prompt rendering
+    自我反思引擎
+
+    负责执行记忆系统的自我反思，包括冲突检测、冲突解决和记忆更新。
     """
 
     def __init__(
@@ -169,21 +115,18 @@ class ReflectionEngine:
             update_query: Optional[str] = None
     ):
         """
-        Initialize reflection engine
-        
-        Sets up the reflection engine with configuration and optional dependencies.
-        Uses lazy initialization to avoid circular imports and optimize startup time.
+        初始化反思引擎
 
         Args:
-            config: Reflection engine configuration object
-            neo4j_connector: Neo4j connector instance (optional, will be created if not provided)
-            llm_client: LLM client instance (optional, will be created if not provided)
-            get_data_func: Function for retrieving data (optional, uses default if not provided)
-            render_evaluate_prompt_func: Function for rendering evaluation prompts (optional)
-            render_reflexion_prompt_func: Function for rendering reflection prompts (optional)
-            conflict_schema: Schema for conflict result validation (optional)
-            reflexion_schema: Schema for reflection result validation (optional)
-            update_query: Query string for database updates (optional)
+            config: 反思引擎配置
+            neo4j_connector: Neo4j 连接器（可选）
+            llm_client: LLM 客户端（可选）
+            get_data_func: 获取数据的函数（可选）
+            render_evaluate_prompt_func: 渲染评估提示词的函数（可选）
+            render_reflexion_prompt_func: 渲染反思提示词的函数（可选）
+            conflict_schema: 冲突结果 Schema（可选）
+            reflexion_schema: 反思结果 Schema（可选）
+            update_query: 更新查询语句（可选）
         """
         self.config = config
         self.neo4j_connector = neo4j_connector
@@ -194,20 +137,14 @@ class ReflectionEngine:
         self.conflict_schema = conflict_schema
         self.reflexion_schema = reflexion_schema
         self.update_query = update_query
-        self._semaphore = asyncio.Semaphore(5)  # Default concurrency limit of 5
+        self._semaphore = asyncio.Semaphore(5)  # 默认并发数为5
 
 
-        # Lazy import to avoid circular dependencies
+        # 延迟导入以避免循环依赖
         self._lazy_init_done = False
 
     def _lazy_init(self):
-        """
-        Lazy initialization to avoid circular imports
-        
-        Initializes dependencies only when needed, preventing circular import issues
-        and optimizing startup performance. Sets up default implementations for
-        any components not provided during construction.
-        """
+        """延迟初始化，避免循环导入"""
         if self._lazy_init_done:
             return
 
@@ -221,7 +158,7 @@ class ReflectionEngine:
                 factory = MemoryClientFactory(db)
                 self.llm_client = factory.get_llm_client(self.config.model_id)
         elif isinstance(self.llm_client, str):
-            # If llm_client is a string (model_id), use it to initialize the client
+            # 如果 llm_client 是字符串（model_id），则用它初始化客户端
             from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
             from app.db import get_db_context
             from app.services.memory_config_service import MemoryConfigService
@@ -235,10 +172,10 @@ class ReflectionEngine:
                 model_config = config_service.get_model_config(model_id)
                 
             extra_params={
-                    "temperature": 0.2,  # Lower temperature for faster response and consistency
-                    "max_tokens": 600,  # Limit maximum token count
-                    "top_p": 0.8,  # Optimize sampling parameters
-                    "stream": False,  # Ensure non-streaming output for fastest response
+                    "temperature": 0.2,  # 降低温度提高响应速度和一致性
+                    "max_tokens": 600,  # 限制最大token数
+                    "top_p": 0.8,  # 优化采样参数
+                    "stream": False,  # 确保非流式输出以获得最快响应
                 }
 
             self.llm_client  = OpenAIClient(RedBearModelConfig(
@@ -254,7 +191,7 @@ class ReflectionEngine:
         if self.get_data_func is None:
             self.get_data_func = get_data
 
-        # Import get_data_statement function
+        # 导入get_data_statement函数
         if not hasattr(self, 'get_data_statement'):
             self.get_data_statement = get_data_statement
 
@@ -286,20 +223,13 @@ class ReflectionEngine:
 
     async def execute_reflection(self, host_id) -> ReflectionResult:
         """
-        Execute complete reflection workflow
-        
-        Performs the full reflection process including data retrieval, conflict detection,
-        conflict resolution, and memory updates. This is the main entry point for
-        reflection operations.
-        
+        执行完整的反思流程
         Args:
-            host_id: Host identifier for scoping reflection operations
-            
+            host_id: 主机ID
         Returns:
-            ReflectionResult: Comprehensive result of the reflection operation including
-                            success status, conflict metrics, and execution time
+            ReflectionResult: 反思结果
         """
-        # Lazy initialization
+        # 延迟初始化
         self._lazy_init()
 
         if not self.config.enabled:
@@ -313,7 +243,7 @@ class ReflectionEngine:
 
         print(self.config.baseline, self.config.memory_verify, self.config.quality_assessment)
         try:
-            # 1. Get reflection data
+            # 1. 获取反思数据
             reflexion_data, statement_databasets = await self._get_reflexion_data(host_id)
             if not reflexion_data:
                 return ReflectionResult(
@@ -322,7 +252,7 @@ class ReflectionEngine:
                     execution_time=asyncio.get_event_loop().time() - start_time
                 )
 
-            # 2. Detect conflicts (fact-based reflection)
+            # 2. 检测冲突（基于事实的反思）
             conflict_data = await self._detect_conflicts(reflexion_data, statement_databasets)
             conflict_list=[]
             for i  in conflict_data:
@@ -331,7 +261,7 @@ class ReflectionEngine:
 
 
             conflicts_found=0
-            # 3. Resolve conflicts
+            # 3. 解决冲突
             solved_data = await self._resolve_conflicts(conflict_list, statement_databasets)
 
             if not solved_data:
@@ -346,7 +276,7 @@ class ReflectionEngine:
             logging.info(f"解决了 {conflicts_resolved} 个冲突")
 
 
-            # 4. Apply reflection results (update memory database)
+            # 4. 应用反思结果（更新记忆库）
             memories_updated=await self._apply_reflection_results(solved_data)
 
             execution_time = asyncio.get_event_loop().time() - start_time
@@ -372,19 +302,7 @@ class ReflectionEngine:
             )
 
     async def Translate(self, text):
-        """
-        Translate Chinese text to English
-        
-        Uses the configured LLM to translate Chinese text to English with structured output.
-        Provides consistent translation format for reflection results.
-        
-        Args:
-            text: Chinese text to be translated
-            
-        Returns:
-            str: Translated English text
-        """
-        # Translate Chinese to English
+        # 翻译中文为英文
         translation_messages = [
             {
                 "role": "user",
@@ -398,19 +316,6 @@ class ReflectionEngine:
         )
         return response.data
     async def extract_translation(self,data):
-        """
-        Extract and translate reflection data to English
-        
-        Processes reflection data structure and translates all Chinese content to English.
-        Handles nested data structures including memory verifications, quality assessments,
-        and reflection data while preserving the original structure.
-        
-        Args:
-            data: Dictionary containing reflection data with Chinese content
-            
-        Returns:
-            dict: Translated data structure with English content
-        """
         end_datas={}
         end_datas['source_data']=await self.Translate(data['source_data'])
         quality_assessments = []
@@ -445,18 +350,6 @@ class ReflectionEngine:
         return end_datas
 
     async def reflection_run(self):
-        """
-        Execute reflection workflow with comprehensive data processing
-        
-        Performs a complete reflection operation including conflict detection, resolution,
-        and result formatting. Supports both Chinese and English output based on
-        configuration settings.
-        
-        Returns:
-            dict: Comprehensive reflection results including source data, memory verifications,
-                 quality assessments, and reflection data. Results are translated to English
-                 if language_type is set to 'en'.
-        """
         self._lazy_init()
         start_time = time.time()
         memory_verifies_flag = self.config.memory_verify
@@ -474,7 +367,7 @@ class ReflectionEngine:
         result_data['source_data'] = "我是 2023 年春天去北京工作的，后来基本一直都在北京上班，也没怎么换过城市。不过后来公司调整，2024 年上半年我被调到上海待了差不多半年，那段时间每天都是在上海办公室打卡。当时入职资料用的还是我之前的身份信息，身份证号是 11010119950308123X，银行卡是 6222023847595898，这些一直没变。对了，其实我 从 2023 年开始就一直在北京生活，从来没有长期离开过北京，上海那段更多算是远程配合"
         # 2. 检测冲突（基于事实的反思）
         conflict_data = await self._detect_conflicts(databasets, source_data)
-        # Traverse data to extract fields
+        # 遍历数据提取字段
         quality_assessments = []
         memory_verifies = []
         for item in conflict_data:
@@ -482,9 +375,9 @@ class ReflectionEngine:
             memory_verifies.append(item['memory_verify'])
         result_data['memory_verifies'] = memory_verifies
         result_data['quality_assessments'] = quality_assessments
-        conflicts_found = 0  # Initialize as integer 0 instead of empty string
+        conflicts_found = 0  # 初始化为整数0而不是空字符串
         REMOVE_KEYS = {"created_at", "expired_at","relationship","predicate","statement_id","id","statement_id","relationship_statement_id"}
-        # Clean conflict_data, and memory_verify and quality_assessment
+        # Clearn conflict_data，And memory_verify和quality_assessment
         cleaned_conflict_data = []
         for item in conflict_data:
             cleaned_item = {
@@ -496,7 +389,7 @@ class ReflectionEngine:
         for item in conflict_data:
             cleaned_data = []
             for row in item.get("data", []):
-                # Remove created_at / expired_at
+                # 删除 created_at / expired_at
                 cleaned_row = {
                     k: v
                     for k, v in row.items()
@@ -509,7 +402,7 @@ class ReflectionEngine:
             }
             cleaned_conflict_data_.append(cleaned_item)
         print(cleaned_conflict_data_)
-        # 3. Resolve conflicts
+        # 3. 解决冲突
         solved_data = await self._resolve_conflicts(cleaned_conflict_data_, source_data)
         if not solved_data:
             return ReflectionResult(
@@ -520,7 +413,7 @@ class ReflectionEngine:
             )
         reflexion_data = []
 
-        # Traverse data to extract reflexion fields
+        # 遍历数据提取reflexion字段
         for item in solved_data:
             if 'results' in item:
                 for result in item['results']:
@@ -538,24 +431,15 @@ class ReflectionEngine:
 
 
     async def extract_fields_from_json(self):
-        """
-        Extract source_data and databasets fields from example.json
-        
-        Reads reflection example data from the example.json file and extracts
-        the source data and database statements for testing and demonstration purposes.
-        
-        Returns:
-            tuple: (source_data, databasets) extracted from the example file
-                  Returns empty lists if file reading fails
-        """
+        """从example.json中提取source_data和databasets字段"""
 
         prompt_dir = os.path.join(os.path.dirname(__file__), "example")
         try:
-            # Read JSON file
+            # 读取JSON文件
             with open(prompt_dir + '/example.json', 'r', encoding='utf-8') as f:
                 data = json.loads(f.read())
 
-            # Extract fields under memory_verify
+            # 提取memory_verify下的字段
             memory_verify = data.get("memory_verify", {})
             source_data = memory_verify.get("source_data", [])
             databasets = memory_verify.get("databasets", [])
@@ -567,17 +451,15 @@ class ReflectionEngine:
 
     async def _get_reflexion_data(self, host_id: uuid.UUID) -> List[Any]:
         """
-        Get reflection data from database
-        
-        Retrieves memory data for reflection based on the configured reflection range.
-        Supports both partial (from retrieval results) and full (entire database) modes.
+        获取反思数据
+
+        根据配置的反思范围获取需要反思的记忆数据。
 
         Args:
-            host_id: Host UUID identifier for scoping data retrieval
+            host_id: 主机ID
 
         Returns:
-            tuple: (reflexion_data, statement_data) containing memory data for reflection
-                  Returns empty lists if query fails
+            List[Any]: 反思数据列表
         """
 
         print("=== 获取反思数据 ===")
@@ -602,29 +484,26 @@ class ReflectionEngine:
 
     async def _detect_conflicts(self, data: List[Any], statement_databasets: List[Any]) -> List[Any]:
         """
-        Detect conflicts (fact-based reflection)
-        
-        Uses LLM to analyze memory data and detect conflicts within the memories.
-        Performs comprehensive conflict detection including memory verification and
-        quality assessment based on configuration settings.
+        检测冲突（基于事实的反思）
+
+        使用 LLM 分析记忆数据，检测其中的冲突。
 
         Args:
-            data: Memory data to be analyzed for conflicts
-            statement_databasets: Statement database records for context
+            data: 待检测的记忆数据
 
         Returns:
-            List[Any]: List of detected conflicts with detailed analysis
+            List[Any]: 冲突记忆列表
         """
         if not data:
             return []
 
-        # Data preprocessing: if data is too small, return no conflicts directly
+        # 数据预处理：如果数据量太少，直接返回无冲突
         if len(data) < 2:
             logging.info("数据量不足，无需检测冲突")
             return []
 
-        # Use converted data
-        # print("Converted data:", data[:2] if len(data) > 2 else data)  # Only print first 2 to avoid long logs
+        # 使用转换后的数据
+        # print("转换后的数据:", data[:2] if len(data) > 2 else data)  # 只打印前2条避免日志过长
         memory_verify = self.config.memory_verify
 
         logging.info("====== 冲突检测开始 ======")
@@ -633,7 +512,7 @@ class ReflectionEngine:
         language_type=self.config.language_type
 
         try:
-            # Render conflict detection prompt
+            # 渲染冲突检测提示词
             rendered_prompt = await self.render_evaluate_prompt_func(
                 data,
                 self.conflict_schema,
@@ -647,7 +526,7 @@ class ReflectionEngine:
             messages = [{"role": "user", "content": rendered_prompt}]
             logging.info(f"提示词长度: {len(rendered_prompt)}")
 
-            # Call LLM for conflict detection
+            # 调用 LLM 进行冲突检测
             response = await self.llm_client.response_structured(
                 messages,
                 self.conflict_schema
@@ -660,7 +539,7 @@ class ReflectionEngine:
                 logging.error("LLM 冲突检测输出解析失败")
                 return []
 
-            # Standardize return format
+            # 标准化返回格式
             if isinstance(response, BaseModel):
                 return [response.model_dump()]
             elif hasattr(response, 'dict'):
@@ -674,17 +553,15 @@ class ReflectionEngine:
 
     async def _resolve_conflicts(self, conflicts: List[Any], statement_databasets: List[Any]) -> List[Any]:
         """
-        Resolve detected conflicts
-        
-        Uses LLM to perform reflection and resolution on detected conflicts.
-        Processes conflicts in parallel for efficiency while respecting concurrency limits.
+        解决冲突
+
+        使用 LLM 对检测到的冲突进行反思和解决。
 
         Args:
-            conflicts: List of conflicts to be resolved
-            statement_databasets: Statement database records for context
+            conflicts: 冲突列表
 
         Returns:
-            List[Any]: List of resolution solutions with reflection results
+            List[Any]: 解决方案列表
         """
         if not conflicts:
             return []
@@ -693,12 +570,12 @@ class ReflectionEngine:
         baseline = self.config.baseline
         memory_verify = self.config.memory_verify
 
-        # Process each conflict in parallel
+        # 并行处理每个冲突
         async def _resolve_one(conflict: Any) -> Optional[Dict[str, Any]]:
-            """Resolve a single conflict"""
+            """解决单个冲突"""
             async with self._semaphore:
                 try:
-                    # Render reflection prompt
+                    # 渲染反思提示词
                     rendered_prompt = await self.render_reflexion_prompt_func(
                         [conflict],
                         self.reflexion_schema,
@@ -710,7 +587,7 @@ class ReflectionEngine:
 
                     messages = [{"role": "user", "content": rendered_prompt}]
 
-                    # Call LLM for reflection
+                    # 调用 LLM 进行反思
                     response = await self.llm_client.response_structured(
                         messages,
                         self.reflexion_schema
@@ -719,7 +596,7 @@ class ReflectionEngine:
                     if not response:
                         return None
 
-                    # Standardize return format
+                    # 标准化返回格式
                     if isinstance(response, BaseModel):
                         return response.model_dump()
                     elif hasattr(response, 'dict'):
@@ -733,11 +610,11 @@ class ReflectionEngine:
                     logging.warning(f"解决单个冲突失败: {e}")
                     return None
 
-        # Execute all conflict resolution tasks concurrently
+        # 并发执行所有冲突解决任务
         tasks = [_resolve_one(conflict) for conflict in conflicts]
         results = await asyncio.gather(*tasks, return_exceptions=False)
 
-        # Filter out failed results
+        # 过滤掉失败的结果
         solved = [r for r in results if r is not None]
 
         logging.info(f"成功解决 {len(solved)}/{len(conflicts)} 个冲突")
@@ -749,16 +626,15 @@ class ReflectionEngine:
             solved_data: List[Dict[str, Any]]
     ) -> int:
         """
-        Apply reflection results (update memory database)
-        
-        Updates the Neo4j database with resolved conflicts and reflection results.
-        Processes the solved data and applies changes to the memory storage system.
+        应用反思结果（更新记忆库）
+
+        将解决冲突后的记忆更新到 Neo4j 数据库中。
 
         Args:
-            solved_data: List of resolved conflict solutions with reflection data
+            solved_data: 解决方案列表
 
         Returns:
-            int: Number of successfully updated memory entries
+            int: 成功更新的记忆数量
         """
         changes = extract_and_process_changes(solved_data)
         success_count = await neo4j_data(changes)
@@ -766,86 +642,80 @@ class ReflectionEngine:
 
 
 
-    # Time-based reflection methods
+    # 基于时间的反思方法
     async def time_based_reflection(
             self,
             host_id: uuid.UUID,
             time_period: Optional[str] = None
     ) -> ReflectionResult:
         """
-        Time-based reflection
-        
-        Triggers reflection based on time cycles, checking memories within
-        specified time periods. Uses the configured iteration period if
-        no specific time period is provided.
+        基于时间的反思
+
+        根据时间周期触发反思，检查在指定时间段内的记忆。
 
         Args:
-            host_id: Host UUID identifier for scoping reflection
-            time_period: Time period (e.g., "three hours"), uses config value if not provided
+            host_id: 主机ID
+            time_period: 时间周期（如"三小时"），如果不提供则使用配置中的值
 
         Returns:
-            ReflectionResult: Comprehensive reflection operation result
+            ReflectionResult: 反思结果
         """
         period = time_period or self.config.iteration_period
         logging.info(f"执行基于时间的反思，周期: {period}")
 
-        # Use standard reflection workflow
+        # 使用标准反思流程
         return await self.execute_reflection(host_id)
 
-    # Fact-based reflection methods
+    # 基于事实的反思方法
     async def fact_based_reflection(
             self,
             host_id: uuid.UUID
     ) -> ReflectionResult:
         """
-        Fact-based reflection
-        
-        Detects and resolves factual conflicts within memories. Analyzes
-        memory data for inconsistencies and contradictions that need resolution.
+        基于事实的反思
+
+        检测记忆中的事实冲突并解决。
 
         Args:
-            host_id: Host UUID identifier for scoping reflection
+            host_id: 主机ID
 
         Returns:
-            ReflectionResult: Comprehensive reflection operation result
+            ReflectionResult: 反思结果
         """
         logging.info("执行基于事实的反思")
 
-        # Use standard reflection workflow
+        # 使用标准反思流程
         return await self.execute_reflection(host_id)
 
-    # Comprehensive reflection methods
+    # 综合反思方法
     async def comprehensive_reflection(
             self,
             host_id: uuid.UUID
     ) -> ReflectionResult:
         """
-        Comprehensive reflection
-        
-        Integrates time-based and fact-based reflection strategies based on
-        the configured baseline. Supports hybrid approaches that combine
-        multiple reflection methodologies.
+        综合反思
+
+        整合基于时间和基于事实的反思策略。
 
         Args:
-            host_id: Host UUID identifier for scoping reflection
+            host_id: 主机ID
 
         Returns:
-            ReflectionResult: Comprehensive reflection operation result combining
-                            multiple strategies if using hybrid baseline
+            ReflectionResult: 反思结果
         """
         logging.info("执行综合反思")
 
-        # Choose reflection strategy based on configured baseline
+        # 根据配置的基线选择反思策略
         if self.config.baseline == ReflectionBaseline.TIME:
             return await self.time_based_reflection(host_id)
         elif self.config.baseline == ReflectionBaseline.FACT:
             return await self.fact_based_reflection(host_id)
         elif self.config.baseline == ReflectionBaseline.HYBRID:
-            # Hybrid strategy: execute time-based reflection first, then fact-based reflection
+            # 混合策略：先执行基于时间的反思，再执行基于事实的反思
             time_result = await self.time_based_reflection(host_id)
             fact_result = await self.fact_based_reflection(host_id)
 
-            # Merge results
+            # 合并结果
             return ReflectionResult(
                 success=time_result.success and fact_result.success,
                 message=f"时间反思: {time_result.message}; 事实反思: {fact_result.message}",

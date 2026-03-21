@@ -193,15 +193,7 @@ async def get_workspace_end_users(
         await aio_redis_set(cache_key, json.dumps(result), expire=30)
     except Exception as e:
         api_logger.warning(f"Redis 缓存写入失败: {str(e)}")
-
-    # 触发社区聚类补全任务（异步，不阻塞接口响应）
-    try:
-        from app.tasks import init_community_clustering_for_users
-        init_community_clustering_for_users.delay(end_user_ids=end_user_ids, workspace_id=str(workspace_id))
-        api_logger.info(f"已触发社区聚类补全任务，候选用户数: {len(end_user_ids)}")
-    except Exception as e:
-        api_logger.warning(f"触发社区聚类补全任务失败（不影响主流程）: {str(e)}")
-
+    
     api_logger.info(f"成功获取 {len(end_users)} 个宿主记录")
     return success(data=result, msg="宿主列表获取成功")
 
@@ -602,12 +594,9 @@ async def dashboard_data(
                 )
                 neo4j_data["total_memory"] = total_memory_data.get("total_memory_count", 0)
                 # total_app: 统计当前空间下的所有app数量
-                # 包含自有app + 被分享给本工作空间的app
-                from app.services import app_service as _app_svc
-                _, total_app = _app_svc.AppService(db).list_apps(
-                    workspace_id=workspace_id, include_shared=True, pagesize=1
-                )
-                neo4j_data["total_app"] = total_app
+                from app.repositories import app_repository
+                apps_orm = app_repository.get_apps_by_workspace_id(db, workspace_id)
+                neo4j_data["total_app"] = len(apps_orm)
                 api_logger.info(f"成功获取记忆总量: {neo4j_data['total_memory']}, 应用数量: {neo4j_data['total_app']}")
             except Exception as e:
                 api_logger.warning(f"获取记忆总量失败: {str(e)}")

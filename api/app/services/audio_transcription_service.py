@@ -75,7 +75,7 @@ class AudioTranscriptionService:
         try:
             # 下载音频文件
             async with httpx.AsyncClient(timeout=60.0) as client:
-                audio_response = await client.get(audio_url, follow_redirects=True)
+                audio_response = await client.get(audio_url)
                 audio_response.raise_for_status()
                 audio_data = audio_response.content
                 

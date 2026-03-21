@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 import uuid
-from typing import Callable
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -20,7 +19,6 @@ from app.services import user_service
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success
 from app.core.security import verify_password
-from app.i18n.dependencies import get_translator
 
 # 获取API专用日志器
 api_logger = get_api_logger()
@@ -35,8 +33,7 @@ router = APIRouter(
 def create_superuser(
     user: user_schema.UserCreate,
     db: Session = Depends(get_db),
-    current_superuser: User = Depends(get_current_superuser),
-    t: Callable = Depends(get_translator)
+    current_superuser: User = Depends(get_current_superuser)
 ):
     """创建超级管理员（仅超级管理员可访问）"""
     api_logger.info(f"超级管理员创建请求: {user.username}, email: {user.email}")
@@ -45,7 +42,7 @@ def create_superuser(
     api_logger.info(f"超级管理员创建成功: {result.username} (ID: {result.id})")
     
     result_schema = user_schema.User.model_validate(result)
-    return success(data=result_schema, msg=t("users.create.superuser_success"))
+    return success(data=result_schema, msg="超级管理员创建成功")
 
 
 @router.delete("/{user_id}", response_model=ApiResponse)
@@ -53,7 +50,6 @@ def delete_user(
     user_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    t: Callable = Depends(get_translator)
 ):
     """停用用户（软删除）"""
     api_logger.info(f"用户停用请求: user_id={user_id}, 操作者: {current_user.username}")
@@ -61,14 +57,13 @@ def delete_user(
         db=db, user_id_to_deactivate=user_id, current_user=current_user
     )
     api_logger.info(f"用户停用成功: {result.username} (ID: {result.id})")
-    return success(msg=t("users.delete.deactivate_success"))
+    return success(msg="用户停用成功")
 
 @router.post("/{user_id}/activate", response_model=ApiResponse)
 def activate_user(
     user_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    t: Callable = Depends(get_translator)
 ):
     """激活用户"""
     api_logger.info(f"用户激活请求: user_id={user_id}, 操作者: {current_user.username}")
@@ -79,14 +74,13 @@ def activate_user(
     api_logger.info(f"用户激活成功: {result.username} (ID: {result.id})")
     
     result_schema = user_schema.User.model_validate(result)
-    return success(data=result_schema, msg=t("users.activate.success"))
+    return success(data=result_schema, msg="用户激活成功")
 
 
 @router.get("", response_model=ApiResponse)
 def get_current_user_info(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    t: Callable = Depends(get_translator)
 ):
     """获取当前用户信息"""
     api_logger.info(f"当前用户信息请求: {current_user.username}")
@@ -111,7 +105,7 @@ def get_current_user_info(
                 break
     
     api_logger.info(f"当前用户信息获取成功: {result.username}, 角色: {result_schema.role}, 工作空间: {result_schema.current_workspace_name}")
-    return success(data=result_schema, msg=t("users.info.get_success"))
+    return success(data=result_schema, msg="用户信息获取成功")
 
 
 @router.get("/superusers", response_model=ApiResponse)
@@ -119,7 +113,6 @@ def get_tenant_superusers(
     include_inactive: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_superuser),
-    t: Callable = Depends(get_translator)
 ):
     """获取当前租户下的超管账号列表（仅超级管理员可访问）"""
     api_logger.info(f"获取租户超管列表请求: {current_user.username}")
@@ -132,7 +125,7 @@ def get_tenant_superusers(
     api_logger.info(f"租户超管列表获取成功: count={len(superusers)}")
     
     superusers_schema = [user_schema.User.model_validate(u) for u in superusers]
-    return success(data=superusers_schema, msg=t("users.list.superusers_success"))
+    return success(data=superusers_schema, msg="租户超管列表获取成功")
 
 
 
@@ -141,7 +134,6 @@ def get_user_info_by_id(
     user_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    t: Callable = Depends(get_translator)
 ):
     """根据用户ID获取用户信息"""
     api_logger.info(f"获取用户信息请求: user_id={user_id}, 操作者: {current_user.username}")
@@ -152,7 +144,7 @@ def get_user_info_by_id(
     api_logger.info(f"用户信息获取成功: {result.username}")
     
     result_schema = user_schema.User.model_validate(result)
-    return success(data=result_schema, msg=t("users.info.get_success"))
+    return success(data=result_schema, msg="用户信息获取成功")
 
 
 @router.put("/change-password", response_model=ApiResponse)
@@ -160,7 +152,6 @@ async def change_password(
     request: ChangePasswordRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    t: Callable = Depends(get_translator)
 ):
     """修改当前用户密码"""
     api_logger.info(f"用户密码修改请求: {current_user.username}")
@@ -173,7 +164,7 @@ async def change_password(
         current_user=current_user
     )
     api_logger.info(f"用户密码修改成功: {current_user.username}")
-    return success(msg=t("auth.password.change_success"))
+    return success(msg="密码修改成功")
 
 
 @router.put("/admin/change-password", response_model=ApiResponse)
@@ -181,7 +172,6 @@ async def admin_change_password(
     request: AdminChangePasswordRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_superuser),
-    t: Callable = Depends(get_translator)
 ):
     """超级管理员修改指定用户的密码"""
     api_logger.info(f"管理员密码修改请求: 管理员 {current_user.username} 修改用户 {request.user_id}")
@@ -196,17 +186,16 @@ async def admin_change_password(
     # 根据是否生成了随机密码来构造响应
     if request.new_password:
         api_logger.info(f"管理员密码修改成功: 用户 {request.user_id}")
-        return success(msg=t("auth.password.change_success"))
+        return success(msg="密码修改成功")
     else:
         api_logger.info(f"管理员密码重置成功: 用户 {request.user_id}, 随机密码已生成")
-        return success(data=generated_password, msg=t("auth.password.reset_success"))
+        return success(data=generated_password, msg="密码重置成功")
 
 
 @router.post("/verify_pwd", response_model=ApiResponse)
 def verify_pwd(
     request: VerifyPasswordRequest,
     current_user: User = Depends(get_current_user),
-    t: Callable = Depends(get_translator)
 ):
     """验证当前用户密码"""
     api_logger.info(f"用户验证密码请求: {current_user.username}")
@@ -214,8 +203,8 @@ def verify_pwd(
     is_valid = verify_password(request.password, current_user.hashed_password)
     api_logger.info(f"用户密码验证结果: {current_user.username}, valid={is_valid}")
     if not is_valid:
-        raise BusinessException(t("users.errors.password_verification_failed"), code=BizCode.VALIDATION_FAILED)
-    return success(data={"valid": is_valid}, msg=t("common.success.retrieved"))
+        raise BusinessException("密码验证失败", code=BizCode.VALIDATION_FAILED)
+    return success(data={"valid": is_valid}, msg="验证完成")
 
 
 @router.post("/send-email-code", response_model=ApiResponse)
@@ -223,7 +212,6 @@ async def send_email_code(
     request: SendEmailCodeRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    t: Callable = Depends(get_translator)
 ):
     """发送邮箱验证码"""
     api_logger.info(f"用户请求发送邮箱验证码: {current_user.username}, email={request.email}")
@@ -231,7 +219,7 @@ async def send_email_code(
     await user_service.send_email_code_method(db=db, email=request.email, user_id=current_user.id)
     
     api_logger.info(f"邮箱验证码已发送: {current_user.username}")
-    return success(msg=t("users.email.code_sent"))
+    return success(msg="验证码已发送到您的邮箱，请查收")
 
 
 @router.put("/change-email", response_model=ApiResponse)
@@ -239,7 +227,6 @@ async def change_email(
     request: VerifyEmailCodeRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    t: Callable = Depends(get_translator)
 ):
     """验证验证码并修改邮箱"""
     api_logger.info(f"用户修改邮箱: {current_user.username}, new_email={request.new_email}")
@@ -252,51 +239,4 @@ async def change_email(
     )
     
     api_logger.info(f"用户邮箱修改成功: {current_user.username}")
-    return success(msg=t("users.email.change_success"))
-
-
-
-@router.get("/me/language", response_model=ApiResponse)
-def get_current_user_language(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    t: Callable = Depends(get_translator)
-):
-    """获取当前用户的语言偏好"""
-    api_logger.info(f"获取用户语言偏好: {current_user.username}")
-    
-    language = user_service.get_user_language_preference(
-        db=db,
-        user_id=current_user.id,
-        current_user=current_user
-    )
-    
-    api_logger.info(f"用户语言偏好获取成功: {current_user.username}, language={language}")
-    return success(
-        data=user_schema.LanguagePreferenceResponse(language=language),
-        msg=t("users.language.get_success")
-    )
-
-
-@router.put("/me/language", response_model=ApiResponse)
-def update_current_user_language(
-    request: user_schema.LanguagePreferenceRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    t: Callable = Depends(get_translator)
-):
-    """设置当前用户的语言偏好"""
-    api_logger.info(f"更新用户语言偏好: {current_user.username}, language={request.language}")
-    
-    updated_user = user_service.update_user_language_preference(
-        db=db,
-        user_id=current_user.id,
-        language=request.language,
-        current_user=current_user
-    )
-    
-    api_logger.info(f"用户语言偏好更新成功: {current_user.username}, language={request.language}")
-    return success(
-        data=user_schema.LanguagePreferenceResponse(language=updated_user.preferred_language),
-        msg=t("users.language.update_success")
-    )
+    return success(msg="邮箱修改成功")

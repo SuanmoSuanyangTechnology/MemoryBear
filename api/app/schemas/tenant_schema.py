@@ -11,8 +11,6 @@ class TenantBase(BaseModel):
     name: str = Field(..., description="租户名称", max_length=255)
     description: Optional[str] = Field(None, description="租户描述", max_length=1000)
     is_active: bool = Field(True, description="是否激活")
-    default_language: Optional[str] = Field('zh', description="租户默认语言", max_length=10)
-    supported_languages: Optional[List[str]] = Field(['zh', 'en'], description="租户支持的语言列表")
 
     @field_validator('name')
     @classmethod
@@ -20,26 +18,6 @@ class TenantBase(BaseModel):
         if not v or not v.strip():
             raise ValidationException('租户名称不能为空', code=BizCode.VALIDATION_FAILED)
         return v.strip()
-    
-    @field_validator('default_language')
-    @classmethod
-    def validate_default_language(cls, v):
-        if v:
-            # Validate language code format (2-letter code, optionally with region)
-            import re
-            if not re.match(r'^[a-z]{2}(-[A-Z]{2})?$', v):
-                raise ValidationException('语言代码格式不正确', code=BizCode.VALIDATION_FAILED)
-        return v
-    
-    @field_validator('supported_languages')
-    @classmethod
-    def validate_supported_languages(cls, v):
-        if v:
-            import re
-            for lang in v:
-                if not re.match(r'^[a-z]{2}(-[A-Z]{2})?$', lang):
-                    raise ValidationException(f'语言代码格式不正确: {lang}', code=BizCode.VALIDATION_FAILED)
-        return v
 
 
 class TenantCreate(TenantBase):
@@ -52,8 +30,6 @@ class TenantUpdate(BaseModel):
     name: Optional[str] = Field(None, description="租户名称", max_length=255)
     description: Optional[str] = Field(None, description="租户描述", max_length=1000)
     is_active: Optional[bool] = Field(None, description="是否激活")
-    default_language: Optional[str] = Field(None, description="租户默认语言", max_length=10)
-    supported_languages: Optional[List[str]] = Field(None, description="租户支持的语言列表")
 
     @field_validator('name')
     @classmethod
@@ -61,25 +37,6 @@ class TenantUpdate(BaseModel):
         if v is not None and (not v or not v.strip()):
             raise ValidationException('租户名称不能为空', code=BizCode.VALIDATION_FAILED)
         return v.strip() if v else v
-    
-    @field_validator('default_language')
-    @classmethod
-    def validate_default_language(cls, v):
-        if v:
-            import re
-            if not re.match(r'^[a-z]{2}(-[A-Z]{2})?$', v):
-                raise ValidationException('语言代码格式不正确', code=BizCode.VALIDATION_FAILED)
-        return v
-    
-    @field_validator('supported_languages')
-    @classmethod
-    def validate_supported_languages(cls, v):
-        if v:
-            import re
-            for lang in v:
-                if not re.match(r'^[a-z]{2}(-[A-Z]{2})?$', lang):
-                    raise ValidationException(f'语言代码格式不正确: {lang}', code=BizCode.VALIDATION_FAILED)
-        return v
 
 
 class Tenant(TenantBase):
@@ -106,28 +63,3 @@ class TenantList(BaseModel):
     page: int
     size: int
     pages: int
-
-
-class TenantLanguageConfig(BaseModel):
-    """租户语言配置Schema"""
-    default_language: str = Field(..., description="租户默认语言", max_length=10)
-    supported_languages: List[str] = Field(..., description="租户支持的语言列表")
-    
-    @field_validator('default_language')
-    @classmethod
-    def validate_default_language(cls, v):
-        import re
-        if not re.match(r'^[a-z]{2}(-[A-Z]{2})?$', v):
-            raise ValidationException('语言代码格式不正确', code=BizCode.VALIDATION_FAILED)
-        return v
-    
-    @field_validator('supported_languages')
-    @classmethod
-    def validate_supported_languages(cls, v):
-        if not v:
-            raise ValidationException('支持的语言列表不能为空', code=BizCode.VALIDATION_FAILED)
-        import re
-        for lang in v:
-            if not re.match(r'^[a-z]{2}(-[A-Z]{2})?$', lang):
-                raise ValidationException(f'语言代码格式不正确: {lang}', code=BizCode.VALIDATION_FAILED)
-        return v

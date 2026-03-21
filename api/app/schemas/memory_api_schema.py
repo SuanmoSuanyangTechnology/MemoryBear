@@ -21,7 +21,7 @@ class MemoryWriteRequest(BaseModel):
     """
     end_user_id: str = Field(..., description="End user ID (required)")
     message: str = Field(..., description="Message content to store")
-    config_id: str = Field(..., description="Memory configuration ID (required)")
+    config_id: Optional[str] = Field(None, description="Memory configuration ID")
     storage_type: str = Field("neo4j", description="Storage type: neo4j or rag")
     user_rag_memory_id: Optional[str] = Field(None, description="RAG memory ID")
 
@@ -68,7 +68,7 @@ class MemoryReadRequest(BaseModel):
         "0", 
         description="Search mode: 0=verify, 1=direct, 2=context"
     )
-    config_id: str = Field(..., description="Memory configuration ID (required)")
+    config_id: Optional[str] = Field(None, description="Memory configuration ID")
     storage_type: str = Field("neo4j", description="Storage type: neo4j or rag")
     user_rag_memory_id: Optional[str] = Field(None, description="RAG memory ID")
 
@@ -132,79 +132,3 @@ class MemoryReadResponse(BaseModel):
         description="Intermediate retrieval outputs"
     )
     end_user_id: str = Field(..., description="End user ID")
-
-
-class CreateEndUserRequest(BaseModel):
-    """Request schema for creating an end user.
-    
-    Attributes:
-        workspace_id: Workspace ID (required)
-        other_id: External user identifier (required)
-        other_name: Display name for the end user
-    """
-    workspace_id: str = Field(..., description="Workspace ID (required)")
-    other_id: str = Field(..., description="External user identifier (required)")
-    other_name: Optional[str] = Field("", description="Display name")
-
-    @field_validator("workspace_id")
-    @classmethod
-    def validate_workspace_id(cls, v: str) -> str:
-        """Validate that workspace_id is not empty."""
-        if not v or not v.strip():
-            raise ValueError("workspace_id is required and cannot be empty")
-        return v.strip()
-
-    @field_validator("other_id")
-    @classmethod
-    def validate_other_id(cls, v: str) -> str:
-        """Validate that other_id is not empty."""
-        if not v or not v.strip():
-            raise ValueError("other_id is required and cannot be empty")
-        return v.strip()
-
-
-class CreateEndUserResponse(BaseModel):
-    """Response schema for end user creation.
-    
-    Attributes:
-        id: Created end user UUID
-        other_id: External user identifier
-        other_name: Display name
-        workspace_id: Workspace the user belongs to
-    """
-    id: str = Field(..., description="End user UUID")
-    other_id: str = Field(..., description="External user identifier")
-    other_name: str = Field("", description="Display name")
-    workspace_id: str = Field(..., description="Workspace ID")
-
-
-class MemoryConfigItem(BaseModel):
-    """Schema for a single memory config in the list response.
-    
-    Attributes:
-        config_id: Configuration UUID
-        config_name: Configuration name
-        config_desc: Configuration description
-        is_default: Whether this is the workspace default config
-        scene_name: Associated ontology scene name
-        created_at: Creation timestamp
-        updated_at: Last update timestamp
-    """
-    config_id: str = Field(..., description="Configuration ID")
-    config_name: str = Field(..., description="Configuration name")
-    config_desc: Optional[str] = Field(None, description="Configuration description")
-    is_default: bool = Field(False, description="Whether this is the workspace default")
-    scene_name: Optional[str] = Field(None, description="Associated ontology scene name")
-    created_at: Optional[str] = Field(None, description="Creation timestamp")
-    updated_at: Optional[str] = Field(None, description="Last update timestamp")
-
-
-class ListConfigsResponse(BaseModel):
-    """Response schema for listing memory configs.
-    
-    Attributes:
-        configs: List of memory config items
-        total: Total number of configs
-    """
-    configs: List[MemoryConfigItem] = Field(default_factory=list, description="List of configs")
-    total: int = Field(0, description="Total number of configs")

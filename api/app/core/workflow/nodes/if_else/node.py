@@ -5,7 +5,7 @@ from typing import Any
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
-from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator, ValueInputType
+from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator
 from app.core.workflow.nodes.if_else import IfElseNodeConfig
 from app.core.workflow.nodes.operators import ConditionExpressionResolver, CompareOperatorInstance
 from app.core.workflow.variable.base_variable import VariableType
@@ -21,26 +21,6 @@ class IfElseNode(BaseNode):
     def _output_types(self) -> dict[str, VariableType]:
         return {
             "output": VariableType.STRING
-        }
-
-    def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
-        result = []
-        for case in self.typed_config.cases:
-            expressions = []
-            for expression in case.expressions:
-                expressions.append({
-                    "left": self.get_variable(expression.left, variable_pool, strict=False),
-                    "right": expression.right
-                    if expression.input_type == ValueInputType.CONSTANT or expression.right is None
-                    else self.get_variable(expression.right, variable_pool, strict=False),
-                    "operator": str(expression.operator),
-                })
-            result.append({
-                "expressions": expressions,
-                "logical_operator": str(case.logical_operator),
-            })
-        return {
-            "cases": result
         }
 
     @staticmethod

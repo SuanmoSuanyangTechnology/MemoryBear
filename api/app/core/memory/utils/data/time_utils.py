@@ -4,13 +4,7 @@ from datetime import datetime
 
 def validate_date_format(date_str: str) -> bool:
     """
-    Validate if date string conforms to YYYY-MM-DD format
-    
-    Args:
-        date_str: Date string to validate
-        
-    Returns:
-        bool: True if format is correct, False otherwise
+    Validate if the date string is in the format YYYY-MM-DD.
     """
     pattern = r"^\d{4}-\d{1,2}-\d{1,2}$"
     return bool(re.match(pattern, date_str))
@@ -47,20 +41,7 @@ def normalize_date(date_str: str) -> str:
 
 
 def preprocess_date_string(date_str: str) -> str:
-    """
-    预处理日期字符串，处理特殊格式
-    
-    处理以下特殊格式：
-    - 年份后直接跟月份没有分隔符的格式（如 "20259/28"）
-    - 无分隔符的纯数字格式（如 "20251028", "251028"）
-    - 混合分隔符，统一为 "-"
-    
-    Args:
-        date_str: 原始日期字符串
-        
-    Returns:
-        str: 预处理后的日期字符串，格式为 "YYYY-MM-DD" 或 "YYYY-MM"
-    """
+    """预处理日期字符串，处理特殊格式"""
 
     # 处理类似 "20259/28" 的格式（年份后直接跟月份没有分隔）
     match = re.match(r'^(\d{4,5})[/\.\-_]?(\d{1,2})[/\.\-_]?(\d{1,2})$', date_str)
@@ -97,23 +78,7 @@ def preprocess_date_string(date_str: str) -> str:
 
 
 def fallback_parse(date_str: str) -> str:
-    """
-    备选日期解析方案
-    
-    当智能解析失败时，尝试使用预定义的日期格式进行解析。
-    支持多种常见的日期格式，包括：
-    - YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
-    - YYYYMMDD, YYMMDD
-    - MM-DD-YYYY, MM/DD/YYYY, MM.DD.YYYY
-    - DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY
-    - YYYY-MM, YYYY/MM, YYYY.MM
-    
-    Args:
-        date_str: 待解析的日期字符串
-        
-    Returns:
-        str: 标准化后的日期字符串（YYYY-MM-DD格式），解析失败时返回原字符串
-    """
+    """备选解析方案"""
 
     # 尝试常见的日期格式[citation:4][citation:5]
     formats_to_try = [

@@ -2,15 +2,15 @@ import os
 from jinja2 import Environment, FileSystemLoader
 from typing import List, Dict, Any
 
+
 # Setup Jinja2 environment
 prompt_dir = os.path.join(os.path.dirname(__file__), "prompts")
 prompt_env = Environment(loader=FileSystemLoader(prompt_dir))
 
-
 async def render_evaluate_prompt(evaluate_data: List[Any], schema: Any,
                                  baseline: str = "TIME",
-                                 memory_verify: bool = False, quality_assessment: bool = False,
-                                 statement_databasets=None, language_type: str = "zh") -> str:
+                                 memory_verify: bool = False,quality_assessment:bool = False,
+                                 statement_databasets: List[str] = [],language_type:str = "zh") -> str:
     """
     Renders the evaluate prompt using the evaluate_optimized.jinja2 template.
 
@@ -23,8 +23,6 @@ async def render_evaluate_prompt(evaluate_data: List[Any], schema: Any,
     Returns:
         Rendered prompt content as string
     """
-    if statement_databasets is None:
-        statement_databasets = []
     template = prompt_env.get_template("evaluate.jinja2")
 
     # Convert Pydantic model to JSON schema if needed
@@ -48,7 +46,7 @@ async def render_evaluate_prompt(evaluate_data: List[Any], schema: Any,
 
 
 async def render_reflexion_prompt(data: Dict[str, Any], schema: Any, baseline: str, memory_verify: bool = False,
-                                  statement_databasets=None, language_type: str = "zh") -> str:
+                                  statement_databasets: List[str] = [],language_type:str = "zh") -> str:
     """
     Renders the reflexion prompt using the reflexion_optimized.jinja2 template.
 
@@ -60,8 +58,6 @@ async def render_reflexion_prompt(data: Dict[str, Any], schema: Any, baseline: s
     Returns:
         Rendered prompt content as a string.
     """
-    if statement_databasets is None:
-        statement_databasets = []
     template = prompt_env.get_template("reflexion.jinja2")
 
     # Convert Pydantic model to JSON schema if needed
@@ -73,7 +69,7 @@ async def render_reflexion_prompt(data: Dict[str, Any], schema: Any, baseline: s
         json_schema = schema
 
     rendered_prompt = template.render(data=data, json_schema=json_schema,
-                                      baseline=baseline, memory_verify=memory_verify,
-                                      statement_databasets=statement_databasets, language_type=language_type)
+                                      baseline=baseline,memory_verify=memory_verify,
+                                      statement_databasets=statement_databasets,language_type=language_type)
 
     return rendered_prompt

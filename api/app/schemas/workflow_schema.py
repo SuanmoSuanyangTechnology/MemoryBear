@@ -80,7 +80,6 @@ class WorkflowConfigCreate(BaseModel):
     variables: list[VariableDefinition] = Field(default_factory=list, description="变量列表")
     execution_config: ExecutionConfig = Field(default_factory=ExecutionConfig, description="执行配置")
     triggers: list[TriggerConfig] = Field(default_factory=list, description="触发器列表")
-    features: dict = Field(default_factory=dict, description="功能特性配置")
 
 
 class WorkflowConfigUpdate(BaseModel):
@@ -88,7 +87,6 @@ class WorkflowConfigUpdate(BaseModel):
     nodes: list[NodeDefinition] | None = None
     edges: list[EdgeDefinition] | None = None
     variables: list[VariableDefinition] | None = None
-    features: dict | None = None
     execution_config: ExecutionConfig | None = None
     triggers: list[TriggerConfig] | None = None
 
@@ -104,7 +102,6 @@ class WorkflowConfig(BaseModel):
     variables: list[dict[str, Any]]
     execution_config: dict[str, Any]
     triggers: list[dict[str, Any]]
-    features: dict | None
     is_active: bool
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -116,10 +113,6 @@ class WorkflowConfig(BaseModel):
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
-
-    @field_serializer("features", when_used="json")
-    def _serialize_features(self, features: dict | None):
-        return features or {}
 
 
 # ==================== 工作流执行 ====================

@@ -384,14 +384,6 @@ class ExtractionOrchestrator:
         
         logger.info(f"陈述句提取完成，共提取 {len(all_statements)} 条陈述句")
 
-        # 试运行模式下，所有分块提取完成后发送完成事件
-        if self.progress_callback and self.is_pilot_run:
-            await self.progress_callback(
-                "knowledge_extraction_complete",
-                f"陈述句提取完成，共提取 {len(all_statements)} 条",
-                {"total_statements": len(all_statements), "total_chunks": total_chunks}
-            )
-
         return dialog_data_list
 
     async def _extract_triplets(

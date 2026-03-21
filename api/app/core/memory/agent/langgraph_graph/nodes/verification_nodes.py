@@ -18,46 +18,24 @@ logger = get_agent_logger(__name__)
 
 
 class VerificationNodeService(LLMServiceMixin):
-    """
-    Verification node service class
-    
-    Handles data verification operations using LLM services. Inherits from 
-    LLMServiceMixin to provide structured LLM calling capabilities for 
-    verifying and validating retrieved information.
-    
-    Attributes:
-        template_service: Service for rendering Jinja2 templates
-    """
+    """验证节点服务类"""
 
     def __init__(self):
         super().__init__()
         self.template_service = TemplateService(template_root)
 
 
-# Create global service instance
+# 创建全局服务实例
 verification_service = VerificationNodeService()
 
 
 async def Verify_prompt(state: ReadState, messages_deal: VerificationResult):
-    """
-    Process verification results and generate output format
-    
-    Transforms VerificationResult objects into structured output format suitable
-    for frontend consumption. Handles conversion of VerificationItem objects to
-    dictionary format and adds metadata for tracking.
-    
-    Args:
-        state: ReadState containing storage and user configuration
-        messages_deal: VerificationResult containing verification outcomes
-        
-    Returns:
-        dict: Formatted verification result with status and metadata
-    """
+    """处理验证结果并生成输出格式"""
     storage_type = state.get('storage_type', '')
     user_rag_memory_id = state.get('user_rag_memory_id', '')
     data = state.get('data', '')
 
-    # Convert VerificationItem objects to dictionary list
+    # 将 VerificationItem 对象转换为字典列表
     verified_data = []
     if messages_deal.expansion_issue:
         for item in messages_deal.expansion_issue:
@@ -111,7 +89,7 @@ async def Verify(state: ReadState):
 
         logger.info("Verify: 开始渲染模板")
 
-        # Generate JSON schema to guide LLM output format
+        # 生成 JSON schema 以指导 LLM 输出正确格式
         json_schema = VerificationResult.model_json_schema()
 
         system_prompt = await verification_service.template_service.render_template(
@@ -126,8 +104,8 @@ async def Verify(state: ReadState):
         # 使用优化的LLM服务，添加超时保护
         logger.info("Verify: 开始调用 LLM")
         try:
-            # Add asyncio.wait_for timeout wrapper to prevent infinite waiting
-            # Timeout set to 150 seconds (slightly longer than LLM config's 120 seconds)
+            # 添加 asyncio.wait_for 超时包裹，防止无限等待
+            # 超时时间设置为 150 秒（比 LLM 配置的 120 秒稍长）
 
             with get_db_context() as db_session:
                 structured = await asyncio.wait_for(
@@ -144,7 +122,7 @@ async def Verify(state: ReadState):
                             "reason": "验证失败或超时"
                         }
                     ),
-                    timeout=150.0  # 150 second timeout
+                    timeout=150.0  # 150秒超时
                 )
             logger.info(f"Verify: LLM 调用完成，result={structured}")
         except asyncio.TimeoutError:

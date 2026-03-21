@@ -38,7 +38,6 @@ class Workspace(Base):
     members = relationship("WorkspaceMember", back_populates="workspace")  # users collaborate through membership
     api_keys = relationship("ApiKey", back_populates="workspace", cascade="all, delete-orphan")  # API Keys
     memory_increments = relationship("MemoryIncrement", back_populates="workspace")
-    end_users = relationship("EndUser", back_populates="workspace", cascade="all, delete-orphan")
 
 class WorkspaceMember(Base):
     __tablename__ = "workspace_members"

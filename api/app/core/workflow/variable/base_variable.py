@@ -2,7 +2,7 @@ from enum import StrEnum
 from abc import abstractmethod, ABC
 from typing import Any
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field
 
 from app.schemas import FileType
 
@@ -41,10 +41,10 @@ class VariableType(StrEnum):
         """
         if isinstance(var, str):
             return cls.STRING
-        elif isinstance(var, bool):
-            return cls.BOOLEAN
         elif isinstance(var, (int, float)):
             return cls.NUMBER
+        elif isinstance(var, bool):
+            return cls.BOOLEAN
         elif isinstance(var, FileObject) or (isinstance(var, dict) and var.get('is_file')):
             return cls.FILE
         elif isinstance(var, dict):
@@ -116,7 +116,7 @@ class FileObject(BaseModel):
     content_cache: dict = Field(default_factory=dict)
     is_file: bool
 
-    _byte_content: bytes | None = PrivateAttr(default=None)
+    _byte_content: bytes | None = None
 
     def get_content(self):
         return self._byte_content

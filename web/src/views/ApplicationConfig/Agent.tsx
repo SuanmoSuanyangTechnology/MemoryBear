@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 14:24:29
+ * @Last Modified time: 2026-03-03 14:24:34
  */
 import { type FC, type ReactNode, useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import clsx from 'clsx'
@@ -23,8 +23,7 @@ import type {
   MemoryConfig,
   AiPromptModalRef,
   Source,
-  ChatVariableConfigModalRef,
-  FeaturesConfigForm
+  ChatVariableConfigModalRef
 } from './types'
 import type { Variable } from './components/VariableList/types'
 import type { KnowledgeConfig } from './components/Knowledge/types'
@@ -42,7 +41,6 @@ import ToolList from './components/ToolList/ToolList'
 import SkillList from './components/Skill'
 import ChatVariableConfigModal from './components/ChatVariableConfigModal';
 import type { Skill } from '@/views/Skills/types'
-import FeaturesConfig from './components/FeaturesConfig'
 
 /**
  * Description wrapper component
@@ -101,7 +99,7 @@ const SwitchWrapper: FC<{ title: string, desc?: string, name: string | string[];
  * @param name - Form field name
  * @param url - API URL for options
  */
-const SelectWrapper: FC<{ title: string, desc: string, name: string | string[], url: string; disabled?: boolean }> = ({ title, desc, name, url, disabled }) => {
+const SelectWrapper: FC<{ title: string, desc: string, name: string | string[], url: string }> = ({ title, desc, name, url }) => {
   const { t } = useTranslation();
   return (
     <>
@@ -117,7 +115,6 @@ const SelectWrapper: FC<{ title: string, desc: string, name: string | string[], 
           hasAll={false}
           valueKey='config_id'
           labelKey="config_name"
-          disabled={disabled}
         />
       </Form.Item>
       <DescWrapper desc={t(`application.${desc}`)} className="rb:mt-2" />
@@ -129,7 +126,7 @@ const SelectWrapper: FC<{ title: string, desc: string, name: string | string[], 
  * Agent configuration component
  * Manages single agent configuration including prompts, knowledge, memory, variables, and tools
  */
-const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void }>(({ onFeaturesLoad }, ref) => {
+const Agent = forwardRef<AgentRef>((_props, ref) => {
   const { t } = useTranslation()
   const { id } = useParams();
   const { message } = App.useApp()
@@ -200,7 +197,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
         ...response,
         tools: allTools
       })
-      onFeaturesLoad?.(response.features)
     }).finally(() => {
       setLoading(false)
     })
@@ -356,8 +352,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   }, [modelList, values?.default_model_config_id])
 
   useImperativeHandle(ref, () => ({
-    handleSave,
-    features: values?.features
+    handleSave
   }))
 
   const aiPromptModalRef = useRef<AiPromptModalRef>(null)
@@ -411,11 +406,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   useEffect(() => {
     setChatVariables(values?.variables || [])
   }, [values?.variables])
-
-  const handleSaveFeaturesConfig = (value: FeaturesConfigForm) => {
-    form.setFieldValue('features', value)
-  }
-  console.log('agent', values)
+  console.log('values', values)
   return (
     <>
       {loading && <Spin fullscreen></Spin>}
@@ -427,7 +418,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
                 {defaultModel?.name ? <div className="rb:w-4 rb:h-4 rb:bg-[url('@/assets/images/application/model.svg')] rb:group-hover:bg-[url('@/assets/images/application/model_hover.svg')]"></div> : null}
                 {defaultModel?.name || t('application.chooseModel')}
               </Button>
-              <FeaturesConfig value={values?.features as FeaturesConfigForm} refresh={handleSaveFeaturesConfig} />
               <Button type="primary" onClick={() => handleSave()}>
                 {t('common.save')}
               </Button>
@@ -436,7 +426,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
           <Form form={form}>
             <Form.Item name="default_model_config_id" hidden noStyle></Form.Item>
             <Form.Item name="model_parameters" hidden noStyle></Form.Item>
-            <Form.Item name="features" hidden noStyle></Form.Item>
             <Space size={16} direction="vertical" style={{ width: '100%' }}>
               <Card title={t('application.promptConfiguration')}>
                 <div className="rb:flex rb:items-center rb:justify-between rb:mb-2.75">
@@ -475,12 +464,11 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
               <Card title={t('application.memoryConfiguration')}>
                 <Space size={24} direction='vertical' style={{ width: '100%' }}>
                   <SwitchWrapper title="dialogueHistoricalMemory" desc="dialogueHistoricalMemoryDesc" name={['memory', 'enabled']} />
-                  <SelectWrapper
-                    title="selectMemoryContent"
-                    desc="selectMemoryContentDesc"
+                  <SelectWrapper 
+                    title="selectMemoryContent" 
+                    desc="selectMemoryContentDesc" 
                     name={['memory', 'memory_config_id']}
                     url={memoryConfigListUrl}
-                    disabled={!values?.memory?.enabled}
                   />
                 </Space>
               </Card>
@@ -505,6 +493,11 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
             {t('application.debuggingAndPreview')}
 
             <Space size={10}>
+              {chatVariables.length > 0 &&
+                <Button type="primary" ghost onClick={handleOpenVariableConfig}>
+                  {t('application.variableConfig')}
+                </Button>
+              }
               <Button type="primary" ghost onClick={handleAddModel}>
                 + {t('application.addModel')}
               </Button>
@@ -513,12 +506,11 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
           </div>
           <RbCard height="calc(100vh - 160px)" bodyClassName="rb:p-[0]! rb:h-full rb:overflow-hidden">
             <Chat
-              data={values as Config}
+              data={data as Config}
               chatList={chatList}
               updateChatList={setChatList}
               handleSave={handleSave}
               chatVariables={chatVariables}
-              handleEditVariables={handleOpenVariableConfig}
             />
           </RbCard>
         </Col>

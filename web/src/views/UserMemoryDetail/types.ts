@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:15 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-13 11:49:52
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:57:15 
  */
 /**
  * User Memory Detail Types
@@ -90,7 +90,6 @@ export interface ExtractedEntityNodeProperties {
   connect_strngth: string;
   importance_score: number;
   associative_memory: number;
-  community_name?: string;
 }
 /**
  * Memory summary node
@@ -247,53 +246,4 @@ export interface ForgetData {
  */
 export interface GraphDetailRef {
   handleOpen: (vo: Node) => void
-}
-// Community
-export type CommunityNodeType = 'Community' | 'ExtractedEntity';
-export type CommunityEdgeType = 'BELONGS_TO_COMMUNITY' | 'EXTRACTED_RELATIONSHIP';
-export type CommunityEntityType = "Person" | "Organization" | "ORG" | "Location" | "LOC" | "Event" | "Concept" | "Time" | "Position" | "WorkRole" | "System" | "Policy" | "HistoricalPeriod" | "HistoricalState" | "HistoricalEvent" | "EconomicFactor" | "Condition" | "Numeric" | "Work";
-// 社区节点
-export interface CommunityTypeNode {
-  id: string;
-  label: 'Community';
-  properties: {
-    community_id: string;
-    end_user_id: string;
-    member_count: number;
-    updated_at: string;
-    name: string;
-    summary: string;
-    core_entities: string[];
-    member_entity_ids: string[];
-  };
-}
-// 核心实体
-export interface ExtractedEntityTypeNode {
-  id: string;
-  label: 'ExtractedEntity';
-  properties: {
-    name: string;
-    end_user_id: string;
-    description: string;
-    created_at: string;
-    entity_type: CommunityEntityType;
-    community_name: string;
-  };
-}
-// 社区图谱连线
-export interface CommunityEdge {
-  id: string;
-  target: string;
-  source: string;
-}
-export interface CommunityStatistics {
-  total_nodes: number;
-  total_edges: number;
-  node_types: Record<CommunityNodeType, number>;
-  edge_types: Record<CommunityEdgeType, number>;
-}
-export interface CommunityGraphData {
-  nodes: (CommunityTypeNode | ExtractedEntityTypeNode)[];
-  edges: CommunityEdge[];
-  statistics: CommunityStatistics;
 }

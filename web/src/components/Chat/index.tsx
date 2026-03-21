@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:09 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-12 13:57:49
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-06 21:05:09 
  */
 import { type FC } from 'react'
 import ChatInput from './ChatInput'
@@ -25,8 +25,7 @@ const Chat: FC<ChatProps> = ({
   labelFormat,
   errorDesc,
   fileList,
-  fileChange,
-  renderRuntime
+  fileChange
 }) => {
   return (
     <div className="rb:h-full rb:relative rb:pt-2">
@@ -38,7 +37,6 @@ const Chat: FC<ChatProps> = ({
         empty={empty}
         labelFormat={labelFormat}
         errorDesc={errorDesc}
-        renderRuntime={renderRuntime}
       />
 
       {/* Chat input area */}
