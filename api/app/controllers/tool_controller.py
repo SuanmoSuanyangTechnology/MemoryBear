@@ -76,8 +76,6 @@ async def get_tool_methods(
         if methods is None:
             raise HTTPException(status_code=404, detail="工具不存在")
         return success(data=methods, msg="获取工具方法成功")
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -123,8 +121,6 @@ async def create_tool(
         raise HTTPException(status_code=400, detail=e.message)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -153,8 +149,6 @@ async def update_tool(
         return success(msg="工具更新成功")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -197,8 +191,6 @@ async def set_tool_active(
         return success(msg=f"工具已{action}")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -231,8 +223,6 @@ async def execute_tool(
             },
             msg="工具执行完成"
         )
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

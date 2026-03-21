@@ -579,20 +579,9 @@ class AgentRunService:
                 user_id=user_id
             )
 
-            model_info = ModelInfo(
-                model_name=api_key_config["model_name"],
-                provider=api_key_config["provider"],
-                api_key=api_key_config["api_key"],
-                api_base=api_key_config["api_base"],
-                capability=api_key_config["capability"],
-                is_omni=api_key_config["is_omni"],
-                model_type=model_config.type
-            )
-
             # 6. 加载历史消息
             history = await self._load_conversation_history(
                 conversation_id=conversation_id,
-                api_config=model_info,
                 max_history=10
             )
 
@@ -600,6 +589,15 @@ class AgentRunService:
             processed_files = None
             if files:
                 # 获取 provider 信息
+                model_info = ModelInfo(
+                    model_name=api_key_config["model_name"],
+                    provider=api_key_config["provider"],
+                    api_key=api_key_config["api_key"],
+                    api_base=api_key_config["api_base"],
+                    capability=api_key_config["capability"],
+                    is_omni=api_key_config["is_omni"],
+                    model_type=ModelType.LLM
+                )
                 provider = api_key_config.get("provider", "openai")
                 multimodal_service = MultimodalService(self.db, model_info)
                 processed_files = await multimodal_service.process_files(user_id, files)
@@ -817,20 +815,9 @@ class AgentRunService:
                 sub_agent=sub_agent
             )
 
-            model_info = ModelInfo(
-                model_name=api_key_config["model_name"],
-                provider=api_key_config["provider"],
-                api_key=api_key_config["api_key"],
-                api_base=api_key_config["api_base"],
-                capability=api_key_config["capability"],
-                is_omni=api_key_config["is_omni"],
-                model_type=model_config.type
-            )
-
             # 6. 加载历史消息
             history = await self._load_conversation_history(
                 conversation_id=conversation_id,
-                api_config=model_info,
                 max_history=memory_config.get("max_history", 10)
             )
 
@@ -838,6 +825,15 @@ class AgentRunService:
             processed_files = None
             if files:
                 # 获取 provider 信息
+                model_info = ModelInfo(
+                    model_name=api_key_config["model_name"],
+                    provider=api_key_config["provider"],
+                    api_key=api_key_config["api_key"],
+                    api_base=api_key_config["api_base"],
+                    capability=api_key_config["capability"],
+                    is_omni=api_key_config["is_omni"],
+                    model_type=ModelType.LLM
+                )
                 provider = api_key_config.get("provider", "openai")
                 multimodal_service = MultimodalService(self.db, model_info)
                 processed_files = await multimodal_service.process_files(user_id, files)
@@ -1119,7 +1115,6 @@ class AgentRunService:
     async def _load_conversation_history(
             self,
             conversation_id: str,
-            api_config: ModelInfo | None = None,
             max_history: int = 10
     ) -> List[Dict[str, str]]:
         """加载会话历史消息
@@ -1134,11 +1129,9 @@ class AgentRunService:
         try:
 
             conversation_service = ConversationService(self.db)
-            # 获取 API 配置用于多模态处理
-            history = await conversation_service.get_conversation_history(
+            history = conversation_service.get_conversation_history(
                 conversation_id=uuid.UUID(conversation_id),
-                max_history=max_history,
-                api_config=api_config
+                max_history=max_history
             )
 
             logger.debug(

@@ -1408,11 +1408,12 @@ async def analytics_memory_types(
     if end_user_id:
         try:
             conversation_repo = ConversationRepository(db)
-            conversations, total = conversation_repo.get_conversation_by_user_id(
+            conversations = conversation_repo.get_conversation_by_user_id(
                 user_id=uuid.UUID(end_user_id),
+                limit=100,  # 获取更多会话以准确统计
                 is_activate=True
             )
-            work_count = total
+            work_count = len(conversations)
             logger.debug(f"工作记忆数量（会话数）: {work_count} (end_user_id={end_user_id})")
         except Exception as e:
             logger.warning(f"获取会话数量失败，工作记忆数量设为0: {str(e)}")
