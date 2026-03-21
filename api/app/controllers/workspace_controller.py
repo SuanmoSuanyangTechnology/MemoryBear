@@ -14,12 +14,6 @@ from app.dependencies import (
     get_current_user,
     workspace_access_guard,
 )
-from app.i18n.dependencies import get_current_language, get_translator
-from app.i18n.serializers import (
-    WorkspaceSerializer,
-    WorkspaceMemberSerializer,
-    WorkspaceInviteSerializer
-)
 from app.models.tenant_model import Tenants
 from app.models.user_model import User
 from app.models.workspace_model import InviteStatus
@@ -71,9 +65,7 @@ def get_workspaces(
     include_current: bool = Query(True, description="是否包含当前工作空间"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    current_tenant: Tenants = Depends(get_current_tenant),
-    language: str = Depends(get_current_language),
-    t: callable = Depends(get_translator)
+    current_tenant: Tenants = Depends(get_current_tenant)
 ):
     """获取当前租户下用户参与的所有工作空间
 
@@ -96,13 +88,8 @@ def get_workspaces(
         )
 
     api_logger.info(f"成功获取 {len(workspaces)} 个工作空间")
-    
-    # 使用序列化器添加国际化字段
-    serializer = WorkspaceSerializer()
-    workspaces_data = [WorkspaceResponse.model_validate(w).model_dump() for w in workspaces]
-    workspaces_i18n = serializer.serialize_list(workspaces_data, language)
-    
-    return success(data=workspaces_i18n, msg=t("workspace.list_retrieved"))
+    workspaces_schema = [WorkspaceResponse.model_validate(w) for w in workspaces]
+    return success(data=workspaces_schema, msg="工作空间列表获取成功")
 
 
 @router.post("", response_model=ApiResponse)
@@ -111,8 +98,6 @@ def create_workspace(
     language_type: str = Header(default="zh", alias="X-Language-Type"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_superuser),
-    language: str = Depends(get_current_language),
-    t: callable = Depends(get_translator)
 ):
     """创建新的工作空间"""
     from app.core.language_utils import get_language_from_header
@@ -133,13 +118,8 @@ def create_workspace(
         f"工作空间创建成功 - 名称: {workspace.name}, ID: {result.id}, "
         f"创建者: {current_user.username}, language={language}"
     )
-    
-    # 使用序列化器添加国际化字段
-    serializer = WorkspaceSerializer()
-    result_data = WorkspaceResponse.model_validate(result).model_dump()
-    result_i18n = serializer.serialize(result_data, language)
-    
-    return success(data=result_i18n, msg=t("workspace.created"))
+    result_schema = WorkspaceResponse.model_validate(result)
+    return success(data=result_schema, msg="工作空间创建成功")
 
 @router.put("", response_model=ApiResponse)
 @cur_workspace_access_guard()
@@ -147,8 +127,6 @@ def update_workspace(
     workspace: WorkspaceUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    language: str = Depends(get_current_language),
-    t: callable = Depends(get_translator)
 ):
     """更新工作空间"""
     workspace_id = current_user.current_workspace_id
@@ -161,21 +139,14 @@ def update_workspace(
         user=current_user,
     )
     api_logger.info(f"工作空间更新成功 - ID: {workspace_id}, 用户: {current_user.username}")
-    
-    # 使用序列化器添加国际化字段
-    serializer = WorkspaceSerializer()
-    result_data = WorkspaceResponse.model_validate(result).model_dump()
-    result_i18n = serializer.serialize(result_data, language)
-    
-    return success(data=result_i18n, msg=t("workspace.updated"))
+    result_schema = WorkspaceResponse.model_validate(result)
+    return success(data=result_schema, msg="工作空间更新成功")
 
 @router.get("/members", response_model=ApiResponse)
 @cur_workspace_access_guard()
 def get_cur_workspace_members(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    language: str = Depends(get_current_language),
-    t: callable = Depends(get_translator)
 ):
     """获取工作空间成员列表（关系序列化）"""
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {current_user.current_workspace_id} 的成员列表")
@@ -186,14 +157,8 @@ def get_cur_workspace_members(
         user=current_user,
     )
     api_logger.info(f"工作空间成员列表获取成功 - ID: {current_user.current_workspace_id}, 数量: {len(members)}")
-    
-    # 转换为表格项并使用序列化器添加国际化字段
     table_items = _convert_members_to_table_items(members)
-    serializer = WorkspaceMemberSerializer()
-    members_data = [item.model_dump() for item in table_items]
-    members_i18n = serializer.serialize_list(members_data, language)
-    
-    return success(data=members_i18n, msg=t("workspace.members.list_retrieved"))
+    return success(data=table_items, msg="工作空间成员列表获取成功")
 
 
 @router.put("/members", response_model=ApiResponse)
@@ -203,7 +168,6 @@ def update_workspace_members(
     updates: List[WorkspaceMemberUpdate],
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    t: callable = Depends(get_translator)
 ):
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求更新工作空间 {workspace_id} 的成员角色")
@@ -214,7 +178,7 @@ def update_workspace_members(
         user=current_user,
     )
     api_logger.info(f"工作空间成员角色更新成功 - ID: {workspace_id}, 数量: {len(members)}")
-    return success(msg=t("workspace.members.role_updated"))
+    return success(msg="成员角色更新成功")
 
 
 @router.delete("/members/{member_id}", response_model=ApiResponse)
@@ -223,7 +187,6 @@ def delete_workspace_member(
     member_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    t: callable = Depends(get_translator)
 ):
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求删除工作空间 {workspace_id} 的成员 {member_id}")
@@ -235,7 +198,7 @@ def delete_workspace_member(
         user=current_user,
     )
     api_logger.info(f"工作空间成员删除成功 - ID: {workspace_id}, 成员: {member_id}")
-    return success(msg=t("workspace.members.deleted"))
+    return success(msg="成员删除成功")
 
 
 # 创建空间协作邀请
@@ -245,8 +208,6 @@ def create_workspace_invite(
     invite_data: WorkspaceInviteCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    language: str = Depends(get_current_language),
-    t: callable = Depends(get_translator)
 ):
     """创建工作空间邀请"""
     workspace_id = current_user.current_workspace_id
@@ -259,12 +220,7 @@ def create_workspace_invite(
         user=current_user
     )
     api_logger.info(f"工作空间邀请创建成功 - 工作空间: {workspace_id}, 邮箱: {invite_data.email}")
-    
-    # 使用序列化器添加国际化字段
-    serializer = WorkspaceInviteSerializer()
-    result_i18n = serializer.serialize(result, language)
-    
-    return success(data=result_i18n, msg=t("workspace.invites.created"))
+    return success(data=result, msg="邀请创建成功")
 
 
 @router.get("/invites", response_model=ApiResponse)
@@ -276,8 +232,6 @@ def get_workspace_invites(
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    language: str = Depends(get_current_language),
-    t: callable = Depends(get_translator)
 ):
     """获取工作空间邀请列表"""
     workspace_id = current_user.current_workspace_id
@@ -292,30 +246,18 @@ def get_workspace_invites(
         offset=offset
     )
     api_logger.info(f"成功获取 {len(invites)} 个邀请记录")
-    
-    # 使用序列化器添加国际化字段
-    serializer = WorkspaceInviteSerializer()
-    invites_i18n = serializer.serialize_list(invites, language)
-    
-    return success(data=invites_i18n, msg=t("workspace.invites.list_retrieved"))
+    return success(data=invites, msg="邀请列表获取成功")
 
 
 @public_router.get("/invites/validate/{token}", response_model=ApiResponse)
 def get_workspace_invite_info(
     token: str,
     db: Session = Depends(get_db),
-    language: str = Depends(get_current_language),
-    t: callable = Depends(get_translator)
 ):
     """获取工作空间邀请用户信息（无需认证）"""
     result = workspace_service.validate_invite_token(db=db, token=token)
     api_logger.info(f"工作空间邀请验证成功 - 邀请: {token}")
-    
-    # 使用序列化器添加国际化字段
-    serializer = WorkspaceInviteSerializer()
-    result_i18n = serializer.serialize(result, language)
-    
-    return success(data=result_i18n, msg=t("workspace.invites.validated"))
+    return success(data=result, msg="邀请验证成功")
 
 
 @router.delete("/invites/{invite_id}", response_model=ApiResponse)
@@ -325,8 +267,6 @@ def revoke_workspace_invite(
     invite_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    language: str = Depends(get_current_language),
-    t: callable = Depends(get_translator)
 ):
     """撤销工作空间邀请"""
     workspace_id = current_user.current_workspace_id
@@ -339,12 +279,7 @@ def revoke_workspace_invite(
         user=current_user
     )
     api_logger.info(f"工作空间邀请撤销成功 - 邀请: {invite_id}")
-    
-    # 使用序列化器添加国际化字段
-    serializer = WorkspaceInviteSerializer()
-    result_i18n = serializer.serialize(result, language)
-    
-    return success(data=result_i18n, msg=t("workspace.invites.revoked"))
+    return success(data=result, msg="邀请撤销成功")
 
 # ==================== 公开邀请接口（无需认证） ====================
 
@@ -367,7 +302,6 @@ def switch_workspace(
     workspace_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    t: callable = Depends(get_translator)
 ):
     """切换工作空间"""
     api_logger.info(f"用户 {current_user.username} 请求切换工作空间为 {workspace_id}")
@@ -378,7 +312,7 @@ def switch_workspace(
         user=current_user,
     )
     api_logger.info(f"成功切换工作空间为 {workspace_id}")
-    return success(msg=t("workspace.switched"))
+    return success(msg="工作空间切换成功")
 
 
 @router.get("/storage", response_model=ApiResponse)
@@ -386,7 +320,6 @@ def switch_workspace(
 def get_workspace_storage_type(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user),
-        t: callable = Depends(get_translator)
 ):
     """获取当前工作空间的存储类型"""
     workspace_id = current_user.current_workspace_id
@@ -398,7 +331,7 @@ def get_workspace_storage_type(
         user=current_user
     )
     api_logger.info(f"成功获取工作空间 {workspace_id} 的存储类型: {storage_type}")
-    return success(data={"storage_type": storage_type}, msg=t("workspace.storage.type_retrieved"))
+    return success(data={"storage_type": storage_type}, msg="存储类型获取成功")
 
 
 @router.get("/workspace_models", response_model=ApiResponse)
@@ -406,8 +339,6 @@ def get_workspace_storage_type(
 def workspace_models_configs(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user),
-        language: str = Depends(get_current_language),
-        t: callable = Depends(get_translator)
 ):
     """获取当前工作空间的模型配置（llm, embedding, rerank）"""
     workspace_id = current_user.current_workspace_id
@@ -423,14 +354,14 @@ def workspace_models_configs(
         api_logger.warning(f"工作空间 {workspace_id} 不存在或无权访问")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=t("workspace.not_found")
+            detail="工作空间不存在或无权访问"
         )
 
     api_logger.info(
         f"成功获取工作空间 {workspace_id} 的模型配置: "
         f"llm={configs.get('llm')}, embedding={configs.get('embedding')}, rerank={configs.get('rerank')}"
     )
-    return success(data=WorkspaceModelsConfig.model_validate(configs), msg=t("workspace.models.config_retrieved"))
+    return success(data=WorkspaceModelsConfig.model_validate(configs), msg="模型配置获取成功")
 
 
 @router.put("/workspace_models", response_model=ApiResponse)
@@ -439,7 +370,6 @@ def update_workspace_models_configs(
         models_update: WorkspaceModelsUpdate,
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user),
-        t: callable = Depends(get_translator)
 ):
     """更新当前工作空间的模型配置（llm, embedding, rerank）"""
     workspace_id = current_user.current_workspace_id
@@ -456,5 +386,5 @@ def update_workspace_models_configs(
         f"成功更新工作空间 {workspace_id} 的模型配置: "
         f"llm={updated_workspace.llm}, embedding={updated_workspace.embedding}, rerank={updated_workspace.rerank}"
     )
-    return success(data=WorkspaceModelsConfig.model_validate(updated_workspace), msg=t("workspace.models.config_updated"))
+    return success(data=WorkspaceModelsConfig.model_validate(updated_workspace), msg="模型配置更新成功")
 

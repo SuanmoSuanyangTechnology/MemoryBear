@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 18:41:07
+ * @Last Modified time: 2026-03-04 18:51:48
  */
 /**
  * Workflow Chat Component
@@ -21,59 +21,50 @@
  * 
  * @component
  */
-import { forwardRef, useImperativeHandle, useState, useRef, useEffect, useCallback } from 'react'
+import { forwardRef, useImperativeHandle, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { App } from 'antd'
+import { App, Space, Button, Flex, Dropdown, type MenuProps, Divider } from 'antd'
 
 import ChatIcon from '@/assets/images/application/chat.png'
 import RbDrawer from '@/components/RbDrawer';
+import VariableConfigModal from './VariableConfigModal'
 import { draftRun } from '@/api/application';
 import Empty from '@/components/Empty'
 import ChatContent from '@/components/Chat/ChatContent'
 import type { ChatItem } from '@/components/Chat/types'
 import dayjs from 'dayjs'
-import type { ChatRef, GraphRef, WorkflowConfig } from '../../types'
+import type { ChatRef, VariableConfigModalRef, GraphRef } from '../../types'
 import { type SSEMessage } from '@/utils/stream'
 import type { Variable } from '../Properties/VariableList/types'
 import ChatInput from '@/components/Chat/ChatInput'
-import ChatToolbar from '@/components/Chat/ChatToolbar'
-import type { ChatToolbarRef } from '@/components/Chat/ChatToolbar'
+import UploadFiles from '@/views/Conversation/components/FileUpload'
+import AudioRecorder from '@/components/AudioRecorder'
+import UploadFileListModal from '@/views/Conversation/components/UploadFileListModal'
+import type { UploadFileListModalRef } from '@/views/Conversation/types'
 import Runtime from './Runtime';
-import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
 
-const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: WorkflowConfig | null }>(({ appId, graphRef, data }, ref) => {
+const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef }>(({ appId, graphRef }, ref) => {
   const { t } = useTranslation()
   const { message: messageApi } = App.useApp()
-  const toolbarRef = useRef<ChatToolbarRef>(null)
-  const toolbarCallbackRef = useCallback((node: ChatToolbarRef | null) => {
-    (toolbarRef as React.MutableRefObject<ChatToolbarRef | null>).current = node
-  }, [])
-  const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [chatList, setChatList] = useState<ChatItem[]>([])
-  const [variables, setVariables] = useState<Variable[]>([])
-  const [streamLoading, setStreamLoading] = useState(false)
-  const [conversationId, setConversationId] = useState<string | null>(null)
-  const [fileList, setFileList] = useState<any[]>([])
-  const [message, setMessage] = useState<string | undefined>(undefined)
-  const [features, setFeatures] = useState<FeaturesConfigForm>({} as FeaturesConfigForm)
+  const variableConfigModalRef = useRef<VariableConfigModalRef>(null)
+  // State management
+  const [open, setOpen] = useState(false) // Drawer visibility
+  const [loading, setLoading] = useState(false) // Send button loading state
+  const [chatList, setChatList] = useState<ChatItem[]>([]) // Chat message history
+  const [variables, setVariables] = useState<Variable[]>([]) // Workflow input variables
+  const [streamLoading, setStreamLoading] = useState(false) // SSE streaming state
+  const [conversationId, setConversationId] = useState<string | null>(null) // Current conversation ID
+  const [fileList, setFileList] = useState<any[]>([]) // Uploaded files
+  const [message, setMessage] = useState<string | undefined>(undefined) // Current input message
+  const uploadFileListModalRef = useRef<UploadFileListModalRef>(null)
 
   /**
    * Opens the chat drawer and loads workflow variables from the start node
    */
   const handleOpen = () => {
     setOpen(true)
+    getVariables()
   }
-
-  useEffect(() => {
-    if (data?.features && open) setFeatures(data.features)
-  }, [open, data?.features])
-
-  useEffect(() => {
-    if (open && graphRef.current && toolbarRef.current) {
-      getVariables()
-    }
-  }, [open])
   /**
    * Extracts variables from the workflow's start node and merges with previous values
    */
@@ -93,9 +84,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
           vo.value = lastVo.value
         }
       })
-      console.log('curVariables', curVariables)
-      setVariables([...curVariables])
-      toolbarRef.current?.setVariables([...curVariables])
+      setVariables(curVariables)
     }
   }
   /**
@@ -107,11 +96,21 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
     setVariables([])
     setConversationId(null)
     setMessage(undefined)
-    toolbarRef.current?.setFiles([])
-    toolbarRef.current?.setVariables([])
     setFileList([])
     setLoading(false)
     setStreamLoading(false)
+  }
+  /**
+   * Opens the variable configuration modal
+   */
+  const handleEditVariables = () => {
+    variableConfigModalRef.current?.handleOpen(variables)
+  }
+  /**
+   * Saves updated variable values from the modal
+   */
+  const handleSave = (values: Variable[]) => {
+    setVariables([...values])
   }
   /**
    * Sends a message to execute the workflow
@@ -151,14 +150,10 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
 
     setLoading(true)
     const message = msg
-    const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
     setChatList(prev => [...prev, {
       role: 'user',
       content: message,
       created_at: Date.now(),
-      meta_data: {
-        files
-      },
     }])
     setChatList(prev => [...prev, {
       role: 'assistant',
@@ -343,14 +338,13 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
     }
 
     setMessage(undefined)
-    toolbarRef.current?.setFiles([])
     setFileList([])
     const data = {
       message: message,
       variables: params,
       stream: true,
       conversation_id: conversationId,
-      files: files.map(file => {
+      files: fileList.map(file => {
         if (file.url) {
           return file
         } else {
@@ -365,7 +359,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
     setStreamLoading(true)
     draftRun(appId, data, handleStreamMessage)
       .catch((error) => {
-        const errorInfo = JSON.parse(error.message)
+        console.log('draftRun error', error)
         setChatList(prev => {
           const newList = [...prev]
           const lastIndex = newList.length - 1
@@ -374,7 +368,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
               ...newList[lastIndex],
               status: 'failed',
               content: null,
-              subContent: errorInfo.error
+              subContent: error.error
             }
           }
           return newList
@@ -385,20 +379,65 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
       })
   }
 
-  const updateFileList = (list?: any[]) => {
-    setFileList([...list || []])
-    toolbarRef.current?.setFiles([...list || []])
+  /**
+   * Updates the current input message
+   */
+  const handleMessageChange = (message: string) => {
+    setMessage(message)
+  }
+  /**
+   * Handles file upload from local device
+   */
+  const fileChange = (file?: any) => {
+    setFileList([...fileList, file])
+  }
+  const handleRecordingComplete = async (file: any) => {
+    setFileList([...fileList, {
+      response: { data: file },
+      thumbUrl: file.url,
+      type: file.type
+    }])
   }
 
+  /**
+   * Handles dropdown menu actions for file upload
+   */
+  const handleShowUpload: MenuProps['onClick'] = ({ key }) => {
+    switch(key) {
+      case 'define':
+        uploadFileListModalRef.current?.handleOpen()
+        break
+    }
+  }
+  /**
+   * Adds files from remote URL modal
+   */
+  const addFileList = (list?: any[]) => {
+    if (!list || list.length <= 0) return
+    setFileList([...fileList, ...(list || [])])
+  }
+  /**
+   * Updates the entire file list (used when removing files)
+   */
+  const updateFileList = (list?: any[]) => {
+    setFileList([...list || []])
+  }
+
+  // Expose methods to parent component via ref
   useImperativeHandle(ref, () => ({
     handleOpen,
     handleClose
   }));
 
+  console.log('fileList', fileList)
+
   return (
     <RbDrawer
       title={<div className="rb:flex rb:items-center rb:gap-2.5">
         {t('workflow.run')}
+        {variables.length > 0 && <Space>
+          <Button size="small" onClick={handleEditVariables}>{t('application.variable')}</Button>
+        </Space>}
       </div>}
       classNames={{
         body: 'rb:p-0!'
@@ -427,16 +466,48 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
           fileChange={updateFileList}
           fileList={fileList}
           onSend={handleSend}
-          onChange={(msg) => setMessage(msg)}
+          onChange={handleMessageChange}
         >
-          <ChatToolbar
-            ref={toolbarCallbackRef}
-            features={features}
-            onFilesChange={setFileList}
-            onVariablesChange={setVariables}
-          />
+          <Flex justify="space-between" className="rb:flex-1">
+            <Flex gap={8} align="center">
+              <Dropdown
+                menu={{
+                  items: [
+                    { key: 'define', label: t('memoryConversation.addRemoteFile') },
+                    {
+                      key: 'upload', label: (
+                        <UploadFiles
+                          onChange={fileChange}
+                        />
+                      )
+                    },
+                  ],
+                  onClick: handleShowUpload
+                }}
+              >
+                <div
+                  className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/link.svg')] rb:hover:bg-[url('@/assets/images/conversation/link_hover.svg')]"
+                ></div>
+              </Dropdown>
+            </Flex>
+            <Flex align="center">
+              <AudioRecorder onRecordingComplete={handleRecordingComplete} />
+              <Divider type="vertical" className="rb:ml-1.5! rb:mr-3!" />
+            </Flex>
+          </Flex>
         </ChatInput>
       </div>
+
+      <VariableConfigModal
+        ref={variableConfigModalRef}
+        refresh={handleSave}
+        variables={variables}
+      />
+
+      <UploadFileListModal
+        ref={uploadFileListModalRef}
+        refresh={addFileList}
+      />
     </RbDrawer>
   )
 })

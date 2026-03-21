@@ -20,20 +20,8 @@ from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes import NodeFactory
 from app.core.workflow.nodes.enums import NodeType, BRANCH_NODES
 from app.core.workflow.utils.expression_evaluator import evaluate_condition
-from app.core.workflow.validator import WorkflowValidator
 
 logger = logging.getLogger(__name__)
-
-# Regex to split output into:
-#    - variable placeholders: {{ ... }}
-#    - normal literal text
-#
-# Example:
-#   "Hello {{user.name}}!" ->
-#   ["Hello ", "{{user.name}}", "!"]
-_OUTPUT_PATTERN = re.compile(r'\{\{.*?}}|[^{}]+')
-# Strict variable format: {{ node_id.field_name }}
-_VARIABLE_PATTERN = re.compile(r'\{\{\s*[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+\s*}}')
 
 
 class GraphBuilder:
@@ -49,13 +37,13 @@ class GraphBuilder:
         self.stream = stream
         self.subgraph = subgraph
 
-        self.start_node_id: str | None = None
-
+        self.start_node_id = None
+        self.end_node_ids = []
         self.node_map = {node["id"]: node for node in self.nodes}
         self.end_node_map: dict[str, StreamOutputConfig] = {}
-        self._find_upstream_activation_dep = lru_cache(
+        self._find_upstream_branch_node = lru_cache(
             maxsize=len(self.nodes) * 2
-        )(self._find_upstream_activation_dep)
+        )(self._find_upstream_branch_node)
         if variable_pool:
             self.variable_pool = variable_pool
         else:
@@ -63,18 +51,9 @@ class GraphBuilder:
 
         self.graph = StateGraph(WorkflowState)
         self.add_nodes()
-        self.reachable_nodes = WorkflowValidator.get_reachable_nodes(self.start_node_id, self.edges)
-        self.end_nodes = [
-            node
-            for node in self.nodes
-            if node.get("type") == "end" and node.get("id") in self.reachable_nodes
-        ]
         self.add_edges()
-        # EDGES MUST BE ADDED AFTER NODES ARE ADDED.
-
-        self._reverse_adj: dict[str, list[dict]] = defaultdict(list)
-        self._build_reverse_adj()
         self._analyze_end_node_output()
+        # EDGES MUST BE ADDED AFTER NODES ARE ADDED.
 
     @property
     def nodes(self) -> list[dict[str, Any]]:
@@ -108,50 +87,60 @@ class GraphBuilder:
             result[node[0]].append(node[1])
         return result
 
-    def _build_reverse_adj(self):
-        for edge in self.edges:
-            if edge["source"] not in self.reachable_nodes:
-                continue
-            self._reverse_adj[edge.get("target")].append({
-                "id": edge["source"], "branch": edge.get("label")
-            })
+    def _find_upstream_branch_node(self, target_node: str) -> tuple[bool, tuple[tuple[str, str]]]:
+        """
+        Recursively find all upstream branch (control) nodes that influence the execution
+        of the given target node.
 
-    def _find_upstream_activation_dep(
-            self,
-            target_node: str
-    ) -> tuple[tuple[tuple[str, str]], tuple[str]]:
-        """Find upstream dependencies that affect the activation of a target node.
+        This method walks upstream along the workflow graph starting from `target_node`.
+        It distinguishes between:
+          - branch nodes (node types listed in `BRANCH_NODES`)
+          - non-branch nodes (ordinary processing nodes)
 
-        Walks upstream along the workflow graph from the target node, collecting
-        two types of dependencies:
-            - Branch control nodes: upstream branch nodes (e.g. if-else) whose
-              routing outcome determines whether the target node executes.
-            - Output nodes: upstream END nodes that must complete their output
-              before the target node can activate.
+        Traversal rules:
+        1. For each immediate upstream node:
+           - If it is a branch node, it is recorded as an affecting control node.
+           - If it is a non-branch node, the traversal continues recursively upstream.
+        2. If ANY upstream path reaches a START / CYCLE_START node without encountering
+           a branch node, the traversal is considered invalid:
+           - `has_branch` will be False
+           - no branch nodes are returned.
+        3. Only when ALL upstream non-branch paths eventually lead to at least one
+           branch node will `has_branch` be True.
 
-        The traversal terminates early and returns empty tuples if any upstream
-        path reaches START/CYCLE_START without encountering a branch or output
-        node, indicating the target node is directly reachable and should be
-        activated immediately.
+        Special case:
+        - If `target_node` has no upstream nodes AND its type is START or CYCLE_START,
+          it is considered directly reachable from the workflow entry, and therefore
+          has no controlling branch nodes.
 
         Args:
-            target_node: The ID of the node whose upstream activation
-                dependencies are to be resolved.
+            target_node (str):
+                The identifier of the node whose upstream control branches
+                are to be resolved.
 
         Returns:
-            A tuple of two elements:
-                - A deduplicated tuple of (branch_node_id, branch_label) pairs
-                  representing upstream branch control dependencies. Empty if
-                  any clean path to START exists.
-                - A deduplicated tuple of upstream output node IDs that must
-                  complete before this node activates.
+            tuple[bool, tuple[tuple[str, str]]]:
+                - has_branch (bool):
+                    True if every upstream path from `target_node` encounters
+                    at least one branch node.
+                    False if any path reaches a start node without a branch.
+                - branch_nodes (tuple[tuple[str, str]]):
+                    A deduplicated tuple of `(branch_node_id, branch_label)` pairs
+                    representing all branch nodes that can influence `target_node`.
+                    Returns an empty tuple if `has_branch` is False.
         """
-        source_nodes = self._reverse_adj[target_node]
+        source_nodes = [
+            {
+                "id": edge.get("source"),
+                "branch": edge.get("label")
+            }
+            for edge in self.edges
+            if edge.get("target") == target_node
+        ]
         if not source_nodes and self.get_node_type(target_node) in [NodeType.START, NodeType.CYCLE_START]:
-            return tuple(), tuple()
+            return False, tuple()
 
         branch_nodes = []
-        output_nodes = []
         non_branch_nodes = []
 
         for node_info in source_nodes:
@@ -160,23 +149,19 @@ class GraphBuilder:
                     (node_info["id"], node_info["branch"])
                 )
             else:
-                if self.get_node_type(node_info["id"]) == NodeType.END:
-                    output_nodes.append(node_info["id"])
                 non_branch_nodes.append(node_info["id"])
 
         has_branch = True
         for node_id in non_branch_nodes:
-            upstream_control_nodes, upstream_output_nodes = self._find_upstream_activation_dep(node_id)
-            if not upstream_control_nodes:
-                if not upstream_output_nodes and node_id not in output_nodes:
-                    return tuple(), tuple()
-                branch_nodes = []
-                has_branch = False
-            if has_branch:
-                branch_nodes.extend(upstream_control_nodes)
-            output_nodes.extend(upstream_output_nodes)
+            node_has_branch, nodes = self._find_upstream_branch_node(node_id)
+            has_branch = has_branch and node_has_branch
+            if not has_branch:
+                break
+            branch_nodes.extend(nodes)
+        if not has_branch:
+            branch_nodes = []
 
-        return tuple(set(branch_nodes)), tuple(set(output_nodes))
+        return has_branch, tuple(set(branch_nodes))
 
     def _analyze_end_node_output(self):
         """
@@ -197,10 +182,11 @@ class GraphBuilder:
         """
 
         # Collect all End nodes in the workflow
-        logger.info(f"[Prefix Analysis] Found {len(self.end_nodes)} End nodes")
+        end_nodes = [node for node in self.nodes if node.get("type") == "end"]
+        logger.info(f"[Prefix Analysis] Found {len(end_nodes)} End nodes")
 
         # Iterate through each End node to analyze its output
-        for end_node in self.end_nodes:
+        for end_node in end_nodes:
             end_node_id = end_node.get("id")
             config = end_node.get("config", {})
             output = config.get("output")
@@ -209,33 +195,42 @@ class GraphBuilder:
             if not output:
                 continue
 
+            # Regex to split output into:
+            #    - variable placeholders: {{ ... }}
+            #    - normal literal text
+            #
+            # Example:
+            #   "Hello {{user.name}}!" ->
+            #   ["Hello ", "{{user.name}}", "!"]
+            pattern = r'\{\{.*?\}\}|[^{}]+'
+
+            # Strict variable format: {{ node_id.field_name }}
+            variable_pattern_string = r'\{\{\s*[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+\s*\}\}'
+            variable_pattern = re.compile(variable_pattern_string)
+
             # Split output into ordered segments
-            output_template = list(_OUTPUT_PATTERN.findall(output))
+            output_template = list(re.findall(pattern, output))
 
             # Determine whether each segment is literal text
             #    True  -> literal (can be directly output)
             #    False -> variable placeholder (needs runtime value)
             output_flag = [
-                not bool(_VARIABLE_PATTERN.match(item))
+                not bool(variable_pattern.match(item))
                 for item in output_template
             ]
 
             # Stream mode: output activation depends on upstream branch nodes
             if self.stream:
                 # Find upstream branch nodes that can control this End node
-                upstream_control_nodes, upstream_output_nodes = self._find_upstream_activation_dep(end_node_id)
-                activate = not bool(upstream_control_nodes) and not bool(upstream_output_nodes)
+                has_branch, control_nodes = self._find_upstream_branch_node(end_node_id)
+
                 # Build StreamOutputConfig for this End node
                 self.end_node_map[end_node_id] = StreamOutputConfig(
-                    id=end_node_id,
                     # If there is no upstream branch, output is active immediately
-                    activate=activate,
+                    activate=not has_branch,
 
                     # Branch nodes that control activation of this End node
-                    control_nodes=self._merge_control_nodes(upstream_control_nodes),
-                    upstream_output_nodes=list(upstream_output_nodes),
-                    control_resolved=not bool(upstream_control_nodes),
-                    output_resolved=not bool(upstream_output_nodes),
+                    control_nodes=self._merge_control_nodes(control_nodes),
 
                     # Convert output segments into OutputContent objects
                     outputs=list(
@@ -254,16 +249,14 @@ class GraphBuilder:
                     cursor=0
                 )
                 logger.info(f"[Stream Analysis] end_id: {end_node_id}, "
-                            f"activate: {activate}, "
-                            f"control_nodes: {upstream_control_nodes},"
-                            f"ref_outputs: {upstream_output_nodes},"
+                            f"activate: {not has_branch}, "
+                            f"control_nodes: {control_nodes},"
                             f"output: {output_template},"
                             f"output_activate: {output_flag}")
 
             # Non-stream mode: all outputs are activated by default
             else:
                 self.end_node_map[end_node_id] = StreamOutputConfig(
-                    id=end_node_id,
                     activate=True,
                     control_nodes={},
                     outputs=list(
@@ -276,10 +269,7 @@ class GraphBuilder:
                             for output_string, activate in zip(output_template, output_flag)
                         ]
                     ),
-                    cursor=0,
-                    upstream_output_nodes=[],
-                    control_resolved=True,
-                    output_resolved=True,
+                    cursor=0
                 )
 
     def add_nodes(self):
@@ -314,6 +304,8 @@ class GraphBuilder:
             # Record start and end node IDs
             if node_type in [NodeType.START, NodeType.CYCLE_START]:
                 self.start_node_id = node_id
+            elif node_type == NodeType.END:
+                self.end_node_ids.append(node_id)
 
             # Create node instance (start and end nodes are also created)
             # NOTE:Loop node creation automatically removes the nodes and edges of the subgraph from the current graph
@@ -456,7 +448,7 @@ class GraphBuilder:
                     branch_activate = []
                     new_state = state.copy()
                     new_state["activate"] = dict(state.get("activate", {}))  # deep copy of activate
-                    node_output = variable_pool.get_node_output(src, default=dict(), strict=False)
+                    node_output = variable_pool.get_node_output(src, defalut=dict(), strict=False)
                     for label, branch in unique_branch.items():
                         if node_output and evaluate_condition(
                                 branch["condition"],
@@ -502,11 +494,9 @@ class GraphBuilder:
                 logger.debug(f"Added waiting edge: {sources} -> {target}")
 
         # Connect End nodes to the global END node
-        for end_node in self.end_nodes:
-            end_node_id = end_node.get("id")
-            if end_node_id:
-                self.graph.add_edge(end_node_id, END)
-                logger.debug(f"Added edge: {end_node_id} -> END")
+        for end_node_id in self.end_node_ids:
+            self.graph.add_edge(end_node_id, END)
+            logger.debug(f"Added edge: {end_node_id} -> END")
         return
 
     def build(self) -> CompiledStateGraph:

@@ -8,6 +8,7 @@ import RbModal from '@/components/RbModal'
 
 interface VariableEditModalProps {
   refresh: (values: Variable[]) => void;
+  variables: Variable[]
 }
 
 const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModalProps>(({

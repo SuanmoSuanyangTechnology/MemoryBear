@@ -195,6 +195,6 @@ class MCPToolManager:
         except Exception as e:
             return {
                 "success": False,
-                "error": "连接失败",
-                "message": str(e)
+                "error": str(e),
+                "message": "连接失败"
             }

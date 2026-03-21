@@ -6,7 +6,6 @@ of the memory system including LLM, chunking, pruning, and search.
 Classes:
     LLMConfig: Configuration for LLM client
     ChunkerConfig: Configuration for dialogue chunking
-    OntologyClassInfo: Single ontology class with name and description
     PruningConfig: Configuration for semantic pruning
     TemporalSearchParams: Parameters for temporal search queries
 """
@@ -51,41 +50,30 @@ class ChunkerConfig(BaseModel):
     min_characters_per_chunk: Optional[int] = Field(24, ge=0, description="The minimum number of characters in each chunk.")
 
 
-class OntologyClassInfo(BaseModel):
-    """本体类型的名称与语义描述，用于剪枝提示词注入。
-
-    Attributes:
-        class_name: 本体类型名称（如"患者"、"课程"）
-        class_description: 本体类型语义描述，告知 LLM 该类型在当前场景下的含义
-    """
-    class_name: str = Field(..., description="本体类型名称")
-    class_description: str = Field(default="", description="本体类型语义描述")
-
-
 class PruningConfig(BaseModel):
     """Configuration for semantic pruning of dialogue content.
 
     Attributes:
         pruning_switch: Enable or disable semantic pruning
-        pruning_scene: Scene name for pruning from ontology_scene table
+        pruning_scene: Scene name for pruning, either a built-in key
+            ('education', 'online_service', 'outbound') or a custom scene_name
+            from ontology_scene table
         pruning_threshold: Pruning ratio (0-0.9, max 0.9 to avoid complete removal)
-        scene_id: Optional ontology scene UUID
-        ontology_class_infos: Full ontology class info (name + description) from
-            ontology_class table, injected into the pruning prompt to drive
-            scene-aware preservation decisions
+        scene_id: Optional ontology scene UUID, used to load custom ontology classes
+        ontology_classes: List of class_name strings from ontology_class table,
+            injected into the prompt when pruning_scene is not a built-in scene
     """
     pruning_switch: bool = Field(False, description="Enable semantic pruning when True.")
     pruning_scene: str = Field(
         "education",
-        description="Scene name from ontology_scene table.",
+        description="Scene for pruning: built-in key or custom scene_name from ontology_scene.",
     )
     pruning_threshold: float = Field(
         0.5, ge=0.0, le=0.9,
         description="Pruning ratio within 0-0.9 (max 0.9 to avoid termination).")
     scene_id: Optional[str] = Field(None, description="Ontology scene UUID (optional).")
-    ontology_class_infos: List[OntologyClassInfo] = Field(
-        default_factory=list,
-        description="Full ontology class info (name + description) injected into pruning prompt."
+    ontology_classes: Optional[List[str]] = Field(
+        None, description="Class names from ontology_class table for custom scenes."
     )
 
 

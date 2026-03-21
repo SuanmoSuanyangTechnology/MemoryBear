@@ -10,6 +10,10 @@ interface CanvasToolbarProps {
   isHandMode: boolean;
   setIsHandMode: React.Dispatch<React.SetStateAction<boolean>>;
   zoomLevel: number;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
   addNotes: () => void;
 }
 

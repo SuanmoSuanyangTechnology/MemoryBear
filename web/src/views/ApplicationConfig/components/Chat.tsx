@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 20:52:33
+ * @Last Modified time: 2026-03-05 17:03:46
  */
 /**
  * Chat debugging component for application testing
@@ -12,24 +12,23 @@
 
 import { type FC, useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams } from 'react-router-dom'
 import clsx from 'clsx'
-import { App } from 'antd';
-import { SettingOutlined } from '@ant-design/icons'
+import { Flex, Dropdown, type MenuProps, App, Divider } from 'antd'
 
 import ChatIcon from '@/assets/images/application/chat.png'
 import DebuggingEmpty from '@/assets/images/application/debuggingEmpty.png'
-import type { ChatData, Config, FeaturesConfigForm } from '../types'
+import type { ChatData, Config } from '../types'
 import { runCompare, draftRun } from '@/api/application'
 import Empty from '@/components/Empty'
 import ChatContent from '@/components/Chat/ChatContent'
 import type { ChatItem } from '@/components/Chat/types'
 import { type SSEMessage } from '@/utils/stream'
 import ChatInput from '@/components/Chat/ChatInput'
-import ChatToolbar from '@/components/Chat/ChatToolbar'
-import type { ChatToolbarRef } from '@/components/Chat/ChatToolbar'
+import UploadFiles from '@/views/Conversation/components/FileUpload'
+import AudioRecorder from '@/components/AudioRecorder'
+import UploadFileListModal from '@/views/Conversation/components/UploadFileListModal'
+import type { UploadFileListModalRef } from '@/views/Conversation/types'
 import type { Variable } from './VariableList/types'
-
 
 /**
  * Component props
@@ -45,44 +44,27 @@ interface ChatProps {
   handleSave: (flag?: boolean) => Promise<unknown>;
   /** Source type: multi-agent cluster or single agent */
   source?: 'multi_agent' | 'agent';
-  /** chatVariables prop */
-  chatVariables?: Variable[];
-  handleEditVariables?: () => void;
+  chatVariables?: Variable[]; // Add chatVariables prop
 }
-
 
 /**
  * Chat debugging component
  * Allows testing application with different model configurations side-by-side
  */
-const Chat: FC<ChatProps> = ({
-  chatList, data, updateChatList, handleSave, source = 'agent', chatVariables,
-  handleEditVariables
-}) => {
+const Chat: FC<ChatProps> = ({ chatList, data, updateChatList, handleSave, source = 'agent', chatVariables }) => {
   const { t } = useTranslation();
-  const { id } = useParams()
   const { message: messageApi } = App.useApp()
-  const toolbarRef = useRef<ChatToolbarRef>(null)
   const [loading, setLoading] = useState(false)
   const [isCluster, setIsCluster] = useState(source === 'multi_agent')
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [compareLoading, setCompareLoading] = useState(false)
   const [fileList, setFileList] = useState<any[]>([])
   const [message, setMessage] = useState<string | undefined>(undefined)
-  const [features, setFeatures] = useState<FeaturesConfigForm>({} as FeaturesConfigForm)
-
-  useEffect(() => {
-    setCompareLoading(false)
-    setLoading(false)
-  }, [chatList.map(item => item.label).join(',')])
-
-  useEffect(() => {
-    if (data?.features) setFeatures(data.features)
-  }, [data?.features])
+  const uploadFileListModalRef = useRef<UploadFileListModalRef>(null)
 
   useEffect(() => {
     setIsCluster(source === 'multi_agent')
-    toolbarRef.current?.setFiles([])
+    setFileList([])
     setMessage(undefined)
   }, [source])
 
@@ -92,9 +74,7 @@ const Chat: FC<ChatProps> = ({
       role: 'user',
       content: message,
       created_at: Date.now(),
-      meta_data: {
-        files
-      },
+      files
     };
     updateChatList(prev => prev.map(item => ({
       ...item,
@@ -126,8 +106,8 @@ const Chat: FC<ChatProps> = ({
     }
   }
   /** Update assistant message with streaming content */
-  const updateAssistantMessage = (content?: string, model_config_id?: string, conversation_id?: string, audio_url?: string) => {
-    if ((!content && !audio_url) || !model_config_id) return
+  const updateAssistantMessage = (content?: string, model_config_id?: string, conversation_id?: string) => {
+    if (!content || !model_config_id) return
     updateChatList(prev => {
       const targetIndex = prev.findIndex(item => item.model_config_id === model_config_id);
       if (targetIndex !== -1) {
@@ -138,13 +118,12 @@ const Chat: FC<ChatProps> = ({
         if (lastMsg && lastMsg.role === 'assistant') {
           modelChatList[targetIndex] = {
             ...modelChatList[targetIndex],
-            conversation_id,
+            conversation_id: conversation_id,
             list: [
               ...curChatMsgList.slice(0, curChatMsgList.length - 1),
               {
                 ...lastMsg,
-                content: lastMsg.content + (content || ''),
-                meta_data: { audio_url }
+                content: lastMsg.content + content
               }
             ]
           }
@@ -162,7 +141,8 @@ const Chat: FC<ChatProps> = ({
       const targetIndex = prev.findIndex(item => item.model_config_id === model_config_id);
       if (targetIndex > -1) {
         const modelChatList = [...prev]
-        const curChatMsgList = modelChatList[targetIndex].list || []
+        const curModelChat = modelChatList[targetIndex]
+        const curChatMsgList = curModelChat.list || []
         const lastMsg = curChatMsgList[curChatMsgList.length - 1]
         if (lastMsg.role === 'assistant') {
           modelChatList[targetIndex] = {
@@ -184,14 +164,13 @@ const Chat: FC<ChatProps> = ({
   }
   /** Send message for agent comparison mode */
   const handleSend = (msg?: string) => {
-    if (loading || !id) return
+    if (loading) return
     setLoading(true)
     setCompareLoading(true)
     handleSave(false)
       .then(() => {
         const message = msg
         if (!message?.trim()) return
-        const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
         // Validate required variables before sending
         let isCanSend = true
         const params: Record<string, any> = {}
@@ -216,9 +195,8 @@ const Chat: FC<ChatProps> = ({
           return
         }
 
-        addUserMessage(message, files)
+        addUserMessage(message, fileList)
         setMessage(message)
-        toolbarRef.current?.setFiles([])
         setFileList([])
         addAssistantMessage()
 
@@ -226,16 +204,13 @@ const Chat: FC<ChatProps> = ({
           setCompareLoading(false)
 
           data.map(item => {
-            const { model_config_id, conversation_id, content, message_length, audio_url } = item.data as { model_config_id: string; conversation_id: string; content: string; message_length: number; audio_url: string };
-            
+            const { model_config_id, conversation_id, content, message_length } = item.data as { model_config_id: string; conversation_id: string; content: string; message_length: number };
+
             switch (item.event) {
               case 'model_message':
-                updateAssistantMessage(content, model_config_id, conversation_id, audio_url)
+                updateAssistantMessage(content, model_config_id, conversation_id)
                 break;
               case 'model_end':
-                if (audio_url) {
-                  updateAssistantMessage(content, model_config_id, conversation_id, audio_url)
-                }
                 updateErrorAssistantMessage(message_length, model_config_id)
                 break;
               case 'compare_end':
@@ -246,9 +221,9 @@ const Chat: FC<ChatProps> = ({
         };
 
         setTimeout(() => {
-          runCompare(id, {
+          runCompare(data.app_id, {
             message,
-            files: files.map(file => {
+            files: fileList.map(file => {
               if (file.url) {
                 return file
               } else {
@@ -266,9 +241,9 @@ const Chat: FC<ChatProps> = ({
               conversation_id: item.conversation_id
             })),
             variables: params,
-            parallel: true,
-            stream: true,
-            timeout: 60,
+            "parallel": true,
+            "stream": true,
+            "timeout": 60,
           }, handleStreamMessage)
             .catch(() => {
               setLoading(false)
@@ -292,7 +267,7 @@ const Chat: FC<ChatProps> = ({
     const assistantMessage: ChatItem = {
       role: 'assistant',
       content: '',
-      created_at: Date.now()
+      created_at: Date.now(),
     };
     updateChatList(prev => prev.map(item => ({
       ...item,
@@ -304,7 +279,8 @@ const Chat: FC<ChatProps> = ({
     if (!content) return
     updateChatList(prev => {
       const modelChatList = [...prev]
-      const curChatMsgList = modelChatList[0].list || []
+      const curModelChat = modelChatList[0]
+      const curChatMsgList = curModelChat.list || []
       const lastMsg = curChatMsgList[curChatMsgList.length - 1]
       if (lastMsg.role === 'assistant') {
         modelChatList[0] = {
@@ -324,9 +300,11 @@ const Chat: FC<ChatProps> = ({
   /** Update cluster message when error occurs */
   const updateClusterErrorAssistantMessage = (message_length: number) => {
     if (message_length > 0) return
+
     updateChatList(prev => {
       const modelChatList = [...prev]
-      const curChatMsgList = modelChatList[0].list || []
+      const curModelChat = modelChatList[0]
+      const curChatMsgList = curModelChat.list || []
       const lastMsg = curChatMsgList[curChatMsgList.length - 1]
       if (lastMsg.role === 'assistant') {
         modelChatList[0] = {
@@ -343,19 +321,17 @@ const Chat: FC<ChatProps> = ({
       return [...modelChatList]
     })
   }
-
+  /** Send message for cluster mode */
   const handleClusterSend = (msg?: string) => {
-    if (loading || !id) return
+    if (loading) return
     setLoading(true)
     setCompareLoading(true)
     handleSave(false)
       .then(() => {
         const message = msg
         if (!message || message.trim() === '') return
-        const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
-        addUserMessage(message, files)
+        addUserMessage(message, fileList)
         setMessage(undefined)
-        toolbarRef.current?.setFiles([])
         setFileList([])
         addClusterAssistantMessage()
 
@@ -364,7 +340,7 @@ const Chat: FC<ChatProps> = ({
 
           data.map(item => {
             const { conversation_id, content, message_length } = item.data as { conversation_id: string, content: string, message_length: number };
-            
+
             switch (item.event) {
               case 'start':
                 if (conversation_id && conversationId !== conversation_id) {
@@ -388,12 +364,13 @@ const Chat: FC<ChatProps> = ({
         };
 
         setTimeout(() => {
-          draftRun(id,
+          draftRun(
+            data.app_id,
             {
               message,
               conversation_id: conversationId,
               stream: true,
-              files: files.map(file => {
+              files: fileList.map(file => {
                 if (file.url) {
                   return file
                 } else {
@@ -428,6 +405,35 @@ const Chat: FC<ChatProps> = ({
   const handleDelete = (index: number) => {
     updateChatList(chatList.filter((_, voIndex) => voIndex !== index))
   }
+  const handleMessageChange = (message: string) => {
+    setMessage(message)
+  }
+  const fileChange = (file?: any) => {
+    setFileList([...fileList, file])
+  }
+  const handleRecordingComplete = async (file: any) => {
+    setFileList([...fileList, {
+      uid: file.file_id,
+      response: { data: file },
+      thumbUrl: file.url,
+      type: file.type
+    }])
+  }
+
+  const handleShowUpload: MenuProps['onClick'] = ({ key }) => {
+    switch (key) {
+      case 'define':
+        uploadFileListModalRef.current?.handleOpen()
+        break
+    }
+  }
+  const addFileList = (list?: any[]) => {
+    if (!list || list.length <= 0) return
+    setFileList([...fileList, ...(list || [])])
+  }
+  const updateFileList = (list?: any[]) => {
+    setFileList([...list || []])
+  }
 
   return (
     <div className="rb:relative rb:h-full rb:flex rb:flex-col">
@@ -446,10 +452,13 @@ const Chat: FC<ChatProps> = ({
                 "rb:border-r rb:border-[#DFE4ED]": index !== chatList.length - 1 && chatList.length > 1,
               })}>
                 {chat.label &&
-                  <div className={clsx("rb:grid rb:bg-[#F0F3F8] rb:text-center rb:flex-[0_0_auto]", {
-                    'rb:rounded-tr-xl': index === chatList.length - 1,
-                    'rb:rounded-tl-xl': index === 0,
-                  })}>
+                  <div className={clsx(
+                    "rb:grid rb:bg-[#F0F3F8] rb:text-center rb:flex-[0_0_auto]",
+                    {
+                      'rb:rounded-tr-xl': index === chatList.length - 1,
+                      'rb:rounded-tl-xl': index === 0,
+                    }
+                  )}>
                     <div className='rb:relative rb:p-[10px_12px] rb:overflow-hidden'>
                       <div className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:w-[calc(100%-24px)]">{chat.label}</div>
                       <div
@@ -486,37 +495,47 @@ const Chat: FC<ChatProps> = ({
               message={message}
               className="rb:relative!"
               loading={loading}
-              fileChange={(list) => {
-                setFileList(list || [])
-                toolbarRef.current?.setFiles(list || [])
-              }}
+              fileChange={updateFileList}
               fileList={fileList}
               onSend={isCluster ? handleClusterSend : handleSend}
-              onChange={setMessage}
+              onChange={handleMessageChange}
             >
-              <ChatToolbar
-                ref={toolbarRef}
-                features={features}
-                onFilesChange={setFileList}
-                extra={
-                  chatVariables && chatVariables.length > 0 ? (
+              <Flex justify="space-between" className="rb:flex-1">
+                <Flex gap={8} align="center">
+                  <Dropdown
+                    menu={{
+                      items: [
+                        { key: 'define', label: t('memoryConversation.addRemoteFile') },
+                        {
+                          key: 'upload', label: (
+                            <UploadFiles
+                              onChange={fileChange}
+                            />
+                          )
+                        },
+                      ],
+                      onClick: handleShowUpload
+                    }}
+                  >
                     <div
-                      className={clsx('rb:flex rb:items-center rb:border rb:rounded-lg rb:px-2 rb:text-[12px] rb:h-6 rb:cursor-pointer rb:hover:bg-[#F0F3F8] rb:text-[#212332]', {
-                        'rb:border-[#FF5D34] rb:text-[#FF5D34]': chatVariables.some(vo => vo.required && !vo.value),
-                        'rb:border-[#DFE4ED]': !chatVariables.some(vo => vo.required && !vo.value),
-                      })}
-                      onClick={handleEditVariables}
-                    >
-                      <SettingOutlined className="rb:mr-1" />
-                      {t('memoryConversation.variableConfig')}
-                    </div>
-                  ) : null
-                }
-              />
+                      className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/link.svg')] rb:hover:bg-[url('@/assets/images/conversation/link_hover.svg')]"
+                    ></div>
+                  </Dropdown>
+                </Flex>
+                <Flex align="center">
+                  <AudioRecorder onRecordingComplete={handleRecordingComplete} />
+                  <Divider type="vertical" className="rb:ml-1.5! rb:mr-3!" />
+                </Flex>
+              </Flex>
             </ChatInput>
           </div>
         </>
       }
+
+      <UploadFileListModal
+        ref={uploadFileListModalRef}
+        refresh={addFileList}
+      />
     </div>
   )
 }

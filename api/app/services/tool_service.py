@@ -78,7 +78,7 @@ class ToolService:
 
     def get_tool_info(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[ToolInfo]:
         """获取工具详情"""
-        config = self.tool_repo.find_by_id_and_tenant_all(self.db, uuid.UUID(tool_id), tenant_id)
+        config = self.tool_repo.find_by_id_and_tenant(self.db, uuid.UUID(tool_id), tenant_id)
         return self._config_to_info(config) if config else None
 
     def _check_name_duplicate(self, name: str, tool_type: ToolType, tenant_id: uuid.UUID, exclude_id: Optional[uuid.UUID] = None):
@@ -237,7 +237,7 @@ class ToolService:
             return False
 
     def delete_tool(self, tool_id: str, tenant_id: uuid.UUID) -> bool:
-        """删除工具（逻辑删除）"""
+        """删除工具"""
         config = self._get_tool_config(tool_id, tenant_id)
         if not config:
             return False
@@ -246,34 +246,20 @@ class ToolService:
             raise ValueError("内置工具不允许删除")
 
         try:
-            config.is_active = False
+            # 删除关联表记录
+            if config.tool_type == ToolType.CUSTOM.value:
+                self.db.query(CustomToolConfig).filter(CustomToolConfig.id == config.id).delete()
+            elif config.tool_type == ToolType.MCP.value:
+                self.db.query(MCPToolConfig).filter(MCPToolConfig.id == config.id).delete()
+            
+            # 删除主表记录（ToolExecution会通过cascade自动删除）
+            self.db.delete(config)
             self._clear_tool_cache(tool_id)
             self.db.commit()
             return True
         except Exception as e:
             self.db.rollback()
             logger.error(f"删除工具失败: {tool_id}, {e}")
-            return False
-
-    def set_tool_active(self, tool_id: str, tenant_id: uuid.UUID, is_active: bool) -> bool:
-        """设置工具可用状态（启用/禁用）"""
-        # 直接查询，包含 is_active=False 的记录
-        config = self.db.query(ToolConfig).filter(
-            ToolConfig.id == uuid.UUID(tool_id),
-            ToolConfig.tenant_id == tenant_id
-        ).first()
-        if not config:
-            return False
-        if config.tool_type == ToolType.BUILTIN.value:
-            raise ValueError("内置工具不允许修改可用状态")
-        try:
-            config.is_active = is_active
-            self._clear_tool_cache(tool_id)
-            self.db.commit()
-            return True
-        except Exception as e:
-            self.db.rollback()
-            logger.error(f"设置工具状态失败: {tool_id}, {e}")
             return False
 
     async def execute_tool(
@@ -392,7 +378,7 @@ class ToolService:
         Returns:
             方法列表或None
         """
-        config = self._get_tool_config_all(tool_id, tenant_id)
+        config = self._get_tool_config(tool_id, tenant_id)
         if not config:
             return None
         
@@ -871,20 +857,16 @@ class ToolService:
             }
 
     def _get_tool_config(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[ToolConfig]:
-        """获取工具配置(仅返回 is_active=True)"""
+        """获取工具配置"""
         return self.tool_repo.find_by_id_and_tenant(self.db, uuid.UUID(tool_id), tenant_id)
 
-    def _get_tool_config_all(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[ToolConfig]:
-        """获取工具配置（返回所有）"""
-        return self.tool_repo.find_by_id_and_tenant_all(self.db, uuid.UUID(tool_id), tenant_id)
-
     def get_tool_instance(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[BaseTool]:
-        """获取工具实例（仅返回 is_active=True 的工具）"""
+        """获取工具实例"""
         if tool_id in self._tool_cache:
             return self._tool_cache[tool_id]
 
         config = self._get_tool_config(tool_id, tenant_id)
-        if not config or not config.is_active:
+        if not config:
             return None
 
         try:
@@ -998,7 +980,6 @@ class ToolService:
             tags=config.tags or [],
             tenant_id=str(config.tenant_id) if config.tenant_id else None,
             config_data=config_data,
-            is_active=config.is_active,
             created_at=config.created_at
         )
 

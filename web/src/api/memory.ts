@@ -2,10 +2,9 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 18:35:10
+ * @Last Modified time: 2026-03-12 18:25:06
  */
 import { request } from '@/utils/request'
-import type { AxiosRequestConfig } from 'axios'
 import type {
   MemoryFormData,
 } from '@/views/MemoryManagement/types'
@@ -95,12 +94,8 @@ export const updatedEndUserProfile = (values: EndUser) => {
   return request.post(`/memory-storage/updated_end_user/profile`, values)
 }
 // User Memory - Relationship network
-export const getMemorySearchEdges = (end_user_id: string, config?: AxiosRequestConfig) => {
-  return request.get(`/memory-storage/analytics/graph_data`, { end_user_id }, config)
-}
-// User Memory - Community graph
-export const getMemoryCommunityGraph = (end_user_id: string, config?: AxiosRequestConfig) => {
-  return request.get(`/memory-storage/analytics/community_graph`, { end_user_id }, config)
+export const getMemorySearchEdges = (end_user_id: string) => {
+  return request.get(`/memory-storage/analytics/graph_data`, { end_user_id })
 }
 // User Memory - User interest distribution
 export const getInterestDistributionByUser = (end_user_id: string) => {
@@ -218,8 +213,8 @@ export const getExplicitMemory = (end_user_id: string) => {
 export const getExplicitMemoryDetails = (data: { end_user_id: string, memory_id: string; }) => {
   return request.post(`/memory/explicit-memory/details`, data)
 }
-export const getConversations = (end_user_id: string, page = 1, pagesize = 20) => {
-  return request.get(`/memory/work/${end_user_id}/conversations`, { page, pagesize })
+export const getConversations = (end_user_id: string) => {
+  return request.get(`/memory/work/${end_user_id}/conversations`)
 }
 export const getConversationMessages = (end_user_id: string, conversation_id: string) => {
   return request.get(`/memory/work/${end_user_id}/messages`, { conversation_id })

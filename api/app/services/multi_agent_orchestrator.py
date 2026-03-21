@@ -1638,7 +1638,6 @@ class MultiAgentOrchestrator:
                 self.variables = config_data.get("variables", [])
                 self.tools = config_data.get("tools", {})
                 self.skills = config_data.get("skills", {})
-                self.features = config_data.get("features", {})
                 self.default_model_config_id = release.default_model_config_id
 
         return AgentConfigProxy(release, app, config_data)

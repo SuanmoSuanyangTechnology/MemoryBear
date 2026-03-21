@@ -128,100 +128,89 @@ class WorkflowExecutor:
                   - token_usage: aggregated token usage if available
                   - error: error message if any
         """
-        start = datetime.datetime.now()
-        async for event in self.execute_stream(input_data):
-            if event.get("event") == "workflow_end":
-                return event.get("data")
-        return self.result_builder.build_final_output(
-            {"error": "Workflow execution did not end as expected"},
-            self.variable_pool,
-            (datetime.datetime.now() - start).total_seconds(),
-            "",
-            success=False
-        )
-        # logger.info(f"Starting workflow execution: execution_id={self.execution_context.execution_id}")
-        #
-        # start_time = datetime.datetime.now()
-        #
-        # # Execute the workflow
-        # try:
-        #     # Build the workflow graph
-        #     graph = self.build_graph()
-        #
-        #     # Initialize the variable pool with input data
-        #     await self.variable_initializer.initialize(
-        #         variable_pool=self.variable_pool,
-        #         input_data=input_data,
-        #         execution_context=self.execution_context
-        #     )
-        #     initial_state = self.state_manager.create_initial_state(
-        #         workflow_config=self.workflow_config,
-        #         input_data=input_data,
-        #         execution_context=self.execution_context,
-        #         start_node_id=self.start_node_id
-        #     )
-        #
-        #     result = await graph.ainvoke(initial_state, config=self.execution_context.checkpoint_config)
-        #
-        #     # Aggregate output from all End nodes
-        #     full_content = ''
-        #     for end_id in self.stream_coordinator.end_outputs.keys():
-        #         full_content += self.variable_pool.get_value(f"{end_id}.output", default="", strict=False)
-        #
-        #     # Append messages for user and assistant
-        #     if input_data.get("files"):
-        #         result["messages"].extend(
-        #             [
-        #                 {
-        #                     "role": "user",
-        #                     "content": input_data.get("message", '')
-        #                 },
-        #                 {
-        #                     "role": "user",
-        #                     "content": input_data.get("files")
-        #                 },
-        #                 {
-        #                     "role": "assistant",
-        #                     "content": full_content
-        #                 }
-        #             ]
-        #         )
-        #     else:
-        #         result["messages"].extend(
-        #             [
-        #                 {
-        #                     "role": "user",
-        #                     "content": input_data.get("message", '')
-        #                 },
-        #                 {
-        #                     "role": "assistant",
-        #                     "content": full_content
-        #                 }
-        #             ]
-        #         )
-        #     # Calculate elapsed time
-        #     end_time = datetime.datetime.now()
-        #     elapsed_time = (end_time - start_time).total_seconds()
-        #
-        #     logger.info(
-        #         f"Workflow execution completed: execution_id={self.execution_context.execution_id}, elapsed_time={elapsed_time:.2f}ms")
-        #
-        #     return self.result_builder.build_final_output(result, self.variable_pool, elapsed_time, full_content)
-        #
-        # except Exception as e:
-        #     end_time = datetime.datetime.now()
-        #     elapsed_time = (end_time - start_time).total_seconds()
-        #
-        #     logger.error(f"Workflow execution failed: execution_id={self.execution_context.execution_id}, error={e}",
-        #                  exc_info=True)
-        #     return {
-        #         "status": "failed",
-        #         "error": str(e),
-        #         "output": None,
-        #         "node_outputs": {},
-        #         "elapsed_time": elapsed_time,
-        #         "token_usage": None
-        #     }
+        logger.info(f"Starting workflow execution: execution_id={self.execution_context.execution_id}")
+
+        start_time = datetime.datetime.now()
+
+        # Execute the workflow
+        try:
+            # Build the workflow graph
+            graph = self.build_graph()
+
+            # Initialize the variable pool with input data
+            await self.variable_initializer.initialize(
+                variable_pool=self.variable_pool,
+                input_data=input_data,
+                execution_context=self.execution_context
+            )
+            initial_state = self.state_manager.create_initial_state(
+                workflow_config=self.workflow_config,
+                input_data=input_data,
+                execution_context=self.execution_context,
+                start_node_id=self.start_node_id
+            )
+
+            result = await graph.ainvoke(initial_state, config=self.execution_context.checkpoint_config)
+
+            # Aggregate output from all End nodes
+            full_content = ''
+            for end_id in self.stream_coordinator.end_outputs.keys():
+                full_content += self.variable_pool.get_value(f"{end_id}.output", default="", strict=False)
+
+            # Append messages for user and assistant
+            if input_data.get("files"):
+                result["messages"].extend(
+                    [
+                        {
+                            "role": "user",
+                            "content": input_data.get("message", '')
+                        },
+                        {
+                            "role": "user",
+                            "content": input_data.get("files")
+                        },
+                        {
+                            "role": "assistant",
+                            "content": full_content
+                        }
+                    ]
+                )
+            else:
+                result["messages"].extend(
+                    [
+                        {
+                            "role": "user",
+                            "content": input_data.get("message", '')
+                        },
+                        {
+                            "role": "assistant",
+                            "content": full_content
+                        }
+                    ]
+                )
+            # Calculate elapsed time
+            end_time = datetime.datetime.now()
+            elapsed_time = (end_time - start_time).total_seconds()
+
+            logger.info(
+                f"Workflow execution completed: execution_id={self.execution_context.execution_id}, elapsed_time={elapsed_time:.2f}ms")
+
+            return self.result_builder.build_final_output(result, self.variable_pool, elapsed_time, full_content)
+
+        except Exception as e:
+            end_time = datetime.datetime.now()
+            elapsed_time = (end_time - start_time).total_seconds()
+
+            logger.error(f"Workflow execution failed: execution_id={self.execution_context.execution_id}, error={e}",
+                         exc_info=True)
+            return {
+                "status": "failed",
+                "error": str(e),
+                "output": None,
+                "node_outputs": {},
+                "elapsed_time": elapsed_time,
+                "token_usage": None
+            }
 
     async def execute_stream(
             self,
@@ -259,8 +248,7 @@ class WorkflowExecutor:
                 "timestamp": int(start_time.timestamp() * 1000)
             }
         }
-        result = None
-        full_content = ''
+
         try:
             # Build the workflow graph in streaming mode
             graph = self.build_graph(stream=True)
@@ -278,6 +266,7 @@ class WorkflowExecutor:
                 start_node_id=self.start_node_id
             )
 
+            full_content = ''
             self.stream_coordinator.update_scope_activation("sys")
 
             # Execute the workflow with streaming
@@ -374,12 +363,7 @@ class WorkflowExecutor:
 
             yield {
                 "event": "workflow_end",
-                "data": self.result_builder.build_final_output(
-                    result,
-                    self.variable_pool,
-                    elapsed_time,
-                    full_content,
-                    success=True)
+                "data": self.result_builder.build_final_output(result, self.variable_pool, elapsed_time, full_content)
             }
 
         except Exception as e:
@@ -388,19 +372,16 @@ class WorkflowExecutor:
 
             logger.error(f"Workflow execution failed: execution_id={self.execution_context.execution_id}, error={e}",
                          exc_info=True)
-            if result is None:
-                result = {"error": str(e)}
-            else:
-                result["error"] = str(e)
+
             yield {
                 "event": "workflow_end",
-                "data": self.result_builder.build_final_output(
-                    result,
-                    self.variable_pool,
-                    elapsed_time,
-                    full_content,
-                    success=False
-                )
+                "data": {
+                    "execution_id": self.execution_context.execution_id,
+                    "status": "failed",
+                    "error": str(e),
+                    "elapsed_time": elapsed_time,
+                    "timestamp": end_time.isoformat()
+                }
             }
 
 

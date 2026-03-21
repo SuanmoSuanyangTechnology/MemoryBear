@@ -58,16 +58,6 @@ class VerifyPasswordRequest(BaseModel):
     password: str = Field(..., description="密码")
 
 
-class LanguagePreferenceRequest(BaseModel):
-    """语言偏好设置请求"""
-    language: str = Field(..., min_length=2, max_length=10, description="语言代码，如 'zh', 'en'")
-
-
-class LanguagePreferenceResponse(BaseModel):
-    """语言偏好响应"""
-    language: str = Field(..., description="当前语言偏好")
-
-
 class ChangePasswordResponse(BaseModel):
     """修改密码响应"""
     message: str
@@ -84,7 +74,6 @@ class User(UserBase):
     current_workspace_id: Optional[uuid.UUID] = None
     current_workspace_name: Optional[str] = None
     role: Optional[WorkspaceRole] = None
-    preferred_language: Optional[str] = "zh"  # 用户语言偏好
 
     # 将 datetime 转换为毫秒时间戳
     @validator("created_at", pre=True)

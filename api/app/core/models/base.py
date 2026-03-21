@@ -1,19 +1,23 @@
 from __future__ import annotations
 
+import asyncio
 import os
-from typing import Any, Dict, Optional, TypeVar
+import time
+from abc import ABC, abstractmethod
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 
-from langchain_aws import ChatBedrock
-from langchain_community.chat_models import ChatTongyi
-from langchain_core.embeddings import Embeddings
-from langchain_core.language_models import BaseLLM
-from langchain_ollama import OllamaLLM
-from langchain_openai import ChatOpenAI, OpenAI
-from pydantic import BaseModel, Field
-
+import httpx
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.models.models_model import ModelProvider, ModelType
+from langchain_community.document_compressors import JinaRerank
+from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.embeddings import Embeddings
+from langchain_core.language_models import BaseLanguageModel, BaseLLM
+from langchain_core.outputs import Generation, LLMResult
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.runnables import RunnableSerializable
+from pydantic import BaseModel, Field
 
 T = TypeVar("T")
 
@@ -159,17 +163,25 @@ def get_provider_llm_class(config: RedBearModelConfig, type: ModelType = ModelTy
 
     # dashscope 的 omni 模型使用 OpenAI 兼容模式
     if provider == ModelProvider.DASHSCOPE and config.is_omni:
+        from langchain_openai import ChatOpenAI
         return ChatOpenAI
-    if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK]:
+
+    if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK] :
         if type == ModelType.LLM:
+            from langchain_openai import OpenAI
             return OpenAI
         elif type == ModelType.CHAT:
+            from langchain_openai import ChatOpenAI
             return ChatOpenAI
     elif provider == ModelProvider.DASHSCOPE:
+        from langchain_community.chat_models import ChatTongyi
         return ChatTongyi
     elif provider == ModelProvider.OLLAMA:
+        from langchain_ollama import OllamaLLM
         return OllamaLLM
     elif provider == ModelProvider.BEDROCK:
+        from langchain_aws import ChatBedrock, ChatBedrockConverse
+
         return ChatBedrock
     else:
         raise BusinessException(f"不支持的模型提供商: {provider}", code=BizCode.PROVIDER_NOT_SUPPORTED)

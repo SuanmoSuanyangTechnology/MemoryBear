@@ -51,10 +51,6 @@ class Message(BaseModel):
     def _serialize_created_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
 
-    @field_serializer("meta_data", when_used="json")
-    def _serialize_meta_data(self, data: Optional[Dict[str, Any]]):
-        return data or {}
-
 
 class Conversation(BaseModel):
     """会话输出"""

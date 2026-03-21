@@ -51,7 +51,7 @@ class ConditionDetail(BaseModel):
     )
 
     right: Any = Field(
-        default=None,
+        ...,
         description="Right-hand operand of the comparison expression"
     )
 

@@ -6,7 +6,6 @@ from app.core.response_utils import success
 from app.db import get_db
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_api_schema import (
-    ListConfigsResponse,
     MemoryReadRequest,
     MemoryReadResponse,
     MemoryWriteRequest,
@@ -32,15 +31,14 @@ async def write_memory_api_service(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
-    message: str = Body(..., description="Message content"),
+    payload: MemoryWriteRequest = Body(..., embed=False),
+
 ):
     """
     Write memory to storage.
     
     Stores memory content for the specified end user using the Memory API Service.
     """
-    body = await request.json()
-    payload = MemoryWriteRequest(**body)
     logger.info(f"Memory write request - end_user_id: {payload.end_user_id}, workspace_id: {api_key_auth.workspace_id}")
     
     memory_api_service = MemoryAPIService(db)
@@ -64,15 +62,13 @@ async def read_memory_api_service(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
-    message: str = Body(..., description="Query message"),
+    payload: MemoryReadRequest = Body(..., embed=False),
 ):
     """
     Read memory from storage.
     
     Queries and retrieves memories for the specified end user with context-aware responses.
     """
-    body = await request.json()
-    payload = MemoryReadRequest(**body)
     logger.info(f"Memory read request - end_user_id: {payload.end_user_id}")
     
     memory_api_service = MemoryAPIService(db)
@@ -89,27 +85,3 @@ async def read_memory_api_service(
     
     logger.info(f"Memory read successful for end_user: {payload.end_user_id}")
     return success(data=MemoryReadResponse(**result).model_dump(), msg="Memory read successfully")
-
-
-@router.get("/configs")
-@require_api_key(scopes=["memory"])
-async def list_memory_configs(
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
-):
-    """
-    List all memory configs for the workspace.
-    
-    Returns all available memory configurations associated with the authorized workspace.
-    """
-    logger.info(f"List configs request - workspace_id: {api_key_auth.workspace_id}")
-
-    memory_api_service = MemoryAPIService(db)
-
-    result = memory_api_service.list_memory_configs(
-        workspace_id=api_key_auth.workspace_id,
-    )
-
-    logger.info(f"Listed {result['total']} configs for workspace: {api_key_auth.workspace_id}")
-    return success(data=ListConfigsResponse(**result).model_dump(), msg="Configs listed successfully")

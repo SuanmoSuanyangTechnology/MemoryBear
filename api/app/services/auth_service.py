@@ -80,7 +80,6 @@ def authenticate_user_or_raise(db: Session, email: str, password: str) -> User:
     from app.core.exceptions import BusinessException
     from app.core.error_codes import BizCode
     from app.core.logging_config import get_auth_logger
-    from app.i18n.service import t
     
     logger = get_auth_logger()
     
@@ -88,17 +87,17 @@ def authenticate_user_or_raise(db: Session, email: str, password: str) -> User:
     user = user_repository.get_user_by_email(db, email=email)
     if not user:
         logger.warning(f"用户不存在: {email}")
-        raise BusinessException(t("auth.user.not_found"), code=BizCode.USER_NOT_FOUND)
+        raise BusinessException("用户不存在", code=BizCode.USER_NOT_FOUND)
     
     # 检查用户状态
     if not user.is_active:
         logger.warning(f"用户未激活: {email}")
-        raise BusinessException(t("auth.login.account_disabled"), code=BizCode.USER_NOT_FOUND)
+        raise BusinessException("用户未激活", code=BizCode.USER_NOT_FOUND)
     
     # 验证密码
     if not verify_password(password, user.hashed_password):
         logger.warning(f"密码错误: {email}")
-        raise BusinessException(t("auth.password.incorrect"), code=BizCode.PASSWORD_ERROR)
+        raise BusinessException("密码错误", code=BizCode.PASSWORD_ERROR)
     
     logger.info(f"用户认证成功: {email}")
     return user
@@ -255,8 +254,6 @@ def decode_access_token(token: str) -> dict:
     Raises:
         BusinessException: token 无效
     """
-    from app.i18n.service import t
-    
     try:
         payload = jwt.decode(token, TOKEN_SECRET_KEY, algorithms=[TOKEN_ALGORITHM])
         return {
@@ -264,4 +261,4 @@ def decode_access_token(token: str) -> dict:
             "share_token": payload["share_token"]
         }
     except jwt.InvalidTokenError:
-        raise BusinessException(t("auth.token.invalid"), BizCode.INVALID_TOKEN)
+        raise BusinessException("无效的访问 token", BizCode.INVALID_TOKEN)

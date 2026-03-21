@@ -170,7 +170,7 @@ class WorkflowValidator:
                 # 仅在发布时验证所有节点可达
                 # 6. 验证所有节点可达（从 start 节点出发）
                 if start_nodes and not errors:  # 只有在前面验证通过时才检查可达性
-                    reachable = WorkflowValidator.get_reachable_nodes(
+                    reachable = WorkflowValidator._get_reachable_nodes(
                         start_nodes[0]["id"],
                         edges
                     )
@@ -194,7 +194,7 @@ class WorkflowValidator:
         return len(errors) == 0, errors
 
     @staticmethod
-    def get_reachable_nodes(start_id: str, edges: list[dict]) -> set[str]:
+    def _get_reachable_nodes(start_id: str, edges: list[dict]) -> set[str]:
         """获取从 start 节点可达的所有节点
         
         Args:

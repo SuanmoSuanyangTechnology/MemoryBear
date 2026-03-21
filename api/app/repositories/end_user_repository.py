@@ -32,21 +32,6 @@ class EndUserRepository:
             db_logger.error(f"查询应用 {app_id} 下宿主时出错: {str(e)}")
             raise
 
-    def get_end_users_by_workspace(self, workspace_id: uuid.UUID) -> List[EndUser]:
-        """获取指定 workspace 下的所有 end_user"""
-        try:
-            end_users = (
-                self.db.query(EndUser)
-                .filter(EndUser.workspace_id == workspace_id)
-                .all()
-            )
-            db_logger.info(f"成功查询工作空间 {workspace_id} 下的 {len(end_users)} 个终端用户")
-            return end_users
-        except Exception as e:
-            self.db.rollback()
-            db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
-            raise
-
     def get_end_user_by_id(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
         """根据 end_user_id 查询宿主"""
         try:
@@ -66,9 +51,8 @@ class EndUserRepository:
             raise
 
     def get_or_create_end_user(
-        self,
-        app_id: uuid.UUID,
-        workspace_id: uuid.UUID,
+        self, 
+        app_id: uuid.UUID, 
         other_id: str,
         original_user_id: Optional[str] = None
     ) -> EndUser:
@@ -76,7 +60,6 @@ class EndUserRepository:
         
         Args:
             app_id: 应用ID
-            workspace_id: 工作空间ID
             other_id: 第三方ID
             original_user_id: 原始用户ID (存储到 other_id)
         """
@@ -85,31 +68,26 @@ class EndUserRepository:
             end_user = (
                 self.db.query(EndUser)
                 .filter(
-                    EndUser.workspace_id == workspace_id,
+                    EndUser.app_id == app_id,
                     EndUser.other_id == other_id
                 )
-                .order_by(EndUser.created_at.asc())
                 .first()
             )
             
             if end_user:
-                db_logger.debug(f"找到现有终端用户: 应用ID {workspace_id}、第三方ID {other_id}")
-                end_user.app_id=app_id
-                self.db.commit()
-                self.db.refresh(end_user)
+                db_logger.debug(f"找到现有终端用户: 应用ID {app_id}、第三方ID {other_id}")
                 return end_user
             
             # 创建新用户
             end_user = EndUser(
                 app_id=app_id,
-                workspace_id=workspace_id,
                 other_id=other_id
             )
             self.db.add(end_user)
             self.db.commit()
             self.db.refresh(end_user)
             
-            db_logger.info(f"创建新终端用户: (other_id: {other_id}) for workspace {workspace_id}")
+            db_logger.info(f"创建新终端用户: (other_id: {other_id}) for app {app_id}")
             return end_user
             
         except Exception as e:
@@ -336,7 +314,8 @@ class EndUserRepository:
         try:
             end_users = (
                 self.db.query(EndUser)
-                .filter(EndUser.workspace_id == workspace_id)
+                .join(App, EndUser.app_id == App.id)
+                .filter(App.workspace_id == workspace_id)
                 .all()
             )
             db_logger.info(f"成功查询工作空间 {workspace_id} 下的 {len(end_users)} 个终端用户")
@@ -423,79 +402,45 @@ class EndUserRepository:
             db_logger.error(f"获取终端用户 {end_user_id} 的 memory_config_id 时出错: {str(e)}")
             raise
 
-    # def batch_update_memory_config_id(
-    #     self,
-    #     app_id: uuid.UUID,
-    #     memory_config_id: uuid.UUID
-    # ) -> int:
-    #     """批量更新应用下所有终端用户的 memory_config_id
-    #
-    #     Args:
-    #         app_id: 应用ID
-    #         memory_config_id: 新的记忆配置ID
-    #
-    #     Returns:
-    #         int: 更新的行数
-    #     """
-    #     try:
-    #         from sqlalchemy import update
-    #
-    #         stmt = (
-    #             update(EndUser)
-    #             .where(EndUser.app_id == app_id)
-    #             .values(memory_config_id=memory_config_id)
-    #         )
-    #
-    #         result = self.db.execute(stmt)
-    #         self.db.commit()
-    #
-    #         updated_count = result.rowcount
-    #
-    #         db_logger.info(
-    #             f"批量更新终端用户记忆配置: app_id={app_id}, "
-    #             f"memory_config_id={memory_config_id}, updated_count={updated_count}"
-    #         )
-    #
-    #         return updated_count
-    #
-    #     except Exception as e:
-    #         self.db.rollback()
-    #         db_logger.error(
-    #             f"批量更新终端用户记忆配置时出错: app_id={app_id}, "
-    #             f"memory_config_id={memory_config_id}, error={str(e)}"
-    #         )
-    #         raise
-
-    def batch_update_memory_config_id_by_workspace(
-            self,
-            workspace_id: uuid.UUID,
-            memory_config_id: uuid.UUID
+    def batch_update_memory_config_id(
+        self,
+        app_id: uuid.UUID,
+        memory_config_id: uuid.UUID
     ) -> int:
-        """批量更新工作空间下所有终端用户的 memory_config_id"""
+        """批量更新应用下所有终端用户的 memory_config_id
+        
+        Args:
+            app_id: 应用ID
+            memory_config_id: 新的记忆配置ID
+            
+        Returns:
+            int: 更新的行数
+        """
         try:
             from sqlalchemy import update
             
             stmt = (
                 update(EndUser)
-                .where(EndUser.workspace_id == workspace_id)
+                .where(EndUser.app_id == app_id)
                 .values(memory_config_id=memory_config_id)
             )
-
+            
             result = self.db.execute(stmt)
             self.db.commit()
-
+            
             updated_count = result.rowcount
-
+            
             db_logger.info(
-                f"批量更新终端用户记忆配置: workspace_id={workspace_id}, "
+                f"批量更新终端用户记忆配置: app_id={app_id}, "
                 f"memory_config_id={memory_config_id}, updated_count={updated_count}"
             )
-
+            
             return updated_count
+            
         except Exception as e:
             self.db.rollback()
             db_logger.error(
-                f"批量更新终端用户记忆配置时出错: workspace_id={workspace_id}, "
+                f"批量更新终端用户记忆配置时出错: app_id={app_id}, "
                 f"memory_config_id={memory_config_id}, error={str(e)}"
             )
             raise
@@ -547,7 +492,7 @@ class EndUserRepository:
         """
         try:
             from sqlalchemy import update
-
+            
             stmt = (
                 update(EndUser)
                 .where(EndUser.memory_config_id == memory_config_id)
@@ -574,16 +519,10 @@ class EndUserRepository:
             )
             raise
 
-# def get_end_users_by_app_id(db: Session, app_id: uuid.UUID) -> List[EndUser]:
-#     """根据应用ID查询宿主（返回 EndUser ORM 列表）"""
-#     repo = EndUserRepository(db)
-#     end_users = repo.get_end_users_by_app_id(app_id)
-#     return end_users
-
-def get_end_users_by_workspace(db: Session, workspace_id: uuid.UUID) -> List[EndUser]:
-    """根据工作空间ID查询终端用户（返回 EndUser ORM 列表）"""
+def get_end_users_by_app_id(db: Session, app_id: uuid.UUID) -> List[EndUser]:
+    """根据应用ID查询宿主（返回 EndUser ORM 列表）"""
     repo = EndUserRepository(db)
-    end_users = repo.get_end_users_by_workspace(workspace_id)
+    end_users = repo.get_end_users_by_app_id(app_id)
     return end_users
 
 def get_end_user_by_id(db: Session, end_user_id: uuid.UUID) -> Optional[EndUser]:

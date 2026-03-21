@@ -274,7 +274,7 @@ class MemoryAgentService:
 
         Args:
             end_user_id: Group identifier (also used as end_user_id)
-            messages: Message to write
+            message: Message to write
             config_id: Configuration ID from database
             db: SQLAlchemy database session
             storage_type: Storage type (neo4j or rag)
@@ -1179,7 +1179,7 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     app = db.query(App).filter(App.id == app_id).first()
     if not app:
         logger.warning(f"App not found: {app_id}")
-        # raise ValueError(f"应用不存在: {app_id}")
+        raise ValueError(f"应用不存在: {app_id}")
     # TODO: temp fix for draft run
     # if not app.current_release_id:
     #     logger.warning(f"No current release for app: {app_id}")
@@ -1252,15 +1252,17 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     memory_config_service = MemoryConfigService(db)
     memory_config = memory_config_service.get_config_with_fallback(
         memory_config_id=memory_config_id_to_use,
-        workspace_id=end_user.workspace_id
+        workspace_id=app.workspace_id
     )
 
     memory_config_id = str(memory_config.config_id) if memory_config else None
 
     result = {
         "end_user_id": str(end_user_id),
+        "app_id": str(app_id),
+        "release_id": str(app.current_release_id) if app.current_release_id else None,
         "memory_config_id": memory_config_id,
-        "workspace_id": str(end_user.workspace_id)
+        "workspace_id": str(app.workspace_id)
     }
 
     logger.info(

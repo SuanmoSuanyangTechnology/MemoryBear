@@ -100,8 +100,7 @@ def agent_config_4_app_release(release: AppRelease) -> AgentConfig:
         memory=config_dict.get("memory"),
         variables=config_dict.get("variables", []),
         tools=config_dict.get("tools", []),
-        skills=config_dict.get("skills", {}),
-        features=config_dict.get("features", {})
+        skills=config_dict.get("skills", {})
     )
 
     return agent_config

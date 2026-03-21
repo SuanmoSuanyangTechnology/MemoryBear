@@ -10,7 +10,6 @@ T = TypeVar("T", bound=BaseVariable)
 
 
 class StringVariable(BaseVariable):
-    value: str
     type = 'str'
 
     def valid_value(self, value) -> str:
@@ -23,7 +22,6 @@ class StringVariable(BaseVariable):
 
 
 class NumberVariable(BaseVariable):
-    value: int | float
     type = 'number'
 
     def valid_value(self, value) -> int | float:
@@ -36,7 +34,6 @@ class NumberVariable(BaseVariable):
 
 
 class BooleanVariable(BaseVariable):
-    value: bool
     type = 'boolean'
 
     def valid_value(self, value) -> bool:
@@ -49,7 +46,6 @@ class BooleanVariable(BaseVariable):
 
 
 class DictVariable(BaseVariable):
-    value: dict
     type = 'object'
 
     def valid_value(self, value) -> dict:
@@ -62,7 +58,6 @@ class DictVariable(BaseVariable):
 
 
 class FileVariable(BaseVariable):
-    value: FileObject
     type = 'file'
 
     def valid_value(self, value) -> FileObject:
@@ -107,7 +102,6 @@ class FileVariable(BaseVariable):
 
 
 class ArrayVariable(BaseVariable, Generic[T]):
-    value: list[T]
     type = 'array'
 
     def __init__(self, child_type: Type[T], value: list[Any]):
@@ -135,7 +129,6 @@ class ArrayVariable(BaseVariable, Generic[T]):
 
 
 class NestedArrayVariable(BaseVariable):
-    value: list[ArrayVariable]
     type = 'array_nest'
 
     def valid_value(self, value: list[T]) -> list[T]:
@@ -160,7 +153,6 @@ class NestedArrayVariable(BaseVariable):
     category=RuntimeWarning
 )
 class AnyVariable(BaseVariable):
-    value: Any
     type = 'any'
 
     def valid_value(self, value: Any) -> Any:

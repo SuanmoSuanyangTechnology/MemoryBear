@@ -12,7 +12,6 @@ class WorkflowResultBuilder:
             variable_pool: VariablePool,
             elapsed_time: float,
             final_output: str,
-            success: bool
     ):
         """Construct the final standardized output of the workflow execution.
 
@@ -30,7 +29,6 @@ class WorkflowResultBuilder:
             elapsed_time (float): Total execution time in seconds.
             final_output (Any): The aggregated or final output content of the workflow
                 (e.g., combined messages from all End nodes).
-            success (bool): Whether the execution was successful.
 
         Returns:
             dict: A dictionary containing the final workflow execution result with keys:
@@ -51,7 +49,7 @@ class WorkflowResultBuilder:
         conversation_id = variable_pool.get_value("sys.conversation_id")
 
         return {
-            "status": "completed" if success else "failed",
+            "status": "completed",
             "output": final_output,
             "variables": {
                 "conv": variable_pool.get_all_conversation_vars(),

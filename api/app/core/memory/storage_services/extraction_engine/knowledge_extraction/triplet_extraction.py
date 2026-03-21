@@ -5,7 +5,7 @@ from typing import List, Dict, Optional
 from app.core.logging_config import get_memory_logger
 from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.memory.utils.prompt.prompt_utils import render_triplet_extraction_prompt
-from app.core.memory.utils.data.ontology import PREDICATE_DEFINITIONS, Predicate  # 引入枚举 Predicate 白名单过滤
+from app.core.memory.utils.data.ontology import PREDICATE_DEFINITIONS, Predicate # 引入枚举 Predicate 白名单过滤
 from app.core.memory.models.triplet_models import TripletExtractionResponse
 from app.core.memory.models.message_models import DialogData, Statement
 from app.core.memory.models.ontology_extraction_models import OntologyTypeList
@@ -14,15 +14,15 @@ from app.core.memory.utils.log.logging_utils import prompt_logger
 logger = get_memory_logger(__name__)
 
 
+
 class TripletExtractor:
     """Extracts knowledge triplets and entities from statements using LLM"""
 
     def __init__(
-            self,
-            llm_client: OpenAIClient,
-            ontology_types: Optional[OntologyTypeList] = None,
-            language: str = "zh"
-    ):
+        self,
+        llm_client: OpenAIClient,
+        ontology_types: Optional[OntologyTypeList] = None,
+        language: str = "zh"):
         """Initialize the TripletExtractor with an LLM client
 
         Args:
@@ -65,8 +65,7 @@ class TripletExtractor:
 
         # Create messages for LLM
         messages = [
-            {"role": "system",
-             "content": "You are an expert at extracting knowledge triplets and entities from text. Follow the provided instructions carefully and return valid JSON."},
+            {"role": "system", "content": "You are an expert at extracting knowledge triplets and entities from text. Follow the provided instructions carefully and return valid JSON."},
             {"role": "user", "content": prompt_content}
         ]
 
@@ -117,8 +116,7 @@ class TripletExtractor:
             logger.error(f"Error processing statement: {e}", exc_info=True)
             return TripletExtractionResponse(triplets=[], entities=[])
 
-    async def extract_triplets_from_statements(self, dialog_data: DialogData, limit_chunks: int = None) -> Dict[
-        str, TripletExtractionResponse]:
+    async def extract_triplets_from_statements(self, dialog_data: DialogData, limit_chunks: int = None) -> Dict[str, TripletExtractionResponse]:
         """Extract triplets and entities from statements
 
         Args:

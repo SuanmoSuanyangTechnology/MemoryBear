@@ -12,8 +12,7 @@ class EndUser(Base):
     __tablename__ = "end_users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False, index=True)
-    app_id = Column(UUID(as_uuid=True), ForeignKey("apps.id"), nullable=True)
-    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False)
+    app_id = Column(UUID(as_uuid=True), ForeignKey("apps.id"), nullable=False)
     # end_user_id = Column(String, nullable=False, index=True)
     other_id = Column(String, nullable=True)  # Store original user_id
     other_name = Column(String, default="", nullable=False)
@@ -63,6 +62,3 @@ class EndUser(Base):
         "App",
         back_populates="end_users"
     )
-
-    # 与 WorkSpace 的反向关系
-    workspace = relationship("Workspace", back_populates="end_users")

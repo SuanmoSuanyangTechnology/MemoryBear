@@ -326,14 +326,3 @@ class ModelBaseQuery(BaseModel):
     is_official: Optional[bool] = Field(None, description="是否官方模型")
     is_deprecated: Optional[bool] = Field(None, description="是否弃用")
     search: Optional[str] = Field(None, description="搜索关键词", max_length=255)
-
-class ModelInfo(BaseModel):
-    """模型信息Schema"""
-    model_name: str = Field(..., description="模型名称")
-    provider: str = Field(..., description="模型提供商")
-    api_key: str = Field(..., description="API密钥")
-    api_base: str = Field(..., description="API基础URL")
-    is_omni: bool = Field(default=False, description="是否为omni模型")
-    model_type: ModelType = Field(..., description="模型类型")
-    capability: List[str] = Field(default_factory=list, description="模型能力列表")
-

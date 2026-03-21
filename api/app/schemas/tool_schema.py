@@ -90,7 +90,6 @@ class ToolInfo(BaseModel):
     parameters: List[ToolParameter] = Field(default_factory=list, description="工具参数")
     config_data: Dict[str, Any] = Field(default_factory=dict, description="工具配置")
     status: ToolStatus = Field(ToolStatus.AVAILABLE, description="工具状态")
-    is_active: bool = Field(True, description="是否可用（False 表示已删除）")
     tags: List[str] = Field(default_factory=list, description="工具标签")
     tenant_id: Optional[str] = Field(None, description="租户ID")
     created_at: datetime = Field(..., description="创建时间")
@@ -211,11 +210,6 @@ class ToolUpdateRequest(BaseModel):
     config: Optional[Dict[str, Any]] = None
     is_enabled: Optional[bool] = None
     tags: Optional[List[str]] = None
-
-
-class ToolActiveUpdate(BaseModel):
-    """工具可用状态更新"""
-    is_active: bool = Field(..., description="True=启用, False=禁用（逻辑删除）")
 
 
 class ToolExecuteRequest(BaseModel):

@@ -35,7 +35,6 @@ class WorkflowConfig(Base):
     
     # 执行配置
     execution_config = Column(JSONB, nullable=False, default=dict)
-    features = Column(JSONB, nullable=True, default=dict)
     
     # 触发器配置（可选）
     triggers = Column(JSONB, default=list)

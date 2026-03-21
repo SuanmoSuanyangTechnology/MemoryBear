@@ -1,7 +1,7 @@
 import datetime
 import uuid
-from sqlalchemy import Column, String, DateTime, Boolean, text
-from sqlalchemy.dialects.postgresql import UUID, ARRAY
+from sqlalchemy import Column, String, DateTime, Boolean
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.db import Base
 
@@ -19,10 +19,6 @@ class Tenants(Base):
     # SSO 外部关联字段
     external_id = Column(String(100), nullable=True, index=True)  # 外部企业ID
     external_source = Column(String(50), nullable=True)  # 来源系统
-    
-    # 国际化语言配置字段
-    default_language = Column(String(10), nullable=False, default='zh', server_default='zh', index=True)  # 租户默认语言
-    supported_languages = Column(ARRAY(String(10)), nullable=False, default=lambda: ['zh', 'en'], server_default=text("'{zh,en}'"))  # 租户支持的语言列表
     
     # Relationship to users - one tenant has many users
     users = relationship("User", back_populates="tenant")

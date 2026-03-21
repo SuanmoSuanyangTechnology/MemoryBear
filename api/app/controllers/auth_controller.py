@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta, timezone
-from typing import Callable
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -17,7 +16,6 @@ from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.dependencies import get_current_user, oauth2_scheme
 from app.models.user_model import User
-from app.i18n.dependencies import get_translator
 
 # 获取专用日志器
 auth_logger = get_auth_logger()
@@ -28,8 +26,7 @@ router = APIRouter(tags=["Authentication"])
 @router.post("/token", response_model=ApiResponse)
 async def login_for_access_token(
     form_data: TokenRequest,
-    db: Session = Depends(get_db),
-    t: Callable = Depends(get_translator)
+    db: Session = Depends(get_db)
 ):
     """用户登录获取token"""
     auth_logger.info(f"用户登录请求: {form_data.email}")
@@ -43,10 +40,10 @@ async def login_for_access_token(
         invite_info = workspace_service.validate_invite_token(db, form_data.invite)
         
         if not invite_info.is_valid:
-            raise BusinessException(t("auth.invite.invalid"), code=BizCode.BAD_REQUEST)
+            raise BusinessException("邀请码无效或已过期", code=BizCode.BAD_REQUEST)
         
         if invite_info.email != form_data.email:
-            raise BusinessException(t("auth.invite.email_mismatch"), code=BizCode.BAD_REQUEST)        
+            raise BusinessException("邀请邮箱与登录邮箱不匹配", code=BizCode.BAD_REQUEST)        
         auth_logger.info(f"邀请码验证成功: workspace={invite_info.workspace_name}")
         try:
             # 尝试认证用户
@@ -72,7 +69,7 @@ async def login_for_access_token(
             elif e.code == BizCode.PASSWORD_ERROR:
                 # 用户存在但密码错误
                 auth_logger.warning(f"接受邀请失败，密码验证错误: {form_data.email}")
-                raise BusinessException(t("auth.invite.password_verification_failed"), BizCode.LOGIN_FAILED)
+                raise BusinessException("接受邀请失败，密码验证错误", BizCode.LOGIN_FAILED)
             else:
                 # 其他认证失败情况，直接抛出
                 raise
@@ -85,7 +82,7 @@ async def login_for_access_token(
         except BusinessException as e:
             
             # 其他认证失败情况，直接抛出
-            raise BusinessException(e.message, BizCode.LOGIN_FAILED)
+            raise BusinessException(e.message,BizCode.LOGIN_FAILED)
 
     # 创建 tokens
     access_token, access_token_id = security.create_access_token(subject=user.id)
@@ -113,15 +110,14 @@ async def login_for_access_token(
             expires_at=access_expires_at,
             refresh_expires_at=refresh_expires_at
         ),
-        msg=t("auth.login.success")
+        msg="登录成功"
     )
 
 
 @router.post("/refresh", response_model=ApiResponse)
 async def refresh_token(
     refresh_request: RefreshTokenRequest,
-    db: Session = Depends(get_db),
-    t: Callable = Depends(get_translator)
+    db: Session = Depends(get_db)
 ):
     """刷新token"""
     auth_logger.info("收到token刷新请求")
@@ -129,18 +125,18 @@ async def refresh_token(
     # 验证 refresh token
     userId = security.verify_token(refresh_request.refresh_token, "refresh")
     if not userId:
-        raise BusinessException(t("auth.token.invalid_refresh_token"), code=BizCode.TOKEN_INVALID)
+        raise BusinessException("无效的refresh token", code=BizCode.TOKEN_INVALID)
     
     # 检查用户是否存在
     user = auth_service.get_user_by_id(db, userId)
     if not user:
-        raise BusinessException(t("auth.user.not_found"), code=BizCode.USER_NOT_FOUND)
+        raise BusinessException("用户不存在", code=BizCode.USER_NOT_FOUND)
     
     # 检查 refresh token 黑名单
     if settings.ENABLE_SINGLE_SESSION:
         refresh_token_id = security.get_token_id(refresh_request.refresh_token)
         if refresh_token_id and await SessionService.is_token_blacklisted(refresh_token_id):
-            raise BusinessException(t("auth.token.refresh_token_blacklisted"), code=BizCode.TOKEN_BLACKLISTED)
+            raise BusinessException("Refresh token已失效", code=BizCode.TOKEN_BLACKLISTED)
     
     # 生成新 tokens
     new_access_token, new_access_token_id = security.create_access_token(subject=user.id)
@@ -171,7 +167,7 @@ async def refresh_token(
             expires_at=access_expires_at,
             refresh_expires_at=refresh_expires_at
         ),
-        msg=t("auth.token.refresh_success")
+        msg="token刷新成功"
     )
 
 
@@ -179,15 +175,14 @@ async def refresh_token(
 async def logout(
     token: str = Depends(oauth2_scheme),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-    t: Callable = Depends(get_translator)
+    db: Session = Depends(get_db)
 ):
     """登出当前用户：加入token黑名单并清理会话"""
     auth_logger.info(f"用户 {current_user.username} 请求登出")
     
     token_id = security.get_token_id(token)
     if not token_id:
-        raise BusinessException(t("auth.token.invalid"), code=BizCode.TOKEN_INVALID)
+        raise BusinessException("无效的access token", code=BizCode.TOKEN_INVALID)
 
     # 加入黑名单
     await SessionService.blacklist_token(token_id)
@@ -197,5 +192,5 @@ async def logout(
         await SessionService.clear_user_session(current_user.username)
 
     auth_logger.info(f"用户 {current_user.username} 登出成功")
-    return success(msg=t("auth.logout.success"))
+    return success(msg="登出成功")
 

@@ -9,7 +9,7 @@ and error handling.
 import logging
 import time
 import uuid
-from typing import AsyncIterator, Optional
+from typing import Optional
 
 from app.core.storage import StorageFactory, StorageBackend
 from app.core.storage_exceptions import (
@@ -161,31 +161,6 @@ class FileStorageService:
                 file_key=file_key,
                 cause=e,
             )
-
-    async def upload_stream(
-        self,
-        tenant_id: uuid.UUID,
-        workspace_id: uuid.UUID | None,
-        file_id: uuid.UUID,
-        file_ext: str,
-        stream: AsyncIterator[bytes],
-        content_type: Optional[str] = None,
-    ) -> int:
-        """
-        Upload a file from an async byte stream.
-
-        Returns:
-            Total bytes written.
-        """
-        file_key = generate_file_key(tenant_id, workspace_id, file_id, file_ext)
-        logger.info(f"Starting stream upload: file_key={file_key}, content_type={content_type}")
-        try:
-            total = await self.storage.upload_stream(file_key, stream, content_type)
-            logger.info(f"Stream upload successful: file_key={file_key}, size={total} bytes")
-            return total
-        except Exception as e:
-            logger.error(f"Stream upload failed: file_key={file_key}, error={str(e)}")
-            raise
 
     async def download_file(self, file_key: str) -> bytes:
         """

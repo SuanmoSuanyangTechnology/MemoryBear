@@ -303,7 +303,7 @@ async def test_get_node_output_not_exist_with_default():
     """测试获取不存在的节点输出（使用默认值）"""
     pool = VariablePool()
     
-    result = pool.get_node_output("nonexistent_node", default=None, strict=False)
+    result = pool.get_node_output("nonexistent_node", defalut=None, strict=False)
     
     assert result is None
 

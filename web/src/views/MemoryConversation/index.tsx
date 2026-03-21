@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:09:03 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 16:21:47
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-02-03 17:09:03 
  */
 /**
  * Memory Conversation Page
@@ -92,7 +92,7 @@ export interface LogItem {
   type: string;
   title: string;
   data?: DataItem[] | AnyObject;
-  raw_results?: string | Record<string, AnyObject>;
+  raw_results?: string | AnyObject;
   summary?: string;
   query?: string;
   reason?: string;
@@ -264,25 +264,22 @@ const MemoryConversation: FC = () => {
                           </ContentWrapper>
                         ))}
                       </Space>
-                      : log.type === 'search_result' && log.raw_results && typeof log.raw_results !== 'string'
+                      : log.type === 'search_result' && log.raw_results
                       ? <ContentWrapper>
                         <div className="rb:font-medium rb:text-[#212332] rb:mb-2">{log.query}</div>
-                        {(log.raw_results.reranked_results as AnyObject)?.communities?.length > 0 && <>
-                          <div className="rb:font-medium rb:text-[#212332] rb:text-[12px]">{t('memoryConversation.communities')}</div>
-                          <ul className='rb:mt-2 rb:text-[12px] rb:text-[#5B6167] rb:list-disc rb:pl-4'>
-                              {((log.raw_results.reranked_results as AnyObject)?.communities as { content: string }[]).map((item, index: number) => (
-                              <li key={index}>{item.content}</li>
-                            ))}
-                          </ul>
-                        </>}
-                        {(log.raw_results.reranked_results as AnyObject)?.summaries?.length > 0 && <>
-                          <div className="rb:font-medium rb:text-[#212332] rb:text-[12px]">{t('memoryConversation.summaries')}</div>
-                          <ul className='rb:mt-2 rb:text-[12px] rb:text-[#5B6167] rb:list-disc rb:pl-4'>
-                                {((log.raw_results.reranked_results as AnyObject)?.summaries as { content: string }[]).map((item, index: number) => (
-                              <li key={index}>{item.content}</li>
-                            ))}
-                          </ul>
-                        </>}
+                          <div className='rb:mt-2 rb:text-[12px] rb:text-[#5B6167]'>
+                            {typeof log.raw_results === 'string'
+                              ? <Markdown content={log.raw_results} />
+                              : <>
+                                {log.raw_results.reranked_results?.statements.length > 0 && log.raw_results.reranked_results?.statements.map((item: { statement: string }, index: number) => (
+                                  <div key={index}>{item.statement}</div>
+                                ))}
+                                {log.raw_results.reranked_results?.summaries.length > 0 && log.raw_results.reranked_results?.summaries.map((item: { content: string }, index: number) => (
+                                  <div key={index}>{item.content}</div>
+                                ))}
+                              </> 
+                            }
+                          </div>
                         </ContentWrapper>
                       : log.type === 'retrieval_summary' && log.summary
                       ? <ContentWrapper><div className="rb:text-[12px] rb:text-[#5B6167]">{log.summary}</div></ContentWrapper>
@@ -299,22 +296,22 @@ const MemoryConversation: FC = () => {
                       </ContentWrapper>
                       : log.type === 'input_summary' && log.raw_results
                       ? <ContentWrapper>
-                        <div className="rb:font-medium rb:text-[#212332] rb:mb-2">{log.query}</div>
-                        <div className="rb:font-medium rb:text-[12px] rb:text-[#5B6167] rb:mb-2">{log.summary}</div>
-                        <div className='rb:mt-2 rb:text-[12px] rb:text-[#5B6167]'>
-                          {typeof log.raw_results === 'string'
-                            ? <Markdown content={log.raw_results} />
-                            : <>
-                              {(log.raw_results.reranked_results as AnyObject)?.statements?.length > 0 && ((log.raw_results.reranked_results as AnyObject)?.statements as { statement: string }[]).map((item, index: number) => (
-                                <div key={index}>{item.statement}</div>
-                              ))}
-                              {(log.raw_results.reranked_results as AnyObject)?.summaries?.length > 0 && ((log.raw_results.reranked_results as AnyObject)?.summaries as { content: string }[]).map((item, index: number) => (
-                                <div key={index}>{item.content}</div>
-                              ))}
-                            </>
-                          }
-                        </div>
-                      </ContentWrapper>
+                          <div className="rb:font-medium rb:text-[#212332] rb:mb-2">{log.query}</div>
+                          <div className="rb:font-medium rb:text-[12px] rb:text-[#5B6167] rb:mb-2">{log.summary}</div>
+                          <div className='rb:mt-2 rb:text-[12px] rb:text-[#5B6167]'>
+                            {typeof log.raw_results === 'string'
+                              ? <Markdown content={log.raw_results} />
+                              : <>
+                                {log.raw_results.reranked_results?.statements.length > 0 && log.raw_results.reranked_results?.statements.map((item: { statement: string; } , index: number) => (
+                                  <div key={index}>{item.statement}</div>
+                                ))}
+                                {log.raw_results.reranked_results?.summaries.length > 0 && log.raw_results.reranked_results?.summaries.map((item: { content: string; }, index: number) => (
+                                  <div key={index}>{item.content}</div>
+                                ))}
+                              </> 
+                            }
+                          </div>
+                        </ContentWrapper>
                       : null
                     }
                   </div>

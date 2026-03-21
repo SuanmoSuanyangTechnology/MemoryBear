@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from app.core.memory.models.message_models import DialogData, ConversationMessage, ConversationContext
 from app.core.memory.models.config_models import PruningConfig
+from app.core.memory.utils.config.config_utils import get_pruning_config
 from app.core.memory.utils.prompt.prompt_utils import prompt_env, log_prompt_rendering, log_template_rendering
 from app.core.memory.storage_services.extraction_engine.data_preprocessing.scene_config import (
     SceneConfigRegistry,
@@ -33,8 +34,6 @@ class DialogExtractionResponse(BaseModel):
     - is_related：对话与场景的相关性判定。
     - times / ids / amounts / contacts / addresses / keywords：重要信息片段，用来在不相关对话中保留关键消息。
     - preserve_keywords：情绪/兴趣/爱好/个人观点相关词，包含这些词的消息必须强制保留。
-    - scene_unrelated_snippets：与当前场景无关且无语义关联的消息片段（原文截取），
-      用于高阈值阶段精准删除跨场景内容。
     """
     is_related: bool = Field(...)
     times: List[str] = Field(default_factory=list)
@@ -44,7 +43,6 @@ class DialogExtractionResponse(BaseModel):
     addresses: List[str] = Field(default_factory=list)
     keywords: List[str] = Field(default_factory=list)
     preserve_keywords: List[str] = Field(default_factory=list, description="情绪/兴趣/爱好/个人观点相关词，包含这些词的消息强制保留")
-    scene_unrelated_snippets: List[str] = Field(default_factory=list,description="与当前场景无关且无语义关联的消息原文片段，高阈值阶段用于精准删除跨场景内容")
 
 
 class MessageImportanceResponse(BaseModel):
@@ -93,14 +91,12 @@ class SemanticPruner:
         # 加载统一填充词库
         self.scene_config: ScenePatterns = SceneConfigRegistry.get_config(self.config.pruning_scene)
         
-        # 本体类型列表：直接使用 ontology_class_infos（name + description）
-        self._ontology_class_infos = getattr(self.config, "ontology_class_infos", None) or []
-        # _ontology_classes 仅用于日志统计
-        self._ontology_classes = [info.class_name for info in self._ontology_class_infos]
+        # 本体类型列表（用于注入提示词，所有场景均支持）
+        self._ontology_classes = getattr(self.config, "ontology_classes", None) or []
         
         self._log(f"[剪枝-初始化] 场景={self.config.pruning_scene}")
-        if self._ontology_class_infos:
-            self._log(f"[剪枝-初始化] 注入本体类型({len(self._ontology_class_infos)}个): {self._ontology_classes}")
+        if self._ontology_classes:
+            self._log(f"[剪枝-初始化] 注入本体类型: {self._ontology_classes}")
         else:
             self._log(f"[剪枝-初始化] 未找到本体类型，将使用通用提示词")
         
@@ -125,8 +121,7 @@ class SemanticPruner:
         1. 空消息
         2. 场景特定填充词库精确匹配
         3. 常见寒暄精确匹配
-        4. 组合寒暄模式（前缀+后缀组合，如"好的谢谢"、"同学你好"、"明白了"）
-        5. 纯表情/标点
+        4. 纯表情/标点
         """
         t = message.msg.strip()
         if not t:
@@ -147,55 +142,6 @@ class SemanticPruner:
         }
         if t in common_greetings:
             return True
-
-        # 组合寒暄模式：短消息（≤15字）且完全由寒暄成分构成
-        # 策略：将消息拆分后，每个片段都能在填充词库或常见寒暄中找到，则整体为填充
-        if len(t) <= 15:
-            # 确认+称呼/感谢组合，如"好的谢谢"、"明白了"、"知道了谢谢"
-            _confirm_prefixes = {"好的", "好", "嗯", "嗯嗯", "哦", "明白", "明白了", "知道了", "了解", "收到", "没问题"}
-            _thanks_suffixes = {"谢谢", "谢谢你", "谢谢您", "多谢", "感谢", "谢了"}
-            _greeting_suffixes = {"你好", "您好", "老师好", "同学好", "大家好"}
-            _greeting_prefixes = {"同学", "老师", "您好", "你好"}
-            _close_patterns = {
-                "没有了", "没事了", "没问题了", "好了", "行了", "可以了",
-                "不用了", "不需要了", "就这样", "就这样吧", "那就这样",
-            }
-            _polite_responses = {
-                "不客气", "不用谢", "没关系", "没事", "应该的", "这是我应该做的",
-            }
-
-            # 规则1：确认词 + 感谢词（如"好的谢谢"、"嗯谢谢"）
-            for cp in _confirm_prefixes:
-                for ts in _thanks_suffixes:
-                    if t == cp + ts or t == cp + "，" + ts or t == cp + "," + ts:
-                        return True
-
-            # 规则2：称呼前缀 + 问候（如"同学你好"、"老师好"）
-            for gp in _greeting_prefixes:
-                for gs in _greeting_suffixes:
-                    if t == gp + gs or t.startswith(gp) and t.endswith("好"):
-                        return True
-
-            # 规则3：结束语 + 感谢（如"没有了，谢谢老师"、"没有了谢谢"）
-            for cp in _close_patterns:
-                if t.startswith(cp):
-                    remainder = t[len(cp):].lstrip("，,、 ")
-                    if not remainder or any(remainder.startswith(ts) for ts in _thanks_suffixes):
-                        return True
-
-            # 规则4：礼貌回应（如"不客气，祝你考试顺利"——前缀是礼貌词，后半是祝福套话）
-            for pr in _polite_responses:
-                if t.startswith(pr):
-                    remainder = t[len(pr):].lstrip("，,、 ")
-                    # 后半是祝福/套话（不含实质信息）
-                    if not remainder or re.match(r"^(祝|希望|期待|加油|顺利|好好|保重)", remainder):
-                        return True
-
-            # 规则5：纯确认词加"了"后缀（如"明白了"、"知道了"、"好了"）
-            _confirm_base = {"明白", "知道", "了解", "收到", "好", "行", "可以", "没问题"}
-            for cb in _confirm_base:
-                if t == cb + "了" or t == cb + "了。" or t == cb + "了！":
-                    return True
 
         # 检查是否为纯表情符号（方括号包裹）
         if re.fullmatch(r"(\[[^\]]+\])+", t):
@@ -385,13 +331,13 @@ class SemanticPruner:
 
         rendered = self.template.render(
             pruning_scene=self.config.pruning_scene,
-            ontology_class_infos=self._ontology_class_infos,
+            ontology_classes=self._ontology_classes,
             dialog_text=dialog_text,
             language=self.language
         )
         log_template_rendering("extracat_Pruning.jinja2", {
             "pruning_scene": self.config.pruning_scene,
-            "ontology_class_infos_count": len(self._ontology_class_infos),
+            "ontology_classes_count": len(self._ontology_classes),
             "language": self.language
         })
         log_prompt_rendering("pruning-extract", rendered)
@@ -431,183 +377,6 @@ class SemanticPruner:
                     )
                     return fallback_response
 
-    def _get_pruning_mode(self) -> str:
-        """根据 pruning_threshold 返回当前剪枝阶段。
-
-        - 低阈值 [0.0, 0.3)：conservative  只删填充，保留所有实质内容
-        - 中阈值 [0.3, 0.6)：semantic      保留场景相关 + 有语义关联的内容，删除无关联内容
-        - 高阈值 [0.6, 0.9]：strict        只保留场景相关内容，跨场景内容可被删除
-        """
-        t = float(self.config.pruning_threshold)
-        if t < 0.3:
-            return "conservative"
-        elif t < 0.6:
-            return "semantic"
-        else:
-            return "strict"
-
-    def _apply_related_dialog_pruning(
-        self,
-        msgs: List[ConversationMessage],
-        extraction: "DialogExtractionResponse",
-        dialog_label: str,
-        pruning_mode: str,
-    ) -> List[ConversationMessage]:
-        """相关对话统一剪枝入口，消除 prune_dialog / prune_dataset 中的重复逻辑。
-
-        - conservative：只删填充
-        - semantic / strict：场景感知剪枝
-        """
-        if pruning_mode == "conservative":
-            preserve_tokens = self._build_preserve_tokens(extraction)
-            return self._prune_fillers_only(msgs, preserve_tokens, dialog_label)
-        else:
-            return self._prune_with_scene_filter(msgs, extraction, dialog_label, pruning_mode)
-
-    def _prune_fillers_only(
-        self,
-        msgs: List[ConversationMessage],
-        preserve_tokens: List[str],
-        dialog_label: str,
-    ) -> List[ConversationMessage]:
-        """相关对话专用：只删填充消息，LLM 保护消息和实质内容一律保留。
-
-        不受 pruning_threshold 约束，删多少算多少（填充有多少删多少）。
-        至少保留 1 条消息。
-        注意：填充检测优先于 preserve_tokens 保护——填充消息本身无信息价值，
-        即使 LLM 误将其关键词放入 preserve_tokens 也应删除。
-        """
-        to_delete_ids: set = set()
-        for m in msgs:
-            # 填充检测优先：先判断是否为填充，再看 LLM 保护
-            if self._is_filler_message(m):
-                to_delete_ids.add(id(m))
-                self._log(f"  [填充] '{m.msg[:40]}' → 删除")
-                continue
-            if self._msg_matches_tokens(m, preserve_tokens):
-                self._log(f"  [保护] '{m.msg[:40]}' → LLM保护，跳过")
-
-        kept = [m for m in msgs if id(m) not in to_delete_ids]
-        if not kept and msgs:
-            kept = [msgs[0]]
-
-        deleted = len(msgs) - len(kept)
-        self._log(
-            f"[剪枝-相关] {dialog_label} 总消息={len(msgs)} "
-            f"填充删除={deleted} 保留={len(kept)}"
-        )
-        return kept
-
-    def _prune_with_scene_filter(
-        self,
-        msgs: List[ConversationMessage],
-        extraction: "DialogExtractionResponse",
-        dialog_label: str,
-        mode: str,
-    ) -> List[ConversationMessage]:
-        """场景感知剪枝，供 semantic / strict 两个阈值档位调用。
-
-        本函数体现剪枝系统的三层递进逻辑：
-
-        第一层（conservative，阈值 < 0.3）：
-            不进入本函数，由 _prune_fillers_only 处理。
-            保留标准：只问"有没有信息量"，填充消息（嗯/好的/哈哈等）删除，其余一律保留。
-
-        第二层（semantic，阈值 [0.3, 0.6)）：
-            保留标准：内容价值优先，场景相关性是参考而非唯一标准。
-            - 填充消息 → 删除（最高优先级）
-            - 场景相关消息 → 保留
-            - 场景无关消息 → 有两次豁免机会：
-                1. 命中 scene_preserve_tokens（LLM 标记的关键词/时间/金额等）→ 保留
-                2. 含情感词（感觉/压力/开心等）→ 保留（情感内容有记忆价值）
-                3. 两次豁免均未命中 → 删除
-
-        第三层（strict，阈值 [0.6, 0.9]）：
-            保留标准：场景相关性优先，无任何豁免。
-            - 填充消息 → 删除（最高优先级）
-            - 场景相关消息 → 保留
-            - 场景无关消息 → 直接删除，preserve_keywords 和情感词在此模式下均不生效
-
-        至少保留 1 条消息（兜底取第一条）。
-        """
-        # strict 模式收窄保护范围：只保护结构化关键信息（时间/编号/金额/联系方式/地址），
-        # 不保护 keywords / preserve_keywords，让场景过滤能删掉更多内容。
-        # semantic 模式完整保护：包含 LLM 抽取的所有重要片段（含 keywords 和 preserve_keywords）。
-        if mode == "strict":
-            scene_preserve_tokens = (
-                extraction.times + extraction.ids + extraction.amounts +
-                extraction.contacts + extraction.addresses
-            )
-        else:
-            scene_preserve_tokens = self._build_preserve_tokens(extraction)
-
-        unrelated_snippets = extraction.scene_unrelated_snippets or []
-
-        to_delete_ids: set = set()
-        for m in msgs:
-            msg_text = m.msg.strip()
-
-            # 第一优先级：填充消息无论模式直接删除，不参与后续场景判断
-            if self._is_filler_message(m):
-                to_delete_ids.add(id(m))
-                self._log(f"  [填充] '{msg_text[:40]}' → 删除")
-                continue
-
-            # 双向包含匹配：处理 LLM 返回片段与原始消息文本长度不完全一致的情况
-            is_scene_unrelated = any(
-                snip and (snip in msg_text or msg_text in snip)
-                for snip in unrelated_snippets
-            )
-
-            if is_scene_unrelated:
-                if mode == "strict":
-                    # strict：场景无关直接删除，不做任何豁免
-                    # 场景相关性是唯一裁决标准，preserve_keywords 在此模式下不生效
-                    to_delete_ids.add(id(m))
-                    self._log(f"  [场景无关-严格] '{msg_text[:40]}' → 删除")
-                elif mode == "semantic":
-                    # semantic：场景无关但有内容价值 → 保留
-                    # 豁免第一层：命中 scene_preserve_tokens（关键词/结构化信息保护）
-                    if self._msg_matches_tokens(m, scene_preserve_tokens):
-                        self._log(f"  [保护] '{msg_text[:40]}' → 场景关键词保护，保留")
-                    else:
-                        # 豁免第二层：含情感词，认为有情境记忆价值，即使场景无关也保留
-                        has_contextual_emotion = any(
-                            word in msg_text
-                            for word in ["感觉", "觉得", "心情", "开心", "难过", "高兴", "沮丧",
-                                         "喜欢", "讨厌", "爱", "恨", "担心", "害怕", "兴奋",
-                                         "压力", "累", "疲惫", "烦", "焦虑", "委屈", "感动"]
-                        )
-                        if not has_contextual_emotion:
-                            to_delete_ids.add(id(m))
-                            self._log(f"  [场景无关-语义] '{msg_text[:40]}' → 删除（无情感关联）")
-                        else:
-                            self._log(f"  [场景关联-保留] '{msg_text[:40]}' → 有情感关联，保留")
-            else:
-                # 不在 scene_unrelated_snippets 中 → 场景相关，直接保留
-                if self._msg_matches_tokens(m, scene_preserve_tokens):
-                    self._log(f"  [保护] '{msg_text[:40]}' → LLM保护，跳过")
-                # else: 普通场景相关消息，保留，不输出日志
-
-        kept = [m for m in msgs if id(m) not in to_delete_ids]
-        if not kept and msgs:
-            kept = [msgs[0]]
-
-        deleted = len(msgs) - len(kept)
-        self._log(
-            f"[剪枝-{mode}] {dialog_label} 总消息={len(msgs)} "
-            f"删除={deleted} 保留={len(kept)}"
-        )
-        return kept
-
-    def _build_preserve_tokens(self, extraction: "DialogExtractionResponse") -> List[str]:
-        """统一构建 preserve_tokens，合并 LLM 抽取的所有重要片段。"""
-        return (
-            extraction.times + extraction.ids + extraction.amounts +
-            extraction.contacts + extraction.addresses + extraction.keywords +
-            extraction.preserve_keywords
-        )
-
     def _msg_matches_tokens(self, message: ConversationMessage, tokens: List[str]) -> bool:
         """判断消息是否包含任意抽取到的重要片段。"""
         if not tokens:
@@ -628,18 +397,16 @@ class SemanticPruner:
 
         proportion = float(self.config.pruning_threshold)
         extraction = await self._extract_dialog_important(dialog.content)
-        pruning_mode = self._get_pruning_mode()
-        self._log(f"[剪枝-模式] 阈值={proportion} → 模式={pruning_mode}")
-
         if extraction.is_related:
-            kept = self._apply_related_dialog_pruning(
-                dialog.context.msgs, extraction, f"对话ID={dialog.id}", pruning_mode
-            )
-            dialog.context = ConversationContext(msgs=kept)
+            # 相关对话不剪枝
             return dialog
 
         # 在不相关对话中，LLM 已通过 preserve_tokens 标记需要保护的内容
-        preserve_tokens = self._build_preserve_tokens(extraction)
+        preserve_tokens = (
+            extraction.times + extraction.ids + extraction.amounts +
+            extraction.contacts + extraction.addresses + extraction.keywords +
+            extraction.preserve_keywords
+        )
         msgs = dialog.context.msgs
 
         # 分类：填充 / 其他可删（LLM保护消息通过不加入任何桶来隐式保护）
@@ -714,29 +481,10 @@ class SemanticPruner:
         self._log(
             f"[剪枝-数据集] 对话总数={len(dialogs)} 场景={self.config.pruning_scene} 删除比例={proportion} 开关={self.config.pruning_switch} 模式=消息级独立判断"
         )
-
-        pruning_mode = self._get_pruning_mode()
-        self._log(f"[剪枝-数据集] 阈值={proportion} → 剪枝阶段={pruning_mode}")
-
+        
         result: List[DialogData] = []
         total_original_msgs = 0
         total_deleted_msgs = 0
-
-        # 统计对象：直接收集结构化数据，无需事后正则解析
-        stats = {
-            "scene": self.config.pruning_scene,
-            "dialog_total": len(dialogs),
-            "deletion_ratio": proportion,
-            "enabled": self.config.pruning_switch,
-            "pruning_mode": pruning_mode,
-            "related_count": 0,
-            "unrelated_count": 0,
-            "related_indices": [],
-            "unrelated_indices": [],
-            "total_deleted_messages": 0,
-            "remaining_dialogs": 0,
-            "dialogs": [],
-        }
 
         # 并发执行所有对话的 LLM 抽取（获取 preserve_keywords 等保护信息）
         semaphore = asyncio.Semaphore(self.max_concurrent)
@@ -757,31 +505,12 @@ class SemanticPruner:
             original_count = len(msgs)
             total_original_msgs += original_count
 
-            # 相关对话：根据阶段决定处理力度
-            if extraction.is_related:
-                stats["related_count"] += 1
-                stats["related_indices"].append(d_idx + 1)
-                kept = self._apply_related_dialog_pruning(
-                    msgs, extraction, f"对话 {d_idx+1}", pruning_mode
-                )
-                deleted_count = original_count - len(kept)
-                total_deleted_msgs += deleted_count
-                dd.context.msgs = kept
-                result.append(dd)
-                stats["dialogs"].append({
-                    "index": d_idx + 1,
-                    "is_related": True,
-                    "total_messages": original_count,
-                    "deleted": deleted_count,
-                    "kept": len(kept),
-                })
-                continue
-
-            stats["unrelated_count"] += 1
-            stats["unrelated_indices"].append(d_idx + 1)
-
             # 从 LLM 抽取结果中获取所有需要保留的 token
-            preserve_tokens = self._build_preserve_tokens(extraction)
+            preserve_tokens = (
+                extraction.times + extraction.ids + extraction.amounts +
+                extraction.contacts + extraction.addresses + extraction.keywords +
+                extraction.preserve_keywords  # 情绪/兴趣/爱好关键词
+            )
 
             # 判断是否需要详细日志
             should_log_details = self._detailed_prune_logging and original_count <= self._max_debug_msgs_per_dialog
@@ -814,16 +543,16 @@ class SemanticPruner:
 
             # important_msgs 仅用于日志统计
             important_msgs = llm_protected_msgs
-
+            
             # 计算删除配额
             delete_target = int(original_count * proportion)
             if proportion > 0 and original_count > 0 and delete_target == 0:
                 delete_target = 1
-
+            
             # 确保至少保留1条消息
             max_deletable = max(0, original_count - 1)
             delete_target = min(delete_target, max_deletable)
-
+            
             # 删除策略：优先删填充消息，再按出现顺序删其余可删消息
             to_delete_indices = set()
             deleted_details = []
@@ -841,65 +570,50 @@ class SemanticPruner:
                     break
                 to_delete_indices.add(idx)
                 deleted_details.append(f"[{idx}] 可删: '{msg.msg[:50]}'")
-
+            
             # 执行删除
             kept_msgs = []
             for idx, m in enumerate(msgs):
                 if idx not in to_delete_indices:
                     kept_msgs.append(m)
-
+            
             # 确保至少保留1条
             if not kept_msgs and msgs:
                 kept_msgs = [msgs[0]]
-
+            
             dd.context.msgs = kept_msgs
             deleted_count = original_count - len(kept_msgs)
             total_deleted_msgs += deleted_count
-
+            
             # 输出删除详情
             if deleted_details:
                 self._log(f"[剪枝-删除详情] 对话 {d_idx+1} 删除了以下消息:")
                 for detail in deleted_details:
                     self._log(f"  {detail}")
-
+            
             # ========== 问答对统计（已注释） ==========
             # qa_info = f"，问答对={len(qa_pairs)}" if qa_pairs else ""
             # ========================================
-
+            
             self._log(
                 f"[剪枝-对话] 对话 {d_idx+1} 总消息={original_count} "
                 f"(保护={len(important_msgs)} 填充={len(filler_msgs)} 可删={len(deletable_msgs)}) "
                 f"删除={deleted_count} 保留={len(kept_msgs)}"
             )
-
-            stats["dialogs"].append({
-                "index": d_idx + 1,
-                "is_related": False,
-                "total_messages": original_count,
-                "protected": len(important_msgs),
-                "fillers": len(filler_msgs),
-                "deletable": len(deletable_msgs),
-                "deleted": deleted_count,
-                "kept": len(kept_msgs),
-            })
-
+            
             result.append(dd)
-
-        # 补全统计对象
-        stats["total_deleted_messages"] = total_deleted_msgs
-        stats["remaining_dialogs"] = len(result)
-
+        
         self._log(f"[剪枝-数据集] 剩余对话数={len(result)}")
-        self._log(f"[剪枝-数据集] 相关对话数={stats['related_count']} 不相关对话数={stats['unrelated_count']}")
-        self._log(f"[剪枝-数据集] 总删除 {total_deleted_msgs} 条")
 
-        # 直接序列化统计对象，无需正则解析
+        # 保存日志
         try:
             from app.core.config import settings
             settings.ensure_memory_output_dir()
             log_output_path = settings.get_memory_output_path("pruned_terminal.json")
+            sanitized_logs = [self._sanitize_log_line(l) for l in self.run_logs]
+            payload = self._parse_logs_to_structured(sanitized_logs)
             with open(log_output_path, "w", encoding="utf-8") as f:
-                json.dump(stats, f, ensure_ascii=False, indent=2)
+                json.dump(payload, f, ensure_ascii=False, indent=2)
         except Exception as e:
             self._log(f"[剪枝-数据集] 保存终端输出日志失败：{e}")
 
@@ -907,7 +621,7 @@ class SemanticPruner:
         if not result:
             print("警告: 语义剪枝后数据集为空，已回退为未剪枝数据以避免流程中断")
             return dialogs
-
+        
         return result
 
     def _log(self, msg: str) -> None:
@@ -919,4 +633,114 @@ class SemanticPruner:
             pass
         print(msg)
 
+    def _sanitize_log_line(self, line: str) -> str:
+        """移除行首的方括号标签前缀，例如 [剪枝-数据集] 或 [剪枝-对话]。"""
+        try:
+            return re.sub(r"^\[[^\]]+\]\s*", "", line)
+        except Exception:
+            return line
 
+    def _parse_logs_to_structured(self, logs: List[str]) -> dict:
+        """将已去前缀的日志列表解析为结构化 JSON，便于数据对接。"""
+        summary = {
+            "scene": self.config.pruning_scene,
+            "dialog_total": None,
+            "deletion_ratio": None,
+            "enabled": None,
+            "related_count": None,
+            "unrelated_count": None,
+            "related_indices": [],
+            "unrelated_indices": [],
+            "total_deleted_messages": None,
+            "remaining_dialogs": None,
+        }
+        dialogs = []
+
+        # 解析函数
+        def parse_int(value: str) -> Optional[int]:
+            try:
+                return int(value)
+            except Exception:
+                return None
+
+        def parse_float(value: str) -> Optional[float]:
+            try:
+                return float(value)
+            except Exception:
+                return None
+
+        def parse_indices(s: str) -> List[int]:
+            s = s.strip()
+            if not s:
+                return []
+            parts = [p.strip() for p in s.split(",") if p.strip()]
+            out: List[int] = []
+            for p in parts:
+                try:
+                    out.append(int(p))
+                except Exception:
+                    pass
+            return out
+
+        # 正则
+        re_header = re.compile(r"对话总数=(\d+)\s+场景=([^\s]+)\s+删除比例=([0-9.]+)\s+开关=(True|False)")
+        re_counts = re.compile(r"相关对话数=(\d+)\s+不相关对话数=(\d+)")
+        re_indices = re.compile(r"相关对话：第\[(.*?)\]段；不相关对话：第\[(.*?)\]段")
+        re_dialog = re.compile(r"对话\s+(\d+)\s+总消息=(\d+)\s+分配删除=(\d+)\s+实删=(\d+)\s+保留=(\d+)")
+        re_total_del = re.compile(r"总删除\s+(\d+)\s+条")
+        re_remaining = re.compile(r"剩余对话数=(\d+)")
+
+        for line in logs:
+            # 第一行：总览
+            m = re_header.search(line)
+            if m:
+                summary["dialog_total"] = parse_int(m.group(1))
+                # 顶层 scene 依配置，这里不覆盖，但也可校验 m.group(2)
+                summary["deletion_ratio"] = parse_float(m.group(3))
+                summary["enabled"] = True if m.group(4) == "True" else False
+                continue
+
+            # 第二行：相关/不相关数量
+            m = re_counts.search(line)
+            if m:
+                summary["related_count"] = parse_int(m.group(1))
+                summary["unrelated_count"] = parse_int(m.group(2))
+                continue
+
+            # 第三行：相关/不相关索引
+            m = re_indices.search(line)
+            if m:
+                summary["related_indices"] = parse_indices(m.group(1))
+                summary["unrelated_indices"] = parse_indices(m.group(2))
+                continue
+
+            # 对话级统计
+            m = re_dialog.search(line)
+            if m:
+                dialogs.append({
+                    "index": parse_int(m.group(1)),
+                    "total_messages": parse_int(m.group(2)),
+                    "quota_delete": parse_int(m.group(3)),
+                    "actual_deleted": parse_int(m.group(4)),
+                    "kept": parse_int(m.group(5)),
+                })
+                continue
+
+            # 全局删除总数
+            m = re_total_del.search(line)
+            if m:
+                summary["total_deleted_messages"] = parse_int(m.group(1))
+                continue
+
+            # 剩余对话数
+            m = re_remaining.search(line)
+            if m:
+                summary["remaining_dialogs"] = parse_int(m.group(1))
+                continue
+
+        return {
+            "scene": summary["scene"],
+            "timestamp": datetime.now().isoformat(),
+            "summary": {k: v for k, v in summary.items() if k != "scene"},
+            "dialogs": dialogs,
+        }
