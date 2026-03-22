@@ -461,122 +461,76 @@ class LabelPropagationEngine:
         2. 收集所有 summary，一次性批量 embed
         3. 单个社区用 update_community_metadata，多个用 batch_update_community_metadata
         """
-        try:
-            # 先检查属性是否已完整，完整则跳过，避免重复生成
-            check_embedding = bool(self.embedding_model_id)
-            if await self.repo.is_community_complete(community_id, end_user_id, check_embedding=check_embedding):
-                logger.debug(f"[Clustering] 社区 {community_id} 属性已完整，跳过生成")
-                return
+        from app.db import get_db_context
+        from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 
-            members = await self.repo.get_community_members(community_id, end_user_id)
-            if not members:
+        async def _build_one(cid: str) -> Optional[Dict]:
+            try:
+                check_embedding = bool(self.embedding_model_id)
+                if await self.repo.is_community_complete(cid, end_user_id, check_embedding=check_embedding):
+                    logger.debug(f"[Clustering] 社区 {cid} 属性已完整，跳过生成")
+                    return None
+
+                members = await self.repo.get_community_members(cid, end_user_id)
+                if not members:
+                    return None
+
+                sorted_members = sorted(
+                    members,
+                    key=lambda m: m.get("activation_value") or 0,
+                    reverse=True,
+                )
+                core_entities = [m["name"] for m in sorted_members[:CORE_ENTITY_LIMIT] if m.get("name")]
+                all_names = [m["name"] for m in members if m.get("name")]
+
+                name = "、".join(core_entities[:3]) if core_entities else cid[:8]
+                summary = f"包含实体：{', '.join(all_names)}"
+
+                if self.llm_model_id:
+                    try:
+                        entity_list_str = "\n".join(self._build_entity_lines(members))
+                        relationships = await self.repo.get_community_relationships(cid, end_user_id)
+                        rel_lines = [
+                            f"- {r['subject']} → {r['predicate']} → {r['object']}"
+                            for r in relationships
+                            if r.get("subject") and r.get("predicate") and r.get("object")
+                        ]
+                        rel_section = (
+                            f"\n实体间关系：\n" + "\n".join(rel_lines)
+                            if rel_lines else ""
+                        )
+                        prompt = (
+                            f"以下是一组语义相关的实体：\n{entity_list_str}{rel_section}\n\n"
+                            f"请为这组实体所代表的主题：\n"
+                            f"1. 起一个简洁的中文名称（不超过10个字）\n"
+                            f"2. 写一句话摘要（不超过80个字）\n\n"
+                            f"严格按以下格式输出，不要有其他内容：\n"
+                            f"名称：<名称>\n摘要：<摘要>"
+                        )
+                        with get_db_context() as db:
+                            llm_client = MemoryClientFactory(db).get_llm_client(self.llm_model_id)
+                            response = await llm_client.chat([{"role": "user", "content": prompt}])
+                            text = response.content if hasattr(response, "content") else str(response)
+
+                        for line in text.strip().splitlines():
+                            if line.startswith("名称："):
+                                name = line[3:].strip()
+                            elif line.startswith("摘要："):
+                                summary = line[3:].strip()
+                    except Exception as e:
+                        logger.warning(f"[Clustering] LLM 生成社区元数据失败，使用兜底值: {e}")
+
+                return {
+                    "community_id": cid,
+                    "end_user_id": end_user_id,
+                    "name": name,
+                    "summary": summary,
+                    "core_entities": core_entities,
+                    "summary_embedding": None,
+                }
+            except Exception as e:
+                logger.error(f"[Clustering] 社区 {cid} 元数据准备失败: {e}", exc_info=e)
                 return None
-
-            sorted_members = sorted(
-                members,
-                key=lambda m: m.get("activation_value") or 0,
-                reverse=True,
-            )
-            core_entities = [m["name"] for m in sorted_members[:CORE_ENTITY_LIMIT] if m.get("name")]
-            all_names = [m["name"] for m in members if m.get("name")]
-
-            name = "、".join(core_entities[:3]) if core_entities else community_id[:8]
-            summary = f"包含实体：{', '.join(all_names)}"
-
-            # 若有 LLM 配置，调用 LLM 生成更好的名称和摘要
-            if self.llm_model_id:
-                try:
-                    from app.db import get_db_context
-                    from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-
-                    entity_list_str = "、".join(all_names)
-                    prompt = (
-                        f"以下是一组语义相关的实体：{entity_list_str}\n\n"
-                        f"请为这组实体所代表的主题：\n"
-                        f"1. 起一个简洁的中文名称（不超过10个字）\n"
-                        f"2. 写一句话摘要（不超过50个字）\n\n"
-                        f"严格按以下格式输出，不要有其他内容：\n"
-                        f"名称：<名称>\n摘要：<摘要>"
-                    )
-                    with get_db_context() as db:
-                        factory = MemoryClientFactory(db)
-                        llm_client = factory.get_llm_client(self.llm_model_id)
-                        response = await llm_client.chat([{"role": "user", "content": prompt}])
-                        text = response.content if hasattr(response, "content") else str(response)
-
-                    for line in text.strip().splitlines():
-                        if line.startswith("名称："):
-                            name = line[3:].strip()
-                        elif line.startswith("摘要："):
-                            summary = line[3:].strip()
-                except Exception as e:
-                    logger.warning(f"[Clustering] LLM 生成社区元数据失败，使用兜底值: {e}")
-
-            # 生成 summary_embedding
-            summary_embedding: Optional[List[float]] = None
-            if self.embedding_model_id and summary:
-                try:
-                    from app.db import get_db_context
-                    from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-
-                    with get_db_context() as db:
-                        embedder = MemoryClientFactory(db).get_embedder_client(self.embedding_model_id)
-                        vectors = await embedder.response([summary])
-                        if vectors:
-                            summary_embedding = vectors[0]
-                except Exception as e:
-                    logger.warning(f"[Clustering] 社区 {community_id} 生成 summary_embedding 失败: {e}")
-
-            await self.repo.update_community_metadata(
-                community_id=community_id,
-                end_user_id=end_user_id,
-                name=name,
-                summary=summary,
-                core_entities=core_entities,
-                summary_embedding=summary_embedding,
-
-            entity_list_str = "\n".join(self._build_entity_lines(members))
-
-            # 方案四：注入社区内实体间关系三元组
-            relationships = await self.repo.get_community_relationships(cid, end_user_id)
-            rel_lines = [
-                f"- {r['subject']} → {r['predicate']} → {r['object']}"
-                for r in relationships
-                if r.get("subject") and r.get("predicate") and r.get("object")
-            ]
-            rel_section = (
-                f"\n实体间关系：\n" + "\n".join(rel_lines)
-                if rel_lines else ""
-            )
-
-            prompt = (
-                f"以下是一组语义相关的实体：\n{entity_list_str}{rel_section}\n\n"
-                f"请为这组实体所代表的主题：\n"
-                f"1. 起一个简洁的中文名称（不超过10个字）\n"
-                f"2. 写一句话摘要（不超过80个字）\n\n"
-                f"严格按以下格式输出，不要有其他内容：\n"
-                f"名称：<名称>\n摘要：<摘要>"
-            )
-            with get_db_context() as db:
-                llm_client = MemoryClientFactory(db).get_llm_client(self.llm_model_id)
-                response = await llm_client.chat([{"role": "user", "content": prompt}])
-                text = response.content if hasattr(response, "content") else str(response)
-
-            name, summary = "", ""
-            for line in text.strip().splitlines():
-                if line.startswith("名称："):
-                    name = line[3:].strip()
-                elif line.startswith("摘要："):
-                    summary = line[3:].strip()
-
-            return {
-                "community_id": cid,
-                "end_user_id": end_user_id,
-                "name": name,
-                "summary": summary,
-                "core_entities": core_entities,
-                "summary_embedding": None,
-            }
 
         results = await asyncio.gather(
             *[_build_one(cid) for cid in community_ids],
@@ -593,12 +547,16 @@ class LabelPropagationEngine:
             return
 
         # --- 阶段2：批量生成 summary_embedding ---
-        summaries = [m["summary"] for m in metadata_list]
-        with get_db_context() as db:
-            embedder = MemoryClientFactory(db).get_embedder_client(self.embedding_model_id)
-        embeddings = await embedder.response(summaries)
-        for i, meta in enumerate(metadata_list):
-            meta["summary_embedding"] = embeddings[i] if i < len(embeddings) else None
+        if self.embedding_model_id:
+            try:
+                summaries = [m["summary"] for m in metadata_list]
+                with get_db_context() as db:
+                    embedder = MemoryClientFactory(db).get_embedder_client(self.embedding_model_id)
+                embeddings = await embedder.response(summaries)
+                for i, meta in enumerate(metadata_list):
+                    meta["summary_embedding"] = embeddings[i] if i < len(embeddings) else None
+            except Exception as e:
+                logger.warning(f"[Clustering] 批量生成 summary_embedding 失败: {e}")
 
         # --- 阶段3：写入（单个 or 批量）---
         if len(metadata_list) == 1:
