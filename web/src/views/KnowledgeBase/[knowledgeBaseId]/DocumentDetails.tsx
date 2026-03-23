@@ -11,7 +11,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useBreadcrumbManager, type BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
 import { Button, Spin, message, Switch } from 'antd';
-import { getDocumentDetail, getDocumentChunkList, downloadFile, updateDocument, updateDocumentChunk, createDocumentChunk } from '@/api/knowledgeBase';
+import { getDocumentDetail, getDocumentChunkList, downloadFile, updateDocument, updateDocumentChunk, createDocumentChunk, getFileUrl } from '@/api/knowledgeBase';
 import type { KnowledgeBaseDocumentData, RecallTestData } from '@/views/KnowledgeBase/types';
 import { formatDateTime } from '@/utils/format';
 import InfoPanel, { type InfoItem } from '../components/InfoPanel';
@@ -138,7 +138,7 @@ const DocumentDetails: FC = () => {
       const response = await getDocumentDetail(documentId);
       setDocument(response);
       setInfoItems(formatDocumentInfo(response));
-      const url = `${imagePath}/api/files/${response.file_id}`
+      const url = `${window.location.origin}/api/files/${response.file_id}`;
       setFileUrl(url);
       setParserMode(response?.parser_config?.auto_questions || 0)
       // ChunkList will be called automatically in useEffect based on document.progress

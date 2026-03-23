@@ -191,24 +191,28 @@ const RelationshipNetwork: FC = () => {
           })}>
             {(selectedNode as RawCommunityNode).properties.community_id
               ? <div>
-                <div className="rb:font-medium rb:text-[#212332] rb:text-[16px] rb:leading-5.5 rb:pl-1">
-                  {(selectedNode as RawCommunityNode).properties.name}
-                </div>
-                <div className="rb:mt-3 rb:font-medium rb:leading-5 rb:pl-1">{t('userMemory.summary')}</div>
-                <div className="rb:bg-[#F6F6F6] rb:rounded-xl rb:px-3 rb:py-2.5 rb:mt-2">
-                  {(selectedNode as RawCommunityNode).properties.summary}
-                </div>
-                <Flex align="center" justify="space-between" className="rb:mt-5!">
-                  <span className="rb:text-[#5B6167] rb:font-regular rb:pl-1">{t('userMemory.member_count')}</span>
-                  <span className="rb:font-medium">{(selectedNode as RawCommunityNode).properties.member_count}{t('userMemory.member_count_desc')}</span>
-                </Flex>
+                  <div className="rb:font-medium rb:text-[#212332] rb:text-[16px] rb:leading-5.5 rb:pl-1">
+                    {(selectedNode as RawCommunityNode).properties.name || selectedNode.id}
+                  </div>
+                  {(selectedNode as RawCommunityNode).properties.summary && <>
+                    <div className="rb:mt-3 rb:font-medium rb:leading-5 rb:pl-1">{t('userMemory.summary')}</div>
+                    <div className="rb:bg-[#F6F6F6] rb:rounded-xl rb:px-3 rb:py-2.5 rb:mt-2">
+                      {(selectedNode as RawCommunityNode).properties.summary}
+                    </div>
+                  </>}
+                  <Flex align="center" justify="space-between" className="rb:mt-5!">
+                    <span className="rb:text-[#5B6167] rb:font-regular rb:pl-1">{t('userMemory.member_count')}</span>
+                    <span className="rb:font-medium">{(selectedNode as RawCommunityNode).properties.member_count}{t('userMemory.member_count_desc')}</span>
+                  </Flex>
 
-                <Divider className='rb:my-2.5!' />
-                <div className="rb:font-medium rb:leading-5 rb:pl-1">{t('userMemory.core_entities')}</div>
-                <ul className="rb:list-disc rb:pl-4 rb:text-[#5B6167] rb:mt-2">
-                  {(selectedNode as RawCommunityNode).properties.core_entities.map((entity, index) => <li key={index}>{entity}</li>)}
-                </ul>
-              </div>
+                  {(selectedNode as RawCommunityNode).properties.core_entities && <>
+                    <Divider className='rb:my-2.5!' />
+                    <div className="rb:font-medium rb:leading-5 rb:pl-1">{t('userMemory.core_entities')}</div>
+                    <ul className="rb:list-disc rb:pl-4 rb:text-[#5B6167] rb:mt-2">
+                      {(selectedNode as RawCommunityNode).properties.core_entities?.map((entity, index) => <li key={index}>{entity}</li>)}
+                    </ul>
+                  </>}
+                </div>
               : <>
                 {(selectedNode as Node).name &&
                   <div className="rb:font-medium rb:text-[16px] rb:text-[#212332] rb:leading-5.5 rb:mb-3">

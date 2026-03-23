@@ -469,6 +469,7 @@ export const en = {
       download: 'Download',
       view: 'View',
       updated_at: 'Updated At',
+      callbackUrlInvalid: 'Please enter a valid URL',
     },
     model: {
       searchPlaceholder: 'search model…',

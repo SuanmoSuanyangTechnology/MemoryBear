@@ -143,15 +143,20 @@ const ChatContent: FC<ChatContentProps> = ({
                     }
                     return (
                       <div key={file.url || file.uid} className="rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:p-1! rb:cursor-pointer" onClick={() => handleDownload(file)}>
-                        {(file.type.includes('doc') || file.type.includes('docx') || file.type.includes('word') || file.type.includes('wordprocessingml.document')) && <div
-                          className="rb:size-10 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/word.svg')]"
-                        ></div>}
-                        {(file.type.includes('pdf')) && <div
-                          className="rb:size-10 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/pdf.svg')]"
-                        ></div>}
-                        {(file.type.includes('excel') || file.type.includes('spreadsheetml.sheet') || file.type.includes('csv')) && <div
-                          className="rb:size-10 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/excel.svg')]"
-                        ></div>}
+                        {(file.type.includes('excel') || file.type.includes('spreadsheetml.sheet') || file.type.includes('csv'))
+                          ? <div
+                            className="rb:size-10 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/excel.svg')]"
+                          ></div>
+                          :(file.type.includes('pdf'))
+                          ? <div
+                            className="rb:size-10 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/pdf.svg')]"
+                          ></div>
+                          : (file.type.includes('doc') || file.type.includes('docx') || file.type.includes('word') || file.type.includes('wordprocessingml.document'))
+                          ? <div
+                            className="rb:size-10 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/word.svg')]"
+                          ></div>
+                          : null
+                        }
                       </div>
                     )
                   })}

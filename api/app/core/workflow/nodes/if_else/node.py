@@ -31,13 +31,13 @@ class IfElseNode(BaseNode):
                 expressions.append({
                     "left": self.get_variable(expression.left, variable_pool, strict=False),
                     "right": expression.right
-                    if expression.input_type == ValueInputType.CONSTANT
+                    if expression.input_type == ValueInputType.CONSTANT or expression.right is None
                     else self.get_variable(expression.right, variable_pool, strict=False),
-                    "operator": expression.operator,
+                    "operator": str(expression.operator),
                 })
             result.append({
                 "expressions": expressions,
-                "logical_operator": case.logical_operator,
+                "logical_operator": str(case.logical_operator),
             })
         return {
             "cases": result

@@ -4,12 +4,14 @@
  * @Last Modified by:   ZhaoYing 
  * @Last Modified time: 2026-03-16 15:10:17 
  */
-import { type FC, useEffect, useState, useMemo } from 'react'
+import { type FC, useEffect, useState, useMemo, useRef } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Row, Col, Skeleton, Button, Divider, Tooltip, Flex } from 'antd'
 
+
+import InfiniteScroll from 'react-infinite-scroll-component'
 import RbCard from '@/components/RbCard/Card'
 import {
   getConversations,
@@ -61,6 +63,8 @@ const WorkingDetail: FC = () => {
   const { id } = useParams()
   const [loading, setLoading] = useState<boolean>(false)
   const [data, setData] = useState<Conversation[]>([])
+  const [hasMore, setHasMore] = useState<boolean>(true)
+  const pageRef = useRef<number>(1)
   const [messagesLoading, setMessagesLoading] = useState<boolean>(false)
   const [messages, setMessages] = useState<ChatItem[]>([])
   const [detailLoading, setDetailLoading] = useState<boolean>(false)
@@ -80,17 +84,30 @@ const WorkingDetail: FC = () => {
     setSelected(null)
     setDetail(null)
     setData([])
-    getConversations(id).then((res) => {
-      const response = res as Conversation[] 
-      setData(response)
-      setSelected(response[0] || null)
+    setHasMore(true)
+    pageRef.current = 1
+    getConversations(id, 1).then((res) => {
+      const response = res as { items: Conversation[], page: { hasnext: boolean } }
+      setData(response.items)
+      setSelected(response.items[0] || null)
+      setHasMore(response.page.hasnext)
     })
     .finally(() => {
       setLoading(false)
     })
   }
 
-  /* Load messages and AI insight whenever the selected conversation changes. */
+  const loadMore = () => {
+    if (!id) return
+    const nextPage = pageRef.current + 1
+    getConversations(id, nextPage).then((res) => {
+      const response = res as {items: Conversation[], page: { hasnext: boolean }}
+      setData(prev => [...prev, ...response.items])
+      pageRef.current = nextPage
+      setHasMore(response.page.hasnext)
+    })
+  }
+
   useEffect(() => {
     if (!id || !selected || !selected.id) return
     getDetail(selected.id)
@@ -138,16 +155,16 @@ const WorkingDetail: FC = () => {
         : data.length === 0
         ? <Empty />
         :(
-          <Row gutter={16} className="rb:h-full">
-            <Col flex='360px' className="rb:h-full">
-              <RbCard
-                title={t('workingDetail.conversation')}
-                headerType="borderless"
-                headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
-                bodyClassName='rb:p-3! rb:pt-0! rb:h-[calc(100%-54px)]'
-                className="rb:h-full!"
-              >
-                <Flex gap={8} vertical>
+          <Row gutter={16}>
+            <Col span={5}>
+              <div id="conversation-list" className="rb:h-[calc(100vh-76px)]! rb:border-r rb:border-[#EAECEE] rb:py-3 rb:px-4 rb:overflow-y-auto">
+                <InfiniteScroll
+                  dataLength={data.length}
+                  next={loadMore}
+                  hasMore={hasMore}
+                  loader={null}
+                  scrollableTarget="conversation-list"
+                >
                   {data.map(item => (
                     <Flex
                       key={item.id}
@@ -166,8 +183,8 @@ const WorkingDetail: FC = () => {
                       </Tooltip>
                     </Flex>
                   ))}
-                </Flex>
-              </RbCard>
+                </InfiniteScroll>
+              </div>
             </Col>
             {selected && <>
               <Col flex="auto" className="rb:h-full">

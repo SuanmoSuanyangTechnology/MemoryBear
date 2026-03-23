@@ -118,28 +118,54 @@ class AppChatService:
 
         )
 
+        model_info = ModelInfo(
+            model_name=api_key_obj.model_name,
+            provider=api_key_obj.provider,
+            api_key=api_key_obj.api_key,
+            api_base=api_key_obj.api_base,
+            capability=api_key_obj.capability,
+            is_omni=api_key_obj.is_omni,
+            model_type=ModelType.LLM
+        )
+
         # 加载历史消息
         messages = self.conversation_service.get_messages(
             conversation_id=conversation_id,
             limit=10
         )
-        history = [
-            {"role": msg.role, "content": msg.content}
-            for msg in messages
-        ]
+        history = []
+        for msg in messages:
+            content = [{"type": "text", "text": msg.content}]
+
+            # 处理 meta_data 中的 files
+            if msg.meta_data and msg.meta_data.get("files"):
+                files = msg.meta_data.get("files", [])
+                # 使用 MultimodalService 处理文件
+                multimodal_service = MultimodalService(self.db, api_config=model_info)
+
+                # 将 files 转换为 FileInput 格式
+                file_inputs = []
+                for file in files:
+                    from app.schemas.app_schema import FileInput, TransferMethod
+                    file_input = FileInput(
+                        type=file.get("type"),
+                        transfer_method=TransferMethod.REMOTE_URL,
+                        url=file.get("url")
+                    )
+                    file_inputs.append(file_input)
+
+                history_processed_files = await multimodal_service.history_process_files(files=file_inputs)
+
+                content.extend(history_processed_files)
+
+            history.append({
+                "role": msg.role,
+                "content": content
+            })
 
         # 处理多模态文件
         processed_files = None
         if files:
-            model_info = ModelInfo(
-                model_name=api_key_obj.model_name,
-                provider=api_key_obj.provider,
-                api_key=api_key_obj.api_key,
-                api_base=api_key_obj.api_base,
-                capability=api_key_obj.capability,
-                is_omni=api_key_obj.is_omni,
-                model_type=ModelType.LLM
-            )
             multimodal_service = MultimodalService(self.db, model_info)
             processed_files = await multimodal_service.process_files(user_id, files)
             logger.info(f"处理了 {len(processed_files)} 个文件")
@@ -313,31 +339,54 @@ class AppChatService:
                 streaming=True
             )
 
+            model_info = ModelInfo(
+                model_name=api_key_obj.model_name,
+                provider=api_key_obj.provider,
+                api_key=api_key_obj.api_key,
+                api_base=api_key_obj.api_base,
+                capability=api_key_obj.capability,
+                is_omni=api_key_obj.is_omni,
+                model_type=ModelType.LLM
+            )
+
             # 加载历史消息
+            messages = self.conversation_service.get_messages(
+                conversation_id=conversation_id,
+                limit=10
+            )
             history = []
-            memory_config = {"enabled": True, 'max_history': 10}
-            if memory_config.get("enabled"):
-                messages = self.conversation_service.get_messages(
-                    conversation_id=conversation_id,
-                    limit=memory_config.get("max_history", 10)
-                )
-                history = [
-                    {"role": msg.role, "content": msg.content}
-                    for msg in messages
-                ]
+            for msg in messages:
+                content = [{"type": "text", "text": msg.content}]
+
+                # 处理 meta_data 中的 files
+                if msg.meta_data and msg.meta_data.get("files"):
+                    history_files = msg.meta_data.get("files", [])
+                    # 使用 MultimodalService 处理文件
+                    multimodal_service = MultimodalService(self.db, api_config=model_info)
+
+                    # 将 files 转换为 FileInput 格式
+                    file_inputs = []
+                    for file in history_files:
+                        from app.schemas.app_schema import FileInput, TransferMethod
+                        file_input = FileInput(
+                            type=file.get("type"),
+                            transfer_method=TransferMethod.REMOTE_URL,
+                            url=file.get("url")
+                        )
+                        file_inputs.append(file_input)
+
+                    history_processed_files = await multimodal_service.history_process_files(files=file_inputs)
+
+                    content.extend(history_processed_files)
+
+                history.append({
+                    "role": msg.role,
+                    "content": content
+                })
 
             # 处理多模态文件
             processed_files = None
             if files:
-                model_info = ModelInfo(
-                    model_name=api_key_obj.model_name,
-                    provider=api_key_obj.provider,
-                    api_key=api_key_obj.api_key,
-                    api_base=api_key_obj.api_base,
-                    capability=api_key_obj.capability,
-                    is_omni=api_key_obj.is_omni,
-                    model_type=ModelType.LLM
-                )
                 multimodal_service = MultimodalService(self.db, model_info)
                 processed_files = await multimodal_service.process_files(user_id, files)
                 logger.info(f"处理了 {len(processed_files)} 个文件")
@@ -347,8 +396,14 @@ class AppChatService:
             total_tokens = 0
 
             text_queue: asyncio.Queue = asyncio.Queue()
+            api_key_config = {
+                "model_name": api_key_obj.model_name,
+                "api_key": api_key_obj.api_key,
+                "api_base": api_key_obj.api_base,
+                "provider": api_key_obj.provider,
+            }
             stream_audio_url, tts_task = await self.agent_service._generate_tts_streaming(
-                features_config, api_key_obj,
+                features_config, api_key_config,
                 text_queue=text_queue,
                 tenant_id=tenant_id, workspace_id=workspace_id
             )
