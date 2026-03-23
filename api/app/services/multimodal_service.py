@@ -9,13 +9,11 @@
 - OpenAI: 支持 URL 和 base64 格式
 """
 import base64
+import csv
 import io
-import uuid
+import json
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
-
-import csv
-import json
 
 import PyPDF2
 import httpx
@@ -33,7 +31,6 @@ from app.models.file_metadata_model import FileMetadata
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.services.audio_transcription_service import AudioTranscriptionService
-from app.tasks import write_perceptual_memory
 
 logger = get_business_logger()
 
@@ -342,15 +339,12 @@ class MultimodalService:
 
     async def process_files(
             self,
-            end_user_id: uuid.UUID | str,
             files: Optional[List[FileInput]],
-
     ) -> List[Dict[str, Any]]:
         """
         处理文件列表，返回 LLM 可用的格式
         
         Args:
-            end_user_id: 用户ID
             files: 文件输入列表
             
         Returns:
@@ -358,8 +352,6 @@ class MultimodalService:
         """
         if not files:
             return []
-        if isinstance(end_user_id, uuid.UUID):
-            end_user_id = str(end_user_id)
 
         # 获取对应的策略
         # dashscope 的 omni 模型使用 OpenAI 兼容格式
@@ -380,23 +372,15 @@ class MultimodalService:
                 if file.type == FileType.IMAGE and "vision" in self.capability:
                     is_support, content = await self._process_image(file, strategy)
                     result.append(content)
-                    if is_support:
-                        self.write_perceptual_memory(end_user_id, file.type, file.url, content)
                 elif file.type == FileType.DOCUMENT:
                     is_support, content = await self._process_document(file, strategy)
                     result.append(content)
-                    if is_support:
-                        self.write_perceptual_memory(end_user_id, file.type, file.url, content)
                 elif file.type == FileType.AUDIO and "audio" in self.capability:
                     is_support, content = await self._process_audio(file, strategy)
                     result.append(content)
-                    if is_support:
-                        self.write_perceptual_memory(end_user_id, file.type, file.url, content)
                 elif file.type == FileType.VIDEO and "video" in self.capability:
                     is_support, content = await self._process_video(file, strategy)
                     result.append(content)
-                    if is_support:
-                        self.write_perceptual_memory(end_user_id, file.type, file.url, content)
                 else:
                     logger.warning(f"不支持的文件类型: {file.type}")
             except Exception as e:
@@ -417,17 +401,6 @@ class MultimodalService:
 
         logger.info(f"成功处理 {len(result)}/{len(files)} 个文件，provider={self.provider}")
         return result
-
-    def write_perceptual_memory(
-            self,
-            end_user_id: str,
-            file_type: str,
-            file_url: str,
-            file_message: dict
-    ):
-        """写入感知记忆"""
-        if end_user_id and self.api_config:
-            write_perceptual_memory.delay(end_user_id, self.api_config.model_dump(), file_type, file_url, file_message)
 
     async def _process_image(self, file: FileInput, strategy) -> tuple[bool, Dict[str, Any]]:
         """

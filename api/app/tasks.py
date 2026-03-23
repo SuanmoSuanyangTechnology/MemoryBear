@@ -1080,12 +1080,14 @@ def write_message_task(
         config_id: str | int,
         storage_type: str,
         user_rag_memory_id: str,
+        file_messages: list[dict] | None,
         language: str = "zh"
 ) -> Dict[str, Any]:
     """Celery task to process a write message via MemoryAgentService.
     Args:
         end_user_id: Group ID for the memory agent (also used as end_user_id)
         message: Message to write
+        file_messages: Files to write
         config_id: Configuration ID (can be UUID string, integer, or config_id_old)
         storage_type: Storage type (neo4j or rag)
         user_rag_memory_id: User RAG memory ID
@@ -1097,6 +1099,8 @@ def write_message_task(
     Raises:
         Exception on failure
     """
+    if file_messages is None:
+        file_messages = []
 
     logger.info(
         f"[CELERY WRITE] Starting write task - end_user_id={end_user_id}, "
@@ -1142,7 +1146,7 @@ def write_message_task(
                 f"[CELERY WRITE] Executing MemoryAgentService.write_memory "
                 f"with config_id={actual_config_id} (type: {type(actual_config_id).__name__}), language={language}")
             service = MemoryAgentService()
-            result = await service.write_memory(end_user_id, message, actual_config_id, db, storage_type,
+            result = await service.write_memory(end_user_id, message, file_messages, actual_config_id, db, storage_type,
                                                 user_rag_memory_id, language)
             logger.info(f"[CELERY WRITE] Write completed successfully: {result}")
             return result

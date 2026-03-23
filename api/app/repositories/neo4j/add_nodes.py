@@ -1,7 +1,8 @@
 from typing import List, Optional
 
-from app.repositories.neo4j.cypher_queries import DIALOGUE_NODE_SAVE, STATEMENT_NODE_SAVE, CHUNK_NODE_SAVE,MEMORY_SUMMARY_NODE_SAVE
 from app.core.memory.models.graph_models import DialogueNode, StatementNode, ChunkNode, MemorySummaryNode
+from app.repositories.neo4j.cypher_queries import DIALOGUE_NODE_SAVE, STATEMENT_NODE_SAVE, CHUNK_NODE_SAVE, \
+    MEMORY_SUMMARY_NODE_SAVE, PERCEPTUAL_NODE_SAVE, PERCEPTUAL_DIALOGUE_EDGE_SAVE
 # 使用新的仓储层
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
@@ -11,6 +12,7 @@ async def delete_all_nodes(end_user_id: str, connector: Neo4jConnector):
     result = await connector.execute_query(f"MATCH (n {{end_user_id: '{end_user_id}'}}) DETACH DELETE n")
     print(f"All end_user_id: {end_user_id} node and edge deleted successfully")
     return result
+
 
 async def add_dialogue_nodes(dialogues: List[DialogueNode], connector: Neo4jConnector) -> Optional[List[str]]:
     """Add dialogue nodes to Neo4j database.
@@ -127,6 +129,7 @@ async def add_statement_nodes(statements: List[StatementNode], connector: Neo4jC
         print(f"Error creating statement nodes: {e}")
         return None
 
+
 async def add_chunk_nodes(chunks: List[ChunkNode], connector: Neo4jConnector) -> Optional[List[str]]:
     """Add chunk nodes to Neo4j in batch.
 
@@ -179,8 +182,8 @@ async def add_chunk_nodes(chunks: List[ChunkNode], connector: Neo4jConnector) ->
         return None
 
 
-
-async def add_memory_summary_nodes(summaries: List[MemorySummaryNode], connector: Neo4jConnector) -> Optional[List[str]]:
+async def add_memory_summary_nodes(summaries: List[MemorySummaryNode], connector: Neo4jConnector) -> Optional[
+    List[str]]:
     """Add memory summary nodes to Neo4j in batch.
 
     Args:
@@ -211,7 +214,7 @@ async def add_memory_summary_nodes(summaries: List[MemorySummaryNode], connector
                 "summary_embedding": s.summary_embedding if s.summary_embedding else None,
                 "config_id": s.config_id,  # 添加 config_id
             })
-        
+
         result = await connector.execute_query(
             MEMORY_SUMMARY_NODE_SAVE,
             summaries=flattened
@@ -224,3 +227,103 @@ async def add_memory_summary_nodes(summaries: List[MemorySummaryNode], connector
         return None
 
 
+async def add_perceptual_nodes(
+        perceptuals: list,
+        connector: Neo4jConnector,
+        embedder_client=None,
+) -> Optional[List[str]]:
+    """Add perceptual memory nodes to Neo4j in batch.
+
+    Args:
+        perceptuals: List of MemoryPerceptualModel objects from PostgreSQL
+        connector: Neo4j connector instance
+        embedder_client: Optional embedder client for generating summary embeddings
+
+    Returns:
+        List of created node UUIDs or None if failed
+    """
+    if not perceptuals:
+        print("No perceptual nodes to add")
+        return []
+
+    try:
+        flattened = []
+        for p in perceptuals:
+            meta = p.meta_data or {}
+            content_meta = meta.get("content", {})
+
+            # 生成 summary embedding（如果有 embedder_client）
+            summary_embedding = None
+            if embedder_client and p.summary:
+                try:
+                    summary_embedding = (await embedder_client.response([p.summary]))[0]
+                except Exception as emb_err:
+                    print(f"Failed to embed perceptual summary: {emb_err}")
+
+            flattened.append({
+                "id": str(p.id),
+                "end_user_id": str(p.end_user_id),
+                "perceptual_type": p.perceptual_type,
+                "file_path": p.file_path or "",
+                "file_name": p.file_name or "",
+                "file_ext": p.file_ext or "",
+                "summary": p.summary or "",
+                "keywords": content_meta.get("keywords", []),
+                "topic": content_meta.get("topic", ""),
+                "domain": content_meta.get("domain", ""),
+                "created_at": p.created_time.isoformat() if p.created_time else None,
+                "summary_embedding": summary_embedding,
+            })
+
+        result = await connector.execute_query(
+            PERCEPTUAL_NODE_SAVE,
+            perceptuals=flattened,
+        )
+        created_uuids = [record.get("uuid") for record in result]
+        print(f"Successfully saved {len(created_uuids)} Perceptual nodes to Neo4j")
+        return created_uuids
+
+    except Exception as e:
+        print(f"Failed to save Perceptual nodes to Neo4j: {e}")
+        return None
+
+
+async def add_perceptual_dialogue_edges(
+        perceptuals: list,
+        dialog_id: str,
+        connector: Neo4jConnector,
+) -> Optional[List[str]]:
+    """Add edges between Perceptual nodes and Dialogue nodes.
+
+    Args:
+        perceptuals: List of MemoryPerceptualModel objects
+        dialog_id: The dialogue ID (or ref_id) to link to
+        connector: Neo4j connector instance
+
+    Returns:
+        List of created edge element IDs or None if failed
+    """
+    if not perceptuals or not dialog_id:
+        return []
+
+    try:
+        edges = []
+        for p in perceptuals:
+            edges.append({
+                "perceptual_id": str(p.id),
+                "dialog_id": dialog_id,
+                "end_user_id": str(p.end_user_id),
+                "created_at": p.created_time.isoformat() if p.created_time else None,
+            })
+
+        result = await connector.execute_query(
+            PERCEPTUAL_DIALOGUE_EDGE_SAVE,
+            edges=edges,
+        )
+        created_ids = [record.get("uuid") for record in result]
+        print(f"Successfully saved {len(created_ids)} Perceptual-Dialogue edges to Neo4j")
+        return created_ids
+
+    except Exception as e:
+        print(f"Failed to save Perceptual-Dialogue edges: {e}")
+        return None

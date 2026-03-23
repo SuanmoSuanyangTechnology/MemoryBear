@@ -553,3 +553,21 @@ class MemorySummaryNode(Node):
         ge=0,
         description="Total number of times this node has been accessed (reset to 1 on creation)"
     )
+
+
+class MutlimodalNode(Node):
+    """Node representing a multimodal message in the knowledge graph.
+
+    Attributes:
+        dialog_id: ID of the parent dialog
+        message_id: ID of the message
+        metadata: Additional message metadata
+        embedding: Optional embedding vector for the message
+    """
+    dialog_id: str = Field(..., description="ID of the parent dialog")
+    message_id: str = Field(..., description="ID of the message")
+    summary: str = Field(..., description="The text content of the message")
+    file_type: str = Field(..., description="Type of the message (e.g., 'text', 'image', 'audio', 'video')")
+    file_path: List[str] = Field(..., description="List of file paths for multimodal content")
+    metadata: dict = Field(default_factory=dict, description="Additional message metadata")
+    embedding: Optional[List[float]] = Field(None, description="Embedding vector for the message")

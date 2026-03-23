@@ -141,7 +141,7 @@ class AppChatService:
                 model_type=ModelType.LLM
             )
             multimodal_service = MultimodalService(self.db, model_info)
-            processed_files = await multimodal_service.process_files(user_id, files)
+            processed_files = await multimodal_service.process_files(files)
             logger.info(f"处理了 {len(processed_files)} 个文件")
 
         # 调用 Agent（支持多模态）
@@ -339,7 +339,7 @@ class AppChatService:
                     model_type=ModelType.LLM
                 )
                 multimodal_service = MultimodalService(self.db, model_info)
-                processed_files = await multimodal_service.process_files(user_id, files)
+                processed_files = await multimodal_service.process_files(files)
                 logger.info(f"处理了 {len(processed_files)} 个文件")
 
             # 流式调用 Agent（支持多模态），同时并行启动 TTS

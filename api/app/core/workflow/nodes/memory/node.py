@@ -116,6 +116,7 @@ class MemoryWriteNode(BaseNode):
         write_message_task.delay(
             end_user_id=end_user_id,
             message=messages,
+            file_messages=multimodal_memories,
             config_id=str(self.typed_config.config_id),
             storage_type=state["memory_storage_type"],
             user_rag_memory_id=state["user_rag_memory_id"]

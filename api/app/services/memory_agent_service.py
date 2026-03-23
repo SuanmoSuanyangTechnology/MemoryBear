@@ -19,32 +19,35 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from uuid import UUID
 
 import redis
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.cache import InterestMemoryCache
 from app.core.config import settings
 from app.core.logging_config import get_config_logger, get_logger
 from app.core.memory.agent.langgraph_graph.read_graph import make_read_graph
-from app.core.memory.agent.langgraph_graph.write_graph import make_write_graph
 from app.core.memory.agent.logger_file.log_streamer import LogStreamer
 from app.core.memory.agent.utils.messages_tools import (
     merge_multiple_search_results,
     reorder_output_results,
 )
 from app.core.memory.agent.utils.type_classifier import status_typle
+from app.core.memory.agent.utils.write_tools import write as write_neo4j
 from app.core.memory.analytics.hot_memory_tags import get_interest_distribution
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.schemas import FileInput
 from app.schemas.memory_agent_schema import Write_UserInput
 from app.schemas.memory_config_schema import ConfigurationError
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_konwledges_server import (
     write_rag,
 )
+from app.services.memory_perceptual_service import MemoryPerceptualService
 
 try:
     from app.core.memory.utils.log.audit_logger import audit_logger
@@ -271,6 +274,7 @@ class MemoryAgentService:
             self,
             end_user_id: str,
             messages: list[dict],
+            file_messages: list[dict],
             config_id: Optional[uuid.UUID] | int,
             db: Session,
             storage_type: str,
@@ -283,6 +287,7 @@ class MemoryAgentService:
         Args:
             end_user_id: Group identifier (also used as end_user_id)
             messages: Message to write
+            files: Files to write
             config_id: Configuration ID from database
             db: SQLAlchemy database session
             storage_type: Storage type (neo4j or rag)
@@ -342,48 +347,52 @@ class MemoryAgentService:
 
             raise ValueError(error_msg)
 
+        perceptual_serivce = MemoryPerceptualService(db)
+        file_content = []
+        for message in file_messages:
+            for file in message["files"]:
+                file_object = await perceptual_serivce.generate_perceptual_memory(
+                    end_user_id=end_user_id,
+                    memory_config=memory_config,
+                    file=FileInput(**file)
+                )
+                file_content.append(file_object)
+
+        message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
         try:
             if storage_type == "rag":
                 # For RAG storage, convert messages to single string
-                message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
                 await write_rag(end_user_id, message_text, user_rag_memory_id)
                 return "success"
             else:
-                async with make_write_graph() as graph:
-                    config = {"configurable": {"thread_id": end_user_id}}
-                    # Convert structured messages to LangChain messages
-                    langchain_messages = []
-                    for msg in messages:
-                        if msg['role'] == 'user':
-                            langchain_messages.append(HumanMessage(content=msg['content']))
-                        elif msg['role'] == 'assistant':
-                            langchain_messages.append(AIMessage(content=msg['content']))
-                    print(100 * '-')
-                    print(langchain_messages)
-                    print(100 * '-')
-                    # 初始状态 - 包含所有必要字段
-                    initial_state = {
-                        "messages": langchain_messages,
-                        "end_user_id": end_user_id,
-                        "memory_config": memory_config,
-                        "language": language
-                    }
-
-                    # 获取节点更新信息
-                    async for update_event in graph.astream(
-                            initial_state,
-                            stream_mode="updates",
-                            config=config
-                    ):
-                        for node_name, node_data in update_event.items():
-                            if 'save_neo4j' == node_name:
-                                massages = node_data
-                    massagesstatus = massages.get('write_result')['status']
-                    contents = massages.get('write_result')
-                    # Convert messages back to string for logging
-                    message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
-                    return self.writer_messages_deal(massagesstatus, start_time, end_user_id, config_id, message_text,
-                                                     contents)
+                await write_neo4j(
+                    end_user_id=end_user_id,
+                    messages=messages,
+                    file_content=file_content,
+                    memory_config=memory_config,
+                    ref_id='',
+                    language=language
+                )
+                for lang in ["zh", "en"]:
+                    deleted = await InterestMemoryCache.delete_interest_distribution(
+                        end_user_id, lang
+                    )
+                    if deleted:
+                        logger.info(
+                            f"Invalidated interest distribution cache: end_user_id={end_user_id}, language={lang}")
+                    return self.writer_messages_deal(
+                        "success",
+                        start_time,
+                        end_user_id,
+                        config_id,
+                        message_text,
+                        {
+                            "status": "success",
+                            "data": messages,
+                            "config_id": memory_config.config_id,
+                            "config_name": memory_config.config_name
+                        }
+                    )
         except Exception as e:
             # Ensure proper error handling and logging
             error_msg = f"Write operation failed: {str(e)}"

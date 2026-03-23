@@ -5,6 +5,7 @@ This module provides the main write function for executing the knowledge extract
 pipeline. Only MemoryConfig is needed - clients are constructed internally.
 """
 import asyncio
+import uuid
 import time
 from datetime import datetime
 
@@ -13,16 +14,18 @@ from dotenv import load_dotenv
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
 from app.core.memory.storage_services.extraction_engine.extraction_orchestrator import ExtractionOrchestrator
-from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import memory_summary_generation
+from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import \
+    memory_summary_generation
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.memory.utils.log.logging_utils import log_time
 from app.db import get_db_context
+from app.models import MemoryPerceptualModel
 from app.repositories.neo4j.add_edges import add_memory_summary_statement_edges
-from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
+from app.repositories.neo4j.add_nodes import add_memory_summary_nodes, add_perceptual_nodes, \
+    add_perceptual_dialogue_edges
 from app.repositories.neo4j.graph_saver import save_dialog_and_statements_to_neo4j, schedule_clustering_after_write
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_config_schema import MemoryConfig
-
 
 load_dotenv()
 
@@ -30,11 +33,12 @@ logger = get_agent_logger(__name__)
 
 
 async def write(
-    end_user_id: str,
-    memory_config: MemoryConfig,
-    messages: list,
-    ref_id: str = "wyl20251027",
-    language: str = "zh",
+        end_user_id: str,
+        memory_config: MemoryConfig,
+        messages: list,
+        file_content: list[MemoryPerceptualModel],
+        ref_id: str = "",
+        language: str = "zh",
 ) -> None:
     """
     Execute the complete knowledge extraction pipeline.
@@ -43,9 +47,12 @@ async def write(
         end_user_id: Group identifier
         memory_config: MemoryConfig object containing all configuration
         messages: Structured message list [{"role": "user", "content": "..."}, ...]
-        ref_id: Reference ID, defaults to "wyl20251027"
+        file_content: mutilmodal message list
+        ref_id: Reference ID, defaults to ""
         language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
     """
+    if not ref_id:
+        ref_id = uuid.uuid4().hex
     # Extract config values
     embedding_model_id = str(memory_config.embedding_model_id)
     chunker_strategy = memory_config.chunker_strategy
@@ -99,14 +106,14 @@ async def write(
     if memory_config.scene_id:
         try:
             from app.core.memory.ontology_services.ontology_type_loader import load_ontology_types_for_scene
-            
+
             with get_db_context() as db:
                 ontology_types = load_ontology_types_for_scene(
                     scene_id=memory_config.scene_id,
                     workspace_id=memory_config.workspace_id,
                     db=db
                 )
-                
+
                 if ontology_types:
                     logger.info(
                         f"Loaded {len(ontology_types.types)} ontology types for scene_id: {memory_config.scene_id}"
@@ -173,7 +180,8 @@ async def write(
                 schedule_clustering_after_write(
                     all_entity_nodes,
                     llm_model_id=str(memory_config.llm_model_id) if memory_config.llm_model_id else None,
-                    embedding_model_id=str(memory_config.embedding_model_id) if memory_config.embedding_model_id else None,
+                    embedding_model_id=str(
+                        memory_config.embedding_model_id) if memory_config.embedding_model_id else None,
                 )
                 break
             else:
@@ -208,9 +216,8 @@ async def write(
         summaries = await memory_summary_generation(
             chunked_dialogs, llm_client=llm_client, embedder_client=embedder_client, language=language
         )
-
+        ms_connector = Neo4jConnector()
         try:
-            ms_connector = Neo4jConnector()
             await add_memory_summary_nodes(summaries, ms_connector)
             await add_memory_summary_statement_edges(summaries, ms_connector)
         finally:
@@ -222,6 +229,34 @@ async def write(
         logger.error(f"Memory summary step failed: {e}", exc_info=True)
     finally:
         log_time("Memory Summary (Neo4j)", time.time() - step_start, log_file)
+
+    # Step 5: Save perceptual memory to Neo4j
+    step_start = time.time()
+    if file_content:
+        try:
+            pc_connector = Neo4jConnector()
+            try:
+                created_ids = await add_perceptual_nodes(
+                    perceptuals=file_content,
+                    connector=pc_connector,
+                    embedder_client=embedder_client,
+                )
+                # 如果有 ref_id，建立感知记忆与对话的关联
+                if ref_id and created_ids:
+                    await add_perceptual_dialogue_edges(
+                        perceptuals=file_content,
+                        dialog_id=ref_id,
+                        connector=pc_connector,
+                    )
+                logger.info(f"Successfully saved {len(created_ids or [])} perceptual memory nodes to Neo4j")
+            finally:
+                try:
+                    await pc_connector.close()
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.error(f"Perceptual memory Neo4j save failed: {e}", exc_info=True)
+    log_time("Perceptual Memory (Neo4j)", time.time() - step_start, log_file)
 
     # Log total pipeline time
     total_time = time.time() - pipeline_start

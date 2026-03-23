@@ -600,7 +600,7 @@ class AgentRunService:
                 )
                 provider = api_key_config.get("provider", "openai")
                 multimodal_service = MultimodalService(self.db, model_info)
-                processed_files = await multimodal_service.process_files(user_id, files)
+                processed_files = await multimodal_service.process_files(files)
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
 
             # 7. 知识库检索
@@ -836,7 +836,7 @@ class AgentRunService:
                 )
                 provider = api_key_config.get("provider", "openai")
                 multimodal_service = MultimodalService(self.db, model_info)
-                processed_files = await multimodal_service.process_files(user_id, files)
+                processed_files = await multimodal_service.process_files(files)
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
 
             # 7. 知识库检索

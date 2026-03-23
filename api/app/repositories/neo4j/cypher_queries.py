@@ -1323,3 +1323,36 @@ RETURN s.statement AS statement,
 ORDER BY COALESCE(s.activation_value, 0) DESC
 LIMIT $limit
 """
+
+# 感知记忆节点保存
+PERCEPTUAL_NODE_SAVE = """
+UNWIND $perceptuals AS p
+MERGE (n:Perceptual {id: p.id})
+SET n += {
+    id: p.id,
+    end_user_id: p.end_user_id,
+    perceptual_type: p.perceptual_type,
+    file_path: p.file_path,
+    file_name: p.file_name,
+    file_ext: p.file_ext,
+    summary: p.summary,
+    keywords: p.keywords,
+    topic: p.topic,
+    domain: p.domain,
+    created_at: p.created_at,
+    summary_embedding: p.summary_embedding
+}
+RETURN n.id AS uuid
+"""
+
+# 感知记忆与对话的关联边
+PERCEPTUAL_DIALOGUE_EDGE_SAVE = """
+UNWIND $edges AS edge
+MATCH (p:Perceptual {id: edge.perceptual_id, end_user_id: edge.end_user_id})
+MATCH (d:Dialogue {end_user_id: edge.end_user_id})
+WHERE d.id = edge.dialog_id OR d.ref_id = edge.dialog_id
+MERGE (d)-[r:HAS_PERCEPTUAL]->(p)
+SET r.end_user_id = edge.end_user_id,
+    r.created_at = edge.created_at
+RETURN elementId(r) AS uuid
+"""
