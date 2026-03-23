@@ -467,6 +467,7 @@ export const en = {
       notAllSpaces: 'Cannot be all spaces',
       download: 'Download',
       view: 'View',
+      updated_at: 'Updated At',
     },
     model: {
       searchPlaceholder: 'search model…',
@@ -1918,6 +1919,9 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       refreshFailed: 'Refresh Failed',
       
       // Market related
+      mcpMarket: 'MCP Market',
+      availableMcp: 'Available MCP Services',
+      descEmpty: 'There is currently no introduction available …',
       marketSelectTitle: 'Select an MCP Market',
       marketSelectDesc: 'Choose a market source from the left, configure the connection to browse MCP services',
       marketRefreshSuccess: 'List refreshed',
@@ -1966,6 +1970,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       timeout: 'Timeout (seconds)',
       sseReadTimeout: 'SSE Read Timeout (seconds)',
       saveAndTest: 'Save and Test',
+      testLink: 'Connection Test',
+      noTags: 'There are no tags here…',
 
       timeFormat: 'Time Formatting',
       timeZoneConversion: 'Time Zone Conversion',

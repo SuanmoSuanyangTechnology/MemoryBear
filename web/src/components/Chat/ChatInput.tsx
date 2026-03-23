@@ -127,23 +127,23 @@ const ChatInput: FC<ChatInputProps> = ({
                     className={clsx(
                       "rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/pdf_disabled.svg')]", 
                       file.type.includes('pdf')
-                      ? "rb:bg-[url('src/assets/images/file/pdf.svg')]"
+                      ? "rb:bg-[url('@/assets/images/file/pdf.svg')]"
                       : (file.type.includes('excel') || file.type.includes('spreadsheetml.sheet'))
-                      ? "rb:bg-[url('src/assets/images/file/excel.svg')]"
+                      ? "rb:bg-[url('@/assets/images/file/excel.svg')]"
                       : file.type.includes('csv')
-                      ? "rb:bg-[url('src/assets/images/file/csv.svg')]"
+                      ? "rb:bg-[url('@/assets/images/file/csv.svg')]"
                       : file.type.includes('html')
-                      ? "rb:bg-[url('src/assets/images/file/html.svg')]"
+                      ? "rb:bg-[url('@/assets/images/file/html.svg')]"
                       : file.type.includes('json')
-                      ? "rb:bg-[url('src/assets/images/file/json.svg')]"
+                      ? "rb:bg-[url('@/assets/images/file/json.svg')]"
                       : file.type.includes('ppt')
-                      ? "rb:bg-[url('src/assets/images/file/ppt.svg')]"
+                      ? "rb:bg-[url('@/assets/images/file/ppt.svg')]"
                       : file.type.includes('text')
-                      ? "rb:bg-[url('src/assets/images/file/txt.svg')]"
+                      ? "rb:bg-[url('@/assets/images/file/txt.svg')]"
                       : file.type.includes('markdown')
-                      ? "rb:bg-[url('src/assets/images/file/md.svg')]"
+                      ? "rb:bg-[url('@/assets/images/file/md.svg')]"
                       : (file.type.includes('doc') || file.type.includes('docx') || file.type.includes('word') || file.type.includes('wordprocessingml.document'))
-                      ? "rb:bg-[url('src/assets/images/file/word.svg')]"
+                      ? "rb:bg-[url('@/assets/images/file/word.svg')]"
                       : null
                     )}
                   ></div>

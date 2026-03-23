@@ -2,23 +2,25 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:10:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 10:56:44
+ * @Last Modified time: 2026-03-20 16:36:02
  */
-import { type FC, useState, useRef, type MouseEvent } from 'react';
+import { type FC, useState, useRef } from 'react';
+import type { MenuInfo } from 'rc-menu/lib/interface';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Row, Col, Button, Flex, Divider, Space, App, Tooltip } from 'antd'
+import { Row, Col, Flex, Space, App, Tooltip, Dropdown } from 'antd'
 
 import SearchInput from '@/components/SearchInput';
 import OntologyModal from './components/OntologyModal'
 import type { OntologyModalRef, OntologyItem, Query, OntologyImportModalRef, OntologyExportModalRef } from './types'
-import RbCard from '@/components/RbCard/Card'
+import RbCard from '@/components/RbCard'
 import Tag from '@/components/Tag'
 import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
 import { getOntologyScenesUrl, deleteOntologyScene } from '@/api/ontology'
 import { formatDateTime } from '@/utils/format'
 import OntologyImportModal from './components/OntologyImportModal'
 import OntologyExportModal from './components/OntologyExportModal'
+import RbButton from '@/components/RbButton'
 
 /**
  * Ontology management page component
@@ -51,20 +53,18 @@ const Ontology: FC = () => {
    * @param record - The ontology item to edit
    * @param e - Mouse event to prevent propagation
    */
-  const handleEdit = (record: OntologyItem, e: MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handleEdit = (record: OntologyItem, e: MenuInfo) => {
+    e.domEvent.stopPropagation();
     entityModalRef.current?.handleOpen(record)
   }
   
   /**
    * Delete an ontology scene with confirmation
    * @param item - The ontology item to delete
-   * @param e - Mouse event to prevent propagation
+   * @param e - Menu click info
    */
-  const handleDelete = (item: OntologyItem, e: MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handleDelete = (item: OntologyItem, e: MenuInfo) => {
+    e.domEvent.stopPropagation();
     modal.confirm({
       title: t('common.confirmDeleteDesc', { name: item.scene_name }),
       okText: t('common.delete'),
@@ -111,28 +111,23 @@ const Ontology: FC = () => {
 
   return (
     <>
-      <Row gutter={16} className="rb:mb-4">
-        <Col span={8}>
-          <SearchInput
-            placeholder={t('ontology.searchPlaceholder')}
-            onSearch={(value) => setQuery({ scene_name: value })}
-            className="rb:w-full!"
-          />
-        </Col>
-        <Col span={16} className="rb:text-right">
-          <Space size={12}>
-            <Button onClick={handleExport}>
-              {t('ontology.export')}
-            </Button>
-            <Button onClick={handleImport}>
-              {t('ontology.import')}
-            </Button>
-            <Button type="primary" onClick={handleCreate}>
-              + {t('ontology.create')}
-            </Button>
-          </Space>
-        </Col>
-      </Row>
+      <Flex align="center" justify="space-between" className="rb:mb-4!">
+        <SearchInput
+          placeholder={t('ontology.searchPlaceholder')}
+          onSearch={(value) => setQuery({ scene_name: value })}
+        />
+        <Space size={12}>
+          <RbButton ghost type="primary" onClick={handleExport}>
+            {t('ontology.export')}
+          </RbButton>
+          <RbButton ghost type="primary" onClick={handleImport}>
+            {t('ontology.import')}
+          </RbButton>
+          <RbButton type="primary" onClick={handleCreate}>
+            + {t('ontology.create')}
+          </RbButton>
+        </Space>
+      </Flex>
 
       <PageScrollList<OntologyItem, Query>
         ref={scrollListRef}
@@ -141,58 +136,70 @@ const Ontology: FC = () => {
         column={3}
         renderItem={(item) =>(
           <RbCard
-            title={item.scene_name}
-            extra={<Tag>{item.type_num} {t('ontology.typeCount')}</Tag>}
-            onClick={() => handleJump(item)}
-            className="rb:cursor-pointer rb:relative"
-          >
-            {item.is_system_default &&
-              <div className="rb:absolute rb:-right-px rb:-top-px rb:bg-[#FF5D34] rb:rounded-[0px_7px_0px_8px] rb:text-[12px] rb:text-white rb:font-regular rb:leading-4 rb:py-0.5 rb:px-1">
-                {t('common.default')}
-              </div>
+            title={
+              <Flex justify="space-between">
+                <Flex gap={4} vertical>
+                  {item.scene_name}
+                  <Space size={8}>
+                    <Tag>{item.type_num} {t('ontology.typeCount')}</Tag>
+                    {item.is_system_default  && <Tag color="warning">{t('common.default')}</Tag>}
+                  </Space>
+                </Flex>
+                <Dropdown
+                  menu={{
+                    items: [
+                      {
+                        key: 'edit',
+                        icon: <div className="rb:size-6 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit.svg')]" />,
+                        label: t('common.edit'),
+                        onClick: (e: MenuInfo) => handleEdit(item, e),
+                      },
+                      {
+                        key: 'delete',
+                        icon: <div className="rb:size-6 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete.svg')]" />,
+                        label: t('common.delete'),
+                        onClick: (e: MenuInfo) => handleDelete(item, e),
+                      },
+                    ]
+                  }}
+                  placement="bottomRight"
+                >
+                  <div className="rb:cursor-pointer rb:size-6 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
+                </Dropdown>
+              </Flex>
             }
-            <div
-              className="rb:flex rb:gap-2 rb:justify-between rb:text-[#5B6167] rb:text-[14px] rb:leading-5 rb:mb-3"
-            >
-              <span className="rb:whitespace-nowrap">{t(`ontology.scene_description`)}</span>
-              <Tooltip title={item.scene_description} placement="topRight">
-                <span className="rb:font-medium rb:flex-1 rb:text-right rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{item.scene_description}</span>
-              </Tooltip>
-            </div>
-            {(['created_at', 'updated_at'] as const).map(key => (
-              <div
-                key={key}
-                className="rb:flex rb:gap-2 rb:justify-between rb:text-[#5B6167] rb:text-[14px] rb:leading-5 rb:mb-3"
-              >
-                <span className="rb:whitespace-nowrap">{t(`ontology.${key}`)}</span>
-                <span className="rb:font-medium">{formatDateTime(item[key])}</span>
-              </div>
-            ))}
-            <Divider size="middle" />
-            <Flex gap={8} wrap align="center">
-              <div className="rb:text-[#5B6167] rb:leading-4.5">{t('ontology.entityTypes')}: </div>
-              <div className="rb:flex-1 rb:overflow-hidden rb:wrap-break-word! rb:line-clamp-1!">
+            isNeedTooltip={false}
+            headerClassName="rb:pb-0!"
+            onClick={() => handleJump(item)}
+            className="rb:cursor-pointer!"
+          >
+            <Tooltip title={item.scene_description}>
+              <div className="rb:h-10 rb:wrap-break-word rb:line-clamp-2 rb:leading-5">{item.scene_description}</div>
+            </Tooltip>
+
+            <Flex gap={8} wrap align="center" className="rb:mt-2!">
+              <Flex gap={8} className="rb:flex-1 rb:overflow-hidden rb:wrap-break-word! rb:line-clamp-1!">
                 {item.entity_type?.map((type, i) => (
-                  <Tag key={i} color={i % 2 ? 'processing' : 'success'} className="rb:ml-2">{type}</Tag>
+                  <span key={i} className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">{type}</span>
                 ))}
-              </div>
+              </Flex>
               {item.type_num > 3 && (
-                <Tag color="default">+{item.type_num - 3}</Tag>
+                <span className="rb:bg-[#F6F6F6] rb:rounded-full rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">+{item.type_num - 3}</span>
               )}
             </Flex>
 
-            <div className="rb:mt-4 rb:h-5 rb:text-[12px] rb:leading-4 rb:font-regular rb:text-[#5B6167] rb:flex rb:items-center rb:justify-end">
-              {!item.is_system_default && <Space size={16}>
-                <div
-                  className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/edit.svg')] rb:hover:bg-[url('@/assets/images/edit_hover.svg')]"
-                  onClick={(e) => handleEdit(item, e)}
-                ></div>
-                <div
-                  className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/delete.svg')] rb:hover:bg-[url('@/assets/images/delete_hover.svg')]"
-                  onClick={(e) => handleDelete(item, e)}
-                ></div>
-              </Space>}
-            </div>
+            <Row className="rb:mt-4!">
+              {(['created_at', 'updated_at'] as const).map(key => (
+                <Col
+                  key={key}
+                  span={12}
+                  className="rb:text-[#5B6167] rb:text-[12px]! rb:leading-4.5"
+                >
+                  <div>{t(`ontology.${key}`)}</div>
+                  <div>{formatDateTime(item[key])}</div>
+                </Col>
+              ))}
+            </Row>
           </RbCard>
         )}
       />

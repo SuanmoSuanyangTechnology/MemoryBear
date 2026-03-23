@@ -299,7 +299,7 @@ const Conversation: FC = () => {
     <Flex className="rb:w-full rb:p-[-16px]!">
       <div className="rb:w-80 rb:h-screen rb:bg-[#F6F6F6] rb:overflow-hidden">
         <Flex align="center" gap={8} className="rb:p-5!">
-          <div className="rb:size-6 rb:bg-cover rb:bg-[url('src/assets/images/conversation/redbear.png')]"></div>
+          <div className="rb:size-6 rb:bg-cover rb:bg-[url('@/assets/images/conversation/redbear.png')]"></div>
           <div className="rb:text-[16px] rb:leading-5 rb:font-[Gilroy-Extrabold] rb:font-extrabold">{t('memoryConversation.chatTitle')}</div>
         </Flex>
 

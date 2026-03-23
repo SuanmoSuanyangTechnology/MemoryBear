@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:24:23 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-10 14:59:39
+ * @Last Modified time: 2026-03-23 11:35:33
  */
 /**
  * SearchInput Component
@@ -22,7 +22,7 @@ import { Input, type InputProps } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 /** Props interface for SearchInput component */
-interface SearchInputProps {
+interface SearchInputProps extends InputProps {
   /** Placeholder text */
   placeholder?: string;
   /** Callback fired when search value changes */

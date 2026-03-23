@@ -2,17 +2,17 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:10:20 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 11:26:49
+ * @Last Modified time: 2026-03-20 16:35:14
  */
 import { type FC, useEffect, useState, useRef } from 'react'
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { App, Row, Col, Tooltip, Space, Button } from 'antd'
+import { App, Row, Col, Tooltip, Space, Button, Flex } from 'antd'
 
-import PageHeader from '../components/PageHeader'
+import PageHeader from '@/components/Layout/PageHeader'
 import { getOntologyClassList, deleteOntologyClass } from '@/api/ontology'
 import type { OntologyClassData, OntologyClassModalRef, OntologyClassExtractModalRef, OntologyClassItem } from '@/views/Ontology/types'
-import RbCard from '@/components/RbCard/Card';
+import RbCard from '@/components/RbCard';
 import OntologyClassModal from '../components/OntologyClassModal'
 import SearchInput from '@/components/SearchInput';
 import OntologyClassExtractModal from '../components/OntologyClassExtractModal'
@@ -26,6 +26,7 @@ import Tag from '@/components/Tag'
 const Detail: FC = () => {
   // Hooks
   const { t } = useTranslation();
+  const navigate = useNavigate()
   const { id } = useParams()
   const { modal, message } = App.useApp()
   
@@ -100,19 +101,29 @@ const Detail: FC = () => {
   return (
     <>
       <PageHeader
-        name={<Space>
+        title={<Space>
           {data.scene_name}
           {data.is_system_default ? <Tag color="warning">{t('common.default')}</Tag> : undefined}
+          <Tooltip title={data.scene_description}>
+            <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
+          </Tooltip>
         </Space>}
-        subTitle={<Tooltip title={data.scene_description}><div className="rb:h-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{data.scene_description}</div></Tooltip>}
-        extra={data.is_system_default ? undefined : (<Space>
-          <Button type="primary" ghost className="rb:h-6! rb:px-2! rb:leading-5.5!" onClick={handleAdd}>+ {t('ontology.addClass')}</Button>
-          <Button className="rb:h-6! rb:px-2! rb:leading-5.5!" type="primary" onClick={handleExtract}>+ {t('ontology.extract')}</Button>
-        </Space>)}
+        extra={<Space size={12}>
+          {data.is_system_default ? undefined : (<Space>
+            <Button type="primary" ghost className="rb:h-6! rb:px-2! rb:leading-5.5!" onClick={handleAdd}>+ {t('ontology.addClass')}</Button>
+            <Button className="rb:h-6! rb:px-2! rb:leading-5.5!" type="primary" onClick={handleExtract}>+ {t('ontology.extract')}</Button>
+          </Space>)}
+          <Flex align="center" className="rb:leading-5 rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={() => navigate(-1)}>
+            <div
+              className="rb:mr-2 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/logout.svg')]"
+            ></div>
+            {t('common.return')}
+          </Flex>
+        </Space>}
       />
 
-      <div className="rb:h-[calc(100vh-64px)] rb:overflow-y-auto rb:py-3 rb:px-4">
-        <Row gutter={16} className="rb:mb-4">
+      <div className="rb:h-[calc(100vh-64px)] rb:overflow-y-auto rb:pb-3 rb:px-3">
+        <Row gutter={12} className="rb:mb-4">
           <Col span={6} offset={18}>
             <SearchInput
               placeholder={t('ontology.classSearchPlaceholder')}
@@ -128,13 +139,12 @@ const Detail: FC = () => {
                 <RbCard
                   title={item.class_name}
                   extra={data.is_system_default ? undefined : (<div
-                    className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/delete.svg')] rb:hover:bg-[url('@/assets/images/delete_hover.svg')]"
+                    className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')] rb:hover:bg-[url('@/assets/images/common/delete_hover.svg')]"
                     onClick={() => handleDelete(item)}
                   ></div>)}
-                  className="rb:bg-transparent!"
                 >
                   <Tooltip title={item.class_description}>
-                    <div className="rb:h-8.5 rb:text-[#5B6167] rb:text-[12px] rb:leading-4.25 rb:font-regular rb:-mt-1 rb:wrap-break-word rb:line-clamp-2">{item.class_description}</div>
+                    <div className="rb:h-10 rb:text-[#5B6167] rb:leading-5 rb:font-regular rb:wrap-break-word rb:line-clamp-2">{item.class_description}</div>
                   </Tooltip>
                 </RbCard>
               </Col>

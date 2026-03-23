@@ -1,14 +1,20 @@
 import React, { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
-import { Input, Button, App, Card, Space, Skeleton, Tag } from 'antd';
-import { SearchOutlined, SettingOutlined, GlobalOutlined, SyncOutlined } from '@ant-design/icons';
+import { Button, App, Space, Row, Col, Flex, Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 import InfiniteScroll from 'react-infinite-scroll-component';
+import clsx from 'clsx'
+
 import MarketConfigModal, { type MarketConfigModalRef } from './components/MarketConfigModal';
 import McpServiceModal from './components/McpServiceModal';
 import type { McpServiceModalRef } from './types';
 import pageEmptyIcon from '@/assets/images/empty/pageEmpty.png'
 import Empty from '@/components/Empty/index'
 import { getMarketTools, getMarketConfig, getMarketMCPs, getMarketMCPDetail, getMarketMCPsActivated, getTools } from '@/api/tools';
+import SearchInput from '@/components/SearchInput';
+import RbCard from '@/components/RbCard'
+import Tag from '@/components/Tag'
+import marketIcon from '@/assets/images/tool/market.png'
+
 interface MarketSource {
   id: string;
   name: string;
@@ -97,6 +103,9 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
           });
           
           setCategories(Array.from(categoryMap.values()));
+          if (response.items[0]?.id) {
+            handleSelectSource(response.items[0]?.id)
+          }
         }
       } catch (error) {
         console.error('获取市场数据失败:', error);
@@ -223,6 +232,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
   };
 
   const handleSelectSource = async (sourceId: string) => {
+    if (sourceId === selectedSource) return
     setSelectedSource(sourceId);
     setSearchKeyword('');
     setCurrentPage(1);
@@ -233,21 +243,6 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
     if (mcpCache[sourceId]) return;
 
     await fetchMcpList(sourceId, 1);
-  };
-
-  const handleRefresh = async (sourceId: string) => {
-    // 清除缓存，重新从第一页加载
-    setMcpCache(prev => {
-      const next = { ...prev };
-      delete next[sourceId];
-      return next;
-    });
-    setCurrentPage(1);
-    await fetchMcpList(sourceId, 1);
-    const source = marketSources.find(s => s.id === sourceId);
-    if (source) {
-      message.success(`${source.name} ${t('tool.marketRefreshSuccess')}`);
-    }
   };
 
   const handleOpenConfig = async (sourceId: string) => {
@@ -329,13 +324,13 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
     if (!selectedSource) {
       return (
         <div className="rb:flex rb:flex-col rb:items-center rb:justify-center rb:h-full rb:text-center">
-             <Empty
-                url={pageEmptyIcon}
-                title={t('tool.marketSelectTitle')}
-                subTitle={t('tool.marketSelectDesc')}
-                size={200}
-                className="rb:h-full"
-              />
+          <Empty
+            url={pageEmptyIcon}
+            title={t('tool.marketSelectTitle')}
+            subTitle={t('tool.marketSelectDesc')}
+            size={200}
+            className="rb:h-full"
+          />
 
         </div>
       );
@@ -348,230 +343,170 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
 
     return (
       <>
-        <div className="rb:flex rb:justify-between rb:items-center rb:pb-0">
-          <div className="rb:flex rb:items-center rb:gap-4">
-            <div className="rb:w-10 rb:h-10 rb:flex rb:items-center rb:justify-center rb:bg-gray-50 rb:rounded-xl rb:flex-shrink-0 rb:overflow-hidden">
+        <Flex justify="space-between" align="center">
+          <Flex gap={12} align="center" className="rb:pl-1!">
+            <Flex align="center" justify="center" className="rb:size-12">
               {source.logo_url ? (
-                <img 
-                  src={source.logo_url} 
-                  alt={source.name} 
-                  className="rb:w-full rb:h-full rb:object-cover"
+                <img
+                  src={source.logo_url}
+                  alt={source.name}
+                  className="rb:w-full rb:h-full rb:object-cover  rb:rounded-xl"
                   referrerPolicy="no-referrer"
                   onError={(e) => {
-                    e.currentTarget.style.display = 'none';
-                    const parent = e.currentTarget.parentElement;
-                    if (parent) {
-                      parent.innerHTML = '🏪';
-                      parent.style.fontSize = '48px';
-                    }
+                    e.currentTarget.src = marketIcon
                   }}
                 />
               ) : (
-                <span className="rb:text-5xl">🏪</span>
+                <div className="rb:size-12  rb:rounded-xl rb:bg-cover rb:bg-[url('@/assets/images/tool/market.png')]"></div>
               )}
+            </Flex>
+            <div>
+              <div className="rb:font-[MiSans Bold] rb:font-bold rb:text-[16px] rb:leading-5.5">{source.name}</div>
+              <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{t('tool.availableMcp')} ({mcpTotal})</div>
             </div>
-            <div className="rb:flex rb:items-center rb:flex-1">
-              <h2 className="rb:text-xl rb:font-semibold rb:text-gray-900 rb:mb-2 rb:mr-2">{source.name}</h2>
-              可用 MCP 服务 <span className="rb:text-gray-600 rb:font-normal">({mcpTotal})</span>
-              {/* <p className="rb:text-sm rb:text-gray-600 rb:leading-relaxed">{source.description}</p> */}
-            </div>
-          </div>
+          </Flex>
 
-          <div className="rb:flex rb:gap-3">
-            <div className="rb:flex rb:gap-3 rb:items-center">
-              {source.connected && (
-                <Button size="small" icon={<SyncOutlined />} onClick={() => handleRefresh(selectedSource)}>
-                  {t('tool.marketRefresh')}
-                </Button>
-              )}
-              
-                <Input
-                  prefix={<SearchOutlined />}
-                  placeholder={t('tool.marketSearchPlaceholder')}
-                  value={searchKeyword}
-                  onChange={(e) => handleSearchChange(e.target.value)}
-                  allowClear
-                  style={{ width: 200 }}
-                  
-                />
-              
-            </div>
-            <Button icon={<SettingOutlined />} onClick={() => handleOpenConfig(selectedSource)}>
+          <Space size={12}>
+            <SearchInput
+              placeholder={t('tool.marketSearchPlaceholder')}
+              value={searchKeyword}
+              onSearch={(value: string) => handleSearchChange(value)}
+              allowClear
+              style={{ width: 200 }}
+            />
+            <Button type="primary" ghost onClick={() => handleOpenConfig(selectedSource)}>
               {t('tool.marketConfigBtn')}
             </Button>
-            <Button type="primary" icon={<GlobalOutlined />} onClick={() => window.open(source.url, '_blank')}>
+            <Button type="primary" onClick={() => window.open(source.url, '_blank')}>
               {t('tool.marketVisit')}
             </Button>
-          </div>
-        </div>
+          </Space>
+        </Flex>
 
-        <div className="rb:mt-6">
-            <div id="mcpScrollableDiv" className="rb:overflow-y-auto rb:h-[calc(100vh-260px)]">
-              {!loading && mcpList.length === 0 ? (
-                <Empty
-                  url={pageEmptyIcon}
-                  title={searchKeyword ? t('tool.marketNoSearchResult') : t('tool.marketNoData')}
-                  subTitle={searchKeyword ? t('tool.marketNoSearchResultDesc') : t('tool.marketNoDataDesc')}
-                  size={200}
-                  className="rb:h-full"
-                />
-              ) : (
-              <InfiniteScroll
-                dataLength={mcpList.length}
-                next={loadMore}
-                hasMore={hasMore}
-                loader={null}
-                scrollableTarget="mcpScrollableDiv"
-              >
-                <div 
-                  className="rb:gap-4" 
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))'
-                  }}
-                >
-                  {mcpList.map(mcp => (
-                  <div 
-                    key={mcp.id} 
-                    className="rb:bg-white rb:border rb:border-gray-200 rb:rounded-lg rb:p-4 rb:pb-2 rb:transition-all rb:duration-200 hover:rb:shadow-lg hover:rb:border-gray-300"
+        <div className="rb:mt-4">
+          <div id="mcpScrollableDiv" className="rb:overflow-y-auto rb:h-[calc(100vh-188px)]">
+            {!loading && mcpList.length === 0 ? (
+              <Empty
+                url={pageEmptyIcon}
+                title={searchKeyword ? t('tool.marketNoSearchResult') : t('tool.marketNoData')}
+                subTitle={searchKeyword ? t('tool.marketNoSearchResultDesc') : t('tool.marketNoDataDesc')}
+                size={200}
+                className="rb:h-full"
+              />
+            ) : (
+            <InfiniteScroll
+              dataLength={mcpList.length}
+              next={loadMore}
+              hasMore={hasMore}
+              loader={null}
+              scrollableTarget="mcpScrollableDiv"
+            >
+              <Row gutter={[12,12]}>
+                {mcpList.map(mcp => (
+                  <Col
+                    key={mcp.id}
+                    span={12}
                   >
-                    <div className="rb:flex rb:justify-between rb:items-center rb:mb-3">
-                      <div className="rb:w-12 rb:h-12 rb:flex rb:items-center rb:justify-center rb:bg-gray-50 rb:rounded-lg rb:overflow-hidden">
-                        {mcp.logo_url ? (
-                          <img 
-                            src={mcp.logo_url} 
-                            alt={getLocaleField(mcp, 'name')} 
-                            className="rb:w-full rb:h-full rb:object-cover"
-                            referrerPolicy="no-referrer"
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none';
-                              const parent = e.currentTarget.parentElement;
-                              if (parent) {
-                                parent.innerHTML = '🔧';
-                                parent.style.fontSize = '24px';
-                              }
-                            }}
-                          />
-                        ) : (
-                          <span className="rb:text-3xl">🔧</span>
-                        )}
-                      </div>
-                      {mcp.categories?.[0] && (
-                        <span className="rb:px-2 rb:py-1 rb:rounded rb:text-xs rb:font-medium rb:bg-blue-50 rb:text-blue-700">
-                          {mcp.categories[0]}
-                        </span>
-                      )}
-                    </div>
-                    <h3 className="rb:text-base rb:font-semibold rb:text-gray-900 rb:mb-1">{getLocaleField(mcp, 'name')}</h3>
-                    {mcp.publisher && (
-                      <div className="rb:mb-2">
-                        <span className="rb:text-xs rb:text-gray-500">{mcp.publisher.startsWith('@') ? mcp.publisher : `@${mcp.publisher}`}</span>
-                      </div>
-                    )}
-                    <p className="rb:text-sm rb:text-gray-600 rb:line-clamp-2 rb:mb-3 rb:min-h-10">{getLocaleField(mcp, 'description')}</p>
-                    <div className="rb:flex rb:gap-4 rb:mb-3 rb:pt-3 rb:border-t rb:border-gray-100">
-                      {mcp.view_count != null && (
-                        <span className="rb:flex rb:items-center rb:gap-1 rb:text-xs rb:text-gray-500">
-                          <GlobalOutlined /> {mcp.view_count.toLocaleString()}
-                        </span>
-                      )}
-                    </div>
-                    <div className={`rb:flex rb:items-center ${mcp.activated || mcp.inDatabase ? 'rb:justify-between' : 'rb:justify-end'}`}>
-                      <div className="rb:flex rb:gap-2">
-                        {mcp.activated && <Tag color="success">{t('tool.marketActivated')}</Tag>}
-                        {mcp.inDatabase && <Tag color="blue">{t('tool.marketInDatabase')}</Tag>}
-                      </div>
-                      <Button disabled={mcp.inDatabase} type="primary" size="small" onClick={() => handleOpenMcpServiceModal(mcp)}>
-                        + {t('tool.marketAdd')}
-                      </Button>
-                    </div>
-                  </div>
+                    <RbCard
+                      avatarUrl={mcp.logo_url || marketIcon}
+                      title={
+                        <Flex justify="space-between" gap={16}>
+                          <Flex vertical gap={6}>
+                            <Tooltip title={getLocaleField(mcp, 'name')}>
+                              <div className="rb:wrap-break-word rb:line-clamp-1">{getLocaleField(mcp, 'name')}</div>
+                            </Tooltip>
+                            <Flex gap={8} wrap className='rb:wrap-break-word rb:line-clamp-1'>
+                              {mcp.categories?.[0] && (
+                                <Tag>{mcp.categories[0]}</Tag>
+                              )}
+                              {mcp.activated && <Tag color="success">{t('tool.marketActivated')}</Tag>}
+                              {mcp.inDatabase && <Tag>{t('tool.marketInDatabase')}</Tag>}
+                            </Flex>
+                          </Flex>
+                          <Button
+                            disabled={mcp.inDatabase}
+                            size="small"
+                            onClick={() => handleOpenMcpServiceModal(mcp)}
+                          >+</Button>
+                        </Flex>
+                      }
+                      isNeedTooltip={false}
+                      footer={<Flex justify="space-between" align="center" className="rb:text-[#5B6167] rb:text-[12px] rb:mb-1!">
+                        {mcp.publisher && <span>{mcp.publisher.startsWith('@') ? mcp.publisher : `@${mcp.publisher}`}</span>}
+                        {mcp.view_count && <Space size={4}>
+                          <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/common/global_outline.svg')]"></div>
+                          {mcp.view_count.toLocaleString()}
+                        </Space>}
+                      </Flex>}
+                    >
+                      {getLocaleField(mcp, 'description') ?
+                        <Tooltip title={getLocaleField(mcp, 'description')}>
+                          <div className="rb:h-10 rb:leading-5 rb:wrap-break-word rb:line-clamp-2 rb:mt-2">{getLocaleField(mcp, 'description')}</div>
+                        </Tooltip>
+                        : <div className="rb:h-10 rb:leading-5 rb:text-[#A8A9AA] rb:mt-2">{t('tool.descEmpty')}</div>  
+                      }
+                    </RbCard>
+                  </Col>
                 ))}
-                </div>
-              </InfiniteScroll>
-              )}
-            </div>
+              </Row>
+            </InfiniteScroll>
+            )}
+          </div>
         </div>
       </>
     );
   };
 
   return (
-    <div className="rb:flex rb:gap-4 rb:h-[calc(100vh-138px)]">
-      {/* 左侧市场源列表 */}
-      <div className="rb:w-80 rb:h-full rb:overflow-y-auto">
-        <Space size={12} direction="vertical" className="rb:w-full">
+    <Row gutter={16}>
+      <Col flex="380px">
+        <Flex vertical gap={16}>
+          <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5">{t('tool.mcpMarket')}</div>
           {categories.map(cat => (
-            <Card
-              key={cat.id}
-              type="inner"
-              title={
-                <div className="rb:flex rb:items-center rb:gap-2">
-                  <span>{cat.name}</span>
-                </div>
-              }
-              classNames={{
-                body: "rb:p-[10px]!",
-                header: "rb:bg-[#F6F8FC]!"
-              }}
-            >
-              <Space size={8} direction="vertical" className="rb:w-full">
-                {marketSources
-                  .filter(s => s.category === cat.id)
-                  .map(source => (
-                    <div
-                      key={source.id}
-                      className={`rb:bg-white rb:rounded-lg rb:p-2 rb:border rb:cursor-pointer rb:flex rb:items-center rb:gap-2 rb:transition-all ${
-                        selectedSource === source.id 
-                          ? 'rb:border-[#155EEF] rb:shadow-[0px_2px_4px_0px_rgba(33,35,50,0.15)]' 
-                          : 'rb:border-[#DFE4ED] rb:hover:border-[#155EEF] rb:hover:shadow-[0px_2px_4px_0px_rgba(33,35,50,0.15)]'
-                      }`}
-                      onClick={() => handleSelectSource(source.id)}
-                    >
-                      <div className="rb:w-5 rb:h-5 rb:flex-shrink-0 rb:flex rb:items-center rb:justify-center rb:overflow-hidden rb:rounded rb:bg-gray-100">
-                        {source.logo_url ? (
-                          <img 
-                            src={source.logo_url} 
-                            alt={source.name} 
-                            className="rb:w-full rb:h-full rb:object-cover"
-                            referrerPolicy="no-referrer"
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none';
-                              const parent = e.currentTarget.parentElement;
-                              if (parent) {
-                                parent.innerHTML = '🏪';
-                                parent.style.fontSize = '16px';
-                              }
-                            }}
-                          />
-                        ) : (
-                          <span className="rb:text-base">🏪</span>
-                        )}
-                      </div>
-                      <span className="rb:flex-1 rb:font-medium rb:text-[12px] rb:overflow-hidden rb:text-ellipsis rb:whitespace-nowrap">
-                        {source.name}
-                      </span>
-                      {/* <span className="rb:text-xs rb:text-gray-500 rb:px-1.5 rb:py-0.5 rb:bg-gray-100 rb:rounded-full rb:flex-shrink-0">
-                        {source.mcp_count}
-                      </span> */}
-                      {source.connected && (
-                        <span className="rb:text-green-500 rb:text-[8px] rb:flex-shrink-0">●</span>
+            <Flex key={cat.id} vertical gap={8}>
+              <div className="rb:text-[#5B6167] rb:text-[12px] rb:font-medium rb:leading-4.5">
+                {cat.name}
+              </div>
+              {marketSources
+                .filter(s => s.category === cat.id)
+                .map(source => (
+                  <Flex
+                    key={source.id}
+                    align="center"
+                    gap={8}
+                    className={clsx('rb:bg-white rb:rounded-xl rb:py-2! rb:px-3! rb:cursor-pointer rb:transition-all', {
+                      'rb:border rb:border-[#171719]': selectedSource === source.id,
+                      'rb:shadow-[0px_2px_6px_0px_rgba(23,23,25,0.1)]': selectedSource !== source.id
+                    })}
+                    onClick={() => handleSelectSource(source.id)}
+                  >
+                    <div className="rb:size-7 rb:shrink-0 rb:flex rb:items-center rb:justify-center rb:overflow-hidden rb:rounded rb:bg-gray-100">
+                      {source.logo_url ? (
+                        <img
+                          src={source.logo_url}
+                          alt={source.name}
+                          className="rb:w-full rb:h-full rb:object-cover rb:rounded-sm"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            e.currentTarget.src = marketIcon;
+                          }}
+                        />
+                      ) : (
+                        <div className="rb:size-7 rb:rounded-sm rb:bg-cover rb:bg-[url('@/assets/images/tool/market.png')]"></div>
                       )}
                     </div>
-                  ))}
-              </Space>
-            </Card>
+                    <span className="rb:flex-1 rb:font-medium rb:overflow-hidden rb:text-ellipsis rb:whitespace-nowrap">
+                      {source.name}
+                    </span>
+                  </Flex>
+                ))}
+            </Flex>
           ))}
-        </Space>
-      </div>
-
-      {/* 右侧内容区 */}
-      <div className="rb:flex-1 rb:border-l rb:border-gray-200 rb:overflow-hidden">
-        <div className="rb:h-full rb:overflow-y-auto rb:p-6">
-          {renderSourceDetail()}
-        </div>
-      </div>
-
+        </Flex>
+      </Col>
+      <Col flex="1">
+        {renderSourceDetail()}
+      </Col>
       {/* 配置弹窗 */}
       <MarketConfigModal
         ref={marketConfigModalRef}
@@ -581,7 +516,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
         ref={mcpServiceModalRef}
         refresh={handleRefreshAfterAdd}
       />
-    </div>
+    </Row>
   );
 };
 

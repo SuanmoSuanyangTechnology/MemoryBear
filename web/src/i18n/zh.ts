@@ -1104,6 +1104,7 @@ export const zh = {
       notAllSpaces: '不能是纯空格',
       download: '下载',
       view: '查看',
+      updated_at: '更新时间',
     },
     model: {
       searchPlaceholder: '搜索模型…',
@@ -1914,6 +1915,9 @@ export const zh = {
       refreshFailed: '刷新失败',
       
       // Market 相关
+      mcpMarket: 'MCP Market',
+      availableMcp: '可用的 MCP 服务',
+      descEmpty: '暂无介绍…',
       marketSelectTitle: '选择一个 MCP 市场',
       marketSelectDesc: '从左侧选择一个市场源，配置连接后即可浏览该市场的 MCP 服务',
       marketRefreshSuccess: '列表已刷新',
@@ -1962,6 +1966,8 @@ export const zh = {
       timeout: '超时时间（秒）',
       sseReadTimeout: 'SSE 读取超时时间（秒）',
       saveAndTest: '保存并测试',
+      testLink: '连接测试',
+      noTags: '暂无标签…',
       
       timeFormat: '时间格式化',
       timeZoneConversion: '时区转换',

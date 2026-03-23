@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:10 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-27 10:20:51
+ * @Last Modified time: 2026-03-20 18:51:27
  */
 /**
  * Model List View
@@ -11,11 +11,11 @@
  */
 
 import { useRef, useState, useEffect, forwardRef, useImperativeHandle } from 'react';
-import { Button, Flex, Row, Col } from 'antd'
+import { Button, Flex, Row, Col, Tooltip, Space } from 'antd'
 import { useTranslation } from 'react-i18next';
 
 import type { ProviderModelItem, KeyConfigModalRef, ModelListDetailRef, ModelListItem, BaseRef } from './types'
-import RbCard from '@/components/RbCard/Card'
+import RbCard from '@/components/RbCard'
 import { getModelNewList } from '@/api/models'
 import PageEmpty from '@/components/Empty/PageEmpty';
 import Tag from '@/components/Tag';
@@ -69,26 +69,26 @@ const ModelList = forwardRef<BaseRef, { query: any; handleEdit: (vo?: ModelListI
             {list.map(item => (
               <RbCard
                 key={item.provider}
-                title={t(`modelNew.${item.provider}`)}
                 avatarUrl={getListLogoUrl(item.provider, item.logo)}
-                avatar={
-                  <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
-                    {item.provider[0].toUpperCase()}
-                  </div>
-                }
-                bodyClassName="rb:relative rb:pb-[64px]! rb:h-[calc(100%-64px)]!"
+                avatarText={item.provider[0].toUpperCase()}
+                title={<Flex vertical gap={6}>
+                  <Tooltip title={t(`modelNew.${item.provider}`)}>
+                    <div className="rb:wrap-break-word rb:line-clamp-1">{t(`modelNew.${item.provider}`)}</div>
+                  </Tooltip>
+                  <Space>
+                    <Flex gap={8} wrap>{item.tags.map(tag => <Tag key={tag}>{t(`modelNew.${tag}`)}</Tag>)}</Flex>
+                  </Space>
+                </Flex>}
+                isNeedTooltip={false}
+                footer={<Row gutter={9} className="rb:pt-2!">
+                  <Col span={12}>
+                    <Button className="rb:h-9!" block onClick={() => handleShowModel(item)}>{t('modelNew.showModel')}</Button>
+                  </Col>
+                  <Col span={12}>
+                    <Button className="rb:h-9!" type="primary" ghost block onClick={() => handleKeyConfig(item)}>{t('modelNew.keyConfig')}</Button>
+                  </Col>
+                </Row>}
               >
-                <Flex gap={8} wrap>{item.tags.map(tag => <Tag key={tag}>{t(`modelNew.${tag}`)}</Tag>)}</Flex>
-                <div className="rb:absolute rb:bottom-4 rb:left-6 rb:right-6">
-                  <Row gutter={12}>
-                    <Col span={12}>
-                      <Button block onClick={() => handleShowModel(item)}>{t('modelNew.showModel')}</Button>
-                    </Col>
-                    <Col span={12}>
-                      <Button type="primary" ghost block onClick={() => handleKeyConfig(item)}>{t('modelNew.keyConfig')}</Button>
-                    </Col>
-                  </Row>
-                </div>
               </RbCard>
             ))}
           </div>

@@ -1,12 +1,12 @@
 import { useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Space, Button } from 'antd';
+import { Space, Button, Row, Col, Flex } from 'antd';
+
 import TopCardList from './components/TopCardList';
 import GuideCard from './components/GuideCard';
 import VersionCard from './components/VersionCard';
 import QuickActions from './components/QuickActions';
-import bgImg from '@/assets/images/index/index_bg@2x.png'
 import Table, { type TableRef } from '@/components/Table'
 import type { ColumnsType } from 'antd/es/table';
 import { formatDateTime } from '@/utils/format';
@@ -42,16 +42,15 @@ const Index = () => {
       dataIndex: 'name',
       key: 'name',
     },
-
     {
       title: t('space.spaceIcon'),
       dataIndex: 'icon',
       key: 'icon',
       render:(value: string, record: any) => {
         return value ? (
-          <img src={value} alt="icon" className='rb:w-[24px] rb:h-[24px]' />
+          <img src={value} alt="icon" className='rb:size-6' />
         ) : (
-          <div className='rb:w-[24px] rb:h-[24px] rb:bg-blue-500 rb:text-white rb:rounded rb:flex rb:items-center rb:justify-center rb:text-xs rb:font-medium'>
+          <div className='rb:size-6 rb:bg-[#155EEF] rb:text-white rb:rounded rb:flex rb:items-center rb:justify-center rb:text-xs rb:font-medium'>
             {record.name?.charAt(0)?.toUpperCase() || '?'}
           </div>
         )
@@ -84,7 +83,7 @@ const Index = () => {
       width: 100,
       render: (_, record) => (
         <Space size="middle">
-          <Button onClick={() => handleJump(record.id)} color="primary" variant="text">{t('space.enterSpace')}</Button>
+          <Button type="link" onClick={() => handleJump(record.id)}>{t('space.enterSpace')}</Button>
         </Space>
       ),
     },
@@ -99,44 +98,40 @@ const Index = () => {
 
 
   return (
-    <div className="rb:pb-[24px]">
-      <div className="rb:mt-[16px] rb:flex rb:gap-4">
-        <div className='rb:flex-1'>
-          <div className='rb:flex-col rb:w-full rb:h-[120px] rb:mb-4 rb:p-6 rb:leading-[30px]' style={{backgroundImage: `url(${bgImg})`, backgroundSize: '100% 100%'}}>
-              <div className='rb:flex rb:text-[22px] rb:text-[#0041C3] rb:font-semibold'>
-                { t('index.spaceTitle' )}
-              </div>
-              <div className='rb:flex rb:mt-2 rb:text-xs rb:leading-[18px] rb:text-[#5F6266] rb:max-w-[560px]'>
-                { t('index.spaceSubTitle' )}
-              </div>
+    <Row gutter={12}>
+      <Col flex="1">
+        <Flex vertical>
+          <div className='rb:w-full rb:h-26 rb:p-4 rb:bg-cover rb:bg-[url("@/assets/images/index/index_bg@2x.png")]'>
+            <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-white rb:text-[18px] rb:leading-7">
+              {t('index.spaceTitle')}
+            </div>
+            <div className='rb:mt-2 rb:text-[12px] rb:leading-4.5 rb:text-white rb:max-w-139.75'>
+              {t('index.spaceSubTitle')}
+            </div>
           </div>
           {/* 统计卡片 */}
           <TopCardList data={dashboardData} />
-          <div className="rb:rounded rb:max-h-[calc(100%-100px)] rb:overflow-y-auto rb:mt-4">
+          <div className="rb:rounded-xl rb:bg-white rb:pt-3 rb:px-3 rb:overflow-y-hidden rb:my-3 rb:flex-1">
             <Table
               ref={tableRef}
               apiUrl={tableApi}
               columns={columns}
               rowKey="id"
-              
+              bordered={false}
+              scrollY="100%"
+              className="rb:-mb-3!"
+              // scroll={{ y: 'calc(100vh - 340px)' }}
             />
-        </div>
-        </div>
-        <div className='rb:flex-0 rb:min-w-80'>
-            {/* 引导 */}
-            <GuideCard />
-            <div className='rb:w-full rb:mt-4 '>
-                <VersionCard />
-            </div>
-            {/* 快捷操作 */}
-            <div className='rb:w-full rb:mt-4'>
-                <QuickActions onNavigate={navigate} />
-            </div>
-        </div>
-      </div>
-
-     
-    </div>
+          </div>
+        </Flex>
+      </Col>
+      <Col flex="328px">
+        {/* 引导 */}
+        <GuideCard />
+        <VersionCard />
+        <QuickActions onNavigate={navigate} />
+      </Col>
+    </Row>
   );
 }
 

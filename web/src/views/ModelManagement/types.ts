@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-07 16:14:25
+ * @Last Modified time: 2026-03-20 20:21:45
  */
 /**
  * Type definitions for Model Management
@@ -268,14 +268,6 @@ export interface ModelPlazaItem {
   is_added: boolean;
   capability?: string[];
   is_omni?: boolean;
-}
-
-/**
- * Model square detail ref interface
- */
-export interface ModelSquareDetailRef {
-  /** Open detail drawer with model plaza data */
-  handleOpen: (vo: ModelPlaza) => void;
 }
 
 /**

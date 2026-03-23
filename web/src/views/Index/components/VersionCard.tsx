@@ -8,11 +8,11 @@
  */
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Divider } from 'antd';
-// import arrowRight from '@/assets/images/index/arrow_right.svg'
+import { Flex } from 'antd';
+
 import { getVersion, type versionResponse } from '@/api/common'
 
-const GuideCard: React.FC = () => {
+const VersionCard: React.FC = () => {
   const { t, i18n } = useTranslation();
   const [versionInfo, setVersionInfo] = useState<versionResponse | null>(null);
 
@@ -21,13 +21,6 @@ const GuideCard: React.FC = () => {
     if (!versionInfo) return null;
     const currentLang = i18n.language;
     return currentLang === 'zh' ? versionInfo.introduction : (versionInfo.introduction_en || versionInfo.introduction);
-  };
-
-  // 解析换行符和HTML的方法
-  const parseContent = (text: string) => {
-    if (!text) return '';
-    // 将 \n 转换为 <br/> 标签
-    return text.replace(/\\n/g, '<br/>');
   };
 
   useEffect(() => {
@@ -44,58 +37,36 @@ const GuideCard: React.FC = () => {
   }, []);
     
   return (
-    <div className='rb:w-full rb:p-4 rb:border-1 rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded-xl'>
-        <div className='rb:flex rb:items-center rb:justify-start rb:text-[#5B6167] rb:text-base rb:font-semibold rb:gap-2'>
-            { t('index.latestUpdate')} 
-            <span className='rb:text-xs rb:text-[#1890FF]'>
-              {versionInfo?.version}
-            </span>
-        </div>
-        <div className='rb:flex rb:flex-col rb:max-h-[400px] rb:overflow-y-auto rb:text-[#5B6167]'>
-            {versionInfo && (() => {
-              const introduction = getIntroduction();
-              return introduction ? (<>  
-                <div className='rb:flex  rb:items-center rb:gap-2 rb:text-sm rb:text-[#5B6167] rb:leading-5 '>
-                   
-                    <span className='rb:text-xs rb:text-[#5B6167]'>
-                      {t('version.releaseDate')}: {introduction.releaseDate}
-                    </span>
-                    <Divider type='vertical' />
-                    <span className='rb:text-xs rb:text-[#5B6167]'>
-                      {t('version.name')}: {introduction.codeName}
-                    </span>
-                </div>
-                <p 
-                  className='rb:text-sm rb:text-[#5B6167] rb:leading-5 rb:mt-2'
-                  dangerouslySetInnerHTML={{ __html: introduction.upgradePosition }}
-                />
-                {introduction.coreUpgrades?.map((item: string, index: number) => (
-                    <p 
-                      key={index} 
-                      className='rb:text-sm rb:text-[#5B6167] rb:leading-5'
-                      dangerouslySetInnerHTML={{ __html: item }}
-                    />
-                ))}
-              </>) : null;
-            })()}
-            {/* {loading ? (
-              t('index.loading')
-            ) : (
-              versionInfo?.introduction || t('index.latestUpdateDesc')
-            )} */}
-        </div>
-        {/* <div className='rb:flex rb:w-full rb:items-center rb:justify-between rb:gap-3 rb:mt-4'>
-            <Button className='rb:gap-2 rb:flex rb:items-center rb:text-[#212332] '>
-                <span className='rb:text-xs'>{ t('index.viewDetails')}</span>
-                <img src={arrowRight} className='rb:size-4' />
-            </Button>
-            <Button className='rb:gap-2 rb:flex rb:items-center rb:text-[#212332]'>
-                <span className='rb:text-xs'>{ t('index.changeLog')}</span>
-                <img src={arrowRight} className='rb:size-4' />
-            </Button>
-        </div> */}
+    <div className='rb:w-full rb:p-3 rb:bg-white rb:rounded-xl rb:mt-3'>
+      <Flex gap={4} className="rb:mb-3">
+        <span className="rb:font-[MiSans-Bold] rb:font-bold rb:leading-5">{t('index.latestUpdate')}</span>
+        <span className='rb:text-[12px] rb:text-white rb:leading-4.25 rb:pt-px rb:pl-2 rb:pr-1.75 rb:bg-[#171719] rb:rounded-lg rb:rounded-bl-none '>
+          {versionInfo?.version}
+        </span>
+      </Flex>
+      {versionInfo && (() => {
+        const introduction = getIntroduction();
+        return introduction ? (<>  
+          <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:mt-1 rb:mb-2">
+            {t('version.releaseDate')}: {introduction.releaseDate} | {t('version.name')}: {introduction.codeName}
+          </div>
+          <div className="rb:max-h-76 rb:overflow-y-auto">
+            <p
+              className='rb:text-[12px] rb:leading-4.5'
+              dangerouslySetInnerHTML={{ __html: introduction.upgradePosition }}
+            />
+            {introduction.coreUpgrades?.map((item: string, index: number) => (
+              <p
+                key={index}
+                className='rb:text-[12px] rb:leading-4.5 rb:mt-2'
+                dangerouslySetInnerHTML={{ __html: item }}
+              />
+            ))}
+          </div>
+        </>) : null;
+      })()}
     </div>
   );
 };
 
-export default GuideCard;
+export default VersionCard;

@@ -1,37 +1,40 @@
-import React, { useState, useRef, useEffect, type ReactNode } from 'react';
+import { useState, useRef, useEffect, forwardRef, useImperativeHandle, type ReactNode } from 'react';
 import {
-  Button,
   Row,
   Col,
   App,
   List,
-  Space
+  Space,
+  Flex,
+  Tooltip,
+  Dropdown,
 } from 'antd';
 import { useTranslation } from 'react-i18next';
-import dayjs from 'dayjs';
 
-import type { ToolItem, Query, CustomToolModalRef } from './types';
+import type { ToolItem, CustomToolModalRef, CustomRef } from './types';
 import CustomToolModal from './components/CustomToolModal';
-import SearchInput from '@/components/SearchInput'
 import BodyWrapper from '@/components/Empty/BodyWrapper'
-import RbCard from '@/components/RbCard/Card'
+import RbCard from '@/components/RbCard'
 import { getTools, deleteTool } from '@/api/tools'
+import { formatDateTime } from '@/utils/format'
 
-const Custom: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ getStatusTag }) => {
+const Custom = forwardRef<CustomRef, { getStatusTag: (status: string) => ReactNode; keyword?: string | undefined }>(({ getStatusTag, keyword }, ref) => {
   const { t } = useTranslation();
   const { message, modal } = App.useApp()
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ToolItem[]>([]);
-  const [query, setQuery] = useState<Query>({ name: undefined, tool_type: 'custom' });
   const customToolModalRef = useRef<CustomToolModalRef>(null);
 
   useEffect(() => {
     getData()
-  }, [query.name])
+  }, [keyword])
 
   const getData = () => {
     setLoading(true)
-    getTools(query)
+    getTools({
+      tool_type: 'custom',
+      name: keyword
+    })
       .then((res) => {
         setData(res as ToolItem[])
       })
@@ -39,14 +42,13 @@ const Custom: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ get
         setLoading(false)
       })
   }
-  const handleSearch = (value?: string) => {
-    setQuery(prev => ({ ...prev, name: value }))
-  }
 
   // 打开添加服务弹窗
   const handleEdit = (data?: ToolItem) => {
     customToolModalRef.current?.handleOpen(data);
   };
+
+  useImperativeHandle(ref, () => ({ handleEdit }));
 
   // 删除服务
   const handleDeleteService = (item: ToolItem) => {
@@ -65,71 +67,80 @@ const Custom: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ get
   };
 
   return (
-    <div>
-      <Row gutter={16} className='rb:mb-4 rb:w-full'>
-        <Col span={8}>
-          <SearchInput
-            placeholder={t('tool.customSearchPlaceholder')}
-            onSearch={handleSearch}
-            style={{width: '100%'}}
-          />
-        </Col>
-        <Col span={16} className="rb:text-right">
-          <Button type="primary" onClick={() => {handleEdit()}}>{t('tool.addCustom')}</Button>
-        </Col>
-      </Row>
+    <>
       <BodyWrapper loading={loading} empty={data.length === 0}>
         <List
-          grid={{ gutter: 16, column: 2 }}
+          grid={{ gutter: 16, column: 3 }}
           dataSource={data}
           renderItem={(item) => (
             <List.Item key={item.id}>
               <RbCard
-                // avatar={
-                //   <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
-                //     {item.name[0]}
-                //   </div>
-                // }
                 title={
-                  <div>
-                    {item.name}<br/>
-                    {/* <div className="rb:mt-1 rb:text-[12px] rb:leading-4 rb:font-regular rb:text-[#5B6167]">xx个工具</div> */}
-                  </div>
-                }
-                extra={getStatusTag(item.status)}
-              >
-                <div>
-                  {['auth_type', 'tags', 'created_at'].map(key => (
-                    <div 
-                      key={key}
-                      className="rb:flex rb:gap-4 rb:justify-start rb:text-[#5B6167] rb:text-[14px] rb:leading-5 rb:mb-3"
-                    >
-                      <div className="rb:whitespace-nowrap rb:w-32">{t(`tool.${key}`)}</div>
-                      <div className='rb:flex-1 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-inline rb:text-left rb:py-px rb:rounded rb:font-medium'>
-                        {key === 'created_at' && item[key]
-                          ? dayjs(item[key]).format('YYYY-MM-DD HH:mm:ss')
-                          : key === 'auth_type'
-                          ? t(`tool.${(item.config_data as any)?.[key]}`)
-                          : key === 'tags'
-                          ? (item[key] as string[]).join('、')
-                          : (item.config_data as any)?.[key] || '-'
-                        }
-                      </div>
-                    </div>
-                  ))}
-                  <div className="rb:mt-4 rb:text-[12px] rb:leading-4 rb:font-regular rb:text-[#5B6167] rb:flex rb:items-center rb:justify-end">
-                    <Space size={16}>
-                      <div 
-                        className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/edit.svg')] rb:hover:bg-[url('@/assets/images/edit_hover.svg')]" 
-                        onClick={() => handleEdit(item)}
-                      ></div>
-                      <div 
-                        className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/delete.svg')] rb:hover:bg-[url('@/assets/images/delete_hover.svg')]" 
-                        onClick={() => handleDeleteService(item)}
-                      ></div>
+                  <Flex justify="space-between" gap={16}>
+                    <Space size={8} className="rb:flex-1!">
+                      <Tooltip title={item.name}>
+                        <div className="rb:wrap-break-word rb:line-clamp-1">{item.name}</div>
+                      </Tooltip>
+                      {getStatusTag(item.status)}
                     </Space>
-                  </div>
-                </div>
+                    <Dropdown
+                      menu={{
+                        items: [
+                          {
+                            key: 'edit',
+                            icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit.svg')]" />,
+                            label: t('common.edit'),
+                            onClick: () => handleEdit(item),
+                          },
+                          {
+                            key: 'delete',
+                            className: 'rb:text-[#FF5D34]!',
+                            icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red.svg')]" />,
+                            label: t('common.delete'),
+                            onClick: () => handleDeleteService(item),
+                          },
+                        ]
+                      }}
+                      placement="bottomRight"
+                    >
+                      <div className="rb:cursor-pointer rb:size-6 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
+                    </Dropdown>
+                  </Flex>
+                }
+                isNeedTooltip={false}
+              >
+
+                {item.tags?.length > 0
+                  ? <Flex gap={8} wrap align="center">
+                    <Flex gap={6}>
+                      {item.tags?.slice(0, 2).map((type, i) => (
+                        <div key={i} className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">{type}</div>
+                      ))}
+                    </Flex>
+                    {item.tags.length > 2 && (
+                      <Tooltip
+                        title={<Flex wrap gap={6}>{item.tags?.slice(2, item.tags.length).map((type, i) => (
+                          <div key={i} className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5 rb:text-[#171719]">{type}</div>
+                        ))}</Flex>}
+                        color="white"
+                        placement="bottom"
+                      >
+                        <div className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">+{item.tags.length - 2}</div>
+                      </Tooltip>
+                    )}
+                  </Flex>
+                  : <div className="rb:text-[#A8A9AA] rb:leading-5">{t('tool.noTags')}</div>
+                }
+                <Row className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2! rb:px-3! rb:leading-5 rb:mt-4!">
+                  <Col span={12}>
+                    <div className="rb:text-[#5B6167] rb:mb-1">{t('tool.auth_type')}</div>
+                    {(item.config_data as any)?.auth_type}
+                  </Col>
+                  <Col span={12}>
+                    <div className="rb:text-[#5B6167] rb:mb-1">{t('tool.created_at')}</div>
+                    {formatDateTime(item.created_at)}
+                  </Col>
+                </Row>
               </RbCard>
             </List.Item>
           )}
@@ -142,8 +153,8 @@ const Custom: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ get
         ref={customToolModalRef}
         refresh={getData} 
       />
-    </div>
+    </>
   );
-};
+});
 
 export default Custom;
