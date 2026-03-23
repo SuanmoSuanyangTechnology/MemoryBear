@@ -25,6 +25,8 @@ examples/
 time.log
 celerybeat-schedule.db
 search_results.json
+redbear-mem-metrics/
+pitch-deck/
 
 api/migrations/versions
 tmp

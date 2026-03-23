@@ -1,4 +1,38 @@
 {
+  "v0.2.8": {
+    "introduction": {
+      "codeName": "景玉",
+      "releaseDate": "2026-3-20",
+      "upgradePosition": "🐻 MemoryBear v0.2.8 社区版全面升级应用共享、多模态交互与平台基础设施，引入语音交互、感知记忆和云端存储，打造更强大的开放 AI 记忆平台",
+      "coreUpgrades": [
+        "1. 应用共享与发布<br>* 应用共享（Agent、工作流、Agent 集群）：全类型应用共享至其他空间<br>* 分享应用默认开启记忆功能：发布分享后记忆默认开启，关闭时提醒<br>* 工作流记忆分享规则：按记忆配置自动控制分享页记忆开关<br>* 分享会话联网搜索修复：恢复分享应用的联网搜索能力",
+        "2. 多模态与交互 💬<br>* 语音输入：模型接口和应用支持语音输入<br>* 语音回复：应用支持语音回复模态<br>* 多模态感知记忆：记忆系统支持视觉、音频、图片和文件的感知记忆<br>* 对话框文件展示：试运行和体验分享中正确展示上传文件",
+        "3. 平台与基础设施 ⚙️<br>* i18n 国际化：全面多语言多地区支持<br>* 云端文件存储（OSS + S3）：支持阿里云 OSS 和 S3 云端上传<br>* Flower 容器监控：Celery 异步任务监控与管理",
+        "4. EndUser 身份迁移 🔐<br>* EndUser 从 app_id 迁移至 workspace_id：身份从应用级迁移至工作空间级",
+        "5. 情景记忆 🧠<br>* 情景记忆聚类算法：基于社区图谱的聚类算法，支持老用户图谱生成",
+        "6. 稳健性与缺陷修复 🔧<br>* MCP 服务删除后工具 404：修复删除 MCP 服务后接口报错<br>* 应用导出配置不一致：导出已保存配置而非画布状态<br>* 工作流节点 ID 重复：修复复制节点后 ID 冲突<br>* 条件分支连线错误：修复保存刷新后连线错乱<br>* 回复节点内容丢失：修复点击画布后内容消失<br>* 连接桩规则优化：禁止非法连接方向<br>* 知识库状态列宽度：锁定或自适应宽度<br>* 等待中文档预览：支持未完成解析文档预览<br>* 知识库关联修复：统一修复关联问题<br>* 多模态对话连续性：修复多模态内容后无法继续对话<br>* 时区统一：环境变量统一控制存储和任务时区<br>* 遗忘强度精度：修复小数显示过长",
+        "<br>",
+        "v0.2.8 社区版在应用共享和多模态交互方面实现重大升级，感知记忆扩展了平台的认知维度。后续将深化多智能体协作、情景记忆聚类，并持续优化平台稳定性与开放生态。",
+        "MemoryBear —— 让 AI 拥有记忆 🐻✨"
+      ]
+    },
+    "introduction_en": {
+      "codeName": "JingYu",
+      "releaseDate": "2026-3-20",
+      "upgradePosition": "🐻 MemoryBear v0.2.8 Community delivers multimodal interaction, perceptual memory, cloud storage, and workspace-level identity for a more capable open AI memory platform",
+      "coreUpgrades": [
+        "1. Application Sharing & Publishing<br>* Application Sharing (Agent, Workflow, Agent Cluster): Full sharing across all app types<br>* Memory Enabled by Default: Memory auto-enabled on shared apps with disable reminder<br>* Workflow Memory Sharing Rules: Auto-controlled based on memory configuration<br>* Shared Session Web Search Fix: Restored web search for shared apps",
+        "2. Multimodal & Interaction 💬<br>* Voice Input: Model interfaces and apps support voice input<br>* Voice Reply: Apps support voice reply modality<br>* Multimodal Perceptual Memory: Memory system supports visual, audio, image, and file perception<br>* File Display in Chat: Uploaded files display correctly in dry-run and sharing",
+        "3. Platform & Infrastructure ⚙️<br>* i18n Internationalization: Full multi-language multi-region support<br>* Cloud File Storage (OSS + S3): Alibaba Cloud OSS and S3 cloud uploads<br>* Flower Container Monitoring: Celery async task monitoring and management",
+        "4. EndUser Identity Migration 🔐<br>* EndUser Migration from app_id to workspace_id: Identity migrated to workspace level",
+        "5. Episodic Memory 🧠<br>* Episodic Memory Clustering: Community-graph-based clustering with legacy user support",
+        "6. Robustness & Bug Fixes 🔧<br>* MCP Service Deletion 404: Fixed tool endpoint error after MCP removal<br>* App Export Config Mismatch: Exports saved config instead of canvas state<br>* Workflow Duplicate Node ID: Fixed ID conflict on node duplication<br>* Conditional Branch Wiring: Fixed wiring reset after save/refresh<br>* Reply Node Content Loss: Fixed content disappearing on canvas click<br>* Port Connection Rules: Prohibited invalid connection directions<br>* Knowledge Base Status Width: Locked or adaptive column width<br>* Pending Document Preview: Preview support for unparsed documents<br>* Knowledge Base Association Fixes: Consolidated association fixes<br>* Multimodal Conversation Continuity: Fixed single-round limit after multimodal input<br>* Timezone Unification: Env-var controlled unified timezone<br>* Forgetting Strength Precision: Fixed excessive decimal display",
+        "<br>",
+        "v0.2.8 Community delivers major upgrades in application sharing and multimodal interaction, with perceptual memory expanding the platform's cognitive dimensions. Multi-agent collaboration, episodic clustering, and continued platform stability improvements are ahead.",
+        "MemoryBear — Give AI Memory 🐻✨"
+      ]
+    }
+  },
   "v0.2.7": {
     "introduction": {
       "codeName": "武陵",

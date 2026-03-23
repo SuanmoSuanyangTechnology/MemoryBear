@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 15:18:20
+ * @Last Modified time: 2026-03-19 20:19:14
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, InputNumber, Flex, Switch, Row, Col, Radio } from 'antd';
@@ -82,28 +82,27 @@ const defaultValues: FileUpload = {
     "mp3",
     "wav",
     "m4a",
-    "ogg",
-    "flac"
   ],
   document_enabled: false,
   document_max_size_mb: 100,
   document_allowed_extensions: [
     "pdf",
     "docx",
+    "doc",
     "xlsx",
+    "xls",
     "txt",
     "csv",
-    "json"
+    "json",
+    "md",
   ],
   video_enabled: false,
   video_max_size_mb: 100,
   video_allowed_extensions: [
     "mp4",
     "mov",
-    "avi",
-    "webm"
   ],
-  max_file_count: 5,
+  max_file_count: 1,
   allowed_transfer_methods: 'both'
 }
 
@@ -168,8 +167,8 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
           </Radio.Group>
         </Form.Item>
 
-        <div className="rb:text-[12px] rb:text-[#5B6167] rb:mb-1">{t('application.maxCount')}</div>
-        <Form.Item label={t('application.maxCount')} name="max_file_count">
+        {/* <div className="rb:text-[12px] rb:text-[#5B6167] rb:mb-1">{t('application.maxCount')}</div> */}
+        <Form.Item label={t('application.maxCount')} name="max_file_count" hidden>
           <InputNumber min={1} max={20} precision={0} className="rb:w-full!" placeholder={t('common.pleaseEnter')} />
         </Form.Item>
 

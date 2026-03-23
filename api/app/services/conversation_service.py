@@ -21,6 +21,7 @@ from app.models.conversation_model import ConversationDetail
 from app.models.prompt_optimizer_model import RoleType
 from app.repositories.conversation_repository import ConversationRepository, MessageRepository
 from app.schemas.conversation_schema import ConversationOut
+from app.schemas.model_schema import ModelInfo
 from app.services import workspace_service
 from app.services.model_service import ModelConfigService
 
@@ -269,7 +270,7 @@ class ConversationService:
 
         return messages
 
-    def get_conversation_history(
+    async def get_conversation_history(
             self,
             conversation_id: uuid.UUID,
             max_history: Optional[int] = None,
@@ -546,7 +547,7 @@ class ConversationService:
             type=ModelType(model_type)
         )
 
-        conversation_messages = self.get_conversation_history(
+        conversation_messages = await self.get_conversation_history(
             conversation_id=conversation_id,
             max_history=20,
             current_provider=provider,

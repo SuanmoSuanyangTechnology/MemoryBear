@@ -118,6 +118,16 @@ class AppChatService:
 
         )
 
+        model_info = ModelInfo(
+            model_name=api_key_obj.model_name,
+            provider=api_key_obj.provider,
+            api_key=api_key_obj.api_key,
+            api_base=api_key_obj.api_base,
+            capability=api_key_obj.capability,
+            is_omni=api_key_obj.is_omni,
+            model_type=ModelType.LLM
+        )
+
         # 加载历史消息
         history = self.conversation_service.get_conversation_history(
             conversation_id=conversation_id,
@@ -129,15 +139,6 @@ class AppChatService:
         # 处理多模态文件
         processed_files = None
         if files:
-            model_info = ModelInfo(
-                model_name=api_key_obj.model_name,
-                provider=api_key_obj.provider,
-                api_key=api_key_obj.api_key,
-                api_base=api_key_obj.api_base,
-                capability=api_key_obj.capability,
-                is_omni=api_key_obj.is_omni,
-                model_type=ModelType.LLM
-            )
             multimodal_service = MultimodalService(self.db, model_info)
             processed_files = await multimodal_service.process_files(user_id, files)
             logger.info(f"处理了 {len(processed_files)} 个文件")
@@ -320,6 +321,16 @@ class AppChatService:
                 streaming=True
             )
 
+            model_info = ModelInfo(
+                model_name=api_key_obj.model_name,
+                provider=api_key_obj.provider,
+                api_key=api_key_obj.api_key,
+                api_base=api_key_obj.api_base,
+                capability=api_key_obj.capability,
+                is_omni=api_key_obj.is_omni,
+                model_type=ModelType.LLM
+            )
+
             # 加载历史消息
             history = self.conversation_service.get_conversation_history(
                 conversation_id=conversation_id,
@@ -331,15 +342,6 @@ class AppChatService:
             # 处理多模态文件
             processed_files = None
             if files:
-                model_info = ModelInfo(
-                    model_name=api_key_obj.model_name,
-                    provider=api_key_obj.provider,
-                    api_key=api_key_obj.api_key,
-                    api_base=api_key_obj.api_base,
-                    capability=api_key_obj.capability,
-                    is_omni=api_key_obj.is_omni,
-                    model_type=ModelType.LLM
-                )
                 multimodal_service = MultimodalService(self.db, model_info)
                 processed_files = await multimodal_service.process_files(user_id, files)
                 logger.info(f"处理了 {len(processed_files)} 个文件")
