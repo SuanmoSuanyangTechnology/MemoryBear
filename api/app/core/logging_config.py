@@ -529,8 +529,9 @@ def log_time(step_name: str, duration: float, log_file: str = "logs/time.log") -
         # Fallback to console only if file write fails
         print(f"Warning: Could not write to timing log: {e}")
     
-    # Always print to console (backward compatible behavior)
-    print(f"✓ {step_name}: {duration:.2f}s")
+    # Always log at INFO level (avoids Celery treating stdout as WARNING)
+    _timing_logger = logging.getLogger(__name__)
+    _timing_logger.info(f"✓ {step_name}: {duration:.2f}s")
 
 
 def get_agent_logger(name: str = "agent_service", 
