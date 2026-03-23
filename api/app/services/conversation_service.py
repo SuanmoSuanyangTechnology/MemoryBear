@@ -119,25 +119,27 @@ class ConversationService:
 
     def get_user_conversations(
             self,
-            user_id: uuid.UUID
-    ) -> list[Conversation]:
+            user_id: uuid.UUID,
+            page: int = 1,
+            page_size: int = 20
+    ) -> tuple[list[Conversation], int]:
         """
-        Retrieve recent conversations for a specific user
-
-        This method delegates persistence logic to the repository layer and
-        applies service-level defaults (e.g. recent conversation limit).
+        Retrieve recent conversations for a specific user with pagination.
 
         Args:
             user_id (uuid.UUID): Unique identifier of the user.
+            page (int): Page number (1-based). Defaults to 1.
+            page_size (int): Number of items per page. Defaults to 20.
 
         Returns:
-            list[Conversation]: A list of recent conversation entities.
+            tuple[list[Conversation], int]: A list of recent conversation entities and total count.
         """
-        conversations = self.conversation_repo.get_conversation_by_user_id(
+        conversations, total = self.conversation_repo.get_conversation_by_user_id(
             user_id,
-            limit=10
+            page=page,
+            page_size=page_size
         )
-        return conversations
+        return conversations, total
 
     def list_conversations(
             self,
@@ -270,7 +272,9 @@ class ConversationService:
     def get_conversation_history(
             self,
             conversation_id: uuid.UUID,
-            max_history: Optional[int] = None
+            max_history: Optional[int] = None,
+            current_provider: Optional[str] = None,
+            current_is_omni: Optional[bool] = None
     ) -> List[dict]:
         """
         Retrieve historical conversation messages formatted as dictionaries.
@@ -278,6 +282,8 @@ class ConversationService:
         Args:
             conversation_id (uuid.UUID): Conversation UUID.
             max_history (Optional[int]): Maximum number of messages to retrieve.
+            current_provider (Optional[str]): Current provider for file handling.
+            current_is_omni (Optional[bool]): Current omni flag for file handling.
 
         Returns:
             List[dict]: List of message dictionaries with keys 'role' and 'content'.
@@ -287,14 +293,30 @@ class ConversationService:
             limit=max_history
         )
 
-        # 转换为字典格式
-        history = [
-            {
+        history = []
+        for msg in messages:
+            msg_dict = {
                 "role": msg.role,
-                "content": msg.content
+                "content": [{"type": "text", "text": msg.content}]
             }
-            for msg in messages
-        ]
+
+            # 处理用户消息中的多模态文件
+            if msg.role == "user" and msg.meta_data:
+                history_files = msg.meta_data.get("history_files", {})
+
+                if history_files and current_provider and current_is_omni is not None:
+                    # 检查是否需要重新处理文件
+                    stored_provider = history_files.get("provider")
+                    stored_is_omni = history_files.get("is_omni")
+
+                    # 如果provider或is_omni不匹配，需要重新处理
+                    if stored_provider != current_provider or stored_is_omni != current_is_omni:
+                        continue
+
+                    # provider和is_omni匹配，直接使用存储的内容
+                    msg_dict["content"].extend(history_files.get("content"))
+
+            history.append(msg_dict)
 
         return history
 
@@ -510,6 +532,7 @@ class ConversationService:
         provider = api_config.provider
         api_key = api_config.api_key
         api_base = api_config.api_base
+        is_omni = api_config.is_omni
         model_type = config.type
 
         llm = RedBearLLM(
@@ -517,14 +540,17 @@ class ConversationService:
                 model_name=model_name,
                 provider=provider,
                 api_key=api_key,
-                base_url=api_base
+                base_url=api_base,
+                is_omni=is_omni
             ),
             type=ModelType(model_type)
         )
 
         conversation_messages = self.get_conversation_history(
             conversation_id=conversation_id,
-            max_history=20
+            max_history=20,
+            current_provider=provider,
+            current_is_omni=is_omni
         )
         if len(conversation_messages) == 0:
             return ConversationOut(
