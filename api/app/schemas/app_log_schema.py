@@ -50,4 +50,4 @@ class AppLogConversation(BaseModel):
 
 class AppLogConversationDetail(AppLogConversation):
     """会话详情（包含消息列表）"""
-    messages: List[AppLogMessage] = []
+    messages: List[AppLogMessage] = Field(default_factory=list)

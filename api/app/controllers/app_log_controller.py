@@ -2,7 +2,7 @@
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, desc, func
 from sqlalchemy.orm import Session
 
@@ -23,8 +23,8 @@ logger = get_business_logger()
 @cur_workspace_access_guard()
 def list_app_logs(
         app_id: uuid.UUID,
-        page: int = 1,
-        pagesize: int = 20,
+        page: int = Query(1, ge=1),
+        pagesize: int = Query(20, ge=1, le=100),
         user_id: Optional[str] = None,
         is_draft: Optional[bool] = None,
         db: Session = Depends(get_db),
