@@ -246,6 +246,7 @@ export const en = {
       zh: 'Chinese'
     },
     user: {
+      userList: 'User List',
       searchPlaceholder: 'search user…',
       userId: 'User ID',
       username: 'Username',

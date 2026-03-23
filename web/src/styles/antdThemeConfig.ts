@@ -101,6 +101,8 @@ export const lightTheme: ThemeConfig = {
       rowSelectedHoverBg: '#F0F3F8',
       cellPaddingBlock: 8,
       cellFontSizeSM: 12,
+      footerBg: '#FFFFFF',
+      colorText: '#5B6167',
 
       // cellPaddingInline: 24,
       selectionColumnWidth: 48,

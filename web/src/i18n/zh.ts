@@ -943,6 +943,7 @@ export const zh = {
       zh: '中'
     },
     user: {
+      userList: '用户列表',
       searchPlaceholder: '搜索用户…',
       userId: '用户ID',
       username: '用户名',

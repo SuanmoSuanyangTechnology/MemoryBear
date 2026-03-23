@@ -41,6 +41,7 @@ const Index = () => {
       title: t('space.spaceName'),
       dataIndex: 'name',
       key: 'name',
+      className: 'rb:text-[#212332]'
     },
     {
       title: t('space.spaceIcon'),
@@ -119,8 +120,6 @@ const Index = () => {
               rowKey="id"
               bordered={false}
               scrollY="100%"
-              className="rb:-mb-3!"
-              // scroll={{ y: 'calc(100vh - 340px)' }}
             />
           </div>
         </Flex>
