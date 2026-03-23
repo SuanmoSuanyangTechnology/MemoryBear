@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from . import (
     api_key_controller,
     app_controller,
+    app_log_controller,
     auth_controller,
     chunk_controller,
     document_controller,
@@ -69,6 +70,7 @@ manager_router.include_router(chunk_controller.router)
 manager_router.include_router(test_controller.router)
 manager_router.include_router(knowledgeshare_controller.router)
 manager_router.include_router(app_controller.router)
+manager_router.include_router(app_log_controller.router)
 manager_router.include_router(upload_controller.router)
 manager_router.include_router(memory_agent_controller.router)
 manager_router.include_router(memory_dashboard_controller.router)
