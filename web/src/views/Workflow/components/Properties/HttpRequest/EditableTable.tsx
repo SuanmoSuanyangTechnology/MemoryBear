@@ -47,7 +47,7 @@ const EditableTable: FC<EditableTableProps> = ({
 
   const getColumns = (remove: (index: number) => void): TableProps<TableRow>['columns'] => {
     const hasType = typeOptions.length > 0;
-    const contentClassName = hasType ? 'rb:w-[120px]!' : "rb:w-[154px]!"
+    const contentClassName = hasType ? 'rb:w-[110px]!' : "rb:w-[148px]!"
     const formClassName = 'rb:mb-0! rb:bg-[#F6F6F6] rb:rounded-[8px] rb:py-[2px]! rb:px-[6px]!'
 
     return [
@@ -75,7 +75,7 @@ const EditableTable: FC<EditableTableProps> = ({
             {(form) => (
               <Form.Item name={[index, 'type']} noStyle>
                 <Select 
-                  placeholder={t('common.pleaseSelect')} 
+                  placeholder={t('workflow.config.type')} 
                   // size="small" 
                   options={typeOptions}
                   popupMatchSelectWidth={false}
@@ -127,6 +127,7 @@ const EditableTable: FC<EditableTableProps> = ({
       {
         title: '',
         dataIndex: 'actions',
+        width: 20,
         render: (_: any, __: TableRow, index: number) => (
           <div
             className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"

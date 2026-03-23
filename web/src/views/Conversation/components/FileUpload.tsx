@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 21:32:34
+ * @Last Modified time: 2026-03-23 17:19:58
  */
 /**
  * File Upload Component
@@ -19,11 +19,11 @@
  * - File list management
  * 
  * @component
-*/
+ */
 import { useState, useEffect, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { Upload, Progress, App, Flex } from 'antd';
 import type { UploadProps, UploadFile } from 'antd';
-import type { UploadProps as RcUploadProps } from 'antd/es/upload/interface';
+import type { UploadProps as RcUploadProps, RcFile, UploadFileStatus } from 'antd/es/upload/interface';
 import { useTranslation } from 'react-i18next';
 
 import { request } from '@/utils/request'
@@ -193,13 +193,13 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
       // Get file extension
       const fileName = file.name.toLowerCase();
       const fileExtension = fileName.substring(fileName.lastIndexOf('.') + 1);
-      
+
       // Check if extension is in allowed types list
       const isValidExtension = fileType.some(type => type.toLowerCase() === fileExtension);
-      
+
       // Also check MIME type if available (as fallback validation)
       const isValidMimeType = file.type && accept ? accept.includes(file.type) : true;
-      
+
       if (!isValidExtension && !isValidMimeType) {
         message.error(`${t('common.fileAcceptTip')} ${fileExtension || file.type}`);
         return Upload.LIST_IGNORE;
@@ -221,17 +221,29 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
    */
   const handleCustomRequest: RcUploadProps['customRequest'] = async (options) => {
     const { file, onSuccess, onError } = options;
-    
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      
-      const response = await request.uploadFile(action, formData, requestConfig);
-      
-      onSuccess?.({data: response});
-    } catch (error) {
-      onError?.(error as Error);
+    if (typeof file === 'string') return;
+    const rcFile = file as RcFile;
+    const formData = new FormData();
+    formData.append('file', rcFile);
+    const fileVo: UploadFile = {
+      uid: rcFile.uid,
+      name: rcFile.name,
+      status: 'uploading' as UploadFileStatus,
+      percent: 0,
+      type: rcFile.type,
+      originFileObj: rcFile,
+      thumbUrl: URL.createObjectURL(rcFile)
     }
+    onChange?.(fileVo)
+    request.uploadFile(action, formData, requestConfig)
+      .then(res => {
+        onSuccess?.({ data: res });
+      })
+      .catch((error) => {
+        onError?.(error as Error);
+        fileVo.status = 'error'
+        onChange?.(fileVo)
+      })
   };
 
   /**
