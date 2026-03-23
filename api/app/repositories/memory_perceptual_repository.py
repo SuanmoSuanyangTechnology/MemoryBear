@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import List, Tuple, Optional
 
-from sqlalchemy import and_, desc
+from sqlalchemy import and_, desc, select
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_db_logger
@@ -125,6 +125,17 @@ class MemoryPerceptualRepository:
 
         except Exception as e:
             db_logger.error(f"Failed to query perceptual memory timeline: end_user_id={end_user_id} - {str(e)}")
+            raise
+
+    def get_by_url(
+            self,
+            file_url: str
+    ) -> list[MemoryPerceptualModel]:
+        try:
+            stmt = select(MemoryPerceptualModel).where(MemoryPerceptualModel.file_path == file_url)
+            return list(self.db.execute(stmt).scalars())
+        except Exception:
+            db_logger.error(f"Failed to query perceptual memories by file_url: file_url={file_url}")
             raise
 
     def get_by_type(

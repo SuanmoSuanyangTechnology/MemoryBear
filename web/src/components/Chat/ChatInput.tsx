@@ -2,10 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 13:36:20
+ * @Last Modified time: 2026-03-19 18:44:51
  */
 import { type FC, useEffect, useMemo } from 'react'
-import { Flex, Input, Form } from 'antd'
+import { Flex, Input, Form, Spin } from 'antd'
+import clsx from 'clsx'
 
 import SendIcon from '@/assets/images/conversation/send.svg'
 import SendDisabledIcon from '@/assets/images/conversation/sendDisabled.svg'
@@ -69,6 +70,8 @@ const ChatInput: FC<ChatInputProps> = ({
     onSend(values.message)
   }
 
+  console.log('previewFileList', previewFileList)
+
   return (
     <div className={`rb:absolute rb:bottom-3 rb:left-0 rb:right-0 rb:w-full ${className}`}>
       <Flex vertical justify="space-between" className="rb:border rb:border-[#DFE4ED] rb:rounded-xl rb:min-h-30">
@@ -76,57 +79,78 @@ const ChatInput: FC<ChatInputProps> = ({
           {previewFileList.map((file) => {
             if (file.type.includes('image')) {
               return (
-                <div key={file.url || file.uid} className="rb:inline-block rb:group rb:relative rb:rounded-lg">
-                  <img src={file.url} alt={file.name} className="rb:size-12! rb:rounded-lg rb:object-cover rb:cursor-pointer" />
-                  <div
-                    className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')] rb:hover:bg-[url('@/assets/images/conversation/delete_hover.svg')]"
-                    onClick={() => handleDelete(file)}
-                  ></div>
-                </div>
+                <Spin key={`${file.url || file.uid}_${file.status}`} spinning={file.status === 'uploading'}>
+                  <div key={file.url || file.uid} className={clsx("rb:inline-block rb:group rb:relative rb:rounded-lg", {
+                    'rb:border rb:border-[#FF5D34]': file.status === 'error'
+                  })}>
+                    <img src={file.url} alt={file.name} className="rb:size-12! rb:rounded-lg rb:object-cover rb:cursor-pointer" />
+                    <div
+                      className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')] rb:hover:bg-[url('@/assets/images/conversation/delete_hover.svg')]"
+                      onClick={() => handleDelete(file)}
+                    ></div>
+                  </div>
+                </Spin>
               )
             }
             if (file.type.includes('video')) {
               return (
-                <div key={file.url || file.uid} className="rb:w-45 rb:h-16 rb:inline-block rb:group rb:relative rb:rounded-lg">
-                  <video src={file.url} controls className="rb:w-45 rb:h-16 rb:rounded-lg rb:object-cover rb:cursor-pointer" />
-                  <div
-                    className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')] rb:hover:bg-[url('@/assets/images/conversation/delete_hover.svg')]"
-                    onClick={() => handleDelete(file)}
-                  ></div>
-                </div>
+                <Spin key={`${file.url || file.uid}_${file.status}`} spinning={file.status === 'uploading'}>
+                  <div key={file.url || file.uid} className={clsx("rb:w-45 rb:h-16 rb:inline-block rb:group rb:relative rb:rounded-lg", {
+                    'rb:border rb:border-[#FF5D34]': file.status === 'error'
+                  })}>
+                    <video src={file.url} controls className="rb:w-45 rb:h-15.5 rb:rounded-lg rb:object-cover rb:cursor-pointer" />
+                    <div
+                      className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')] rb:hover:bg-[url('@/assets/images/conversation/delete_hover.svg')]"
+                      onClick={() => handleDelete(file)}
+                    ></div>
+                  </div>
+                </Spin>
               )
             }
             if (file.type.includes('audio')) {
               return (
-                <div key={file.url || file.uid} className="rb:w-45 rb:h-16 rb:inline-flex rb:items-center rb:group rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:py-2 rb:px-2.5 rb:gap-2">
-                  <audio src={file.url} controls className="rb:w-45 rb:h-16" />
+                <Spin key={`${file.url || file.uid}_${file.status}`} spinning={file.status === 'uploading'}>
+                  <div key={file.url || file.uid} className={clsx("rb:w-45 rb:h-16 rb:inline-flex rb:items-center rb:group rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:py-2 rb:px-2.5 rb:gap-2", {
+                    'rb:border rb:border-[#FF5D34]': file.status === 'error'
+                  })}>
+                    <audio src={file.url} controls className="rb:w-45 rb:h-15.5" />
+                    <div
+                      className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')] rb:hover:bg-[url('@/assets/images/conversation/delete_hover.svg')]"
+                      onClick={() => handleDelete(file)}
+                    ></div>
+                  </div>
+                </Spin>
+              )
+            }
+            return (
+              <Spin key={`${file.url || file.uid}_${file.status}`} spinning={file.status === 'uploading'}>
+                <div key={file.url || file.uid} className={clsx("rb:w-45 rb:text-[12px] rb:gap-2.5 rb:flex rb:items-center rb:group rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:py-2 rb:px-2.5", {
+                  'rb:border rb:border-[#FF5D34]': file.status === 'error'
+                })}>
+                  {file.type.includes('pdf')
+                    ? <div
+                      className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/pdf_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/pdf.svg')]"
+                    ></div>
+                    : (file.type.includes('excel') || file.type.includes('spreadsheetml.sheet') || file.type.includes('csv'))
+                    ? <div
+                      className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/excel_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/excel.svg')]"
+                    ></div>
+                    : (file.type.includes('doc') || file.type.includes('docx') || file.type.includes('word') || file.type.includes('wordprocessingml.document'))
+                    ? <div
+                      className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/word_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/word.svg')]"
+                    ></div>
+                    : null
+                  }
+                  <div className="rb:flex-1 rb:w-32.5">
+                    <div className="rb:leading-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.name}</div>
+                    <div className="rb:leading-3.5 rb:mt-0.5 rb:text-[#5B6167] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.type} · {file.size}</div>
+                  </div>
                   <div
                     className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')] rb:hover:bg-[url('@/assets/images/conversation/delete_hover.svg')]"
                     onClick={() => handleDelete(file)}
                   ></div>
-                </div>
-              )
-            }
-            return (
-              <div key={file.url || file.uid} className="rb:w-45 rb:text-[12px] rb:gap-2.5 rb:flex rb:items-center rb:group rb:relative rb:rounded-lg rb:bg-[#F0F3F8] rb:py-2 rb:px-2.5">
-                {(file.type.includes('doc') || file.type.includes('docx') || file.type.includes('word') || file.type.includes('wordprocessingml.document')) && <div
-                  className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/word_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/word.svg')]"
-                ></div>}
-                {(file.type.includes('pdf')) && <div
-                  className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/pdf_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/pdf.svg')]"
-                ></div>}
-                {(file.type.includes('excel') || file.type.includes('spreadsheetml.sheet') || file.type.includes('csv')) && <div
-                  className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/excel_disabled.svg')] rb:hover:bg-[url('@/assets/images/conversation/excel.svg')]"
-                ></div>}
-                <div className="rb:flex-1 rb:w-32.5">
-                  <div className="rb:leading-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.name}</div>
-                  <div className="rb:leading-3.5 rb:mt-0.5 rb:text-[#5B6167] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.type} · {file.size}</div>
-                </div>
-                <div
-                  className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')] rb:hover:bg-[url('@/assets/images/conversation/delete_hover.svg')]"
-                  onClick={() => handleDelete(file)}
-                ></div>
-              </div>
+                  </div>
+              </Spin>
             )
           })}
         </Flex></div>}

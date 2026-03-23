@@ -6,13 +6,13 @@ import Properties from './components/Properties';
 import CanvasToolbar from './components/CanvasToolbar';
 import PortClickHandler from './components/PortClickHandler';
 import { useWorkflowGraph } from './hooks/useWorkflowGraph';
-import type { WorkflowRef } from '@/views/ApplicationConfig/types'
+import type { WorkflowRef, FeaturesConfigForm } from '@/views/ApplicationConfig/types'
 import Chat from './components/Chat/Chat';
 import type { ChatRef, AddChatVariableRef } from './types'
 import arrowIcon from '@/assets/images/workflow/arrow.png'
 import AddChatVariable from './components/AddChatVariable';
 
-const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
+const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void }>(({ onFeaturesLoad }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const miniMapRef = useRef<HTMLDivElement>(null);
   const addChatVariableRef = useRef<AddChatVariableRef>(null)
@@ -25,12 +25,8 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
     selectedNode,
     setSelectedNode,
     zoomLevel,
-    canUndo,
-    canRedo,
     isHandMode,
     setIsHandMode,
-    onUndo,
-    onRedo,
     onDrop,
     blankClick,
     deleteEvent,
@@ -39,8 +35,9 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
     handleSave,
     chatVariables,
     setChatVariables,
-    handleAddNotes
-  } = useWorkflowGraph({ containerRef, miniMapRef });
+    handleAddNotes,
+    handleSaveFeaturesConfig
+  } = useWorkflowGraph({ containerRef, miniMapRef, onFeaturesLoad });
 
   const onDragOver = (event: React.DragEvent) => {
     event.preventDefault();
@@ -60,7 +57,9 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
     handleRun,
     graphRef,
     addVariable,
-    config
+    config,
+    features: config?.features,
+    handleSaveFeaturesConfig
   }))
   return (
     <div className="rb:h-[calc(100vh-64px)] rb:relative">
@@ -92,10 +91,6 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
           isHandMode={isHandMode}
           setIsHandMode={setIsHandMode}
           zoomLevel={zoomLevel}
-          canUndo={canUndo}
-          canRedo={canRedo}
-          onUndo={onUndo}
-          onRedo={onRedo}
           addNotes={handleAddNotes}
         />
       </div>
@@ -114,6 +109,7 @@ const Workflow = forwardRef<WorkflowRef>((_props, ref) => {
       />
       <Chat
         ref={chatRef}
+        data={config}
         graphRef={graphRef}
         appId={config?.app_id as string}
       />

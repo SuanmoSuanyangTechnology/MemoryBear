@@ -8,7 +8,7 @@ class EndUser(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID = Field(description="终端用户ID")
-    app_id: uuid.UUID = Field(description="应用ID")
+    app_id: Optional[uuid.UUID] = Field(description="应用ID", default=None)
     # end_user_id: str = Field(description="终端用户ID")
     other_id: Optional[str] = Field(description="第三方ID", default=None)
     other_name: Optional[str] = Field(description="其他名称", default="")

@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
- * @Last Modified by: ZhaoYing 
- * @Last Modified time: 2026-03-02 17:06:41 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-16 16:11:28
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -88,7 +88,7 @@ const Properties: FC<PropertiesProps> = ({
 
   useEffect(() => {
     if (selectedNode && form) {
-      const { type = 'default', name = '', config } = selectedNode.getData() || {}
+      const { type = 'default', name = '', config, id } = selectedNode.getData() || {}
       const initialValue: Record<string, any> = {}
       Object.keys(config || {}).forEach(key => {
         if (config && config[key] && 'defaultValue' in config[key]) {
@@ -98,7 +98,7 @@ const Properties: FC<PropertiesProps> = ({
 
       form.setFieldsValue({
         type,
-        id: selectedNode.id,
+        id,
         name,
         ...initialValue,
       })

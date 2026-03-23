@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:00 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 18:32:00 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-19 20:23:42
  */
 /**
  * Relationship Network Component
@@ -13,18 +13,20 @@
 import React, { type FC, useEffect, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Col, Row, Space, Button } from 'antd'
+import { Col, Row, Space, Button, Tabs, Flex, Divider } from 'antd'
 import dayjs from 'dayjs'
 import ReactEcharts from 'echarts-for-react'
 
 import RbCard from '@/components/RbCard/Card'
 import detailEmpty from '@/assets/images/userMemory/detail_empty.png'
 import type { Node, Edge, GraphData, StatementNodeProperties, ExtractedEntityNodeProperties } from '../types'
+import type { RawCommunityNode } from '@/components/D3Graph/types'
 import {
   getMemorySearchEdges,
 } from '@/api/memory'
 import Empty from '@/components/Empty'
 import Tag from '@/components/Tag'
+import CommunityNetwork from './CommunityNetwork'
 
 /** Node color palette */
 const colors = ['#155EEF', '#369F21', '#4DA8FF', '#FF5D34', '#9C6FFF', '#FF8A4C', '#8BAEF7', '#FFB048']
@@ -36,16 +38,21 @@ const RelationshipNetwork:FC = () => {
   const [nodes, setNodes] = useState<Node[]>([])
   const [links, setLinks] = useState<Edge[]>([])
   const [categories, setCategories] = useState<{ name: string }[]>([])
-  const [selectedNode, setSelectedNode] = useState<Node | null>(null)
+  const [selectedNode, setSelectedNode] = useState<Node | RawCommunityNode | null>(null)
   // const [fullScreen, setFullScreen] = useState<boolean>(false)
   const navigate = useNavigate()
+  const [activeTab, setActiveTab] = useState('relationshipNetwork')
 
   console.log('categories', categories)
+  const edgeAbortRef = useRef<AbortController | null>(null)
+
   /** Fetch relationship network data */
   const getEdgeData = useCallback(() => {
     if (!id) return
+    edgeAbortRef.current?.abort()
+    edgeAbortRef.current = new AbortController()
     setSelectedNode(null)
-    getMemorySearchEdges(id).then((res) => {
+    getMemorySearchEdges(id, { signal: edgeAbortRef.current.signal }).then((res) => {
       const { nodes, edges, statistics } = res as GraphData
       const curNodes: Node[] = []
       const curEdges: Edge[] = []
@@ -123,6 +130,7 @@ const RelationshipNetwork:FC = () => {
   useEffect(() => {
     if (!id) return
     getEdgeData()
+    return () => { edgeAbortRef.current?.abort() }
   }, [id])
   
   useEffect(() => {
@@ -153,34 +161,36 @@ const RelationshipNetwork:FC = () => {
     const params = new URLSearchParams({
       nodeId: selectedNode.id,
       nodeLabel: selectedNode.label,
-      nodeName: selectedNode.name || ''
+      nodeName: (selectedNode as Node).name || ''
     })
     navigate(`/user-memory/detail/${id}/GRAPH?${params.toString()}`)
+  }
+  const handleChangeTab = (tab: string) => {
+    if (tab === 'communityNetwork') {
+      edgeAbortRef.current?.abort()
+    } else {
+      getEdgeData()
+    }
+    setActiveTab(tab)
+    setSelectedNode(null)
   }
 
   return (
     <Row gutter={16}>
       {/* Relationship Network */}
       <Col span={16}>
-        <RbCard 
-          title={t('userMemory.relationshipNetwork')}
-          headerType="borderless"
-          headerClassName="rb:min-h-[46px]!"
-          // extra={
-          //   <div
-          //     onClick={handleFullScreen}
-          //     className="rb:group rb:cursor-pointer rb:hover:text-[#212332] rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:flex rb:items-center rb:gap-1"
-          //   >
-          //     <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/fullScreen.svg')] rb:hover:bg-[url('@/assets/images/fullScreen_hover.svg')]"></div>
-          //     {t('userMemory.fullScreen')}
-          //   </div>
-          // }
-        >
+        <RbCard bodyClassName="rb:pt-0!">
+          <Tabs
+            items={['relationshipNetwork', 'communityNetwork'].map(key => ({ key, label: t(`userMemory.${key}`) }))}
+            activeKey={activeTab}
+            onChange={handleChangeTab}
+          />
           <div className="rb:h-129.5 rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-sm">
-            {nodes.length === 0 ? (
-              <Empty className="rb:h-full" />
-            ) : (
-              <ReactEcharts
+            {activeTab === 'communityNetwork'
+              ? <CommunityNetwork onSelectCommunity={community => setSelectedNode(community)} />
+              : nodes.length === 0
+              ? <Empty className="rb:h-full" />
+              : <ReactEcharts
                 option={{
                   colors: colors,
                   tooltip: {
@@ -253,103 +263,125 @@ const RelationshipNetwork:FC = () => {
                   }
                 }}
               />
-            )}
+            }
           </div>
         </RbCard>
       </Col>
       {/* Memory Details */}
       <Col span={8}>
-        <RbCard 
+        <RbCard
           title={t('userMemory.memoryDetails')}
           headerType="borderless"
           headerClassName="rb:min-h-[46px]!"
-          bodyClassName='rb:p-0!'
-          extra={selectedNode && <Button type="text" onClick={handleViewAll}>
-            <div
-              className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/userMemory/view.svg')] rb:hover:bg-[url('@/assets/images/userMemory/view_hover.svg')]"
-            ></div>
-            {t('userMemory.completeMemory')}
-          </Button>}
+          bodyClassName="rb:p-0!"
+          extra={selectedNode && !(selectedNode as RawCommunityNode).properties.community_id && (
+            <Button type="text" onClick={handleViewAll}>
+              <div className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/userMemory/view.svg')] rb:hover:bg-[url('@/assets/images/userMemory/view_hover.svg')]" />
+              {t('userMemory.completeMemory')}
+            </Button>
+          )}
         >
           <div className="rb:h-133.5 rb:overflow-y-auto">
             {!selectedNode
-              ? <Empty 
-                url={detailEmpty}
-                subTitle={t('userMemory.memoryDetailEmptyDesc')}
-                className="rb:h-full rb:mx-10 rb:text-center"
-                size={[197.81, 150]}
-              />
-              : <>
-                {selectedNode.name && <div className="rb:bg-[#F6F8FC] rb:border-t rb:border-b rb:border-[#DFE4ED] rb:font-medium rb:py-2 rb:px-4 rb:h-10">{selectedNode.name}</div>}
-                <div className="rb:p-4">
-                  <>
+              ? <Empty url={detailEmpty} subTitle={activeTab === 'relationshipNetwork' ? t('userMemory.memoryDetailEmptyDesc') : t('userMemory.communityDetailEmptyDesc')} className="rb:h-full rb:mx-10 rb:text-center" size={[197.81, 150]} />
+              : (selectedNode as RawCommunityNode).properties.community_id
+                ? <div className="rb:p-3 rb:pt-0">
+                  <div className="rb:font-medium rb:text-[#212332] rb:text-[16px] rb:leading-5.5 rb:pl-1">
+                    {(selectedNode as RawCommunityNode).properties.name || selectedNode.id}
+                  </div>
+                  {(selectedNode as RawCommunityNode).properties.summary && <>
+                    <div className="rb:mt-3 rb:font-medium rb:leading-5 rb:pl-1">{t('userMemory.summary')}</div>
+                    <div className="rb:bg-[#F6F6F6] rb:rounded-xl rb:px-3 rb:py-2.5 rb:mt-2">
+                      {(selectedNode as RawCommunityNode).properties.summary}
+                    </div>
+                  </>}
+                  <Flex align="center" justify="space-between" className="rb:mt-5!">
+                    <span className="rb:text-[#5B6167] rb:font-regular rb:pl-1">{t('userMemory.member_count')}</span>
+                    <span className="rb:font-medium">{(selectedNode as RawCommunityNode).properties.member_count}{t('userMemory.member_count_desc')}</span>
+                  </Flex>
+
+                  {(selectedNode as RawCommunityNode).properties.core_entities && <>
+                    <Divider className='rb:my-2.5!' />
+                    <div className="rb:font-medium rb:leading-5 rb:pl-1">{t('userMemory.core_entities')}</div>
+                    <ul className="rb:list-disc rb:pl-4 rb:text-[#5B6167] rb:mt-2">
+                      {(selectedNode as RawCommunityNode).properties.core_entities?.map((entity, index) => <li key={index}>{entity}</li>)}
+                    </ul>
+                  </>}
+                </div>
+                : <>
+                  {(selectedNode as Node).name && (
+                    <div className="rb:bg-[#F6F8FC] rb:border-t rb:border-b rb:border-[#DFE4ED] rb:font-medium rb:py-2 rb:px-4 rb:h-10">
+                      {(selectedNode as Node).name}
+                    </div>
+                  )}
+                  <div className="rb:p-4">
                     <div className="rb:font-medium rb:leading-5">{t('userMemory.memoryContent')}</div>
                     <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
                       {['Chunk', 'Dialogue', 'MemorySummary'].includes(selectedNode.label) && 'content' in selectedNode.properties
                         ? selectedNode.properties.content
                         : selectedNode.label === 'ExtractedEntity' && 'description' in selectedNode.properties
-                        ? selectedNode.properties.description
-                        : selectedNode.label === 'Statement' && 'statement' in selectedNode.properties
-                        ? selectedNode.properties.statement
-                        : ''
-                      }
-                    </div>
-                  </>
-                  <div className="rb:font-medium rb:mb-2 rb:mt-4">
-                    <div className="rb:font-medium rb:leading-5">{t('userMemory.created_at')}</div>
-                    <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
-                      {dayjs(selectedNode?.properties.created_at).format('YYYY-MM-DD HH:mm:ss')}
+                          ? selectedNode.properties.description
+                          : selectedNode.label === 'Statement' && 'statement' in selectedNode.properties
+                            ? selectedNode.properties.statement
+                            : ''}
                     </div>
 
-                    {selectedNode?.properties.associative_memory > 0 && <div className="rb:mt-4">
-                      <div className="rb:font-medium rb:leading-5">{t('userMemory.associative_memory')}</div>
+                    <div className="rb:font-medium rb:mb-2 rb:mt-4">
+                      <div className="rb:font-medium rb:leading-5">{t('userMemory.created_at')}</div>
                       <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
-                        <span className="rb:text-[#155EEF] rb:font-medium">{selectedNode?.properties.associative_memory}</span> {t('userMemory.unix')}{t('userMemory.associative_memory')}
+                        {dayjs((selectedNode as Node).properties.created_at).format('YYYY-MM-DD HH:mm:ss')}
                       </div>
-                    </div>}
 
-                    {selectedNode.label === 'Statement' && <>
-                      {(['emotion_keywords', 'emotion_type', 'emotion_subject', 'importance_score'] as const).map(key => {
-                        const statementProps = selectedNode.properties as StatementNodeProperties;
-                        if ((key === 'emotion_keywords' && statementProps[key]?.length > 0) || typeof statementProps[key] === 'string') {
-                          console.log('statementProps[key]', statementProps[key])
-                          return (
-                            <div className="rb:mt-4" key={key}>
-                              {t(`userMemory.Statement_${key}`)}
-                              <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
-                                {key === 'emotion_keywords'
-                                  ? <Space>{statementProps.emotion_keywords.map((vo, index) => <Tag key={index}>{vo}</Tag>)}</Space>
-                                  : statementProps[key]
-                                }
+                      {(selectedNode as Node).properties.associative_memory > 0 && (
+                        <div className="rb:mt-4">
+                          <div className="rb:font-medium rb:leading-5">{t('userMemory.associative_memory')}</div>
+                          <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
+                            <span className="rb:text-[#155EEF] rb:font-medium">{(selectedNode as Node).properties.associative_memory}</span>
+                            {' '}{t('userMemory.unix')}{t('userMemory.associative_memory')}
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedNode.label === 'Statement' && (
+                        (['emotion_keywords', 'emotion_type', 'emotion_subject', 'importance_score'] as const).map(key => {
+                          const p = selectedNode.properties as StatementNodeProperties
+                          if ((key === 'emotion_keywords' && p[key]?.length > 0) || typeof p[key] === 'string') {
+                            return (
+                              <div className="rb:mt-4" key={key}>
+                                {t(`userMemory.Statement_${key}`)}
+                                <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
+                                  {key === 'emotion_keywords'
+                                    ? <Space>{p.emotion_keywords.map((v, i) => <Tag key={i}>{v}</Tag>)}</Space>
+                                    : p[key]}
+                                </div>
                               </div>
-                            </div>
-                          )
-                        }
-                        return null
-                      })}
-                    </>}
-                    {selectedNode.label === 'ExtractedEntity' && <>
-                      {(['name', 'entity_type', 'aliases', 'connect_strngth', 'importance_score'] as const).map(key => {
-                        const entityProps = selectedNode.properties as ExtractedEntityNodeProperties;
-                        if (entityProps[key]) {
-                          return (
-                            <div className="rb:mt-4" key={key}>
-                              {t(`userMemory.ExtractedEntity_${key}`)}
-                              <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
-                                {Array.isArray(entityProps[key]) && entityProps[key].length > 0 
-                                  ? entityProps[key].map((vo, index) => <div key={index}>- {vo}</div>)
-                                  : entityProps[key]
-                                }
+                            )
+                          }
+                          return null
+                        })
+                      )}
+
+                      {selectedNode.label === 'ExtractedEntity' && (
+                        (['name', 'entity_type', 'aliases', 'connect_strngth', 'importance_score'] as const).map(key => {
+                          const p = selectedNode.properties as ExtractedEntityNodeProperties
+                          if (p[key]) {
+                            return (
+                              <div className="rb:mt-4" key={key}>
+                                {t(`userMemory.ExtractedEntity_${key}`)}
+                                <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
+                                  {Array.isArray(p[key]) && p[key].length > 0
+                                    ? p[key].map((v, i) => <div key={i}>- {v}</div>)
+                                    : p[key]}
+                                </div>
                               </div>
-                            </div>
-                          )
-                        }
-                        return null
-                      })}
-                    </>}
+                            )
+                          }
+                          return null
+                        })
+                      )}
+                    </div>
                   </div>
-                </div>
-              </>
+                </>
             }
           </div>
         </RbCard>

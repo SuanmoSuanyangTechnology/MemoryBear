@@ -1,22 +1,24 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:37 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:29:37 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-12 10:23:18
  */
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 
 import ConfigHeader from './components/ConfigHeader'
-import type { AgentRef, ClusterRef, WorkflowRef } from './types'
+import type { AgentRef, ClusterRef, WorkflowRef, Config } from './types'
 import type { Application } from '@/views/ApplicationManagement/types'
 import Agent from './Agent'
 import Api from './Api'
 import ReleasePage from './ReleasePage'
 import Cluster from './Cluster'
-import { getApplication } from '@/api/application'
+import { getApplication, getApplicationConfig, getMultiAgentConfig, getWorkflowConfig } from '@/api/application'
 import Workflow from '@/views/Workflow';
 import Statistics from './Statistics'
+import TestChat from './TestChat'
+import type { WorkflowConfig } from '@/views/Workflow/types';
 
 /**
  * Application configuration page component
@@ -25,7 +27,7 @@ import Statistics from './Statistics'
  */
 const ApplicationConfig: React.FC = () => {
   // Hooks
-  const { id } = useParams();
+  const { id, source } = useParams();
   
   // Refs for different application types
   const agentRef = useRef<AgentRef>(null)
@@ -35,6 +37,32 @@ const ApplicationConfig: React.FC = () => {
   // State
   const [application, setApplication] = useState<Application | null>(null);
   const [activeTab, setActiveTab] = useState('arrangement');
+  const [features, setFeatures] = useState<import('./types').FeaturesConfigForm | undefined>(undefined);
+
+  useEffect(() => {
+    setActiveTab(source === 'sharing' ? 'test' : 'arrangement')
+  }, [source])
+
+  const [config, setConfig] = useState<Config | WorkflowConfig | null>(null)
+  useEffect(() => {
+    if (source === 'sharing' && application?.type) {
+      getAppConfig()
+    }
+  }, [source, application?.type])
+
+  const getAppConfig = () => {
+    if (!id || !source || !application?.type) {
+      return
+    }
+    const request = application?.type === 'agent'
+      ? getApplicationConfig
+      : application?.type === 'multi_agent'
+        ? getMultiAgentConfig
+        : getWorkflowConfig
+    request(id as string).then(res => {
+      setConfig(res as Config | WorkflowConfig | null)
+    })
+  }
 
   /**
    * Handle tab change with auto-save for arrangement tab
@@ -87,13 +115,16 @@ const ApplicationConfig: React.FC = () => {
         refresh={getApplicationInfo}
         appRef={application?.type === 'agent' ? agentRef : application?.type === 'multi_agent' ? clusterRef : application?.type === 'workflow' ? workflowRef : undefined}
         workflowRef={workflowRef}
+        features={features}
+        onFeaturesChange={setFeatures}
       />
-      {activeTab === 'arrangement' && application?.type === 'agent' && <Agent ref={agentRef} />}
-      {activeTab === 'arrangement' && application?.type === 'multi_agent' && <Cluster ref={clusterRef} />}
-      {activeTab === 'arrangement' && application?.type === 'workflow' && <Workflow ref={workflowRef} />}
+      {activeTab === 'arrangement' && application?.type === 'agent' && <Agent ref={agentRef} onFeaturesLoad={setFeatures} />}
+      {activeTab === 'arrangement' && application?.type === 'multi_agent' && <Cluster ref={clusterRef} onFeaturesLoad={setFeatures} />}
+      {activeTab === 'arrangement' && application?.type === 'workflow' && <Workflow ref={workflowRef} onFeaturesLoad={setFeatures} />}
       {activeTab === 'api' && <Api application={application} />}
       {activeTab === 'release' && <ReleasePage data={application as Application} refresh={getApplicationInfo} />}
       {activeTab === 'statistics' && <Statistics application={application} />}
+      {activeTab === 'test' && <TestChat application={application} config={config} />}
     </>
   );
 };

@@ -1,20 +1,28 @@
 import json
 
 from langchain_core.messages import HumanMessage, AIMessage
-async def format_parsing(messages: list,type:str='string'):
+
+
+async def format_parsing(messages: list, type: str = 'string'):
     """
-    格式化解析消息列表
+    Format and parse message lists into different output types
+
+    Processes message lists from storage and converts them into either string format
+    or dictionary format based on the specified type parameter. Handles JSON parsing
+    and role-based message organization.
     
     Args:
-        messages: 消息列表
-        type: 返回类型 ('string' 或 'dict')
+        messages: List of message objects from storage containing message data
+        type: Return type specification ('string' for text format, 'dict' for key-value pairs)
         
     Returns:
-        格式化后的消息列表
+        list: Formatted message list in the specified format
+            - 'string': List of formatted text messages with role prefixes
+            - 'dict': List of dictionaries mapping user messages to AI responses
     """
     result = []
-    user=[]
-    ai=[]
+    user = []
+    ai = []
 
     for message in messages:
         hstory_messages = message['messages']
@@ -24,25 +32,38 @@ async def format_parsing(messages: list,type:str='string'):
                 role = content['role']
                 content = content['content']
                 if type == "string":
-                    if role == 'human' or role=="user":
+                    if role == 'human' or role == "user":
                         content = '用户:' + content
                     else:
                         content = 'AI:' + content
                     result.append(content)
-                if type == "dict" :
-                    if role == 'human'  or role=="user":
-                        user.append( content)
+                if type == "dict":
+                    if role == 'human' or role == "user":
+                        user.append(content)
                     else:
                         ai.append(content)
     if type == "dict":
-        for key,values in zip(user,ai):
-            result.append({key:values})
+        for key, values in zip(user, ai):
+            result.append({key: values})
     return result
 
+
 async def messages_parse(messages: list | dict):
-    user=[]
-    ai=[]
-    database=[]
+    """
+    Parse messages from storage format into user-AI conversation pairs
+
+    Extracts and organizes conversation data from stored message format,
+    separating user and AI messages and pairing them for database storage.
+
+    Args:
+        messages: List or dictionary containing stored message data with Query fields
+
+    Returns:
+        list: List of dictionaries containing user-AI message pairs for database storage
+    """
+    user = []
+    ai = []
+    database = []
     for message in messages:
         Query = message['Query']
         Query = json.loads(Query)
@@ -54,10 +75,23 @@ async def messages_parse(messages: list | dict):
                 ai.append(data['content'])
     for key, values in zip(user, ai):
         database.append({key, values})
-    return  database
+    return database
 
 
-async def agent_chat_messages(user_content,ai_content):
+async def agent_chat_messages(user_content, ai_content):
+    """
+    Create structured chat message format for agent conversations
+
+    Formats user and AI content into a standardized message structure suitable
+    for agent processing and storage. Creates role-based message objects.
+
+    Args:
+        user_content: User's message content string
+        ai_content: AI's response content string
+
+    Returns:
+        list: List of structured message dictionaries with role and content fields
+    """
     messages = [
         {
             "role": "user",

@@ -92,6 +92,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add i18n language detection middleware
+from app.i18n.middleware import LanguageMiddleware
+app.add_middleware(LanguageMiddleware)
+
 logger.info("FastAPI应用程序启动")
 
 
@@ -129,6 +133,11 @@ from app.core.exceptions import (
 from app.core.sensitive_filter import SensitiveDataFilter
 import traceback
 
+# Import i18n exception support
+from app.i18n.exceptions import I18nException
+from app.i18n.service import get_translation_service
+from pydantic import ValidationError as PydanticValidationError
+
 
 # 处理验证异常
 @app.exception_handler(ValidationException)
@@ -153,6 +162,131 @@ async def validation_exception_handler(request: Request, exc: ValidationExceptio
     return JSONResponse(
         status_code=status_code,
         content=fail(code=biz_code.value, msg=filtered_message, error=filtered_message)
+    )
+
+
+# 处理 i18n 异常（国际化异常）
+@app.exception_handler(I18nException)
+async def i18n_exception_handler(request: Request, exc: I18nException):
+    """
+    处理国际化异常
+    
+    I18nException 已经自动翻译了错误消息，直接返回即可
+    """
+    # 获取当前语言
+    language = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
+    
+    # 获取异常详情（已经包含翻译后的消息）
+    detail = exc.detail
+    
+    # 过滤敏感信息
+    if isinstance(detail, dict):
+        filtered_message = SensitiveDataFilter.filter_string(detail.get("message", ""))
+        filtered_detail = {
+            **detail,
+            "message": filtered_message
+        }
+    else:
+        filtered_detail = SensitiveDataFilter.filter_string(str(detail))
+    
+    logger.warning(
+        f"I18n exception: {exc.error_key}",
+        extra={
+            "path": request.url.path,
+            "method": request.method,
+            "error_code": exc.error_code,
+            "error_key": exc.error_key,
+            "language": language,
+            "status_code": exc.status_code,
+            "params": exc.params
+        }
+    )
+    
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            **filtered_detail
+        },
+        headers=exc.headers
+    )
+
+
+# 处理 Pydantic 验证错误（国际化支持）
+@app.exception_handler(PydanticValidationError)
+async def pydantic_validation_exception_handler(request: Request, exc: PydanticValidationError):
+    """
+    处理 Pydantic 验证错误，支持国际化
+    """
+    # 获取当前语言
+    language = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
+    
+    # 获取翻译服务
+    translation_service = get_translation_service()
+    
+    # 翻译验证错误消息
+    errors = []
+    for error in exc.errors():
+        field = ".".join(str(loc) for loc in error["loc"])
+        error_type = error["type"]
+        
+        # 尝试翻译错误消息
+        if error_type == "value_error.missing":
+            message = translation_service.translate(
+                "errors.validation.missing_field",
+                language,
+                field=field
+            )
+        elif error_type == "value_error.any_str.max_length":
+            message = translation_service.translate(
+                "errors.validation.field_too_long",
+                language,
+                field=field
+            )
+        elif error_type == "value_error.any_str.min_length":
+            message = translation_service.translate(
+                "errors.validation.field_too_short",
+                language,
+                field=field
+            )
+        else:
+            # 使用通用验证错误消息
+            message = translation_service.translate(
+                "errors.validation.invalid_field",
+                language,
+                field=field
+            )
+        
+        errors.append({
+            "field": field,
+            "message": message,
+            "type": error_type
+        })
+    
+    # 翻译主错误消息
+    main_message = translation_service.translate(
+        "errors.common.validation_failed",
+        language
+    )
+    
+    logger.warning(
+        f"Pydantic validation error: {len(errors)} errors",
+        extra={
+            "path": request.url.path,
+            "method": request.method,
+            "language": language,
+            "errors": errors
+        }
+    )
+    
+    return JSONResponse(
+        status_code=422,
+        content={
+            "success": False,
+            "error_code": "VALIDATION_FAILED",
+            "message": main_message,
+            "errors": errors
+        }
     )
 
 
@@ -354,31 +488,69 @@ async def business_exception_handler(request: Request, exc: BusinessException):
     )
 
 
-# 统一异常处理：将HTTPException转换为统一响应结构
+# 统一异常处理：将HTTPException转换为统一响应结构（支持国际化）
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    """处理HTTP异常"""
-    # 过滤敏感信息
-    filtered_detail = SensitiveDataFilter.filter_string(str(exc.detail))
-
+    """处理HTTP异常，支持国际化"""
+    # 获取当前语言
+    language = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
+    
+    # 获取翻译服务
+    translation_service = get_translation_service()
+    
+    # 尝试翻译标准HTTP错误
+    error_key_map = {
+        400: "errors.common.bad_request",
+        401: "errors.common.unauthorized",
+        403: "errors.common.forbidden",
+        404: "errors.common.not_found",
+        405: "errors.common.method_not_allowed",
+        409: "errors.common.conflict",
+        413: "errors.common.payload_too_large",
+        422: "errors.common.validation_failed",
+        429: "errors.common.too_many_requests",
+        500: "errors.common.internal_error",
+        502: "errors.common.bad_gateway",
+        503: "errors.common.service_unavailable",
+        504: "errors.common.gateway_timeout",
+    }
+    
+    # 如果有对应的翻译键，使用翻译
+    if exc.status_code in error_key_map:
+        translated_message = translation_service.translate(
+            error_key_map[exc.status_code],
+            language
+        )
+    else:
+        # 否则过滤原始消息
+        translated_message = SensitiveDataFilter.filter_string(str(exc.detail))
+    
     logger.warning(
-        f"HTTP exception: {filtered_detail}",
+        f"HTTP exception: {translated_message}",
         extra={
             "path": request.url.path,
             "method": request.method,
-            "status_code": exc.status_code
+            "status_code": exc.status_code,
+            "language": language
         }
     )
+    
     return JSONResponse(
         status_code=exc.status_code,
-        content=fail(code=exc.status_code, msg=filtered_detail, error=filtered_detail)
+        content=fail(code=exc.status_code, msg=translated_message, error=exc.detail)
     )
 
 
-# 捕获未处理的异常，返回统一错误结构
+# 捕获未处理的异常，返回统一错误结构（支持国际化）
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    """处理未捕获的异常"""
+    """处理未捕获的异常，支持国际化"""
+    # 获取当前语言
+    language = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
+    
+    # 获取翻译服务
+    translation_service = get_translation_service()
+    
     # 记录完整的堆栈跟踪（日志过滤器会自动过滤敏感信息）
     logger.error(
         f"Unhandled exception: {exc}",
@@ -386,6 +558,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
             "path": request.url.path,
             "method": request.method,
             "exception_type": type(exc).__name__,
+            "language": language,
             "traceback": traceback.format_exc()
         },
         exc_info=True
@@ -394,7 +567,11 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     # 生产环境隐藏详细错误信息
     environment = os.getenv("ENVIRONMENT", "development")
     if environment == "production":
-        message = "服务器内部错误，请稍后重试"
+        # 使用翻译的通用错误消息
+        message = translation_service.translate(
+            "errors.common.internal_error",
+            language
+        )
     else:
         # 开发环境也要过滤敏感信息
         message = SensitiveDataFilter.filter_string(str(exc))

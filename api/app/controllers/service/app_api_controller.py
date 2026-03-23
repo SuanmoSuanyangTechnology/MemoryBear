@@ -95,8 +95,8 @@ async def chat(
     end_user_repo = EndUserRepository(db)
     new_end_user = end_user_repo.get_or_create_end_user(
         app_id=app.id,
+        workspace_id=workspace_id,
         other_id=other_id,
-        original_user_id=other_id  # Save original user_id to other_id
     )
     end_user_id = str(new_end_user.id)
     web_search = True
@@ -280,6 +280,7 @@ async def chat(
             memory=memory,
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
+            files=payload.files,
             app_id=app.id,
             workspace_id=workspace_id,
             release_id=app.current_release.id
