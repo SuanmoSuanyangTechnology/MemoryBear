@@ -14,6 +14,9 @@ Routes:
 import os
 import uuid
 from typing import Any
+import httpx
+import mimetypes
+from urllib.parse import urlparse, unquote
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
@@ -288,6 +291,101 @@ async def upload_file_with_share_token(
         data={"file_id": str(file_id), "file_key": file_key},
         msg="File upload successful"
     )
+
+
+@router.get("/files/info-by-url", response_model=ApiResponse)
+async def get_file_info_by_url(
+        url: str,
+):
+    """
+    Get file information by network URL (no authentication required).
+
+    Fetches file metadata from a remote URL via HTTP HEAD request.
+    Falls back to GET request if HEAD is not supported.
+    Returns file type, name, and size.
+
+    Args:
+        url: The network URL of the file.
+
+    Returns:
+        ApiResponse with file information.
+    """
+    api_logger.info(f"File info by URL request: url={url}")
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Try HEAD request first
+            response = await client.head(url, follow_redirects=True)
+
+            # If HEAD fails, try GET request (some servers don't support HEAD)
+            if response.status_code != 200:
+                api_logger.info(f"HEAD request failed with {response.status_code}, trying GET request")
+                response = await client.get(url, follow_redirects=True)
+                
+                if response.status_code != 200:
+                    api_logger.error(f"Failed to fetch file info: HTTP {response.status_code}")
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Unable to access file: HTTP {response.status_code}"
+                    )
+
+            # Get file size from Content-Length header or actual content
+            file_size = response.headers.get("Content-Length")
+            if file_size:
+                file_size = int(file_size)
+            elif hasattr(response, 'content'):
+                file_size = len(response.content)
+            else:
+                file_size = None
+
+            # Get content type from Content-Type header
+            content_type = response.headers.get("Content-Type", "application/octet-stream")
+            # Remove charset and other parameters from content type
+            content_type = content_type.split(';')[0].strip()
+
+            # Extract filename from Content-Disposition or URL
+            file_name = None
+            content_disposition = response.headers.get("Content-Disposition")
+            if content_disposition and "filename=" in content_disposition:
+                parts = content_disposition.split("filename=")
+                if len(parts) > 1:
+                    file_name = parts[1].strip('"').strip("'")
+
+            if not file_name:
+                parsed_url = urlparse(url)
+                file_name = unquote(os.path.basename(parsed_url.path)) or "unknown"
+
+            # Extract file extension from filename
+            _, file_ext = os.path.splitext(file_name)
+            
+            # If no extension found, infer from content type
+            if not file_ext:
+                ext = mimetypes.guess_extension(content_type)
+                if ext:
+                    file_ext = ext
+                    file_name = f"{file_name}{file_ext}"
+
+            api_logger.info(f"File info retrieved: name={file_name}, size={file_size}, type={content_type}")
+
+            return success(
+                data={
+                    "url": url,
+                    "file_name": file_name,
+                    "file_ext": file_ext.lower() if file_ext else "",
+                    "file_size": file_size,
+                    "content_type": content_type,
+                },
+                msg="File information retrieved successfully"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        api_logger.error(f"Unexpected error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve file information: {str(e)}"
+        )
 
 
 @router.get("/files/{file_id}", response_model=Any)
@@ -697,3 +795,44 @@ async def permanent_download_file(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to retrieve file: {str(e)}"
             )
+
+
+@router.get("/files/{file_id}/status", response_model=ApiResponse)
+async def get_file_status(
+    file_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    """
+    Get file upload/processing status (no authentication required).
+    
+    This endpoint is used to check if a file (e.g., TTS audio) is ready.
+    Returns status: pending, completed, or failed.
+    
+    Args:
+        file_id: The UUID of the file.
+        db: Database session.
+    
+    Returns:
+        ApiResponse with file status and metadata.
+    """
+    api_logger.info(f"File status request: file_id={file_id}")
+    
+    # Query file metadata from database
+    file_metadata = db.query(FileMetadata).filter(FileMetadata.id == file_id).first()
+    if not file_metadata:
+        api_logger.warning(f"File not found in database: file_id={file_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The file does not exist"
+        )
+    
+    return success(
+        data={
+            "file_id": str(file_id),
+            "status": file_metadata.status,
+            "file_name": file_metadata.file_name,
+            "file_size": file_metadata.file_size,
+            "content_type": file_metadata.content_type,
+        },
+        msg="File status retrieved successfully"
+    )
