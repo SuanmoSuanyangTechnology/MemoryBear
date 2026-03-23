@@ -82,7 +82,6 @@ class OpenAIClient(LLMClient):
             LLMClientException: LLM 调用失败
         """
         try:
-            # 使用 Langfuse 回调（如果可用）
             template = """{messages}"""
             prompt = ChatPromptTemplate.from_template(template)
             chain = prompt | self.client
