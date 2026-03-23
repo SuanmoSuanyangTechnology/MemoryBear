@@ -4,7 +4,7 @@
  * @Author: yujiangping
  * @Date: 2026-03-16 19:01:12
  * @LastEditors: yujiangping
- * @LastEditTime: 2026-03-18 18:35:53
+ * @LastEditTime: 2026-03-20 12:12:20
  */
 import { useState, useEffect, useRef, useCallback, type FC } from 'react';
 import { Spin, Alert, Button, Table, InputNumber, Image } from 'antd';
@@ -309,23 +309,64 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
     }
   };
 
+  const [csvTruncated, setCsvTruncated] = useState(false);
+
   const isCsvFile = () => getFileExtension() === '.csv';
+
+  // CSV 预览大小限制：1MB
+  const CSV_PREVIEW_SIZE = 1 * 1024 * 1024;
+  // 最大预览行数
+  const MAX_PREVIEW_ROWS = 500;
+
+  const fetchFileBufferWithLimit = async (url: string, maxBytes?: number): Promise<ArrayBuffer> => {
+    const requestUrl = getRequestUrl(url);
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${cookieUtils.get('authToken') || ''}`,
+    };
+    if (maxBytes) {
+      headers['Range'] = `bytes=0-${maxBytes - 1}`;
+    }
+    const response = await fetch(requestUrl, {
+      credentials: 'include',
+      headers,
+    });
+    if (!response.ok && response.status !== 206) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    return response.arrayBuffer();
+  };
 
   const loadExcelFile = async () => {
     setLoading(true);
     setError(false);
     setErrorMessage('');
+    setCsvTruncated(false);
     try {
-      const arrayBuffer = await fetchFileBuffer(fileUrl);
-
-      // CSV 文件需要处理编码问题（可能是 GBK/GB2312）
+      // CSV 文件需要处理编码问题（可能是 GBK/GB2312），且大文件只取前 1MB
       if (isCsvFile()) {
+        let arrayBuffer: ArrayBuffer;
+        let truncated = false;
+        try {
+          // 先尝试 Range 请求只取前 1MB
+          arrayBuffer = await fetchFileBufferWithLimit(fileUrl, CSV_PREVIEW_SIZE);
+          // 如果返回的数据刚好等于限制大小，说明可能被截断了
+          if (arrayBuffer.byteLength >= CSV_PREVIEW_SIZE) {
+            truncated = true;
+          }
+        } catch {
+          // Range 请求不支持时，全量获取后截断
+          const fullBuffer = await fetchFileBuffer(fileUrl);
+          if (fullBuffer.byteLength > CSV_PREVIEW_SIZE) {
+            arrayBuffer = fullBuffer.slice(0, CSV_PREVIEW_SIZE);
+            truncated = true;
+          } else {
+            arrayBuffer = fullBuffer;
+          }
+        }
+
         let csvText: string;
-        // 先尝试 UTF-8 解码
         const utf8Text = new TextDecoder('utf-8').decode(arrayBuffer);
-        // 检测是否有乱码特征（常见的 GBK 被错误解析为 UTF-8 的替换字符）
         if (utf8Text.includes('\uFFFD') || /[\x80-\xff]/.test(utf8Text.slice(0, 200))) {
-          // 尝试 GBK 解码
           try {
             csvText = new TextDecoder('gbk').decode(arrayBuffer);
           } catch {
@@ -334,19 +375,35 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
         } else {
           csvText = utf8Text;
         }
+
+        // 如果被截断，去掉最后一行不完整的数据
+        if (truncated) {
+          const lastNewline = csvText.lastIndexOf('\n');
+          if (lastNewline > 0) {
+            csvText = csvText.substring(0, lastNewline);
+          }
+        }
+
         const workbook = XLSX.read(csvText, { type: 'string' });
         const sheets = workbook.SheetNames.map(sheetName => {
           const worksheet = workbook.Sheets[sheetName];
-          const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+          let data = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+          // 限制最大行数
+          if (data.length > MAX_PREVIEW_ROWS + 1) {
+            data = data.slice(0, MAX_PREVIEW_ROWS + 1); // +1 保留表头
+            truncated = true;
+          }
           return { sheetName, data };
         });
+        setCsvTruncated(truncated);
         setExcelData(sheets);
         setLoading(false);
         return;
       }
 
+      const arrayBuffer = await fetchFileBuffer(fileUrl);
       const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-      const sheets = workbook.SheetNames.map(sheetName => {
+      const sheets = workbook.SheetNames.map((sheetName: string) => {
         const worksheet = workbook.Sheets[sheetName];
         const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
         return { sheetName, data };
@@ -522,9 +579,14 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
         )
       )}
 
-      {/* Excel 预览 */}
+      {/* Excel/CSV 预览 */}
       {isExcelFile() && !error && !loading && (
         <div className="rb:w-full rb:flex-1 rb:overflow-auto rb:bg-white rb:p-4 rb:rounded rb:border rb:border-gray-200">
+          {csvTruncated && (
+            <div className="rb:mb-3 rb:px-3 rb:py-2 rb:bg-yellow-50 rb:border rb:border-yellow-200 rb:rounded rb:text-sm rb:text-yellow-700">
+              文件较大，仅预览前 {MAX_PREVIEW_ROWS} 行数据
+            </div>
+          )}
           {excelData.map((sheet, index) => (
             <div key={index} className="rb:mb-6">
               <h3 className="rb:text-lg rb:font-semibold rb:mb-3">{sheet.sheetName}</h3>
@@ -541,6 +603,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
                   scroll={{ x: 'max-content' }}
                   size="small"
                   bordered
+                  virtual
                 />
               )}
             </div>

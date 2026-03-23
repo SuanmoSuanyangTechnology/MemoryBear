@@ -261,3 +261,13 @@ class OSSStorage(StorageBackend):
             logger.error(f"Failed to generate presigned URL for {file_key}: {e}")
             # Return a basic URL format as fallback
             return f"https://{self.bucket_name}.{self.endpoint.replace('https://', '').replace('http://', '')}/{file_key}"
+
+    async def get_permanent_url(self, file_key: str) -> str:
+        """
+        Get a permanent public URL for the file (requires bucket public read).
+
+        Returns:
+            A permanent URL in the format: https://{bucket}.{endpoint}/{file_key}
+        """
+        host = self.endpoint.replace("https://", "").replace("http://", "")
+        return f"https://{self.bucket_name}.{host}/{file_key}"

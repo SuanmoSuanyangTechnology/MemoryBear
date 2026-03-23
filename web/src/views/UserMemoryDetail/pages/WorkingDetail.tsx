@@ -1,8 +1,10 @@
-import { type FC, useEffect, useState, useMemo } from 'react'
+import { type FC, useEffect, useState, useMemo, useRef } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Row, Col, Skeleton, Button, Divider, Tooltip } from 'antd'
+
+import InfiniteScroll from 'react-infinite-scroll-component'
 import RbCard from '@/components/RbCard/Card'
 import {
   getConversations,
@@ -34,6 +36,8 @@ const WorkingDetail: FC = () => {
   const { id } = useParams()
   const [loading, setLoading] = useState<boolean>(false)
   const [data, setData] = useState<Conversation[]>([])
+  const [hasMore, setHasMore] = useState<boolean>(true)
+  const pageRef = useRef<number>(1)
   const [messagesLoading, setMessagesLoading] = useState<boolean>(false)
   const [messages, setMessages] = useState<ChatItem[]>([])
   const [detailLoading, setDetailLoading] = useState<boolean>(false)
@@ -51,13 +55,27 @@ const WorkingDetail: FC = () => {
     setSelected(null)
     setDetail(null)
     setData([])
-    getConversations(id).then((res) => {
-      const response = res as Conversation[] 
-      setData(response)
-      setSelected(response[0] || null)
+    setHasMore(true)
+    pageRef.current = 1
+    getConversations(id, 1).then((res) => {
+      const response = res as { items: Conversation[], page: { hasnext: boolean } }
+      setData(response.items)
+      setSelected(response.items[0] || null)
+      setHasMore(response.page.hasnext)
     })
     .finally(() => {
       setLoading(false)
+    })
+  }
+
+  const loadMore = () => {
+    if (!id) return
+    const nextPage = pageRef.current + 1
+    getConversations(id, nextPage).then((res) => {
+      const response = res as {items: Conversation[], page: { hasnext: boolean }}
+      setData(prev => [...prev, ...response.items])
+      pageRef.current = nextPage
+      setHasMore(response.page.hasnext)
     })
   }
 
@@ -103,22 +121,30 @@ const WorkingDetail: FC = () => {
         : data.length === 0
         ? <Empty />
         :(
-          <Row gutter={16} className="rb:h-full">
+          <Row gutter={16}>
             <Col span={5}>
-              <div className="rb:h-full! rb:border-r rb:border-[#EAECEE] rb:py-3 rb:px-4">
-                {data.map(item => (
-                  <div key={item.id} className="rb:mb-3">
-                    <Tooltip title={item.title}>
-                      <div className={clsx("rb:p-[8px_13px] rb:rounded-lg rb:leading-5 rb:cursor-pointer rb:hover:bg-[#F0F3F8] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap", {
-                        'rb:bg-[#FFFFFF] rb:shadow-[0px_2px_4px_0px_rgba(0,0,0,0.15)] rb:font-medium rb:hover:bg-[#FFFFFF]!': item.id === selected?.id,
-                      })}
-                        onClick={() => setSelected(item)}
-                      >
-                        {item.title}
-                      </div>
-                    </Tooltip>
-                  </div>
-                ))}
+              <div id="conversation-list" className="rb:h-[calc(100vh-76px)]! rb:border-r rb:border-[#EAECEE] rb:py-3 rb:px-4 rb:overflow-y-auto">
+                <InfiniteScroll
+                  dataLength={data.length}
+                  next={loadMore}
+                  hasMore={hasMore}
+                  loader={null}
+                  scrollableTarget="conversation-list"
+                >
+                  {data.map(item => (
+                    <div key={item.id} className="rb:mb-3">
+                      <Tooltip title={item.title}>
+                        <div className={clsx("rb:p-[8px_13px] rb:rounded-lg rb:leading-5 rb:cursor-pointer rb:hover:bg-[#F0F3F8] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap", {
+                          'rb:bg-[#FFFFFF] rb:shadow-[0px_2px_4px_0px_rgba(0,0,0,0.15)] rb:font-medium rb:hover:bg-[#FFFFFF]!': item.id === selected?.id,
+                        })}
+                          onClick={() => setSelected(item)}
+                        >
+                          {item.title}
+                        </div>
+                      </Tooltip>
+                    </div>
+                  ))}
+                </InfiniteScroll>
               </div>
             </Col>
             {selected && <>

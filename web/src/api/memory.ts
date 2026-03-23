@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-13 10:48:41
+ * @Last Modified time: 2026-03-19 18:35:10
  */
 import { request } from '@/utils/request'
 import type { AxiosRequestConfig } from 'axios'
@@ -218,8 +218,8 @@ export const getExplicitMemory = (end_user_id: string) => {
 export const getExplicitMemoryDetails = (data: { end_user_id: string, memory_id: string; }) => {
   return request.post(`/memory/explicit-memory/details`, data)
 }
-export const getConversations = (end_user_id: string) => {
-  return request.get(`/memory/work/${end_user_id}/conversations`)
+export const getConversations = (end_user_id: string, page = 1, pagesize = 20) => {
+  return request.get(`/memory/work/${end_user_id}/conversations`, { page, pagesize })
 }
 export const getConversationMessages = (end_user_id: string, conversation_id: string) => {
   return request.get(`/memory/work/${end_user_id}/messages`, { conversation_id })

@@ -456,7 +456,7 @@ class GraphBuilder:
                     branch_activate = []
                     new_state = state.copy()
                     new_state["activate"] = dict(state.get("activate", {}))  # deep copy of activate
-                    node_output = variable_pool.get_node_output(src, defalut=dict(), strict=False)
+                    node_output = variable_pool.get_node_output(src, default=dict(), strict=False)
                     for label, branch in unique_branch.items():
                         if node_output and evaluate_condition(
                                 branch["condition"],
