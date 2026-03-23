@@ -82,16 +82,26 @@ class OpenAIClient(LLMClient):
             LLMClientException: LLM 调用失败
         """
         try:
-            template = """{messages}"""
-            prompt = ChatPromptTemplate.from_template(template)
-            chain = prompt | self.client
+            from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+
+            # 将 dict 消息列表转换为 LangChain 消息对象
+            lc_messages = []
+            for m in messages:
+                role = m.get("role", "user")
+                content = m.get("content", "")
+                if role == "system":
+                    lc_messages.append(SystemMessage(content=content))
+                elif role == "assistant":
+                    lc_messages.append(AIMessage(content=content))
+                else:
+                    lc_messages.append(HumanMessage(content=content))
 
             # 添加 Langfuse 回调（如果可用）
             config = {}
             if self.langfuse_handler:
                 config["callbacks"] = [self.langfuse_handler]
 
-            response = await chain.ainvoke({"messages": messages}, config=config)
+            response = await self.client.ainvoke(lc_messages, config=config)
             return response
 
         except Exception as e:

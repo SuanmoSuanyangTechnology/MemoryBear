@@ -1,9 +1,12 @@
 from typing import List, Optional
+import logging
 
 from app.repositories.neo4j.cypher_queries import DIALOGUE_NODE_SAVE, STATEMENT_NODE_SAVE, CHUNK_NODE_SAVE,MEMORY_SUMMARY_NODE_SAVE
 from app.core.memory.models.graph_models import DialogueNode, StatementNode, ChunkNode, MemorySummaryNode
 # 使用新的仓储层
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+logger = logging.getLogger(__name__)
 
 
 async def delete_all_nodes(end_user_id: str, connector: Neo4jConnector):
@@ -217,10 +220,10 @@ async def add_memory_summary_nodes(summaries: List[MemorySummaryNode], connector
             summaries=flattened
         )
         created_ids = [record.get("uuid") for record in result]
-        print(f"Successfully saved {len(created_ids)} MemorySummary nodes to Neo4j")
+        logger.info(f"Successfully saved {len(created_ids)} MemorySummary nodes to Neo4j")
         return created_ids
     except Exception as e:
-        print(f"Failed to save MemorySummary nodes to Neo4j: {e}")
+        logger.error(f"Failed to save MemorySummary nodes to Neo4j: {e}")
         return None
 
 
