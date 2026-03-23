@@ -71,10 +71,12 @@ class LabelPropagationEngine:
         connector: Neo4jConnector,
         llm_model_id: Optional[str] = None,
         embedding_model_id: Optional[str] = None,
+        embedding_model_id: Optional[str] = None,
     ):
         self.connector = connector
         self.repo = CommunityRepository(connector)
         self.llm_model_id = llm_model_id
+        self.embedding_model_id = embedding_model_id
         self.embedding_model_id = embedding_model_id
 
     # ──────────────────────────────────────────────────────────────────────────

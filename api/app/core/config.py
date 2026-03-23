@@ -97,6 +97,7 @@ class Settings:
 
     # File Upload
     MAX_FILE_SIZE: int = int(os.getenv("MAX_FILE_SIZE", "52428800"))
+    MAX_FILE_COUNT: int = int(os.getenv("MAX_FILE_COUNT", "20"))
     FILE_PATH: str = os.getenv("FILE_PATH", "/files")
     FILE_URL_EXPIRES: int = int(os.getenv("FILE_URL_EXPIRES", "3600"))
 
