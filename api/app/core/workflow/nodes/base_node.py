@@ -623,7 +623,6 @@ class BaseNode(ABC):
     async def process_message(
             api_config: ModelInfo,
             content: str | dict | FileObject,
-            end_user_id: str,
             enable_file=False
     ) -> list | str | None:
         provider = api_config.provider
@@ -642,8 +641,8 @@ class BaseNode(ABC):
             return content
 
         elif isinstance(content, FileObject):
-            if content.content_cache.get(provider):
-                return content.content_cache[provider]
+            if content.content_cache.get(f"{provider}_{ModelInfo.is_omni}"):
+                return content.content_cache[f"{provider}_{ModelInfo.is_omni}"]
             with get_db_read() as db:
                 multimodel_service = MultimodalService(db, api_config=api_config)
                 file_obj = FileInput(
@@ -655,12 +654,11 @@ class BaseNode(ABC):
                 )
                 file_obj.set_content(content.get_content())
                 message = await multimodel_service.process_files(
-                    end_user_id,
                     [file_obj],
                 )
                 content.set_content(file_obj.get_content())
                 if message:
-                    content.content_cache[provider] = message
+                    content.content_cache[f"{provider}_{ModelInfo.is_omni}"] = message
                     return message
                 return None
         raise TypeError(f'Unexpect input value type - {type(content)}')

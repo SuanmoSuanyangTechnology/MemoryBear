@@ -9,21 +9,22 @@ Classes:
 """
 
 import uuid
-from uuid import UUID
 from typing import Dict, List, Optional, Tuple
+from uuid import UUID
+
+from sqlalchemy import desc, select
+from sqlalchemy.orm import Session
+
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_config_logger, get_db_logger
 from app.models.memory_config_model import MemoryConfig
+from app.models.workspace_model import Workspace
 from app.schemas.memory_storage_schema import (
-    ConfigKey,
     ConfigParamsCreate,
     ConfigUpdate,
     ConfigUpdateExtracted,
     ConfigUpdateForget,
 )
-from sqlalchemy import desc, select
-from sqlalchemy.orm import Session
-
 from app.utils.config_utils import resolve_config_id
 
 # 获取数据库专用日志器
@@ -157,7 +158,7 @@ class MemoryConfigRepository:
         return memory_config_obj
 
     @staticmethod
-    def query_reflection_config_by_id(db: Session, config_id: uuid.UUID|int|str) -> MemoryConfig:
+    def query_reflection_config_by_id(db: Session, config_id: uuid.UUID | int | str) -> MemoryConfig:
         """构建反思配置查询语句，通过config_id查询反思配置（SQLAlchemy text() 命名参数）
 
         Args:
@@ -491,7 +492,10 @@ class MemoryConfigRepository:
             raise
 
     @staticmethod
-    def get_config_with_workspace(db: Session, config_id: uuid.UUID | int | str) -> Optional[tuple]:
+    def get_config_with_workspace(
+            db: Session,
+            config_id: uuid.UUID | int | str
+    ) -> Optional[tuple[MemoryConfig, Workspace]]:
         """Get memory config and its associated workspace information
 
         Args:
@@ -505,8 +509,6 @@ class MemoryConfigRepository:
             ValueError: Raised when config exists but workspace doesn't
         """
         import time
-
-        from app.models.workspace_model import Workspace
 
         start_time = time.time()
         config_id = resolve_config_id(config_id, db)
@@ -594,7 +596,7 @@ class MemoryConfigRepository:
 
             db_logger.debug(
                 f"Memory config and workspace query successful: config={config.config_name}, workspace={workspace.name}")
-            return (config, workspace)
+            return config, workspace
 
         except ValueError:
             # Re-raise known business exceptions
@@ -630,7 +632,7 @@ class MemoryConfigRepository:
             List[Tuple[MemoryConfig, Optional[str]]]: 配置列表，每项为 (配置对象, 场景名称)
         """
         from app.models.ontology_scene import OntologyScene
-        
+
         db_logger.debug(f"查询所有配置: workspace_id={workspace_id}")
 
         try:
@@ -694,7 +696,7 @@ class MemoryConfigRepository:
             Optional[MemoryConfig]: 默认配置对象，不存在则返回None
         """
         db_logger.debug(f"查询工作空间默认配置: workspace_id={workspace_id}")
-        
+
         try:
             # 优先查找显式标记为默认的配置
             stmt = (
@@ -706,13 +708,13 @@ class MemoryConfigRepository:
                 )
                 .limit(1)
             )
-            
+
             config = db.scalars(stmt).first()
-            
+
             if config:
                 db_logger.debug(f"找到默认配置: config_id={config.config_id}")
                 return config
-            
+
             # 回退：获取最早创建的活跃配置
             stmt = (
                 select(MemoryConfig)
@@ -723,25 +725,25 @@ class MemoryConfigRepository:
                 .order_by(MemoryConfig.created_at.asc())
                 .limit(1)
             )
-            
+
             config = db.scalars(stmt).first()
-            
+
             if config:
                 db_logger.debug(f"使用最早创建的配置作为默认: config_id={config.config_id}")
             else:
                 db_logger.warning(f"工作空间没有活跃的记忆配置: workspace_id={workspace_id}")
-            
+
             return config
-            
+
         except Exception as e:
             db_logger.error(f"查询工作空间默认配置失败: workspace_id={workspace_id} - {str(e)}")
             raise
 
     @staticmethod
     def get_with_fallback(
-        db: Session,
-        config_id: Optional[uuid.UUID],
-        workspace_id: uuid.UUID
+            db: Session,
+            config_id: Optional[uuid.UUID],
+            workspace_id: uuid.UUID
     ) -> Optional[MemoryConfig]:
         """获取记忆配置，支持回退到工作空间默认配置
         
@@ -756,19 +758,18 @@ class MemoryConfigRepository:
             Optional[MemoryConfig]: 配置对象，如果都不存在则返回None
         """
         db_logger.debug(f"查询配置（支持回退）: config_id={config_id}, workspace_id={workspace_id}")
-        
+
         if not config_id:
             db_logger.debug("config_id 为空，使用工作空间默认配置")
             return MemoryConfigRepository.get_workspace_default(db, workspace_id)
-        
+
         config = db.get(MemoryConfig, config_id)
-        
+
         if config:
             return config
-        
+
         db_logger.warning(
             f"配置不存在，回退到工作空间默认配置: missing_config_id={config_id}, workspace_id={workspace_id}"
         )
-        
-        return MemoryConfigRepository.get_workspace_default(db, workspace_id)
 
+        return MemoryConfigRepository.get_workspace_default(db, workspace_id)

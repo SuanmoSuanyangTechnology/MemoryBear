@@ -374,7 +374,9 @@ class VariablePool:
         self.variables = deepcopy(pool.variables)
 
     def is_file_variable(self, selector):
-        variable_struct = self._get_variable_struct(selector)
+        variable_struct = self.get_instance(selector, default=None, strict=False)
+        if variable_struct is None:
+            return False
         if isinstance(variable_struct, FileVariable):
             return True
         elif isinstance(variable_struct, ArrayVariable) and variable_struct.child_type == FileVariable:
