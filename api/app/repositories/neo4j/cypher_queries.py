@@ -1137,8 +1137,18 @@ MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(
 RETURN e.id AS id, e.name AS name, e.entity_type AS entity_type,
        e.importance_score AS importance_score, e.activation_value AS activation_value,
        e.name_embedding AS name_embedding,
-       e.aliases AS aliases, e.description AS description
+       e.aliases AS aliases, e.description AS description,
+       e.example AS example
 ORDER BY coalesce(e.activation_value, 0) DESC
+"""
+
+GET_COMMUNITY_RELATIONSHIPS = """
+MATCH (e1:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community {community_id: $community_id})
+MATCH (e2:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c)
+MATCH (e1)-[r:EXTRACTED_RELATIONSHIP]->(e2)
+RETURN e1.name AS subject, r.predicate AS predicate, e2.name AS object
+ORDER BY e1.name, r.predicate, e2.name
+LIMIT 20
 """
 
 GET_ALL_COMMUNITY_MEMBERS_BATCH = """
@@ -1315,4 +1325,39 @@ RETURN s.statement AS statement,
        c.name AS community_name
 ORDER BY COALESCE(s.activation_value, 0) DESC
 LIMIT $limit
+"""
+
+CHECK_COMMUNITY_IS_COMPLETE = """
+MATCH (c:Community {community_id: $community_id, end_user_id: $end_user_id})
+RETURN (
+    c.name IS NOT NULL AND c.name <> '' AND
+    c.summary IS NOT NULL AND c.summary <> '' AND
+    c.core_entities IS NOT NULL
+) AS is_complete
+"""
+
+CHECK_COMMUNITY_IS_COMPLETE_WITH_EMBEDDING = """
+MATCH (c:Community {community_id: $community_id, end_user_id: $end_user_id})
+RETURN (
+    c.name IS NOT NULL AND c.name <> '' AND
+    c.summary IS NOT NULL AND c.summary <> '' AND
+    c.core_entities IS NOT NULL AND
+    c.summary_embedding IS NOT NULL
+) AS is_complete
+"""
+
+GET_INCOMPLETE_COMMUNITIES = """
+MATCH (c:Community {end_user_id: $end_user_id})
+WHERE c.name IS NULL OR c.summary IS NULL OR c.core_entities IS NULL
+   OR c.name = '' OR c.summary = ''
+RETURN c.community_id AS community_id
+"""
+
+GET_INCOMPLETE_COMMUNITIES_WITH_EMBEDDING = """
+MATCH (c:Community {end_user_id: $end_user_id})
+WHERE c.name IS NULL OR c.name = ''
+   OR c.summary IS NULL OR c.summary = ''
+   OR c.core_entities IS NULL
+   OR (c.summary_embedding IS NULL AND c.summary IS NOT NULL AND c.summary <> '(empty)')
+RETURN c.community_id AS community_id
 """

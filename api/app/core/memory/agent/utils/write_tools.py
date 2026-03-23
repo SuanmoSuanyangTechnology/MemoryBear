@@ -166,15 +166,12 @@ async def write(
                 statement_entity_edges=all_statement_entity_edges,
                 entity_edges=all_entity_entity_edges,
                 connector=neo4j_connector,
-                config_id=config_id,
-                llm_model_id=str(memory_config.llm_model_id) if memory_config.llm_model_id else None,
             )
             if success:
                 logger.info("Successfully saved all data to Neo4j")
                 # 写入成功后，异步触发聚类（不阻塞写入响应）
                 schedule_clustering_after_write(
                     all_entity_nodes,
-                    config_id=config_id,
                     llm_model_id=str(memory_config.llm_model_id) if memory_config.llm_model_id else None,
                     embedding_model_id=str(memory_config.embedding_model_id) if memory_config.embedding_model_id else None,
                 )

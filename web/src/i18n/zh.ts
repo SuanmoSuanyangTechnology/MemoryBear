@@ -1106,6 +1106,7 @@ export const zh = {
       download: '下载',
       view: '查看',
       updated_at: '更新时间',
+      callbackUrlInvalid: '请输入有效的 URL',
     },
     model: {
       searchPlaceholder: '搜索模型…',

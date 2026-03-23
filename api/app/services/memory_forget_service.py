@@ -619,7 +619,7 @@ class MemoryForgetService:
                     recent_trends.append({
                         'date': date_str,
                         'merged_count': record.merged_count,
-                        'average_activation': record.average_activation_value,
+                        'average_activation': round(record.average_activation_value, 2) if record.average_activation_value is not None else None,
                         'total_nodes': record.total_nodes,
                         'execution_time': int(record.execution_time.timestamp() * 1000)
                     })

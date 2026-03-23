@@ -189,7 +189,7 @@ const Chat: FC<ChatProps> = ({
       .then(() => {
         const message = msg
         if (!message?.trim()) return
-        const files = toolbarRef.current?.getFiles() || []
+        const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
         // Validate required variables before sending
         let isCanSend = true
         const params: Record<string, any> = {}
@@ -350,7 +350,7 @@ const Chat: FC<ChatProps> = ({
       .then(() => {
         const message = msg
         if (!message || message.trim() === '') return
-        const files = toolbarRef.current?.getFiles() || []
+        const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
         addUserMessage(message, files)
         setMessage(undefined)
         toolbarRef.current?.setFiles([])

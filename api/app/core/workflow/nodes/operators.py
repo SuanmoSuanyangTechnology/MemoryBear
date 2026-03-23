@@ -250,6 +250,8 @@ class ConditionBase(ABC):
         self.type_limit = getattr(self, "type_limit", None)
 
     def resolve_right_literal_value(self):
+        if self.right_selector is None:
+            return None
         if self.input_type == ValueInputType.VARIABLE:
             pattern = r"\{\{\s*(.*?)\s*\}\}"
             right_expression = re.sub(pattern, r"\1", self.right_selector).strip()

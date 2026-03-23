@@ -195,10 +195,9 @@ async def get_workspace_end_users(
         api_logger.warning(f"Redis 缓存写入失败: {str(e)}")
 
     # 触发社区聚类补全任务（异步，不阻塞接口响应）
-    # 对有 ExtractedEntity 但无 Community 节点的存量用户自动补跑全量聚类
     try:
         from app.tasks import init_community_clustering_for_users
-        init_community_clustering_for_users.delay(end_user_ids=end_user_ids)
+        init_community_clustering_for_users.delay(end_user_ids=end_user_ids, workspace_id=str(workspace_id))
         api_logger.info(f"已触发社区聚类补全任务，候选用户数: {len(end_user_ids)}")
     except Exception as e:
         api_logger.warning(f"触发社区聚类补全任务失败（不影响主流程）: {str(e)}")

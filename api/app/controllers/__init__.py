@@ -13,6 +13,7 @@ from . import (
     document_controller,
     emotion_config_controller,
     emotion_controller,
+    end_user_controller,
     file_controller,
     file_storage_controller,
     home_page_controller,
@@ -96,5 +97,6 @@ manager_router.include_router(file_storage_controller.router)
 manager_router.include_router(ontology_controller.router)
 manager_router.include_router(skill_controller.router)
 manager_router.include_router(i18n_controller.router)
+manager_router.include_router(end_user_controller.router)
 
 __all__ = ["manager_router"]

@@ -23,7 +23,7 @@
 import { useState, useEffect, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { Upload, Progress, App, Flex } from 'antd';
 import type { UploadProps, UploadFile } from 'antd';
-import type { UploadProps as RcUploadProps } from 'antd/es/upload/interface';
+import type { UploadProps as RcUploadProps, RcFile, UploadFileStatus } from 'antd/es/upload/interface';
 import { useTranslation } from 'react-i18next';
 
 import { request } from '@/utils/request'
@@ -221,17 +221,29 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
    */
   const handleCustomRequest: RcUploadProps['customRequest'] = async (options) => {
     const { file, onSuccess, onError } = options;
-    
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      
-      const response = await request.uploadFile(action, formData, requestConfig);
-      
-      onSuccess?.({data: response});
-    } catch (error) {
-      onError?.(error as Error);
+    if (typeof file === 'string') return;
+    const rcFile = file as RcFile;
+    const formData = new FormData();
+    formData.append('file', rcFile);
+    const fileVo: UploadFile = {
+      uid: rcFile.uid,
+      name: rcFile.name,
+      status: 'uploading' as UploadFileStatus,
+      percent: 0,
+      type: rcFile.type,
+      originFileObj: rcFile,
+      thumbUrl: URL.createObjectURL(rcFile)
     }
+    onChange?.(fileVo)
+    request.uploadFile(action, formData, requestConfig)
+      .then(res => {
+        onSuccess?.({ data: res });
+      })
+      .catch((error) => {
+        onError?.(error as Error);
+        fileVo.status = 'error'
+        onChange?.(fileVo)
+      })
   };
 
   /**

@@ -18,8 +18,8 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
   const isUserInputRef = useRef(false);
 
   useEffect(() => {
-    // 监听编辑器变化，标记是否为用户输入
-    const removeListener = editor.registerUpdateListener(({ editorState }) => {
+    const removeListener = editor.registerUpdateListener(({ editorState, tags }) => {
+      if (tags.has('programmatic')) return;
       editorState.read(() => {
         const root = $getRoot();
         const textContent = root.getTextContent();
@@ -107,7 +107,7 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
           });
           root.append(paragraph);
         }
-        }, { discrete: true });
+        }, { discrete: true, tag: 'programmatic' });
       });
     }
     

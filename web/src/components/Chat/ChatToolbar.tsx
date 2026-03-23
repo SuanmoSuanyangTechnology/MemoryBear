@@ -49,6 +49,7 @@ interface FormValues {
   memory?: boolean;
 }
 
+const max_file_count = 1;
 const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
   features,
   leftExtra,
@@ -86,10 +87,16 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
 
   // Append newly uploaded file to the file list when upload is complete
   const fileChange = (file?: any) => {
-    if (file?.status !== 'done') return
-    const files = [...(queryValues?.files || []), file]
-    form.setFieldValue('files', files)
-    onFilesChange?.(files)
+    console.log('file', file)
+    const lastFiles = form.getFieldValue('files') || [];
+    const index = lastFiles.findIndex((item: any) => item.uid === file.uid)
+    if (index > -1) {
+      lastFiles[index] = file
+    } else {
+      lastFiles.push(file)
+    }
+    form.setFieldValue('files', [...lastFiles])
+    onFilesChange?.([...lastFiles])
   }
 
   // Append recorded audio file to the file list and notify parent
@@ -129,8 +136,8 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
       key: 'url',
       label: t('memoryConversation.addRemoteFile'),
       onClick: () => {
-        if ((queryValues?.files?.length || 0) >= file_upload.max_file_count) {
-          messageApi.warning(t('common.fileNumTip', { num: file_upload.max_file_count }))
+        if ((queryValues?.files?.length || 0) >= max_file_count) {
+          messageApi.warning(t('common.fileNumTip', { num: max_file_count }))
           return
         }
         uploadFileListModalRef.current?.handleOpen()
@@ -146,7 +153,7 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
           onChange={fileChange}
           requestConfig={uploadRequestConfig}
           featureConfig={file_upload}
-          disabled={(queryValues?.files?.length || 0) >= file_upload.max_file_count}
+          disabled={(queryValues?.files?.length || 0) >= max_file_count}
         />
       )
     })
@@ -184,7 +191,7 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
           {rightExtra}
           {file_upload?.audio_enabled && file_upload?.allowed_transfer_methods?.includes('local_file')  &&
             <AudioRecorder
-              disabled={(queryValues?.files?.length || 0) >= file_upload.max_file_count}
+              disabled={(queryValues?.files?.length || 0) >= max_file_count}
               action={uploadAction}
               requestConfig={uploadRequestConfig}
               onRecordingComplete={handleRecordingComplete}

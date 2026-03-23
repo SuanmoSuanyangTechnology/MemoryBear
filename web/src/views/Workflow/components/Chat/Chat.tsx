@@ -151,7 +151,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
 
     setLoading(true)
     const message = msg
-    const files = toolbarRef.current?.getFiles() || []
+    const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
     setChatList(prev => [...prev, {
       role: 'user',
       content: message,
