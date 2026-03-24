@@ -362,17 +362,17 @@ class UserMemoryService:
                     data[key] = UserMemoryService._datetime_to_timestamp(original_value)
         return data
  # ======================== 用户别名及信息 ========================    
-    def get_user_alias(
+    def get_end_user_info(
         self,
         db: Session,
-        user_alias_id: str
+        end_user_info_id: str
     ) -> Dict[str, Any]:
         """
-        查询单个用户别名记录
+        查询单个终端用户信息记录
         
         Args:
             db: 数据库会话
-            user_alias_id: 用户别名记录ID (UUID)
+            end_user_info_id: 终端用户信息记录ID (UUID)
             
         Returns:
             {
@@ -382,33 +382,33 @@ class UserMemoryService:
             }
         """
         try:
-            from app.models.user_alias_model import UserAlias
+            from app.models.end_user_info_model import EndUserInfo
             
             # 转换为UUID并查询
-            alias_uuid = uuid.UUID(user_alias_id)
-            user_alias_record = db.query(UserAlias).filter(UserAlias.id == alias_uuid).first()
+            info_uuid = uuid.UUID(end_user_info_id)
+            end_user_info_record = db.query(EndUserInfo).filter(EndUserInfo.id == info_uuid).first()
             
-            if not user_alias_record:
-                logger.warning(f"用户别名记录不存在: user_alias_id={user_alias_id}")
+            if not end_user_info_record:
+                logger.warning(f"终端用户信息记录不存在: end_user_info_id={end_user_info_id}")
                 return {
                     "success": False,
                     "data": None,
-                    "error": "用户别名记录不存在"
+                    "error": "终端用户信息记录不存在"
                 }
             
             # 构建响应数据
-            from app.schemas.user_alias_schema import UserAliasResponse
-            response_data = UserAliasResponse(
-                user_alias_id=user_alias_record.id,
-                end_user_id=user_alias_record.end_user_id,
-                other_name=user_alias_record.other_name,
-                aliases=user_alias_record.aliases,
-                meta_data=user_alias_record.meta_data,
-                created_at=user_alias_record.created_at,
-                updated_at=user_alias_record.updated_at
+            from app.schemas.end_user_info_schema import EndUserInfoResponse
+            response_data = EndUserInfoResponse(
+                end_user_info_id=end_user_info_record.id,
+                end_user_id=end_user_info_record.end_user_id,
+                other_name=end_user_info_record.other_name,
+                aliases=end_user_info_record.aliases,
+                meta_data=end_user_info_record.meta_data,
+                created_at=end_user_info_record.created_at,
+                updated_at=end_user_info_record.updated_at
             )
             
-            logger.info(f"成功查询用户别名记录: user_alias_id={user_alias_id}")
+            logger.info(f"成功查询终端用户信息记录: end_user_info_id={end_user_info_id}")
             
             return {
                 "success": True,
@@ -417,21 +417,21 @@ class UserMemoryService:
             }
             
         except ValueError:
-            logger.error(f"无效的 user_alias_id 格式: {user_alias_id}")
+            logger.error(f"无效的 end_user_info_id 格式: {end_user_info_id}")
             return {
                 "success": False,
                 "data": None,
-                "error": "无效的用户别名记录ID格式"
+                "error": "无效的终端用户信息记录ID格式"
             }
         except Exception as e:
-            logger.error(f"查询用户别名记录失败: user_alias_id={user_alias_id}, error={str(e)}")
+            logger.error(f"查询终端用户信息记录失败: end_user_info_id={end_user_info_id}, error={str(e)}")
             return {
                 "success": False,
                 "data": None,
                 "error": str(e)
             }
     
-    def create_user_alias(
+    def create_end_user_info(
         self,
         db: Session,
         end_user_id: str,
@@ -440,7 +440,7 @@ class UserMemoryService:
         meta_data: dict = None
     ) -> Dict[str, Any]:
         """
-        创建用户别名记录
+        创建终端用户信息记录
         
         Args:
             db: 数据库会话
@@ -457,7 +457,7 @@ class UserMemoryService:
             }
         """
         try:
-            from app.models.user_alias_model import UserAlias
+            from app.models.end_user_info_model import EndUserInfo
             from app.repositories.end_user_repository import EndUserRepository
             
             # 转换为UUID并查询用户
@@ -473,30 +473,30 @@ class UserMemoryService:
                     "error": "终端用户不存在"
                 }
             
-            # 创建新的别名记录
-            new_alias = UserAlias(
+            # 创建新的用户信息记录
+            new_info = EndUserInfo(
                 end_user_id=user_uuid,
                 other_name=other_name,
                 aliases=aliases,
                 meta_data=meta_data
             )
-            db.add(new_alias)
+            db.add(new_info)
             db.commit()
-            db.refresh(new_alias)
+            db.refresh(new_info)
             
             # 构建响应数据
-            from app.schemas.user_alias_schema import UserAliasResponse
-            response_data = UserAliasResponse(
-                user_alias_id=new_alias.id,
-                end_user_id=new_alias.end_user_id,
-                other_name=new_alias.other_name,
-                aliases=new_alias.aliases,
-                meta_data=new_alias.meta_data,
-                created_at=new_alias.created_at,
-                updated_at=new_alias.updated_at
+            from app.schemas.end_user_info_schema import EndUserInfoResponse
+            response_data = EndUserInfoResponse(
+                end_user_info_id=new_info.id,
+                end_user_id=new_info.end_user_id,
+                other_name=new_info.other_name,
+                aliases=new_info.aliases,
+                meta_data=new_info.meta_data,
+                created_at=new_info.created_at,
+                updated_at=new_info.updated_at
             )
             
-            logger.info(f"成功创建用户别名记录: end_user_id={end_user_id}")
+            logger.info(f"成功创建终端用户信息记录: end_user_id={end_user_id}")
             
             return {
                 "success": True,
@@ -513,25 +513,25 @@ class UserMemoryService:
             }
         except Exception as e:
             db.rollback()
-            logger.error(f"创建用户别名记录失败: end_user_id={end_user_id}, error={str(e)}")
+            logger.error(f"创建终端用户信息记录失败: end_user_id={end_user_id}, error={str(e)}")
             return {
                 "success": False,
                 "data": None,
                 "error": str(e)
             }
     
-    def update_user_alias(
+    def update_end_user_info(
         self,
         db: Session,
-        user_alias_id: str,
+        end_user_info_id: str,
         update_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        更新用户别名记录
+        更新终端用户信息记录
         
         Args:
             db: 数据库会话
-            user_alias_id: 用户别名记录ID (UUID)
+            end_user_info_id: 终端用户信息记录ID (UUID)
             update_data: 更新数据字典
             
         Returns:
@@ -542,18 +542,18 @@ class UserMemoryService:
             }
         """
         try:
-            from app.models.user_alias_model import UserAlias
+            from app.models.end_user_info_model import EndUserInfo
             
             # 转换为UUID并查询
-            alias_uuid = uuid.UUID(user_alias_id)
-            user_alias_record = db.query(UserAlias).filter(UserAlias.id == alias_uuid).first()
+            info_uuid = uuid.UUID(end_user_info_id)
+            end_user_info_record = db.query(EndUserInfo).filter(EndUserInfo.id == info_uuid).first()
             
-            if not user_alias_record:
-                logger.warning(f"用户别名记录不存在: user_alias_id={user_alias_id}")
+            if not end_user_info_record:
+                logger.warning(f"终端用户信息记录不存在: end_user_info_id={end_user_info_id}")
                 return {
                     "success": False,
                     "data": None,
-                    "error": "用户别名记录不存在"
+                    "error": "终端用户信息记录不存在"
                 }
             
             # 定义允许更新的字段白名单
@@ -562,28 +562,28 @@ class UserMemoryService:
             # 更新字段（仅允许白名单中的字段）
             for field, value in update_data.items():
                 if field in allowed_fields:
-                    setattr(user_alias_record, field, value)
+                    setattr(end_user_info_record, field, value)
             
             # 更新时间戳
-            user_alias_record.updated_at = datetime.now()
+            end_user_info_record.updated_at = datetime.now()
             
             # 提交更改
             db.commit()
-            db.refresh(user_alias_record)
+            db.refresh(end_user_info_record)
             
             # 构建响应数据
-            from app.schemas.user_alias_schema import UserAliasResponse
-            response_data = UserAliasResponse(
-                user_alias_id=user_alias_record.id,
-                end_user_id=user_alias_record.end_user_id,
-                other_name=user_alias_record.other_name,
-                aliases=user_alias_record.aliases,
-                meta_data=user_alias_record.meta_data,
-                created_at=user_alias_record.created_at,
-                updated_at=user_alias_record.updated_at
+            from app.schemas.end_user_info_schema import EndUserInfoResponse
+            response_data = EndUserInfoResponse(
+                end_user_info_id=end_user_info_record.id,
+                end_user_id=end_user_info_record.end_user_id,
+                other_name=end_user_info_record.other_name,
+                aliases=end_user_info_record.aliases,
+                meta_data=end_user_info_record.meta_data,
+                created_at=end_user_info_record.created_at,
+                updated_at=end_user_info_record.updated_at
             )
             
-            logger.info(f"成功更新用户别名记录: user_alias_id={user_alias_id}, updated_fields={list(update_data.keys())}")
+            logger.info(f"成功更新终端用户信息记录: end_user_info_id={end_user_info_id}, updated_fields={list(update_data.keys())}")
             
             return {
                 "success": True,
@@ -592,32 +592,32 @@ class UserMemoryService:
             }
             
         except ValueError:
-            logger.error(f"无效的 user_alias_id 格式: {user_alias_id}")
+            logger.error(f"无效的 end_user_info_id 格式: {end_user_info_id}")
             return {
                 "success": False,
                 "data": None,
-                "error": "无效的用户别名记录ID格式"
+                "error": "无效的终端用户信息记录ID格式"
             }
         except Exception as e:
             db.rollback()
-            logger.error(f"更新用户别名记录失败: user_alias_id={user_alias_id}, error={str(e)}")
+            logger.error(f"更新终端用户信息记录失败: end_user_info_id={end_user_info_id}, error={str(e)}")
             return {
                 "success": False,
                 "data": None,
                 "error": str(e)
             }
     
-    def delete_user_alias(
+    def delete_end_user_info(
         self,
         db: Session,
-        user_alias_id: str
+        end_user_info_id: str
     ) -> Dict[str, Any]:
         """
-        删除用户别名记录
+        删除终端用户信息记录
         
         Args:
             db: 数据库会话
-            user_alias_id: 用户别名记录ID (UUID)
+            end_user_info_id: 终端用户信息记录ID (UUID)
             
         Returns:
             {
@@ -627,42 +627,42 @@ class UserMemoryService:
             }
         """
         try:
-            from app.models.user_alias_model import UserAlias
+            from app.models.end_user_info_model import EndUserInfo
             
             # 转换为UUID并查询
-            alias_uuid = uuid.UUID(user_alias_id)
-            user_alias_record = db.query(UserAlias).filter(UserAlias.id == alias_uuid).first()
+            info_uuid = uuid.UUID(end_user_info_id)
+            end_user_info_record = db.query(EndUserInfo).filter(EndUserInfo.id == info_uuid).first()
             
-            if not user_alias_record:
-                logger.warning(f"用户别名记录不存在: user_alias_id={user_alias_id}")
+            if not end_user_info_record:
+                logger.warning(f"终端用户信息记录不存在: end_user_info_id={end_user_info_id}")
                 return {
                     "success": False,
                     "data": None,
-                    "error": "用户别名记录不存在"
+                    "error": "终端用户信息记录不存在"
                 }
             
             # 删除记录
-            db.delete(user_alias_record)
+            db.delete(end_user_info_record)
             db.commit()
             
-            logger.info(f"成功删除用户别名记录: user_alias_id={user_alias_id}")
+            logger.info(f"成功删除终端用户信息记录: end_user_info_id={end_user_info_id}")
             
             return {
                 "success": True,
-                "data": {"user_alias_id": user_alias_id},
+                "data": {"end_user_info_id": end_user_info_id},
                 "error": None
             }
             
         except ValueError:
-            logger.error(f"无效的 user_alias_id 格式: {user_alias_id}")
+            logger.error(f"无效的 end_user_info_id 格式: {end_user_info_id}")
             return {
                 "success": False,
                 "data": None,
-                "error": "无效的用户别名记录ID格式"
+                "error": "无效的终端用户信息记录ID格式"
             }
         except Exception as e:
             db.rollback()
-            logger.error(f"删除用户别名记录失败: user_alias_id={user_alias_id}, error={str(e)}")
+            logger.error(f"删除终端用户信息记录失败: end_user_info_id={end_user_info_id}, error={str(e)}")
             return {
                 "success": False,
                 "data": None,

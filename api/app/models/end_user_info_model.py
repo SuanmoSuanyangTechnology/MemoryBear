@@ -8,9 +8,9 @@ from sqlalchemy.orm import relationship
 from app.db import Base
 
 
-class UserAlias(Base):
-    """用户别名表 - 存储用户的别名信息"""
-    __tablename__ = "user_aliases"
+class EndUserInfo(Base):
+    """终端用户信息表 - 存储用户的别名和扩展信息"""
+    __tablename__ = "end_user_info"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False, index=True)
     end_user_id = Column(UUID(as_uuid=True), ForeignKey("end_users.id"), nullable=False, index=True, comment="关联的终端用户ID")
@@ -21,4 +21,4 @@ class UserAlias(Base):
     updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now, comment="更新时间")
 
     # 与 EndUser 的关系
-    end_user = relationship("EndUser", back_populates="aliases")
+    end_user = relationship("EndUser", back_populates="info")

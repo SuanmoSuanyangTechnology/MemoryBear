@@ -23,10 +23,10 @@ from app.services.memory_entity_relationship_service import MemoryEntityService,
 from app.schemas.response_schema import ApiResponse
 from app.schemas.memory_storage_schema import GenerateCacheRequest
 from app.repositories.workspace_repository import WorkspaceRepository
-from app.schemas.user_alias_schema import (
-    UserAliasResponse,
-    UserAliasCreate,
-    UserAliasUpdate,
+from app.schemas.end_user_info_schema import (
+    EndUserInfoResponse,
+    EndUserInfoCreate,
+    EndUserInfoUpdate,
 )
 from app.models.end_user_model import EndUser
 from app.dependencies import get_current_user
@@ -337,177 +337,177 @@ async def get_community_graph_data_api(
         api_logger.error(f"社区图谱查询失败: end_user_id={end_user_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "社区图谱查询失败", str(e))
 
-#=======================用户别名及信息接口=======================
+#=======================终端用户信息接口=======================
 
-@router.get("/user_alias", response_model=ApiResponse)
-async def get_user_alias(
-    user_alias_id: str,
+@router.get("/end_user_info", response_model=ApiResponse)
+async def get_end_user_info(
+    end_user_info_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     """
-    查询用户别名记录
+    查询终端用户信息记录
 
-    根据 user_alias_id 查询单条用户别名记录。
+    根据 end_user_info_id 查询单条终端用户信息记录。
     """
     workspace_id = current_user.current_workspace_id
 
     if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试查询用户别名但未选择工作空间")
+        api_logger.warning(f"用户 {current_user.username} 尝试查询终端用户信息但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
     api_logger.info(
-        f"查询用户别名请求: user_alias_id={user_alias_id}, user={current_user.username}, "
+        f"查询终端用户信息请求: end_user_info_id={end_user_info_id}, user={current_user.username}, "
         f"workspace={workspace_id}"
     )
 
-    result = user_memory_service.get_user_alias(db, user_alias_id)
+    result = user_memory_service.get_end_user_info(db, end_user_info_id)
 
     if result["success"]:
-        api_logger.info(f"成功查询用户别名: user_alias_id={user_alias_id}")
+        api_logger.info(f"成功查询终端用户信息: end_user_info_id={end_user_info_id}")
         return success(data=result["data"], msg="查询成功")
     else:
         error_msg = result["error"]
-        api_logger.error(f"查询用户别名失败: user_alias_id={user_alias_id}, error={error_msg}")
+        api_logger.error(f"查询终端用户信息失败: end_user_info_id={end_user_info_id}, error={error_msg}")
         
-        if error_msg == "用户别名记录不存在":
-            return fail(BizCode.USER_NOT_FOUND, "用户别名记录不存在", error_msg)
-        elif error_msg == "无效的用户别名记录ID格式":
-            return fail(BizCode.INVALID_USER_ID, "无效的用户别名记录ID格式", error_msg)
+        if error_msg == "终端用户信息记录不存在":
+            return fail(BizCode.USER_NOT_FOUND, "终端用户信息记录不存在", error_msg)
+        elif error_msg == "无效的终端用户信息记录ID格式":
+            return fail(BizCode.INVALID_USER_ID, "无效的终端用户信息记录ID格式", error_msg)
         else:
-            return fail(BizCode.INTERNAL_ERROR, "查询用户别名失败", error_msg)
+            return fail(BizCode.INTERNAL_ERROR, "查询终端用户信息失败", error_msg)
 
 
-@router.post("/user_alias/create", response_model=ApiResponse)
-async def create_user_alias(
-    alias_create: UserAliasCreate,
+@router.post("/end_user_info/create", response_model=ApiResponse)
+async def create_end_user_info(
+    info_create: EndUserInfoCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     """
-    创建用户别名记录
+    创建终端用户信息记录
 
-    为指定用户创建一条新的别名记录，支持多个别名。
+    为指定用户创建一条新的信息记录，支持多个别名。
     """
     workspace_id = current_user.current_workspace_id
-    end_user_id = alias_create.end_user_id
+    end_user_id = info_create.end_user_id
 
     if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试创建别名但未选择工作空间")
+        api_logger.warning(f"用户 {current_user.username} 尝试创建终端用户信息但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
     api_logger.info(
-        f"创建用户别名请求: end_user_id={end_user_id}, aliases={alias_create.aliases}, "
+        f"创建终端用户信息请求: end_user_id={end_user_id}, aliases={info_create.aliases}, "
         f"user={current_user.username}, workspace={workspace_id}"
     )
 
-    result = user_memory_service.create_user_alias(
-        db, end_user_id, alias_create.other_name, alias_create.aliases, alias_create.meta_data
+    result = user_memory_service.create_end_user_info(
+        db, end_user_id, info_create.other_name, info_create.aliases, info_create.meta_data
     )
 
     if result["success"]:
-        api_logger.info(f"成功创建用户别名: end_user_id={end_user_id}")
+        api_logger.info(f"成功创建终端用户信息: end_user_id={end_user_id}")
         return success(data=result["data"], msg="创建成功")
     else:
         error_msg = result["error"]
-        api_logger.error(f"用户别名创建失败: end_user_id={end_user_id}, error={error_msg}")
+        api_logger.error(f"终端用户信息创建失败: end_user_id={end_user_id}, error={error_msg}")
         
         if error_msg == "终端用户不存在":
             return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", error_msg)
         elif error_msg == "无效的用户ID格式":
             return fail(BizCode.INVALID_USER_ID, "无效的用户ID格式", error_msg)
         else:
-            return fail(BizCode.INTERNAL_ERROR, "用户别名创建失败", error_msg)
+            return fail(BizCode.INTERNAL_ERROR, "终端用户信息创建失败", error_msg)
 
 
-@router.post("/user_alias/updated", response_model=ApiResponse)
-async def update_user_alias(
-    alias_update: UserAliasUpdate,
+@router.post("/end_user_info/updated", response_model=ApiResponse)
+async def update_end_user_info(
+    info_update: EndUserInfoUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     """
-    更新用户别名记录
+    更新终端用户信息记录
 
-    根据 user_alias_id 更新用户别名记录，支持批量更新多个别名。
+    根据 end_user_info_id 更新终端用户信息记录，支持批量更新多个别名。
     
     示例请求体：
     {
-      "user_alias_id": "2d4f57d4-639b-47aa-937a-d461bc2c2d53",
+      "end_user_info_id": "2d4f57d4-639b-47aa-937a-d461bc2c2d53",
       "other_name": "张三1",
       "aliases": ["小张", "张工"],
       "meta_data": {"position": "工程师", "department": "技术部"}
     }
     """
     workspace_id = current_user.current_workspace_id
-    user_alias_id = alias_update.user_alias_id
+    end_user_info_id = info_update.end_user_info_id
 
     if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试更新用户别名但未选择工作空间")
+        api_logger.warning(f"用户 {current_user.username} 尝试更新终端用户信息但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
     api_logger.info(
-        f"更新用户别名请求: user_alias_id={user_alias_id}, user={current_user.username}, "
+        f"更新终端用户信息请求: end_user_info_id={end_user_info_id}, user={current_user.username}, "
         f"workspace={workspace_id}"
     )
 
-    # 获取更新数据（排除 user_alias_id）
-    update_data = alias_update.model_dump(exclude_unset=True, exclude={'user_alias_id'})
+    # 获取更新数据（排除 end_user_info_id）
+    update_data = info_update.model_dump(exclude_unset=True, exclude={'end_user_info_id'})
     
-    result = user_memory_service.update_user_alias(db, user_alias_id, update_data)
+    result = user_memory_service.update_end_user_info(db, end_user_info_id, update_data)
 
     if result["success"]:
-        api_logger.info(f"成功更新用户别名: user_alias_id={user_alias_id}")
+        api_logger.info(f"成功更新终端用户信息: end_user_info_id={end_user_info_id}")
         return success(data=result["data"], msg="更新成功")
     else:
         error_msg = result["error"]
-        api_logger.error(f"用户别名更新失败: user_alias_id={user_alias_id}, error={error_msg}")
+        api_logger.error(f"终端用户信息更新失败: end_user_info_id={end_user_info_id}, error={error_msg}")
         
-        if error_msg == "用户别名记录不存在":
-            return fail(BizCode.USER_NOT_FOUND, "用户别名记录不存在", error_msg)
-        elif error_msg == "无效的用户别名记录ID格式":
-            return fail(BizCode.INVALID_USER_ID, "无效的用户别名记录ID格式", error_msg)
+        if error_msg == "终端用户信息记录不存在":
+            return fail(BizCode.USER_NOT_FOUND, "终端用户信息记录不存在", error_msg)
+        elif error_msg == "无效的终端用户信息记录ID格式":
+            return fail(BizCode.INVALID_USER_ID, "无效的终端用户信息记录ID格式", error_msg)
         else:
-            return fail(BizCode.INTERNAL_ERROR, "用户别名更新失败", error_msg)
+            return fail(BizCode.INTERNAL_ERROR, "终端用户信息更新失败", error_msg)
 
 
-@router.delete("/user_alias", response_model=ApiResponse)
-async def delete_user_alias(
-    user_alias_id: str,
+@router.delete("/end_user_info", response_model=ApiResponse)
+async def delete_end_user_info(
+    end_user_info_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     """
-    删除用户别名记录
+    删除终端用户信息记录
 
-    根据 user_alias_id 删除指定的用户别名记录。
+    根据 end_user_info_id 删除指定的终端用户信息记录。
     """
     workspace_id = current_user.current_workspace_id
 
     if workspace_id is None:
-        api_logger.warning(f"用户 {current_user.username} 尝试删除别名但未选择工作空间")
+        api_logger.warning(f"用户 {current_user.username} 尝试删除终端用户信息但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
     api_logger.info(
-        f"删除用户别名请求: user_alias_id={user_alias_id}, user={current_user.username}, "
+        f"删除终端用户信息请求: end_user_info_id={end_user_info_id}, user={current_user.username}, "
         f"workspace={workspace_id}"
     )
 
-    result = user_memory_service.delete_user_alias(db, user_alias_id)
+    result = user_memory_service.delete_end_user_info(db, end_user_info_id)
 
     if result["success"]:
-        api_logger.info(f"成功删除用户别名: user_alias_id={user_alias_id}")
+        api_logger.info(f"成功删除终端用户信息: end_user_info_id={end_user_info_id}")
         return success(data=result["data"], msg="删除成功")
     else:
         error_msg = result["error"]
-        api_logger.error(f"用户别名删除失败: user_alias_id={user_alias_id}, error={error_msg}")
+        api_logger.error(f"终端用户信息删除失败: end_user_info_id={end_user_info_id}, error={error_msg}")
         
-        if error_msg == "用户别名记录不存在":
-            return fail(BizCode.USER_NOT_FOUND, "用户别名记录不存在", error_msg)
-        elif error_msg == "无效的用户别名记录ID格式":
-            return fail(BizCode.INVALID_USER_ID, "无效的用户别名记录ID格式", error_msg)
+        if error_msg == "终端用户信息记录不存在":
+            return fail(BizCode.USER_NOT_FOUND, "终端用户信息记录不存在", error_msg)
+        elif error_msg == "无效的终端用户信息记录ID格式":
+            return fail(BizCode.INVALID_USER_ID, "无效的终端用户信息记录ID格式", error_msg)
         else:
-            return fail(BizCode.INTERNAL_ERROR, "用户别名删除失败", error_msg)
+            return fail(BizCode.INTERNAL_ERROR, "终端用户信息删除失败", error_msg)
 
 @router.get("/memory_space/timeline_memories", response_model=ApiResponse)
 async def memory_space_timeline_of_shared_memories(
