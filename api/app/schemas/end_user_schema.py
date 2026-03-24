@@ -17,41 +17,35 @@ class EndUser(BaseModel):
     created_at: datetime.datetime = Field(description="创建时间", default_factory=datetime.datetime.now)
     updated_at: datetime.datetime = Field(description="更新时间", default_factory=datetime.datetime.now)
     
-    # 用户基本信息字段
-    position: Optional[str] = Field(description="职位", default=None)
-    department: Optional[str] = Field(description="部门", default=None)
-    contact: Optional[str] = Field(description="联系方式", default=None)
-    phone: Optional[str] = Field(description="电话", default=None)
-    hire_date: Optional[datetime.datetime] = Field(description="入职日期", default=None)
-    updatetime_profile: Optional[datetime.datetime] = Field(description="核心档案信息最后更新时间", default=None)
-    
     # 用户摘要和洞察更新时间
     user_summary_updated_at: Optional[datetime.datetime] = Field(description="用户摘要最后更新时间", default=None)
     memory_insight_updated_at: Optional[datetime.datetime] = Field(description="洞察报告最后更新时间", default=None)
 
 
-class EndUserProfileResponse(BaseModel):
-    """终端用户基本信息响应模型"""
+class UserAliasResponse(BaseModel):
+    """用户别名响应模型"""
     model_config = ConfigDict(from_attributes=True)
     
-    id: uuid.UUID = Field(description="终端用户ID")
-    other_name: Optional[str] = Field(description="其他名称", default="")
-    position: Optional[str] = Field(description="职位", default=None)
-    department: Optional[str] = Field(description="部门", default=None)
-    contact: Optional[str] = Field(description="联系方式", default=None)
-    phone: Optional[str] = Field(description="电话", default=None)
-    hire_date: Optional[datetime.datetime] = Field(description="入职日期", default=None)
-    updatetime_profile: Optional[datetime.datetime] = Field(description="核心档案信息最后更新时间", default=None)
-
-
-
-class EndUserProfileUpdate(BaseModel):
-    """终端用户基本信息更新请求模型"""
-    end_user_id: str = Field(description="终端用户ID")
-    other_name: Optional[str] = Field(description="其他名称", default="")
+    user_alias_id: uuid.UUID = Field(description="用户别名记录ID")
+    end_user_id: uuid.UUID = Field(description="终端用户ID")
+    other_name: str = Field(description="用户名称")
     aliases: Optional[List[str]] = Field(description="别名列表", default=None)
-    position: Optional[str] = Field(description="职位", default=None)
-    department: Optional[str] = Field(description="部门", default=None)
-    contact: Optional[str] = Field(description="联系方式", default=None)
-    phone: Optional[str] = Field(description="电话", default=None)
-    hire_date: Optional[int] = Field(description="入职日期（时间戳，毫秒）", default=None)
+    meta_data: Optional[dict] = Field(description="扩展信息", default=None)
+    created_at: datetime.datetime = Field(description="创建时间")
+    updated_at: datetime.datetime = Field(description="更新时间")
+
+
+class UserAliasCreate(BaseModel):
+    """创建用户别名请求模型"""
+    end_user_id: str = Field(description="终端用户ID")
+    other_name: str = Field(description="用户名称")
+    aliases: Optional[List[str]] = Field(description="别名列表", default=None)
+    meta_data: Optional[dict] = Field(description="扩展信息", default=None)
+
+
+class UserAliasUpdate(BaseModel):
+    """更新用户别名请求模型"""
+    user_alias_id: str = Field(description="用户别名记录ID")
+    other_name: Optional[str] = Field(description="用户名称", default=None)
+    aliases: Optional[List[str]] = Field(description="别名列表", default=None)
+    meta_data: Optional[dict] = Field(description="扩展信息", default=None)
