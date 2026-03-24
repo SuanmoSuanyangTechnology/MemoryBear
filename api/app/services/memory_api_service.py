@@ -131,7 +131,6 @@ class MemoryAPIService:
             message: str,
             config_id: str,
             storage_type: str = "neo4j",
-            files: Optional[list]=None,
             user_rag_memory_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Write memory with validation.
@@ -154,8 +153,6 @@ class MemoryAPIService:
             ResourceNotFoundException: If end_user not found
             BusinessException: If end_user not in authorized workspace or write fails
         """
-        if files is None:
-            files = list()
         logger.info(f"Writing memory for end_user: {end_user_id}, workspace: {workspace_id}")
 
         # Validate end_user exists and belongs to workspace
@@ -175,7 +172,6 @@ class MemoryAPIService:
                 db=self.db,
                 storage_type=storage_type,
                 user_rag_memory_id=user_rag_memory_id or "",
-                files=files
             )
 
             logger.info(f"Memory write successful for end_user: {end_user_id}")

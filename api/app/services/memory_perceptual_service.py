@@ -277,8 +277,10 @@ class MemoryPerceptualService:
         file_message = await multimodel_service.process_files(
             files=[file]
         )
-        if file_message:
-            file_message = file_message[0]
+        if not file_message:
+            logger.warning(f"Unsupport file type {file}, model capability: {model_config.capability}")
+            return None
+        file_message = file_message[0]
         try:
             prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prompt')
             with open(os.path.join(prompt_path, 'perceptual_summary_system.jinja2'), 'r', encoding='utf-8') as f:

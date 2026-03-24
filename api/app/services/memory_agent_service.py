@@ -354,6 +354,8 @@ class MemoryAgentService:
                     memory_config=memory_config,
                     file=FileInput(**file)
                 )
+                if file_object is None:
+                    continue
                 message["file_content"].append((file_object, file["type"]))
 
         message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
