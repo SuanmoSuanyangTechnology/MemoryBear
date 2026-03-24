@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 11:02:34
+ * @Last Modified time: 2026-03-24 15:27:30
  */
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import { useTranslation } from 'react-i18next'
@@ -62,8 +62,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   const values = Form.useWatch<Config>([], form) 
   const [isSave, setIsSave] = useState(false)
   const initialized = useRef(false)
-
-  console.log('chatList', chatList)
   
   // Initialization flag
   useEffect(() => {
@@ -81,7 +79,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   useEffect(() => {
     getModels()
     getData()
-  }, [])
+  }, [id])
 
   /**
    * Fetch agent configuration data

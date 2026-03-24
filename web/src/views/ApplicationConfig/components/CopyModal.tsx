@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:56 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:27:56 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-24 15:28:20
  */
 /**
  * Copy Application Modal
@@ -60,7 +60,8 @@ const CopyModal = forwardRef<CopyModalRef, CopyModalProps>(({
     copyApplication(data.id, values.new_name)
       .then((res) => {
         const resData = res as Application
-        navigate(`/application/config/${resData.id}`)
+        navigate(`/application/config/${resData.id}`, { replace: true })
+        handleClose()
       })
       .finally(() => {
         setLoading(false)
