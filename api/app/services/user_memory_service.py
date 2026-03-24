@@ -383,6 +383,7 @@ class UserMemoryService:
         """
         try:
             from app.models.end_user_info_model import EndUserInfo
+            from app.core.api_key_utils import datetime_to_timestamp
             
             # 转换为UUID并查询
             user_uuid = uuid.UUID(end_user_id)
@@ -396,23 +397,22 @@ class UserMemoryService:
                     "error": "终端用户信息记录不存在"
                 }
             
-            # 构建响应数据
-            from app.schemas.end_user_info_schema import EndUserInfoResponse
-            response_data = EndUserInfoResponse(
-                end_user_info_id=end_user_info_record.id,
-                end_user_id=end_user_info_record.end_user_id,
-                other_name=end_user_info_record.other_name,
-                aliases=end_user_info_record.aliases,
-                meta_data=end_user_info_record.meta_data,
-                created_at=end_user_info_record.created_at,
-                updated_at=end_user_info_record.updated_at
-            )
+            # 构建响应数据（转换时间为毫秒时间戳）
+            response_data = {
+                "end_user_info_id": str(end_user_info_record.id),
+                "end_user_id": str(end_user_info_record.end_user_id),
+                "other_name": end_user_info_record.other_name,
+                "aliases": end_user_info_record.aliases,
+                "meta_data": end_user_info_record.meta_data,
+                "created_at": datetime_to_timestamp(end_user_info_record.created_at),
+                "updated_at": datetime_to_timestamp(end_user_info_record.updated_at)
+            }
             
             logger.info(f"成功查询终端用户信息记录: end_user_id={end_user_id}")
             
             return {
                 "success": True,
-                "data": response_data.model_dump(),
+                "data": response_data,
                 "error": None
             }
             
@@ -454,6 +454,7 @@ class UserMemoryService:
         """
         try:
             from app.models.end_user_info_model import EndUserInfo
+            from app.core.api_key_utils import datetime_to_timestamp
             
             # 转换为UUID并查询
             user_uuid = uuid.UUID(end_user_id)
@@ -482,23 +483,22 @@ class UserMemoryService:
             db.commit()
             db.refresh(end_user_info_record)
             
-            # 构建响应数据
-            from app.schemas.end_user_info_schema import EndUserInfoResponse
-            response_data = EndUserInfoResponse(
-                end_user_info_id=end_user_info_record.id,
-                end_user_id=end_user_info_record.end_user_id,
-                other_name=end_user_info_record.other_name,
-                aliases=end_user_info_record.aliases,
-                meta_data=end_user_info_record.meta_data,
-                created_at=end_user_info_record.created_at,
-                updated_at=end_user_info_record.updated_at
-            )
+            # 构建响应数据（转换时间为毫秒时间戳）
+            response_data = {
+                "end_user_info_id": str(end_user_info_record.id),
+                "end_user_id": str(end_user_info_record.end_user_id),
+                "other_name": end_user_info_record.other_name,
+                "aliases": end_user_info_record.aliases,
+                "meta_data": end_user_info_record.meta_data,
+                "created_at": datetime_to_timestamp(end_user_info_record.created_at),
+                "updated_at": datetime_to_timestamp(end_user_info_record.updated_at)
+            }
             
             logger.info(f"成功更新终端用户信息记录: end_user_id={end_user_id}, updated_fields={list(update_data.keys())}")
             
             return {
                 "success": True,
-                "data": response_data.model_dump(),
+                "data": response_data,
                 "error": None
             }
             
