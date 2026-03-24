@@ -365,14 +365,14 @@ class UserMemoryService:
     def get_end_user_info(
         self,
         db: Session,
-        end_user_info_id: str
+        end_user_id: str
     ) -> Dict[str, Any]:
         """
         查询单个终端用户信息记录
         
         Args:
             db: 数据库会话
-            end_user_info_id: 终端用户信息记录ID (UUID)
+            end_user_id: 终端用户ID (UUID)
             
         Returns:
             {
@@ -385,11 +385,11 @@ class UserMemoryService:
             from app.models.end_user_info_model import EndUserInfo
             
             # 转换为UUID并查询
-            info_uuid = uuid.UUID(end_user_info_id)
-            end_user_info_record = db.query(EndUserInfo).filter(EndUserInfo.id == info_uuid).first()
+            user_uuid = uuid.UUID(end_user_id)
+            end_user_info_record = db.query(EndUserInfo).filter(EndUserInfo.end_user_id == user_uuid).first()
             
             if not end_user_info_record:
-                logger.warning(f"终端用户信息记录不存在: end_user_info_id={end_user_info_id}")
+                logger.warning(f"终端用户信息记录不存在: end_user_id={end_user_id}")
                 return {
                     "success": False,
                     "data": None,
@@ -408,95 +408,7 @@ class UserMemoryService:
                 updated_at=end_user_info_record.updated_at
             )
             
-            logger.info(f"成功查询终端用户信息记录: end_user_info_id={end_user_info_id}")
-            
-            return {
-                "success": True,
-                "data": response_data.model_dump(),
-                "error": None
-            }
-            
-        except ValueError:
-            logger.error(f"无效的 end_user_info_id 格式: {end_user_info_id}")
-            return {
-                "success": False,
-                "data": None,
-                "error": "无效的终端用户信息记录ID格式"
-            }
-        except Exception as e:
-            logger.error(f"查询终端用户信息记录失败: end_user_info_id={end_user_info_id}, error={str(e)}")
-            return {
-                "success": False,
-                "data": None,
-                "error": str(e)
-            }
-    
-    def create_end_user_info(
-        self,
-        db: Session,
-        end_user_id: str,
-        other_name: str,
-        aliases: List[str] = None,
-        meta_data: dict = None
-    ) -> Dict[str, Any]:
-        """
-        创建终端用户信息记录
-        
-        Args:
-            db: 数据库会话
-            end_user_id: 终端用户ID (UUID)
-            other_name: 用户名称
-            aliases: 别名列表
-            meta_data: 扩展信息
-            
-        Returns:
-            {
-                "success": bool,
-                "data": dict,
-                "error": Optional[str]
-            }
-        """
-        try:
-            from app.models.end_user_info_model import EndUserInfo
-            from app.repositories.end_user_repository import EndUserRepository
-            
-            # 转换为UUID并查询用户
-            user_uuid = uuid.UUID(end_user_id)
-            repo = EndUserRepository(db)
-            end_user = repo.get_by_id(user_uuid)
-            
-            if not end_user:
-                logger.warning(f"终端用户不存在: end_user_id={end_user_id}")
-                return {
-                    "success": False,
-                    "data": None,
-                    "error": "终端用户不存在"
-                }
-            
-            # 创建新的用户信息记录
-            new_info = EndUserInfo(
-                end_user_id=user_uuid,
-                other_name=other_name,
-                aliases=aliases,
-                meta_data=meta_data
-            )
-            db.add(new_info)
-            db.commit()
-            db.refresh(new_info)
-            
-            # 构建响应数据
-            from app.schemas.end_user_info_schema import EndUserInfoResponse
-            response_data = EndUserInfoResponse(
-                end_user_info_id=new_info.id,
-                end_user_id=new_info.end_user_id,
-                other_name=new_info.other_name,
-                aliases=new_info.aliases,
-                meta_data=new_info.meta_data,
-                created_at=new_info.created_at,
-                updated_at=new_info.updated_at
-            )
-            
-            logger.info(f"成功创建终端用户信息记录: end_user_id={end_user_id}")
+            logger.info(f"成功查询终端用户信息记录: end_user_id={end_user_id}")
             
             return {
                 "success": True,
@@ -509,11 +421,10 @@ class UserMemoryService:
             return {
                 "success": False,
                 "data": None,
-                "error": "无效的用户ID格式"
+                "error": "无效的终端用户ID格式"
             }
         except Exception as e:
-            db.rollback()
-            logger.error(f"创建终端用户信息记录失败: end_user_id={end_user_id}, error={str(e)}")
+            logger.error(f"查询终端用户信息记录失败: end_user_id={end_user_id}, error={str(e)}")
             return {
                 "success": False,
                 "data": None,
@@ -523,7 +434,7 @@ class UserMemoryService:
     def update_end_user_info(
         self,
         db: Session,
-        end_user_info_id: str,
+        end_user_id: str,
         update_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
@@ -531,7 +442,7 @@ class UserMemoryService:
         
         Args:
             db: 数据库会话
-            end_user_info_id: 终端用户信息记录ID (UUID)
+            end_user_id: 终端用户ID (UUID)
             update_data: 更新数据字典
             
         Returns:
@@ -545,11 +456,11 @@ class UserMemoryService:
             from app.models.end_user_info_model import EndUserInfo
             
             # 转换为UUID并查询
-            info_uuid = uuid.UUID(end_user_info_id)
-            end_user_info_record = db.query(EndUserInfo).filter(EndUserInfo.id == info_uuid).first()
+            user_uuid = uuid.UUID(end_user_id)
+            end_user_info_record = db.query(EndUserInfo).filter(EndUserInfo.end_user_id == user_uuid).first()
             
             if not end_user_info_record:
-                logger.warning(f"终端用户信息记录不存在: end_user_info_id={end_user_info_id}")
+                logger.warning(f"终端用户信息记录不存在: end_user_id={end_user_id}")
                 return {
                     "success": False,
                     "data": None,
@@ -583,7 +494,7 @@ class UserMemoryService:
                 updated_at=end_user_info_record.updated_at
             )
             
-            logger.info(f"成功更新终端用户信息记录: end_user_info_id={end_user_info_id}, updated_fields={list(update_data.keys())}")
+            logger.info(f"成功更新终端用户信息记录: end_user_id={end_user_id}, updated_fields={list(update_data.keys())}")
             
             return {
                 "success": True,
@@ -592,85 +503,15 @@ class UserMemoryService:
             }
             
         except ValueError:
-            logger.error(f"无效的 end_user_info_id 格式: {end_user_info_id}")
+            logger.error(f"无效的 end_user_id 格式: {end_user_id}")
             return {
                 "success": False,
                 "data": None,
-                "error": "无效的终端用户信息记录ID格式"
+                "error": "无效的终端用户ID格式"
             }
         except Exception as e:
             db.rollback()
-            logger.error(f"更新终端用户信息记录失败: end_user_info_id={end_user_info_id}, error={str(e)}")
-            return {
-                "success": False,
-                "data": None,
-                "error": str(e)
-            }
-    
-    def delete_end_user_info(
-        self,
-        db: Session,
-        end_user_info_id: str
-    ) -> Dict[str, Any]:
-        """
-        删除终端用户信息记录
-        
-        Args:
-            db: 数据库会话
-            end_user_info_id: 终端用户信息记录ID (UUID)
-            
-        Returns:
-            {
-                "success": bool,
-                "data": dict,
-                "error": Optional[str]
-            }
-        """
-        try:
-            from app.models.end_user_info_model import EndUserInfo
-            
-            # 转换为UUID并查询
-            info_uuid = uuid.UUID(end_user_info_id)
-            end_user_info_record = db.query(EndUserInfo).filter(EndUserInfo.id == info_uuid).first()
-            
-            if not end_user_info_record:
-                logger.warning(f"终端用户信息记录不存在: end_user_info_id={end_user_info_id}")
-                return {
-                    "success": False,
-                    "data": None,
-                    "error": "终端用户信息记录不存在"
-                }
-            
-            # 删除记录
-            db.delete(end_user_info_record)
-            db.commit()
-            
-            logger.info(f"成功删除终端用户信息记录: end_user_info_id={end_user_info_id}")
-            
-            return {
-                "success": True,
-                "data": {"end_user_info_id": end_user_info_id},
-                "error": None
-            }
-            
-        except ValueError:
-            logger.error(f"无效的 end_user_info_id 格式: {end_user_info_id}")
-            return {
-                "success": False,
-                "data": None,
-                "error": "无效的终端用户信息记录ID格式"
-            }
-        except Exception as e:
-            db.rollback()
-            logger.error(f"删除终端用户信息记录失败: end_user_info_id={end_user_info_id}, error={str(e)}")
-            return {
-                "success": False,
-                "data": None,
-                "error": str(e)
-            }
-        except Exception as e:
-            db.rollback()
-            logger.error(f"用户别名记录更新失败: user_alias_id={user_alias_id}, error={str(e)}")
+            logger.error(f"更新终端用户信息记录失败: end_user_id={end_user_id}, error={str(e)}")
             return {
                 "success": False,
                 "data": None,
