@@ -23,7 +23,7 @@ from app.services.memory_entity_relationship_service import MemoryEntityService,
 from app.schemas.response_schema import ApiResponse
 from app.schemas.memory_storage_schema import GenerateCacheRequest
 from app.repositories.workspace_repository import WorkspaceRepository
-from app.schemas.end_user_schema import (
+from app.schemas.user_alias_schema import (
     UserAliasResponse,
     UserAliasCreate,
     UserAliasUpdate,

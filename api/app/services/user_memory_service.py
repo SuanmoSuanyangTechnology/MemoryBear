@@ -397,7 +397,7 @@ class UserMemoryService:
                 }
             
             # 构建响应数据
-            from app.schemas.end_user_schema import UserAliasResponse
+            from app.schemas.user_alias_schema import UserAliasResponse
             response_data = UserAliasResponse(
                 user_alias_id=user_alias_record.id,
                 end_user_id=user_alias_record.end_user_id,
@@ -485,7 +485,7 @@ class UserMemoryService:
             db.refresh(new_alias)
             
             # 构建响应数据
-            from app.schemas.end_user_schema import UserAliasResponse
+            from app.schemas.user_alias_schema import UserAliasResponse
             response_data = UserAliasResponse(
                 user_alias_id=new_alias.id,
                 end_user_id=new_alias.end_user_id,
@@ -556,9 +556,12 @@ class UserMemoryService:
                     "error": "用户别名记录不存在"
                 }
             
-            # 更新字段
+            # 定义允许更新的字段白名单
+            allowed_fields = {'other_name', 'aliases', 'meta_data'}
+            
+            # 更新字段（仅允许白名单中的字段）
             for field, value in update_data.items():
-                if hasattr(user_alias_record, field) and field != 'user_alias_id':
+                if field in allowed_fields:
                     setattr(user_alias_record, field, value)
             
             # 更新时间戳
@@ -569,7 +572,7 @@ class UserMemoryService:
             db.refresh(user_alias_record)
             
             # 构建响应数据
-            from app.schemas.end_user_schema import UserAliasResponse
+            from app.schemas.user_alias_schema import UserAliasResponse
             response_data = UserAliasResponse(
                 user_alias_id=user_alias_record.id,
                 end_user_id=user_alias_record.end_user_id,
