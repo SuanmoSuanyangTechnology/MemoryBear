@@ -348,7 +348,7 @@ class MemoryAgentService:
         perceptual_serivce = MemoryPerceptualService(db)
         for message in messages:
             message["file_content"] = []
-            for file in message["files"]:
+            for file in (message.get("files") or []):
                 file_object = await perceptual_serivce.generate_perceptual_memory(
                     end_user_id=end_user_id,
                     memory_config=memory_config,
