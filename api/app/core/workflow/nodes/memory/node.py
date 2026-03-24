@@ -72,7 +72,6 @@ class MemoryWriteNode(BaseNode):
         if not end_user_id:
             raise RuntimeError("End user id is required")
         messages = []
-        multimodal_memories = []
         if self.typed_config.message:
             messages.append({
                 "role": "user",
@@ -104,19 +103,15 @@ class MemoryWriteNode(BaseNode):
                             url=file_instence.value.url,
                             file_type=file_instence.value.origin_file_type
                         ).model_dump())
-            multimodal_memories.append({
-                "role": message.role,
-                "files": file_info
-            })
             messages.append({
                 "role": message.role,
-                "content": self._render_template(content, variable_pool)
+                "content": self._render_template(content, variable_pool),
+                "files": file_info
             })
 
         write_message_task.delay(
             end_user_id=end_user_id,
             message=messages,
-            file_messages=multimodal_memories,
             config_id=str(self.typed_config.config_id),
             storage_type=state["memory_storage_type"],
             user_rag_memory_id=state["user_rag_memory_id"]

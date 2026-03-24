@@ -1,10 +1,10 @@
-from typing import Any, List
-import re
-import os
 import asyncio
 import json
-import numpy as np
 import logging
+import os
+from typing import Any, List
+
+import numpy as np
 
 # Fix tokenizer parallelism warning
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -246,6 +246,7 @@ class ChunkerClient:
                             "total_sub_chunks": len(sub_chunks),
                             "chunker_strategy": self.chunker_config.chunker_strategy,
                         },
+                        files=msg.files
                     )
                     dialogue.chunks.append(chunk)
             else:
@@ -258,6 +259,7 @@ class ChunkerClient:
                         "message_role": msg.role,
                         "chunker_strategy": self.chunker_config.chunker_strategy,
                     },
+                    files=msg.files
                 )
                 dialogue.chunks.append(chunk)
 

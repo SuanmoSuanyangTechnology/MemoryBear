@@ -1003,60 +1003,69 @@ RETURN DISTINCT
 """
 
 Graph_Node_query = """
-            MATCH (n:MemorySummary)
-                WHERE n.end_user_id = $end_user_id
-                RETURN
-                  elementId(n) AS id,
-                  labels(n) AS labels,
-                  properties(n) AS properties,
-                  0 AS priority
-                LIMIT $limit
+MATCH (n:MemorySummary)
+WHERE n.end_user_id = $end_user_id
+RETURN
+  elementId(n) AS id,
+  labels(n) AS labels,
+  properties(n) AS properties,
+  0 AS priority
+LIMIT $limit
                 
-                UNION ALL
+UNION ALL
 
-                    MATCH (n:Dialogue)
-                    WHERE n.end_user_id =  $end_user_id
-                    RETURN
-                      elementId(n) AS id,
-                      labels(n) AS labels,
-                      properties(n) AS properties,
-                      1 AS priority
-                    LIMIT 1
+MATCH (n:Dialogue)
+WHERE n.end_user_id =  $end_user_id
+RETURN
+  elementId(n) AS id,
+  labels(n) AS labels,
+  properties(n) AS properties,
+  1 AS priority
+LIMIT 1
 
-                UNION ALL
+UNION ALL
 
-                MATCH (n:Statement)
-                WHERE n.end_user_id =  $end_user_id
-                RETURN
-                  elementId(n) AS id,
-                  labels(n) AS labels,
-                  properties(n) AS properties,
-                  1 AS priority
-                LIMIT $limit
+MATCH (n:Statement)
+WHERE n.end_user_id =  $end_user_id
+RETURN
+  elementId(n) AS id,
+  labels(n) AS labels,
+  properties(n) AS properties,
+  1 AS priority
+LIMIT $limit
 
-                UNION ALL
+UNION ALL
 
-                MATCH (n:ExtractedEntity)
-                WHERE n.end_user_id =  $end_user_id
-                RETURN
-                  elementId(n) AS id,
-                  labels(n) AS labels,
-                  properties(n) AS properties,
-                  2 AS priority
-                LIMIT $limit
+MATCH (n:ExtractedEntity)
+WHERE n.end_user_id =  $end_user_id
+RETURN
+  elementId(n) AS id,
+  labels(n) AS labels,
+  properties(n) AS properties,
+  2 AS priority
+LIMIT $limit
 
-                UNION ALL
+UNION ALL
 
-                MATCH (n:Chunk)
-                WHERE n.end_user_id =  $end_user_id
-                RETURN
-                  elementId(n) AS id,
-                  labels(n) AS labels,
-                  properties(n) AS properties,
-                  3 AS priority
-                LIMIT $limit
+MATCH (n:Chunk)
+WHERE n.end_user_id =  $end_user_id
+RETURN
+  elementId(n) AS id,
+  labels(n) AS labels,
+  properties(n) AS properties,
+  3 AS priority
+LIMIT $limit
 
-            """
+UNION ALL
+MATCH (n:Perceptual)
+WHERE n.end_user_id = $end_user_id
+RETURN
+  elementId(n) AS id,
+  labels(n) AS labels,
+  properties(n) AS properties,
+  4 AS priority
+
+"""
 
 # ============================================================
 # Community 节点 & BELONGS_TO_COMMUNITY 边
@@ -1340,19 +1349,19 @@ SET n += {
     topic: p.topic,
     domain: p.domain,
     created_at: p.created_at,
+    file_type: p.file_type,
     summary_embedding: p.summary_embedding
 }
 RETURN n.id AS uuid
 """
 
 # 感知记忆与对话的关联边
-PERCEPTUAL_DIALOGUE_EDGE_SAVE = """
+PERCEPTUAL_CHUNK_EDGE_SAVE = """
 UNWIND $edges AS edge
 MATCH (p:Perceptual {id: edge.perceptual_id, end_user_id: edge.end_user_id})
-MATCH (d:Dialogue {end_user_id: edge.end_user_id})
-WHERE d.id = edge.dialog_id OR d.ref_id = edge.dialog_id
-MERGE (d)-[r:HAS_PERCEPTUAL]->(p)
-SET r.end_user_id = edge.end_user_id,
+MATCH (c:Chunk {id: edge.chunk_id, end_user_id: edge.end_user_id})
+MERGE (c)-[r:HAS_PERCEPTUAL]->(p)
+ON CREATE SET r.end_user_id = edge.end_user_id,
     r.created_at = edge.created_at
 RETURN elementId(r) AS uuid
 """

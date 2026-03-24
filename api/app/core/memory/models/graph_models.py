@@ -114,7 +114,7 @@ class Edge(BaseModel):
     end_user_id: str = Field(..., description="The end user ID of the edge.")
     run_id: str = Field(default_factory=lambda: uuid4().hex, description="Unique identifier for this pipeline run.")
     created_at: datetime = Field(..., description="The valid time of the edge from system perspective.")
-    expired_at: Optional[datetime] = Field(None, description="The expired time of the edge from system perspective.")
+    expired_at: Optional[datetime] = Field(default=None, description="The expired time of the edge from system perspective.")
 
 
 class ChunkEdge(Edge):
@@ -173,6 +173,12 @@ class EntityEntityEdge(Edge):
     def validate_datetime(cls, v):
         """使用通用的历史日期解析函数"""
         return parse_historical_datetime(v)
+
+
+class PerceptualEdge(Edge):
+    """Edge connecting perceptual nodes to their source chunks
+    """
+    pass
 
 
 class Node(BaseModel):
@@ -555,19 +561,16 @@ class MemorySummaryNode(Node):
     )
 
 
-class MutlimodalNode(Node):
+class PerceptualNode(Node):
     """Node representing a multimodal message in the knowledge graph.
-
-    Attributes:
-        dialog_id: ID of the parent dialog
-        message_id: ID of the message
-        metadata: Additional message metadata
-        embedding: Optional embedding vector for the message
     """
-    dialog_id: str = Field(..., description="ID of the parent dialog")
-    message_id: str = Field(..., description="ID of the message")
-    summary: str = Field(..., description="The text content of the message")
-    file_type: str = Field(..., description="Type of the message (e.g., 'text', 'image', 'audio', 'video')")
-    file_path: List[str] = Field(..., description="List of file paths for multimodal content")
-    metadata: dict = Field(default_factory=dict, description="Additional message metadata")
-    embedding: Optional[List[float]] = Field(None, description="Embedding vector for the message")
+    perceptual_type: int
+    file_path: str
+    file_name: str
+    file_ext: str
+    summary: str
+    keywords: list[str]
+    topic: str
+    domain: str
+    file_type: str
+    summary_embedding: list[float] | None

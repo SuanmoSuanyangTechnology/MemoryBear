@@ -317,11 +317,11 @@ class MemoryPerceptualService:
             stmt = select(FileMetadata).where(
                 FileMetadata.id == file_id
             )
-            file = self.db.execute(stmt).scalar_one_or_none()
+            file_obj = self.db.execute(stmt).scalar_one_or_none()
 
-            if file:
-                filename = file.file_name
-                file_ext = file.file_ext
+            if file_obj:
+                filename = file_obj.file_name
+                file_ext = file_obj.file_ext
         except ValueError:
             business_logger.debug(f"Remote file, file_id={filename}")
         if not file_ext:

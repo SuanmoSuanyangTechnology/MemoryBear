@@ -5,8 +5,8 @@ This module provides the main write function for executing the knowledge extract
 pipeline. Only MemoryConfig is needed - clients are constructed internally.
 """
 import asyncio
-import uuid
 import time
+import uuid
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -19,10 +19,8 @@ from app.core.memory.storage_services.extraction_engine.knowledge_extraction.mem
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.memory.utils.log.logging_utils import log_time
 from app.db import get_db_context
-from app.models import MemoryPerceptualModel
 from app.repositories.neo4j.add_edges import add_memory_summary_statement_edges
-from app.repositories.neo4j.add_nodes import add_memory_summary_nodes, add_perceptual_nodes, \
-    add_perceptual_dialogue_edges
+from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
 from app.repositories.neo4j.graph_saver import save_dialog_and_statements_to_neo4j, schedule_clustering_after_write
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_config_schema import MemoryConfig
@@ -36,7 +34,6 @@ async def write(
         end_user_id: str,
         memory_config: MemoryConfig,
         messages: list,
-        file_content: list[MemoryPerceptualModel],
         ref_id: str = "",
         language: str = "zh",
 ) -> None:
@@ -47,7 +44,6 @@ async def write(
         end_user_id: Group identifier
         memory_config: MemoryConfig object containing all configuration
         messages: Structured message list [{"role": "user", "content": "..."}, ...]
-        file_content: mutilmodal message list
         ref_id: Reference ID, defaults to ""
         language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
     """
@@ -142,9 +138,11 @@ async def write(
         all_chunk_nodes,
         all_statement_nodes,
         all_entity_nodes,
+        all_perceptual_nodes,
         all_statement_chunk_edges,
         all_statement_entity_edges,
         all_entity_entity_edges,
+        all_perceptual_edges,
         all_dedup_details,
     ) = await orchestrator.run(chunked_dialogs, is_pilot_run=False)
 
@@ -169,9 +167,11 @@ async def write(
                 chunk_nodes=all_chunk_nodes,
                 statement_nodes=all_statement_nodes,
                 entity_nodes=all_entity_nodes,
+                perceptual_nodes=all_perceptual_nodes,
                 statement_chunk_edges=all_statement_chunk_edges,
                 statement_entity_edges=all_statement_entity_edges,
                 entity_edges=all_entity_entity_edges,
+                perceptual_edges=all_perceptual_edges,
                 connector=neo4j_connector,
             )
             if success:
@@ -229,34 +229,6 @@ async def write(
         logger.error(f"Memory summary step failed: {e}", exc_info=True)
     finally:
         log_time("Memory Summary (Neo4j)", time.time() - step_start, log_file)
-
-    # Step 5: Save perceptual memory to Neo4j
-    step_start = time.time()
-    if file_content:
-        try:
-            pc_connector = Neo4jConnector()
-            try:
-                created_ids = await add_perceptual_nodes(
-                    perceptuals=file_content,
-                    connector=pc_connector,
-                    embedder_client=embedder_client,
-                )
-                # 如果有 ref_id，建立感知记忆与对话的关联
-                if ref_id and created_ids:
-                    await add_perceptual_dialogue_edges(
-                        perceptuals=file_content,
-                        dialog_id=ref_id,
-                        connector=pc_connector,
-                    )
-                logger.info(f"Successfully saved {len(created_ids or [])} perceptual memory nodes to Neo4j")
-            finally:
-                try:
-                    await pc_connector.close()
-                except Exception:
-                    pass
-        except Exception as e:
-            logger.error(f"Perceptual memory Neo4j save failed: {e}", exc_info=True)
-    log_time("Perceptual Memory (Neo4j)", time.time() - step_start, log_file)
 
     # Log total pipeline time
     total_time = time.time() - pipeline_start

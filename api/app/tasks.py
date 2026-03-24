@@ -1080,14 +1080,12 @@ def write_message_task(
         config_id: str | int,
         storage_type: str,
         user_rag_memory_id: str,
-        file_messages: list[dict] | None,
         language: str = "zh"
 ) -> Dict[str, Any]:
     """Celery task to process a write message via MemoryAgentService.
     Args:
         end_user_id: Group ID for the memory agent (also used as end_user_id)
         message: Message to write
-        file_messages: Files to write
         config_id: Configuration ID (can be UUID string, integer, or config_id_old)
         storage_type: Storage type (neo4j or rag)
         user_rag_memory_id: User RAG memory ID
@@ -1099,9 +1097,6 @@ def write_message_task(
     Raises:
         Exception on failure
     """
-    if file_messages is None:
-        file_messages = []
-
     logger.info(
         f"[CELERY WRITE] Starting write task - end_user_id={end_user_id}, "
         f"config_id={config_id} (type: {type(config_id).__name__}), "
@@ -1146,7 +1141,7 @@ def write_message_task(
                 f"[CELERY WRITE] Executing MemoryAgentService.write_memory "
                 f"with config_id={actual_config_id} (type: {type(actual_config_id).__name__}), language={language}")
             service = MemoryAgentService()
-            result = await service.write_memory(end_user_id, message, file_messages, actual_config_id, db, storage_type,
+            result = await service.write_memory(end_user_id, message, actual_config_id, db, storage_type,
                                                 user_rag_memory_id, language)
             logger.info(f"[CELERY WRITE] Write completed successfully: {result}")
             return result
@@ -2615,57 +2610,6 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
             "elapsed_time": time.time() - start_time,
             "task_id": self.request.id,
         }
-
-
-@celery_app.task(
-    name="app.tasks.write_perceptual_memory",
-    bind=True,
-    ignore_result=True,
-    max_retries=0,
-    acks_late=False,
-    time_limit=3600,
-    soft_time_limit=3300,
-)
-def write_perceptual_memory(
-        self,
-        end_user_id: str,
-        model_api_config: dict,
-        file_type: str,
-        file_url: str,
-        file_message: dict
-):
-    """
-    Write perceptual memory for a user into PostgreSQL and Neo4j.
-
-    This task generates or updates the user's perceptual memory
-    in the backend databases. It is intended to be executed asynchronously
-    via Celery.
-
-    Args:
-        end_user_id (uuid.UUID): The unique identifier of the end user.
-        model_api_config (ModelInfo): API configuration for the model
-            used to generate perceptual memory.
-        file_type (str): The file type
-        file_url (url): The url of file
-        file_message (dict): The file message containing details about the file
-            to be processed.
-
-    Returns:
-        None
-    """
-    file_url_md5 = hashlib.md5(file_url.encode("utf-8")).hexdigest()
-    set_asyncio_event_loop()
-    with RedisLock(f"perceptual:{file_url_md5}", redis_client=get_sync_redis_client()):
-        model_info = ModelInfo(**model_api_config)
-        with get_db_context() as db:
-            memory_perceptual_service = MemoryPerceptualService(db)
-            return asyncio.run(memory_perceptual_service.generate_perceptual_memory(
-                end_user_id,
-                model_info,
-                file_type,
-                file_url,
-                file_message,
-            ))
 
 
 # =============================================================================

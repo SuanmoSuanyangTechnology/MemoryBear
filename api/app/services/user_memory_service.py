@@ -1888,7 +1888,8 @@ async  def _extract_node_properties(label: str, properties: Dict[str, Any],node_
         "Chunk": ["content", "created_at"],
         "Statement": ["temporal_info", "stmt_type", "statement", "valid_at", "created_at", "caption","emotion_keywords","emotion_type","emotion_subject"],
         "ExtractedEntity": ["description", "name", "entity_type", "created_at", "caption","aliases","connect_strength"],
-        "MemorySummary": ["summary", "content", "created_at", "caption"]  # 添加 content 字段
+        "MemorySummary": ["summary", "content", "created_at", "caption"],  # 添加 content 字段
+        "Perceptual": ["file_name", "file_path", "file_type", "domain", "topic", "keywords", "summary"]
     }
     
     # 获取该节点类型的白名单字段

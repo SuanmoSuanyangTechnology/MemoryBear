@@ -31,7 +31,9 @@ from app.core.memory.models.graph_models import (
     ExtractedEntityNode,
     StatementChunkEdge,
     StatementEntityEdge,
-    StatementNode
+    StatementNode,
+    PerceptualEdge,
+    PerceptualNode
 )
 from app.core.memory.models.message_models import DialogData
 from app.core.memory.models.ontology_extraction_models import OntologyTypeList
@@ -170,9 +172,11 @@ class ExtractionOrchestrator:
         list[ChunkNode],
         list[StatementNode],
         list[ExtractedEntityNode],
+        list[PerceptualNode],
         list[StatementChunkEdge],
         list[StatementEntityEdge],
         list[EntityEntityEdge],
+        list[PerceptualEdge],
         dict
     ]:
         """
@@ -259,9 +263,11 @@ class ExtractionOrchestrator:
                 chunk_nodes,
                 statement_nodes,
                 entity_nodes,
+                perceptual_nodes,
                 statement_chunk_edges,
                 statement_entity_edges,
                 entity_entity_edges,
+                perceptual_edges
             ) = await self._create_nodes_and_edges(dialog_data_list)
 
             # 导出去重前的测试输入文档（试运行和正式模式都需要，用于生成结果汇总）
@@ -275,7 +281,16 @@ class ExtractionOrchestrator:
 
             # 注意：deduplication 消息已在创建节点和边完成后立即发送
 
-            result = await self._run_dedup_and_write_summary(
+            (
+                dialogue_nodes,
+                chunk_nodes,
+                statement_nodes,
+                entity_nodes,
+                statement_chunk_edges,
+                statement_entity_edges,
+                entity_entity_edges,
+                dialog_data_list,
+            ) = await self._run_dedup_and_write_summary(
                 dialogue_nodes,
                 chunk_nodes,
                 statement_nodes,
@@ -287,7 +302,18 @@ class ExtractionOrchestrator:
             )
 
             logger.info(f"知识提取流水线运行完成（{mode_str}）")
-            return result
+            return (
+                dialogue_nodes,
+                chunk_nodes,
+                statement_nodes,
+                entity_nodes,
+                perceptual_nodes,
+                statement_chunk_edges,
+                statement_entity_edges,
+                entity_entity_edges,
+                perceptual_edges,
+                dialog_data_list,
+            )
 
         except Exception as e:
             logger.error(f"知识提取流水线运行失败: {e}", exc_info=True)
@@ -1000,9 +1026,11 @@ class ExtractionOrchestrator:
         List[ChunkNode],
         List[StatementNode],
         List[ExtractedEntityNode],
+        List[PerceptualNode],
         List[StatementChunkEdge],
         List[StatementEntityEdge],
-        List[EntityEntityEdge]
+        List[EntityEntityEdge],
+        List[PerceptualEdge]
     ]:
         """
         创建图数据库节点和边
@@ -1026,6 +1054,8 @@ class ExtractionOrchestrator:
         statement_chunk_edges = []
         statement_entity_edges = []
         entity_entity_edges = []
+        perceptual_nodes = []
+        perceptual_edges = []
 
         # 用于去重的集合
         entity_id_set = set()
@@ -1069,6 +1099,46 @@ class ExtractionOrchestrator:
                     metadata=chunk.metadata,
                 )
                 chunk_nodes.append(chunk_node)
+                logger.error(f"chunk file: {chunk.files}")
+
+                for p, file_type in chunk.files:
+
+                    meta = p.meta_data or {}
+                    content_meta = meta.get("content", {})
+
+                    # 生成 summary embedding（如果有 embedder_client）
+                    summary_embedding = None
+                    if self.embedder_client and p.summary:
+                        try:
+                            summary_embedding = (await self.embedder_client.response([p.summary]))[0]
+                        except Exception as emb_err:
+                            print(f"Failed to embed perceptual summary: {emb_err}")
+
+                    perceptual = PerceptualNode(
+                        name=f"Perceptual_{p.id}",
+                        **{
+                        "id": str(p.id),
+                        "end_user_id": str(p.end_user_id),
+                        "perceptual_type": p.perceptual_type,
+                        "file_path": p.file_path or "",
+                        "file_name": p.file_name or "",
+                        "file_ext": p.file_ext or "",
+                        "summary": p.summary or "",
+                        "keywords": content_meta.get("keywords", []),
+                        "topic": content_meta.get("topic", ""),
+                        "domain": content_meta.get("domain", ""),
+                        "created_at": p.created_time.isoformat() if p.created_time else None,
+                        "file_type": file_type,
+                        "summary_embedding": summary_embedding,
+                    })
+                    perceptual_nodes.append(perceptual)
+                    perceptual_edges.append(PerceptualEdge(
+                        source=perceptual.id,
+                        target=chunk.id,
+                        end_user_id=dialog_data.end_user_id,
+                        run_id=dialog_data.run_id,
+                        created_at=dialog_data.created_at,
+                    ))
 
                 # 处理每个陈述句
                 for statement in chunk.statements:
@@ -1248,9 +1318,11 @@ class ExtractionOrchestrator:
             chunk_nodes,
             statement_nodes,
             entity_nodes,
+            perceptual_nodes,
             statement_chunk_edges,
             statement_entity_edges,
             entity_entity_edges,
+            perceptual_edges
         )
 
     async def _run_dedup_and_write_summary(

@@ -274,7 +274,6 @@ class MemoryAgentService:
             self,
             end_user_id: str,
             messages: list[dict],
-            file_messages: list[dict],
             config_id: Optional[uuid.UUID] | int,
             db: Session,
             storage_type: str,
@@ -287,7 +286,6 @@ class MemoryAgentService:
         Args:
             end_user_id: Group identifier (also used as end_user_id)
             messages: Message to write
-            files: Files to write
             config_id: Configuration ID from database
             db: SQLAlchemy database session
             storage_type: Storage type (neo4j or rag)
@@ -348,15 +346,15 @@ class MemoryAgentService:
             raise ValueError(error_msg)
 
         perceptual_serivce = MemoryPerceptualService(db)
-        file_content = []
-        for message in file_messages:
+        for message in messages:
+            message["file_content"] = []
             for file in message["files"]:
                 file_object = await perceptual_serivce.generate_perceptual_memory(
                     end_user_id=end_user_id,
                     memory_config=memory_config,
                     file=FileInput(**file)
                 )
-                file_content.append(file_object)
+                message["file_content"].append((file_object, file["type"]))
 
         message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
         try:
@@ -368,7 +366,6 @@ class MemoryAgentService:
                 await write_neo4j(
                     end_user_id=end_user_id,
                     messages=messages,
-                    file_content=file_content,
                     memory_config=memory_config,
                     ref_id='',
                     language=language
@@ -380,19 +377,23 @@ class MemoryAgentService:
                     if deleted:
                         logger.info(
                             f"Invalidated interest distribution cache: end_user_id={end_user_id}, language={lang}")
-                    return self.writer_messages_deal(
-                        "success",
-                        start_time,
-                        end_user_id,
-                        config_id,
-                        message_text,
-                        {
-                            "status": "success",
-                            "data": messages,
-                            "config_id": memory_config.config_id,
-                            "config_name": memory_config.config_name
-                        }
-                    )
+                for message in messages:
+                    message["file_content"] = [
+                        perceptual[0].file_path for perceptual in message["file_content"]
+                    ]
+                return self.writer_messages_deal(
+                    "success",
+                    start_time,
+                    end_user_id,
+                    config_id,
+                    message_text,
+                    {
+                        "status": "success",
+                        "data": messages,
+                        "config_id": memory_config.config_id,
+                        "config_name": memory_config.config_name
+                    }
+                )
         except Exception as e:
             # Ensure proper error handling and logging
             error_msg = f"Write operation failed: {str(e)}"
