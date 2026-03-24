@@ -278,7 +278,7 @@ class MemoryPerceptualService:
             files=[file]
         )
         if not file_message:
-            logger.warning(f"Unsupport file type {file}, model capability: {model_config.capability}")
+            business_logger.warning(f"Unsupported file type {file}, model capability: {model_config.capability}")
             return None
         file_message = file_message[0]
         try:
