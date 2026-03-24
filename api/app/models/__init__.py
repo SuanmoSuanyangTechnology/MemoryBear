@@ -16,6 +16,7 @@ from .agent_app_config_model import AgentConfig
 from .app_release_model import AppRelease
 from .memory_increment_model import MemoryIncrement
 from .end_user_model import EndUser
+from .user_alias_model import UserAlias
 from .appshare_model import AppShare
 from .release_share_model import ReleaseShare
 from .conversation_model import Conversation, Message
@@ -60,6 +61,7 @@ __all__ = [
     "AppRelease",
     "MemoryIncrement",
     "EndUser",
+    "UserAlias",
     "AppShare",
     "ReleaseShare",
     "Conversation",

@@ -361,29 +361,105 @@ class UserMemoryService:
                 if hasattr(original_value, 'timestamp'):
                     data[key] = UserMemoryService._datetime_to_timestamp(original_value)
         return data
-    
-    def update_end_user_profile(
+ # ======================== 用户别名及信息 ========================    
+    def get_user_alias(
         self,
         db: Session,
-        end_user_id: str,
-        profile_update: Any
+        user_alias_id: str
     ) -> Dict[str, Any]:
         """
-        更新终端用户的基本信息
+        查询单个用户别名记录
         
         Args:
             db: 数据库会话
-            end_user_id: 终端用户ID (UUID)
-            profile_update: 包含更新字段的 Pydantic 模型
+            user_alias_id: 用户别名记录ID (UUID)
             
         Returns:
             {
                 "success": bool,
-                "data": dict,  # 更新后的用户档案数据
+                "data": dict,
                 "error": Optional[str]
             }
         """
         try:
+            from app.models.user_alias_model import UserAlias
+            
+            # 转换为UUID并查询
+            alias_uuid = uuid.UUID(user_alias_id)
+            user_alias_record = db.query(UserAlias).filter(UserAlias.id == alias_uuid).first()
+            
+            if not user_alias_record:
+                logger.warning(f"用户别名记录不存在: user_alias_id={user_alias_id}")
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": "用户别名记录不存在"
+                }
+            
+            # 构建响应数据
+            from app.schemas.end_user_schema import UserAliasResponse
+            response_data = UserAliasResponse(
+                user_alias_id=user_alias_record.id,
+                end_user_id=user_alias_record.end_user_id,
+                other_name=user_alias_record.other_name,
+                aliases=user_alias_record.aliases,
+                meta_data=user_alias_record.meta_data,
+                created_at=user_alias_record.created_at,
+                updated_at=user_alias_record.updated_at
+            )
+            
+            logger.info(f"成功查询用户别名记录: user_alias_id={user_alias_id}")
+            
+            return {
+                "success": True,
+                "data": response_data.model_dump(),
+                "error": None
+            }
+            
+        except ValueError:
+            logger.error(f"无效的 user_alias_id 格式: {user_alias_id}")
+            return {
+                "success": False,
+                "data": None,
+                "error": "无效的用户别名记录ID格式"
+            }
+        except Exception as e:
+            logger.error(f"查询用户别名记录失败: user_alias_id={user_alias_id}, error={str(e)}")
+            return {
+                "success": False,
+                "data": None,
+                "error": str(e)
+            }
+    
+    def create_user_alias(
+        self,
+        db: Session,
+        end_user_id: str,
+        other_name: str,
+        aliases: List[str] = None,
+        meta_data: dict = None
+    ) -> Dict[str, Any]:
+        """
+        创建用户别名记录
+        
+        Args:
+            db: 数据库会话
+            end_user_id: 终端用户ID (UUID)
+            other_name: 用户名称
+            aliases: 别名列表
+            meta_data: 扩展信息
+            
+        Returns:
+            {
+                "success": bool,
+                "data": dict,
+                "error": Optional[str]
+            }
+        """
+        try:
+            from app.models.user_alias_model import UserAlias
+            from app.repositories.end_user_repository import EndUserRepository
+            
             # 转换为UUID并查询用户
             user_uuid = uuid.UUID(end_user_id)
             repo = EndUserRepository(db)
@@ -397,47 +473,34 @@ class UserMemoryService:
                     "error": "终端用户不存在"
                 }
             
-            # 获取更新数据（排除 end_user_id 字段）
-            update_data = profile_update.model_dump(exclude_unset=True, exclude={'end_user_id'})
-            
-            # 特殊处理 hire_date：如果提供了时间戳，转换为 DateTime
-            if 'hire_date' in update_data:
-                hire_date_timestamp = update_data['hire_date']
-                if hire_date_timestamp is not None:
-                    from app.core.api_key_utils import timestamp_to_datetime
-                    update_data['hire_date'] = timestamp_to_datetime(hire_date_timestamp)
-                # 如果是 None，保持 None（允许清空）
-            
-            # 更新字段
-            for field, value in update_data.items():
-                setattr(end_user, field, value)
-            
-            # 更新时间戳
-            end_user.updated_at = datetime.now()
-            end_user.updatetime_profile = datetime.now()
-            
-            # 提交更改
+            # 创建新的别名记录
+            new_alias = UserAlias(
+                end_user_id=user_uuid,
+                other_name=other_name,
+                aliases=aliases,
+                meta_data=meta_data
+            )
+            db.add(new_alias)
             db.commit()
-            db.refresh(end_user)
+            db.refresh(new_alias)
             
             # 构建响应数据
-            from app.schemas.end_user_schema import EndUserProfileResponse
-            profile_data = EndUserProfileResponse(
-                id=end_user.id,
-                other_name=end_user.other_name,
-                position=end_user.position,
-                department=end_user.department,
-                contact=end_user.contact,
-                phone=end_user.phone,
-                hire_date=end_user.hire_date,
-                updatetime_profile=end_user.updatetime_profile
+            from app.schemas.end_user_schema import UserAliasResponse
+            response_data = UserAliasResponse(
+                user_alias_id=new_alias.id,
+                end_user_id=new_alias.end_user_id,
+                other_name=new_alias.other_name,
+                aliases=new_alias.aliases,
+                meta_data=new_alias.meta_data,
+                created_at=new_alias.created_at,
+                updated_at=new_alias.updated_at
             )
             
-            logger.info(f"成功更新用户信息: end_user_id={end_user_id}, updated_fields={list(update_data.keys())}")
+            logger.info(f"成功创建用户别名记录: end_user_id={end_user_id}")
             
             return {
                 "success": True,
-                "data": self.convert_profile_to_dict_with_timestamp(profile_data),
+                "data": response_data.model_dump(),
                 "error": None
             }
             
@@ -450,7 +513,161 @@ class UserMemoryService:
             }
         except Exception as e:
             db.rollback()
-            logger.error(f"用户信息更新失败: end_user_id={end_user_id}, error={str(e)}")
+            logger.error(f"创建用户别名记录失败: end_user_id={end_user_id}, error={str(e)}")
+            return {
+                "success": False,
+                "data": None,
+                "error": str(e)
+            }
+    
+    def update_user_alias(
+        self,
+        db: Session,
+        user_alias_id: str,
+        update_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        更新用户别名记录
+        
+        Args:
+            db: 数据库会话
+            user_alias_id: 用户别名记录ID (UUID)
+            update_data: 更新数据字典
+            
+        Returns:
+            {
+                "success": bool,
+                "data": dict,
+                "error": Optional[str]
+            }
+        """
+        try:
+            from app.models.user_alias_model import UserAlias
+            
+            # 转换为UUID并查询
+            alias_uuid = uuid.UUID(user_alias_id)
+            user_alias_record = db.query(UserAlias).filter(UserAlias.id == alias_uuid).first()
+            
+            if not user_alias_record:
+                logger.warning(f"用户别名记录不存在: user_alias_id={user_alias_id}")
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": "用户别名记录不存在"
+                }
+            
+            # 更新字段
+            for field, value in update_data.items():
+                if hasattr(user_alias_record, field) and field != 'user_alias_id':
+                    setattr(user_alias_record, field, value)
+            
+            # 更新时间戳
+            user_alias_record.updated_at = datetime.now()
+            
+            # 提交更改
+            db.commit()
+            db.refresh(user_alias_record)
+            
+            # 构建响应数据
+            from app.schemas.end_user_schema import UserAliasResponse
+            response_data = UserAliasResponse(
+                user_alias_id=user_alias_record.id,
+                end_user_id=user_alias_record.end_user_id,
+                other_name=user_alias_record.other_name,
+                aliases=user_alias_record.aliases,
+                meta_data=user_alias_record.meta_data,
+                created_at=user_alias_record.created_at,
+                updated_at=user_alias_record.updated_at
+            )
+            
+            logger.info(f"成功更新用户别名记录: user_alias_id={user_alias_id}, updated_fields={list(update_data.keys())}")
+            
+            return {
+                "success": True,
+                "data": response_data.model_dump(),
+                "error": None
+            }
+            
+        except ValueError:
+            logger.error(f"无效的 user_alias_id 格式: {user_alias_id}")
+            return {
+                "success": False,
+                "data": None,
+                "error": "无效的用户别名记录ID格式"
+            }
+        except Exception as e:
+            db.rollback()
+            logger.error(f"更新用户别名记录失败: user_alias_id={user_alias_id}, error={str(e)}")
+            return {
+                "success": False,
+                "data": None,
+                "error": str(e)
+            }
+    
+    def delete_user_alias(
+        self,
+        db: Session,
+        user_alias_id: str
+    ) -> Dict[str, Any]:
+        """
+        删除用户别名记录
+        
+        Args:
+            db: 数据库会话
+            user_alias_id: 用户别名记录ID (UUID)
+            
+        Returns:
+            {
+                "success": bool,
+                "data": dict,
+                "error": Optional[str]
+            }
+        """
+        try:
+            from app.models.user_alias_model import UserAlias
+            
+            # 转换为UUID并查询
+            alias_uuid = uuid.UUID(user_alias_id)
+            user_alias_record = db.query(UserAlias).filter(UserAlias.id == alias_uuid).first()
+            
+            if not user_alias_record:
+                logger.warning(f"用户别名记录不存在: user_alias_id={user_alias_id}")
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": "用户别名记录不存在"
+                }
+            
+            # 删除记录
+            db.delete(user_alias_record)
+            db.commit()
+            
+            logger.info(f"成功删除用户别名记录: user_alias_id={user_alias_id}")
+            
+            return {
+                "success": True,
+                "data": {"user_alias_id": user_alias_id},
+                "error": None
+            }
+            
+        except ValueError:
+            logger.error(f"无效的 user_alias_id 格式: {user_alias_id}")
+            return {
+                "success": False,
+                "data": None,
+                "error": "无效的用户别名记录ID格式"
+            }
+        except Exception as e:
+            db.rollback()
+            logger.error(f"删除用户别名记录失败: user_alias_id={user_alias_id}, error={str(e)}")
+            return {
+                "success": False,
+                "data": None,
+                "error": str(e)
+            }
+        except Exception as e:
+            db.rollback()
+            logger.error(f"用户别名记录更新失败: user_alias_id={user_alias_id}, error={str(e)}")
             return {
                 "success": False,
                 "data": None,
