@@ -129,7 +129,7 @@ class AppChatService:
         )
 
         # 加载历史消息
-        history = self.conversation_service.get_conversation_history(
+        history = await self.conversation_service.get_conversation_history(
             conversation_id=conversation_id,
             max_history=10,
             current_provider=api_key_obj.provider,
@@ -332,7 +332,7 @@ class AppChatService:
             )
 
             # 加载历史消息
-            history = self.conversation_service.get_conversation_history(
+            history = await self.conversation_service.get_conversation_history(
                 conversation_id=conversation_id,
                 max_history=10,
                 current_provider=api_key_obj.provider,
