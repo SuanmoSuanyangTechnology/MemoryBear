@@ -1258,6 +1258,8 @@ export const zh = {
       bedrock: "Bedrock",
 
       is_vision: '支持视觉',
+      is_video: '支持视频',
+      is_audio: '支持音频',
       is_omni: '支持全模态',
       vision: '视觉',
       audio: '音频',
@@ -1496,7 +1498,7 @@ export const zh = {
       
       endUserProfile: '核心档案',
       editEndUserProfile: '编辑',
-      other_name: '姓名',
+      other_name: '名称',
       position: '职位',
       department: '部门',
       contact: '联系方式',

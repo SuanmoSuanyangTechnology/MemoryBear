@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-11 15:08:24
+ * @Last Modified time: 2026-03-24 18:23:31
  */
 /**
  * Custom Model Modal
@@ -41,7 +41,11 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
 
   useEffect(() => {
     if (isOmni) {
-      form.setFieldsValue({ is_vision: true })
+      form.setFieldsValue({
+        is_vision: true,
+        is_video: true,
+        is_audio: true
+      })
     }
   }, [isOmni])
 
@@ -66,6 +70,8 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         logo: model.logo && model.logo.startsWith('http') ? { url: model.logo, uid: model.logo, status: 'done', name: 'logo' } : undefined,
         is_omni,
         is_vision: capability?.includes('vision') || false,
+        is_video: capability?.includes('video') || false,
+        is_audio: capability?.includes('audio') || false,
       });
     } else {
       setIsEdit(false);
@@ -95,13 +101,27 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
     form
       .validateFields()
       .then((values) => {
-        const { logo, type, is_vision, is_omni, ...rest } = values;
+        const { logo, type, is_vision, is_video, is_audio, is_omni, ...rest } = values;
         const formData: CustomModelForm = {
           ...rest,
           type,
         }
         if (!['embedding', 'rerank'].includes(type as string)) {
-          formData.capability = is_omni ? ["vision", "audio"] : is_vision ? ['vision'] : []
+          let capability = is_omni ? ["vision", "audio", 'video'] : []
+
+          if (!is_omni) {
+            if (is_vision) {
+              capability.push('vision')
+            }
+            if (is_audio) {
+              capability.push('audio')
+            }
+            if (is_video) {
+              capability.push('video')
+            }
+          }
+
+          formData.capability = capability
           formData.is_omni = is_omni
         }
 
@@ -222,8 +242,14 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
             <Form.Item name="is_omni" valuePropName="checked" className="rb:mb-2!">
               <Checkbox>{t('modelNew.is_omni')}</Checkbox>
             </Form.Item>
-            <Form.Item name="is_vision" valuePropName="checked" className="rb:mb-0!">
+            <Form.Item name="is_vision" valuePropName="checked" className="rb:mb-2!">
               <Checkbox disabled={isOmni}>{t('modelNew.is_vision')}</Checkbox>
+            </Form.Item>
+            <Form.Item name="is_video" valuePropName="checked" className="rb:mb-2!">
+              <Checkbox disabled={isOmni}>{t('modelNew.is_video')}</Checkbox>
+            </Form.Item>
+            <Form.Item name="is_audio" valuePropName="checked" className="rb:mb-0!">
+              <Checkbox disabled={isOmni}>{t('modelNew.is_audio')}</Checkbox>
             </Form.Item>
           </>
         }

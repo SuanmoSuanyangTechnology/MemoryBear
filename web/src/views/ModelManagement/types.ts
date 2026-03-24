@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 20:21:45
+ * @Last Modified time: 2026-03-24 18:23:48
  */
 /**
  * Type definitions for Model Management
@@ -291,6 +291,8 @@ export interface CustomModelForm {
     api_base: string;
   }>
   is_vision?: boolean;
+  is_video?: boolean;
+  is_audio?: boolean;
   is_omni?: boolean;
   capability?: string[];
 }

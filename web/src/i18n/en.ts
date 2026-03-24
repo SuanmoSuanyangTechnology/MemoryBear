@@ -620,6 +620,8 @@ export const en = {
       bedrock: "Bedrock",
 
       is_vision: 'Vision Support',
+      is_video: 'Video Support',
+      is_audio: 'Audio Support',
       is_omni: 'Omni Support',
       vision: 'Vision',
       audio: 'Audio',
