@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 11:26:43
+ * @Last Modified time: 2026-03-24 15:01:52
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -17,6 +17,7 @@ import type { WorkflowConfig, NodeProperties, ChatVariable } from '../types';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
 import { useUser } from '@/store/user';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types'
+import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils'
 
 /**
  * Props for useWorkflowGraph hook
@@ -218,7 +219,6 @@ export const useWorkflowGraph = ({
         // Generate ports dynamically for if-else node based on cases
         if (type === 'if-else' && config.cases && Array.isArray(config.cases)) {
           const totalPorts = config.cases.length + 1; // IF/ELIF + ELSE
-          const newHeight = conditionNodeHeight + (totalPorts - 2) * conditionNodeItemHeight;
           
           const portItems: PortMetadata[] = [
             defaultPortItems[0],
@@ -230,7 +230,7 @@ export const useWorkflowGraph = ({
               id: `CASE${i + 1}`,
               args: {
                 x: nodeWidth,
-                y: portItemArgsY * i + conditionNodePortItemArgsY,
+                y: getConditionNodeCasePortY(config.cases, i),
               },
             });
           }
@@ -240,7 +240,7 @@ export const useWorkflowGraph = ({
             items: portItems
           };
           
-          nodeConfig.height = newHeight;
+          nodeConfig.height = calcConditionNodeTotalHeight(config.cases);
         }
         
         // Generate ports dynamically for question-classifier node based on categories

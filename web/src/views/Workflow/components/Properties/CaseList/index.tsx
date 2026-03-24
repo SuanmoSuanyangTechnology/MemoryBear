@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:24:53 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 14:24:57
+ * @Last Modified time: 2026-03-24 15:00:46
  */
 import { type FC } from 'react'
 import clsx from 'clsx'
@@ -12,9 +12,10 @@ import { Form, Button, Select, Space, Divider, InputNumber, type SelectProps, Fl
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import VariableSelect from '../VariableSelect'
 import Editor from '../../Editor'
-import { edgeAttrs, conditionNodeItemHeight, nodeWidth, portItemArgsY, conditionNodePortItemArgsY, conditionNodeHeight } from '../../../constant'
+import { edgeAttrs, nodeWidth } from '../../../constant'
 import RbButton from '@/components/RbButton';
 import RadioGroupBtn from '../RadioGroupBtn'
+import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../../../utils'
 
 interface CaseListProps {
   value?: Array<{ logical_operator: 'and' | 'or'; expressions: { left: string; operator: string; right: string; input_type?: string; }[] }>;
@@ -60,6 +61,16 @@ const CaseList: FC<CaseListProps> = ({
   const { t } = useTranslation();
   const form = Form.useFormInstance();
 
+  // Recalculate node height and port Y positions without rebuilding ports
+  const updateNodeLayout = (cases: any[]) => {
+    if (!selectedNode || !graphRef?.current) return;
+    selectedNode.prop('size', { width: nodeWidth, height: calcConditionNodeTotalHeight(cases) });
+    cases.forEach((_c: any, i: number) => {
+      selectedNode.portProp(`CASE${i + 1}`, 'args/y', getConditionNodeCasePortY(cases, i));
+    });
+    selectedNode.portProp(`CASE${cases.length + 1}`, 'args/y', getConditionNodeCasePortY(cases, cases.length));
+  };
+
   // Update node ports based on case count changes (add/remove cases)
   const updateNodePorts = (caseCount: number, removedCaseIndex?: number) => {
     if (!selectedNode || !graphRef?.current) return;
@@ -89,19 +100,10 @@ const CaseList: FC<CaseListProps> = ({
         selectedNode.removePort(port.id);
       }
     });
-    
-    // Calculate new node height: base height 88px + 30px for each additional port
-    const totalPorts = caseCount + 1; // IF/ELIF + ELSE
-    const newHeight = conditionNodeHeight + (totalPorts - 2) * conditionNodeItemHeight;
 
-    selectedNode.prop('size', { width: nodeWidth, height: newHeight })
+    const cases = form.getFieldValue(name) || [];
+    selectedNode.prop('size', { width: nodeWidth, height: calcConditionNodeTotalHeight(cases) });
 
-    // Update right port x position
-    currentPorts.forEach((port: any) => {
-      if (port.group === 'right' && port.args) {
-        selectedNode.portProp(port.id!, 'args/x', nodeWidth);
-      }
-    });
     // Add ELIF ports
     for (let i = 0; i < caseCount; i++) {
       selectedNode.addPort({
@@ -109,7 +111,7 @@ const CaseList: FC<CaseListProps> = ({
         group: 'right',
         args: {
           x: nodeWidth,
-          y: portItemArgsY * i + conditionNodePortItemArgsY,
+          y: getConditionNodeCasePortY(cases, i),
         },
       });
     }
@@ -120,7 +122,7 @@ const CaseList: FC<CaseListProps> = ({
       group: 'right',
       args: {
         x: nodeWidth,
-        y: portItemArgsY * caseCount + conditionNodePortItemArgsY,
+        y: getConditionNodeCasePortY(cases, caseCount),
       },
     });
     
@@ -351,7 +353,10 @@ const CaseList: FC<CaseListProps> = ({
                                   </div>
                                   <div
                                     className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
-                                    onClick={() => removeCondition(conditionField.name)}
+                                    onClick={() => {
+                                      removeCondition(conditionField.name);
+                                      setTimeout(() => updateNodeLayout(form.getFieldValue(name) || []), 100);
+                                    }}
                                   ></div>
                                 </Flex>
                               )
@@ -360,14 +365,17 @@ const CaseList: FC<CaseListProps> = ({
                           <Row>
                             <Col flex="1">
                               <Button
-                                onClick={() => addCondition({})}
+                                onClick={() => {
+                                  addCondition({});
+                                  setTimeout(() => updateNodeLayout(form.getFieldValue(name) || []), 100);
+                                }}
                                 className={clsx("rb:py-0! rb:px-1! rb:h-4.5! rb:rounded-sm! rb:text-[12px]!")}
                                 size="small"
                               >
                                 + {t('workflow.config.addCase')}
                               </Button>
                             </Col>
-                            <Col flex="70px">
+                            {caseFields.length > 1 && <Col flex="70px">
                               <RbButton 
                                 danger 
                                 className="rb:group rb:mr-5 rb:py-0! rb:px-1! rb:h-4.5! rb:rounded-sm! rb:text-[12px]! rb:gap-0!"
@@ -376,7 +384,7 @@ const CaseList: FC<CaseListProps> = ({
                               >
                                 {t('common.remove')}
                               </RbButton>
-                            </Col>
+                            </Col>}
                           </Row>
                         </Col>
                       </Row>
