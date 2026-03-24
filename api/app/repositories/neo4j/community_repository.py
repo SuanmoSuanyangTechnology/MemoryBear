@@ -24,6 +24,10 @@ from app.repositories.neo4j.cypher_queries import (
     CHECK_USER_HAS_COMMUNITIES,
     UPDATE_COMMUNITY_MEMBER_COUNT,
     UPDATE_COMMUNITY_METADATA,
+    GET_INCOMPLETE_COMMUNITIES,
+    GET_INCOMPLETE_COMMUNITIES_WITH_EMBEDDING,
+    CHECK_COMMUNITY_IS_COMPLETE,
+    CHECK_COMMUNITY_IS_COMPLETE_WITH_EMBEDDING,
     BATCH_UPDATE_COMMUNITY_METADATA,
 )
 
@@ -249,6 +253,31 @@ class CommunityRepository:
             logger.error(f"refresh_member_count failed: {e}")
             return 0
 
+    async def get_incomplete_communities(self, end_user_id: str, check_embedding: bool = False) -> List[str]:
+        """查询该用户下属性不完整的 Community 节点 ID 列表。
+
+        Args:
+            end_user_id: 用户 ID
+            check_embedding: 为 True 时额外检查 summary_embedding 是否缺失（仅当用户有 embedding 模型配置时传 True）
+        """
+        try:
+            query = GET_INCOMPLETE_COMMUNITIES_WITH_EMBEDDING if check_embedding else GET_INCOMPLETE_COMMUNITIES
+            result = await self.connector.execute_query(query, end_user_id=end_user_id)
+            return [row["community_id"] for row in result]
+        except Exception as e:
+            logger.error(f"get_incomplete_communities failed: {e}")
+            return []
+
+    async def is_community_complete(self, community_id: str, end_user_id: str, check_embedding: bool = False) -> bool:
+        """检查单个社区节点的属性是否完整。"""
+        try:
+            query = CHECK_COMMUNITY_IS_COMPLETE_WITH_EMBEDDING if check_embedding else CHECK_COMMUNITY_IS_COMPLETE
+            result = await self.connector.execute_query(query, community_id=community_id, end_user_id=end_user_id)
+            return result[0]["is_complete"] if result else False
+        except Exception as e:
+            logger.error(f"is_community_complete failed: {e}")
+            return False
+
     async def update_community_metadata(
         self,
         community_id: str,
@@ -258,7 +287,7 @@ class CommunityRepository:
         core_entities: List[str],
         summary_embedding: Optional[List[float]] = None,
     ) -> bool:
-        """更新社区的名称、摘要、核心实体列表和摘要向量。"""
+        """更新社区的名称、摘要、核心实体列表及 summary_embedding。"""
         try:
             result = await self.connector.execute_query(
                 UPDATE_COMMUNITY_METADATA,
@@ -271,7 +300,7 @@ class CommunityRepository:
             )
             return bool(result)
         except Exception as e:
-            logger.error(f"update_community_metadata failed: {e}")
+            logger.error(f"update_community_metadata failed: {e}", exc_info=True)
             return False
 
     async def batch_update_community_metadata(

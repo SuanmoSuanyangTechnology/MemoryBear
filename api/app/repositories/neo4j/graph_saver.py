@@ -169,7 +169,7 @@ async def save_dialog_and_statements_to_neo4j(
     """Save dialogue nodes, chunk nodes, statement nodes, entities, and all relationships to Neo4j using graph models.
 
     只负责数据写入，不触发聚类。聚类由调用方在写入成功后通过
-    schedule_clustering_after_write() 显式触发。
+    _trigger_clustering_sync() 显式触发。
 
     Args:
         dialogue_nodes: List of DialogueNode objects to save
@@ -336,16 +336,13 @@ async def save_dialog_and_statements_to_neo4j(
         return False
 
 
-def schedule_clustering_after_write(
+async def _trigger_clustering_sync(
         entity_nodes: List,
         llm_model_id: Optional[str] = None,
         embedding_model_id: Optional[str] = None,
 ) -> None:
     """
-    写入 Neo4j 成功后，调度后台聚类任务。
-
-    可通过环境变量 CLUSTERING_ENABLED=false 禁用（用于基准测试对比）。
-    使用 asyncio.create_task 异步触发，不阻塞写入响应。
+    同步等待聚类完成，避免与其他 LLM 任务并发冲突。
     """
     if not entity_nodes:
         return
@@ -357,9 +354,9 @@ def schedule_clustering_after_write(
 
     end_user_id = entity_nodes[0].end_user_id
     new_entity_ids = [e.id for e in entity_nodes]
-    logger.info(f"[Clustering] 准备触发聚类，实体数: {len(new_entity_ids)}, end_user_id: {end_user_id}")
-    asyncio.create_task(_trigger_clustering(new_entity_ids, end_user_id, llm_model_id=llm_model_id,
-                                            embedding_model_id=embedding_model_id))
+    logger.info(f"[Clustering] 准备触发聚类（同步），实体数: {len(new_entity_ids)}, end_user_id: {end_user_id}")
+    await _trigger_clustering(new_entity_ids, end_user_id, llm_model_id=llm_model_id,
+                              embedding_model_id=embedding_model_id)
 
 
 async def _trigger_clustering(

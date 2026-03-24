@@ -77,6 +77,7 @@ celery_app.conf.update(
 
     # Worker 设置 (per-worker settings are in docker-compose command line)
     worker_prefetch_multiplier=1,  # Don't hoard tasks, fairer distribution
+    worker_redirect_stdouts_level='INFO',  # stdout/print → INFO instead of WARNING
 
     # 结果过期时间
     result_expires=3600,  # 结果保存1小时

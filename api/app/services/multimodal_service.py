@@ -12,10 +12,12 @@ import base64
 import csv
 import io
 import json
+import zipfile
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 
 import PyPDF2
+import chardet
 import httpx
 import magic
 import openpyxl
@@ -39,12 +41,10 @@ PDF_MIME = ['application/pdf']
 DOC_MIME = [
     'application/msword',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/zip'
 ]
 XLSX_MIME = [
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'application/vnd.ms-excel',
-    'application/zip'
 ]
 CSV_MIME = ['text/csv', 'application/csv']
 JSON_MIME = ['application/json']
@@ -402,6 +402,71 @@ class MultimodalService:
         logger.info(f"成功处理 {len(result)}/{len(files)} 个文件，provider={self.provider}")
         return result
 
+    async def history_process_files(
+            self,
+            files: Optional[List[FileInput]],
+    ) -> List[Dict[str, Any]]:
+        """
+        处理文件列表，返回 LLM 可用的格式
+
+        Args:
+            files: 文件输入列表
+
+        Returns:
+            List[Dict]: LLM 可用的内容格式列表（根据 provider 返回不同格式）
+        """
+        if not files:
+            return []
+
+        # 获取对应的策略
+        # dashscope 的 omni 模型使用 OpenAI 兼容格式
+        if self.provider == "dashscope" and self.is_omni:
+            strategy_class = OpenAIFormatStrategy
+        else:
+            strategy_class = PROVIDER_STRATEGIES.get(self.provider)
+            if not strategy_class:
+                logger.warning(f"未找到 provider '{self.provider}' 的策略，使用默认策略")
+                strategy_class = DashScopeFormatStrategy
+
+        result = []
+        for idx, file in enumerate(files):
+            strategy = strategy_class(file)
+            if not file.url:
+                file.url = await self.get_file_url(file)
+            try:
+                if file.type == FileType.IMAGE and "vision" in self.capability:
+                    is_support, content = await self._process_image(file, strategy)
+                    result.append(content)
+                elif file.type == FileType.DOCUMENT:
+                    is_support, content = await self._process_document(file, strategy)
+                    result.append(content)
+                elif file.type == FileType.AUDIO and "audio" in self.capability:
+                    is_support, content = await self._process_audio(file, strategy)
+                    result.append(content)
+                elif file.type == FileType.VIDEO and "video" in self.capability:
+                    is_support, content = await self._process_video(file, strategy)
+                    result.append(content)
+                else:
+                    logger.warning(f"不支持的文件类型: {file.type}")
+            except Exception as e:
+                logger.error(
+                    f"处理文件失败",
+                    extra={
+                        "file_index": idx,
+                        "file_type": file.type,
+                        "error": str(e)
+                    },
+                    exc_info=True
+                )
+                # 继续处理其他文件，不中断整个流程
+                result.append({
+                    "type": "text",
+                    "text": f"[文件处理失败: {str(e)}]"
+                })
+
+        logger.info(f"成功处理 {len(result)}/{len(files)} 个文件，provider={self.provider}")
+        return result
+
     async def _process_image(self, file: FileInput, strategy) -> tuple[bool, Dict[str, Any]]:
         """
         处理图片文件
@@ -561,12 +626,12 @@ class MultimodalService:
                     file.set_content(file_content)
             file_mime_type = magic.from_buffer(file_content, mime=True)
             if file_mime_type in TEXT_MIME:
-                return file_content.decode("utf-8")
+                return self._decode_text_safe(file_content)
             elif file_mime_type in PDF_MIME:
                 return await self._extract_pdf_text(file_content)
-            elif file_mime_type in DOC_MIME and file.file_type.endswith(('docx', 'doc')):
+            elif self._is_word_file(file_content, file_mime_type):
                 return await self._extract_word_text(file_content)
-            elif file_mime_type in XLSX_MIME and file.file_type.endswith(("xlsx", "xls")):
+            elif self._is_excel_file(file_content, file_mime_type):
                 return await self._extract_xlsx_text(file_content)
             elif file_mime_type in CSV_MIME:
                 return await self._extract_csv_text(file_content)
@@ -595,51 +660,155 @@ class MultimodalService:
 
     @staticmethod
     async def _extract_word_text(file_content: bytes) -> str:
-        """提取 Word 文档文本"""
+        """提取 Word 文档文本（支持 .docx 和旧版 .doc）"""
+        # 先尝试 docx（ZIP 格式）
+        if file_content[:2] == b'PK':
+            try:
+                word_file = io.BytesIO(file_content)
+                doc = Document(word_file)
+                return '\n'.join(p.text for p in doc.paragraphs)
+            except Exception as e:
+                logger.error(f"提取 docx 文本失败: {e}")
+                return f"[docx 提取失败: {str(e)}]"
+
+        # 旧版 .doc（OLE2 格式）
         try:
-            word_file = io.BytesIO(file_content)
-            doc = Document(word_file)
-            text_parts = [paragraph.text for paragraph in doc.paragraphs]
-            return '\n'.join(text_parts)
+            import olefile
+            ole = olefile.OleFileIO(io.BytesIO(file_content))
+            if not ole.exists('WordDocument'):
+                return "[doc 提取失败: 未找到 WordDocument 流]"
+            # 读取 WordDocument 流，提取可见 ASCII/Unicode 文本
+            stream = ole.openstream('WordDocument').read()
+            # Word Binary Format: 文本在流中以 UTF-16-LE 编码存储
+            # 简单提取：过滤出可打印字符段
+            try:
+                text = stream.decode('utf-16-le', errors='ignore')
+            except Exception:
+                text = stream.decode('latin-1', errors='ignore')
+            # 过滤控制字符，保留可打印内容
+            import re
+            text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+            text = re.sub(r' +', ' ', text).strip()
+            ole.close()
+            return text
         except Exception as e:
-            logger.error(f"提取 Word 文本失败: {e}")
-            return f"[Word 提取失败: {str(e)}]"
+            logger.error(f"提取 doc 文本失败: {e}")
+            return f"[doc 提取失败: {str(e)}]"
 
     @staticmethod
     async def _extract_xlsx_text(file_content: bytes) -> str:
-        """提取 Excel 文本"""
+        """提取 Excel 文本（支持 .xlsx 和旧版 .xls）"""
+        # xlsx（ZIP 格式）
+        if file_content[:2] == b'PK':
+            try:
+                wb = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True, data_only=True)
+                parts = []
+                for sheet in wb.worksheets:
+                    parts.append(f"[Sheet: {sheet.title}]")
+                    for row in sheet.iter_rows(values_only=True):
+                        parts.append('\t'.join('' if v is None else str(v) for v in row))
+                return '\n'.join(parts)
+            except Exception as e:
+                logger.error(f"提取 xlsx 文本失败: {e}")
+                return f"[xlsx 提取失败: {str(e)}]"
+
+        # xls（OLE2/BIFF 格式）
         try:
-            wb = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True, data_only=True)
+            import xlrd
+            wb = xlrd.open_workbook(file_contents=file_content)
             parts = []
-            for sheet in wb.worksheets:
-                parts.append(f"[Sheet: {sheet.title}]")
-                for row in sheet.iter_rows(values_only=True):
-                    parts.append('\t'.join('' if v is None else str(v) for v in row))
+            for sheet in wb.sheets():
+                parts.append(f"[Sheet: {sheet.name}]")
+                for row_idx in range(sheet.nrows):
+                    parts.append('\t'.join(str(sheet.cell_value(row_idx, col)) for col in range(sheet.ncols)))
             return '\n'.join(parts)
         except Exception as e:
-            logger.error(f"提取 Excel 文本失败: {e}")
-            return f"[Excel 提取失败: {str(e)}]"
+            logger.error(f"提取 xls 文本失败: {e}")
+            return f"[xls 提取失败: {str(e)}]"
 
-    @staticmethod
-    async def _extract_csv_text(file_content: bytes) -> str:
+    async def _extract_csv_text(self, file_content: bytes) -> str:
         """提取 CSV 文本"""
         try:
-            text = file_content.decode('utf-8-sig')
+            text = self._decode_text_safe(file_content)
             reader = csv.reader(io.StringIO(text))
             return '\n'.join('\t'.join(row) for row in reader)
         except Exception as e:
             logger.error(f"提取 CSV 文本失败: {e}")
             return f"[CSV 提取失败: {str(e)}]"
 
-    @staticmethod
-    async def _extract_json_text(file_content: bytes) -> str:
+    async def _extract_json_text(self, file_content: bytes) -> str:
         """提取 JSON 文本"""
         try:
-            data = json.loads(file_content.decode('utf-8'))
+            text = self._decode_text_safe(file_content)
+            data = json.loads(text)
             return json.dumps(data, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"提取 JSON 文本失败: {e}")
             return f"[JSON 提取失败: {str(e)}]"
+
+    def _is_word_file(self, file_content: bytes, mime_type: str) -> bool:
+        """判断是不是 Word 文件（doc / docx），不依赖后缀"""
+        # 旧版 .doc
+        if mime_type == 'application/msword':
+            return True
+
+        # 新版 .docx（ZIP 内部包含 word/document.xml）
+        header = file_content[:4]
+        if header == b'PK\x03\x04':
+            try:
+                with zipfile.ZipFile(io.BytesIO(file_content)) as zf:
+                    return "word/document.xml" in zf.namelist()
+            except:
+                pass
+
+        return False
+
+    def _is_excel_file(self, file_content: bytes, mime_type: str) -> bool:
+        """判断是不是 Excel 文件（xls / xlsx），不依赖后缀"""
+        # 旧版 .xls
+        if mime_type == 'application/vnd.ms-excel':
+            return True
+
+        # 新版 .xlsx（ZIP 内部包含 xl/workbook.xml）
+        header = file_content[:4]
+        if header == b'PK\x03\x04':
+            try:
+                with zipfile.ZipFile(io.BytesIO(file_content)) as zf:
+                    return "xl/workbook.xml" in zf.namelist()
+            except:
+                pass
+
+        return False
+
+    @staticmethod
+    def _decode_text_safe(file_content: bytes) -> str:
+        """
+        【万能文本解码】
+        自动检测编码，支持 utf-8 / gbk / gb2312 / utf-8-sig / ascii 等
+        永远不报错，永远不乱码
+        """
+        if not file_content:
+            return ""
+
+        # 1. 自动检测文件编码
+        detect = chardet.detect(file_content)
+        encoding = detect.get("encoding") or "utf-8"
+        encoding = encoding.lower()
+
+        # 2. 兼容常见中文编码
+        compatible_encodings = ["utf-8", "gbk", "gb18030", "gb2312", "ascii", "latin-1"]
+
+        # 3. 按优先级尝试解码
+        for enc in [encoding] + compatible_encodings:
+            if not enc:
+                continue
+            try:
+                return file_content.decode(enc.strip())
+            except (UnicodeDecodeError, LookupError):
+                continue
+
+        # 终极兜底
+        return file_content.decode("utf-8", errors="replace")
 
 
 def get_multimodal_service(db: Session) -> MultimodalService:

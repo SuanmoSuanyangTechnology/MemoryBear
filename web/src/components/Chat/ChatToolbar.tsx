@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-17 14:22:25 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 15:55:13
+ * @Last Modified time: 2026-03-19 18:59:37
  */
 // Toolbar component for chat input area, supporting file upload, audio recording, and variable configuration
 import { useRef, forwardRef, useImperativeHandle, type ReactNode, useEffect } from 'react'
@@ -49,6 +49,7 @@ interface FormValues {
   memory?: boolean;
 }
 
+const max_file_count = 1;
 const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
   features,
   extra,
@@ -85,10 +86,18 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
 
   // Append newly uploaded file to the file list when upload is complete
   const fileChange = (file?: any) => {
-    if (file?.status !== 'done') return
-    const files = [...(queryValues?.files || []), file]
-    form.setFieldValue('files', files)
-    onFilesChange?.(files)
+    console.log('file', file)
+    const lastFiles = form.getFieldValue('files') || [];
+    const index = lastFiles.findIndex((item: any) => item.uid === file.uid)
+    if (index > -1) {
+      lastFiles[index] = file
+    } else {
+      lastFiles.push(file)
+    }
+    form.setFieldValue('files', [...lastFiles])
+    onFilesChange?.([...lastFiles])
+
+    console.log('lastFiles', lastFiles)
   }
 
   // Append recorded audio file to the file list and notify parent
@@ -128,8 +137,8 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
       key: 'url',
       label: t('memoryConversation.addRemoteFile'),
       onClick: () => {
-        if ((queryValues?.files?.length || 0) >= file_upload.max_file_count) {
-          messageApi.warning(t('common.fileNumTip', { num: file_upload.max_file_count }))
+        if ((queryValues?.files?.length || 0) >= max_file_count) {
+          messageApi.warning(t('common.fileNumTip', { num: max_file_count }))
           return
         }
         uploadFileListModalRef.current?.handleOpen()
@@ -145,7 +154,7 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
           onChange={fileChange}
           requestConfig={uploadRequestConfig}
           featureConfig={file_upload}
-          disabled={(queryValues?.files?.length || 0) >= file_upload.max_file_count}
+          disabled={(queryValues?.files?.length || 0) >= max_file_count}
         />
       )
     })
@@ -177,7 +186,7 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
         {file_upload?.audio_enabled && file_upload?.allowed_transfer_methods?.includes('local_file') && (
           <Flex align="center">
             <AudioRecorder
-              disabled={(queryValues?.files?.length || 0) >= file_upload.max_file_count}
+              disabled={(queryValues?.files?.length || 0) >= max_file_count}
               action={uploadAction}
               requestConfig={uploadRequestConfig}
               onRecordingComplete={handleRecordingComplete}

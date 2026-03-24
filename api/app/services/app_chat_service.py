@@ -118,28 +118,27 @@ class AppChatService:
 
         )
 
-        # 加载历史消息
-        messages = self.conversation_service.get_messages(
-            conversation_id=conversation_id,
-            limit=10
+        model_info = ModelInfo(
+            model_name=api_key_obj.model_name,
+            provider=api_key_obj.provider,
+            api_key=api_key_obj.api_key,
+            api_base=api_key_obj.api_base,
+            capability=api_key_obj.capability,
+            is_omni=api_key_obj.is_omni,
+            model_type=ModelType.LLM
         )
-        history = [
-            {"role": msg.role, "content": msg.content}
-            for msg in messages
-        ]
+
+        # 加载历史消息
+        history = await self.conversation_service.get_conversation_history(
+            conversation_id=conversation_id,
+            max_history=10,
+            current_provider=api_key_obj.provider,
+            current_is_omni=api_key_obj.is_omni
+        )
 
         # 处理多模态文件
         processed_files = None
         if files:
-            model_info = ModelInfo(
-                model_name=api_key_obj.model_name,
-                provider=api_key_obj.provider,
-                api_key=api_key_obj.api_key,
-                api_base=api_key_obj.api_base,
-                capability=api_key_obj.capability,
-                is_omni=api_key_obj.is_omni,
-                model_type=ModelType.LLM
-            )
             multimodal_service = MultimodalService(self.db, model_info)
             processed_files = await multimodal_service.process_files(files)
             logger.info(f"处理了 {len(processed_files)} 个文件")
@@ -180,7 +179,8 @@ class AppChatService:
 
         # 构建用户消息内容（含多模态文件）
         human_meta = {
-            "files": []
+            "files": [],
+            "history_files": {}
         }
         assistant_meta = {
             "model": api_key_obj.model_name,
@@ -194,6 +194,13 @@ class AppChatService:
                     "type": f.type,
                     "url": f.url
                 })
+
+        if processed_files:
+            human_meta["history_files"] = {
+                "content": processed_files,
+                "provider": api_key_obj.provider,
+                "is_omni": api_key_obj.is_omni
+            }
 
         # 保存消息
         if audio_url:
@@ -225,6 +232,7 @@ class AppChatService:
             "suggested_questions": suggested_questions,
             "citations": self.agent_service._filter_citations(features_config, result.get("citations", [])),
             "audio_url": audio_url,
+            "audio_status": "pending"
         }
 
     async def agnet_chat_stream(
@@ -313,31 +321,27 @@ class AppChatService:
                 streaming=True
             )
 
+            model_info = ModelInfo(
+                model_name=api_key_obj.model_name,
+                provider=api_key_obj.provider,
+                api_key=api_key_obj.api_key,
+                api_base=api_key_obj.api_base,
+                capability=api_key_obj.capability,
+                is_omni=api_key_obj.is_omni,
+                model_type=ModelType.LLM
+            )
+
             # 加载历史消息
-            history = []
-            memory_config = {"enabled": True, 'max_history': 10}
-            if memory_config.get("enabled"):
-                messages = self.conversation_service.get_messages(
-                    conversation_id=conversation_id,
-                    limit=memory_config.get("max_history", 10)
-                )
-                history = [
-                    {"role": msg.role, "content": msg.content}
-                    for msg in messages
-                ]
+            history = await self.conversation_service.get_conversation_history(
+                conversation_id=conversation_id,
+                max_history=10,
+                current_provider=api_key_obj.provider,
+                current_is_omni=api_key_obj.is_omni
+            )
 
             # 处理多模态文件
             processed_files = None
             if files:
-                model_info = ModelInfo(
-                    model_name=api_key_obj.model_name,
-                    provider=api_key_obj.provider,
-                    api_key=api_key_obj.api_key,
-                    api_base=api_key_obj.api_base,
-                    capability=api_key_obj.capability,
-                    is_omni=api_key_obj.is_omni,
-                    model_type=ModelType.LLM
-                )
                 multimodal_service = MultimodalService(self.db, model_info)
                 processed_files = await multimodal_service.process_files(files)
                 logger.info(f"处理了 {len(processed_files)} 个文件")
@@ -347,8 +351,14 @@ class AppChatService:
             total_tokens = 0
 
             text_queue: asyncio.Queue = asyncio.Queue()
+            api_key_config = {
+                "model_name": api_key_obj.model_name,
+                "api_key": api_key_obj.api_key,
+                "api_base": api_key_obj.api_base,
+                "provider": api_key_obj.provider,
+            }
             stream_audio_url, tts_task = await self.agent_service._generate_tts_streaming(
-                features_config, api_key_obj,
+                features_config, api_key_config,
                 text_queue=text_queue,
                 tenant_id=tenant_id, workspace_id=workspace_id
             )
@@ -378,7 +388,7 @@ class AppChatService:
             elapsed_time = time.time() - start_time
             ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
 
-            # 发送结束事件（包含 suggested_questions、tts、citations）
+            # 发送结束事件（包含 suggested_questions、tts、audio_status、citations）
             end_data: dict = {"elapsed_time": elapsed_time, "message_length": len(full_content), "error": None}
             sq_config = features_config.get("suggested_questions_after_answer", {})
             if isinstance(sq_config, dict) and sq_config.get("enabled"):
@@ -388,11 +398,23 @@ class AppChatService:
                      "api_base": api_key_obj.api_base}, {}
                 )
             end_data["audio_url"] = stream_audio_url
+            # 检查TTS是否已完成（非阻塞，不取消任务）
+            audio_status = "pending"
+            if tts_task is not None and tts_task.done():
+                # 任务已完成，检查是否有异常
+                try:
+                    tts_task.result()
+                    audio_status = "completed"
+                except Exception as e:
+                    logger.warning(f"TTS任务异常: {e}")
+                    audio_status = "failed"
+            end_data["audio_status"] = audio_status if stream_audio_url else None
             end_data["citations"] = self.agent_service._filter_citations(features_config, [])
 
             # 保存消息
             human_meta = {
-                "files":[]
+                "files":[],
+                "history_files": {}
             }
             assistant_meta = {
                 "model": api_key_obj.model_name,
@@ -402,11 +424,16 @@ class AppChatService:
 
             if files:
                 for f in files:
-                    # url = await MultimodalService(self.db).get_file_url(f)
                     human_meta["files"].append({
                         "type": f.type,
                         "url": f.url
                     })
+            if processed_files:
+                human_meta["history_files"] = {
+                    "content": processed_files,
+                    "provider": api_key_obj.provider,
+                    "is_omni": api_key_obj.is_omni
+                }
 
             if stream_audio_url:
                 assistant_meta["audio_url"] = stream_audio_url

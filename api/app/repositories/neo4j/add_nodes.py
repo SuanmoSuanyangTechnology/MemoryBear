@@ -1,13 +1,13 @@
+import logging
 from typing import List, Optional
 
-from app.core.logging_config import get_logger
 from app.core.memory.models.graph_models import DialogueNode, StatementNode, ChunkNode, MemorySummaryNode
 from app.repositories.neo4j.cypher_queries import DIALOGUE_NODE_SAVE, STATEMENT_NODE_SAVE, CHUNK_NODE_SAVE, \
     MEMORY_SUMMARY_NODE_SAVE
 # 使用新的仓储层
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 async def delete_all_nodes(end_user_id: str, connector: Neo4jConnector):
@@ -57,7 +57,7 @@ async def add_dialogue_nodes(dialogues: List[DialogueNode], connector: Neo4jConn
         return created_uuids
 
     except Exception as e:
-        logger.info(f"Error creating dialogue nodes: {e}")
+        logger.error(f"Error creating dialogue nodes: {e}")
         return None
 
 
@@ -129,7 +129,7 @@ async def add_statement_nodes(statements: List[StatementNode], connector: Neo4jC
         return created_uuids
 
     except Exception as e:
-        logger.info(f"Error creating statement nodes: {e}")
+        logger.error(f"Error creating statement nodes: {e}")
         return None
 
 
@@ -181,7 +181,7 @@ async def add_chunk_nodes(chunks: List[ChunkNode], connector: Neo4jConnector) ->
         return created_uuids
 
     except Exception as e:
-        logger.info(f"Error creating chunk nodes: {e}")
+        logger.error(f"Error creating chunk nodes: {e}")
         return None
 
 
@@ -228,5 +228,5 @@ async def add_memory_summary_nodes(
         logger.info(f"Successfully saved {len(created_ids)} MemorySummary nodes to Neo4j")
         return created_ids
     except Exception as e:
-        logger.info(f"Failed to save MemorySummary nodes to Neo4j: {e}")
+        logger.error(f"Failed to save MemorySummary nodes to Neo4j: {e}")
         return None

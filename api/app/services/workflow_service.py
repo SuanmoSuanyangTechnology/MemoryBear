@@ -57,6 +57,7 @@ class WorkflowService:
             edges: list[dict[str, Any]],
             variables: list[dict[str, Any]] | None = None,
             execution_config: dict[str, Any] | None = None,
+            features: dict[str, Any] | None = None,
             triggers: list[dict[str, Any]] | None = None,
             validate: bool = True
     ) -> WorkflowConfig:
@@ -68,6 +69,7 @@ class WorkflowService:
             edges: 边列表
             variables: 变量列表
             execution_config: 执行配置
+            features: 功能特性
             triggers: 触发器列表
             validate: 是否验证配置
 
@@ -83,6 +85,7 @@ class WorkflowService:
             "edges": edges,
             "variables": variables or [],
             "execution_config": execution_config or {},
+            "features": features or {},
             "triggers": triggers or []
         }
 
@@ -103,6 +106,7 @@ class WorkflowService:
             edges=edges,
             variables=variables,
             execution_config=execution_config,
+            features=features,
             triggers=triggers
         )
 
