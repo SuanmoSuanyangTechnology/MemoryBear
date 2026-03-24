@@ -96,6 +96,15 @@ The following shows type inheritance relationships (Child → Parent → Grandpa
 {% endif %}
   * Include common alternative names, abbreviations and full names
   * If no aliases exist, use empty array: []
+
+  **姓名别名识别规则（Name Alias Recognition）：**
+  * 当前对话的用户实体 name 固定为"用户"，不得使用用户透露的真实姓名作为 name
+  * 自我称呼模式：用户说"我的名字是X"、"我叫X" → X 加入 aliases（name 保持为"用户"）
+  * 昵称/小名模式：识别"小名"、"昵称"、"英文名"、"网名"等关键词后的称呼 → 加入 aliases
+  * 他人称呼模式：识别"同事叫我X"、"朋友叫我X"、"大家叫我X" → X 加入 aliases
+  * 同一实体的多个称呼应合并到同一 Entity 的 aliases 列表中
+  * aliases 中不应包含与 name 完全相同的字符串
+  * **严禁将已加入某实体 aliases 的词再单独抽取为另一个独立实体**：若某个词已作为别名归属于"用户"实体，则不得再将该词作为独立 Entity 的 name 出现在 entities 列表中
 - Exclude lengthy quotes, calendar dates, temporal ranges, and temporal expressions
 - For numeric values: extract as separate entities (instance_of: 'Numeric', name: units, numeric_value: value)
   Example: £30 → name: 'GBP', numeric_value: 30, instance_of: 'Numeric'
@@ -205,6 +214,15 @@ Output:
   "triplets": [],
   "entities": [
     {"entity_idx": 0, "name": "三脚架", "type": "Equipment", "description": "摄影器材配件", "example": "", "aliases": ["相机三脚架"], "is_explicit_memory": false}
+  ]
+}
+
+**Example 4 (姓名别名识别 - Chinese):** "我的名字是乐力齐，我的小名是齐齐，同事们都叫我小乐"
+Output:
+{
+  "triplets": [],
+  "entities": [
+    {"entity_idx": 0, "name": "用户", "type": "Person", "description": "用户本人，有多个称呼", "example": "", "aliases": ["乐力齐", "齐齐", "小乐"], "is_explicit_memory": false}
   ]
 }
 {% endif %}

@@ -1,6 +1,6 @@
 import uuid
 import datetime
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, Field
 from pydantic import ConfigDict
 
@@ -49,6 +49,7 @@ class EndUserProfileUpdate(BaseModel):
     """终端用户基本信息更新请求模型"""
     end_user_id: str = Field(description="终端用户ID")
     other_name: Optional[str] = Field(description="其他名称", default="")
+    aliases: Optional[List[str]] = Field(description="别名列表", default=None)
     position: Optional[str] = Field(description="职位", default=None)
     department: Optional[str] = Field(description="部门", default=None)
     contact: Optional[str] = Field(description="联系方式", default=None)

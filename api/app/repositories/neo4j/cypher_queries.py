@@ -336,6 +336,61 @@ ORDER BY score DESC
 LIMIT $limit
 """
 
+SEARCH_ENTITIES_BY_NAME_OR_ALIAS = """
+CALL db.index.fulltext.queryNodes("entitiesFulltext", $q) YIELD node AS e, score
+WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
+OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
+RETURN e.id AS id,
+       e.name AS name,
+       e.end_user_id AS end_user_id,
+       e.entity_type AS entity_type,
+       e.created_at AS created_at,
+       e.expired_at AS expired_at,
+       e.entity_idx AS entity_idx,
+       e.statement_id AS statement_id,
+       e.description AS description,
+       e.aliases AS aliases,
+       e.name_embedding AS name_embedding,
+       e.connect_strength AS connect_strength,
+       collect(DISTINCT s.id) AS statement_ids,
+       collect(DISTINCT c.id) AS chunk_ids,
+       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
+       COALESCE(e.importance_score, 0.5) AS importance_score,
+       e.last_access_time AS last_access_time,
+       COALESCE(e.access_count, 0) AS access_count,
+       score
+UNION
+MATCH (e:ExtractedEntity)
+WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
+  AND e.aliases IS NOT NULL
+  AND ANY(alias IN e.aliases WHERE toLower(alias) CONTAINS toLower($q))
+OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
+RETURN e.id AS id,
+       e.name AS name,
+       e.end_user_id AS end_user_id,
+       e.entity_type AS entity_type,
+       e.created_at AS created_at,
+       e.expired_at AS expired_at,
+       e.entity_idx AS entity_idx,
+       e.statement_id AS statement_id,
+       e.description AS description,
+       e.aliases AS aliases,
+       e.name_embedding AS name_embedding,
+       e.connect_strength AS connect_strength,
+       collect(DISTINCT s.id) AS statement_ids,
+       collect(DISTINCT c.id) AS chunk_ids,
+       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
+       COALESCE(e.importance_score, 0.5) AS importance_score,
+       e.last_access_time AS last_access_time,
+       COALESCE(e.access_count, 0) AS access_count,
+       0.8 AS score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+
 SEARCH_CHUNKS_BY_CONTENT = """
 CALL db.index.fulltext.queryNodes("chunksFulltext", $q) YIELD node AS c, score
 WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
