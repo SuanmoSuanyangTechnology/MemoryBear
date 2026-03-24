@@ -52,16 +52,20 @@ def _validate_config_id(config_id, db: Session = None):
                 field_name="config_id",
                 invalid_value=config_id,
             )
-        # 如果提供了数据库会话，尝试通过 user_id 查询 config_id
+        # 如果提供了数据库会话，尝试通过 config_id_old 查询 config_id
         if db is not None:
-            # 查询 user_id 匹配的记录
-            stmt = select(MemoryConfigModel).where(MemoryConfigModel.config_id_old == str(config_id))
+            # 查询 config_id_old 匹配的记录
+            stmt = select(MemoryConfigModel).where(MemoryConfigModel.config_id_old == config_id)
             result = db.execute(stmt).scalars().first()
             if result:
-                logger.info(f"Found config_id {result.config_id} for user_id {config_id}")
+                logger.info(f"Found config_id {result.config_id} for config_id_old {config_id}")
                 return result.config_id
-
-        return config_id
+        
+        raise InvalidConfigError(
+            f"未找到 config_id_old={config_id} 对应的配置",
+            field_name="config_id",
+            invalid_value=config_id,
+        )
 
     if isinstance(config_id, str):
         config_id_stripped = config_id.strip()
@@ -84,15 +88,19 @@ def _validate_config_id(config_id, db: Session = None):
 
             # 如果提供了数据库会话，尝试通过 user_id 查询 config_id
             if db is not None:
-                # 查询 user_id 匹配的记录
-                stmt = select(MemoryConfigModel).where(MemoryConfigModel.user_id == str(parsed_id))
+                # 查询 config_id_old 匹配的记录
+                stmt = select(MemoryConfigModel).where(MemoryConfigModel.config_id_old == parsed_id)
                 result = db.execute(stmt).scalars().first()
 
                 if result:
-                    logger.info(f"Found config_id {result.config_id} for user_id {parsed_id}")
+                    logger.info(f"Found config_id {result.config_id} for config_id_old {parsed_id}")
                     return result.config_id
-
-            return parsed_id
+            
+            raise InvalidConfigError(
+                f"未找到 config_id_old={parsed_id} 对应的配置",
+                field_name="config_id",
+                invalid_value=config_id,
+            )
         except ValueError:
             raise InvalidConfigError(
                 f"Invalid configuration ID format: '{config_id}' (must be UUID or positive integer)",
@@ -869,6 +877,23 @@ class MemoryConfigService:
             logger.warning(f"不支持的应用类型，无法提取记忆配置: app_type={app_type}")
             return None, False
 
+    def _resolve_config_id_old(self, config_id_old: int) -> Optional[uuid.UUID]:
+        """通过 config_id_old 查询对应的 UUID config_id。
+
+        Args:
+            config_id_old: 旧格式的整数配置ID
+
+        Returns:
+            对应的 UUID config_id，未找到返回 None
+        """
+        from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+        result = self.db.query(MemoryConfigModel).filter(
+            MemoryConfigModel.config_id_old == config_id_old
+        ).first()
+        if result:
+            return result.config_id
+        return None
+
     def _extract_memory_config_id_from_agent(
             self,
             config: dict
@@ -900,10 +925,11 @@ class MemoryConfigService:
                 elif isinstance(memory_value, str):
                     # Check if it's a numeric string (legacy int format)
                     if memory_value.isdigit():
-                        logger.warning(
-                            f"Agent 配置中 memory_config_id 为旧格式 int 字符串，将使用工作空间默认配置: "
-                            f"value={memory_value}"
-                        )
+                        resolved = self._resolve_config_id_old(int(memory_value))
+                        if resolved:
+                            logger.info(f"Resolved legacy config_id_old={memory_value} to config_id={resolved}")
+                            return resolved, False
+                        logger.warning(f"未找到 config_id_old={memory_value} 对应的配置，将使用工作空间默认配置")
                         return None, True
                     try:
                         return uuid.UUID(memory_value), False
@@ -911,11 +937,11 @@ class MemoryConfigService:
                         logger.warning(f"Invalid UUID string: {memory_value}")
                         return None, False
                 elif isinstance(memory_value, int):
-                    # 旧数据存储为 int，需要回退到工作空间默认配置
-                    logger.warning(
-                        f"Agent 配置中 memory_config_id 为旧格式 int，将使用工作空间默认配置: "
-                        f"value={memory_value}"
-                    )
+                    resolved = self._resolve_config_id_old(memory_value)
+                    if resolved:
+                        logger.info(f"Resolved legacy config_id_old={memory_value} to config_id={resolved}")
+                        return resolved, False
+                    logger.warning(f"未找到 config_id_old={memory_value} 对应的配置，将使用工作空间默认配置")
                     return None, True
                 else:
                     logger.warning(
@@ -963,10 +989,16 @@ class MemoryConfigService:
                         elif isinstance(config_id, str):
                             return uuid.UUID(config_id), False
                         elif isinstance(config_id, int):
-                            # 旧数据存储为 int，需要回退到工作空间默认配置
+                            resolved = self._resolve_config_id_old(config_id)
+                            if resolved:
+                                logger.info(
+                                    f"Resolved workflow legacy config_id_old={config_id} to config_id={resolved}: "
+                                    f"node_id={node.get('id')}, node_type={node_type}"
+                                )
+                                return resolved, False
                             logger.warning(
-                                f"工作流记忆节点 config_id 为旧格式 int，将使用工作空间默认配置: "
-                                f"node_id={node.get('id')}, node_type={node_type}, value={config_id}"
+                                f"未找到工作流记忆节点 config_id_old={config_id} 对应的配置，将使用工作空间默认配置: "
+                                f"node_id={node.get('id')}, node_type={node_type}"
                             )
                             return None, True
                         else:
