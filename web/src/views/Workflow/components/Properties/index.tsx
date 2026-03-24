@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 11:25:59
+ * @Last Modified time: 2026-03-24 16:33:32
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -315,8 +315,12 @@ const Properties: FC<PropertiesProps> = ({
 
       return filteredList;
     }
-    if (nodeType === 'knowledge-retrieval' || nodeType === 'parameter-extractor' && key !== 'prompt' || nodeType === 'memory-read' || nodeType === 'memory-write' || nodeType === 'question-classifier') {
+    if (nodeType === 'knowledge-retrieval' || nodeType === 'parameter-extractor' && key !== 'prompt' || nodeType === 'memory-read' || nodeType === 'question-classifier') {
       let filteredList = addParentIterationVars(variableList).filter(variable => variable.dataType === 'string');
+      return filteredList;
+    }
+    if (nodeType === 'memory-write') {
+      let filteredList = addParentIterationVars(variableList).filter(variable => variable.dataType === 'string' || variable.dataType.includes('file'));
       return filteredList;
     }
     if (nodeType === 'parameter-extractor' && key === 'prompt') {
