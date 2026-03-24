@@ -19,7 +19,7 @@ class EndUserInfoCreate(EndUserInfoBase):
 
 class EndUserInfoUpdate(BaseModel):
     """更新终端用户信息请求模型"""
-    end_user_info_id: str = Field(description="终端用户信息记录ID")
+    end_user_id: str = Field(description="终端用户ID")
     other_name: Optional[str] = Field(description="用户名称", default=None)
     aliases: Optional[List[str]] = Field(description="用户别名列表", default=None)
     meta_data: Optional[Dict[str, Any]] = Field(description="用户相关的扩展信息", default=None)
