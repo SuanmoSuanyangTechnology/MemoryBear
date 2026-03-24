@@ -81,6 +81,12 @@ class ModelConfig(ModelConfigBase):
     updated_at: datetime.datetime
     api_keys: List["ModelApiKey"] = []
 
+    @staticmethod
+    def mask_api_key(key: str, prefix: int = 4, suffix: int = 4) -> str:
+        if not key or len(key) <= prefix + suffix:
+            return "*" * len(key)
+        return key[:prefix] + "*" * (len(key) - prefix - suffix) + key[-suffix:]
+
     @field_validator("api_keys", mode="after")
     @classmethod
     def filter_active_api_keys(cls, api_keys: List["ModelApiKey"]) -> List["ModelApiKey"]:
@@ -89,6 +95,15 @@ class ModelConfig(ModelConfigBase):
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime | None):
         return int(dt.timestamp() * 1000) if dt else None
+
+    @field_serializer("api_keys", when_used="json")
+    def _serialize_api_keys(self, api_keys: List["ModelApiKey"]):
+        result = []
+        for api_key in api_keys:
+            data = api_key.model_dump()
+            data["api_key"] = self.mask_api_key(api_key.api_key)
+            result.append(data)
+        return result
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
@@ -165,20 +180,20 @@ class ModelApiKey(ModelApiKeyBase):
                 if hasattr(self.model_configs, '__iter__') and not isinstance(self.model_configs, dict):
                     self.model_config_ids = [
                         mc.id for mc in self.model_configs
-                        if hasattr(mc, 'id') 
-                        and not getattr(mc, 'is_composite', False)
-                        and getattr(mc, 'name', None) == self.model_name
+                        if hasattr(mc, 'id')
+                           and not getattr(mc, 'is_composite', False)
+                           and getattr(mc, 'name', None) == self.model_name
                     ]
                 # 情况2：字典列表
                 elif isinstance(self.model_configs, list):
                     self.model_config_ids = [
                         mc['id'] if isinstance(mc, dict) else mc.id
                         for mc in self.model_configs
-                        if ((isinstance(mc, dict) 
-                             and 'id' in mc 
+                        if ((isinstance(mc, dict)
+                             and 'id' in mc
                              and not mc.get('is_composite', False)
-                             and mc.get('name') == self.model_name) or 
-                            (hasattr(mc, 'id') 
+                             and mc.get('name') == self.model_name) or
+                            (hasattr(mc, 'id')
                              and not getattr(mc, 'is_composite', False)
                              and getattr(mc, 'name', None) == self.model_name))
                     ]
@@ -193,11 +208,10 @@ class ModelApiKey(ModelApiKeyBase):
         validate_assignment=True  # 确保赋值触发校验
     )
 
-
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
-    
+
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
         return int(dt.timestamp() * 1000) if dt else None
@@ -211,6 +225,7 @@ class ModelConfigQuery(BaseModel):
     """模型配置查询Schema"""
     type: Optional[List[ModelType]] = Field(None, description="模型类型筛选（支持多个）")
     provider: Optional[ModelProvider] = Field(None, description="提供商筛选(通过API Key)")
+    capability: Optional[List[str]] = Field(None, description="能力筛选（支持多个）")
     is_active: Optional[bool] = Field(None, description="激活状态筛选")
     is_public: Optional[bool] = Field(None, description="公开状态筛选")
     search: Optional[str] = Field(None, description="搜索关键词", max_length=255)
@@ -227,6 +242,7 @@ class ModelConfigQueryNew(BaseModel):
     is_public: Optional[bool] = Field(None, description="公开状态筛选")
     is_composite: Optional[bool] = Field(None, description="组合模型筛选")
     search: Optional[str] = Field(None, description="搜索关键词", max_length=255)
+
 
 class ModelMarketplace(BaseModel):
     """模型广场响应Schema"""
@@ -304,7 +320,7 @@ class ModelBaseUpdate(BaseModel):
 class ModelBase(BaseModel):
     """基础模型Schema"""
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: uuid.UUID
     name: str
     type: str
@@ -327,6 +343,7 @@ class ModelBaseQuery(BaseModel):
     is_deprecated: Optional[bool] = Field(None, description="是否弃用")
     search: Optional[str] = Field(None, description="搜索关键词", max_length=255)
 
+
 class ModelInfo(BaseModel):
     """模型信息Schema"""
     model_name: str = Field(..., description="模型名称")
@@ -336,4 +353,3 @@ class ModelInfo(BaseModel):
     is_omni: bool = Field(default=False, description="是否为omni模型")
     model_type: ModelType = Field(..., description="模型类型")
     capability: List[str] = Field(default_factory=list, description="模型能力列表")
-

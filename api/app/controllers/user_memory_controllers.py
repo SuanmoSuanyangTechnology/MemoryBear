@@ -5,7 +5,7 @@
 from typing import Optional
 import datetime
 from sqlalchemy.orm import Session
-from fastapi import APIRouter, Depends,Header
+from fastapi import APIRouter, Depends, Header
 
 from app.db import get_db
 from app.core.language_utils import get_language_from_header
@@ -19,7 +19,7 @@ from app.services.user_memory_service import (
     analytics_graph_data,
     analytics_community_graph_data,
 )
-from app.services.memory_entity_relationship_service import MemoryEntityService,MemoryEmotion,MemoryInteraction
+from app.services.memory_entity_relationship_service import MemoryEntityService, MemoryEmotion, MemoryInteraction
 from app.schemas.response_schema import ApiResponse
 from app.schemas.memory_storage_schema import GenerateCacheRequest
 from app.repositories.workspace_repository import WorkspaceRepository
@@ -45,9 +45,9 @@ router = APIRouter(
 
 @router.get("/analytics/memory_insight/report", response_model=ApiResponse)
 async def get_memory_insight_report_api(
-    end_user_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        end_user_id: str,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
     """
     获取缓存的记忆洞察报告
@@ -73,10 +73,10 @@ async def get_memory_insight_report_api(
 
 @router.get("/analytics/user_summary", response_model=ApiResponse)
 async def get_user_summary_api(
-    end_user_id: str,
-    language_type: str = Header(default=None, alias="X-Language-Type"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        end_user_id: str,
+        language_type: str = Header(default=None, alias="X-Language-Type"),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
     """
     获取缓存的用户摘要
@@ -90,7 +90,7 @@ async def get_user_summary_api(
     """
     # 使用集中化的语言校验
     language = get_language_from_header(language_type)
-    
+
     workspace_id = current_user.current_workspace_id
     workspace_repo = WorkspaceRepository(db)
     workspace_models = workspace_repo.get_workspace_models_configs(workspace_id)
@@ -102,7 +102,7 @@ async def get_user_summary_api(
     api_logger.info(f"用户摘要查询请求: end_user_id={end_user_id}, user={current_user.username}")
     try:
         # 调用服务层获取缓存数据
-        result = await user_memory_service.get_cached_user_summary(db, end_user_id,model_id,language)
+        result = await user_memory_service.get_cached_user_summary(db, end_user_id, model_id, language)
 
         if result["is_cached"]:
             api_logger.info(f"成功返回缓存的用户摘要: end_user_id={end_user_id}")
@@ -117,10 +117,10 @@ async def get_user_summary_api(
 
 @router.post("/analytics/generate_cache", response_model=ApiResponse)
 async def generate_cache_api(
-    request: GenerateCacheRequest,
-    language_type: str = Header(default=None, alias="X-Language-Type"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        request: GenerateCacheRequest,
+        language_type: str = Header(default=None, alias="X-Language-Type"),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
     """
     手动触发缓存生成
@@ -134,7 +134,7 @@ async def generate_cache_api(
     """
     # 使用集中化的语言校验
     language = get_language_from_header(language_type)
-    
+
     workspace_id = current_user.current_workspace_id
 
     # 检查用户是否已选择工作空间
@@ -155,10 +155,12 @@ async def generate_cache_api(
             api_logger.info(f"开始为单个用户生成缓存: end_user_id={end_user_id}")
 
             # 生成记忆洞察
-            insight_result = await user_memory_service.generate_and_cache_insight(db, end_user_id, workspace_id, language=language)
+            insight_result = await user_memory_service.generate_and_cache_insight(db, end_user_id, workspace_id,
+                                                                                  language=language)
 
             # 生成用户摘要
-            summary_result = await user_memory_service.generate_and_cache_summary(db, end_user_id, workspace_id, language=language)
+            summary_result = await user_memory_service.generate_and_cache_summary(db, end_user_id, workspace_id,
+                                                                                  language=language)
 
             # 构建响应
             result = {
@@ -209,9 +211,9 @@ async def generate_cache_api(
 
 @router.get("/analytics/node_statistics", response_model=ApiResponse)
 async def get_node_statistics_api(
-    end_user_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        end_user_id: str,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
 
@@ -220,7 +222,8 @@ async def get_node_statistics_api(
         api_logger.warning(f"用户 {current_user.username} 尝试查询节点统计但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
-    api_logger.info(f"记忆类型统计请求: end_user_id={end_user_id}, user={current_user.username}, workspace={workspace_id}")
+    api_logger.info(
+        f"记忆类型统计请求: end_user_id={end_user_id}, user={current_user.username}, workspace={workspace_id}")
 
     try:
         # 调用新的记忆类型统计函数
@@ -228,21 +231,23 @@ async def get_node_statistics_api(
 
         # 计算总数用于日志
         total_count = sum(item["count"] for item in result)
-        api_logger.info(f"成功获取记忆类型统计: end_user_id={end_user_id}, 总记忆数={total_count}, 类型数={len(result)}")
+        api_logger.info(
+            f"成功获取记忆类型统计: end_user_id={end_user_id}, 总记忆数={total_count}, 类型数={len(result)}")
         return success(data=result, msg="查询成功")
     except Exception as e:
         api_logger.error(f"记忆类型查询失败: end_user_id={end_user_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "记忆类型查询失败", str(e))
 
+
 @router.get("/analytics/graph_data", response_model=ApiResponse)
 async def get_graph_data_api(
-    end_user_id: str,
-    node_types: Optional[str] = None,
-    limit: int = 100,
-    depth: int = 1,
-    center_node_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        end_user_id: str,
+        node_types: Optional[str] = None,
+        limit: int = 100,
+        depth: int = 1,
+        center_node_id: Optional[str] = None,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
 
@@ -298,9 +303,9 @@ async def get_graph_data_api(
 
 @router.get("/analytics/community_graph", response_model=ApiResponse)
 async def get_community_graph_data_api(
-    end_user_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        end_user_id: str,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
 
@@ -334,9 +339,9 @@ async def get_community_graph_data_api(
 
 @router.get("/read_end_user/profile", response_model=ApiResponse)
 async def get_end_user_profile(
-    end_user_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        end_user_id: str,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
     workspace_repo = WorkspaceRepository(db)
@@ -385,9 +390,9 @@ async def get_end_user_profile(
 
 @router.post("/updated_end_user/profile", response_model=ApiResponse)
 async def update_end_user_profile(
-    profile_update: EndUserProfileUpdate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+        profile_update: EndUserProfileUpdate,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
     """
     更新终端用户的基本信息
@@ -417,7 +422,7 @@ async def update_end_user_profile(
     else:
         error_msg = result["error"]
         api_logger.error(f"用户信息更新失败: end_user_id={end_user_id}, error={error_msg}")
-        
+
         # 根据错误类型映射到合适的业务错误码
         if error_msg == "终端用户不存在":
             return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", error_msg)
@@ -427,15 +432,18 @@ async def update_end_user_profile(
             # 只有未预期的错误才使用 INTERNAL_ERROR
             return fail(BizCode.INTERNAL_ERROR, "用户信息更新失败", error_msg)
 
+
 @router.get("/memory_space/timeline_memories", response_model=ApiResponse)
-async def memory_space_timeline_of_shared_memories(id: str, label: str,language_type: str = Header(default=None, alias="X-Language-Type"),
-                                      current_user: User = Depends(get_current_user),
-                                      db: Session = Depends(get_db),
-                                      ):
+async def memory_space_timeline_of_shared_memories(
+        id: str, label: str,
+        language_type: str = Header(default=None, alias="X-Language-Type"),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+):
     # 使用集中化的语言校验
     language = get_language_from_header(language_type)
-    
-    workspace_id=current_user.current_workspace_id
+
+    workspace_id = current_user.current_workspace_id
     workspace_repo = WorkspaceRepository(db)
     workspace_models = workspace_repo.get_workspace_models_configs(workspace_id)
 
@@ -447,11 +455,13 @@ async def memory_space_timeline_of_shared_memories(id: str, label: str,language_
     timeline_memories_result = await MemoryEntity.get_timeline_memories_server(model_id, language)
 
     return success(data=timeline_memories_result, msg="共同记忆时间线")
+
+
 @router.get("/memory_space/relationship_evolution", response_model=ApiResponse)
 async def memory_space_relationship_evolution(id: str, label: str,
-                                      current_user: User = Depends(get_current_user),
-                                      db: Session = Depends(get_db),
-                                      ):
+                                              current_user: User = Depends(get_current_user),
+                                              db: Session = Depends(get_db),
+                                              ):
     try:
         api_logger.info(f"关系演变查询请求: id={id}, table={label}, user={current_user.username}")
 

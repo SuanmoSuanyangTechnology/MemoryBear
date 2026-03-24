@@ -1,14 +1,15 @@
-from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import and_, or_, func, desc, select
-from typing import List, Optional, Dict, Any, Tuple
 import uuid
+from typing import List, Optional, Dict, Any, Tuple
 
+from sqlalchemy import and_, or_, func, desc
+from sqlalchemy.orm import Session, joinedload
+
+from app.core.logging_config import get_db_logger
 from app.models.models_model import ModelConfig, ModelApiKey, ModelType, ModelBase, model_config_api_key_association
 from app.schemas.model_schema import (
     ModelConfigUpdate, ModelApiKeyCreate, ModelApiKeyUpdate,
     ModelConfigQuery, ModelConfigQueryNew
 )
-from app.core.logging_config import get_db_logger
 
 # 获取数据库专用日志器
 db_logger = get_db_logger()
@@ -136,6 +137,9 @@ class ModelConfigRepository:
                     if ModelType.LLM not in type_values:
                         type_values.append(ModelType.LLM)
                 filters.append(ModelConfig.type.in_(type_values))
+
+            if query.capability:
+                filters.append(ModelConfig.capability.contains(query.capability))
 
             if query.is_active is not None:
                 filters.append(ModelConfig.is_active == query.is_active)

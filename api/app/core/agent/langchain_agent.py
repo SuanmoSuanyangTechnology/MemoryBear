@@ -598,8 +598,10 @@ class LangChainAgent:
                 for msg in reversed(output_messages):
                     if isinstance(msg, AIMessage):
                         response_meta = msg.response_metadata if hasattr(msg, 'response_metadata') else None
-                        total_tokens = response_meta.get("token_usage", {}).get("total_tokens",
-                                                                                0) if response_meta else 0
+                        total_tokens = response_meta.get("token_usage", {}).get(
+                            "total_tokens",
+                            0
+                        ) if response_meta else 0
                         yield total_tokens
                         break
                 if memory_flag:

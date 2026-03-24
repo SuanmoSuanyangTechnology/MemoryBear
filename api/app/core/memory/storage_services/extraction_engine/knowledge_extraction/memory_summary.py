@@ -188,7 +188,6 @@ async def _process_chunk_summary(
             response_model=MemorySummaryResponse,
         )
         summary_text = structured.summary.strip()
-
         # Generate title and type for the summary
         title = None
         episodic_type = None

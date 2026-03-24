@@ -25,17 +25,17 @@ from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 
 async def dedup_layers_and_merge_and_return(
-    dialogue_nodes: List[DialogueNode],
-    chunk_nodes: List[ChunkNode],
-    statement_nodes: List[StatementNode],
-    entity_nodes: List[ExtractedEntityNode],
-    statement_chunk_edges: List[StatementChunkEdge],
-    statement_entity_edges: List[StatementEntityEdge],
-    entity_entity_edges: List[EntityEntityEdge],
-    dialog_data_list: List[DialogData],
-    pipeline_config: ExtractionPipelineConfig,
-    connector: Optional[Neo4jConnector] = None,
-    llm_client = None,
+        dialogue_nodes: List[DialogueNode],
+        chunk_nodes: List[ChunkNode],
+        statement_nodes: List[StatementNode],
+        entity_nodes: List[ExtractedEntityNode],
+        statement_chunk_edges: List[StatementChunkEdge],
+        statement_entity_edges: List[StatementEntityEdge],
+        entity_entity_edges: List[EntityEntityEdge],
+        dialog_data_list: List[DialogData],
+        pipeline_config: ExtractionPipelineConfig,
+        connector: Optional[Neo4jConnector] = None,
+        llm_client=None,
 ) -> Tuple[
     List[DialogueNode],
     List[ChunkNode],
@@ -44,7 +44,7 @@ async def dedup_layers_and_merge_and_return(
     List[StatementChunkEdge],
     List[StatementEntityEdge],
     List[EntityEntityEdge],
-    dict,  # 新增：返回去重详情
+    dict
 ]:
     """
     执行两层实体去重与融合：

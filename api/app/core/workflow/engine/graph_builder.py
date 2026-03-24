@@ -390,6 +390,8 @@ class GraphBuilder:
         for edge in self.edges:
             source = edge.get("source")
             target = edge.get("target")
+            if source not in self.reachable_nodes or target not in self.reachable_nodes:
+                continue
             condition = edge.get("condition")
             edge_type = edge.get("type")
 
