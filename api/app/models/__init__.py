@@ -16,7 +16,7 @@ from .agent_app_config_model import AgentConfig
 from .app_release_model import AppRelease
 from .memory_increment_model import MemoryIncrement
 from .end_user_model import EndUser
-from .user_alias_model import UserAlias
+from .end_user_info_model import EndUserInfo
 from .appshare_model import AppShare
 from .release_share_model import ReleaseShare
 from .conversation_model import Conversation, Message

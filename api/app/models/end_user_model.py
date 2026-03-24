@@ -59,5 +59,5 @@ class EndUser(Base):
     # 与 WorkSpace 的反向关系
     workspace = relationship("Workspace", back_populates="end_users")
     
-    # 与 UserAlias 的反向关系
-    aliases = relationship("UserAlias", back_populates="end_user", cascade="all, delete-orphan")
+    # 与 EndUserInfo 的反向关系
+    info = relationship("EndUserInfo", back_populates="end_user", cascade="all, delete-orphan")
