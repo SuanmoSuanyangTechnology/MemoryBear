@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 21:21:28
+ * @Last Modified time: 2026-03-24 15:58:23
  */
 import { type FC, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -27,10 +27,10 @@ import FeaturesConfig from './FeaturesConfig'
 /**
  * Tab keys for application configuration
  */
-const tabKeys = ['arrangement', 'api', 'release', 'statistics']
+const tabKeys = ['arrangement', 'api', 'release', 'log', 'statistics']
 const sharingTabKeys = [
   'test',
-  // 'log',
+  'log',
   'api'
 ]
 

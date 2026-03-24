@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 10:59:18
+ * @Last Modified time: 2026-03-24 15:44:33
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
@@ -481,4 +481,18 @@ export interface AppSharingModalRef {
 export interface AppSharingForm {
   target_workspace_ids: string[];
   permission: 'readonly' | 'editable'
+}
+
+export interface LogItem {
+  id: string;
+  app_id: string;
+  user_id: string;
+  title: string;
+  message_count: number;
+  is_draft: boolean;
+  created_at: number;
+  updated_at: number;
+}
+export interface LogDetailModalRef {
+  handleOpen: (vo: LogItem) => void;
 }

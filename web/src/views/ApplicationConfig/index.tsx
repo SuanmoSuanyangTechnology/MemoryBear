@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:37 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 21:09:32
+ * @Last Modified time: 2026-03-24 15:59:47
  */
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
@@ -19,6 +19,7 @@ import Workflow from '@/views/Workflow';
 import Statistics from './Statistics'
 import TestChat from './TestChat'
 import type { WorkflowConfig } from '@/views/Workflow/types';
+import Logs from './Logs';
 
 /**
  * Application configuration page component
@@ -126,6 +127,7 @@ const ApplicationConfig: React.FC = () => {
         {activeTab === 'release' && <ReleasePage data={application as Application} refresh={getApplicationInfo} />}
         {activeTab === 'statistics' && <Statistics application={application} />}
         {activeTab === 'test' && <TestChat application={application} config={config} />}
+        {activeTab === 'log' && <Logs />}
       </div>
     </>
   );

@@ -1309,7 +1309,7 @@ export const en = {
       apiKeyRequestTotal: 'Total Requests',
       qps: 'Average QPS',
       qpsLimit: 'QPS Limit',
-      qpsLimitTip: '(Requests per second)',
+      qpsLimitTip: 'Requests per second',
       apiLimitConfig: 'Rate Limiting Configuration',
       qpsLimitDesc: 'Limit the maximum number of requests this Key can make per second',
       dailyUsageLimit: 'Daily Usage Limit',

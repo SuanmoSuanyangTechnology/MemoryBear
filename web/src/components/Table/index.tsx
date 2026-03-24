@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:29:46 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-23 12:11:18
+ * @Last Modified time: 2026-03-24 16:12:56
  */
 /**
  * RbTable Component
@@ -102,7 +102,7 @@ const RbTable = forwardRef<TableRef, TableComponentProps>(({
   const [loading, setLoading] = useState(false)
   const [currentPagination, setCurrentPagination] = useState({
     page: 1,
-    pagesize: 10,
+    pagesize: 20,
   });
   const [total, setTotal] = useState(0);
 

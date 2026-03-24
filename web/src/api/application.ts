@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 20:42:23
+ * @Last Modified time: 2026-03-24 15:48:30
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
@@ -169,4 +169,9 @@ export const cancelShare = (app_id: string, target_workspace_id?: string) => {
 export const cancelSpaceShare = (target_workspace_id?: string) => {
   return request.delete(`/apps/share/${target_workspace_id}`)
 }
-
+// Application conversation logs
+export const getAppLogsUrl = (app_id: string) => `/apps/${app_id}/logs`
+// Get full conversation message history
+export const getAppLogDetail = (app_id: string, conversation_id: string) => {
+  return request.get(`/apps/${app_id}/logs/${conversation_id}`)
+}

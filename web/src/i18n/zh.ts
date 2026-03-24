@@ -687,7 +687,7 @@ export const zh = {
       apiKeyRequestTotal: '总请求数',
       qps: '平均 QPS',
       qpsLimit: 'QPS 限制',
-      qpsLimitTip: '（每秒请求数）',
+      qpsLimitTip: '每秒请求数',
       apiLimitConfig: '限流配置',
       qpsLimitDesc: '限制此 Key 每秒最多可以发起的请求数',
       dailyUsageLimit: '日调用量限制',
