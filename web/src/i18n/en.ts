@@ -1440,6 +1440,7 @@ export const en = {
       confirmCopyDesc: 'Are you sure to copy 【{{app}}】 app?',
       noShareAuth: 'No permission to share apps',
       appCount: '{{count}} apps shared to this space',
+      resetFeaturesTip: 'Please reconfigure the [Conversation Features - File Upload] settings',
     },
     userMemory: {
       userMemory: 'User Memory',

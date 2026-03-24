@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 11:36:49
+ * @Last Modified time: 2026-03-24 11:02:34
  */
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import { useTranslation } from 'react-i18next'
@@ -132,9 +132,20 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
    */
   const refresh = (vo: ModelConfig, type: Source) => {
     if (type === 'model') {
-      const { default_model_config_id, ...rest } = vo
+      const { default_model_config_id, capability, ...rest } = vo
+      if (default_model_config_id !== values.default_model_config_id) {
+        const fileUpload = { ...values.features?.file_upload }
+        Object.keys(fileUpload).forEach(key => {
+          if (key.includes('enabled')) {
+            (fileUpload as Record<string, any>)[key] = false
+          }
+        })
+        form.setFieldValue(['features', 'file_upload'], fileUpload)
+        message.warning(t('application.resetFeaturesTip'))
+      }
       form.setFieldsValue({
         default_model_config_id,
+        capability,
         model_parameters: {...rest}
       })
       if (default_model_config_id === values?.default_model_config_id) {
@@ -348,13 +359,14 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
                   {defaultModel?.name || t('application.chooseModel')}
                 </Button>
                 <Space size={12}>
-                  <FeaturesConfig value={values?.features as FeaturesConfigForm} refresh={handleSaveFeaturesConfig} />
+                  <FeaturesConfig value={values?.features as FeaturesConfigForm} capability={values?.capability || []} refresh={handleSaveFeaturesConfig} />
                   <Button type="primary" onClick={() => handleSave()}>
                     {t('common.save')}
                   </Button>
                 </Space>
               </Flex>
               <Form.Item name="default_model_config_id" hidden noStyle></Form.Item>
+              <Form.Item name="capability" hidden noStyle></Form.Item>
               <Form.Item name="model_parameters" hidden noStyle></Form.Item>
               <Form.Item name="features" hidden noStyle></Form.Item>
               <Card

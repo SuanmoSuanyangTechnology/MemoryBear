@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:28:07 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:28:07 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-24 10:59:20
  */
 /**
  * Model Configuration Modal
@@ -105,6 +105,8 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
   const handleChange = (_value: string, option: ModelListItem | ModelListItem[] | undefined) => {
     if (source === 'chat') {
       form.setFieldValue('label', (option as ModelListItem).name)
+    } else {
+      form.setFieldValue('capability', (option as ModelListItem).capability)
     }
   }
 
@@ -137,16 +139,19 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
           rules={[{ required: source !== 'multi_agent', message: t('common.pleaseSelect') }]}
           hidden={source === 'multi_agent'}
         >
-          {source !== 'multi_agent' && <Select
-            placeholder={t('common.pleaseSelect')}
-            fieldNames={{
-              label: 'name',
-              value: 'id',
-            }}
-            options={modelList}
-            onChange={handleChange}
-          />}
+          {source !== 'multi_agent' &&
+            <Select
+              placeholder={t('common.pleaseSelect')}
+              fieldNames={{
+                label: 'name',
+                value: 'id',
+              }}
+              options={modelList}
+              onChange={handleChange}
+            />
+          }
         </FormItem>
+        {source === 'model' && <FormItem name="capability" hidden />}
         {source === 'chat' && <FormItem name="label" hidden />}
 
         <div className="rb:text-[14px] rb:font-medium rb:text-[#5B6167] rb:mb-4">{t('application.parameterConfig')}</div>

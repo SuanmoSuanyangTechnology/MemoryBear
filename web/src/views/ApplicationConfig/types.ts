@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 21:10:53
+ * @Last Modified time: 2026-03-24 10:59:18
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
@@ -11,6 +11,7 @@ import type { ChatItem } from '@/components/Chat/types'
 import type { GraphRef, WorkflowConfig } from '@/views/Workflow/types';
 import type { ApiKey } from '@/views/ApiKeyManagement/types'
 import type { SkillConfigForm } from './components/Skill/types'
+import type { Capability } from '@/views/ModelManagement/types'
 
 /**
  * Model configuration parameters
@@ -20,6 +21,7 @@ export interface ModelConfig {
   label?: string;
   /** Default model configuration ID */
   default_model_config_id?: string;
+  capability?: Capability[];
   /** Temperature for response randomness (0-2) */
   temperature: number;
   /** Maximum tokens in response */
@@ -60,6 +62,7 @@ export interface Config extends MultiAgentConfig {
   system_prompt: string;
   /** Default model configuration ID */
   default_model_config_id?: string;
+  capability?: Capability[];
   /** Model parameters */
   model_parameters: ModelConfig;
   /** Knowledge retrieval configuration */
