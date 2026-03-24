@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import logging
 import os
 import hashlib
 import json
@@ -25,6 +26,8 @@ from app.core.memory.storage_services.extraction_engine.data_preprocessing.scene
     SceneConfigRegistry,
     ScenePatterns
 )
+
+logger = logging.getLogger(__name__)
 
 
 class DialogExtractionResponse(BaseModel):
@@ -706,7 +709,7 @@ class SemanticPruner:
         # 阈值保护：最高0.9
         proportion = float(self.config.pruning_threshold)
         if proportion > 0.9:
-            print(f"[剪枝-数据集] 阈值{proportion}超过上限0.9，已自动调整为0.9")
+            logger.warning(f"[剪枝-数据集] 阈值{proportion}超过上限0.9，已自动调整为0.9")
             proportion = 0.9
         if proportion < 0.0:
             proportion = 0.0
@@ -905,7 +908,7 @@ class SemanticPruner:
 
         # Safety: avoid empty dataset
         if not result:
-            print("警告: 语义剪枝后数据集为空，已回退为未剪枝数据以避免流程中断")
+            logger.warning("语义剪枝后数据集为空，已回退为未剪枝数据以避免流程中断")
             return dialogs
 
         return result
@@ -915,8 +918,7 @@ class SemanticPruner:
         try:
             self.run_logs.append(msg)
         except Exception:
-            # 任何异常都不影响打印
             pass
-        print(msg)
+        logger.debug(msg)
 
 

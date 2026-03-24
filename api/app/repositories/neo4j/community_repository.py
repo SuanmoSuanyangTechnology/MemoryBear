@@ -300,7 +300,7 @@ class CommunityRepository:
             )
             return bool(result)
         except Exception as e:
-            logger.error(f"update_community_metadata failed: {e}")
+            logger.error(f"update_community_metadata failed: {e}", exc_info=True)
             return False
 
     async def batch_update_community_metadata(

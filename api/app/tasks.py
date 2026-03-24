@@ -2760,7 +2760,7 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
                         patch_fail = 0
                         for cid in incomplete_ids:
                             try:
-                                await engine._generate_community_metadata(cid, end_user_id)
+                                await engine._generate_community_metadata([cid], end_user_id)
                                 patch_ok += 1
                             except Exception as patch_err:
                                 patch_fail += 1
