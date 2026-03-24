@@ -1542,6 +1542,7 @@ export const en = {
       MemorySummary: 'Long-term Accumulation',
       Statement: 'Emotional Memory',
       ExtractedEntity: 'Episodic Memory',
+      Perceptual: 'Perceptual Memory',
       positive: 'Positive Emotion',
       negative: 'Negative Emotion',
       neutral: 'Neutral Emotion',

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:23 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 11:07:02
+ * @Last Modified time: 2026-03-24 11:36:22
  */
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -12,6 +12,7 @@ import clsx from 'clsx'
 
 import RbCard from '@/components/RbCard/Card'
 import AudioPlayer from './AudioPlayer'
+import VideoPlayer from './VideoPlayer'
 import {
   getPerceptualLastVisual,
   getPerceptualLastListen,
@@ -107,7 +108,7 @@ const PerceptualLastInfo: FC = () => {
     })
   }
 
-  const handleDownload = async () => {
+  const handleDownload = () => {
     if (!data.file_path) return
     window.open(data.file_path, '_blank')
   }
@@ -139,9 +140,7 @@ const PerceptualLastInfo: FC = () => {
                 {/\.(jpg|jpeg|png|gif|webp|svg)$/i.test(data.file_name)
                   ? <Image src={data.file_path} alt={data.file_name} width={432} className="rb:rounded-xl rb:h-45!" />
                   : /\.(mp4|webm|ogg|mov)$/i.test(data.file_name)
-                  ? <Flex align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:min-h-15.5! rb:rounded-xl rb:p-3!">
-
-                  </Flex>
+                  ? <VideoPlayer src={data.file_path} />
                   : /\.(mp3|wav|ogg|m4a|aac)$/i.test(data.file_name)
                   ? <AudioPlayer src={data.file_path} fileName={data.file_name} fileSize={fileSize} />
                   : <Flex gap={11} align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:min-h-15.5! rb:rounded-xl rb:p-3!">

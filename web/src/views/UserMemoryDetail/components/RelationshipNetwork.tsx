@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:00 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 12:14:43
+ * @Last Modified time: 2026-03-24 12:19:12
  */
 /**
  * Relationship Network Component
@@ -13,7 +13,7 @@
 import React, { type FC, useEffect, useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Space, Flex, Divider, type SegmentedProps } from 'antd'
+import { Space, Flex, Divider, type SegmentedProps, Image } from 'antd'
 import dayjs from 'dayjs'
 import clsx from 'clsx'
 
@@ -27,6 +27,8 @@ import Tag from '@/components/Tag'
 import GraphNetworkChart, { type Node, type Edge } from '@/components/Charts/GraphNetworkChart'
 import CommunityNetwork from './CommunityNetwork'
 import PageTabs from '@/components/PageTabs'
+import AudioPlayer from './AudioPlayer'
+import VideoPlayer from './VideoPlayer'
 
 const RelationshipNetwork: FC = () => {
   const { t } = useTranslation()
@@ -149,6 +151,26 @@ const RelationshipNetwork: FC = () => {
     setSelectedNode(null)
   }
 
+  const [fileSize, setFileSize] = useState<string>('')
+  useEffect(() => {
+    setFileSize('')
+    if (selectedNode && 'file_path' in selectedNode.properties && selectedNode.properties.file_path) {
+      fetch(selectedNode.properties.file_path, { method: 'HEAD' })
+        .then(r => {
+          const bytes = Number(r.headers.get('content-length'))
+          if (!bytes) return
+          setFileSize(bytes < 1024 * 1024
+            ? `${(bytes / 1024).toFixed(1)} KB`
+            : `${(bytes / 1024 / 1024).toFixed(1)} MB`)
+        })
+        .catch(() => {})
+    }
+  }, [selectedNode])
+  const handleDownload = () => {
+    if (!selectedNode?.properties?.file_path) return
+    window.open(selectedNode?.properties?.file_path, '_blank')
+  }
+
   return (
     <div className="rb:flex-1 rb:relative">
       <div className="rb:absolute rb:z-111 rb:bottom-10 rb:left-[calc(50%-96px)] rb:transition-transform-[translateX(-50%]">
@@ -229,6 +251,8 @@ const RelationshipNetwork: FC = () => {
                           ? selectedNode.properties.description
                           : selectedNode.label === 'Statement' && 'statement' in selectedNode.properties
                             ? selectedNode.properties.statement
+                            : selectedNode.label === 'Perceptual' && 'summary' in selectedNode.properties
+                              ? selectedNode.properties.summary
                             : ''
                       }
                     </div>
@@ -284,6 +308,30 @@ const RelationshipNetwork: FC = () => {
                       }
                       return null
                     })}
+                  </>}
+                  {selectedNode.label === 'Perceptual' && <>
+                    {selectedNode.properties.file_type.includes('image')
+                      ? <Image src={selectedNode.properties.file_path} alt={selectedNode.properties.file_name} className="rb:rounded-xl rb:h-45! rb:w-full" />
+                      : selectedNode.properties.file_type.includes('video')
+                      ? <VideoPlayer src={selectedNode.properties.file_path} />
+                      : selectedNode.properties.file_type.includes('audio')
+                      ? <AudioPlayer src={selectedNode.properties.file_path} fileName={selectedNode.properties.file_name} fileSize={fileSize} />
+                      : <Flex gap={11} align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:min-h-15.5! rb:rounded-xl rb:p-3!">
+                        <Flex gap={12} align="center">
+                          <div className="rb:w-7.5 rb:h-9 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/file.svg')]"></div>
+                          <div>
+                            <div className="rb:leading-5 rb:font-medium rb:mb-1">{selectedNode.properties.file_name}</div>
+                            <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">
+                              {fileSize || '-'}
+                            </div>
+                          </div>
+                        </Flex>
+                        <div
+                          className="rb:size-6 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/userMemory/download.svg')] rb:hover:bg-[url('@/assets/images/userMemory/download_hover.svg')]"
+                          onClick={handleDownload}
+                        ></div>
+                      </Flex>
+                    }
                   </>}
                 </Flex>
               </>}

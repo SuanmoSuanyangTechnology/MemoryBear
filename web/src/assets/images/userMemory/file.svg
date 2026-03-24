@@ -62,8 +62,8 @@
                         </g>
                         <path d="M21,0 L30,9 L23,9 C21.8954305,9 21,8.1045695 21,7 L21,0 L21,0 Z" id="矩形" fill="url(#linearGradient-7)"></path>
                         <rect id="矩形" fill="#155EEF" x="2" y="25" width="26" height="9" rx="3"></rect>
-                        <text id="DOC" font-family="MiSans-Semibold, MiSans" font-size="8" font-weight="400" line-spacing="8" fill="#FFFFFF">
-                            <tspan x="5" y="33.5">DOC</tspan>
+                        <text id="text" font-family="MiSans-Semibold, MiSans" font-size="8" font-weight="400" line-spacing="8" fill="#FFFFFF">
+                            <tspan x="4" y="33.5">TEXT</tspan>
                         </text>
                         <g id="矩形" fill-rule="nonzero">
                             <use fill="black" fill-opacity="1" filter="url(#filter-10)" xlink:href="#path-9"></use>

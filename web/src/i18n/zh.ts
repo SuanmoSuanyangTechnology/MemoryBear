@@ -1540,6 +1540,7 @@ export const zh = {
       MemorySummary: '长期沉淀',
       Statement: '情绪记忆',
       ExtractedEntity: '情景记忆',
+      Perceptual: '感知记忆',
       positive: '正向情绪',
       negative: '负向情绪',
       neutral: '中性情绪',
