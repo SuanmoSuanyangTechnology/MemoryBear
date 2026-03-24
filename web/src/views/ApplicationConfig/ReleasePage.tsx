@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:41 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 21:10:38
+ * @Last Modified time: 2026-03-24 16:43:10
  */
 import { type FC, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -163,20 +163,19 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                 title={t('application.changeLog')}
                 headerType="borderless"
               >
-                <Flex gap={16} vertical>
                 {selectedVersion && (
                   <RbCard
                     headerType="borderless"
                     title={<div className="rb:text-[14px]">{formatDateTime(selectedVersion.published_at, 'YYYY-MM-DD HH:mm:ss')}</div>}
                     extra={<span className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4">{selectedVersion.publisher_name}</span>}
                     bodyClassName="rb:pt-0! rb:pb-3! rb:px-4!"
+                    variant="outlined"
                   >
                     <div className="rb:font-regular rb:text-[#5B6167] rb:leading-4">
                       <Markdown content={selectedVersion.release_notes} />
                     </div>
                   </RbCard>
                 )}
-                </Flex>
               </RbCard>
             </Flex>
           }

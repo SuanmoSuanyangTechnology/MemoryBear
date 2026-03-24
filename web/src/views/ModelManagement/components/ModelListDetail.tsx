@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 12:26:12
+ * @Last Modified time: 2026-03-24 16:55:30
  */
 /**
  * Model List Detail Drawer
@@ -146,16 +146,19 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
               }
               extra={<Switch checked={item.is_active} disabled={loading} onChange={() => handleChange(item)} />}
               bodyClassName="rb:relative rb:pb-[64px]! rb:h-[calc(100%-64px)]!"
+              variant="outlined"
             >
               <Tooltip title={item.description}>
                 <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:font-regular rb:wrap-break-word rb:line-clamp-2">{item.description}</div>
               </Tooltip>
               <div className="rb:absolute rb:bottom-4 rb:left-6 rb:right-6">
                 <Row gutter={12}>
-                  <Col span={12}>
-                    {!item.model_id && <Button block onClick={() => handleEdit(item)}>{t('modelNew.modelConfiguration')}</Button>}
-                  </Col>
-                  <Col span={12}>
+                  {!item.model_id && 
+                    <Col span={12}>
+                      <Button block onClick={() => handleEdit(item)}>{t('modelNew.modelConfiguration')}</Button>
+                    </Col>
+                  }
+                  <Col span={!item.model_id ? 12 : 24}>
                     <Button type="primary" ghost block onClick={() => handleKeyConfig(item)}>{t('modelNew.keyConfig')}</Button>
                   </Col>
                 </Row>

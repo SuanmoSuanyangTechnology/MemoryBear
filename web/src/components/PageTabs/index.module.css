@@ -1,5 +1,4 @@
 .page-tabs:global(.ant-segmented) {
-  background-color: #F6F6F6;
   padding: 4px;
 }
 .page-tabs:global(.ant-segmented .ant-segmented-item-label) {

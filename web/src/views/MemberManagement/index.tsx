@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:42:12 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:42:12 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-24 16:49:45
  */
 /**
  * Member Management Page
@@ -10,7 +10,7 @@
  */
 
 import React, { useRef } from 'react';
-import { App, Button, Space } from 'antd';
+import { App, Button, Space, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
 import type { AnyObject } from 'antd/es/_util/type';
@@ -106,12 +106,12 @@ const MemberManagement: React.FC = () => {
   ];
 
   return (
-    <>
-      <div className="rb:flex rb:justify-end rb:mb-3">
+    <div className="rb:h-[calc(100vh-80px)] rb:overflow-hidden rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
+      <Flex justify="end" className="rb:px-1! rb:mb-3!">
         <Button type="primary" onClick={() => handleEdit()}>
           {t('member.createMember')}
         </Button>
-      </div>
+      </Flex>
       <Table
         ref={tableRef}
         apiUrl={memberListUrl}
@@ -124,7 +124,7 @@ const MemberManagement: React.FC = () => {
         ref={memberFormRef}
         refreshTable={refreshTable}
       />
-    </>
+    </div>
   );
 };
 

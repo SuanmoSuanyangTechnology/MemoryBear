@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-05 10:45:08 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 10:41:35
+ * @Last Modified time: 2026-03-24 16:59:57
  */
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import { List, Flex, Tooltip, Form } from 'antd';
@@ -185,19 +185,19 @@ const SkillListModal = forwardRef<SkillModalRef, SkillModalProps>(({
                     "rb:bg-[rgba(21,94,239,0.06)] rb:border-[#155EEF] rb:text-[#155EEF]": selectedIds.includes(item.id),
                     "rb:border-[#DFE4ED] rb:text-[#212332]": !selectedIds.includes(item.id),
                   })} onClick={() => handleSelect(item)}>
-                    <Flex>
-                      {/* Skill avatar showing first letter of name */}
-                      <Flex align="center" justify="center" className="rb:size-12 rb:rounded-lg rb:mr-3.25! rb:bg-[#155eef] rb:text-[28px] rb:text-white">
-                        {item.name[0]}
-                      </Flex>
-                      {/* Skill name and description */}
-                      <div className="rb:flex-1 rb:max-w-[calc(100%-60px)]">
-                        <div className="rb:font-medium rb:wrap-break-word rb:line-clamp-1">{item.name}</div>
-                        <Tooltip title={item.description}>
-                          <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.25 rb:font-regular rb:-mt-1 rb:wrap-break-word rb:line-clamp-1">{item.description}</div>
-                        </Tooltip>
-                      </div>
-                    </Flex>
+                    {/* Skill name and description */}
+                    <div className="rb:flex-1 rb:max-w-[calc(100%-60px)]">
+                      <Tooltip title={item.name}>
+                        <div className="rb:flex-1 rb:leading-5.5 rb:min-w-0 rb:whitespace-break-spaces rb:wrap-break-word rb:line-clamp-1 rb:font-medium rb:text-[16px] rb:mb-4">
+                          {item.name}
+                        </div>
+                      </Tooltip>
+                      
+                      {/* Skill description with tooltip */}
+                      <Tooltip title={item.description}>
+                        <div className="rb:h-10 rb:leading-5 rb:wrap-break-word rb:line-clamp-2">{item.description}</div>
+                      </Tooltip>
+                    </div>
                   </div>
                 </List.Item>
               )}

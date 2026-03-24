@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:10 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 18:51:27
+ * @Last Modified time: 2026-03-24 16:52:48
  */
 /**
  * Model List View
@@ -11,7 +11,7 @@
  */
 
 import { useRef, useState, useEffect, forwardRef, useImperativeHandle } from 'react';
-import { Button, Flex, Row, Col, Tooltip, Space } from 'antd'
+import { Button, Flex, Row, Col, Tooltip } from 'antd'
 import { useTranslation } from 'react-i18next';
 
 import type { ProviderModelItem, KeyConfigModalRef, ModelListDetailRef, ModelListItem, BaseRef } from './types'
@@ -75,9 +75,7 @@ const ModelList = forwardRef<BaseRef, { query: any; handleEdit: (vo?: ModelListI
                   <Tooltip title={t(`modelNew.${item.provider}`)}>
                     <div className="rb:wrap-break-word rb:line-clamp-1">{t(`modelNew.${item.provider}`)}</div>
                   </Tooltip>
-                  <Space>
-                    <Flex gap={8} wrap>{item.tags.map(tag => <Tag key={tag}>{t(`modelNew.${tag}`)}</Tag>)}</Flex>
-                  </Space>
+                  <Flex gap={8}>{item.tags.map(tag => <Tag key={tag}>{t(`modelNew.${tag}`)}</Tag>)}</Flex>
                 </Flex>}
                 isNeedTooltip={false}
                 footer={<Row gutter={9} className="rb:pt-2!">

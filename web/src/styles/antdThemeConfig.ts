@@ -146,6 +146,9 @@ export const lightTheme: ThemeConfig = {
     },
     Progress: {
       remainingColor: '#EBEBEB',
+    },
+    Segmented: {
+      trackBg: '#E1E2E7',
     }
   }
 };
