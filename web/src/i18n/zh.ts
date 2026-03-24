@@ -1760,6 +1760,11 @@ export const zh = {
       finalResult: '最终结果',
       chunking: '分块',
       dataStatistics: '数据统计',
+      modelConfig: '模型配置',
+      llm_id: 'LLM 模型',
+      vision_id: '视觉模型',
+      audio_id: '音频模型',
+      video_id: '视频模型',
     },
     memoryConversation: {
       chatEmpty:'有什么我可以帮您的吗？',
@@ -1919,7 +1924,7 @@ export const zh = {
       refreshFailed: '刷新失败',
       
       // Market 相关
-      mcpMarket: 'MCP Market',
+      mcpMarket: 'MCP 市场',
       availableMcp: '可用的 MCP 服务',
       descEmpty: '暂无介绍…',
       marketSelectTitle: '选择一个 MCP 市场',

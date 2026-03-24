@@ -1764,6 +1764,11 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       finalResult: 'Final Result',
       chunking: 'Chunking',
       dataStatistics: 'Data Statistics',
+      modelConfig: 'Model Configuration',
+      llm_id: 'LLM model',
+      vision_id: 'Vision model',
+      audio_id: 'Audio model',
+      video_id: 'Video model',
     },
     memoryConversation: {
       searchPlaceholder: 'Enter user ID...',

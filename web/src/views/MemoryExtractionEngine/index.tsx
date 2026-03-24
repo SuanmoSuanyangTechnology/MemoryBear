@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 17:55:32
+ * @Last Modified time: 2026-03-24 14:07:35
  */
 /**
  * Memory Extraction Engine Configuration Page
@@ -20,15 +20,17 @@ import Card from './components/Card'
 import type { ConfigForm, Variable } from './types'
 import { getMemoryExtractionConfig, updateMemoryExtractionConfig } from '@/api/memory'
 import Markdown from '@/components/Markdown'
-import { configList } from './constant'
+import { configList, modelConfigList } from './constant'
 import Result from './components/Result'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import ModelSelect from '@/components/ModelSelect'
 import RbSlider from '@/components/RbSlider';
 import DescWrapper from '@/components/FormItem/DescWrapper'
+import LabelWrapper from '@/components/FormItem/LabelWrapper'
 
 /** Available configuration section keys */
 const keys = [
+  'modelConfig',
   'storageLayerModule', 
   'arrangementLayerModule'
 ]
@@ -54,8 +56,6 @@ const MemoryExtractionEngine: FC = () => {
   const { id } = useParams()
   const [expandedKeys, setExpandedKeys] = useState<string[]>(keys)
   const [form] = Form.useForm<ConfigForm>()
-  const [modelForm] = Form.useForm()
-  const modelValues = Form.useWatch([], modelForm)
   const values = Form.useWatch<ConfigForm>([], form)
   const [loading, setLoading] = useState(false)
   const [iterationPeriodDisabled, setIterationPeriodDisabled] = useState(false)
@@ -82,11 +82,7 @@ const MemoryExtractionEngine: FC = () => {
         t_type_strict: Number(response.t_type_strict || 0),
         t_overall: Number(response.t_overall || 0),
       }
-      // setData(initialValues)
       form.setFieldsValue(initialValues)
-      modelForm.setFieldsValue({
-        llm_id: response.llm_id,
-      })
     })
   }
   useEffect(() => {
@@ -106,11 +102,9 @@ const MemoryExtractionEngine: FC = () => {
     if (!id) {
       return
     }
-    console.log('values', values)
     setLoading(true)
     updateMemoryExtractionConfig({
       ...values,
-      ...modelValues,
       config_id: id,
     }).then(() => {
       message.success(t('common.saveSuccess'))
@@ -131,45 +125,56 @@ const MemoryExtractionEngine: FC = () => {
 
       <Row gutter={12}>
         <Col span={12}>
-          <Flex vertical gap={12} className="rb:h-[calc(100vh-114px)]! rb:overflow-y-auto">
-            <Form form={modelForm}>
-              <Form.Item
-                name="llm_id"
-                noStyle
+          <Form form={form}>
+            <Flex vertical gap={12} className="rb:h-[calc(100vh-114px)]! rb:overflow-y-auto">
+              <div className="rb:bg-white rb:rounded-xl rb:py-2.5 rb:px-4">
+                <Flex
+                  align="center"
+                  justify="space-between"
+                  className="rb:font-[MiSans-Bold] rb:font-bold rb:cursor-pointer"
+                  onClick={() => handleExpand('example')}
+                >
+                  {t('memoryExtractionEngine.example')}
+                  <div className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')]", {
+                    'rb:rotate-180': !expandedKeys.includes('example'),
+                    'rb:rotate-0': expandedKeys.includes('example'),
+                  })}></div>
+                </Flex>
+
+                {expandedKeys.includes('example') &&
+                  <div className="rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2.5 rb:mb-1.5">
+                    <Markdown content={t('memoryExtractionEngine.exampleText')} />
+                  </div>
+                }
+              </div>
+
+              <Card
+                title={t('memoryExtractionEngine.modelConfig')}
+                type="modelConfig"
+                expanded={expandedKeys.includes('modelConfig')}
+                handleExpand={handleExpand}
               >
-                <ModelSelect
-                  params={{ type: 'llm,chat' }}
-                  className="rb:w-full! rb:h-10! rb:bg-white rb:rounded-xl"
-                  variant="borderless"
-                  placeholder={t('memoryExtractionEngine.model')}
-                  allowClear={false}
-                  fontClassName="rb:font-medium!"
-                />
-              </Form.Item>
-            </Form>
+                {/* <Form form={modelForm}> */}
+                  <Flex vertical gap={12}>
+                    <Flex gap={12} vertical>
+                      {modelConfigList.map(config => (
+                        <div key={config.key} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3">
+                          <LabelWrapper title={t(`memoryExtractionEngine.${config.key}`)} className="rb:mb-3" />
+                          <Form.Item
+                            name={config.key}
+                            className="rb:mb-0!"
+                          >
+                            <ModelSelect
+                              params={config.params}
+                            />
+                          </Form.Item>
+                        </div>
+                      ))}
+                    </Flex>
+                  </Flex>
+                {/* </Form> */}
+              </Card>
 
-            <div className="rb:bg-white rb:rounded-xl rb:py-2.5 rb:px-4">
-              <Flex
-                align="center"
-                justify="space-between"
-                className="rb:font-[MiSans-Bold] rb:font-bold rb:cursor-pointer"
-                onClick={() => handleExpand('example')}
-              >
-                {t('memoryExtractionEngine.example')}
-                <div className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')]", {
-                  'rb:rotate-180': !expandedKeys.includes('example'),
-                  'rb:rotate-0': expandedKeys.includes('example'),
-                })}></div>
-              </Flex>
-
-              {expandedKeys.includes('example') &&
-                <div className="rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2.5 rb:mb-1.5">
-                  <Markdown content={t('memoryExtractionEngine.exampleText')} />
-                </div>
-              }
-            </div>
-
-            <Form form={form}>
               <Flex vertical gap={16}>
                 {configList.map((item, index) => (
                   <Card
@@ -251,8 +256,8 @@ const MemoryExtractionEngine: FC = () => {
                   </Card>
                 ))}
               </Flex>
-            </Form>
-          </Flex>
+            </Flex>
+          </Form>
         </Col>
         <Col span={12}>
           <Result
