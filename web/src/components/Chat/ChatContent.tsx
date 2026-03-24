@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 20:45:39
+ * @Last Modified time: 2026-03-23 18:24:33
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -38,7 +38,8 @@ const ChatContent: FC<ChatContentProps> = ({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [playingIndex, setPlayingIndex] = useState<number | null>(null)
 
-  const handlePlay = (index: number, audio_url: string) => {
+  const handlePlay = (index: number, audio_url: string, audio_status?: string) => {
+    if (audio_status !== 'completed' && !audio_status) return
     if (playingIndex === index) {
       audioRef.current?.pause()
       setPlayingIndex(null)
@@ -180,11 +181,16 @@ const ChatContent: FC<ChatContentProps> = ({
                   {item.meta_data?.audio_url && <>
                     <Divider className="rb:my-3!" />
                     <Space size={12} className="rb:pb-2 rb:pl-1">
-                      {playingIndex !== index
-                        ? <SoundOutlined className="rb:cursor-pointer rb:hover:text-[#155EEF]! rb:size-5.5" onClick={() => handlePlay(index, item.meta_data?.audio_url!)} />
+                      {playingIndex !== index && item.meta_data?.audio_status === 'pending'
+                        ? <Spin />
+                        : playingIndex !== index
+                        ? <SoundOutlined className={clsx("rb:cursor-pointer rb:size-5.5", {
+                          'rb:text-[#FF5D34]': item.meta_data?.audio_status === 'error',
+                          'rb:hover:text-[#155EEF]!': !item.meta_data?.audio_status || !['pending', 'error'].includes(item.meta_data?.audio_status)
+                        })} onClick={() => handlePlay(index, item.meta_data?.audio_url!, item.meta_data?.audio_status)} />
                         : <div
                             className="rb:size-5.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/audio_ing.gif')]"
-                            onClick={() => handlePlay(index, item.meta_data?.audio_url!)}
+                            onClick={() => handlePlay(index, item.meta_data?.audio_url!, item.meta_data?.audio_status)}
                           />
                       }
                     </Space>

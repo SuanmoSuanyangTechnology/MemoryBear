@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 15:38:36
+ * @Last Modified time: 2026-03-24 10:19:34
  */
 /**
  * Conversation Page
@@ -31,6 +31,7 @@ import { shareFileUploadUrlWithoutApiPrefix } from '@/api/fileStorage'
 import ChatToolbar, { type ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import type { Variable } from '@/views/Workflow/components/Properties/VariableList/types'
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
+import { getFileStatusById } from '@/api/fileStorage';
 
 const Conversation: FC = () => {
   const { t } = useTranslation()
@@ -51,6 +52,7 @@ const Conversation: FC = () => {
   const [hasMore, setHasMore] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<ChatToolbarRef>(null)
+  const audioPollingRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
   const [shareToken, setShareToken] = useState<string | null>(localStorage.getItem(`shareToken_${token}`))
   const [fileList, setFileList] = useState<any[]>([])
   const [webSearch, setWebSearch] = useState(false)
@@ -58,6 +60,7 @@ const Conversation: FC = () => {
   const [memory, setMemory] = useState(true)
   const [features, setFeatures] = useState<FeaturesConfigForm>({} as FeaturesConfigForm)
   const [config, setConfig] = useState<Record<string, any>>({})
+  const [audioStatusMap, setAudioStatusMap] = useState<Record<string, string>>({})
 
   useEffect(() => {
     const shareToken = localStorage.getItem(`shareToken_${token}`)
@@ -170,7 +173,7 @@ const Conversation: FC = () => {
     }])
   }
 
-  const updateAssistantMessage = (content: string = '', audio_url?: string) => {
+  const updateAssistantMessage = (content: string = '', audio_url?: string, audio_status?: string) => {
     if (!content && !audio_url) return
     if (streamLoading) setStreamLoading(false)
     setChatList(prev => {
@@ -183,13 +186,28 @@ const Conversation: FC = () => {
           {
             ...lastMsg,
             content: lastMsg.content + content,
-            meta_data: { audio_url }
+            meta_data: { audio_url, audio_status }
           }
         ]
       }
       return prev
     })
   }
+  useEffect(() => {
+    if (!Object.keys(audioStatusMap).length) return
+    setChatList(prev => prev.map(msg => {
+      if (msg.role === 'assistant' && msg.meta_data?.audio_url && audioStatusMap[msg.meta_data.audio_url]) {
+        return {
+          ...msg,
+          meta_data: {
+            ...msg.meta_data,
+            audio_status: audioStatusMap[msg.meta_data.audio_url]
+          }
+        }
+      }
+      return msg
+    }))
+  }, [audioStatusMap, chatList.length])
 
   /** Send message and handle streaming response */
   const handleSend = () => {
@@ -232,13 +250,38 @@ const Conversation: FC = () => {
             currentConversationId = newId
             break
           case 'message':
-            updateAssistantMessage(content, audio_url)
+            updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined)
             if (curId) currentConversationId = curId;
             break
           case 'end':
           case 'workflow_end':
             if (audio_url) {
-              updateAssistantMessage(content, audio_url)
+              updateAssistantMessage(content, audio_url, 'pending')
+              const { file_id } = item.data as { file_id?: string }
+              const idToPoll = file_id || audio_url || ''
+              const fileId = audio_url.split('/').pop()
+              if (fileId && idToPoll && !audioPollingRef.current.has(idToPoll)) {
+
+                const timer = setInterval(() => {
+                  getFileStatusById(fileId)
+                    .then(res => {
+                      const { status } = res as { status: string }
+                      if (status && status !== 'pending') {
+                        setAudioStatusMap(prev => ({
+                          ...prev,
+                          [idToPoll]: status
+                        }))
+                        clearInterval(audioPollingRef.current.get(idToPoll))
+                        audioPollingRef.current.delete(idToPoll)
+                      }
+                    })
+                    .catch(() => {
+                      clearInterval(audioPollingRef.current.get(idToPoll))
+                      audioPollingRef.current.delete(idToPoll)
+                    })
+                }, 2000)
+                audioPollingRef.current.set(idToPoll, timer)
+              }
             }
             setLoading(false)
             if (currentConversationId && currentConversationId !== conversation_id) {

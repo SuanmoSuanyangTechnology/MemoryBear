@@ -5,7 +5,7 @@
  * @Last Modified time: 2026-03-23 17:46:25
  */
 import { type FC, useEffect, useMemo, useState } from 'react'
-import { Flex, Input, Form, Spin } from 'antd'
+import { Flex, Input, Spin } from 'antd'
 import clsx from 'clsx'
 
 import type { ChatInputProps } from './types'
@@ -24,29 +24,18 @@ const ChatInput: FC<ChatInputProps> = ({
   className = '',
   onChange
 }) => {
-  const [form] = Form.useForm()
-  const values = Form.useWatch([], form)
+  const [inputValue, setInputValue] = useState('')
   const [isFocus, setIsFocus] = useState(false)
-  // Monitor form value changes to control send button state
 
-  // Clear form when external message is empty
+  // Clear input when external message is cleared
   useEffect(() => {
-    if (!message) {
-      form.setFieldsValue({
-        message: undefined,
-      })
-    }
-  }, [form, message])
+    if (!message) setInputValue('')
+  }, [message])
 
   // Clear input when loading
   useEffect(() => {
-    if (loading) {
-      form.setFieldsValue({
-        message: undefined,
-      })
-    }
+    if (loading) setInputValue('')
   }, [loading])
-
 
   const handleDelete = (file: any) => {
     fileChange?.(fileList?.filter(item => {
@@ -55,7 +44,7 @@ const ChatInput: FC<ChatInputProps> = ({
           : item.uid !== file.uid
     }) || [])
   }
-  // Convert file object to preview URL
+
   const previewFileList = useMemo(() => {
     return fileList?.map(file => ({
       ...file,
@@ -64,16 +53,11 @@ const ChatInput: FC<ChatInputProps> = ({
   }, [fileList])
 
   const handleSend = () => {
-    if (loading || !values || !values?.message || values?.message?.trim() === '') return
-    onSend(values.message)
+    if (loading || !inputValue || inputValue.trim() === '') return
+    onSend(inputValue)
   }
 
-  const handleFocus = () => {
-    setIsFocus(true)
-  }
-  const handleBlur = () => {
-    setIsFocus(false)
-  }
+  const canSend = !loading && inputValue.trim() !== ''
 
   return (
     <div className={`rb:absolute rb:bottom-3 rb:left-0 rb:right-0 rb:w-full ${className}`}>
@@ -174,41 +158,40 @@ const ChatInput: FC<ChatInputProps> = ({
           })}
         </Flex>
         </div>}
-        {/* Message input form */}
-        <Form form={form} layout="vertical">
-          <Form.Item name="message" noStyle>
-            <Input.TextArea
-              className="rb:m-[10px_12px_10px_12px]! rb:p-0! rb:w-[calc(100%-24px)]! rb:flex-[1_1_auto] rb:h-15! rb:resize-none! rb:rounded-none!"
-              variant="borderless"
-              onChange={(e) => onChange?.(e.target.value)}
-              onKeyDown={(e) => {
-                // Enter to send, Shift+Enter for new line
-                if (e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).value?.trim() !== '' && !loading) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              onFocus={handleFocus}
-              onBlur={handleBlur}
-            />
-          </Form.Item>
-        </Form>
+        {/* Message input area */}
+        <Input.TextArea
+          value={inputValue}
+          className="rb:m-[10px_12px_10px_12px]! rb:p-0! rb:w-[calc(100%-24px)]! rb:flex-[1_1_auto] rb:h-15! rb:resize-none! rb:rounded-none!"
+          variant="borderless"
+          onChange={(e) => {
+            setInputValue(e.target.value)
+            onChange?.(e.target.value)
+          }}
+          onKeyDown={(e) => {
+            // Enter to send, Shift+Enter for new line
+            if (e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).value?.trim() !== '' && !loading) {
+              e.preventDefault();
+              handleSend();
+            }
+          }}
+          onFocus={() => setIsFocus(true)}
+          onBlur={() => setIsFocus(false)}
+        />
 
         {/* Bottom action area */}
         <Flex align="center" justify="space-between" gap={8} className="rb:mx-2.5! rb:mb-2.5!">
-          {/* Child component content (such as buttons) */}
           <div className="rb:flex-1">{children}</div>
           <Flex align="center" justify="center"
             className={clsx('rb:size-7 rb:rounded-full rb:shadow-[0px 2px 12px 0px rgba(23,23,25,0.1)]', {
-              'rb:cursor-not-allowed rb:bg-[#F6F6F6]': loading || !values || !values?.message || values?.message?.trim() === '',
-              'rb:cursor-pointer rb:bg-[#171719]': !loading && !(!values || !values?.message || values?.message?.trim() === '')
+              'rb:cursor-not-allowed rb:bg-[#F6F6F6]': !canSend,
+              'rb:cursor-pointer rb:bg-[#171719]': canSend
             })}
             onClick={handleSend}
           >
             <div className={clsx("rb:size-4 rb:bg-cover", {
               "rb:bg-[url('@/assets/images/conversation/loading.svg')]": loading,
-              "rb:bg-[url('@/assets/images/conversation/sendDisabled.svg')]": !loading && (!values || !values?.message || values?.message?.trim() === ''),
-              "rb:bg-[url('@/assets/images/conversation/send.svg')]": !loading && !(!values || !values?.message || values?.message?.trim() === '')
+              "rb:bg-[url('@/assets/images/conversation/sendDisabled.svg')]": !loading && !canSend,
+              "rb:bg-[url('@/assets/images/conversation/send.svg')]": canSend
             })}></div>
           </Flex>
         </Flex>

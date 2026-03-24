@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 15:40:44
+ * @Last Modified time: 2026-03-24 10:12:09
  */
 /**
  * Chat debugging component for application testing
@@ -28,6 +28,7 @@ import ChatInput from '@/components/Chat/ChatInput'
 import ChatToolbar from '@/components/Chat/ChatToolbar'
 import type { ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import type { Variable } from './VariableList/types'
+import { getFileStatusById } from '@/api/fileStorage'
 
 
 /**
@@ -62,6 +63,8 @@ const Chat: FC<ChatProps> = ({
   const { id } = useParams()
   const { message: messageApi } = App.useApp()
   const toolbarRef = useRef<ChatToolbarRef>(null)
+  const audioPollingRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
+  const msgCreatedAtRef = useRef<Map<string, number | string>>(new Map())
   const [loading, setLoading] = useState(false)
   const [isCluster, setIsCluster] = useState(source === 'multi_agent')
   const [conversationId, setConversationId] = useState<string | null>(null)
@@ -69,6 +72,7 @@ const Chat: FC<ChatProps> = ({
   const [fileList, setFileList] = useState<any[]>([])
   const [message, setMessage] = useState<string | undefined>(undefined)
   const [features, setFeatures] = useState<FeaturesConfigForm>({} as FeaturesConfigForm)
+  const [audioStatusMap, setAudioStatusMap] = useState<Record<string, string>>({})
 
   useEffect(() => {
     setCompareLoading(false)
@@ -117,6 +121,7 @@ const Chat: FC<ChatProps> = ({
       const assistantMessages: Record<string, ChatItem> = {}
       chatList.forEach(item => {
         assistantMessages[item.model_config_id as string] = assistantMessage
+        msgCreatedAtRef.current.set(item.model_config_id as string, assistantMessage.created_at as number)
       })
       updateChatList(prev => prev.map(item => ({
         ...item,
@@ -143,7 +148,7 @@ const Chat: FC<ChatProps> = ({
               {
                 ...lastMsg,
                 content: lastMsg.content + (content || ''),
-                meta_data: { audio_url }
+                ...(audio_url !== undefined ? { meta_data: { audio_url, audio_status: 'pending' } } : {})
               }
             ]
           }
@@ -180,6 +185,26 @@ const Chat: FC<ChatProps> = ({
       return prev
     })
   }
+
+  useEffect(() => {
+    updateChatList(prev => prev.map(item => ({
+      ...item,
+      list: item.list?.map(msg => {
+        console.log('item', item)
+        const id = `${item.model_config_id}_${msg.meta_data?.audio_url}`
+        if (msg.role === 'assistant' && msg.meta_data?.audio_url && audioStatusMap[id]) {
+          return {
+            ...msg,
+            meta_data: {
+              ...msg.meta_data,
+              audio_status: audioStatusMap[id]
+            }
+          }
+        }
+        return msg
+      })
+    })))
+  }, [chatList.length, audioStatusMap])
   /** Send message for agent comparison mode */
   const handleSend = (msg?: string) => {
     if (loading || !id) return
@@ -215,7 +240,7 @@ const Chat: FC<ChatProps> = ({
         }
 
         addUserMessage(message, files)
-        setMessage(message)
+        setMessage(undefined)
         toolbarRef.current?.setFiles([])
         setFileList([])
         addAssistantMessage()
@@ -231,8 +256,38 @@ const Chat: FC<ChatProps> = ({
                 updateAssistantMessage(content, model_config_id, conversation_id, audio_url)
                 break;
               case 'model_end':
+                const idToPoll = `${model_config_id}_${audio_url}`
+                if (audio_url && !audioStatusMap[idToPoll]) {
+                  setAudioStatusMap(prev => ({
+                    ...prev,
+                    [idToPoll]: 'pending'
+                  }))
+                }
                 if (audio_url) {
                   updateAssistantMessage(content, model_config_id, conversation_id, audio_url)
+                  const fileId = audio_url.split('/').pop()
+                  if (fileId && idToPoll && !audioPollingRef.current.has(idToPoll)) {
+                    const timer = setInterval(() => {
+                      getFileStatusById(fileId)
+                        .then(res => {
+                          const { status } = res as { status: string }
+                          if (status && status !== 'pending') {
+                            clearInterval(audioPollingRef.current.get(idToPoll))
+                            audioPollingRef.current.delete(idToPoll)
+                            setAudioStatusMap(prev => ({
+                              ...prev,
+                              [idToPoll]: status
+                            }))
+                          }
+                        })
+                        .catch((e) => {
+                          console.log('[audio poll] error', e)
+                          clearInterval(audioPollingRef.current.get(idToPoll))
+                          audioPollingRef.current.delete(idToPoll)
+                        })
+                    }, 2000)
+                    audioPollingRef.current.set(idToPoll, timer)
+                  }
                 }
                 updateErrorAssistantMessage(message_length, model_config_id)
                 break;
@@ -504,7 +559,6 @@ const Chat: FC<ChatProps> = ({
               }}
               fileList={fileList}
               onSend={isCluster ? handleClusterSend : handleSend}
-              onChange={setMessage}
             >
               <ChatToolbar
                 ref={toolbarRef}
