@@ -30,8 +30,8 @@ class CycleGraphNode(BaseNode):
     It acts as a container and execution controller for a subgraph.
     """
 
-    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
-        super().__init__(node_config, workflow_config)
+    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
+        super().__init__(node_config, workflow_config, down_stream_nodes)
         self.cycle_nodes, self.cycle_edges = self.pure_cycle_graph()
         self.start_node_id = None  # ID of the start node within the cycle
 
@@ -115,11 +115,11 @@ class CycleGraphNode(BaseNode):
             else:
                 remain_edges.append(edge)
 
-        # Update workflow_config by removing cycle nodes and internal edges
-        self.workflow_config["nodes"] = [
-            node for node in nodes if node.get("cycle") != self.node_id
-        ]
-        self.workflow_config["edges"] = remain_edges
+        # # Update workflow_config by removing cycle nodes and internal edges
+        # self.workflow_config["nodes"] = [
+        #     node for node in nodes if node.get("cycle") != self.node_id
+        # ]
+        # self.workflow_config["edges"] = remain_edges
 
         return cycle_nodes, cycle_edges
 
@@ -140,8 +140,8 @@ class CycleGraphNode(BaseNode):
                 "nodes": self.cycle_nodes,
                 "edges": self.cycle_edges,
             },
-            subgraph=True,
-            variable_pool=self.child_variable_pool
+            variable_pool=self.child_variable_pool,
+            cycle=self.node_id
         )
         self.graph = builder.build()
         self.start_node_id = builder.start_node_id

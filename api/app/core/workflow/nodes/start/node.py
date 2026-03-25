@@ -27,14 +27,8 @@ class StartNode(BaseNode):
     注意：变量的验证和默认值处理由 Executor 在初始化时完成。
     """
 
-    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
-        """初始化 Start 节点
-        
-        Args:
-            node_config: 节点配置
-            workflow_config: 工作流配置
-        """
-        super().__init__(node_config, workflow_config)
+    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
+        super().__init__(node_config, workflow_config, down_stream_nodes)
 
         # 解析并验证配置
         self.typed_config: StartNodeConfig | None = None
