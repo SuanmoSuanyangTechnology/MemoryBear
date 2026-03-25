@@ -315,8 +315,8 @@ class BaseNode(ABC):
 
             elapsed_time = (time.time() - start_time) * 1000
 
-            logger.info(f"Node {self.node_id} streaming execution finished, "
-                        f"time elapsed: {elapsed_time:.2f}ms, chunks: {chunk_count}")
+            logger.debug(f"Node {self.node_id} streaming execution finished, "
+                         f"time elapsed: {elapsed_time:.2f}ms, chunks: {chunk_count}")
 
             # Extract processed output (call subclass's _extract_output)
             extracted_output = self._extract_output(final_result)
@@ -644,7 +644,7 @@ class BaseNode(ABC):
             if content.content_cache.get(f"{provider}_{ModelInfo.is_omni}"):
                 return content.content_cache[f"{provider}_{ModelInfo.is_omni}"]
             with get_db_read() as db:
-                multimodel_service = MultimodalService(db, api_config=api_config)
+                multimodal_service = MultimodalService(db, api_config=api_config)
                 file_obj = FileInput(
                     type=content.type,
                     url=content.url,
@@ -653,7 +653,7 @@ class BaseNode(ABC):
                     upload_file_id=uuid.UUID(content.file_id) if content.file_id else None,
                 )
                 file_obj.set_content(content.get_content())
-                message = await multimodel_service.process_files(
+                message = await multimodal_service.process_files(
                     [file_obj],
                 )
                 content.set_content(file_obj.get_content())
@@ -661,7 +661,7 @@ class BaseNode(ABC):
                     content.content_cache[f"{provider}_{ModelInfo.is_omni}"] = message
                     return message
                 return None
-        raise TypeError(f'Unexpect input value type - {type(content)}')
+        raise TypeError(f'Unexpected input value type - {type(content)}')
 
     @staticmethod
     def process_model_output(content) -> str:

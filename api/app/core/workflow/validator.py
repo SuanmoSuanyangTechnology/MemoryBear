@@ -6,6 +6,7 @@
 
 import copy
 import logging
+from collections import defaultdict, deque
 from typing import Any, Union, TYPE_CHECKING
 
 from app.core.workflow.nodes.enums import NodeType
@@ -119,7 +120,6 @@ class WorkflowValidator:
         errors = []
 
         graphs = cls.get_subgraph(workflow_config)
-        logger.info(graphs)
         for index, graph in enumerate(graphs):
             nodes = graph.get("nodes", [])
             edges = graph.get("edges", [])
@@ -204,18 +204,18 @@ class WorkflowValidator:
         Returns:
             可达节点 ID 集合
         """
+        adj = defaultdict(list)
+        for edge in edges:
+            adj[edge["source"]].append(edge["target"])
+
         reachable = {start_id}
-        queue = [start_id]
-
+        queue = deque([start_id])
         while queue:
-            current = queue.pop(0)
-            for edge in edges:
-                if edge.get("source") == current:
-                    target = edge.get("target")
-                    if target and target not in reachable:
-                        reachable.add(target)
-                        queue.append(target)
-
+            current = queue.popleft()
+            for target in adj[current]:
+                if target not in reachable:
+                    reachable.add(target)
+                    queue.append(target)
         return reachable
 
     @staticmethod

@@ -69,11 +69,12 @@ class GraphBuilder:
             for node in self.nodes
             if node.get("type") == "end" and node.get("id") in self.reachable_nodes
         ]
+        self._reverse_adj: dict[str, list[dict]] = defaultdict(list)
+        self._adj: dict[str, list[str]] = defaultdict(list)
+        self._build_reverse_adj()
         self.add_edges()
         # EDGES MUST BE ADDED AFTER NODES ARE ADDED.
 
-        self._reverse_adj: dict[str, list[dict]] = defaultdict(list)
-        self._build_reverse_adj()
         self._analyze_end_node_output()
 
     @property
@@ -115,6 +116,7 @@ class GraphBuilder:
             self._reverse_adj[edge.get("target")].append({
                 "id": edge["source"], "branch": edge.get("label")
             })
+            self._adj[edge.get("source")].append(edge["target"])
 
     def _find_upstream_activation_dep(
             self,
@@ -413,11 +415,12 @@ class GraphBuilder:
         # Add conditional edges
         for source_node, branches in conditional_edges.items():
             def make_router(src, branch_list):
-                """reate a router function for each source node that routes to a NOP node for later merging."""
+                """Create a router function for each source node that routes to a NOP node for later merging."""
 
                 def make_branch_node(node_name, targets):
                     def node(s):
-                        # NOTE: NOP NODE MUST NOT MODIFY STATE
+                        # NOTE: NOP NODE USED FOR ROUTING ONLY.
+                        # MUST NOT MUTATE STATE DIRECTLY; ONLY EMIT ACTIVATE SIGNALS.
                         return {
                             "activate": {
                                 node_id: s["activate"][node_name]
@@ -504,11 +507,9 @@ class GraphBuilder:
                 logger.debug(f"Added waiting edge: {sources} -> {target}")
 
         # Connect End nodes to the global END node
-        for end_node in self.end_nodes:
-            end_node_id = end_node.get("id")
-            if end_node_id:
-                self.graph.add_edge(end_node_id, END)
-                logger.debug(f"Added edge: {end_node_id} -> END")
+        for node in self.reachable_nodes:
+            if not self._adj[node]:
+                self.graph.add_edge(node, END)
         return
 
     def build(self) -> CompiledStateGraph:

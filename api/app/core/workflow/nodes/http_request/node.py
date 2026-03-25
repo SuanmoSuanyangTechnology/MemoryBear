@@ -16,7 +16,7 @@ from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.enums import HttpRequestMethod, HttpErrorHandle, HttpAuthType, HttpContentType
 from app.core.workflow.nodes.http_request.config import HttpRequestNodeConfig, HttpRequestNodeOutput
-from app.core.workflow.utils.file_processer import mime_to_file_type
+from app.core.workflow.utils.file_processor import mime_to_file_type
 from app.core.workflow.variable.base_variable import VariableType, FileObject
 from app.core.workflow.variable.variable_objects import FileVariable, ArrayVariable
 from app.schemas import FileType, TransferMethod

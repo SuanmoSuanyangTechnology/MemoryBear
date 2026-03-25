@@ -12,7 +12,7 @@ from app.aioRedis import aio_redis_set, aio_redis_get
 from app.core.config import settings
 from app.core.exceptions import BusinessException
 from app.core.workflow.adapters.base_adapter import WorkflowImportResult, WorkflowParserResult
-from app.core.workflow.adapters.errors import UnsupportPlatform, InvalidConfiguration
+from app.core.workflow.adapters.errors import UnsupportedPlatform, InvalidConfiguration
 from app.core.workflow.adapters.registry import PlatformAdapterRegistry
 from app.schemas import AppCreate
 from app.schemas.workflow_schema import WorkflowConfigCreate
@@ -46,7 +46,7 @@ class WorkflowImportService:
                 success=False,
                 temp_id=None,
                 workflow_id=None,
-                errors=[UnsupportPlatform(platform=platform)]
+                errors=[UnsupportedPlatform(platform=platform)]
             )
 
         adapter = self.registry.get_adapter(platform, config)

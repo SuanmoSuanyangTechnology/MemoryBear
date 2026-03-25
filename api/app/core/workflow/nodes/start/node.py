@@ -62,7 +62,6 @@ class StartNode(BaseNode):
             包含系统参数、会话变量和自定义变量的字典
         """
         self.typed_config = StartNodeConfig(**self.config)
-        logger.info(f"节点 {self.node_id} (Start) 开始执行")
 
         # 处理自定义变量（传入 pool 避免重复创建）
         custom_vars = self._process_custom_variables(variable_pool)
@@ -77,9 +76,9 @@ class StartNode(BaseNode):
             **custom_vars  # 自定义变量作为节点输出的一部分
         }
 
-        logger.info(
-            f"节点 {self.node_id} (Start) 执行完成，"
-            f"输出了 {len(custom_vars)} 个自定义变量"
+        logger.debug(
+            f"Node {self.node_id} (Start) execution completed, "
+            f"outputting {len(custom_vars)} custom variables"
         )
 
         return result

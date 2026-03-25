@@ -54,7 +54,7 @@ class DictVariable(BaseVariable):
 
     def valid_value(self, value) -> dict:
         if not isinstance(value, dict):
-            raise TypeError(f"Value must be a dict  - {type(value)}:{value}")
+            raise TypeError(f"Value must be a dict - {type(value)}:{value}")
         return value
 
     def to_literal(self) -> str:

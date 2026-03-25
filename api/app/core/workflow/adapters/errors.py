@@ -18,7 +18,7 @@ class ExceptionType(StrEnum):
     UNKNOWN = "unknown"
 
 
-class ExceptionDefineition(BaseModel):
+class ExceptionDefinition(BaseModel):
     type: ExceptionType
     detail: str
 
@@ -29,7 +29,7 @@ class ExceptionDefineition(BaseModel):
     name: str | None = None
 
 
-class UnknowModelWarning(ExceptionDefineition):
+class UnknownModelWarning(ExceptionDefinition):
     type: ExceptionType = ExceptionType.NODE
 
     def __init__(self, node_id, node_name, model_name):
@@ -40,36 +40,36 @@ class UnknowModelWarning(ExceptionDefineition):
         )
 
 
-class UnknowError(ExceptionDefineition):
+class UnknownError(ExceptionDefinition):
     type: ExceptionType = ExceptionType.UNKNOWN
 
     def __init__(self, detail: str, **kwargs):
         super().__init__(detail=detail, **kwargs)
 
 
-class UnsupportPlatform(ExceptionDefineition):
+class UnsupportedPlatform(ExceptionDefinition):
     type: ExceptionType = ExceptionType.PLATFORM
 
     def __init__(self, platform: str):
-        super().__init__(detail=f"Unsupport platform {platform}")
+        super().__init__(detail=f"Unsupported platform {platform}")
 
 
-class UnsupportVariableType(ExceptionDefineition):
+class UnsupportedVariableType(ExceptionDefinition):
     type: ExceptionType = ExceptionType.VARIABLE
 
     def __init__(self, scope, name, var_type: str, **kwargs):
-        super().__init__(scope=scope, name=name, detail=f"Unsupport variable type：[{var_type}]", **kwargs)
+        super().__init__(scope=scope, name=name, detail=f"Unsupported variable type: [{var_type}]", **kwargs)
 
 
-class InvalidConfiguration(ExceptionDefineition):
+class InvalidConfiguration(ExceptionDefinition):
     type: ExceptionType = ExceptionType.CONFIG
 
     def __init__(self):
         super().__init__(detail="Invalid workflow configuration format")
 
 
-class UnsupportNodeType(ExceptionDefineition):
+class UnsupportedNodeType(ExceptionDefinition):
     type: ExceptionType = ExceptionType.NODE
 
     def __init__(self, node_id: str, node_type: str):
-        super().__init__(node_id=node_id, detail=f"Unsupport node Type {node_type}")
+        super().__init__(node_id=node_id, detail=f"Unsupported node type {node_type}")
