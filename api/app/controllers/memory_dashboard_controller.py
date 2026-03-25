@@ -663,9 +663,12 @@ async def dashboard_data(
                 rag_data["total_memory"] = total_chunk
                 
                 # total_app: 统计当前空间下的所有app数量
-                from app.repositories import app_repository
-                apps_orm = app_repository.get_apps_by_workspace_id(db, workspace_id)
-                rag_data["total_app"] = len(apps_orm)
+                # 包含自有app + 被分享给本工作空间的app
+                from app.services import app_service as _app_svc
+                _, total_app = _app_svc.AppService(db).list_apps(
+                    workspace_id=workspace_id, include_shared=True, pagesize=1
+                )
+                rag_data["total_app"] = total_app
                 
                 # total_knowledge: 使用 total_kb（总知识库数）
                 total_kb = memory_dashboard_service.get_rag_total_kb(db, current_user)
@@ -687,7 +690,7 @@ async def dashboard_data(
                     api_logger.warning(f"获取RAG模式API调用统计失败，使用默认值: {str(e)}")
                     rag_data["total_api_call"] = 0
                 
-                api_logger.info(f"成功获取RAG相关数据: memory={total_chunk}, app={len(apps_orm)}, knowledge={total_kb}, api_calls={rag_data['total_api_call']}")
+                api_logger.info(f"成功获取RAG相关数据: memory={total_chunk}, app={total_app}, knowledge={total_kb}, api_calls={rag_data['total_api_call']}")
             except Exception as e:
                 api_logger.warning(f"获取RAG相关数据失败: {str(e)}")
             
