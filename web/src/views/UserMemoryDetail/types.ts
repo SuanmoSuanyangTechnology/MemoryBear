@@ -2,14 +2,12 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-13 11:49:52
+ * @Last Modified time: 2026-03-24 17:58:54
  */
 /**
  * User Memory Detail Types
  * Type definitions for user memory detail views including nodes, edges, and statistics
  */
-
-import type { Dayjs } from "dayjs";
 
 /**
  * User memory data structure
@@ -171,15 +169,13 @@ export interface NodeStatisticsItem {
  * End user profile
  */
 export interface EndUser {
-  end_user_id: string;
-  id: string;
   other_name: string;
-  position: string;
-  department: string;
-  contact: string;
-  phone: string;
-  hire_date: string | number | Dayjs | null;
-  updatetime_profile?: number;
+  aliases: string | null;
+  meta_data: Record<string, string>;
+  end_user_info_id: string;
+  end_user_id: string;
+  created_at: string;
+  updated_at: string;
 }
 /**
  * End user profile modal ref

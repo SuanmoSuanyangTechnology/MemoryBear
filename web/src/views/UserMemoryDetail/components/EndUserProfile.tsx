@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:33:30 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-11 14:51:00
+ * @Last Modified time: 2026-03-24 17:55:02
  */
 /**
  * End User Profile Component
@@ -18,7 +18,7 @@ import clsx from 'clsx'
 
 import RbCard from '@/components/RbCard/Card'
 import {
-  getEndUserProfile,
+  getEndUserInfo,
 } from '@/api/memory'
 import EndUserProfileModal from './EndUserProfileModal'
 import type { EndUser, EndUserProfileModalRef, EndUserProfileRef } from '../types'
@@ -31,7 +31,7 @@ interface EndUserProfileProps {
   className?: string;
 }
 
-const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ onDataLoaded, className }, ref) => {
+const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ className }, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const endUserProfileModalRef = useRef<EndUserProfileModalRef>(null)
@@ -47,13 +47,9 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ onD
   const getData = () => {
     if (!id) return
     setLoading(true)
-    getEndUserProfile(id).then((res) => {
+    getEndUserInfo(id).then((res) => {
       const userData = res as EndUser
       setData(userData)
-      onDataLoaded?.({
-        other_name: userData.other_name,
-        id: userData.id
-      })
       setLoading(false) 
     })
     .finally(() => {
@@ -62,10 +58,10 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ onD
   }
   /** Format profile items for display */
   const formatItems = useCallback(() => {
-    return ['other_name', 'position', 'department', 'contact', 'phone', 'hire_date'].map(key => ({
+    return ['other_name'].map(key => ({
       key,
       label: t(`userMemory.${key}`),
-      children: key === 'hire_date' && data?.[key] ? dayjs(data[key as keyof EndUser]).format('YYYY-MM-DD') : String(data?.[key as keyof EndUser] || '-'),
+      children: String(data?.[key as keyof EndUser] || '-'),
     }))
   }, [data])
   /** Open edit modal */
@@ -102,7 +98,7 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ onD
             ))}
 
             <div className="rb:text-[#7B8085] rb:text-[12px] rb:leading-4.5">
-              {t('userMemory.updated_at')}: {data?.updatetime_profile ? dayjs(data?.updatetime_profile).format('YYYY/MM/DD HH:mm:ss') : ''}
+            {t('userMemory.updated_at')}: {data?.updated_at ? dayjs(data?.updated_at).format('YYYY/MM/DD HH:mm:ss') : ''}
             </div>
         </Flex>
       }
