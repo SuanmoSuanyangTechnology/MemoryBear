@@ -64,7 +64,6 @@ class RedBearImageGenerator:
             prompt: 提示词
             image: 参考图片URL或URL列表（图文生图/多图融合）
             size: 图片尺寸，支持 "2K", "2048x2048", "1920x1080" 等（至少3686400像素）
-            n: 生成数量
             output_format: 输出格式，如 "png", "jpg"
             response_format: 返回格式，"url" 或 "b64_json"
             watermark: 是否添加水印

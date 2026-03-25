@@ -90,7 +90,7 @@ class RedBearEmbeddings(Embeddings):
             input=contents,
             **kwargs
         )
-        return [item.embedding for item in response.data]
+        return [response.data.embedding]
     
     async def aembed_multimodal(
         self,

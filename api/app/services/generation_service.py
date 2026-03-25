@@ -25,8 +25,7 @@ class GenerationService:
         self,
         model_config_id: str,
         prompt: str,
-        size: Optional[str] = "1024x1024",
-        n: int = 1,
+        size: Optional[str] = "2k",
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -36,7 +35,6 @@ class GenerationService:
             model_config_id: 模型配置ID
             prompt: 提示词
             size: 图片尺寸
-            n: 生成数量
             **kwargs: 其他参数
             
         Returns:
@@ -69,7 +67,7 @@ class GenerationService:
         
         # 生成图片
         generator = RedBearImageGenerator(config)
-        result = await generator.agenerate(prompt, size, n, **kwargs)
+        result = await generator.agenerate(prompt, size, **kwargs)
         
         return result
     
