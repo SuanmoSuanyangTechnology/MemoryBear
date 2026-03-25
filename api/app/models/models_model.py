@@ -26,9 +26,9 @@ class ModelType(StrEnum):
     RERANK = "rerank"
     # TTS = "tts"
     # SPEECH2TEXT = "speech2text"
-    # IMAGE = "image"
+    IMAGE = "image"
     # AUDIO = "audio"
-    # VISION = "vision"
+    VIDEO = "video"
 
 
 class ModelProvider(StrEnum):
@@ -45,6 +45,7 @@ class ModelProvider(StrEnum):
     XINFERENCE = "xinference"
     GPUSTACK = "gpustack"
     BEDROCK = "bedrock"
+    VOLCANO = "volcano"
     COMPOSITE = "composite"
 
 

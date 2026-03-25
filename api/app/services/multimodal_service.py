@@ -297,6 +297,7 @@ PROVIDER_STRATEGIES = {
     "bedrock": BedrockFormatStrategy,
     "anthropic": BedrockFormatStrategy,
     "openai": OpenAIFormatStrategy,
+    "volcano": OpenAIFormatStrategy,
 }
 
 

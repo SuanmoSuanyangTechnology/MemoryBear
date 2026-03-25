@@ -67,7 +67,7 @@ class RedBearModelFactory:
                 **config.extra_params
             }
 
-        if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.OLLAMA]:
+        if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.OLLAMA, ModelProvider.VOLCANO]:
             # 使用 httpx.Timeout 对象来设置详细的超时配置
             # 这样可以分别控制连接超时和读取超时
             import httpx
@@ -160,11 +160,13 @@ def get_provider_llm_class(config: RedBearModelConfig, type: ModelType = ModelTy
     # dashscope 的 omni 模型使用 OpenAI 兼容模式
     if provider == ModelProvider.DASHSCOPE and config.is_omni:
         return ChatOpenAI
-    if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK]:
+    if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.VOLCANO]:
         if type == ModelType.LLM:
             return OpenAI
         elif type == ModelType.CHAT:
             return ChatOpenAI
+        else:
+            raise BusinessException(f"不支持的模型提供商及类型: {provider}-{type}", code=BizCode.PROVIDER_NOT_SUPPORTED)
     elif provider == ModelProvider.DASHSCOPE:
         return ChatTongyi
     elif provider == ModelProvider.OLLAMA:
