@@ -819,6 +819,7 @@ export const zh = {
       noShareAuth: '无共享应用的权限',
       appCount: '{{count}}个应用共享到此空间',
       resetFeaturesTip: '请重新配置【对话功能-文件上传】功能',
+      logTitle: '描述',
     },
     table: {
       totalRecords: '共 {{total}} 条记录'

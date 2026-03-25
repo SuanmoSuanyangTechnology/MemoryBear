@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:42:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 16:49:45
+ * @Last Modified time: 2026-03-25 16:25:23
  */
 /**
  * Member Management Page
@@ -13,7 +13,6 @@ import React, { useRef } from 'react';
 import { App, Button, Space, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
-import type { AnyObject } from 'antd/es/_util/type';
 
 import { deleteMember, memberListUrl } from '@/api/member';
 import MemberModal from './components/MemberModal';
@@ -61,7 +60,7 @@ const MemberManagement: React.FC = () => {
   };
 
   /** Table column configuration */
-  const columns: ColumnsType = [
+  const columns: ColumnsType<Member> = [
     {
       title: t('member.username'),
       dataIndex: 'username',
@@ -89,15 +88,15 @@ const MemberManagement: React.FC = () => {
     {
       title: t('common.operation'),
       key: 'action',
-      render: (_, record: AnyObject) => (
+      render: (_, record) => (
         <Space size="large">
           <Button
             type="link"
-            onClick={() => handleEdit(record as Member)}
+            onClick={() => handleEdit(record)}
           >
             {t('common.edit')}
           </Button>
-          <Button type="link" danger onClick={() => handleDelete(record as Member)}>
+          <Button type="link" danger onClick={() => handleDelete(record)}>
             {t('common.delete')}
           </Button>
         </Space>
@@ -112,7 +111,7 @@ const MemberManagement: React.FC = () => {
           {t('member.createMember')}
         </Button>
       </Flex>
-      <Table
+      <Table<Member>
         ref={tableRef}
         apiUrl={memberListUrl}
         columns={columns}

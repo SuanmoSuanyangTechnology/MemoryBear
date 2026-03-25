@@ -15,6 +15,9 @@
 .properties :global(.ant-select-multiple.ant-select-sm .ant-select-selector) {
   min-height: 28px;
 }
+.properties :global(.ant-select-multiple.ant-select-sm .ant-select-selection-item) {
+  height: 18px;
+}
 .properties :global(:not(.select).ant-select-single.ant-select-sm.ant-select-borderless) {
   height: 22px;
 }

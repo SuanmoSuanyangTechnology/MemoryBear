@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-24 15:41:20 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 16:06:44
+ * @Last Modified time: 2026-03-25 16:20:32
  */
 import { type FC, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -26,7 +26,7 @@ const Statistics: FC = () => {
   }
 
   /** Table column configuration */
-  const columns: ColumnsType = [
+  const columns: ColumnsType<LogItem> = [
     {
       title: t('application.logTitle'),
       dataIndex: 'title',
@@ -62,7 +62,7 @@ const Statistics: FC = () => {
   ];
   return (
     <div className="rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
-      <Table
+      <Table<LogItem>
         apiUrl={getAppLogsUrl(id || '')}
         apiParams={{
           is_draft: false,

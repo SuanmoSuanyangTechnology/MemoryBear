@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:26:32 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-25 15:09:09
+ * @Last Modified time: 2026-03-25 17:10:30
  */
 /**
  * Variable List Component
@@ -78,9 +78,10 @@ interface VariableListProps {
             <>
               {fields.length > 0 ? (
                 <div className="rb:mt-3">
-                  <Table
+                  <Table<Variable>
                     size="small"
                     rowKey="index"
+                    bordered={true}
                     pagination={false}
                     columns={[
                       {
@@ -123,7 +124,7 @@ interface VariableListProps {
                         ),
                       },
                     ]}
-                    initialData={value as unknown as Record<string, unknown>[]}
+                    initialData={value}
                     emptySize={88}
                   />
                 </div>

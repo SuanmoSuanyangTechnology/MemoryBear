@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:51:08 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 10:41:25
+ * @Last Modified time: 2026-03-25 16:45:18
  */
 /**
  * User Management Page
@@ -63,7 +63,7 @@ const UserManagement: React.FC = () => {
   };
 
   /** Table column configuration */
-  const columns: ColumnsType = [
+  const columns: ColumnsType<User> = [
     {
       title: t('user.userId'),
       dataIndex: 'id',
@@ -150,7 +150,7 @@ const UserManagement: React.FC = () => {
         </Button>
       </Flex>
 
-      <Table
+      <Table<User>
         ref={tableRef}
         apiUrl={getUserListUrl}
         apiParams={{
@@ -159,6 +159,7 @@ const UserManagement: React.FC = () => {
         columns={columns}
         rowKey="id"
         isScroll={true}
+        scrollY="calc(100vh - 256px)"
       />
 
       <CreateModal

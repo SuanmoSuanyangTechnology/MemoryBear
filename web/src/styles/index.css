@@ -156,6 +156,19 @@ body {
   border-radius: 12px;
   border: none;
 }
+
+.ant-table-wrapper .ant-table.ant-table-bordered {
+  border-radius: 12px;
+}
+.ant-table-wrapper table.ant-table-bordered {
+  border-radius: 12px;
+}
+.ant-table-bordered .ant-table-row:last-child .ant-table-cell:first-child {
+  border-bottom-left-radius: 12px;
+}
+.ant-table-bordered .ant-table-row:last-child .ant-table-cell:last-child {
+  border-bottom-right-radius: 12px;
+}
 .ant-table-wrapper table {
   border-radius: 12px;
 }
@@ -200,6 +213,18 @@ body {
 .table-header.ant-table-wrapper .ant-table-thead>tr>th,
 .table-header.ant-table-wrapper .ant-table-thead>tr>td {
   background-color: #F6F6F6;
+  border-bottom: 1px solid #EBEBEB;
+}
+.ant-table-wrapper .ant-table-bordered .ant-table-thead>tr>th,
+.ant-table-wrapper .ant-table-bordered .ant-table-thead>tr>td,
+.table-header.ant-table-wrapper .ant-table-bordered .ant-table-thead>tr>th,
+.table-header.ant-table-wrapper .ant-table-bordered .ant-table-thead>tr>td {
+  background-color: #FFFFFF;
+  font-weight: 500;
+}
+.ant-table-wrapper .ant-table.ant-table-small.ant-table-bordered .ant-table-tbody>tr>th,
+.ant-table-wrapper .ant-table.ant-table-small.ant-table-bordered .ant-table-tbody>tr>td {
+  color: #171719;
 }
 .ant-table-wrapper .ant-btn {
   height: 24px;

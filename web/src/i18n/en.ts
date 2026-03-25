@@ -1444,6 +1444,7 @@ export const en = {
       noShareAuth: 'No permission to share apps',
       appCount: '{{count}} apps shared to this space',
       resetFeaturesTip: 'Please reconfigure the [Conversation Features - File Upload] settings',
+      logTitle: 'Description',
     },
     userMemory: {
       userMemory: 'User Memory',

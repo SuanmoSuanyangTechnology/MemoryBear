@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:40:13 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 16:03:59
+ * @Last Modified time: 2026-03-25 16:54:44
  */
 import { type FC } from 'react'
 import clsx from 'clsx';
@@ -40,6 +40,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
   onChange,
   size = 'middle',
   filterBooleanType = false,
+  mode,
   ...resetPorps
 }) => {
 
@@ -63,9 +64,10 @@ const VariableSelect: FC<VariableSelectProps> = ({
     if (filterOption) {
       return (
         <span
-          className={clsx("rb:max-w-full rb:wrap-break-word rb:line-clamp-1 rb-border rb:rounded-md rb:bg-white rb:text-[12px] rb:inline-flex rb:items-center rb:px-1.5 rb:cursor-pointer", {
+          className={clsx("rb:max-w-full rb:wrap-break-word rb:line-clamp-1 rb:rounded-md rb:bg-white rb:text-[12px] rb:inline-flex rb:items-center rb:px-1.5 rb:cursor-pointer", {
             'rb:leading-5.5!': size !== 'small',
-            'rb:leading-4! rb:text-[10px]!': size === 'small'
+            'rb:leading-4! rb:text-[10px]!': size === 'small',
+            'rb-border': mode !== "multiple"
           })}
           contentEditable={false}
         >
@@ -131,6 +133,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
   return (
     <Select
       {...resetPorps}
+      mode={mode}
       size={size}
       placeholder={placeholder}
       value={value}

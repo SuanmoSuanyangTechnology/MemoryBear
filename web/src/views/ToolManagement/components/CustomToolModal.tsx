@@ -12,21 +12,23 @@ const FormItem = Form.Item;
 interface CustomToolModalProps {
   refresh: () => void;
 }
+
+interface OperationItem {
+  method: string;
+  path: string;
+  summary: string;
+  description: string;
+  parameters: Record<string, Record<string, string | null>>
+  request_body: null | string;
+  responses: Record<string, Record<string, string | null>>
+  tags: string[]
+}
 interface ParseSchemaData {
   title: string;
   description: string;
   version: string;
   base_url: string;
-  operations: Array<{
-    method: string;
-    path: string;
-    summary: string;
-    description: string;
-    parameters: Record<string, Record<string, string | null>>
-    request_body: null | string;
-    responses: Record<string, Record<string, string | null>>
-    tags: string[]
-  }>
+  operations: OperationItem[]
 }
 const authTypeList = ['none', 'api_key', 'basic_auth']
 const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
@@ -170,9 +172,10 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
         <Form.Item
           label={t('tool.availableTools')}
         >
-          <Table
+          <Table<OperationItem>
             rowKey="summary"
             pagination={false}
+            bordered={true}
             columns={[
               {
                 title: t('tool.name'),

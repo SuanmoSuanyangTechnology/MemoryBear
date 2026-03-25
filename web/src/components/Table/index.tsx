@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:29:46 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 16:12:56
+ * @Last Modified time: 2026-03-25 17:11:55
  */
 /**
  * RbTable Component
@@ -30,21 +30,21 @@ import Empty from '@/components/Empty';
 interface TablePaginationConfig { pagesize: number; page: number; }
 
 /** Props interface for Table component */
-interface TableComponentProps extends Omit<TableProps, 'pagination'> {
+interface TableComponentProps<T = Record<string, unknown>, Q = Record<string, unknown>> extends Omit<TableProps<T>, 'pagination'> {
   /** Table column definitions */
-  columns: ColumnsType;
+  columns: ColumnsType<T>;
   /** API endpoint URL for data fetching */
   apiUrl?: string;
   /** Query parameters for API request */
-  apiParams?: Record<string, unknown>;
+  apiParams?: Q;
   /** Pagination configuration or boolean to enable/disable */
   pagination?: boolean | TablePaginationConfig;
   /** Key to use for row identification */
   rowKey: string;
   /** Row selection configuration */
-  rowSelection?: TableProps['rowSelection'];
+  rowSelection?: TableProps<T>['rowSelection'];
   /** Initial data to display (used when no API) */
-  initialData?: Record<string, unknown>[];
+  initialData?: T[];
   /** Size of empty state icon */
   emptySize?: number;
   /** Custom empty state text */
@@ -81,7 +81,7 @@ const dealSo = (params: any) => {
 }
 
 /** Table component with pagination and API integration */
-const RbTable = forwardRef<TableRef, TableComponentProps>(({
+const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unknown>>({
   columns,
   apiUrl,
   apiParams,
@@ -96,9 +96,9 @@ const RbTable = forwardRef<TableRef, TableComponentProps>(({
   scrollY,
   currentPageKey = 'page',
   ...props
-}, ref) => {
+}: TableComponentProps<T, Q>, ref: React.Ref<TableRef>) => {
   const { t } = useTranslation();
-  const [data, setData] = useState<Record<string, unknown>[]>(initialData || [])
+  const [data, setData] = useState<T[]>(initialData || [])
   const [loading, setLoading] = useState(false)
   const [currentPagination, setCurrentPagination] = useState({
     page: 1,
@@ -122,7 +122,7 @@ const RbTable = forwardRef<TableRef, TableComponentProps>(({
       })
     }
   }
-  
+
   /** Fetch data from API with pagination */
   const getList = (pageData: TablePaginationConfig) => {
     if (!apiUrl) {
@@ -134,7 +134,7 @@ const RbTable = forwardRef<TableRef, TableComponentProps>(({
         ...currentPagination,
         ...pageData,
       })
-      params = { ...params, ...pageData, [currentPageKey]: pageData.page}
+      params = { ...params, ...pageData, [currentPageKey]: pageData.page }
     }
     setLoading(true)
     /** Build query parameters and call API */
@@ -151,7 +151,7 @@ const RbTable = forwardRef<TableRef, TableComponentProps>(({
         setLoading(false)
       })
   }
-  
+
   /** Reload data when initialized or apiParams changes */
   useEffect(() => {
     loadData()
@@ -164,7 +164,7 @@ const RbTable = forwardRef<TableRef, TableComponentProps>(({
       pagesize
     })
   }
-  
+
   /** Pagination configuration with i18n support */
   const paginationConfig = pagination ? ({
     ...(typeof pagination === 'object' ? pagination : {}),
@@ -173,7 +173,7 @@ const RbTable = forwardRef<TableRef, TableComponentProps>(({
     onChange: handlePageChange,
     showSizeChanger: true,
     showQuickJumper: true,
-    showTotal: (totalCount: number) => t('table.totalRecords', {total: totalCount})
+    showTotal: (totalCount: number) => t('table.totalRecords', { total: totalCount })
   }) : false;
 
 
@@ -186,27 +186,27 @@ const RbTable = forwardRef<TableRef, TableComponentProps>(({
   /** Calculate scroll configuration based on props */
   const getScrollConfig = () => {
     if (!isScroll && !scrollX && !scrollY) return undefined;
-    
+
     const config: { x?: number | string | true; y?: number | string } = {};
-    
+
     /** Only apply horizontal scroll when there is data */
     if (scrollX !== undefined && data.length > 0) {
       config.x = scrollX;
     } else if (isScroll) {
       config.x = 'max-content';
     }
-    
+
     if (scrollY !== undefined) {
       config.y = scrollY;
     } else if (isScroll) {
-      config.y = 'calc(100vh - 256px)';
+      config.y = 'calc(100vh - 232px)';
     }
-    
+
     return Object.keys(config).length > 0 ? config : undefined;
   };
 
   return (
-    <Table
+    <Table<T>
       {...props}
       rowKey={rowKey}
       loading={loading}
@@ -219,6 +219,6 @@ const RbTable = forwardRef<TableRef, TableComponentProps>(({
       tableLayout="auto"
     />
   );
-});
+}) as <T = Record<string, unknown>, Q = Record<string, unknown>>(props: TableComponentProps<T, Q> & { ref?: React.Ref<TableRef> }) => React.ReactElement;
 
 export default RbTable;
