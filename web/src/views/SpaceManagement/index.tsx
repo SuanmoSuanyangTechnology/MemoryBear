@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:48:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 18:49:51
+ * @Last Modified time: 2026-03-25 15:33:38
  */
 /**
  * Space Management Page
@@ -93,7 +93,7 @@ const SpaceManagement: React.FC = () => {
               </RbCard>
             </List.Item>
           )}
-          className="rb:h-[calc(100vh-148px)] rb:overflow-y-auto rb:overflow-x-hidden"
+          className="rb:h-[calc(100vh-124px)] rb:overflow-y-auto rb:overflow-x-hidden"
         />
       </BodyWrapper>
 

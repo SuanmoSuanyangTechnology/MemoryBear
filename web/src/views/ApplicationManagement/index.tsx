@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 11:16:04
+ * @Last Modified time: 2026-03-25 15:38:13
  */
 /**
  * Application Management Page
@@ -199,8 +199,8 @@ const ApplicationManagement: React.FC = () => {
               footer={
                 item.is_shared
                   ? <Flex justify="space-between" gap={12}>
-                    <RbButton type="primary" ghost block onClick={() => handleEdit(item)}>{t('common.view')}</RbButton>
-                    {item.share_permission === 'editable' && <RbButton type="primary" className="rb:w-[calc(100%-46px)]" onClick={() => handleCopy(item)}>{t('common.copy')}</RbButton>}
+                    <RbButton block onClick={() => handleEdit(item)}>{t('common.view')}</RbButton>
+                    {item.share_permission === 'editable' && <RbButton type="primary" ghost className="rb:w-[calc(100%-46px)]" onClick={() => handleCopy(item)}>{t('common.copy')}</RbButton>}
                   </Flex>
                   : <Flex justify="space-between" gap={12}>
                     <RbButton danger className="rb:w-22.25" onClick={() => handleDelete(item)}>{t('common.delete')}</RbButton>

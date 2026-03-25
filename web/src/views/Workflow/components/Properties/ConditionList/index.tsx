@@ -195,7 +195,7 @@ const ConditionList: FC<CaseListProps> = ({
                                     </Form.Item>
                                     <Divider type="vertical" />
                                     <Form.Item name={[field.name, 'right']} noStyle>
-                                      {inputType === 'Variable'
+                                      {inputType === 'variable'
                                         ? (
                                           <VariableSelect
                                             placeholder={t('common.pleaseSelect')}

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:24:53 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 15:00:46
+ * @Last Modified time: 2026-03-25 15:23:45
  */
 import { type FC } from 'react'
 import clsx from 'clsx'
@@ -321,7 +321,7 @@ const CaseList: FC<CaseListProps> = ({
                                             </Form.Item>
                                             <Divider type="vertical" />
                                             <Form.Item name={[conditionField.name, 'right']} noStyle>
-                                              {inputType === 'Variable'
+                                              {inputType === 'variable'
                                                 ? <VariableSelect
                                                   placeholder={t('common.pleaseSelect')}
                                                   options={options.filter(vo => vo.dataType === 'number')}

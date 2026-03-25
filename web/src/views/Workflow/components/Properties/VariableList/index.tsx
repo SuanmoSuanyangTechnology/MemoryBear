@@ -78,7 +78,7 @@ const VariableList: FC<VariableListProps> = ({
             className="rb:cursor-pointer rb:group rb:py-2! rb:pl-2.5! rb:pr-2! rb:text-[12px] rb:bg-[#F6F6F6] rb-border rb:rounded-lg"
             onClick={() => handleEditVariable(index, vo)}
           >
-            <span className="rb:font-medium">{vo.name}·{vo.description}</span>
+            <span className="rb:font-medium rb:flex-1">{vo.name}·{vo.description}</span>
 
             <Space size={8}>
               {vo.required && <span className="rb:py-px rb:px-2 rb:bg-white rb-border rb:rounded-sm">{t('workflow.config.start.required')}</span>}

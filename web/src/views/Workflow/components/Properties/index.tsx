@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 16:33:32
+ * @Last Modified time: 2026-03-25 15:08:02
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -454,7 +454,7 @@ const Properties: FC<PropertiesProps> = ({
         className="rb:h-full! rb:hover:shadow-none!"
         bodyClassName={clsx('rb:overflow-y-auto! rb:h-[calc(100vh-131px)]! rb:px-3! rb:pt-0! rb:pb-3!')}
       >
-        <Form form={form} size="small" layout="vertical">
+        <Form key={selectedNode?.getData()?.id} form={form} size="small" layout="vertical">
           <Form.Item name="name" label={t('workflow.nodeName')}>
             <Input
               placeholder={t('common.pleaseEnter')}
@@ -525,7 +525,7 @@ const Properties: FC<PropertiesProps> = ({
                       }
 
                       if (key === 'model_id' && selectedNode?.data?.type === 'llm') {
-                        return <ModelConfig />
+                        return <ModelConfig key={key} />
                       }
                       if (selectedNode?.data?.type === 'llm' && key === 'messages' && config.type === 'define') {
                         // 为llm节点且isArray=true时添加context变量支持
