@@ -1,5 +1,5 @@
 import {  useMemo,useRef, useState, useEffect } from 'react';
-import { Button, Flex, Radio, Steps, Modal, Input, Spin, message, Checkbox, Select, Form, Progress} from 'antd';
+import { Button, Flex, Radio, Steps, Modal, Input, Checkbox, Select, Form, Progress, App } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import './Private.css';
@@ -15,7 +15,7 @@ import exitIcon from '@/assets/images/knowledgeBase/exit.png';
 
 import SliderInput from '@/components/SliderInput';
 import DelimiterSelector from '../components/DelimiterSelector';
-const { confirm } = Modal
+
 const { TextArea } = Input;
 
   const style: React.CSSProperties = {
@@ -28,12 +28,13 @@ const { TextArea } = Input;
     columnGap: 14, // Wider gap between dot and text
     width: '100%',
     border: '1px solid #E5E5E5',
-    borderRadius: 8,
+    borderRadius: 12,
     padding: 16,
   };
   const getActiveRadioStyle = (active: boolean): React.CSSProperties => ({
     ...radioWrapperBaseStyle,
     border: active ? '1px solid #171719' : radioWrapperBaseStyle.border,
+    backgroundColor: active ? '#FAFAFA' : 'transparent',
   });
 
 
@@ -65,6 +66,7 @@ interface ContentFormData {
 const CreateDataset = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { modal, message: messageApi } = App.useApp()
   const { knowledgeBaseId: routeKnowledgeBaseId } = useParams<{ knowledgeBaseId: string }>();
   const location = useLocation();
   const locationState = (location.state ?? {}) as CreateDatasetLocationState;
@@ -93,7 +95,6 @@ const CreateDataset = () => {
   const [parameterSettings, setParameterSettings] = useState<ParameterSettings>('defaultSettings');
   const [pdfEnhancementEnabled, setPdfEnhancementEnabled] = useState<boolean>(true);
   const [pdfEnhancementMethod, setPdfEnhancementMethod] = useState<string>('deepdoc');
-  const [messageApi, contextHolder] = message.useMessage();
   const fileType = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'htm', 'html', 'json', 'ppt', 'pptx', 'txt','png','jpg','mp3','mp4','mov','wav']
   const steps = useMemo(
     () => [
@@ -184,7 +185,7 @@ const CreateDataset = () => {
     }
 
     // 显示确认弹框
-    confirm({
+    modal.confirm({
       title: t('knowledgeBase.startUploadConfirmTitle') || 'Start processing documents',
       content: t('knowledgeBase.startUploadConfirmContent') || 'Document processing will proceed in the background. You can choose to return to the list page immediately or stay on this page to view processing progress.',
       okText: t('knowledgeBase.returnToList') || 'Return to list',
@@ -231,7 +232,7 @@ const CreateDataset = () => {
     }
   };
   const handleDelete = (record: AnyObject) => {
-        confirm({
+       modal.confirm({
             title: t('common.deleteWarning'),
             content: t('common.deleteWarningContent', { content: record.name }),
           onOk: async () => {
@@ -548,8 +549,6 @@ const CreateDataset = () => {
   }, [location.pathname]);
 
   return (<>
-      {contextHolder}
-    
     <div className='rb:p-3 rb:pt-2 rb:h-full rb:flex rb:flex-col'>
       {/* <Typography.Title level={4} className='rb:!m-0 rb:!mb-4'>
         {t('knowledgeBase.createA') + ' ' + t('knowledgeBase.dataset')}
@@ -558,10 +557,10 @@ const CreateDataset = () => {
           <img src={exitIcon} alt='exit' className='rb:w-4 rb:h-4' />
           <span className='rb:text-gray-500 rb:text-sm'>{t('common.exit')}</span>
       </div>
-      <div className='rb:px-24 rb:py-5  rb:bg-white rb:rounded-lg'>
+      <div className='rb:px-24 rb:py-5  rb:bg-white rb:rounded-xl'>
           <Steps current={current} items={steps} className="custom-steps" />
       </div>  
-      <div className='rb:bg-white rb:rounded-lg rb:flex-1 rb:mt-3'>
+      <div className='rb:bg-white rb:rounded-xl rb:flex-1 rb:mt-3'>
 
         {current === 0 && (
           <div className='rb:flex rb:w-full rb:p-6'>
@@ -672,7 +671,7 @@ const CreateDataset = () => {
         {current === 1 && (
           <div className='rb:flex rb:flex-col rb:mt-10 rb:px-40'>
               {rechunkFileIds.length > 0 && (
-                <div className='rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded rb:px-3 rb:py-2 rb:mb-4 rb:text-xs rb:text-gray-600 rb:flex rb:flex-wrap rb:gap-2'>
+                <div className='rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-[8px] rb:px-3 rb:py-2 rb:mb-4 rb:text-xs rb:text-gray-600 rb:flex rb:items-center rb:flex-wrap rb:gap-2'>
                     <span className='rb:text-gray-700 rb:font-medium'>{t('knowledgeBase.rechunking')}:</span>
                     {rechunkFileIds.map((id) => (
                       <span key={id} className='rb:px-2 rb:py-0.5 rb:bg-white rb:border rb:border-[#DFE4ED] rb:rounded'>{id}</span>
@@ -684,8 +683,8 @@ const CreateDataset = () => {
               </div>
               <div className='rb:mt-4'>
                 <div 
-                  className={`rb:flex rb:items-center rb:w-full rb:border rb:rounded-lg rb:p-4 rb:cursor-pointer ${
-                    pdfEnhancementEnabled ? 'rb:border-blue-500' : 'rb:border-gray-300'
+                  className={`rb:flex rb:items-center rb:justify-between rb:w-full rb:border rb:rounded-xl rb:p-4 rb:cursor-pointer ${
+                  pdfEnhancementEnabled ? 'rb:border-[#171719] rb:bg-[#FAFAFA]' : 'rb-border'
                   }`}
                   // onClick={() => setPdfEnhancementEnabled(!pdfEnhancementEnabled)}
                 >
@@ -693,24 +692,25 @@ const CreateDataset = () => {
                     checked={pdfEnhancementEnabled}
                     onChange={(e) => setPdfEnhancementEnabled(e.target.checked)}
                     className='rb:mr-3'
-                  />
-                  <span className='rb:text-base rb:font-medium rb:text-gray-800 rb:pl-[22px]'>
-                    {t('knowledgeBase.pdfEnhancementAnalysis')}
-                  </span>
+                  >
+                    <span className='rb:text-base rb:font-medium rb:text-gray-800 rb:pl-[22px]'>
+                      {t('knowledgeBase.pdfEnhancementAnalysis')}
+                    </span>
+                  </Checkbox>
                   {pdfEnhancementEnabled && (
-                  <div className='rb:ml-10'>
-                    <Select
-                      value={pdfEnhancementMethod}
-                      onChange={(value) => setPdfEnhancementMethod(value)}
-                      className='rb:w-48'
-                      options={[
-                        { value: 'deepdoc', label: 'DeepDoc' },
-                        { value: 'mineru', label: 'MinerU' },
-                        { value: 'textln', label: 'TextLN' }
-                      ]}
-                    />
-                  </div>
-                )}
+                    <div className='rb:ml-10'>
+                      <Select
+                        value={pdfEnhancementMethod}
+                        onChange={(value) => setPdfEnhancementMethod(value)}
+                        className='rb:w-[300px]'
+                        options={[
+                          { value: 'deepdoc', label: 'DeepDoc' },
+                          { value: 'mineru', label: 'MinerU' },
+                          { value: 'textln', label: 'TextLN' }
+                        ]}
+                      />
+                    </div>
+                  )}
                 </div>
                 
               </div>
@@ -766,12 +766,14 @@ const CreateDataset = () => {
                   </Radio>
               </Radio.Group>
               {parameterSettings === 'customSettings' && ( 
-                <div className='rb:flex rb:flex-col rb:mt-5'> 
-                    <div className='rb:w-full rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
-                        {t('knowledgeBase.delimiter')}
-                    </div>
-                    <DelimiterSelector value={delimiter} onChange={setDelimiter} className='rb:mb-5'/>
-                    <SliderInput label={t('knowledgeBase.suggestedBlockSize')} max={1024} min={1} step={1} value={blockSize} onChange={handleChange} />
+                <div className='rb:grid rb:grid-cols-2 rb:mt-5 rb-border rb:rounded-xl rb:px-6 rb:py-4 rb:gap-10'> 
+                <div>
+                  <div className='rb:w-full rb:text-[#5B6167] rb:leading-5 rb:mb-2'>
+                    {t('knowledgeBase.delimiter')}
+                  </div>
+                  <DelimiterSelector value={delimiter} onChange={setDelimiter} />
+                  </div>
+                  <SliderInput label={t('knowledgeBase.suggestedBlockSize')} max={1024} min={1} step={1} value={blockSize} onChange={handleChange} />
                 </div>
                 
               )}

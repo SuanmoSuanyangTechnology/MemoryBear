@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useMemo, useCallback, type FC } from 'react';
-import { Row, Col, Button, Dropdown, Modal, message, Tooltip } from 'antd'
+import { Row, Col, Button, Dropdown, Tooltip, App } from 'antd'
 import type { MenuProps } from 'antd';
 import { EllipsisOutlined, RightOutlined, DownOutlined } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -16,7 +16,7 @@ import RbCard from '@/components/RbCard/Card'
 import SearchInput from '@/components/SearchInput'
 import Empty from '@/components/Empty'
 import { getKnowledgeBaseList, getModelList, getModelTypeList, deleteKnowledgeBase, getKnowledgeBaseTypeList } from '@/api/knowledgeBase'
-const { confirm } = Modal;
+
 import InfiniteScroll from 'react-infinite-scroll-component';
 
 import { useBreadcrumbManager, type BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
@@ -29,6 +29,7 @@ type ModelMenuInfo = {
 const KnowledgeBaseManagement: FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { modal, message: messageApi } = App.useApp()
   const location = useLocation();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<KnowledgeBaseListItem[]>([])
@@ -43,7 +44,6 @@ const KnowledgeBaseManagement: FC = () => {
   const [knowledgeBaseTypes, setKnowledgeBaseTypes] = useState<string[]>([]);
   const modelListCache = useRef<Record<string, string>>({});
   const modalRef = useRef<CreateModalRef>(null)
-  const [messageApi, contextHolder] = message.useMessage();
   const processedStateRef = useRef<any>(null);
   
   // 使用面包屑管理 Hook
@@ -386,7 +386,7 @@ const KnowledgeBaseManagement: FC = () => {
 
   // 处理删除
   const handleDelete = (item: KnowledgeBaseListItem) => {
-    confirm({
+    modal.confirm({
       title: t('common.deleteWarning'),
       content: t('common.deleteWarningContent', { content: item.name }),
       onOk: () => {
@@ -528,7 +528,6 @@ const KnowledgeBaseManagement: FC = () => {
 
   return (
     <>
-      {contextHolder}
       <div className="rb:flex rb:justify-between rb:px-2 rb:mb-4">
         <SearchInput
           placeholder={t('knowledgeBase.searchPlaceholder')}

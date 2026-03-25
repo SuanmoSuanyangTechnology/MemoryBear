@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:00:12 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 15:41:54
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-03-25 18:29:00 
  */
 /**
  * Forgetting Engine Configuration Page
@@ -11,7 +11,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Row, Col, Form, Button, Space, message, Flex, Tooltip } from 'antd';
+import { Row, Col, Form, Button, Space, App, Flex, Tooltip } from 'antd';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -107,7 +107,7 @@ const ForgettingEngine: React.FC = () => {
   const { id } = useParams();
   const [configData, setConfigData] = useState<ConfigForm>();
   const [form] = Form.useForm<ConfigForm>();
-  const [messageApi, contextHolder] = message.useMessage();
+  const { message: messageApi } = App.useApp();
   const [loading, setLoading] = useState(false)
 
   const values = Form.useWatch([], form);
@@ -238,7 +238,6 @@ const ForgettingEngine: React.FC = () => {
           />
         </RbCard>
       </Col>
-      {contextHolder}
     </Row>
   );
 };

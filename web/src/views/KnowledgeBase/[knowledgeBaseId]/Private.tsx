@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef, useCallback, type FC } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Switch, Button, Dropdown, Space, Modal, message, Radio, Tooltip } from 'antd';
+import { Switch, Button, Dropdown, Space, Radio, Tooltip, App } from 'antd';
 import type { MenuProps } from 'antd';
 import SearchInput from '@/components/SearchInput'
 import Table, { type TableRef } from '@/components/Table'
@@ -39,12 +39,11 @@ import { formatDateTime } from '@/utils/format';
 import KnowledgeGraphCard from '../components/KnowledgeGraphCard';
 import { useBreadcrumbManager, type BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
 import './Private.css'
-const { confirm } = Modal
 // Tree node data type
 
 const Private: FC = () => {
   const { t } = useTranslation();
-  const [messageApi, contextHolder] = message.useMessage();
+  const { modal, message: messageApi } = App.useApp()
   const navigate = useNavigate();
   const location = useLocation();
   const { knowledgeBaseId } = useParams<{ knowledgeBaseId: string }>();
@@ -501,7 +500,7 @@ const Private: FC = () => {
     downloadFile(targetFileId, fileName);
   }
   const handleDelete = (item: any) => {
-      confirm({
+      modal.confirm({
         title: t('common.deleteWarning'),
         content: t('common.deleteWarningContent', { content: item.file_name }),
         onOk: () => {
@@ -765,7 +764,6 @@ const Private: FC = () => {
 
   return (
     <>
-    {contextHolder}
     <div className="rb:flex rb:h-full rb:bg-white rb:rounded-xl">
       {folder && (
         <div className="rb:w-64 rb:py-4 rb:flex-shrink-0 rb:h-[calc(100%+40px)] rb:border-r rb:border-[#EAECEE] rb:p-4 rb:bg-transparent">

@@ -10,7 +10,6 @@ import { useTranslation } from 'react-i18next';
 import { cookieUtils } from '@/utils/request'
 import { fileUpload } from '@/api/fileStorage'
 
-const { confirm } = Modal;
 const { Dragger } = Upload;
 
 interface UploadFilesProps extends Omit<UploadProps, 'onChange'> {
@@ -91,14 +90,14 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
   ...props
 }, ref) => {
   const { t } = useTranslation();
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const [fileList, setFileList] = useState<UploadFile[]>(propFileList);
   const [accept, setAccept] = useState<string | undefined>();
 
   // 处理文件移除
   const handleRemove = (file: UploadFile) => {
     // 显示确认弹窗
-    confirm({
+    modal.confirm({
       title: `${t('common.confirmRemoveFile')}`,
       okText: `${t('common.confirm')}`,
       okType: 'danger',

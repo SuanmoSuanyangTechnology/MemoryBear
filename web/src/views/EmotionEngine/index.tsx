@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:56:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 11:42:26
+ * @Last Modified time: 2026-03-25 18:28:18
  */
 /**
  * Emotion Engine Configuration Page
@@ -11,7 +11,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Row, Col, Form, Button, message, Space, Flex, Tooltip } from 'antd';
+import { Row, Col, Form, Button, App, Space, Flex, Tooltip } from 'antd';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
@@ -67,7 +67,7 @@ const EmotionEngine: React.FC = () => {
   const { id } = useParams();
   const [configData, setConfigData] = useState<ConfigForm>({} as ConfigForm);
   const [form] = Form.useForm<ConfigForm>();
-  const [messageApi, contextHolder] = message.useMessage();
+  const { message: messageApi } = App.useApp();
   const [loading, setLoading] = useState(false)
 
   const values = Form.useWatch([], form);
@@ -284,7 +284,6 @@ const EmotionEngine: React.FC = () => {
           </Flex>
         </RbCard>
       </Col>
-      {contextHolder}
     </Row>
   );
 };

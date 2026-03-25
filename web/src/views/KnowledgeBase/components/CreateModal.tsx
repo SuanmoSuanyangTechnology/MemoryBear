@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from 'react';
-import { Form, Input, Select, Modal, Tabs, Switch, Radio, Button, message } from 'antd';
+import { Form, Input, Select, Modal, Tabs, Switch, Radio, Button, App } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { KnowledgeBaseListItem, KnowledgeBaseFormData, CreateModalRef, CreateModalRefProps } from '@/views/KnowledgeBase/types';
 import { 
@@ -26,7 +26,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   refreshTable
 }, ref) => {
   const { t } = useTranslation();
-  const [messageApi, contextHolder] = message.useMessage();
+  const { modal, message: messageApi } = App.useApp()
   const [visible, setVisible] = useState(false);
   const [modelTypeList, setModelTypeList] = useState<string[]>([]);
   const [modelOptionsByType, setModelOptionsByType] = useState<Record<string, { label: string; value: string }[]>>({});
@@ -335,7 +335,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     
     // If original type is 'rebuild' and knowledge graph is enabled, show confirmation dialog
     if (originalType === 'rebuild' && isGraphragEnabled) {
-      confirm({
+      modal.confirm({
         title: t('knowledgeBase.rebuildConfirmTitle'),
         content: t('knowledgeBase.rebuildConfirmContent'),
         onOk: async() => {
@@ -478,7 +478,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       // Get previous value from original datasets object
       const previousValue = (datasets as any)[fieldKey];
       
-      confirm({
+      modal.confirm({
         title: t('common.updateWarning'),
         content: t('knowledgeBase.updateEmbeddingContent'),
         onOk: () => {
@@ -880,7 +880,6 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           items={tabItems}
         />
       </Form>
-      {contextHolder}
     </RbModal>
   );
 });
