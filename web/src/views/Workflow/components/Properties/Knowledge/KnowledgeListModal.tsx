@@ -116,6 +116,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
               <SearchInput
                 placeholder={t('knowledgeBase.searchPlaceholder')}
                 className="rb:w-full!"
+                variant="outlined"
               />
             </Form.Item>
           </Form>

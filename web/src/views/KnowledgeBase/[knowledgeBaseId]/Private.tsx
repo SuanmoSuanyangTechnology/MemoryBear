@@ -808,7 +808,7 @@ const Private: FC = () => {
           {/* </div> */}
         </div>
         <div className='rb:flex rb:items-center rb:justify-between rb:mb-4'>
-          <SearchInput placeholder={t('knowledgeBase.search')} onSearch={handleSearch} />
+          <SearchInput placeholder={t('knowledgeBase.search')} variant="outlined" onSearch={handleSearch} />
           <div className='rb:flex-1 rb:flex rb:items-center rb:justify-end rb:gap-2.5'>
             <Radio.Group value={isGraph} onChange={(e) => setIsGraph(e.target.value)}>
               <Radio.Button value={false} >

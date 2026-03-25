@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:25:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 10:39:34
+ * @Last Modified time: 2026-03-25 17:54:38
  */
 /**
  * Knowledge List Modal
@@ -140,6 +140,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
               <SearchInput
                 placeholder={t('knowledgeBase.searchPlaceholder')}
                 className="rb:w-full!"
+                variant="outlined"
               />
             </Form.Item>
           </Form>
