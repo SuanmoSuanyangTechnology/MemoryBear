@@ -315,6 +315,12 @@ class MemoryForgetService:
         # 获取遗忘引擎组件
         _, _, forgetting_scheduler, config = await self._get_forgetting_components(db, config_id)
         
+        # 如果参数为 None，使用配置中的默认值
+        if max_merge_batch_size is None:
+            max_merge_batch_size = config.get('max_merge_batch_size', 100)
+        if min_days_since_access is None:
+            min_days_since_access = config.get('min_days_since_access', 30)
+        
         # 记录执行开始时间
         execution_time = datetime.now()
         
