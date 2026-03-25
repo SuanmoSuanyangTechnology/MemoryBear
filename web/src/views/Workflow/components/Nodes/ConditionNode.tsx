@@ -79,7 +79,7 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
               {item.expressions.length > 0 && <Flex vertical gap={2}>
                 {item.expressions.map((expression: any, eIndex: number) => (
                   <div key={eIndex} className="rb:relative">
-                    {item.expressions.length > 1 && eIndex > 0 && <div className="rb:absolute rb:-top-2 rb:right-2 rb:text-[10px] rb:text-[#155EEF] rb:font-medium rb:leading-3.5 rb:text-right rb:pr-0.5">{item.logical_operator.toLocaleUpperCase()}</div>}
+                    {item.expressions.length > 1 && eIndex > 0 && <div className="rb:absolute rb:-top-2 rb:right-2 rb:text-[10px] rb:text-[#155EEF] rb:font-medium rb:leading-3.5 rb:text-right rb:pr-0.5">{item.logical_operator?.toLocaleUpperCase()}</div>}
                     <Flex align="center" className="rb:bg-[#F0F3F8] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)] rb:rounded-md rb:py-1! rb:px-1.5! rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-3.5">
                       {caculateIsSet(expression, 'cases')
                         ? <>

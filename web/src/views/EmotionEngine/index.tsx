@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:56:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-12 16:58:14
+ * @Last Modified time: 2026-03-25 11:42:26
  */
 /**
  * Emotion Engine Configuration Page
@@ -19,13 +19,12 @@ import clsx from 'clsx';
 import RbCard from '@/components/RbCard/Card';
 import { getMemoryEmotionConfig, updateMemoryEmotionConfig } from '@/api/memory'
 import type { ConfigForm } from './types'
-import CustomSelect from '@/components/CustomSelect';
-import { getModelListUrl } from '@/api/models'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import LabelWrapper from '@/components/FormItem/LabelWrapper'
 import DescWrapper from '@/components/FormItem/DescWrapper'
 import RbSlider from '@/components/RbSlider';
 import RbAlert from '@/components/RbAlert';
+import ModelSelect from '@/components/ModelSelect';
 
 /**
  * Configuration field definitions
@@ -37,9 +36,8 @@ const configList = [
   },
   {
     key: 'emotion_model_id',
-    type: 'customSelect',
-    url: getModelListUrl,
-    params: { type: 'chat,llm', page: 1, pagesize: 100, is_active: true }, // chat,llm
+    type: 'modelSelect',
+    params: { type: 'chat,llm' }, // chat,llm
   },
   {
     key: 'emotion_min_intensity',
@@ -174,7 +172,7 @@ const EmotionEngine: React.FC = () => {
                     </div>
                   )
                 }
-                if (config.type === 'customSelect') {
+                if (config.type === 'modelSelect') {
                   return (
                     <div key={config.key} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3">
                       <LabelWrapper title={t(`emotionEngine.${config.key}`)} className="rb:mb-3">
@@ -184,12 +182,8 @@ const EmotionEngine: React.FC = () => {
                         name={config.key}
                         className="rb:mb-0!"
                       >
-                        <CustomSelect
-                          url={config.url as string}
+                        <ModelSelect
                           params={config.params}
-                          valueKey='id'
-                          labelKey='name'
-                          hasAll={false}
                           disabled={!values?.emotion_enabled && config.key !== 'emotion_enabled'}
                         />
                       </Form.Item>

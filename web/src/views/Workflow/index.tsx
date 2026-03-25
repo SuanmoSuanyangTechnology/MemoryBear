@@ -73,6 +73,7 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
         <div ref={containerRef} className="rb:w-full rb:h-full" />
         {/* 地图工具栏 */}
         <CanvasToolbar
+          selectedNode={selectedNode}
           miniMapRef={miniMapRef}
           graphRef={graphRef}
           isHandMode={isHandMode}

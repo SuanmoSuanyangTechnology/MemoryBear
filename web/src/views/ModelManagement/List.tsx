@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:10 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 16:52:48
+ * @Last Modified time: 2026-03-25 12:27:51
  */
 /**
  * Model List View
@@ -26,7 +26,7 @@ import { getListLogoUrl } from './utils'
 /**
  * Model list component
  */
-const ModelList = forwardRef<BaseRef, { query: any; handleEdit: (vo?: ModelListItem) => void; }> (({ query, handleEdit }, ref) => {
+const ModelList = forwardRef<BaseRef, { query: any; handleEdit: (vo?: ModelListItem) => void; handleCloseModel: () => void; }>(({ query, handleEdit, handleCloseModel }, ref) => {
   const { t } = useTranslation();
   const keyConfigModalRef = useRef<KeyConfigModalRef>(null)
   const modelListDetailRef = useRef<ModelListDetailRef>(null)
@@ -101,6 +101,7 @@ const ModelList = forwardRef<BaseRef, { query: any; handleEdit: (vo?: ModelListI
         ref={modelListDetailRef}
         refresh={getList}
         handleEdit={handleEdit}
+        handleCloseConfig={handleCloseModel}
       />
     </>
   )

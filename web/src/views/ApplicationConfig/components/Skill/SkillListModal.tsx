@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-05 10:45:08 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 16:59:57
+ * @Last Modified time: 2026-03-25 11:09:01
  */
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import { List, Flex, Tooltip, Form } from 'antd';
@@ -169,6 +169,7 @@ const SkillListModal = forwardRef<SkillModalRef, SkillModalProps>(({
               <SearchInput
                 placeholder={t('skills.searchPlaceholder')}
                 className="rb:w-full!"
+                variant="outlined"
               />
             </Form.Item>
           </Form>
@@ -181,9 +182,9 @@ const SkillListModal = forwardRef<SkillModalRef, SkillModalProps>(({
               renderItem={(item: Skill) => (
                 <List.Item>
                   {/* Skill card with selection state styling */}
-                  <div key={item.id} className={clsx("rb:border rb:rounded-lg rb:p-[17px_16px] rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
-                    "rb:bg-[rgba(21,94,239,0.06)] rb:border-[#155EEF] rb:text-[#155EEF]": selectedIds.includes(item.id),
-                    "rb:border-[#DFE4ED] rb:text-[#212332]": !selectedIds.includes(item.id),
+                  <div key={item.id} className={clsx("rb:border rb:rounded-lg rb:p-[17px_16px] rb:cursor-pointer rb:hover:bg-[#F6F6F6]", {
+                    "rb:border-[#171719]": selectedIds.includes(item.id),
+                    "rb-border": !selectedIds.includes(item.id),
                   })} onClick={() => handleSelect(item)}>
                     {/* Skill name and description */}
                     <div className="rb:flex-1 rb:max-w-[calc(100%-60px)]">
@@ -194,7 +195,7 @@ const SkillListModal = forwardRef<SkillModalRef, SkillModalProps>(({
                       </Tooltip>
                       
                       {/* Skill description with tooltip */}
-                      <Tooltip title={item.description}>
+                      <Tooltip title={item.description} placement="topLeft">
                         <div className="rb:h-10 rb:leading-5 rb:wrap-break-word rb:line-clamp-2">{item.description}</div>
                       </Tooltip>
                     </div>

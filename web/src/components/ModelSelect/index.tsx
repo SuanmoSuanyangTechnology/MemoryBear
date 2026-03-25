@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-07 16:49:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 10:12:23
+ * @Last Modified time: 2026-03-25 11:21:59
  */
 import { useEffect, useState, type FC } from 'react';
 import { Select, Flex, Space } from 'antd';
@@ -20,12 +20,16 @@ interface ModelSelectProps extends SelectProps {
   params?: Query;
   placeholder?: string;
   fontClassName?: string;
+  isAutoFetch?: boolean;
+  initialData?: Model[];
 }
 
 const ModelSelect: FC<ModelSelectProps> = ({
   params,
   placeholder,
   fontClassName,
+  isAutoFetch = true,
+  initialData = [],
   ...props
 }) => {
   const { t } = useTranslation();
@@ -33,6 +37,7 @@ const ModelSelect: FC<ModelSelectProps> = ({
 
   // Fetch active models whenever params change; stringify for stable deep comparison
   useEffect(() => {
+    if (!isAutoFetch) return
     getModelList({
       ...(params ?? {}),
       pagesize: 100,
@@ -40,7 +45,7 @@ const ModelSelect: FC<ModelSelectProps> = ({
     }).then((res) => {
       setOptions((res as { items: Model[] }).items ?? []);
     });
-  }, [JSON.stringify(params)]);
+  }, [JSON.stringify(params), isAutoFetch]);
 
   // Render the selected value inside the trigger with logo + truncated name
   const labelRender: SelectProps['labelRender'] = ({ value }) => {
@@ -58,7 +63,7 @@ const ModelSelect: FC<ModelSelectProps> = ({
   return (
     <Select
       placeholder={placeholder ?? t('common.pleaseSelect')}
-      options={options}
+      options={[...options, ...initialData]}
       fieldNames={{ label: 'name', value: 'id' }}
       allowClear
       popupMatchSelectWidth={false}

@@ -212,10 +212,11 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
                     onChange={(value) => form.setFieldValue(['tool_parameters', parameter.name], value)}
                   />
                 : <Editor
-                    height={32}
                     variant="outlined"
-                    options={options} 
+                    type="input"
                     size="small"
+                    height={28}
+                    options={options}
                     placeholder={t('common.pleaseEnter')}
                   />
               }

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-07 20:37:34 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 11:52:00
+ * @Last Modified time: 2026-03-25 11:47:31
  */
 import { type FC, useState, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -114,7 +114,7 @@ const Detail: FC = () => {
           </Space>
         }
       />
-      <div className="rb:h-[calc(100vh-64px)] rb:overflow-y-auto rb:px-3 rb:pb-3">
+      <div className="rb:h-[calc(100vh-64px)] rb:overflow-y-auto rb:p-3">
         {type === 'EMOTIONAL_MEMORY' && <StatementDetail ref={statementDetailRef} refresh={handleRefresh} />}
         {type === 'FORGET_MEMORY' && <ForgetDetail ref={forgetDetailRef} />}
         {type === 'IMPLICIT_MEMORY' && <ImplicitDetail ref={implicitDetailRef} refresh={handleRefresh} />}

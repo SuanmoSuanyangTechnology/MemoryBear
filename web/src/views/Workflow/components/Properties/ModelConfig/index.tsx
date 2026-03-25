@@ -29,7 +29,7 @@ const ModelConfig: FC = () => {
       {model_id && (
         <RbCard
           title={t('workflow.config.llm.parameterSettings')}
-          headerClassName="rb:min-h-8! rb:mx-2!"
+          headerClassName="rb:min-h-8! rb:mx-2! rb:text-[12px]!"
           bodyClassName="rb:pt-[14px]! rb:px-2! rb:pb-2!"
           className="rb-border! rb:mb-4!"
           variant="outlined"

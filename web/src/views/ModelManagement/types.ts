@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 18:23:48
+ * @Last Modified time: 2026-03-25 12:28:10
  */
 /**
  * Type definitions for Model Management
@@ -220,6 +220,7 @@ export interface MultiKeyForm {
 export interface MultiKeyConfigModalRef {
   /** Open modal with model data */
   handleOpen: (vo: ModelListItem, provider?: string) => void;
+  handleClose: () => void;
 }
 
 /**
@@ -303,6 +304,7 @@ export interface CustomModelForm {
 export interface CustomModelModalRef {
   /** Open modal with optional model plaza item */
   handleOpen: (vo?: ModelListItem) => void;
+  handleClose: () => void;
 }
 
 /**

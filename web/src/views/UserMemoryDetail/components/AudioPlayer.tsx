@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-03-16 15:00:07 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-16 15:00:07 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-25 12:09:39
  */
 import { type FC, useRef, useState, useEffect } from 'react'
 import { Flex, Dropdown, type MenuProps, Slider } from 'antd'
@@ -114,7 +114,7 @@ const AudioPlayer: FC<AudioPlayerProps> = ({ src, fileName, fileSize }) => {
         <Flex align="center" gap={12}>
           <div className="rb:w-7.5 rb:h-9 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/mp3.svg')]" />
           <div className="rb:flex-1">
-            <div className="rb:font-medium rb:leading-5 rb:text-[14px]">{fileName}</div>
+            <div className="rb:font-medium rb:leading-5 rb:text-[14px] rb:wrap-break-word rb:line-clamp-1">{fileName}</div>
             <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{fileSize || '-'}</div>
           </div>
         </Flex>

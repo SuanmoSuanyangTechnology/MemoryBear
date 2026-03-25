@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:46:47 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 15:54:45
+ * @Last Modified time: 2026-03-25 11:44:16
  */
 /**
  * Self Reflection Engine Configuration Page
@@ -18,13 +18,12 @@ import { useTranslation } from 'react-i18next';
 import RbCard from '@/components/RbCard/Card';
 import { getMemoryReflectionConfig, updateMemoryReflectionConfig, pilotRunMemoryReflectionConfig } from '@/api/memory'
 import type { ConfigForm, Result, ReflexionData, MemoryVerify, QualityAssessment } from './types'
-import CustomSelect from '@/components/CustomSelect';
-import { getModelListUrl } from '@/api/models'
 import Tag from '@/components/Tag'
 import { useI18n } from '@/store/locale';
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import LabelWrapper from '@/components/FormItem/LabelWrapper'
 import DescWrapper from '@/components/FormItem/DescWrapper'
+import ModelSelect from '@/components/ModelSelect';
 
 /** Configuration list */
 const configList = [
@@ -36,9 +35,8 @@ const configList = [
   // Reflection model
   {
     key: 'reflection_model_id',
-    type: 'customSelect',
-    url: getModelListUrl,
-    params: { type: 'chat,llm', page: 1, pagesize: 100, is_active: true }, // chat,llm
+    type: 'modelSelect',
+    params: { type: 'chat,llm' }, // chat,llm
   },
   // Iteration period
   {
@@ -195,7 +193,7 @@ const SelfReflectionEngine: React.FC = () => {
           >
             <Flex vertical gap={24}>
               {configList.map(config => {
-                if (config.type === 'customSelect') {
+                if (config.type === 'modelSelect') {
                   return (
                     <div key={config.key}>
                       <LabelWrapper title={t(`reflectionEngine.${config.key}`)} className="rb:mb-3">
@@ -205,12 +203,8 @@ const SelfReflectionEngine: React.FC = () => {
                         name={config.key}
                         className="rb:mb-0!"
                       >
-                        <CustomSelect
-                          url={config.url as string}
+                        <ModelSelect
                           params={config.params}
-                          valueKey='id'
-                          labelKey='name'
-                          hasAll={false}
                           placeholder={t('common.pleaseSelect')}
                           disabled={!values?.reflection_enabled && config.key !== 'reflection_enabled'}
                         />

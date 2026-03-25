@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-07 20:37:34 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 15:07:50
+ * @Last Modified time: 2026-03-25 12:05:26
  */
 import { useEffect, useState, useMemo, forwardRef, useImperativeHandle, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -170,8 +170,8 @@ const ForgetDetail = forwardRef((_props, ref) => {
               <div className="rb:text-[18px] rb:font-[MiSans-Bold] rb:font-bold rb:leading-6">{data.activation_metrics?.low_activation_nodes ?? 0}</div>
               <div className="rb:text-[#5B6167] rb:text-[10px] rb:leading-3.5">{t('forgetDetail.low_nodes')}</div>
 
-              <div className="rb:bg-white rb:rounded-lg rb:mt-2">
-                <div className="rb:h-29.5 rb:w-full rb:bg-cover rb:bg-[url('@/assets/images/userMemory/forget.png')]"></div>
+              <div className="rb:bg-white rb:rounded-lg rb:mt-2 rb:h-29.5">
+                <div className="rb:h-29.5 rb:w-full rb:bg-contain rb:bg-no-repeat rb:bg-center rb:bg-[url('@/assets/images/userMemory/forget.png')]"></div>
               </div>
             </div>
           </div>

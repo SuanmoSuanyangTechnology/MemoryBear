@@ -2801,6 +2801,7 @@ export const zh = {
     },
     prompt: {
       promptDesc: '输入您的原始提示词，AI将帮助您优化为更专业的版本',
+      chatTitle: '多轮对话',
       editor: '提示词生成器',
       history: '我的历史',
       historyDesc: '查看和管理您的提示词优化历史',

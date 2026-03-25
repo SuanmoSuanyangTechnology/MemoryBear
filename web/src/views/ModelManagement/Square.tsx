@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-23 11:33:44
+ * @Last Modified time: 2026-03-25 12:19:24
  */
 /**
  * Model Square View
@@ -39,7 +39,9 @@ const ModelSquare = forwardRef <BaseRef, { query: any; }>(({ query }, ref) => {
       .then(res => {
         const response = res as ModelPlaza[]
         setList(response || [])
-        setActiveProvider(response[0]?.provider || null)
+        if (!activeProvider) {
+          setActiveProvider(response[0]?.provider || null)
+        }
       })
   }
 

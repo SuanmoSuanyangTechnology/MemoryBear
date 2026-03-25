@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-01-12 14:42:02 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-16 15:10:17 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-25 11:55:36
  */
 import { type FC, useEffect, useState, useMemo, useRef } from 'react'
 import clsx from 'clsx'
@@ -157,34 +157,44 @@ const WorkingDetail: FC = () => {
         :(
           <Row gutter={16}>
             <Col span={5}>
-              <div id="conversation-list" className="rb:h-[calc(100vh-76px)]! rb:border-r rb:border-[#EAECEE] rb:py-3 rb:px-4 rb:overflow-y-auto">
-                <InfiniteScroll
-                  dataLength={data.length}
-                  next={loadMore}
-                  hasMore={hasMore}
-                  loader={null}
-                  scrollableTarget="conversation-list"
-                >
-                  {data.map(item => (
-                    <Flex
-                      key={item.id}
-                      gap={12}
-                      align="center"
-                      className={clsx("rb:cursor-pointer rb:rounded-xl rb:h-12 rb:py-1! rb:px-3! rb:hover:bg-[#F6F6F6]", {
-                        'rb:bg-[#171719] rb:hover:bg-[#171719]! rb:text-white': item.id === selected?.id,
-                      })}
-                      onClick={() => setSelected(item)}
-                    >
-                      <div className="rb:size-6 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/chat.svg')]"></div>
-                      <Tooltip title={item.title}>
-                        <div className="rb:leading-5 rb:wrap-break-word rb:line-clamp-2 rb:flex-1">
-                          {item.title}
-                        </div>
-                      </Tooltip>
+              <RbCard
+                title={t('workingDetail.conversation')}
+                headerType="borderless"
+                headerClassName="rb:min-h-[58px]! rb:font-[MiSans-Bold] rb:font-bold"
+                bodyClassName='rb:p-3! rb:pt-0! rb:h-[calc(100%-58px)]'
+                className="rb:h-[calc(100vh-88px)]!"
+              >
+                <div id="conversation-list" className="rb:h-full! rb:overflow-y-auto">
+                  <InfiniteScroll
+                    dataLength={data.length}
+                    next={loadMore}
+                    hasMore={hasMore}
+                    loader={null}
+                    scrollableTarget="conversation-list"
+                  >
+                    <Flex vertical gap={8}>
+                      {data.map(item => (
+                        <Flex
+                          key={item.id}
+                          gap={12}
+                          align="center"
+                          className={clsx("rb:cursor-pointer rb:rounded-xl rb:h-12 rb:py-1! rb:px-3! rb:hover:bg-[#F6F6F6]", {
+                            'rb:bg-[#171719] rb:hover:bg-[#171719]! rb:text-white': item.id === selected?.id,
+                          })}
+                          onClick={() => setSelected(item)}
+                        >
+                          <div className="rb:size-6 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/chat.svg')]"></div>
+                          <Tooltip title={item.title}>
+                            <div className="rb:leading-5 rb:break-all rb:line-clamp-2 rb:flex-1">
+                              {item.title}
+                            </div>
+                          </Tooltip>
+                        </Flex>
+                      ))}
                     </Flex>
-                  ))}
-                </InfiniteScroll>
-              </div>
+                  </InfiniteScroll>
+                </div>
+              </RbCard>
             </Col>
             {selected && <>
               <Col flex="auto" className="rb:h-full">
@@ -193,7 +203,7 @@ const WorkingDetail: FC = () => {
                   headerType="borderless"
                   headerClassName="rb:min-h-[42px]! rb:pt-4! rb:font-[MiSans-Bold] rb:font-bold"
                   bodyClassName='rb:p-4! rb:pt-0! rb:h-[calc(100%-42px)]'
-                  className="rb:h-full!"
+                  className="rb:h-[calc(100vh-88px)]!"
                 >
                   <div className="rb:text-[#5B6167] rb:leading-4.5 rb:text-[12px]">{timeRange}</div>
                   <Flex justify="space-between" align="center" className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5! rb:pr-2.5! rb:pl-3.25! rb:mt-3!">
@@ -222,7 +232,7 @@ const WorkingDetail: FC = () => {
                   headerType="borderless"
                   headerClassName="rb:min-h-[50px]! rb:font-[MiSans-Bold] rb:font-bold rb:leading-5.5"
                   bodyClassName='rb:p-4! rb:pt-0! rb:h-[calc(100%-50px)] rb:overflow-y-auto!'
-                  className="rb:h-full!"
+                  className="rb:h-[calc(100vh-88px)]!"
                 >
                   {detailLoading
                     ? <Skeleton active />

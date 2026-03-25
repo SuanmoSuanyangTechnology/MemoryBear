@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:51:08 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-23 12:14:51
+ * @Last Modified time: 2026-03-25 10:41:25
  */
 /**
  * User Management Page
@@ -72,7 +72,7 @@ const UserManagement: React.FC = () => {
       className: 'rb:text-[#212332]'
     },
     {
-      title: <>{t('user.username')}<div className="rb:text-[#5B6167] rb:text-[12px] rb:font-medium">({t(`user.subUsername`)})</div></>,
+      title: <>{t('user.username')}<div>({t(`user.subUsername`)})</div></>,
       dataIndex: 'email',
       key: 'email',
       width: 210,
@@ -121,7 +121,7 @@ const UserManagement: React.FC = () => {
       key: 'action',
       width: 137,
       render: (_, record) => (
-        <Flex wrap>
+        <Flex vertical justify="start" align="start">
           {record.is_active &&
             <Button
               type="link"

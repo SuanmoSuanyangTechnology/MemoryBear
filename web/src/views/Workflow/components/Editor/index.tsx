@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-03 10:11:48
+ * @Last Modified time: 2026-03-25 10:58:47
  */
 import { type FC, useState, useEffect, useMemo } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
@@ -185,7 +185,7 @@ const Editor: FC<LexicalEditorProps> =({
 
   // Calculate line height based on size prop
   const lineHeight = useMemo(() => {
-    return `${height ? 16 : size === 'small' && variant === 'borderless' ? 18 : size === 'small' ? 16 : 20}px`
+    return `${height ? height - 10 : size === 'small' && variant === 'borderless' ? 18 : size === 'small' ? 16 : 20}px`
   }, [size])
 
   // Calculate placeholder minimum height
@@ -228,7 +228,7 @@ const Editor: FC<LexicalEditorProps> =({
               <ContentEditable
                 style={{
                   minHeight: minheight,
-                  padding: height || variant === 'borderless' ? '0' : '6px 8px',
+                  padding: height ? '4px 6px' : variant === 'borderless' ? '0' : '6px 8px',
                   border: variant === 'borderless' ? 'none' : '1px solid #EBEBEB',
                   borderRadius: '8px',
                   outline: 'none',

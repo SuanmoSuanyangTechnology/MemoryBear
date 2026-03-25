@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 18:23:31
+ * @Last Modified time: 2026-03-25 12:27:33
  */
 /**
  * Custom Model Modal
@@ -148,6 +148,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
+    handleClose
   }));
   return (
     <RbModal

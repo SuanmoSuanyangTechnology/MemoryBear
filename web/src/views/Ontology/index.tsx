@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:10:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 16:36:02
+ * @Last Modified time: 2026-03-25 13:38:59
  */
 import { type FC, useState, useRef } from 'react';
 import type { MenuInfo } from 'rc-menu/lib/interface';
@@ -164,7 +164,7 @@ const Ontology: FC = () => {
                   }}
                   placement="bottomRight"
                 >
-                  <div className="rb:cursor-pointer rb:size-6 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
+                  <div onClick={(e) => e.stopPropagation()} className="rb:cursor-pointer rb:size-6 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
                 </Dropdown>
               </Flex>
             }

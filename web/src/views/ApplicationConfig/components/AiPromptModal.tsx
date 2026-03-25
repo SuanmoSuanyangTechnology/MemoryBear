@@ -19,7 +19,7 @@ import copy from 'copy-to-clipboard';
 import { updatePromptMessages, createPromptSessions } from '@/api/prompt'
 import type { AiPromptModalRef, AiPromptVariableModalRef, AiPromptForm } from '../types'
 import RbModal from '@/components/RbModal'
-import type { ModelListItem } from '@/views/ModelManagement/types'
+import type { Model } from '@/views/ModelManagement/types'
 import ChatContent from '@/components/Chat/ChatContent'
 import Empty from '@/components/Empty'
 import ConversationEmptyIcon from '@/assets/images/conversation/conversationEmpty.svg'
@@ -37,7 +37,7 @@ interface AiPromptModalProps {
   /** Callback to refresh prompt with optimized value */
   refresh: (value: string) => void;
   /** Default model to pre-select */
-  defaultModel?: ModelListItem | null;
+  defaultModel?: Model | null;
   source?: 'application' | 'skills'
 }
 

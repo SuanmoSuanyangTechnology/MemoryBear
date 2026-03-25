@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:11 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 15:38:38
+ * @Last Modified time: 2026-03-25 11:40:38
  */
 /**
  * Result Component
@@ -382,7 +382,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
                 ))}
               </div>
             }
-            if (textPreprocessingTab === 'chunking') {
+            if (textPreprocessingTab === 'chunking' && vo.content) {
               return (
                 <div key={index} className="rb:leading-5">
                   <div className="rb:font-medium">-{t('memoryExtractionEngine.fragment')}{vo.chunk_index}:</div>

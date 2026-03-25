@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-08 19:46:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 14:27:58
+ * @Last Modified time: 2026-03-25 11:56:55
  */
 import { forwardRef, useImperativeHandle, useRef, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -91,7 +91,7 @@ const ImplicitDetail = forwardRef<{ handleRefresh: () => void; }, { refresh: () 
             headerType="borderless"
             headerClassName="rb:min-h-[50px]! rb:font-[MiSans-Bold] rb:font-bold"
             bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-54px)]"
-            className="rb:h-[calc(100vh-84px)]!"
+            className="rb:h-[calc(100vh-88px)]!"
           >
             <RadioGroupButton
               value={activeTab}

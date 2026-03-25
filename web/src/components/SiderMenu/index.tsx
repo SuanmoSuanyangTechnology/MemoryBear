@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:25:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 10:51:29
+ * @Last Modified time: 2026-03-25 12:32:58
  */
 /**
  * SiderMenu Component
@@ -298,7 +298,10 @@ const Menu: FC<{
         items={menuItems}
         inlineCollapsed={collapsed}
         inlineIndent={10}
-        className="rb:max-h-[calc(100vh-136px)] rb:overflow-y-auto"
+        className={clsx("rb:overflow-y-auto", {
+          'rb:max-h-[calc(100vh-136px)]': user?.is_superuser && source === 'space',
+          'rb:max-h-[calc(100vh-76px)]': !(user?.is_superuser && source === 'space')
+        })}
       />
       {/* Return to space button for superusers */}
       {user?.is_superuser && source === 'space' &&

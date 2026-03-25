@@ -68,7 +68,7 @@ const TopCardList: FC<{data?: DataResponse}> = ({ data }) => {
             </Flex>
 
             <div className="rb:mt-5 rb:font-[MiSans-Bold] rb:font-bold rb:text-[24px] rb:leading-8">
-              {item.key === 'spaces' && String(data?.active_workspaces)}
+              {item.key === 'spaces' && String(data?.active_workspaces || 0)}
               {item.key === 'running_apps' &&  String(data?.[`${item.key}` as keyof DataResponse] || item.value || 0)}
               {item.key !== 'spaces' && item.key !== 'running_apps' && String(data?.[`total_${item.key}` as keyof DataResponse] || item.value || 0)}
             </div>

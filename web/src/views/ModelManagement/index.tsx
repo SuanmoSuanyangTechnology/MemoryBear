@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 19:02:31
+ * @Last Modified time: 2026-03-25 12:28:07
  */
 /**
  * Model Management Main Page
@@ -134,7 +134,7 @@ const tabKeys = ['group', 'list', 'square']
 
       <div className="rb:w-full rb:h-[calc(100vh-125px)] rb:overflow-y-auto">
         {activeTab === 'group' && <GroupModel ref={groupRef} query={query} handleEdit={handleEdit} />}
-        {activeTab === 'list' && <ModelList ref={modelListRef} query={query} handleEdit={handleEdit} />}
+        {activeTab === 'list' && <ModelList ref={modelListRef} query={query} handleEdit={handleEdit} handleCloseModel={() => customModelModalRef.current?.handleClose() } />}
         {activeTab === 'square' && <ModelSquare query={query} />}
       </div>
       <GroupModelModal

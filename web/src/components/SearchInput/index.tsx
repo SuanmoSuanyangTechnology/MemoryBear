@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:24:23 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-23 11:35:33
+ * @Last Modified time: 2026-03-25 11:15:26
  */
 /**
  * SearchInput Component
@@ -51,6 +51,7 @@ const SearchInput: FC<SearchInputProps> = ({
   throttleDelay,
   defaultValue = undefined,
   className = '',
+  variant = 'filled',
   ...props
 }) => {
   const { t } = useTranslation();
@@ -115,7 +116,8 @@ const SearchInput: FC<SearchInputProps> = ({
       value={value}
       onChange={handleChange}
       style={{ width: '300px' }}
-      className={`rb:border-none! ${className}`}
+      className={className}
+      variant={variant}
       {...props}
     />
   );

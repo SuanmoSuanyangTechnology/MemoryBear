@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:23 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 11:36:22
+ * @Last Modified time: 2026-03-25 12:09:53
  */
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -130,7 +130,7 @@ const PerceptualLastInfo: FC = () => {
               'rb:bg-[#F6F6F6]': type !== key
             })}
             onClick={() => setType(key)}
-          >{key}</div>))}
+          >{t(`perceptualDetail.${key}`)}</div>))}
       </Flex>
       {loading
         ? <Skeleton active />
@@ -147,7 +147,7 @@ const PerceptualLastInfo: FC = () => {
                     <Flex gap={12} align="center">
                       <div className="rb:w-7.5 rb:h-9 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/file.svg')]"></div>
                       <div>
-                        <div className="rb:leading-5 rb:font-medium rb:mb-1">{data.file_name}</div>
+                        <div className="rb:leading-5 rb:font-medium rb:mb-1 rb:wrap-break-word rb:line-clamp-1">{data.file_name}</div>
                         <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">
                           {fileSize || '-'}
                         </div>

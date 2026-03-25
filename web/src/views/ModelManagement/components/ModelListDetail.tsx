@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 16:55:30
+ * @Last Modified time: 2026-03-25 12:28:07
  */
 /**
  * Model List Detail Drawer
@@ -31,12 +31,13 @@ interface ModelListDetailProps {
   /** Callback to refresh parent list */
   refresh?: () => void;
   handleEdit: (vo?: ModelListItem) => void;
+  handleCloseConfig?: () => void;
 }
 
 /**
  * Model list detail drawer component
  */
-const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ refresh, handleEdit }, ref) => {
+const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ refresh, handleEdit, handleCloseConfig }, ref) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<ProviderModelItem>({} as ProviderModelItem)
@@ -84,6 +85,8 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
     setType(null)
     setOpen(false)
     refresh?.()
+    multiKeyConfigModalRef.current?.handleClose()
+    handleCloseConfig?.()
   }
   /** Refresh model list */
   const handleRefresh = () => {

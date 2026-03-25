@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 21:29:45
+ * @Last Modified time: 2026-03-25 11:16:04
  */
 /**
  * Application Management Page
@@ -148,6 +148,7 @@ const ApplicationManagement: React.FC = () => {
                     label: t(`application.${type}`),
                   }))}
                   allowClear
+                  variant="filled"
                   className="rb:w-30!"
                 />
               </Form.Item>

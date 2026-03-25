@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:10:20 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 16:35:14
+ * @Last Modified time: 2026-03-25 12:16:23
  */
 import { type FC, useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom';
@@ -122,7 +122,7 @@ const Detail: FC = () => {
         </Space>}
       />
 
-      <div className="rb:h-[calc(100vh-64px)] rb:overflow-y-auto rb:pb-3 rb:px-3">
+      <div className="rb:h-[calc(100vh-64px)] rb:overflow-y-auto rb:p-3">
         <Row gutter={12} className="rb:mb-4">
           <Col span={6} offset={18}>
             <SearchInput

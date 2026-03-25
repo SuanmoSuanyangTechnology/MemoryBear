@@ -2,9 +2,9 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 15:27:30
+ * @Last Modified time: 2026-03-25 11:34:04
  */
-import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom';
 import { Row, Col, Space, Form, Input, Button, App, Spin, Flex } from 'antd'
@@ -27,7 +27,7 @@ import type {
 } from './types'
 import type { Variable } from './components/VariableList/types'
 import type { KnowledgeConfig } from './components/Knowledge/types'
-import type { ModelListItem } from '@/views/ModelManagement/types'
+import type { Model } from '@/views/ModelManagement/types'
 import { getModelList } from '@/api/models';
 import { saveAgentConfig } from '@/api/application'
 import Knowledge from './components/Knowledge/Knowledge'
@@ -43,6 +43,7 @@ import type { Skill } from '@/views/Skills/types'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import DescWrapper from '@/components/FormItem/DescWrapper'
 import FeaturesConfig from './components/FeaturesConfig'
+import { getListLogoUrl } from '@/views/ModelManagement/utils';
 
 /**
  * Agent configuration component
@@ -56,8 +57,8 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<Config | null>(null);
   const modelConfigModalRef = useRef<ModelConfigModalRef>(null)
-  const [modelList, setModelList] = useState<ModelListItem[]>([])
-  const [defaultModel, setDefaultModel] = useState<ModelListItem | null>(null)
+  const [modelList, setModelList] = useState<Model[]>([])
+  const [defaultModel, setDefaultModel] = useState<Model | null>(null)
   const [chatList, setChatList] = useState<ChatData[]>([])
   const values = Form.useWatch<Config>([], form) 
   const [isSave, setIsSave] = useState(false)
@@ -260,7 +261,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   const getModels = () => {
     getModelList({ type: 'llm,chat', pagesize: 100, page: 1, is_active: true })
       .then(res => {
-        const response = res as { items: ModelListItem[] }
+        const response = res as { items: Model[] }
         setModelList(response.items)
       })
   }
@@ -273,7 +274,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   useEffect(() => {
     if (values?.default_model_config_id && modelList.length > 0) {
       const filterValue = modelList.find(item => item.id === values.default_model_config_id)
-      setDefaultModel(filterValue as ModelListItem | null)
+      setDefaultModel(filterValue as Model | null)
       setChatList([{
         label: filterValue?.name || '',
         model_config_id: filterValue?.id || '',
@@ -343,7 +344,10 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   const handleSaveFeaturesConfig = (value: FeaturesConfigForm) => {
     form.setFieldValue('features', value)
   }
-  console.log('values', values)
+  const modelLogo = useMemo(() => {
+    return defaultModel?.name && getListLogoUrl(defaultModel.provider, defaultModel.logo as string)
+  }, [defaultModel])
+  console.log('values', values, defaultModel)
   return (
     <>
       {loading && <Spin fullscreen></Spin>}
@@ -353,7 +357,10 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
             <Flex gap={16} vertical>
               <Flex align="center" justify="space-between" className="rb:p-3! rb:bg-white rb:rounded-xl">
                 <Button type="primary" ghost onClick={handleModelConfig} className="rb:group">
-                  {defaultModel?.name ? <div className="rb:size-4 rb:bg-[url('@/assets/images/application/model.svg')]"></div> : null}
+                  {modelLogo
+                    ? <img src={modelLogo} className="rb:size-4 rb:rounded-md" alt="" />
+                    : defaultModel?.name
+                    ? <div className="rb:size-4 rb:bg-[url('@/assets/images/application/model.svg')]"></div> : null}
                   {defaultModel?.name || t('application.chooseModel')}
                 </Button>
                 <Space size={12}>
@@ -475,7 +482,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
       </Row>
 
       <ModelConfigModal
-        modelList={modelList}
         data={values}
         ref={modelConfigModalRef}
         refresh={refresh}

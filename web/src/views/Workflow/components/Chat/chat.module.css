@@ -13,6 +13,9 @@
   border-color: rgba(91, 97, 103, 0.30);
   border-radius: 8px;
 }
+.default:global(.ant-collapse .ant-collapse-content) {
+  padding-top: 12px;
+}
 .collapse-item {
   font-size: 12px;
   line-height: 16px;

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:29 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-03 19:05:23
+ * @Last Modified time: 2026-03-25 11:18:09
  */
 import { type FC, useState, useRef, useEffect } from 'react';
 import clsx from 'clsx';
@@ -127,10 +127,10 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
     <div className="rb:w-250 rb:mx-auto">
       <Flex gap={20} vertical>
         <RbCard 
-          title={<Flex align="center">
+          title={() => (<Flex align="center">
             {t('application.endpointConfiguration')}
             <span className="rb:text-[#5B6167] rb:text-[12px]">({t('application.endpointConfigurationSubTitle')})</span>
-          </Flex>}
+          </Flex>)}
           headerType="borderless"
           headerClassName="rb:min-h-13.5!"
         >
@@ -157,10 +157,10 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
           </Flex>
         </RbCard>
         <RbCard
-          title={<Flex align="center">
+          title={() => (<Flex align="center">
             {t('application.apiKeys')}
             <span className="rb:text-[#5B6167] rb:text-[12px]">({t('application.apiKeySubTitle')})</span>
-          </Flex>}
+          </Flex>)}
           extra={
             <Button style={{padding: '0 8px', height: '24px'}} onClick={handleAdd}>+ {t('application.addApiKey')}</Button>
           }
