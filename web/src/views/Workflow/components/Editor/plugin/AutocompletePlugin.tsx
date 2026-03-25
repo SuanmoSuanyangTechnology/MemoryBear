@@ -2,11 +2,12 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-03 10:12:33
+ * @Last Modified time: 2026-03-25 15:53:57
  */
 import { useEffect, useState, useRef, type FC } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { $getSelection, $isRangeSelection, $isTextNode, COMMAND_PRIORITY_HIGH, KEY_ENTER_COMMAND, KEY_ARROW_DOWN_COMMAND, KEY_ARROW_UP_COMMAND, KEY_ESCAPE_COMMAND } from 'lexical';
+import { Space } from 'antd';
 
 import { INSERT_VARIABLE_COMMAND, CLOSE_AUTOCOMPLETE_COMMAND } from '../commands';
 import type { NodeProperties } from '../../../types'
@@ -317,26 +318,12 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
                   onClick={() => !option.disabled && insertMention(option)}
                   onMouseEnter={() => setSelectedIndex(globalIndex)}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span
-                      style={{
-                        background: option.isContext ? '#722ed1' :
-                          option.type === 'system' ? '#1890ff' : '#52c41a',
-                        color: 'white',
-                        padding: '2px 6px',
-                        borderRadius: '4px',
-                        fontSize: '12px',
-                        minWidth: '16px',
-                        textAlign: 'center',
-                      }}
-                    >
-                      {option.isContext ? '📄' :
-                        option.type === 'system' ? 'x' : 'x'}
-                    </span>
-                    <span style={{ fontSize: '14px' }}>{option.label}</span>
-                  </div>
+                  <Space size={4}>
+                    <span className="rb:text-[#155EEF]">{option.isContext ? '📄' : `{x}`}</span>
+                    <span>{option.label}</span>
+                  </Space>
                   {option.dataType && (
-                    <span style={{ fontSize: '12px', color: '#999' }}>
+                    <span className="rb:text-[#5B6167]">
                       {option.dataType}
                     </span>
                   )}

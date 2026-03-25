@@ -1,12 +1,12 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:40:13 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 15:40:13 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-25 15:52:24
  */
 import { type FC } from 'react'
 import clsx from 'clsx';
-import { Select, type SelectProps, Flex } from 'antd'
+import { Select, type SelectProps, Flex, Space } from 'antd'
 
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
 type LabelRender = SelectProps['labelRender'];
@@ -110,7 +110,13 @@ const VariableSelect: FC<VariableSelectProps> = ({
   const groupedOptions = Object.entries(groupedSuggestions).map(([_nodeId, suggestions]) => ({
     label: suggestions[0].nodeData.name,
     options: suggestions.map(s => ({ 
-      label: <Flex align="center" justify="space-between" gap={4}> {s.label} <span>{s.dataType}</span></Flex>, 
+      label: <Flex align="center" justify="space-between" gap={4}>
+        <Space size={8}>
+          <span className="rb:text-[#155EEF]">{`{x}`}</span>
+          {s.label}
+        </Space>
+        <span className="rb:text-[#5B6167]">{s.dataType}</span>
+      </Flex>, 
       value: `{{${s.value}}}` 
     }))
   }));
