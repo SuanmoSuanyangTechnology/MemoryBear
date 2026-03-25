@@ -75,9 +75,8 @@ Extract entities and knowledge triplets from the given statement.
 
 **CRITICAL RULES (违反将导致提取失败):**
 
-1. **EVERY entity MUST have BOTH fields:**
+1. **EVERY entity MUST have aliases field:**
    - `"aliases": [...]` - REQUIRED, even if empty `[]`
-   - `"denied_aliases": [...]` - REQUIRED, even if empty `[]`
 
 2. **ALIASES - 别名提取规则:**
 {% if language == "zh" %}
@@ -100,12 +99,9 @@ Extract entities and knowledge triplets from the given statement.
    - Important: Only extract aliases explicitly mentioned in current conversation, do not infer or add unmentioned names
 {% endif %}
 
-<!-- TODO: v0.2.10 - denied_aliases 功能暂时禁用，将通过 Cypher 查询实现
-3. **DENIED_ALIASES - 否定别名规则:**
-...
--->
 
-4. **USER ENTITY SPECIAL HANDLING:**
+
+3. **USER ENTITY SPECIAL HANDLING:**
 {% if language == "zh" %}
    - 用户实体的 name 字段：使用 "用户" 或 "我"
    - 用户的真实姓名：放入 aliases
@@ -118,46 +114,24 @@ Extract entities and knowledge triplets from the given statement.
      * "I'm John" → name="User", aliases=["John"]
 {% endif %}
 
-<!-- TODO: v0.2.10 - denied_aliases 功能暂时禁用
-     * "我不叫王强，我叫李明" → name="用户", aliases=["李明"], denied_aliases=["王强"]
-     * "I'm not Bob, I'm John" → name="User", aliases=["John"], denied_aliases=["Bob"]
--->
 
-5. **CONFLICT RESOLUTION:**
+
+4. **ALIASES ORDER:**
 {% if language == "zh" %}
    - 顺序优先级：按出现顺序，先出现的在前
 {% else %}
    - Order priority: by appearance order, first mentioned comes first
 {% endif %}
 
-<!-- TODO: v0.2.10 - denied_aliases 功能暂时禁用
-   - 如果同一句话中既有肯定又有否定：
-     * "我不叫X，我叫Y" → aliases=["Y"], denied_aliases=["X"]
-   - If both affirmation and denial in same sentence:
-     * "I'm not X, I'm Y" → aliases=["Y"], denied_aliases=["X"]
--->
-
 **EXAMPLES OF CORRECT EXTRACTION:**
 {% if language == "zh" %}
 - "我叫张三" → aliases=["张三"] （张三将成为 other_name）
 - "大家叫我小明，我全名叫李明" → aliases=["小明", "李明"] （小明先出现，将成为 other_name）
 - "我是李华，网名叫华仔" → aliases=["李华", "华仔"] （李华先出现，将成为 other_name）
-
-<!-- TODO: v0.2.10 - denied_aliases 示例暂时禁用
-- "我不叫王强" → aliases=[], denied_aliases=["王强"]
-- "我不叫老张，我叫小张" → aliases=["小张"], denied_aliases=["老张"] （小张将成为 other_name）
-- "我是李华，网名叫华仔，但我不是小李" → aliases=["李华", "华仔"], denied_aliases=["小李"] （李华先出现，将成为 other_name）
--->
 {% else %}
 - "I'm John" → aliases=["John"] (John will become other_name)
 - "People call me Mike, my full name is Michael" → aliases=["Mike", "Michael"] (Mike appears first, will become other_name)
 - "I'm John Smith, username JSmith" → aliases=["John Smith", "JSmith"] (John Smith appears first, will become other_name)
-
-<!-- TODO: v0.2.10 - denied_aliases examples temporarily disabled
-- "I'm not called Bob" → aliases=[], denied_aliases=["Bob"]
-- "I'm not Bob, I'm John" → aliases=["John"], denied_aliases=["Bob"] (John will become other_name)
-- "I'm John Smith, username JSmith, but not Johnny" → aliases=["John Smith", "JSmith"], denied_aliases=["Johnny"] (John Smith appears first, will become other_name)
--->
 {% endif %}
   
 - Exclude lengthy quotes, dates, temporal expressions
@@ -278,50 +252,7 @@ Output:
   ]
 }
 
-**Example 6 (否定别名 - Chinese):** "我不叫陈思远，我其实叫小小张"
-Output:
-{
-  "triplets": [],
-  "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "Person", "description": "用户本人", "example": "", "aliases": ["小小张"], "denied_aliases": ["陈思远"], "is_explicit_memory": false}
-  ]
-}
 
-**Example 7 (否定别名 - Chinese):** "我不叫远山"
-Output:
-{
-  "triplets": [],
-  "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "Person", "description": "用户本人", "example": "", "aliases": [], "denied_aliases": ["远山"], "is_explicit_memory": false}
-  ]
-}
-
-**Example 8 (复杂场景 - Chinese):** "大家都叫我明明，我的全名是小明，但我不是小红"
-Output:
-{
-  "triplets": [],
-  "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "Person", "description": "用户本人", "example": "", "aliases": ["明明", "小明"], "denied_aliases": ["小红"], "is_explicit_memory": false}
-  ]
-}
-
-**Example 9 (纠正错误 - Chinese):** "我搞错了，我的网名不叫做远山，网名叫做大山"
-Output:
-{
-  "triplets": [],
-  "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "Person", "description": "用户本人", "example": "", "aliases": ["大山"], "denied_aliases": ["远山"], "is_explicit_memory": false}
-  ]
-}
-
-**Example 10 (多重纠正 - Chinese):** "其实我不是老张，也不叫小张，我叫张三"
-Output:
-{
-  "triplets": [],
-  "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "Person", "description": "用户本人", "example": "", "aliases": ["张三"], "denied_aliases": ["老张", "小张"], "is_explicit_memory": false}
-  ]
-}
 {% endif %}
 ===End of Examples===
 
@@ -341,10 +272,5 @@ Output:
 {% endif %}
 - **⚠️ ALIASES ORDER: preserve temporal order of appearance**
 - **🚨 MANDATORY FIELD: EVERY entity MUST include "aliases" field, even if empty array []**
-
-<!-- TODO: v0.2.10 - denied_aliases 要求暂时禁用
-- **🚨 DENIED_ALIASES: "我不叫X" → X to denied_aliases (mutually exclusive with aliases)**
-- **🚨 MANDATORY FIELDS: EVERY entity MUST include both "aliases" and "denied_aliases" fields, even if empty arrays []**
--->
 
 {{ json_schema }}
