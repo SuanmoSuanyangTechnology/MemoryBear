@@ -2,12 +2,12 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 15:53:57
+ * @Last Modified time: 2026-03-25 16:13:37
  */
 import { useEffect, useState, useRef, type FC } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { $getSelection, $isRangeSelection, $isTextNode, COMMAND_PRIORITY_HIGH, KEY_ENTER_COMMAND, KEY_ARROW_DOWN_COMMAND, KEY_ARROW_UP_COMMAND, KEY_ESCAPE_COMMAND } from 'lexical';
-import { Space } from 'antd';
+import { Space, Flex } from 'antd';
 
 import { INSERT_VARIABLE_COMMAND, CLOSE_AUTOCOMPLETE_COMMAND } from '../commands';
 import type { NodeProperties } from '../../../types'
@@ -275,64 +275,59 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
       ref={popupRef}
       data-autocomplete-popup="true"
       onMouseDown={(e) => e.preventDefault()}
+      className="rb:fixed rb:z-1000 rb:py-1 rb:bg-white rb:rounded-xl rb:min-w-70 rb:max-h-50 rb:overflow-y-auto rb:transform-[translateY(-100%)] rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]"
       style={{
-        position: 'fixed',
         top: popupPosition.top,
         left: popupPosition.left,
-        zIndex: 1000,
-        background: 'white',
-        border: '1px solid #d9d9d9',
-        borderRadius: '6px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-        minWidth: '280px',
-        maxHeight: '200px',
-        overflowY: 'auto',
-        transform: 'translateY(-100%)',
       }}
     >
-      {Object.entries(groupedSuggestions).map(([nodeId, nodeOptions], groupIndex) => {
-        const nodeName = nodeOptions[0]?.nodeData?.name || nodeId;
-        return (
-          <div key={nodeId}>
-            {/* Divider between groups */}
-            {groupIndex > 0 && <div style={{ height: '1px', background: '#f0f0f0', margin: '4px 0' }} />}
-            {/* Group header with node name */}
-            <div style={{ padding: '4px 12px', fontSize: '12px', color: '#999', fontWeight: 'bold' }}>
-              {nodeName}
+      <Flex vertical gap={12}>
+        {Object.entries(groupedSuggestions).map(([nodeId, nodeOptions]) => {
+          const nodeName = nodeOptions[0]?.nodeData?.name || nodeId;
+          const nodeIcon = nodeOptions[0]?.nodeData?.icon;
+          return (
+            <div key={nodeId}>
+              <Flex align="center" gap={4} className="rb:px-3! rb:text-[12px] rb:py-1.25! rb:font-medium rb:text-[#5B6167]">
+                {nodeIcon && <img
+                  src={nodeIcon}
+                  className="rb:size-3"
+                  alt=""
+                />}
+                {nodeName}
+              </Flex>
+              {nodeOptions.map((option) => {
+                const globalIndex = Object.values(groupedSuggestions).flat().indexOf(option);
+                return (
+                  <Flex
+                    key={option.key}
+                    data-selected={selectedIndex === globalIndex}
+                    className="rb:pl-6! rb:pr-3! rb:py-2! "
+                    align="center"
+                    justify="space-between"
+                    style={{
+                      cursor: option.disabled ? 'not-allowed' : 'pointer',
+                      background: selectedIndex === globalIndex ? '#f0f8ff' : 'white',
+                      opacity: option.disabled ? 0.5 : 1,
+                    }}
+                    onClick={() => !option.disabled && insertMention(option)}
+                    onMouseEnter={() => setSelectedIndex(globalIndex)}
+                  >
+                    <Space size={4}>
+                      <span className="rb:text-[#155EEF]">{option.isContext ? '📄' : `{x}`}</span>
+                      <span>{option.label}</span>
+                    </Space>
+                    {option.dataType && (
+                      <span className="rb:text-[#5B6167]">
+                        {option.dataType}
+                      </span>
+                    )}
+                  </Flex>
+                );
+              })}
             </div>
-            {nodeOptions.map((option) => {
-              const globalIndex = Object.values(groupedSuggestions).flat().indexOf(option);
-              return (
-                <div
-                  key={option.key}
-                  data-selected={selectedIndex === globalIndex}
-                  style={{
-                    padding: '8px 12px',
-                    cursor: option.disabled ? 'not-allowed' : 'pointer',
-                    background: selectedIndex === globalIndex ? '#f0f8ff' : 'white',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    opacity: option.disabled ? 0.5 : 1,
-                  }}
-                  onClick={() => !option.disabled && insertMention(option)}
-                  onMouseEnter={() => setSelectedIndex(globalIndex)}
-                >
-                  <Space size={4}>
-                    <span className="rb:text-[#155EEF]">{option.isContext ? '📄' : `{x}`}</span>
-                    <span>{option.label}</span>
-                  </Space>
-                  {option.dataType && (
-                    <span className="rb:text-[#5B6167]">
-                      {option.dataType}
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        );
-      })}
+          );
+        })}
+      </Flex>
     </div>
   );
 }

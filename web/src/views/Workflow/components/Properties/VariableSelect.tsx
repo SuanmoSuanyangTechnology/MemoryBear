@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:40:13 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 15:52:24
+ * @Last Modified time: 2026-03-25 16:03:59
  */
 import { type FC } from 'react'
 import clsx from 'clsx';
@@ -108,7 +108,14 @@ const VariableSelect: FC<VariableSelectProps> = ({
    * Format grouped options for Select component
    */
   const groupedOptions = Object.entries(groupedSuggestions).map(([_nodeId, suggestions]) => ({
-    label: suggestions[0].nodeData.name,
+    label: <Flex align="center" gap={4}>
+      {suggestions[0].nodeData.icon && <img
+        src={suggestions[0].nodeData.icon}
+        className="rb:size-3"
+        alt=""
+      />}
+      {suggestions[0].nodeData.name}
+    </Flex>,
     options: suggestions.map(s => ({ 
       label: <Flex align="center" justify="space-between" gap={4}>
         <Space size={8}>
