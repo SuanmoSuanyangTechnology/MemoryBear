@@ -61,21 +61,11 @@ class GraphBuilder:
         else:
             self.variable_pool = VariablePool()
 
-        self.graph = StateGraph(WorkflowState)
-        self.add_nodes()
-        self.reachable_nodes = WorkflowValidator.get_reachable_nodes(self.start_node_id, self.edges)
-        self.end_nodes = [
-            node
-            for node in self.nodes
-            if node.get("type") == "end" and node.get("id") in self.reachable_nodes
-        ]
-        self._reverse_adj: dict[str, list[dict]] = defaultdict(list)
-        self._adj: dict[str, list[str]] = defaultdict(list)
-        self._build_reverse_adj()
-        self.add_edges()
-        # EDGES MUST BE ADDED AFTER NODES ARE ADDED.
-
-        self._analyze_end_node_output()
+        self.graph: StateGraph | None = None
+        self.reachable_nodes: set[str] | None = None
+        self.end_nodes: list[dict] = []
+        self._reverse_adj: dict[str, list[dict]] | None = defaultdict(list)
+        self._adj: dict[str, list[str]] | None = defaultdict(list)
 
     @property
     def nodes(self) -> list[dict[str, Any]]:
@@ -109,7 +99,7 @@ class GraphBuilder:
             result[node[0]].append(node[1])
         return result
 
-    def _build_reverse_adj(self):
+    def _build_adj(self):
         for edge in self.edges:
             if edge["source"] not in self.reachable_nodes:
                 continue
@@ -513,6 +503,21 @@ class GraphBuilder:
         return
 
     def build(self) -> CompiledStateGraph:
+        self.graph = StateGraph(WorkflowState)
+        self.add_nodes()
+        self.reachable_nodes = WorkflowValidator.get_reachable_nodes(self.start_node_id, self.edges)
+        self.end_nodes = [
+            node
+            for node in self.nodes
+            if node.get("type") == "end" and node.get("id") in self.reachable_nodes
+        ]
+        self._reverse_adj: dict[str, list[dict]] = defaultdict(list)
+        self._adj: dict[str, list[str]] = defaultdict(list)
+        self._build_adj()
+        self.add_edges()
+        # EDGES MUST BE ADDED AFTER NODES ARE ADDED.
+
+        self._analyze_end_node_output()
         checkpointer = InMemorySaver()
-        self.graph = self.graph.compile(checkpointer=checkpointer)
-        return self.graph
+        return self.graph.compile(checkpointer=checkpointer)
+

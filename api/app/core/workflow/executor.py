@@ -88,9 +88,10 @@ class WorkflowExecutor:
             self.workflow_config,
             stream=stream,
         )
+
+        self.graph = builder.build()
         self.start_node_id = builder.start_node_id
         self.variable_pool = builder.variable_pool
-        self.graph = builder.build()
 
         self.stream_coordinator.initialize_end_outputs(builder.end_node_map)
         self.event_handler = EventStreamHandler(

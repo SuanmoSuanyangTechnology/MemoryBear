@@ -183,7 +183,7 @@ class WorkflowValidator:
                 has_cycle, cycle_path = WorkflowValidator._has_cycle(nodes, edges)
                 if has_cycle:
                     errors.append(
-                        f"工作流存在循环依赖（请使用 loop 节点实现循环）: {' -> '.join(cycle_path)}"
+                        f"工作流存在循环依赖（请使用 loop/iteration 节点实现循环）: {' -> '.join(cycle_path)}"
                     )
 
             # 8. 验证变量名
@@ -229,10 +229,6 @@ class WorkflowValidator:
         Returns:
             (has_cycle, cycle_path): 是否有循环和循环路径
         """
-        # 排除 loop 类型的节点
-        loop_nodes = {n["id"] for n in nodes if n.get("type") == "loop"}
-
-        # 构建邻接表（排除 loop 节点的边和错误边）
         graph: dict[str, list[str]] = {}
         for edge in edges:
             source = edge.get("source")
@@ -241,10 +237,6 @@ class WorkflowValidator:
 
             # 跳过错误边
             if edge_type == "error":
-                continue
-
-            # 如果涉及 loop 节点，跳过
-            if source in loop_nodes or target in loop_nodes:
                 continue
 
             if source and target:
