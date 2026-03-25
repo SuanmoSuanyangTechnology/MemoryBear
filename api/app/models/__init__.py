@@ -61,7 +61,7 @@ __all__ = [
     "AppRelease",
     "MemoryIncrement",
     "EndUser",
-    "UserAlias",
+    "EndUserInfo",
     "AppShare",
     "ReleaseShare",
     "Conversation",
