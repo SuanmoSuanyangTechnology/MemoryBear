@@ -7,7 +7,7 @@ import re
 import uuid
 from collections import defaultdict
 from functools import lru_cache
-from typing import Any, Iterable
+from typing import Any, Iterable, Callable
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import START, END
@@ -41,39 +41,31 @@ class GraphBuilder:
             self,
             workflow_config: dict[str, Any],
             stream: bool = False,
-            subgraph: bool = False,
+            cycle: str = '',
             variable_pool: VariablePool | None = None
     ):
         self.workflow_config = workflow_config
 
         self.stream = stream
-        self.subgraph = subgraph
+        self.cycle = cycle
 
         self.start_node_id: str | None = None
 
-        self.node_map = {node["id"]: node for node in self.nodes}
+        self.node_map: dict[str, dict] = {}
         self.end_node_map: dict[str, StreamOutputConfig] = {}
-        self._find_upstream_activation_dep = lru_cache(
-            maxsize=len(self.nodes) * 2
-        )(self._find_upstream_activation_dep)
+        self._find_upstream_activation_dep: Callable = self._find_upstream_activation_dep
         if variable_pool:
             self.variable_pool = variable_pool
         else:
             self.variable_pool = VariablePool()
 
         self.graph: StateGraph | None = None
+        self.nodes: list = []
+        self.edges: list = []
         self.reachable_nodes: set[str] | None = None
         self.end_nodes: list[dict] = []
-        self._reverse_adj: dict[str, list[dict]] | None = defaultdict(list)
-        self._adj: dict[str, list[str]] | None = defaultdict(list)
-
-    @property
-    def nodes(self) -> list[dict[str, Any]]:
-        return self.workflow_config.get("nodes", [])
-
-    @property
-    def edges(self) -> list[dict[str, Any]]:
-        return self.workflow_config.get("edges", [])
+        self._reverse_adj: dict[str, list[dict]] = defaultdict(list)
+        self._adj: dict[str, list[str]] = defaultdict(list)
 
     def get_node_type(self, node_id: str) -> str:
         """Retrieve the type of node given its ID.
@@ -294,22 +286,13 @@ class GraphBuilder:
         """
         for node in self.nodes:
             node_type = node.get("type")
-            if node_type == NodeType.NOTES:
-                continue
             node_id = node.get("id")
-            cycle_node = node.get("cycle")
-            if cycle_node:
-                # Nodes within a loop subgraph are constructed by CycleGraphNode
-                if not self.subgraph:
-                    continue
-
-            # Record start and end node IDs
-            if node_type in [NodeType.START, NodeType.CYCLE_START]:
-                self.start_node_id = node_id
+            if node_id not in self.reachable_nodes:
+                continue
 
             # Create node instance (start and end nodes are also created)
             # NOTE:Loop node creation automatically removes the nodes and edges of the subgraph from the current graph
-            node_instance = NodeFactory.create_node(node, self.workflow_config)
+            node_instance = NodeFactory.create_node(node, self.workflow_config, self._adj[node_id])
 
             if node_type in BRANCH_NODES:
 
@@ -503,21 +486,46 @@ class GraphBuilder:
         return
 
     def build(self) -> CompiledStateGraph:
-        self.graph = StateGraph(WorkflowState)
-        self.add_nodes()
+        nodes = self.workflow_config.get("nodes", [])
+        edges = self.workflow_config.get("edges", [])
+
+        for node in nodes:
+            if (node.get("cycle") or '') == self.cycle:
+                node_type = node.get("type")
+                if node_type in [NodeType.START, NodeType.CYCLE_START]:
+                    self.start_node_id = node.get("id")
+                elif node_type == NodeType.NOTES:
+                    continue
+                self.nodes.append(node)
+                self.node_map[node.get("id")] = node
+
+        for edge in edges:
+            source_in = edge.get("source") in self.node_map
+            target_in = edge.get("target") in self.node_map
+            if source_in ^ target_in:
+                raise ValueError(
+                    f"Cycle node is connected to external node, "
+                    f"source: {edge.get('source')}, target: {edge.get('target')}"
+                )
+
+            if source_in and target_in:
+                self.edges.append(edge)
+
         self.reachable_nodes = WorkflowValidator.get_reachable_nodes(self.start_node_id, self.edges)
         self.end_nodes = [
             node
             for node in self.nodes
             if node.get("type") == "end" and node.get("id") in self.reachable_nodes
         ]
-        self._reverse_adj: dict[str, list[dict]] = defaultdict(list)
-        self._adj: dict[str, list[str]] = defaultdict(list)
         self._build_adj()
+        self._find_upstream_activation_dep: Callable = lru_cache(
+            maxsize=len(self.nodes)*2
+        )(self._find_upstream_activation_dep)
+
+        self.graph = StateGraph(WorkflowState)
+        self.add_nodes()
         self.add_edges()
-        # EDGES MUST BE ADDED AFTER NODES ARE ADDED.
 
         self._analyze_end_node_output()
         checkpointer = InMemorySaver()
         return self.graph.compile(checkpointer=checkpointer)
-
