@@ -12,7 +12,7 @@ from app.core.workflow.adapters.base_adapter import (
     WorkflowParserResult
 )
 from app.core.workflow.adapters.dify.converter import DifyConverter
-from app.core.workflow.adapters.errors import ExceptionDefineition, ExceptionType
+from app.core.workflow.adapters.errors import ExceptionDefinition, ExceptionType
 from app.core.workflow.nodes.enums import NodeType
 from app.schemas.workflow_schema import (
     NodeDefinition,
@@ -85,7 +85,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         if not all(field in self.config for field in require_fields):
             return False
         if self.config.get("app", {}).get("mode") == "workflow":
-            self.errors.append(ExceptionDefineition(
+            self.errors.append(ExceptionDefinition(
                 type=ExceptionType.PLATFORM,
                 detail="workflow mode is not supported"
             ))
@@ -111,12 +111,12 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
             edge = self._convert_edge(edge)
             if edge:
                 self.edges.append(edge)
-        #
+
         for variable in self.config.get("workflow").get("conversation_variables"):
             con_var = self._convert_variable(variable)
             if variable:
                 self.conv_variables.append(con_var)
-        #
+
         # for variables in config.get("workflow").get("environment_variables"):
         #     variable = self._convert_variable(variables)
         #     conv_variables.append(variable)
@@ -152,7 +152,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
                     "y": node["position"]["y"] + position["y"]
                 }
         self.errors.append(
-            ExceptionDefineition(
+            ExceptionDefinition(
                 type=ExceptionType.NODE,
                 node_id=node_id,
                 detail="parent cycle node not found"
@@ -189,7 +189,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
             node_data = node["data"]
             converter = self.get_node_convert(node_type)
             if node_type == NodeType.UNKNOWN:
-                self.errors.append(ExceptionDefineition(
+                self.errors.append(ExceptionDefinition(
                     type=ExceptionType.NODE,
                     node_id=node["id"],
                     node_name=node["data"]["title"],
@@ -197,7 +197,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
                 ))
             return converter(node)
         except Exception as e:
-            self.errors.append(ExceptionDefineition(
+            self.errors.append(ExceptionDefinition(
                 type=ExceptionType.NODE,
                 node_id=node["id"],
                 node_name=node["data"]["title"],
@@ -207,7 +207,6 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
 
     def _convert_edge(self, edge: dict[str, Any]) -> EdgeDefinition | None:
         try:
-
             source = edge["source"]
             target = edge["target"]
             label = None
@@ -230,7 +229,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
                 label=label,
             )
         except Exception as e:
-            self.errors.append(ExceptionDefineition(
+            self.errors.append(ExceptionDefinition(
                 type=ExceptionType.EDGE,
                 detail=f"convert edge error - {e}",
             ))
@@ -246,7 +245,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
                 description=variable.get("description")
             )
         except Exception as e:
-            self.errors.append(ExceptionDefineition(
+            self.errors.append(ExceptionDefinition(
                 type=ExceptionType.VARIABLE,
                 name=variable.get("name"),
                 detail=f"convert variable error - {e}",

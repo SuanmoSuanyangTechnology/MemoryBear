@@ -1,9 +1,7 @@
 """End 节点配置"""
-
 from pydantic import Field
 
-from app.core.workflow.nodes.base_config import BaseNodeConfig, VariableDefinition
-from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.nodes.base_config import BaseNodeConfig
 
 
 class EndNodeConfig(BaseNodeConfig):

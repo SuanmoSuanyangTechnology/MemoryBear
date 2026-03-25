@@ -6,6 +6,7 @@
 
 import copy
 import logging
+from collections import defaultdict, deque
 from typing import Any, Union, TYPE_CHECKING
 
 from app.core.workflow.nodes.enums import NodeType
@@ -119,7 +120,6 @@ class WorkflowValidator:
         errors = []
 
         graphs = cls.get_subgraph(workflow_config)
-        logger.info(graphs)
         for index, graph in enumerate(graphs):
             nodes = graph.get("nodes", [])
             edges = graph.get("edges", [])
@@ -183,7 +183,7 @@ class WorkflowValidator:
                 has_cycle, cycle_path = WorkflowValidator._has_cycle(nodes, edges)
                 if has_cycle:
                     errors.append(
-                        f"工作流存在循环依赖（请使用 loop 节点实现循环）: {' -> '.join(cycle_path)}"
+                        f"工作流存在循环依赖（请使用 loop/iteration 节点实现循环）: {' -> '.join(cycle_path)}"
                     )
 
             # 8. 验证变量名
@@ -204,18 +204,18 @@ class WorkflowValidator:
         Returns:
             可达节点 ID 集合
         """
+        adj = defaultdict(list)
+        for edge in edges:
+            adj[edge["source"]].append(edge["target"])
+
         reachable = {start_id}
-        queue = [start_id]
-
+        queue = deque([start_id])
         while queue:
-            current = queue.pop(0)
-            for edge in edges:
-                if edge.get("source") == current:
-                    target = edge.get("target")
-                    if target and target not in reachable:
-                        reachable.add(target)
-                        queue.append(target)
-
+            current = queue.popleft()
+            for target in adj[current]:
+                if target not in reachable:
+                    reachable.add(target)
+                    queue.append(target)
         return reachable
 
     @staticmethod
@@ -229,10 +229,6 @@ class WorkflowValidator:
         Returns:
             (has_cycle, cycle_path): 是否有循环和循环路径
         """
-        # 排除 loop 类型的节点
-        loop_nodes = {n["id"] for n in nodes if n.get("type") == "loop"}
-
-        # 构建邻接表（排除 loop 节点的边和错误边）
         graph: dict[str, list[str]] = {}
         for edge in edges:
             source = edge.get("source")
@@ -241,10 +237,6 @@ class WorkflowValidator:
 
             # 跳过错误边
             if edge_type == "error":
-                continue
-
-            # 如果涉及 loop 节点，跳过
-            if source in loop_nodes or target in loop_nodes:
                 continue
 
             if source and target:
