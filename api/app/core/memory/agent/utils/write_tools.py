@@ -176,6 +176,22 @@ async def write(
             )
             if success:
                 logger.info("Successfully saved all data to Neo4j")
+                
+                # 同步用户别名到 PostgreSQL
+                try:
+                    # 创建一个临时的 orchestrator 实例来调用同步方法
+                    temp_orchestrator = ExtractionOrchestrator(
+                        llm_client=llm_client,
+                        embedder_client=embedder_client,
+                        connector=neo4j_connector,
+                        embedding_id=embedding_model_id
+                    )
+                    await temp_orchestrator._update_end_user_other_name(all_entity_nodes, chunked_dialogs)
+                    logger.info("Successfully synced user aliases to PostgreSQL")
+                except Exception as sync_error:
+                    logger.error(f"Failed to sync user aliases to PostgreSQL: {sync_error}", exc_info=True)
+                    # 不影响主流程
+                
                 # 写入成功后，同步等待聚类完成（避免与 Memory Summary 并发冲突）
                 await _trigger_clustering_sync(
                     all_entity_nodes,
