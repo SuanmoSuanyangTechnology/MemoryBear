@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 11:34:04
+ * @Last Modified time: 2026-03-25 16:32:26
  */
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { useTranslation } from 'react-i18next'
@@ -281,6 +281,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
         model_parameters: {...(filterValue?.config || {})} as unknown as ModelConfig,
         list: []
       }])
+      form.setFieldValue('capability', filterValue?.capability)
     }
   }, [modelList, values?.default_model_config_id])
 
