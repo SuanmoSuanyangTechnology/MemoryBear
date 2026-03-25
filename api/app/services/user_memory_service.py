@@ -382,20 +382,23 @@ class UserMemoryService:
             }
         """
         try:
-            from app.models.end_user_info_model import EndUserInfo
+            from app.repositories.end_user_info_repository import EndUserInfoRepository
             from app.core.api_key_utils import datetime_to_timestamp
             
             # 转换为UUID并查询
             user_uuid = uuid.UUID(end_user_id)
-            end_user_info_record = db.query(EndUserInfo).filter(EndUserInfo.end_user_id == user_uuid).first()
+            end_user_info_records = EndUserInfoRepository(db).get_by_end_user_id(user_uuid)
             
-            if not end_user_info_record:
+            if not end_user_info_records:
                 logger.warning(f"终端用户信息记录不存在: end_user_id={end_user_id}")
                 return {
                     "success": False,
                     "data": None,
                     "error": "终端用户信息记录不存在"
                 }
+            
+            # 获取第一条记录
+            end_user_info_record = end_user_info_records[0]
             
             # 构建响应数据（转换时间为毫秒时间戳）
             response_data = {
@@ -453,21 +456,24 @@ class UserMemoryService:
             }
         """
         try:
-            from app.models.end_user_info_model import EndUserInfo
-            from app.models.end_user_model import EndUser
+            from app.repositories.end_user_info_repository import EndUserInfoRepository
+            from app.repositories.end_user_repository import EndUserRepository
             from app.core.api_key_utils import datetime_to_timestamp
             
             # 转换为UUID并查询
             user_uuid = uuid.UUID(end_user_id)
-            end_user_info_record = db.query(EndUserInfo).filter(EndUserInfo.end_user_id == user_uuid).first()
+            end_user_info_records = EndUserInfoRepository(db).get_by_end_user_id(user_uuid)
             
-            if not end_user_info_record:
+            if not end_user_info_records:
                 logger.warning(f"终端用户信息记录不存在: end_user_id={end_user_id}")
                 return {
                     "success": False,
                     "data": None,
                     "error": "终端用户信息记录不存在"
                 }
+            
+            # 获取第一条记录
+            end_user_info_record = end_user_info_records[0]
             
             # 定义允许更新的字段白名单
             allowed_fields = {'other_name', 'aliases', 'meta_data'}
@@ -488,7 +494,7 @@ class UserMemoryService:
             
             # 如果 other_name 被更新，同步更新 end_user 表
             if other_name_updated:
-                end_user_record = db.query(EndUser).filter(EndUser.id == user_uuid).first()
+                end_user_record = EndUserRepository(db).get_by_id(user_uuid)
                 if end_user_record:
                     end_user_record.other_name = update_data['other_name']
                     end_user_record.updated_at = datetime.now()
