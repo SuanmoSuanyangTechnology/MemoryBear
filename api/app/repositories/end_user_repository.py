@@ -115,8 +115,8 @@ class EndUserRepository:
             end_user_info = EndUserInfo(
                 end_user_id=end_user.id,
                 other_name=other_name or "",  # 如果没有提供 other_name，使用空字符串
-                aliases={},  # 空字典而不是 None
-                meta_data={}  # 空字典而不是 None
+                aliases=[],  
+                meta_data=[]  
             )
             self.db.add(end_user_info)
             

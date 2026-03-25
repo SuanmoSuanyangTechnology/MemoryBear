@@ -510,7 +510,7 @@ class UserMemoryService:
             if aliases_updated:
                 try:
                     import asyncio
-                    asyncio.create_task(self._sync_aliases_to_neo4j(end_user_id, update_data['aliases']))
+                    asyncio.run(self._sync_aliases_to_neo4j(end_user_id, update_data['aliases']))
                     logger.info(f"已触发 aliases 同步到 Neo4j: end_user_id={end_user_id}, aliases={update_data['aliases']}")
                 except Exception as sync_error:
                     logger.error(f"触发同步 aliases 到 Neo4j 失败: {sync_error}", exc_info=True)
