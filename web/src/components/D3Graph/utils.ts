@@ -45,13 +45,13 @@ export function addZoom(
 
 // ─── Node drag ────────────────────────────────────────────────────────────────
 
-export function makeNodeDrag<N extends d3.SimulationNodeDatum>(
-  simulation: d3.Simulation<N, d3.SimulationLinkDatum<N>>
+export function makeNodeDrag<N extends d3.SimulationNodeDatum & { x?: number; y?: number }>(
+  simulation: d3.Simulation<N, d3.SimulationLinkDatum<N>>,
 ) {
   return d3.drag<SVGGElement, N>()
-    .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y })
-    .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y })
-    .on('end', (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = e.x; d.fy = e.y })
+    .on('start', (e, d) => { d.fx = d.x; d.fy = d.y })
+    .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; d.x = e.x; d.y = e.y; simulation.alpha(0).restart() })
+    .on('end', (e, d) => { d.fx = e.x; d.fy = e.y })
 }
 
 // ─── Cluster force ────────────────────────────────────────────────────────────
@@ -241,12 +241,14 @@ export function buildHullData(
     const color = getColor(ci++)
     if (!pts.length) return
     let pathPoints: [number, number][]
+    const pad = Math.min(40, 15 + pts.length * 3)
     if (pts.length < CIRCLE_THRESHOLD) {
       const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length
       const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length
-      pathPoints = circlePoints(cx, cy, 60)
+      const maxDist = Math.max(0, ...pts.map(([x, y]) => Math.sqrt((x - cx) ** 2 + (y - cy) ** 2)))
+      pathPoints = circlePoints(cx, cy, maxDist + pad)
     } else {
-      pathPoints = expandPoints(toHullPoints(pts), 60) as [number, number][]
+      pathPoints = expandPoints(toHullPoints(pts), pad) as [number, number][]
     }
     const path = smoothLine(pathPoints)
     if (!path) return
@@ -276,7 +278,6 @@ export function renderHulls(
   let dragStart = { x: 0, y: 0 }
   const communityDrag = d3.drag<SVGPathElement, HullDatum>()
     .on('start', (event, d) => {
-      if (!event.active) simulation.alphaTarget(0.3).restart()
       dragNodes = nodes.filter(n => n.community === d.id)
       dragStart = { x: event.x, y: event.y }
       dragNodes.forEach(n => { n.fx = n.x; n.fy = n.y })
@@ -284,9 +285,13 @@ export function renderHulls(
     .on('drag', (event) => {
       const dx = event.x - dragStart.x, dy = event.y - dragStart.y
       dragStart = { x: event.x, y: event.y }
-      dragNodes.forEach(n => { n.fx = (n.fx ?? n.x ?? 0) + dx; n.fy = (n.fy ?? n.y ?? 0) + dy })
+      dragNodes.forEach(n => {
+        n.fx = (n.fx ?? n.x ?? 0) + dx; n.fy = (n.fy ?? n.y ?? 0) + dy
+        n.x = n.fx; n.y = n.fy
+      })
+      simulation.alpha(0).restart()
     })
-    .on('end', (event) => { if (!event.active) simulation.alphaTarget(0) })
+    .on('end', () => { dragNodes = [] })
 
   const pathSel = hullG.selectAll<SVGPathElement, HullDatum>('path.hull').data(hulls, d => d.id)
   pathSel.enter().append('path').attr('class', 'hull').style('cursor', 'grab')
@@ -372,6 +377,21 @@ export function initCommunityGraph(
         if (!c) return
         d.vx = (d.vx ?? 0) + (c.x - (d.x ?? 0)) * 0.4 * alpha
         d.vy = (d.vy ?? 0) + (c.y - (d.y ?? 0)) * 0.4 * alpha
+      })
+    })
+    .force('cohesion', (alpha: number) => {
+      const centroids = new Map<string, { x: number; y: number; n: number }>()
+      nodes.forEach(d => {
+        const c = centroids.get(d.community)
+        if (c) { c.x += d.x ?? 0; c.y += d.y ?? 0; c.n++ }
+        else centroids.set(d.community, { x: d.x ?? 0, y: d.y ?? 0, n: 1 })
+      })
+      centroids.forEach(c => { c.x /= c.n; c.y /= c.n })
+      nodes.forEach(d => {
+        const c = centroids.get(d.community)
+        if (!c || c.n < 2) return
+        d.vx = (d.vx ?? 0) + (c.x - (d.x ?? 0)) * 0.15 * alpha
+        d.vy = (d.vy ?? 0) + (c.y - (d.y ?? 0)) * 0.15 * alpha
       })
     })
 
