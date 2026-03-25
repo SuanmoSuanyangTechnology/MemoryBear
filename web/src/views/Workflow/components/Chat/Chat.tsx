@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 11:25:51
+ * @Last Modified time: 2026-03-25 13:57:40
  */
 /**
  * Workflow Chat Component
@@ -45,8 +45,10 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   const { t } = useTranslation()
   const { message: messageApi } = App.useApp()
   const toolbarRef = useRef<ChatToolbarRef>(null)
+  const [toolbarReady, setToolbarReady] = useState(false)
   const toolbarCallbackRef = useCallback((node: ChatToolbarRef | null) => {
     (toolbarRef as React.MutableRefObject<ChatToolbarRef | null>).current = node
+    setToolbarReady(!!node)
   }, [])
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -70,10 +72,10 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   }, [open, data?.features])
 
   useEffect(() => {
-    if (open && graphRef.current && toolbarRef.current) {
+    if (open && toolbarReady) {
       getVariables()
     }
-  }, [open])
+  }, [open, toolbarReady])
   /**
    * Extracts variables from the workflow's start node and merges with previous values
    */
@@ -103,6 +105,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
    */
   const handleClose = () => {
     setOpen(false)
+    setToolbarReady(false)
     setChatList([])
     setVariables([])
     setConversationId(null)
