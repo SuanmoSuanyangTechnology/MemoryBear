@@ -608,6 +608,7 @@ export const en = {
       official: 'Official',
       deprecated: 'Deprecated',
 
+      image: 'Image',
       llm: 'LLM',
       chat: 'Chat',
       embedding: 'Embedding',

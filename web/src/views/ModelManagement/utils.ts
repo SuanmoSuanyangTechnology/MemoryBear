@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:22 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-27 10:22:46
+ * @Last Modified time: 2026-03-25 14:03:13
  */
 /**
  * Utility functions for Model Management
@@ -14,6 +14,7 @@ import gpustackIcon from '@/assets/images/model/gpustack.png'
 import ollamaIcon from '@/assets/images/model/ollama.svg'
 import openaiIcon from '@/assets/images/model/openai.svg'
 import xinferenceIcon from '@/assets/images/model/xinference.svg'
+import volcanoIcon from '@/assets/images/model/volcano.png'
 
 /**
  * Provider icon mapping
@@ -24,7 +25,8 @@ export const ICONS = {
   gpustack: gpustackIcon,
   ollama: ollamaIcon,
   openai: openaiIcon,
-  xinference: xinferenceIcon
+  xinference: xinferenceIcon,
+  volcano: volcanoIcon,
 }
 
 /**

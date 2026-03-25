@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 12:27:33
+ * @Last Modified time: 2026-03-25 14:07:10
  */
 /**
  * Custom Model Modal
@@ -210,7 +210,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
             url={modelProviderUrl}
             hasAll={false}
             disabled={isEdit}
-            format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
+            format={(items) => items.map((item) => ({ label: String(item).charAt(0).toUpperCase() + String(item).slice(1), value: String(item) }))}
           />
         </Form.Item>
 

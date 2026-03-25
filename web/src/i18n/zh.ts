@@ -1246,6 +1246,7 @@ export const zh = {
       official: '官方',
       deprecated: '已弃用',
 
+      image: '图片',
       llm: 'LLM',
       chat: 'Chat',
       embedding: 'Embedding',

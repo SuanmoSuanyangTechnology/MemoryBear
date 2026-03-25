@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:10 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 12:27:51
+ * @Last Modified time: 2026-03-25 14:21:01
  */
 /**
  * Model List View
@@ -72,10 +72,10 @@ const ModelList = forwardRef<BaseRef, { query: any; handleEdit: (vo?: ModelListI
                 avatarUrl={getListLogoUrl(item.provider, item.logo)}
                 avatarText={item.provider[0].toUpperCase()}
                 title={<Flex vertical gap={6}>
-                  <Tooltip title={t(`modelNew.${item.provider}`)}>
-                    <div className="rb:wrap-break-word rb:line-clamp-1">{t(`modelNew.${item.provider}`)}</div>
+                  <Tooltip title={String(item.provider).charAt(0).toUpperCase() + String(item.provider).slice(1)}>
+                    <div className="rb:wrap-break-word rb:line-clamp-1">{String(item.provider).charAt(0).toUpperCase() + String(item.provider).slice(1)}</div>
                   </Tooltip>
-                  <Flex gap={8}>{item.tags.map(tag => <Tag key={tag}>{t(`modelNew.${tag}`)}</Tag>)}</Flex>
+                  <Flex gap={8} className="rb:overflow-hidden rb:flex-nowrap rb:w-auto!">{item.tags.map(tag => <Tag key={tag} className="rb:shrink-0">{t(`modelNew.${tag}`)}</Tag>)}</Flex>
                 </Flex>}
                 isNeedTooltip={false}
                 footer={<Row gutter={9} className="rb:pt-2!">

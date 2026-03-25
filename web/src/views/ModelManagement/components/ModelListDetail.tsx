@@ -111,7 +111,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
 
   return (
     <RbDrawer
-      title={<>{t(`modelNew.${data.provider}`)} {t('modelNew.modelList')} ({list.length}{t('modelNew.item')})</>}
+      title={<>{String(data.provider).charAt(0).toUpperCase() + String(data.provider).slice(1)} {t('modelNew.modelList')} ({list.length}{t('modelNew.item')})</>}
       open={open}
       onClose={handleClose}
     >

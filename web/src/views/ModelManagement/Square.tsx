@@ -74,7 +74,7 @@ const ModelSquare = forwardRef <BaseRef, { query: any; }>(({ query }, ref) => {
                   'rb:text-[#171719]': activeProvider === vo.provider,
                 })}
                 onClick={() => setActiveProvider(vo.provider)}
-              >{t(`modelNew.${vo.provider}`)}</div>
+              >{String(vo.provider).charAt(0).toUpperCase() + String(vo.provider).slice(1)}</div>
             ))}
           </Space>
           {list.filter(vo => vo.provider === activeProvider).map(vo => (
@@ -105,7 +105,7 @@ const ModelSquare = forwardRef <BaseRef, { query: any; }>(({ query }, ref) => {
                     }
                     isNeedTooltip={false}
                     footer={<Flex justify="space-between" align="center" className="rb:text-[#5B6167] rb:text-[12px]">
-                      @{t(`modelNew.${vo.provider}`)}
+                      @{String(item.provider).charAt(0).toUpperCase() + String(item.provider).slice(1)}
                       <Space size={4}><UsergroupAddOutlined /> {item.add_count}</Space>
                     </Flex>}
                   >
