@@ -109,17 +109,13 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def get_url(self, file_key: str, expires: int = 3600) -> str:
-        """
-        Get an access URL for the file.
-
-        Args:
-            file_key: Unique identifier for the file in the storage system.
-            expires: URL validity period in seconds (default: 1 hour).
-
-        Returns:
-            URL for accessing the file.
-        """
+    async def get_url(
+        self,
+        file_key: str,
+        expires: int = 3600,
+        file_name: Optional[str] = None
+    ) -> str:
+        """Get an access URL for the file."""
         pass
 
     async def get_permanent_url(self, file_key: str) -> Optional[str]:

@@ -574,8 +574,12 @@ async def get_file_url(
             # For local storage, generate signed URL with expiration
             url = generate_signed_url(str(file_id), expires)
         else:
-            # For remote storage (OSS/S3), get presigned URL
-            url = await storage_service.get_file_url(file_key, expires=expires)
+            # For remote storage (OSS/S3), get presigned URL with forced download
+            url = await storage_service.get_file_url(
+                file_key,
+                expires=expires,
+                file_name=file_metadata.file_name,
+            )
             url = _match_scheme(request, url)
 
         api_logger.info(f"Generated file URL: file_id={file_id}")
@@ -786,7 +790,7 @@ async def permanent_download_file(
         # For remote storage, redirect to presigned URL with long expiration
         try:
             # Use a very long expiration (7 days max for most cloud providers)
-            presigned_url = await storage_service.get_file_url(file_key, expires=604800)
+            presigned_url = await storage_service.get_file_url(file_key, expires=604800, file_name=file_metadata.file_name)
             presigned_url = _match_scheme(request, presigned_url)
             return RedirectResponse(url=presigned_url, status_code=status.HTTP_302_FOUND)
         except Exception as e:

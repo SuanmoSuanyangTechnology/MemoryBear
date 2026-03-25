@@ -6,6 +6,7 @@ using the boto3 SDK.
 """
 
 import io
+import urllib.parse
 import logging
 from typing import AsyncIterator, Optional
 
@@ -352,31 +353,37 @@ class S3Storage(StorageBackend):
             logger.error(f"Failed to check file existence in S3 {file_key}: {e}")
             return False
 
-    async def get_url(self, file_key: str, expires: int = 3600) -> str:
+    async def get_url(
+        self,
+        file_key: str,
+        expires: int = 3600,
+        file_name: Optional[str] = None,
+    ) -> str:
         """
         Get a presigned URL for accessing the file.
 
         Args:
             file_key: Unique identifier for the file in the storage system.
             expires: URL validity period in seconds (default: 1 hour).
+            file_name: If set, adds Content-Disposition: attachment to force download.
 
         Returns:
             A presigned URL for accessing the file.
         """
         try:
+            params = {"Bucket": self.bucket_name, "Key": file_key}
+            if file_name:
+                filename_encoded = urllib.parse.quote(file_name.encode("utf-8"))
+                params["ResponseContentDisposition"] = f"attachment; filename*=UTF-8''{filename_encoded}"
             url = self.client.generate_presigned_url(
                 "get_object",
-                Params={
-                    "Bucket": self.bucket_name,
-                    "Key": file_key,
-                },
+                Params=params,
                 ExpiresIn=expires,
             )
             logger.debug(f"Generated presigned URL for {file_key}, expires in {expires}s")
             return url
         except Exception as e:
             logger.error(f"Failed to generate presigned URL for {file_key}: {e}")
-            # Return a basic URL format as fallback
             return f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{file_key}"
 
     async def get_permanent_url(self, file_key: str) -> str:
