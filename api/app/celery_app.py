@@ -108,6 +108,9 @@ celery_app.conf.update(
         'app.core.memory.agent.long_term_storage.time': {'queue': 'memory_tasks'},
         'app.core.memory.agent.long_term_storage.aggregate': {'queue': 'memory_tasks'},
 
+        # Clustering tasks → memory_tasks queue (使用相同的 worker，避免 macOS fork 问题)
+        'app.tasks.run_incremental_clustering': {'queue': 'memory_tasks'},
+
         # Document tasks → document_tasks queue (prefork worker)
         'app.core.rag.tasks.parse_document': {'queue': 'document_tasks'},
         'app.core.rag.tasks.build_graphrag_for_kb': {'queue': 'document_tasks'},
