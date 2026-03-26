@@ -37,6 +37,14 @@ class ParameterExtractorNode(BaseNode):
                 }
         return None
 
+    def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
+        return {
+            "text": self._render_template(self.typed_config.text, variable_pool),
+            "prompt": self._render_template(self.typed_config.prompt, variable_pool),
+            "params": [param.model_dump(mode="json") for param in self.typed_config.params],
+            "model_id": str(self.typed_config.model_id),
+        }
+
     def _output_types(self) -> dict[str, VariableType]:
         outputs = {}
         for param in self.typed_config.params:

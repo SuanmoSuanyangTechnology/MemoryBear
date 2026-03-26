@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>PDF</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="工作台-知识库-创建数据集-本地文件-2" transform="translate(-554, -811)">
+            <g id="PDF" transform="translate(554, 811)">
+                <g id="编组-9" transform="translate(3, 1)">
+                    <path d="M2.88,0 L12.5983161,0 L12.5983161,0 L18,5.5 L18,19.12 C18,20.7105801 16.7105801,22 15.12,22 L2.88,22 C1.28941992,22 1.33226763e-15,20.7105801 1.33226763e-15,19.12 L0,2.88 C0,1.28941992 1.28941992,-8.8817842e-16 2.88,-8.8817842e-16 Z" id="矩形" fill="#9C6FFF"></path>
+                    <path d="M12.6,0 L18,5.5 L14.328,5.5 C13.373652,5.5 12.6,4.72634805 12.6,3.772 L12.6,0 L12.6,0 Z" id="矩形" fill-opacity="0.5" fill="#FFFFFF"></path>
+                </g>
+                <text id="MD" font-family="Rubik-Medium, Rubik" font-size="10" font-weight="400" fill="#FFFFFF">
+                    <tspan x="4.5" y="17">MD</tspan>
+                </text>
+            </g>
+        </g>
+    </g>
+</svg>

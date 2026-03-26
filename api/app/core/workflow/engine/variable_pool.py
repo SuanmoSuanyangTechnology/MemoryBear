@@ -351,12 +351,12 @@ class VariablePool:
             }
         return runtime_vars
 
-    def get_node_output(self, node_id: str, defalut: Any = None, strict: bool = True) -> dict[str, Any] | None:
+    def get_node_output(self, node_id: str, default: Any = None, strict: bool = True) -> dict[str, Any] | None:
         """获取指定节点的输出（运行时变量）
         
         Args:
             node_id: 节点 ID
-            defalut: 默认值
+            default: 默认值
             strict: 是否严格模式
         
         Returns:
@@ -368,7 +368,7 @@ class VariablePool:
         if strict:
             raise KeyError(f"node {node_id} output not exist")
         else:
-            return defalut
+            return default
 
     def copy(self, pool: 'VariablePool'):
         self.variables = deepcopy(pool.variables)

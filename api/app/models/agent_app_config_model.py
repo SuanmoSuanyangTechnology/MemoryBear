@@ -31,6 +31,7 @@ class AgentConfig(Base):
     variables = Column(JSON, default=list, nullable=True, comment="变量配置")
     tools = Column(JSON, default=list, nullable=True, comment="工具配置")
     skills = Column(JSON, default=dict, nullable=True, comment="技能配置")
+    features = Column(JSON, default=dict, nullable=True, comment="功能特性配置")
 
     # 多 Agent 相关字段
     agent_role = Column(String(20), comment="Agent 角色: master|sub|standalone")

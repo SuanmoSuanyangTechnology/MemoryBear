@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>txt</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="工作台-知识库-创建数据集-本地文件-2" transform="translate(-821, -811)">
+            <g id="txt" transform="translate(821, 811)">
+                <rect id="矩形" fill="#4DA8FF" x="2" y="2" width="20" height="20" rx="4"></rect>
+                <path d="M16,8 C16.5522847,8 17,8.44771525 17,9 C17,9.55228475 16.5522847,10 16,10 L13,10 L13,17 C13,17.5522847 12.5522847,18 12,18 C11.4477153,18 11,17.5522847 11,17 L11,10 L8,10 C7.44771525,10 7,9.55228475 7,9 C7,8.44771525 7.44771525,8 8,8 L16,8 Z" id="形状结合" fill="#FFFFFF"></path>
+            </g>
+        </g>
+    </g>
+</svg>

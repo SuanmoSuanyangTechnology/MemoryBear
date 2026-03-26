@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:47 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 17:47:09
+ * @Last Modified time: 2026-03-18 21:10:01
  */
 /**
  * Upload File List Modal Component
@@ -18,25 +18,28 @@
  * 
  * @component
  */
-import { forwardRef, useImperativeHandle, useState } from 'react';
+import { forwardRef, useImperativeHandle, useState, useMemo } from 'react';
 import { Form, Input, Select, Button, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { UploadFileListModalRef } from '../types'
 import RbModal from '@/components/RbModal'
+import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
 
 const FormItem = Form.Item;
 
 interface UploadFileListModalProps {
   /** Callback to refresh parent component with new file list */
   refresh: (fileList?: any[]) => void;
+  featureConfig: FeaturesConfigForm['file_upload']
 }
 
 /**
  * Modal for adding remote files via URL
  */
 const UploadFileListModal = forwardRef<UploadFileListModalRef, UploadFileListModalProps>(({
-  refresh
+  refresh,
+  featureConfig
 }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
@@ -79,6 +82,20 @@ const UploadFileListModal = forwardRef<UploadFileListModalRef, UploadFileListMod
     handleOpen
   }));
 
+  const fileTypeOptions = useMemo(() => {
+    const options = [];
+    if (featureConfig?.image_enabled) {
+      options.push({ label: t('memoryConversation.image'), value: 'image' });
+    }
+    if (featureConfig?.audio_enabled) {
+      options.push({ label: t('memoryConversation.audio'), value: 'audio' });
+    }
+    if (featureConfig?.video_enabled) {
+      options.push({ label: t('memoryConversation.video'), value: 'video' });
+    }
+    return options;
+  }, [featureConfig, t])
+
   return (
     <RbModal
       title={t('memoryConversation.addRemoteFile')}
@@ -98,26 +115,21 @@ const UploadFileListModal = forwardRef<UploadFileListModalRef, UploadFileListMod
                   <FormItem
                     {...restField}
                     name={[name, 'type']}
-                    initialValue="image"
                     className="rb:mb-0!"
                   >
                     <Select
                       placeholder={t('memoryConversation.fileType')}
-                      options={[
-                        { label: t('memoryConversation.image'), value: 'image' },
-                        { label: t('memoryConversation.audio'), value: 'audio' },
-                        { label: t('memoryConversation.video'), value: 'video' },
-                      ]}
-                      className="rb:w-30"
+                      options={fileTypeOptions}
+                      className="rb:w-30!"
                     />
                   </FormItem>
                   <FormItem
                     {...restField}
                     name={[name, 'url']}
                     rules={[{ required: true, message: t('common.pleaseEnter') }]}
-                    className="rb:mb-0!"
+                    className="rb:mb-0! rb:flex-1!"
                   >
-                    <Input placeholder={t('memoryConversation.fileUrl')} className="rb:w-82.5!" />
+                    <Input placeholder={t('memoryConversation.fileUrl')} />
                   </FormItem>
                   <div
                     className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/delete.svg')] rb:hover:bg-[url('@/assets/images/delete_hover.svg')]"

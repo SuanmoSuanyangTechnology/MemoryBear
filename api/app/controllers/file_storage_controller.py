@@ -15,7 +15,7 @@ import os
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -45,6 +45,19 @@ router = APIRouter(
     prefix="/storage",
     tags=["storage"]
 )
+
+
+def _match_scheme(request: Request, url: str) -> str:
+    """
+    将 presigned URL 的协议替换为与当前请求一致的协议（http/https）。
+    解决反向代理场景下 presigned URL 协议与请求协议不匹配的问题。
+    """
+    incoming_scheme = request.headers.get("x-forwarded-proto") or request.url.scheme
+    if url.startswith("http://") and incoming_scheme == "https":
+        return "https://" + url[7:]
+    if url.startswith("https://") and incoming_scheme == "http":
+        return "http://" + url[8:]
+    return url
 
 
 @router.post("/files", response_model=ApiResponse)
@@ -280,6 +293,7 @@ async def upload_file_with_share_token(
 
 @router.get("/files/{file_id}", response_model=Any)
 async def download_file(
+    request: Request,
     file_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -327,6 +341,7 @@ async def download_file(
     else:
         try:
             presigned_url = await storage_service.get_file_url(file_key, expires=3600)
+            presigned_url = _match_scheme(request, presigned_url)
             api_logger.info(f"Redirecting to presigned URL: file_key={file_key}")
             return RedirectResponse(url=presigned_url, status_code=status.HTTP_302_FOUND)
         except FileNotFoundError:
@@ -400,6 +415,7 @@ async def delete_file(
 
 @router.get("/files/{file_id}/url", response_model=ApiResponse)
 async def get_file_url(
+    request: Request,
     file_id: uuid.UUID,
     expires: int = None,
     permanent: bool = False,
@@ -463,6 +479,7 @@ async def get_file_url(
         else:
             # For remote storage (OSS/S3), get presigned URL
             url = await storage_service.get_file_url(file_key, expires=expires)
+            url = _match_scheme(request, url)
 
         api_logger.info(f"Generated file URL: file_id={file_id}")
         return success(
@@ -484,6 +501,7 @@ async def get_file_url(
 
 @router.get("/public/{file_id}", response_model=Any)
 async def public_download_file(
+    request: Request,
     file_id: uuid.UUID,
     expires: int = 0,
     signature: str = "",
@@ -555,6 +573,7 @@ async def public_download_file(
         # For remote storage, redirect to presigned URL
         try:
             presigned_url = await storage_service.get_file_url(file_key, expires=3600)
+            presigned_url = _match_scheme(request, presigned_url)
             return RedirectResponse(url=presigned_url, status_code=status.HTTP_302_FOUND)
         except Exception as e:
             api_logger.error(f"Failed to get presigned URL: {e}")
@@ -566,6 +585,7 @@ async def public_download_file(
 
 @router.get("/permanent/{file_id}", response_model=Any)
 async def permanent_download_file(
+    request: Request,
     file_id: uuid.UUID,
     db: Session = Depends(get_db),
     storage_service: FileStorageService = Depends(get_file_storage_service),
@@ -625,6 +645,7 @@ async def permanent_download_file(
         try:
             # Use a very long expiration (7 days max for most cloud providers)
             presigned_url = await storage_service.get_file_url(file_key, expires=604800)
+            presigned_url = _match_scheme(request, presigned_url)
             return RedirectResponse(url=presigned_url, status_code=status.HTTP_302_FOUND)
         except Exception as e:
             api_logger.error(f"Failed to get presigned URL: {e}")

@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:33 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:29:33 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-18 19:49:09
  */
 import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -19,7 +19,8 @@ import type {
   ChatData,
   SubAgentItem,
   ClusterRef,
-  ModelConfigModalRef
+  ModelConfigModalRef,
+  FeaturesConfigForm
 } from './types'
 import Chat from './components/Chat'
 import RbCard from '@/components/RbCard/Card'
@@ -29,7 +30,7 @@ import RadioGroupCard from '@/components/RadioGroupCard'
 import { getModelListUrl } from '@/api/models'
 import ModelConfigModal from './components/ModelConfigModal'
 import type { Application } from '@/views/ApplicationManagement/types'
-
+// import FeaturesConfig from './components/FeaturesConfig'
 
 const tagColors = ['processing', 'warning', 'default']
 const MAX_LENGTH = 5;
@@ -37,7 +38,7 @@ const MAX_LENGTH = 5;
  * Multi-agent cluster configuration component
  * Manages multi-agent orchestration, sub-agents, and collaboration modes
  */
-const Cluster = forwardRef<ClusterRef>((_props, ref) => {
+const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void }>(({ onFeaturesLoad }, ref) => {
   const { t } = useTranslation()
   const { message } = App.useApp()
   const [form] = Form.useForm()
@@ -130,6 +131,7 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
       } else {
         setSubAgents(sub_agents)
       }
+      onFeaturesLoad?.(response.features)
     })
   }
   /**
@@ -165,7 +167,8 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
     setSubAgents(prev => prev.filter(item => item.agent_id !== agent.agent_id))
   }
   useImperativeHandle(ref, () => ({
-    handleSave
+    handleSave,
+    features: data?.features
   }))
 
   const modelConfigModalRef = useRef<ModelConfigModalRef>(null)
@@ -184,16 +187,21 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
       model_parameters: values
     })
   }
+  // const handleSaveFeaturesConfig = (value: FeaturesConfigForm) => {
+  //   form.setFieldValue('features', value)
+  // }
 
   return (
     <Row className="rb:h-[calc(100vh-64px)]">
       <Col span={12} className="rb:h-full rb:overflow-x-auto rb:border-r rb:border-[#DFE4ED] rb:p-[20px_16px_24px_16px]">
-        <div className="rb:flex rb:items-center rb:justify-end rb:mb-5">
+        <Flex gap={10} justify="end" align="center" className="rb:mb-5!">
+          {/* <FeaturesConfig value={values?.features as FeaturesConfigForm} refresh={handleSaveFeaturesConfig} /> */}
           <Button type="primary" onClick={() => handleSave()}>
             {t('common.save')}
           </Button>
-        </div>
+        </Flex>
         <Form form={form} layout="vertical">
+          <Form.Item name="features" hidden noStyle></Form.Item>
           <Space size={20} direction="vertical" style={{width: '100%'}}>
             <Card title={t('application.collaboration')}>
               <Form.Item
@@ -287,6 +295,7 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
                     value: type,
                     label: t(`application.${type}`),
                   }))}
+                  placeholder={t('common.pleaseSelect')}
                 />
               </Form.Item>
               <Form.Item
@@ -298,6 +307,7 @@ const Cluster = forwardRef<ClusterRef>((_props, ref) => {
                     value: type,
                     label: t(`application.${type}`),
                   }))}
+                  placeholder={t('common.pleaseSelect')}
                 />
               </Form.Item>
             </Card>}

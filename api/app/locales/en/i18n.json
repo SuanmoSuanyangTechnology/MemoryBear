@@ -1,0 +1,27 @@
+{
+  "language": {
+    "not_found": "Language {locale} not found",
+    "already_exists": "Language {locale} already exists",
+    "add_instructions": "Language {locale} validated successfully. Please create translation files in {dir} directory to complete the addition.",
+    "update_instructions": "Language {locale} update validated successfully. Please update I18N_SUPPORTED_LANGUAGES environment variable to apply configuration changes."
+  },
+  "namespace": {
+    "not_found": "Namespace {namespace} not found in language {locale}"
+  },
+  "translation": {
+    "invalid_key_format": "Invalid translation key format: {key}. Should use format: namespace.key.subkey",
+    "update_instructions": "Translation {locale}/{key} update validated successfully. Please modify the corresponding JSON translation file to apply changes."
+  },
+  "reload": {
+    "disabled": "Translation hot reload is disabled. Please enable I18N_ENABLE_HOT_RELOAD in configuration.",
+    "success": "Translations reloaded successfully",
+    "failed": "Translation reload failed: {error}"
+  },
+  "metrics": {
+    "reset_success": "Performance metrics reset successfully"
+  },
+  "logs": {
+    "export_success": "Missing translations exported to: {file}",
+    "clear_success": "Missing translation logs cleared successfully"
+  }
+}

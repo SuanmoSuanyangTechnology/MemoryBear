@@ -3,9 +3,10 @@
 # @Email: 1533512157@qq.com
 # @Time : 2026/2/9 15:11
 import re
+from queue import Queue
 from typing import AsyncGenerator
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from app.core.logging_config import get_logger
 from app.core.workflow.engine.variable_pool import VariablePool
@@ -37,8 +38,8 @@ class OutputContent(BaseModel):
     activate: bool = Field(
         ...,
         description=(
-            "Whether this output segment is currently active.\n"
-            "- True: allowed to be emitted/output\n"
+            "Whether this output segment is currently active."
+            "- True: allowed to be emitted/output"
             "- False: blocked until activated by branch control"
         )
     )
@@ -46,16 +47,17 @@ class OutputContent(BaseModel):
     is_variable: bool = Field(
         ...,
         description=(
-            "Whether this segment represents a variable placeholder.\n"
-            "True  -> variable (e.g. {{ node.field }})\n"
+            "Whether this segment represents a variable placeholder."
+            "True  -> variable (e.g. {{ node.field }})"
             "False -> literal text"
         )
     )
 
-    _SCOPE: str | None = None
+    _SCOPE: str | None = PrivateAttr(default=None)
 
-    def get_scope(self) -> str:
-        self._SCOPE = SCOPE_PATTERN.findall(self.literal)[0]
+    def get_scope(self) -> str | None:
+        matches = SCOPE_PATTERN.findall(self.literal)
+        self._SCOPE = matches[0] if matches else None
         return self._SCOPE
 
     def depends_on_scope(self, scope: str) -> bool:
@@ -68,6 +70,8 @@ class OutputContent(BaseModel):
         Returns:
             bool: True if this segment references the given scope.
         """
+        if not self.is_variable:
+            return False
         if self._SCOPE:
             return self._SCOPE == scope
         return self.get_scope() == scope
@@ -83,12 +87,16 @@ class StreamOutputConfig(BaseModel):
     - which upstream branch/control nodes gate the activation
     - how each parsed output segment is streamed and activated
     """
+    id: str = Field(
+        ...,
+        description="ID of the End node this configuration belongs to."
+    )
 
     activate: bool = Field(
         ...,
         description=(
-            "Global activation flag for the End node output.\n"
-            "When False, output segments should not be emitted even if available.\n"
+            "Global activation flag for the End node output."
+            "When False, output segments should not be emitted even if available."
             "This flag typically becomes True once required control branch conditions "
             "are satisfied."
         )
@@ -97,17 +105,46 @@ class StreamOutputConfig(BaseModel):
     control_nodes: dict[str, list[str]] = Field(
         ...,
         description=(
-            "Control branch conditions for this End node output.\n"
-            "Mapping of `branch_node_id -> expected_branch_label`.\n"
+            "Control branch conditions for this End node output."
+            "Mapping of `branch_node_id -> expected_branch_label`."
             "The End node output becomes globally active when a controlling branch node "
             "reports a matching completion status."
+        )
+    )
+
+    upstream_output_nodes: list[str] = Field(
+        ...,
+        description=(
+            "Upstream output node dependencies (data flow)."
+            "Represents END/output nodes that this output depends on."
+            "These nodes provide data sources required before this output can be activated "
+            "or streamed."
+            "Used to ensure correct ordering and dependency resolution in streaming mode."
+        )
+    )
+
+    control_resolved: bool = Field(
+        ...,
+        description=(
+            "Whether all upstream branch control dependencies have been satisfied."
+            "True if no upstream branch nodes exist or the required branch "
+            "conditions have been met."
+        )
+    )
+
+    output_resolved: bool = Field(
+        ...,
+        description=(
+            "Whether all upstream output node dependencies have been completed."
+            "True if no upstream output nodes exist or all upstream output "
+            "nodes have finished their output."
         )
     )
 
     outputs: list[OutputContent] = Field(
         ...,
         description=(
-            "Ordered list of output segments parsed from the output template.\n"
+            "Ordered list of output segments parsed from the output template."
             "Each segment represents either a literal text block or a variable placeholder "
             "that may be activated independently."
         )
@@ -116,49 +153,97 @@ class StreamOutputConfig(BaseModel):
     cursor: int = Field(
         ...,
         description=(
-            "Streaming cursor index.\n"
-            "Indicates the next output segment index to be emitted.\n"
+            "Streaming cursor index."
+            "Indicates the next output segment index to be emitted."
             "Segments with index < cursor are considered already streamed."
+        )
+    )
+
+    force: bool = Field(
+        default=False,
+        description=(
+            "Force flag for output emission."
+            "When True, all output segments are emitted regardless of activation state."
+            "Triggered when this output node has finished execution."
         )
     )
 
     def update_activate(self, scope: str, status=None):
         """
-        Update streaming activation state based on an upstream node or special variable.
+        Update streaming activation state based on upstream events.
 
         Args:
             scope (str):
                 Identifier of the completed upstream entity.
                 - If a control branch node, it should match a key in `control_nodes`.
-                - If a variable placeholder (e.g., "sys.xxx"), it may appear in output segments.
+                - If an upstream output node, it should match an entry in `upstream_output_nodes`.
+                - If a variable placeholder (e.g., "sys.xxx" or "node_id.field"),
+                  it may appear in output segments.
+
             status (optional):
                 Completion status of the control branch node.
                 Required when `scope` refers to a control node.
 
         Behavior:
-        1. Control branch nodes:
-           - If `scope` matches a key in `control_nodes` and `status` matches the expected
-             branch label, the End node output becomes globally active (`activate = True`).
+        1. Force activation:
+           - If `self.force` is True, the method returns immediately.
+           - If `scope == self.id`, the node marks itself as completed:
+               - `activate = True`
+               - `force = True`
+             This is typically used for final flushing when the node finishes execution.
 
-        2. Variable output segments:
-           - For each segment that is a variable (`is_variable=True`):
-               - If the segment literal references `scope`, mark the segment as active.
-               - This applies both to regular node variables (e.g., "node_id.field")
-                 and special system variables (e.g., "sys.xxx").
+        2. Control dependency resolution:
+           - If `scope` matches a key in `control_nodes`:
+               - `status` must be provided.
+               - If `status` matches expected branch labels, mark control as resolved
+                 (`control_resolved = True`).
+
+        3. Upstream output dependency resolution:
+           - If `scope` is in `upstream_output_nodes`,
+             mark data dependency as resolved (`output_resolved = True`).
+
+        4. Global activation condition:
+           - The node becomes active when BOTH conditions are satisfied:
+               - control_resolved == True
+               - output_resolved == True
+           - Once activated, `activate` remains True.
+
+        5. Variable segment activation:
+           - For each output segment that is a variable (`is_variable=True`):
+               - If the segment depends on the given `scope`,
+                 mark the segment as active.
+           - This applies to both node variables (e.g., "node_id.field")
+             and system variables (e.g., "sys.xxx").
 
         Notes:
-        - This method does not emit output or advance the streaming cursor.
-        - It only updates activation flags based on upstream events or special variables.
+        - This method does NOT emit output or advance the streaming cursor.
+        - It only updates activation and dependency resolution states.
+        - Activation is driven by both control flow (branch nodes) and
+          data flow (upstream output nodes).
         """
+        if self.force:
+            return
 
-        # Case 1: resolve control branch dependency
-        if scope in self.control_nodes.keys():
+        if scope == self.id:
+            self.activate = True
+            self.force = True
+            return
+
+        # resolve control branch dependency
+        if scope in self.control_nodes:
             if status is None:
                 raise RuntimeError("[Stream Output] Control node activation status not provided")
             if status in self.control_nodes[scope]:
-                self.activate = True
+                self.control_resolved = True
 
-        # Case 2: activate variable segments related to this node
+        if scope in self.upstream_output_nodes:
+            self.upstream_output_nodes.remove(scope)
+        if not self.upstream_output_nodes:
+            self.output_resolved = True
+
+        self.activate = self.activate or (self.control_resolved and self.output_resolved)
+
+        # activate variable segments related to this node
         for i in range(len(self.outputs)):
             if (
                     self.outputs[i].is_variable
@@ -171,12 +256,17 @@ class StreamOutputCoordinator:
     def __init__(self):
         self.end_outputs: dict[str, StreamOutputConfig] = {}
         self.activate_end: str | None = None
+        self.output_queue: Queue = Queue()
+        self.processed_outputs = []
 
     def initialize_end_outputs(
             self,
             end_node_map: dict[str, StreamOutputConfig]
     ):
         self.end_outputs = end_node_map
+        self.processed_outputs = []
+        self.activate_end = None
+        self.output_queue = Queue()
 
     @property
     def current_activate_end_info(self):
@@ -208,8 +298,11 @@ class StreamOutputCoordinator:
         """
         for node in self.end_outputs.keys():
             self.end_outputs[node].update_activate(scope, status)
-            if self.end_outputs[node].activate and self.activate_end is None:
-                self.activate_end = node
+            if self.end_outputs[node].activate and node not in self.processed_outputs:
+                self.output_queue.put(node)
+                self.processed_outputs.append(node)
+        if self.activate_end is None and not self.output_queue.empty():
+            self.activate_end = self.output_queue.get_nowait()
 
     async def emit_activate_chunk(
             self,
@@ -253,7 +346,7 @@ class StreamOutputCoordinator:
             final_chunk = ''
             current_segment = end_info.outputs[end_info.cursor]
 
-            if not current_segment.activate and not force:
+            if not current_segment.activate and not force and not end_info.force:
                 # Stop processing until this segment becomes active
                 break
 
@@ -270,7 +363,7 @@ class StreamOutputCoordinator:
                     logger.warning(f"[STREAM] Failed to evaluate segment: {current_segment.literal}, error: {e}")
 
             if final_chunk:
-                logger.info(f"[STREAM] StreamOutput Node:{self.activate_end}, chunk:{final_chunk}")
+                logger.info(f"[STREAM] StreamOutput Node:{self.activate_end}, chunk_length:{len(final_chunk)}")
                 yield {
                     "event": "message",
                     "data": {
@@ -282,8 +375,7 @@ class StreamOutputCoordinator:
             end_info.cursor += 1
 
         if end_info.cursor >= len(end_info.outputs):
-            self.end_outputs.pop(self.activate_end)
-            self.activate_end = None
+            self.pop_current_activate_end()
 
     async def flush_remaining_chunk(
             self,
@@ -322,6 +414,8 @@ class StreamOutputCoordinator:
                 async for msg_event in self.emit_activate_chunk(variable_pool, force=True):
                     yield msg_event
 
+                if not self.output_queue.empty():
+                    self.activate_end = self.output_queue.get_nowait()
                 # Move to next active End node if current one is done
                 if not self.activate_end and self.end_outputs:
                     self.activate_end = list(self.end_outputs.keys())[0]
