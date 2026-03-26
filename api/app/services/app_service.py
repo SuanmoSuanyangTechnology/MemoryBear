@@ -1638,7 +1638,7 @@ class AppService:
 
     # ==================== 记忆配置提取方法 ====================
 
-    def _extract_memory_config_id(
+    def _get_memory_config_id_from_release(
             self,
             app_type: str,
             config: Dict[str, Any]
@@ -1863,7 +1863,7 @@ class AppService:
         self.db.flush()  # 先 flush，确保 release 已插入数据库
 
         # 提取记忆配置ID并更新终端用户
-        memory_config_id, is_legacy_int = self._extract_memory_config_id(app.type, config)
+        memory_config_id, is_legacy_int = self._get_memory_config_id_from_release(app.type, config)
 
         # 如果检测到旧格式 int 数据，回退到工作空间默认配置
         if is_legacy_int and not memory_config_id:
@@ -2001,7 +2001,7 @@ class AppService:
             raise ResourceNotFoundException("发布版本", f"app_id={app_id}, version={version}")
 
         # 提取记忆配置ID并更新终端用户
-        memory_config_id, is_legacy_int = self._extract_memory_config_id(release.type, release.config)
+        memory_config_id, is_legacy_int = self._get_memory_config_id_from_release(release.type, release.config)
 
         # 如果检测到旧格式 int 数据，回退到工作空间默认配置
         if is_legacy_int and not memory_config_id:
