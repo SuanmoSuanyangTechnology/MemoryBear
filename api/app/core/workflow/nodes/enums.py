@@ -23,6 +23,7 @@ class NodeType(StrEnum):
     BREAK = "break"
     MEMORY_READ = "memory-read"
     MEMORY_WRITE = "memory-write"
+    DOCUMENT_EXTRACTOR = "document-extractor"
 
     UNKNOWN = "unknown"
     NOTES = "notes"
