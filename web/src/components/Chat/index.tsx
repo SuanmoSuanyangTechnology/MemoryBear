@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 20:47:27
+ * @Last Modified time: 2026-03-26 13:32:46
  */
 import { type FC } from 'react'
 import ChatInput from './ChatInput'
@@ -40,6 +40,7 @@ const Chat: FC<ChatProps> = ({
         labelFormat={labelFormat}
         errorDesc={errorDesc}
         renderRuntime={renderRuntime}
+        onSend={onSend}
       />
 
       {/* Chat input area */}
