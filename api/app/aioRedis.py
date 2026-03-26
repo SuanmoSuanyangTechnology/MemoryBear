@@ -33,7 +33,7 @@ def get_redis_client() -> Redis:
                 db=settings.REDIS_DB,
                 password=settings.REDIS_PASSWORD,
                 decode_responses=True,
-                max_connections=50
+                max_connections=30
             )
             client = Redis(connection_pool=pool)
             _loop_clients[loop_id] = client
@@ -48,7 +48,7 @@ def get_redis_client() -> Redis:
             db=settings.REDIS_DB,
             password=settings.REDIS_PASSWORD,
             decode_responses=True,
-            max_connections=50
+            max_connections=30
         )
         return Redis(connection_pool=pool)
 
