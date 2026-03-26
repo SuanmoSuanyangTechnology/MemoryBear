@@ -29,12 +29,14 @@ def _normalise_files(val: Any) -> list[FileObject]:
     if isinstance(val, dict) and val.get("is_file"):
         return [FileObject(**val)]
     if isinstance(val, list):
-        result = []
+        result: list[FileObject] = []
         for item in val:
             if isinstance(item, FileObject):
                 result.append(item)
             elif isinstance(item, dict) and item.get("is_file"):
                 result.append(FileObject(**item))
+            else:
+                logger.warning("Ignoring non-file entry in file list for document extractor: %r", item)
         return result
     return []
 
