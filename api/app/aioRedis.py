@@ -17,7 +17,7 @@ pool = ConnectionPool.from_url(
     db=settings.REDIS_DB,
     password=settings.REDIS_PASSWORD,
     decode_responses=True,
-    max_connections=50  # 增加连接数以支持更高并发
+    max_connections=30  
 )
 
 # 全局 Redis 客户端
@@ -44,7 +44,9 @@ async def aio_redis_set(key: str, val: str | dict, expire: int = None):
             val = json.dumps(val, ensure_ascii=False)
 
         if expire is not None:
+            # 设置带过期时间的键值
             await aio_redis.set(key, val, ex=expire)
+            # 设置永久键值    
         else:
             await aio_redis.set(key, val)
     except Exception as e:

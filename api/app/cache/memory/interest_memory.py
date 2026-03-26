@@ -62,10 +62,7 @@ class InterestMemoryCache:
                 "cached": True,
             }
             value = json.dumps(payload, ensure_ascii=False)
-            
-            # 使用 set ex 参数，aio_redis 通过 RedisProxy 自动获取当前 event loop 的客户端
             await aio_redis.set(key, value, ex=expire)
-            
             logger.info(f"设置兴趣分布缓存成功: {key}, 过期时间: {expire}秒")
             return True
         except Exception as e:
