@@ -53,7 +53,7 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
           const root = $getRoot();
           root.clear();
 
-          const parts = value.split(/(\{\{[^}]+\}\})/);
+          const parts = value.split(/(\{\{[^}]+\}\}|\n)/);
 
           if (enableLineNumbers) {
             const lines = value.split('\n');
@@ -63,8 +63,14 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
               root.append(paragraph);
             });
           } else {
-            const paragraph = $createParagraphNode();
+            let paragraph = $createParagraphNode();
+
             parts.forEach(part => {
+              if (part === '\n') {
+                root.append(paragraph);
+                paragraph = $createParagraphNode();
+                return;
+              }
               const match = part.match(/^\{\{([^.]+)\.([^}]+)\}\}$/);
               const contextMatch = part.match(/^\{\{context\}\}$/);
               const conversationMatch = part.match(/^\{\{conv\.([^}]+)\}\}$/);
@@ -78,10 +84,10 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
                 }
                 return
               }
-              
+
               if (conversationMatch) {
                 const [_, variableName] = conversationMatch;
-                const conversationSuggestion = optionsRef.current.find(s => 
+                const conversationSuggestion = optionsRef.current.find(s =>
                   s.group === 'CONVERSATION' && s.label === variableName
                 );
                 if (conversationSuggestion) {
@@ -91,7 +97,7 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
                 }
                 return
               }
-              
+
               if (match) {
                 const [_, nodeId, label] = match;
 

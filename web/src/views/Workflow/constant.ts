@@ -473,6 +473,16 @@ export const nodeLibrary: NodeLibrary[] = [
           },
         }
       },
+      {
+        type: "document-extractor", icon: codeExecutionIcon,
+        config: {
+          file_selector: {
+            type: 'variableList',
+            placeholder: 'common.pleaseSelect',
+            onFilterVariableNames: ['sys.files']
+          }
+        }
+      },
     ]
   },
 ];
@@ -856,100 +866,6 @@ export interface OutputVariable {
     name: string;
     type: string;
   }>;
-}
-
-/**
- * Output variable definitions for each node type
- * Specifies what variables each node produces
- */
-export const outputVariable: { [key: string]: OutputVariable } = {
-  start: {
-    sys: [
-      { name: "message", type: "string" },
-      { name: "conversation_id", type: "string" },
-      { name: "execution_id", type: "string", },
-      { name: "workspace_id", type: "string" },
-      { name: "user_id", type: "string" },
-    ],
-    define: ['variables']
-  },
-  end: {
-  },
-  llm: {
-    default: [
-      { name: "output", type: "string" },
-    ]
-  },
-  'knowledge-retrieval': {
-    default: [
-      { name: "output", type: "array[object]" },
-    ]
-  },
-  'parameter-extractor': {
-    default: [
-      { name: "__is_success", type: "number" },
-      { name: "__reason", type: "string" },
-    ],
-    define: ['params']
-  },
-  'memory-read': {
-    default: [
-      { name: "answer", type: "string" },
-      { name: "intermediate_outputs", type: "array[object]" },
-    ],
-  },
-  'memory-write': {
-
-  },
-  'if-else': {
-
-  },
-  'question-classifier': {
-    default: [
-      { name: "class_name", type: "string" },
-      // { name: "output", type: "string" },
-    ],
-  },
-  'iteration': {
-    default: [
-      // { name: "item", type: "string" }, // 仅内部使用
-      { name: "output", type: "array[string]" },
-    ],
-  },
-  'loop': {
-    define: ['cycle_vars']
-  },
-  'cycle-start': {
-
-  },
-  'break': {
-
-  },
-  'var-aggregator': {
-    // default: [
-    //   { name: "output", type: "string" },
-    // ],
-    define: ['group_variables']
-  },
-  'assigner': {
-
-  },
-  'http-request': {
-    default: [
-      { name: "body", type: "string" },
-      { name: "status_code", type: "number" },
-    ],
-  },
-  'tool': {
-    default: [
-      { name: "data", type: "string" },
-    ],
-  },
-  'jinja-render': {
-    default: [
-      { name: "output", type: "string" },
-    ],
-  },
 }
 
 /**

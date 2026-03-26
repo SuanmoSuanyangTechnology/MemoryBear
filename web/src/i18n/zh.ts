@@ -2160,6 +2160,7 @@ export const zh = {
       'memory-write': '记忆储存',
       unknown: '未知节点',
       notes: '便签',
+      'document-extractor': '文档提取器',
 
       clickToConfigure: '点击配置节点参数',
       nodeProperties: '节点属性',
@@ -2360,6 +2361,9 @@ export const zh = {
           enterLink: '输入链接 URL',
           placeholder: '输入注释...',
           removeLink: '取消链接',
+        },
+        'document-extractor': {
+          file_selector: '输入变量',
         },
         name: '键',
         type: '类型',
