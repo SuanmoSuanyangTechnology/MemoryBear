@@ -26,6 +26,7 @@ from app.core.workflow.nodes.variable_aggregator import VariableAggregatorNode
 from app.core.workflow.nodes.question_classifier import QuestionClassifierNode
 from app.core.workflow.nodes.breaker import BreakNode
 from app.core.workflow.nodes.tool import ToolNode
+from app.core.workflow.nodes.document_extractor import DocExtractorNode
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,8 @@ WorkflowNode = Union[
     ToolNode,
     MemoryReadNode,
     MemoryWriteNode,
-    CodeNode
+    CodeNode,
+    DocExtractorNode
 ]
 
 
@@ -81,6 +83,7 @@ class NodeFactory:
         NodeType.MEMORY_READ: MemoryReadNode,
         NodeType.MEMORY_WRITE: MemoryWriteNode,
         NodeType.CODE: CodeNode,
+        NodeType.DOCUMENT_EXTRACTOR: DocExtractorNode
     }
 
     @classmethod
