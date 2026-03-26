@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:25:17 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:25:17 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-26 11:18:04
  */
 /**
  * Rich text editor component using Lexical framework
@@ -136,14 +136,14 @@ const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
         contentEditable={
           <ContentEditable
             className={clsx(
-              "rb:outline-none rb:resize-none rb:text-[14px] rb:leading-5 rb:px-4 rb:py-5 rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:overflow-auto",
+              "rb:outline-none rb:resize-none rb:text-[14px] rb:leading-5 rb:px-4 rb:py-5 rb:bg-[#FBFDFF] rb-border rb:rounded-lg rb:overflow-auto",
               disabled && "rb:cursor-not-allowed rb:bg-[#F6F8FC] rb:text-[#5B6167]",
               className
             )}
           />
         }
         placeholder={
-          <div className="rb:absolute rb:px-4 rb:py-5 rb:text-[14px] rb:text-[#5B6167] rb:leading-5 rb:pointer-none">
+          <div className="rb:absolute rb:top-0 rb:px-4 rb:py-5 rb:text-[14px] rb:text-[#5B6167] rb:leading-5 rb:pointer-none">
             {placeholder}
           </div>
         }

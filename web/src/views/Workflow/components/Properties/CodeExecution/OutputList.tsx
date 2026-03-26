@@ -1,6 +1,6 @@
 import { type FC, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next'
-import { Button, Form, Input, Divider, Space, Select } from 'antd';
+import { Button, Form, Input, Flex, Space, Select } from 'antd';
 
 interface OutputListProps {
   label: string;
@@ -25,7 +25,7 @@ const OutputList: FC<OutputListProps> = ({ label, name, extra }) => {
       <Form.List name={name}>
         {(fields, { add, remove }) => (
           <>
-            <div className="rb:flex rb:items-center rb:justify-between rb:mb-2">
+            <Flex align="center" justify="space-between" className="rb:mb-2!">
               <div className="rb:text-[12px] rb:font-medium rb:leading-4.5">
                 {label}
               </div>
@@ -34,15 +34,15 @@ const OutputList: FC<OutputListProps> = ({ label, name, extra }) => {
                 {extra}
                 <Button
                   onClick={() => add({ type: 'string' })}
-                  className="rb:py-0! rb:px-1! rb:text-[12px]!"
+                  className="rb:py-0! rb:px-1! rb:h-4.5! rb:rounded-sm! rb:text-[12px]!"
                   size="small"
                 >
                   + {t('workflow.config.addVariable')}
                 </Button>
               </Space>
-            </div>
+            </Flex>
             {fields.map(({ key, name, ...restField }) => (
-              <div key={key} className="rb:flex rb:items-center rb:gap-1 rb:mb-2">
+              <Flex key={key} align="center" gap={4} className="rb:mb-2!">
                 <Form.Item
                   {...restField}
                   name={[name, 'name']}
@@ -51,7 +51,7 @@ const OutputList: FC<OutputListProps> = ({ label, name, extra }) => {
                   <Input 
                     placeholder={t('common.pleaseEnter')} 
                     size="small"
-                    className="rb:w-45!"
+                    className="rb:w-51!"
                   />
                 </Form.Item>
                 <Form.Item
@@ -67,14 +67,14 @@ const OutputList: FC<OutputListProps> = ({ label, name, extra }) => {
                     }))}
                     size="small"
                     popupMatchSelectWidth={false}
-                    className="rb:w-22!"
+                    className="rb:w-27!"
                   />
                 </Form.Item>
                 <div
                   className="rb:ml-1 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
                   onClick={() => remove(name)}
                 ></div>
-              </div>
+              </Flex>
             ))}
           </>
         )}

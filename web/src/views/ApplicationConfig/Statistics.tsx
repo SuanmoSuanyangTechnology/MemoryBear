@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:45 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:29:45 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-03 18:57:44
  */
 import { type FC, useState, useEffect } from 'react';
 import { Row, Col, Flex, DatePicker } from 'antd';
@@ -13,7 +13,7 @@ const { RangePicker } = DatePicker;
 
 import type { Application } from '@/views/ApplicationManagement/types'
 import { getAppStatistics } from '@/api/application';
-import LineCard from './components/LineCard'
+import ChartCard from './components/ChartCard'
 import type { StatisticsData, StatisticsItem } from './types'
 
 /**
@@ -79,11 +79,11 @@ const Statistics: FC<{ application: Application | null }> = ({ application }) =>
     })
   }
   return (
-    <div className="rb:w-250 rb:mt-5 rb:pb-5 rb:mx-auto">
+    <div className="rb:w-250 rb:mx-auto">
       <Row gutter={[16, 16]}>
         <Col span={24}>
           <Flex justify="end">
-            <RangePicker defaultValue={[query.start_date, query.end_date]} onChange={handleChange} />
+            <RangePicker className="rb:w-70" defaultValue={[query.start_date, query.end_date]} onChange={handleChange} />
           </Flex>
         </Col>
         {Object.entries(data).map(([key, value]) => {
@@ -93,7 +93,7 @@ const Statistics: FC<{ application: Application | null }> = ({ application }) =>
           const totalKey = TotalObj[key];
           return (
             <Col span={12} key={key}>
-              <LineCard
+              <ChartCard
                 type={key}
                 total={totalKey ? (data[totalKey] as number) : 0}
                 chartData={value as StatisticsItem[]}

@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:00 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:50:00 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-20 18:50:41
  */
 /**
  * Group Model View
@@ -12,14 +12,15 @@
 
 import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import clsx from 'clsx'
-import { Button } from 'antd'
+import { Button, Flex, Tooltip, Space } from 'antd'
 import { useTranslation } from 'react-i18next';
 
 import type { ProviderModelItem, ModelListItem, DescriptionItem, BaseRef } from './types'
-import RbCard from '@/components/RbCard/Card'
+import RbCard from '@/components/RbCard'
 import { getModelNewList } from '@/api/models'
 import PageEmpty from '@/components/Empty/PageEmpty';
 import { formatDateTime } from '@/utils/format';
+import Tag from '@/components/Tag'
 
 /**
  * Group model list component
@@ -51,11 +52,6 @@ const Group = forwardRef <BaseRef,{ query: any; handleEdit: (data: ModelListItem
         children: data.type ? t(`modelNew.${data.type}`) : '-',
       },
       {
-        key: 'is_active',
-        label: t(`modelNew.status`),
-        children: data.is_active ? t(`common.statusEnabled`) : t(`common.statusDisabled`),
-      },
-      {
         key: 'created_at',
         label: t(`modelNew.created_at`),
         children: data.created_at ? formatDateTime(data.created_at, 'YYYY-MM-DD HH:mm:ss') : '-',
@@ -73,31 +69,36 @@ const Group = forwardRef <BaseRef,{ query: any; handleEdit: (data: ModelListItem
       {list.length === 0
         ? <PageEmpty />
         :(
-          <div className="rb:grid rb:grid-cols-4 rb:gap-4">
+          <div className="rb:grid rb:grid-cols-4 rb:gap-3">
             {list.map(item => (
               <RbCard
                 key={item.id}
-                title={item.name}
                 avatarUrl={item.logo}
-                avatar={
-                  <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
-                    {item.name[0]}
-                  </div>
-                }
+                avatarText={item.name[0]}
+                title={<Flex vertical gap={6}>
+                  <Tooltip title={item.name}>
+                    <div className="rb:wrap-break-word rb:line-clamp-1">{item.name}</div>
+                  </Tooltip>
+                  <Space>
+                    <Tag color={item.is_active ? 'success' : 'error'}>{item.is_active ? t(`common.statusEnabled`) : t(`common.statusDisabled`)}</Tag>
+                  </Space>
+                </Flex>}
+                isNeedTooltip={false}
+                footer={<Button className="rb:h-9!" type="primary" ghost block onClick={() => handleEdit(item)}>{t('modelNew.configureBtn')}</Button>}
               >
-                {formatData(item)?.map((description: DescriptionItem) => (
-                  <div
-                    key={description.key}
-                    className="rb:flex rb:justify-between rb:text-[#5B6167] rb:text-[14px] rb:leading-5 rb:mb-3"
-                  >
-                    <span className="rb:whitespace-nowrap">{(description.label as string)}</span>
-                    <span className={clsx({
-                      "rb:text-[#212332]": description.key !== 'is_active',
-                      "rb:text-[#369F21] rb:font-medium": description.key === 'is_active' && item.is_active,
-                    })}>{(description.children as string)}</span>
-                  </div>
-                ))}
-                <Button className="rb:mt-2" type="primary" ghost block onClick={() => handleEdit(item)}>{t('modelNew.configureBtn')}</Button>
+                <Flex vertical gap={8}>
+                  {formatData(item)?.map((description: DescriptionItem) => (
+                    <div
+                      key={description.key}
+                      className="rb:flex rb:justify-between rb:text-[14px] rb:leading-5"
+                    >
+                      <span className="rb:whitespace-nowrap rb:text-[#5B6167]">{(description.label as string)}</span>
+                      <span className={clsx({
+                        "rb:font-medium": description.key === 'type',
+                      })}>{(description.children as string)}</span>
+                    </div>
+                  ))}
+                </Flex>
               </RbCard>
             ))}
           </div>

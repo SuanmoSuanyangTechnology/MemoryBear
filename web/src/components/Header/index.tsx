@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:07:49 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 15:07:49 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-05 13:43:59
  */
 /**
  * AppHeader Component
@@ -121,7 +121,7 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
    * - Disables navigation for the last breadcrumb item
    */
   const formatBreadcrumbNames = () => {
-    return breadcrumbs.map((menu, index) => {
+    return breadcrumbs.filter(item => item.type !== 'group').map((menu, index) => {
       const item: any = {
         title: menu.i18nKey ? t(menu.i18nKey) : menu.label,
       };
@@ -150,14 +150,14 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
   return (
     <Header className={styles.header}>
       {/* Breadcrumb navigation */}
-      <Breadcrumb separator=">" items={formatBreadcrumbNames() as BreadcrumbProps['items']} />
+      <Breadcrumb separator="<" items={formatBreadcrumbNames() as BreadcrumbProps['items']} className="rb:font-medium!" />
       {/* User info dropdown menu */}
       <Dropdown
         menu={{
           items: userMenuItems
         }}
       >
-        <div className="rb:cursor-pointer">{user.username}</div>
+        <div className="rb:cursor-pointer rb:font-medium">{user.username}</div>
       </Dropdown>
       <SettingModal
         ref={settingModalRef}

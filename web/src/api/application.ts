@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 20:01:29
+ * @Last Modified time: 2026-03-24 15:48:30
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
@@ -136,6 +136,10 @@ export const getExperienceConfig = (share_token: string) => {
     }
   })
 }
+// Get workspace API call statistics
+export const getWorkspaceApiStatistics = (data: { start_date: number; end_date: number; }) => {
+  return request.get(`/apps/workspace/api-statistics`, data)
+}
 // Export application
 export const appExport = (app_id: string, appName: string, data?: { release_id: string }) => {
   return request.getDownloadFile(`/apps/${app_id}/export`, `${appName}.yml`, data)
@@ -165,4 +169,9 @@ export const cancelShare = (app_id: string, target_workspace_id?: string) => {
 export const cancelSpaceShare = (target_workspace_id?: string) => {
   return request.delete(`/apps/share/${target_workspace_id}`)
 }
-
+// Application conversation logs
+export const getAppLogsUrl = (app_id: string) => `/apps/${app_id}/logs`
+// Get full conversation message history
+export const getAppLogDetail = (app_id: string, conversation_id: string) => {
+  return request.get(`/apps/${app_id}/logs/${conversation_id}`)
+}

@@ -36,9 +36,11 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
 )
 from app.db import get_db, get_db_context
 from app.models import Document, File, Knowledge
+from app.models.end_user_model import EndUser
 from app.schemas import document_schema, file_schema
 from app.schemas.model_schema import ModelInfo
-from app.services.memory_agent_service import MemoryAgentService
+from app.services.memory_agent_service import MemoryAgentService, get_end_user_connected_config
+from app.services.memory_forget_service import MemoryForgetService
 from app.services.memory_perceptual_service import MemoryPerceptualService
 from app.utils.config_utils import resolve_config_id
 from app.utils.redis_lock import RedisLock
@@ -1073,9 +1075,15 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
 
 
 @celery_app.task(name="app.core.memory.agent.write_message", bind=True)
-def write_message_task(self, end_user_id: str, message: list[dict], config_id: str | int, storage_type: str,
-                       user_rag_memory_id: str,
-                       language: str = "zh") -> Dict[str, Any]:
+def write_message_task(
+        self,
+        end_user_id: str,
+        message: list[dict],
+        config_id: str | int,
+        storage_type: str,
+        user_rag_memory_id: str,
+        language: str = "zh"
+) -> Dict[str, Any]:
     """Celery task to process a write message via MemoryAgentService.
     Args:
         end_user_id: Group ID for the memory agent (also used as end_user_id)
@@ -1091,7 +1099,6 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
     Raises:
         Exception on failure
     """
-
     logger.info(
         f"[CELERY WRITE] Starting write task - end_user_id={end_user_id}, "
         f"config_id={config_id} (type: {type(config_id).__name__}), "
@@ -1105,14 +1112,11 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
         try:
             with get_db_context() as db:
                 actual_config_id = resolve_config_id(config_id, db)
-            print(100 * '-')
-            print(actual_config_id)
-            print(100 * '-')
-            logger.info(
-                f"[CELERY WRITE] Converted config_id to UUID: {actual_config_id} (type: {type(actual_config_id).__name__})")
+            logger.info(f"[CELERY WRITE] Converted config_id to UUID: {actual_config_id} "
+                        f"(type: {type(actual_config_id).__name__})")
         except (ValueError, AttributeError) as e:
-            logger.error(
-                f"[CELERY WRITE] Invalid config_id format: {config_id} (type: {type(config_id).__name__}), error: {e}")
+            logger.error(f"[CELERY WRITE] Invalid config_id format: {config_id} "
+                         f"(type: {type(config_id).__name__}), error: {e}")
             return {
                 "status": "FAILURE",
                 "error": f"Invalid config_id format: {config_id} - {str(e)}",
@@ -1151,8 +1155,8 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
         result = loop.run_until_complete(_run())
         elapsed_time = time.time() - start_time
 
-        logger.info(
-            f"[CELERY WRITE] Task completed successfully - elapsed_time={elapsed_time:.2f}s, task_id={self.request.id}")
+        logger.info(f"[CELERY WRITE] Task completed successfully "
+                    f"- elapsed_time={elapsed_time:.2f}s, task_id={self.request.id}")
 
         # 记录该用户最后一次 write_message 成功的时间，供时间轴筛选使用
         try:
@@ -1167,7 +1171,6 @@ def write_message_task(self, end_user_id: str, message: list[dict], config_id: s
                 )
         except Exception as _e:
             logger.warning(f"[CELERY WRITE] 写入 last_done 时间戳失败（不影响主流程）: {_e}")
-
         return {
             "status": "SUCCESS",
             "result": result,
@@ -1859,7 +1862,7 @@ def workspace_reflection_task(self) -> Dict[str, Any]:
 @celery_app.task(
     name="app.tasks.run_forgetting_cycle_task",
     bind=True,
-    ignore_result=True,
+    ignore_result=False,  # 改为 False 以便在 Flower 中查看结果
     max_retries=0,
     acks_late=False,
     time_limit=7200,
@@ -1867,68 +1870,77 @@ def workspace_reflection_task(self) -> Dict[str, Any]:
 )
 def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Dict[str, Any]:
     """定时任务：运行遗忘周期
-
-    定期执行遗忘周期，识别并融合低激活值的知识节点。
-
-    Args:
-        config_id: 配置ID（可选，如果为None则使用默认配置）
-
-    Returns:
-        包含任务执行结果的字典
+    
+    遍历所有终端用户，执行遗忘周期。
     """
     start_time = time.time()
 
-    async def _run() -> Dict[str, Any]:
-        from app.services.memory_forget_service import MemoryForgetService
-
+    async def _process_users() -> Dict[str, Any]:
         with get_db_context() as db:
-            try:
-                logger.info(f"开始执行遗忘周期定时任务，config_id: {config_id}")
+            end_users = db.query(EndUser).all()
+            if not end_users:
+                logger.info("没有终端用户，跳过遗忘周期")
+                return {"status": "SUCCESS", "message": "没有终端用户", 
+                        "report": {"merged_count": 0, "failed_count": 0, "processed_users": 0},
+                        "duration_seconds": time.time() - start_time}
 
-                forget_service = MemoryForgetService()
+            logger.info(f"开始处理 {len(end_users)} 个终端用户的遗忘周期")
+            forget_service = MemoryForgetService()
+            total_merged = total_failed = processed_users = 0
+            failed_users = []
 
-                # 运行遗忘周期
-                # FIXME: MemeoryForgetService
-                report = await forget_service.trigger_forgetting(
-                    db=db,
-                    end_user_id=None,  # 处理所有组
-                    config_id=config_id
-                )
+            for end_user in end_users:
+                try:
+                    # 获取用户配置（自动回退到工作空间默认配置）
+                    connected_config = get_end_user_connected_config(str(end_user.id), db)
+                    user_config_id = resolve_config_id(connected_config.get("memory_config_id"), db)
+                    
+                    if not user_config_id:
+                        failed_users.append({"end_user_id": str(end_user.id), "error": "无法获取配置"})
+                        continue
 
-                duration = time.time() - start_time
+                    # 执行遗忘周期
+                    report = await forget_service.trigger_forgetting_cycle(
+                        db=db, end_user_id=str(end_user.id), config_id=user_config_id
+                    )
+                    
+                    total_merged += report.get('merged_count', 0)
+                    total_failed += report.get('failed_count', 0)
+                    processed_users += 1
+                    
+                    logger.info(f"用户 {end_user.id}: 融合 {report.get('merged_count', 0)} 对节点")
+                    
+                except Exception as e:
+                    logger.error(f"处理用户 {end_user.id} 失败: {e}", exc_info=True)
+                    failed_users.append({"end_user_id": str(end_user.id), "error": str(e)})
 
-                logger.info(
-                    f"遗忘周期定时任务完成: "
-                    f"融合 {report['merged_count']} 对节点, "
-                    f"失败 {report['failed_count']} 对, "
-                    f"耗时 {duration:.2f} 秒"
-                )
+            duration = time.time() - start_time
+            logger.info(f"遗忘周期完成: {processed_users}/{len(end_users)} 用户, "
+                       f"融合 {total_merged} 对, 耗时 {duration:.2f}s")
 
-                return {
-                    "status": "SUCCESS",
-                    "message": "遗忘周期执行成功",
-                    "report": report,
-                    "duration_seconds": duration
-                }
-
-            except Exception as e:
-                duration = time.time() - start_time
-                logger.error(f"遗忘周期定时任务失败: {str(e)}", exc_info=True)
-
-                return {
-                    "status": "FAILED",
-                    "message": f"遗忘周期执行失败: {str(e)}",
-                    "duration_seconds": duration
-                }
+            return {
+                "status": "SUCCESS",
+                "message": f"处理 {processed_users} 个用户",
+                "report": {
+                    "merged_count": total_merged,
+                    "failed_count": total_failed,
+                    "processed_users": processed_users,
+                    "total_users": len(end_users),
+                    "failed_users": failed_users
+                },
+                "duration_seconds": duration
+            }
 
     # 运行异步函数
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
     try:
-        result = loop.run_until_complete(_run())
-        return result
-    finally:
-        loop.close()
+        return asyncio.run(_process_users())
+    except Exception as e:
+        logger.error(f"遗忘周期任务失败: {e}", exc_info=True)
+        return {
+            "status": "FAILED",
+            "message": f"任务失败: {str(e)}",
+            "duration_seconds": time.time() - start_time
+        }
 
 
 # =============================================================================
@@ -2611,57 +2623,6 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
         }
 
 
-@celery_app.task(
-    name="app.tasks.write_perceptual_memory",
-    bind=True,
-    ignore_result=True,
-    max_retries=0,
-    acks_late=False,
-    time_limit=3600,
-    soft_time_limit=3300,
-)
-def write_perceptual_memory(
-        self,
-        end_user_id: str,
-        model_api_config: dict,
-        file_type: str,
-        file_url: str,
-        file_message: dict
-):
-    """
-    Write perceptual memory for a user into PostgreSQL and Neo4j.
-
-    This task generates or updates the user's perceptual memory
-    in the backend databases. It is intended to be executed asynchronously
-    via Celery.
-
-    Args:
-        end_user_id (uuid.UUID): The unique identifier of the end user.
-        model_api_config (ModelInfo): API configuration for the model
-            used to generate perceptual memory.
-        file_type (str): The file type
-        file_url (url): The url of file
-        file_message (dict): The file message containing details about the file
-            to be processed.
-
-    Returns:
-        None
-    """
-    file_url_md5 = hashlib.md5(file_url.encode("utf-8")).hexdigest()
-    set_asyncio_event_loop()
-    with RedisLock(f"perceptual:{file_url_md5}", redis_client=get_sync_redis_client()):
-        model_info = ModelInfo(**model_api_config)
-        with get_db_context() as db:
-            memory_perceptual_service = MemoryPerceptualService(db)
-            return asyncio.run(memory_perceptual_service.generate_perceptual_memory(
-                end_user_id,
-                model_info,
-                file_type,
-                file_url,
-                file_message,
-            ))
-
-
 # =============================================================================
 # 社区聚类补全任务（触发型）
 # =============================================================================
@@ -2672,7 +2633,7 @@ def write_perceptual_memory(
     ignore_result=False,
     max_retries=0,
     acks_late=False,
-    time_limit=7200,   # 2小时硬超时
+    time_limit=7200,  # 2小时硬超时
     soft_time_limit=6900,
 )
 def init_community_clustering_for_users(self, end_user_ids: List[str], workspace_id: Optional[str] = None) -> Dict[str, Any]:
@@ -2760,7 +2721,7 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
                         patch_fail = 0
                         for cid in incomplete_ids:
                             try:
-                                await engine._generate_community_metadata(cid, end_user_id)
+                                await engine._generate_community_metadata([cid], end_user_id)
                                 patch_ok += 1
                             except Exception as patch_err:
                                 patch_fail += 1
@@ -2787,7 +2748,8 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
                         embedding_model_id=embedding_model_id,
                     )
 
-                    logger.info(f"[CommunityCluster] 用户 {end_user_id} 有 {len(entities)} 个实体，开始全量聚类，llm_model_id={llm_model_id}")
+                    logger.info(
+                        f"[CommunityCluster] 用户 {end_user_id} 有 {len(entities)} 个实体，开始全量聚类，llm_model_id={llm_model_id}")
                     await engine.full_clustering(end_user_id)
                     initialized += 1
                     logger.info(f"[CommunityCluster] 用户 {end_user_id} 聚类完成")
@@ -2810,12 +2772,6 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
         }
 
     try:
-        try:
-            import nest_asyncio
-            nest_asyncio.apply()
-        except ImportError:
-            pass
-
         loop = set_asyncio_event_loop()
         result = loop.run_until_complete(_run())
         result["elapsed_time"] = time.time() - start_time

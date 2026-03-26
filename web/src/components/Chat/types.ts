@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:45:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 20:47:42
+ * @Last Modified time: 2026-03-26 12:30:51
  */
 import { type ReactNode } from 'react'
 
@@ -25,7 +25,15 @@ export interface ChatItem {
   error?: string;
   meta_data?: {
     audio_url?: string;
+    audio_status?: string;
     files?: any[];
+    suggested_questions?: string[];
+    citations?: {
+      document_id: string;
+      file_name: string;
+      knowledge_id: string;
+      score: string;
+    }[]
   },
 }
 
@@ -56,6 +64,7 @@ export interface ChatProps {
   fileList?: any[];
   /** Attachment update */
   fileChange?: (fileList: any[]) => void;
+  className?: string;
   renderRuntime?: (item: ChatItem, index: number) => ReactNode;
 }
 
@@ -99,4 +108,6 @@ export interface ChatContentProps {
   labelFormat: (item: ChatItem) => any;
   errorDesc?: string;
   renderRuntime?: (item: ChatItem, index: number) => ReactNode;
+  /** Send message callback */
+  onSend?: (msg: string) => void;
 }

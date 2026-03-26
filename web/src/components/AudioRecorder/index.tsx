@@ -2,12 +2,13 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:11:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 18:39:09
+ * @Last Modified time: 2026-03-20 14:25:26
  */
 import { type FC, useRef, useState } from 'react'
 import RecordRTC from 'recordrtc'
-import { App } from 'antd'
+import { App, Tooltip } from 'antd'
 import { useTranslation } from 'react-i18next';
+import clsx from 'clsx';
 
 import { fileUploadUrlWithoutApiPrefix } from '@/api/fileStorage'
 import { request } from '@/utils/request'
@@ -91,14 +92,17 @@ const AudioRecorder: FC<AudioRecorderProps> = ({
   // Toggle between recording/idle states on click;
   // swap background image to reflect current state
   return (
-    <div
-      className={`rb:size-5.5 rb:bg-cover ${disabled ? 'rb:opacity-65 rb:cursor-not-allowed' : 'rb:cursor-pointer'} ${className} ${
-        isRecording
-          ? `rb:bg-[url('@/assets/images/conversation/audio_ing.gif')]`
-          : `rb:bg-[url('@/assets/images/conversation/audio.svg')]`
-      }`}
-      onClick={isRecording ? stopRecording : startRecording}
-    />
+    <Tooltip title={isRecording ? t('memoryConversation.stopAudioRecorder') : t('memoryConversation.startAudioRecorder')}>
+      <div
+        className={clsx("rb:bg-cover", className, {
+          'rb:cursor-pointer': !disabled,
+          'rb:opacity-65 rb:cursor-not-allowed': disabled,
+          "rb:size-4 rb:bg-[url('@/assets/images/conversation/audio.svg')]": !isRecording,
+          "rb:size-6 rb:bg-[url('@/assets/images/conversation/audio_ing.gif')]": isRecording,
+        })}
+        onClick={isRecording ? stopRecording : startRecording}
+      />
+    </Tooltip>
   )
 }
 

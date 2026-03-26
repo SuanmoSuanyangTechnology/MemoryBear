@@ -9,17 +9,15 @@
 - OpenAI: 支持 URL 和 base64 格式
 """
 import base64
+import csv
 import io
-import uuid
+import json
 import zipfile
-import chardet
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 
-import csv
-import json
-
 import PyPDF2
+import chardet
 import httpx
 import magic
 import openpyxl
@@ -35,7 +33,6 @@ from app.models.file_metadata_model import FileMetadata
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.services.audio_transcription_service import AudioTranscriptionService
-from app.tasks import write_perceptual_memory
 
 logger = get_business_logger()
 
@@ -297,6 +294,7 @@ PROVIDER_STRATEGIES = {
     "bedrock": BedrockFormatStrategy,
     "anthropic": BedrockFormatStrategy,
     "openai": OpenAIFormatStrategy,
+    "volcano": OpenAIFormatStrategy,
 }
 
 
@@ -342,15 +340,12 @@ class MultimodalService:
 
     async def process_files(
             self,
-            end_user_id: uuid.UUID | str,
             files: Optional[List[FileInput]],
-
     ) -> List[Dict[str, Any]]:
         """
         处理文件列表，返回 LLM 可用的格式
         
         Args:
-            end_user_id: 用户ID
             files: 文件输入列表
             
         Returns:
@@ -358,81 +353,6 @@ class MultimodalService:
         """
         if not files:
             return []
-        if isinstance(end_user_id, uuid.UUID):
-            end_user_id = str(end_user_id)
-
-        # 获取对应的策略
-        # dashscope 的 omni 模型使用 OpenAI 兼容格式
-        if self.provider == "dashscope" and self.is_omni:
-            strategy_class = OpenAIFormatStrategy
-        else:
-            strategy_class = PROVIDER_STRATEGIES.get(self.provider)
-            if not strategy_class:
-                logger.warning(f"未找到 provider '{self.provider}' 的策略，使用默认策略")
-                strategy_class = DashScopeFormatStrategy
-
-        result = []
-        for idx, file in enumerate(files):
-            strategy = strategy_class(file)
-            if not file.url:
-                file.url = await self.get_file_url(file)
-            try:
-                if file.type == FileType.IMAGE and "vision" in self.capability:
-                    is_support, content = await self._process_image(file, strategy)
-                    result.append(content)
-                    if is_support:
-                        self.write_perceptual_memory(end_user_id, file.type, file.url, content)
-                elif file.type == FileType.DOCUMENT:
-                    is_support, content = await self._process_document(file, strategy)
-                    result.append(content)
-                    if is_support:
-                        self.write_perceptual_memory(end_user_id, file.type, file.url, content)
-                elif file.type == FileType.AUDIO and "audio" in self.capability:
-                    is_support, content = await self._process_audio(file, strategy)
-                    result.append(content)
-                    if is_support:
-                        self.write_perceptual_memory(end_user_id, file.type, file.url, content)
-                elif file.type == FileType.VIDEO and "video" in self.capability:
-                    is_support, content = await self._process_video(file, strategy)
-                    result.append(content)
-                    if is_support:
-                        self.write_perceptual_memory(end_user_id, file.type, file.url, content)
-                else:
-                    logger.warning(f"不支持的文件类型: {file.type}")
-            except Exception as e:
-                logger.error(
-                    f"处理文件失败",
-                    extra={
-                        "file_index": idx,
-                        "file_type": file.type,
-                        "error": str(e)
-                    },
-                    exc_info=True
-                )
-                # 继续处理其他文件，不中断整个流程
-                result.append({
-                    "type": "text",
-                    "text": f"[文件处理失败: {str(e)}]"
-                })
-
-        logger.info(f"成功处理 {len(result)}/{len(files)} 个文件，provider={self.provider}")
-        return result
-
-    async def history_process_files(
-            self,
-            files: Optional[List[FileInput]],
-    ) -> List[Dict[str, Any]]:
-        """
-        处理文件列表，返回 LLM 可用的格式
-
-        Args:
-            files: 文件输入列表
-
-        Returns:
-            List[Dict]: LLM 可用的内容格式列表（根据 provider 返回不同格式）
-        """
-        if not files:
-            return []
 
         # 获取对应的策略
         # dashscope 的 omni 模型使用 OpenAI 兼容格式
@@ -482,17 +402,6 @@ class MultimodalService:
 
         logger.info(f"成功处理 {len(result)}/{len(files)} 个文件，provider={self.provider}")
         return result
-
-    def write_perceptual_memory(
-            self,
-            end_user_id: str,
-            file_type: str,
-            file_url: str,
-            file_message: dict
-    ):
-        """写入感知记忆"""
-        if end_user_id and self.api_config:
-            write_perceptual_memory.delay(end_user_id, self.api_config.model_dump(), file_type, file_url, file_message)
 
     async def _process_image(self, file: FileInput, strategy) -> tuple[bool, Dict[str, Any]]:
         """

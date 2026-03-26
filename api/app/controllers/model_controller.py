@@ -42,6 +42,7 @@ def get_model_strategies():
 @router.get("", response_model=ApiResponse)
 def get_model_list(
         type: Optional[list[str]] = Query(None, description="模型类型筛选（支持多个，如 ?type=LLM 或 ?type=LLM,EMBEDDING）"),
+        capability: Optional[list[str]] = Query(None, description="能力筛选（支持多个，如 ?capability=chat 或 ?capability=chat, embedding）"),
         provider: Optional[model_schema.ModelProvider] = Query(None, description="提供商筛选(基于API Key)"),
         is_active: Optional[bool] = Query(None, description="激活状态筛选"),
         is_public: Optional[bool] = Query(None, description="公开状态筛选"),
@@ -74,10 +75,21 @@ def get_model_list(
             unique_flat_type = list(dict.fromkeys(flat_type))
             type_list = [ModelType(t.lower()) for t in unique_flat_type]
 
+        capability_list = []
+        if capability is not None:
+            flat_capability = []
+            for item in capability:
+                split_items = [c.strip() for c in item.split(', ') if c.strip()]
+                flat_capability.extend(split_items)
+
+            unique_flat_capability = list(dict.fromkeys(flat_capability))
+            capability_list = unique_flat_capability
+
         api_logger.error(f"获取模型type_list: {type_list}")
         query = model_schema.ModelConfigQuery(
             type=type_list,
             provider=provider,
+            capability=capability_list,
             is_active=is_active,
             is_public=is_public,
             search=search,

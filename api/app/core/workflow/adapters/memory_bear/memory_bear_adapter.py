@@ -11,7 +11,7 @@ from app.core.workflow.adapters.base_adapter import (
     BasePlatformAdapter,
     WorkflowParserResult
 )
-from app.core.workflow.adapters.errors import ExceptionDefineition, ExceptionType, UnsupportNodeType
+from app.core.workflow.adapters.errors import ExceptionDefinition, ExceptionType, UnsupportedNodeType
 from app.core.workflow.adapters.memory_bear.memory_bear_converter import MemoryBearConverter
 from app.core.workflow.nodes.enums import NodeType
 from app.schemas.workflow_schema import ExecutionConfig, NodeDefinition, EdgeDefinition, VariableDefinition
@@ -73,7 +73,7 @@ class MemoryBearAdapter(BasePlatformAdapter, MemoryBearConverter):
         try:
             node_type = self.map_node_type(node["type"])
             if node_type == NodeType.UNKNOWN:
-                self.errors.append(UnsupportNodeType(
+                self.errors.append(UnsupportedNodeType(
                     node_id=node_id,
                     node_type=node["type"]
                 ))
@@ -85,7 +85,7 @@ class MemoryBearAdapter(BasePlatformAdapter, MemoryBearConverter):
 
             return NodeDefinition(**node)
         except Exception as e:
-            self.errors.append(ExceptionDefineition(
+            self.errors.append(ExceptionDefinition(
                 type=ExceptionType.NODE,
                 node_id=node_id,
                 node_name=node_name,
@@ -97,14 +97,14 @@ class MemoryBearAdapter(BasePlatformAdapter, MemoryBearConverter):
     def _convert_edge(self, edge: dict[str, Any], valid_node_ids: set) -> EdgeDefinition | None:
         try:
             if edge.get("source") not in valid_node_ids or edge.get("target") not in valid_node_ids:
-                self.warnings.append(ExceptionDefineition(
+                self.warnings.append(ExceptionDefinition(
                     type=ExceptionType.EDGE,
                     detail=f"edge {edge.get('id')} skipped: source or target node not found"
                 ))
                 return None
             return EdgeDefinition(**edge)
         except Exception as e:
-            self.errors.append(ExceptionDefineition(
+            self.errors.append(ExceptionDefinition(
                 type=ExceptionType.EDGE,
                 detail=f"convert edge error - {e}"
             ))
@@ -115,7 +115,7 @@ class MemoryBearAdapter(BasePlatformAdapter, MemoryBearConverter):
         try:
             return VariableDefinition(**variable)
         except Exception as e:
-            self.warnings.append(ExceptionDefineition(
+            self.warnings.append(ExceptionDefinition(
                 type=ExceptionType.VARIABLE,
                 name=variable.get("name"),
                 detail=f"convert variable error - {e}"

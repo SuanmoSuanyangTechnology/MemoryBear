@@ -1,16 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg width="20px" height="20px" viewBox="0 0 20 20" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
     <title>兴趣爱好</title>
-    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
-        <g id="红熊空间-记忆库-用户记忆-详情" transform="translate(-272, -837)" stroke="#212332" stroke-width="1.5">
-            <g id="个人信息" transform="translate(256, 80)">
-                <g id="兴趣分布" transform="translate(0, 740)">
-                    <g id="兴趣爱好" transform="translate(16, 17)">
-                        <circle id="椭圆形" cx="10" cy="10" r="7"></circle>
-                        <path d="M3.32048193,11.5580576 C7.00798777,9.91776851 11.5678271,9.4433959 17,10.1349398" id="路径-8"></path>
-                        <path d="M11.0093476,3 C10.3701842,7.39934021 10.7393574,11.9484968 12.1168675,16.6474699" id="路径-9"></path>
-                        <path d="M5.58226172,4.63277108 C7.59301205,5.92562284 10,10.692682 5.83204819,15.410555" id="路径-36"></path>
-                        <path d="M15.8684531,6.17108434 C13.7576424,7.20259363 12.3182708,10.692682 15.4315098,14.2758995" id="路径-37"></path>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="个人记忆" transform="translate(-40, -254)" stroke="#171719" stroke-width="1.5">
+            <g id="编组" transform="translate(12, 12)">
+                <g id="编组-11" transform="translate(16, 104)">
+                    <g id="兴趣爱好" transform="translate(12, 138)">
+                        <g id="编组-13" transform="translate(3, 3)">
+                            <circle id="椭圆形" cx="9" cy="9" r="9"></circle>
+                            <path d="M0.412048193,11.0032169 C5.15312713,8.89427379 11.0157777,8.28436615 18,9.17349398" id="路径-8"></path>
+                            <path d="M10.2977327,0 C9.47595106,5.65629455 9.95060241,11.5052102 11.7216867,17.546747" id="路径-9"></path>
+                            <path d="M3.32005078,2.09927711 C5.9053012,3.76151508 9,9.8905912 3.64120482,15.9564279" id="路径-36"></path>
+                            <path d="M16.545154,4.07710843 C13.8312545,5.40333466 11.9806339,9.8905912 15.9833698,14.4975851" id="路径-37"></path>
+                        </g>
                     </g>
                 </g>
             </g>

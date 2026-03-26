@@ -19,7 +19,7 @@
  */
 
 import { type FC, useState, useEffect } from 'react'
-import { Button, Drawer, Space } from 'antd';
+import { Button, Drawer, Space, Flex } from 'antd';
 import type { DrawerProps } from 'antd';
 import { CloseOutlined  } from '@ant-design/icons';
 
@@ -78,9 +78,9 @@ const RbDrawer: FC<DrawerProps> =({
       {...props}
     >
       {/* Full-height flex container for content */}
-      <div className='rb:flex rb:flex-col rb:h-full'>
+      <Flex vertical className='rb:h-full'>
         {children}
-      </div>
+      </Flex>
     </Drawer>
   )
 }

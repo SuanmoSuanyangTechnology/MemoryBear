@@ -2,6 +2,7 @@ from .base import  RedBearModelConfig, get_provider_llm_class, RedBearModelFacto
 from .llm import RedBearLLM
 from .embedding import RedBearEmbeddings
 from .rerank import RedBearRerank
+from .generation import RedBearImageGenerator, RedBearVideoGenerator
 
 __all__ = [
     "RedBearModelConfig",
@@ -9,5 +10,7 @@ __all__ = [
     "RedBearEmbeddings",
     "RedBearRerank",
     "RedBearModelFactory",
-    "get_provider_llm_class"
+    "get_provider_llm_class",
+    "RedBearImageGenerator",
+    "RedBearVideoGenerator"
 ]

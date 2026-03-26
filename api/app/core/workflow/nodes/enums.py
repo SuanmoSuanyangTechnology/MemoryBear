@@ -23,12 +23,13 @@ class NodeType(StrEnum):
     BREAK = "break"
     MEMORY_READ = "memory-read"
     MEMORY_WRITE = "memory-write"
+    DOCUMENT_EXTRACTOR = "document-extractor"
 
     UNKNOWN = "unknown"
     NOTES = "notes"
 
 
-BRANCH_NODES = [NodeType.IF_ELSE, NodeType.HTTP_REQUEST, NodeType.QUESTION_CLASSIFIER]
+BRANCH_NODES = frozenset({NodeType.IF_ELSE, NodeType.HTTP_REQUEST, NodeType.QUESTION_CLASSIFIER})
 
 
 class ComparisonOperator(StrEnum):

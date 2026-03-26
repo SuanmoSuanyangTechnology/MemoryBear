@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
-import { Form, Select, InputNumber } from 'antd';
+import { Form, Select, InputNumber, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { KnowledgeConfigModalRef, KnowledgeBase, KnowledgeConfigForm, RetrieveType } from './types'
@@ -86,13 +86,13 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
         size="middle"
       >
         {data && (
-          <div className="rb:mb-6 rb:flex rb:items-center rb:justify-between rb:border rb:rounded-lg rb:p-[17px_16px] rb:cursor-pointer rb:bg-[#F0F3F8] rb:border-[#DFE4ED] rb:text-[#212332]">
+          <Flex align="center" justify="space-between" className="rb:mb-6! rb-border rb:rounded-lg rb:p-[17px_16px]! rb:cursor-pointer rb:bg-[#F0F3F8] rb:text-[#212332]">
             <div className="rb:text-[16px] rb:leading-5.5">
               {data.name}
               <div className="rb:text-[12px] rb:leading-4 rb:text-[#5B6167] rb:mt-2">{t('application.contains', {include_count: data.doc_num})}</div>
             </div>
             <div className="rb:text-[12px] rb:leading-4 rb:text-[#5B6167]">{formatDateTime(data.updated_at, 'YYYY-MM-DD HH:mm:ss')}</div>
-          </div>
+          </Flex>
         )}
         <FormItem name="kb_id" hidden />
         {/* 检索模式 */}
@@ -137,6 +137,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
               max={1.0}
               step={0.1}
               min={0.0}
+              isInput={true}
             />
           </FormItem>
         )}
@@ -152,6 +153,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
               max={1.0}
               step={0.1}
               min={0.0}
+              isInput={true}
             />
           </FormItem>
         )}
@@ -168,6 +170,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
                 max={1.0}
                 step={0.1}
                 min={0.0}
+                isInput={true}
               />
             </FormItem>
             <FormItem
@@ -180,6 +183,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
                 max={1.0}
                 step={0.1}
                 min={0.0}
+                isInput={true}
               />
             </FormItem>
           </>

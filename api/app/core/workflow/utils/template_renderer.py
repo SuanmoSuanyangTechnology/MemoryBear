@@ -153,7 +153,8 @@ class TemplateRenderer:
 
 
 # 全局渲染器实例（严格模式）
-_default_renderer = TemplateRenderer(strict=True)
+_strict_renderer = TemplateRenderer(strict=True)
+_lenient_renderer = TemplateRenderer(strict=False)
 
 
 def render_template(
@@ -184,7 +185,7 @@ def render_template(
         ... )
         '请分析: 这是一段文本'
     """
-    renderer = TemplateRenderer(strict=strict)
+    renderer = _strict_renderer if strict else _lenient_renderer
     return renderer.render(template, conv_vars, node_outputs, system_vars)
 
 
@@ -197,4 +198,4 @@ def validate_template(template: str) -> list[str]:
     Returns:
         错误列表
     """
-    return _default_renderer.validate(template)
+    return _strict_renderer.validate(template)

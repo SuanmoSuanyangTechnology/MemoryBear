@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.core.workflow.adapters.errors import ExceptionDefineition
+from app.core.workflow.adapters.errors import ExceptionDefinition
 from app.schemas.workflow_schema import (
     EdgeDefinition,
     NodeDefinition,
@@ -40,8 +40,8 @@ class WorkflowParserResult(BaseModel):
     edges: list[EdgeDefinition] = Field(default_factory=list)
     nodes: list[NodeDefinition] = Field(default_factory=list)
     variables: list[VariableDefinition] = Field(default_factory=list)
-    warnings: list[ExceptionDefineition] = Field(default_factory=list)
-    errors: list[ExceptionDefineition] = Field(default_factory=list)
+    warnings: list[ExceptionDefinition] = Field(default_factory=list)
+    errors: list[ExceptionDefinition] = Field(default_factory=list)
 
 
 class WorkflowImportResult(BaseModel):
@@ -51,8 +51,8 @@ class WorkflowImportResult(BaseModel):
     edges: list[EdgeDefinition] = Field(default_factory=list)
     nodes: list[NodeDefinition] = Field(default_factory=list)
     variables: list[VariableDefinition] = Field(default_factory=list)
-    warnings: list[ExceptionDefineition] = Field(default_factory=list)
-    errors: list[ExceptionDefineition] = Field(default_factory=list)
+    warnings: list[ExceptionDefinition] = Field(default_factory=list)
+    errors: list[ExceptionDefinition] = Field(default_factory=list)
 
 
 class BasePlatformAdapter(ABC):

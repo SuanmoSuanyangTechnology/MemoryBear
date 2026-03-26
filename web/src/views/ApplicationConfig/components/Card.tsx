@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-04 13:50:47
+ * @Last Modified time: 2026-03-04 10:25:35
  */
 import { type FC, type ReactNode } from 'react'
 
@@ -40,8 +40,9 @@ const Card: FC<CardProps> = ({
       subTitle={subTitle}
       extra={extra}
       variant={variant}
-      headerType="borderL"
-      headerClassName={variant ? '' : "rb:before:bg-[#155EEF]! rb:before:h-[19px]"}
+      headerType="borderless"
+      headerClassName="rb:h-11.5! rb:py-3! rb:leading-5.5!"
+      titleClassName="rb:font-[MiSans-Bold] rb:font-bold"
     >
       {children}
     </RbCard>

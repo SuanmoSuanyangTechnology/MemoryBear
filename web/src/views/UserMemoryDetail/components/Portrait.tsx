@@ -1,15 +1,14 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:18 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 18:32:18 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-16 14:19:15
  */
 import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Skeleton, Progress } from 'antd';
+import { Skeleton, Progress, Flex } from 'antd';
 
-import RbCard from '@/components/RbCard/Card'
 import {
   getImplicitPortrait,
 } from '@/api/memory'
@@ -85,28 +84,26 @@ const Portrait = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
     handleRefresh: getData
   }));
   return (
-    <RbCard
-      title={t('implicitDetail.portrait')}
-      headerType="borderless"
-    >
+    <div className="rb-border rb:p-4 rb:pb-2.25 rb:rounded-xl">
+      <div className="rb:text-[#212332] rb:font-medium rb:leading-5 rb:mb-4">{t('implicitDetail.portrait')}</div>
       {loading
         ? <Skeleton active />
-        : <div className="rb:mt-1">
+        : <Flex vertical gap={14} className="rb:mt-1!">
           {(['aesthetic', 'creativity', 'literature', 'technology'] as const).map((key) => {
             const item = data[key] as Item
             return (
               <div key={key}>
-                <div className="rb:flex rb:justify-between rb:items-center">
-                  <div className="rb:text-[#5B6167] rb:leading-5 rb:font-regular rb:mb-1">{t(`implicitDetail.${key}`)}</div>
+                <Flex align="center" justify="space-between" className="rb:leading-5">
+                  <div className="rb:text-[#5B6167]">{t(`implicitDetail.${key}`)}</div>
                   {item?.percentage ?? 0}%
-                </div>
-                <Progress percent={item?.percentage || 0} showInfo={false} />
+                </Flex>
+                <Progress percent={item?.percentage || 0} showInfo={false} strokeColor="#171719" />
               </div>
             )
           })}
-          </div>
+        </Flex>
         }
-    </RbCard>
+    </div>
   )
 })
 export default Portrait

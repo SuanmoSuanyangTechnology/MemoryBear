@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 12</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="应用管理-工作流-配置-知识检索" transform="translate(-30, -348)">
+            <g id="节点名称" transform="translate(10, 74)">
+                <g id="节点" transform="translate(0, 42)">
+                    <g id="外部交互备份" transform="translate(12, 199)">
+                        <g id="1" transform="translate(0, 25)">
+                            <g id="编组-12" transform="translate(8, 8)">
+                                <rect id="矩形" fill="#155EEF" x="0" y="0" width="24" height="24" rx="8"></rect>
+                                <g id="互联网" transform="translate(2.4, 2.4)" stroke="#FFFFFF" stroke-width="1.2">
+                                    <g id="编组-11" transform="translate(2.4, 2.4)">
+                                        <circle id="椭圆形" cx="7.2" cy="7.2" r="6.6"></circle>
+                                        <line x1="1.02857143" y1="4.62857143" x2="13.3714286" y2="4.62857143" id="路径-6"></line>
+                                        <path d="M5.59358998,0.774310703 C5.00530125,2.28227465 4.62857143,4.60035338 4.62857143,7.2 C4.62857143,9.81615737 5.01010178,12.1471589 5.60482447,13.6543231 M8.71879354,13.8406032 C9.3570333,12.3432962 9.77142857,9.92650761 9.77142857,7.2 C9.77142857,4.53217457 9.37467926,2.16087959 8.75969076,0.657347436" id="形状"></path>
+                                        <line x1="1.0116215" y1="9.25714286" x2="13.3544786" y2="9.25714286" id="路径-6"></line>
+                                    </g>
+                                </g>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

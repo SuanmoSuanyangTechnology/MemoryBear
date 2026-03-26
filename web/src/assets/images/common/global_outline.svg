@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>互联网</title>
+    <g id="空间外层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="平台管理-工具管理--工具市场" transform="translate(-1348, -329)" stroke="#5F6266">
+            <g id="卡片1备份-2" transform="translate(1044, 176)">
+                <g id="编组-5" transform="translate(16, 152)">
+                    <g id="互联网" transform="translate(288, 1)">
+                        <g id="编组-11" transform="translate(2, 2)">
+                            <circle id="椭圆形" cx="6" cy="6" r="5.5"></circle>
+                            <line x1="0.857142857" y1="3.85714286" x2="11.1428571" y2="3.85714286" id="路径-6"></line>
+                            <path d="M4.66132498,0.645258919 C4.17108437,1.90189554 3.85714286,3.83362782 3.85714286,6 C3.85714286,8.18013114 4.17508482,10.1226325 4.67068706,11.3786026 M7.26566129,11.533836 C7.79752775,10.2860801 8.14285714,8.27208968 8.14285714,6 C8.14285714,3.77681214 7.81223272,1.80073299 7.2997423,0.54778953" id="形状"></path>
+                            <line x1="0.843017916" y1="7.71428571" x2="11.1287322" y2="7.71428571" id="路径-6"></line>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

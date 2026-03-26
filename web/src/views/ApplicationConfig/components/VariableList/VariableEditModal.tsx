@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:26:27 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:26:27 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-24 11:47:46
  */
 /**
  * Variable Edit Modal
@@ -11,7 +11,7 @@
  */
 
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
-import { Form, Input, Select, InputNumber, Checkbox, Tag, Divider, Button } from 'antd';
+import { Form, Input, Select, InputNumber, Checkbox, Tag, Divider, Button, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { ApiExtensionModalRef, Variable, VariableEditModalRef } from './types'
@@ -150,8 +150,8 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
                 label: t(`application.${key}`),
               }))}
               onChange={handleChangeType}
-              labelRender={(props) => <div className="rb:flex rb:justify-between rb:items-center">{props.label} <Tag color="blue">{variableType[props.value as keyof typeof variableType]}</Tag></div>}
-              optionRender={(props) => <div className="rb:flex rb:justify-between rb:items-center">{props.label} <Tag color="blue">{variableType[props.value as keyof typeof variableType]}</Tag></div>}
+              labelRender={(props) => <Flex align="center" justify="space-between">{props.label} <Tag color="blue">{variableType[props.value as keyof typeof variableType]}</Tag></Flex>}
+              optionRender={(props) => <Flex align="center" justify="space-between">{props.label} <Tag color="blue">{variableType[props.value as keyof typeof variableType]}</Tag></Flex>}
             />
           </FormItem>
           {/* Variable Name */}

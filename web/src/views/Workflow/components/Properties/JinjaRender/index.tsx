@@ -174,7 +174,7 @@ const JinjaRender: FC<JinjaRenderProps> = ({ selectedNode, options, templateOpti
 
   return (
     <>
-      <Form.Item name="mapping" noStyle>
+      <Form.Item name="mapping">
         <MappingList label={t('workflow.config.jinja-render.mapping')} name="mapping" options={options} />
       </Form.Item>
 
@@ -188,6 +188,7 @@ const JinjaRender: FC<JinjaRenderProps> = ({ selectedNode, options, templateOpti
           options={templateOptions}
           titleVariant="borderless"
           size="small"
+          className="rb:bg-[#F6F6F6] rb:border-[#F6F6F6]! rb:hover:bg-white rb:hover:border-[#171719]!"
         />
       </Form.Item>
     </>

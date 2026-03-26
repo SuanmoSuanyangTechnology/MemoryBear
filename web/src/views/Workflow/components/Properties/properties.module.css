@@ -7,51 +7,49 @@
 }
 .properties :global(.ant-input-outlined.ant-input-disabled),
 .properties :global(.ant-input-outlined[disabled]) {
-  background-color: #F6F8FC;
+  background-color: #F6F6F6;
 }
-.properties :global(.ant-select-single.ant-select-sm){
+.properties :global(.ant-select-single.ant-select-sm) {
+  height: 28px;
+}
+.properties :global(.ant-select-multiple.ant-select-sm .ant-select-selector) {
+  min-height: 28px;
+}
+.properties :global(.ant-select-multiple.ant-select-sm .ant-select-selection-item) {
+  height: 18px;
+}
+.properties :global(:not(.select).ant-select-single.ant-select-sm.ant-select-borderless) {
+  height: 22px;
+}
+.properties :global(.select.ant-select-single.ant-select-sm.ant-select-borderless) {
   height: 28px;
 }
 .properties :global(.ant-table-wrapper .ant-table-thead>tr>th),
 .properties :global(.ant-table-wrapper .ant-table-thead>tr>td),
-.properties :global(.ant-table-wrapper .ant-table) {
-  background-color: #F6F8FC;
-}
-.properties :global(.ant-table-wrapper .ant-table),
-.properties :global(.ant-table-container),
-.properties :global(.ant-table-wrapper table) {
-  border-radius: 6px;
-}
-.properties :global(.ant-table-wrapper .ant-table-container table>thead>tr:first-child>*:first-child) {
-  border-start-start-radius: 6px;
-}
-.properties :global(.ant-table-wrapper .ant-table-container table>thead>tr:first-child>*:last-child) {
-  border-start-end-radius: 6px;
-}
-.properties :global(.ant-table-row:last-child .ant-table-cell:first-child) {
-  border-bottom-left-radius: 6px;
-}
-.properties :global(.ant-table-row:last-child .ant-table-cell:last-child) {
-  border-bottom-right-radius: 6px;
-}
-.properties :global(.ant-table-wrapper .ant-table) {
-  background: transparent;
-}
-.properties :global(.ant-table-wrapper .ant-table-container) {
-  border-start-start-radius: 6px;
-  border-start-end-radius: 6px;
-}
-.properties :global(.ant-table-container) {
-  /* border-left: none;
-  border-top: none;
-  border-bottom: none; */
-  border: none;
-}
+.properties :global(.ant-table-wrapper .ant-table-tbody>tr>td),
 .properties :global(.ant-table-wrapper .ant-table-tbody>tr.ant-table-placeholder:hover>th),
 .properties :global(.ant-table-wrapper .ant-table-tbody>tr.ant-table-placeholder:hover>td),
 .properties :global(.ant-table-wrapper .ant-table-tbody>tr.ant-table-placeholder),
-.properties :global(.ant-table-wrapper .ant-table) {
-  background-color: #F6F8FC;
+.properties :global(.ant-table-wrapper .ant-table-wrapper .ant-table-thead>tr>th),
+.properties :global(.ant-table-wrapper .ant-table-thead>tr>td) 
+.properties :global(.ant-table-wrapper .ant-table),
+.properties :global(.ant-table-container),
+.properties :global(.ant-table-wrapper .ant-table-tbody .ant-table-row>.ant-table-cell-row-hover) {
+  background-color: transparent;
+  border: none;
+}
+.properties :global(.ant-table-wrapper .ant-table.ant-table-small .ant-table-title),
+.properties :global(.ant-table-wrapper .ant-table.ant-table-small .ant-table-footer),
+.properties :global(.ant-table-wrapper .ant-table.ant-table-small .ant-table-cell),
+.properties :global(.ant-table-wrapper .ant-table.ant-table-small .ant-table-thead>tr>th),
+.properties :global(.ant-table-wrapper .ant-table.ant-table-small .ant-table-tbody>tr>th),
+.properties :global(.ant-table-wrapper .ant-table.ant-table-small .ant-table-tbody>tr>td),
+.properties :global(.ant-table-wrapper .ant-table.ant-table-small tfoot>tr>th),
+.properties :global(.ant-table-wrapper .ant-table.ant-table-small tfoot>tr>td) {
+  padding: 0;
+}
+.properties :global(.ant-table-wrapper .ant-table.ant-table-small .ant-table-tbody>tr>td) {
+  padding: 4px 4px 0 0;
 }
 .properties :global(.ant-form-item-horizontal.ant-form-item .ant-form-item-control-input-content:has(> .ant-switch:only-child, > .ant-rate:only-child)) {
   display: flex;
@@ -62,12 +60,15 @@
 }
 .properties :global(.ant-form-item) {
   margin-bottom: 16px;
+  line-height: 17px;
 }
 .properties :global(.ant-form-item .ant-form-item-label>label) {
   font-weight: 500;
   font-size: 12px;
+  height: 17px;
 }
 .properties :global(.ant-select-single.ant-select-sm .ant-select-selector),
+.properties :global(.ant-select-multiple.ant-select-sm .ant-select-selector),
 .properties :global(.ant-select-dropdown .ant-select-item),.properties :global(.ant-input-number-sm) {
   font-size: 12px;
 }
@@ -77,7 +78,7 @@
 .properties :global(.ant-slider-horizontal .ant-slider-step) {
   height: 6px;
 }
-.properties :global(.ant-select-single.ant-select-sm:not(.ant-select-customize-input) .ant-select-selector) {
+.properties :global(.ant-select-single.ant-select-sm:not(.ant-select-customize-input) .ant-select-selector){
   padding: 0 4px 0 6px ;
 }
 .properties :global(.ant-select-single.ant-select-sm:not(.ant-select-customize-input).ant-select-show-arrow .ant-select-selection-item),
@@ -88,6 +89,72 @@
   font-size: 10px;
   inset-inline-end: 6px;
 }
+.properties :global(.ant-select-multiple.ant-select-sm .ant-select-selector) {
+  padding-block: 2px;
+}
 .properties :global(.ant-input-sm) {
   padding: 3.6px 7px;
+}
+.properties :global(.ant-divider) {
+  border-block-start: 1px solid #EBEBEB;
+}
+.properties :global(.ant-switch.ant-switch-small) {
+  height: 16px;
+  line-height: 16px;
+}
+.properties :global(.ant-switch.ant-switch-small .ant-switch-handle) {
+  width: 13.6px;
+  height: 13.6px;
+  top: 1.5px;
+  inset-inline-start: 1.5px;
+}
+.properties :global(.ant-switch.ant-switch-small.ant-switch-checked .ant-switch-handle) {
+  inset-inline-start: calc(100% - 15px);
+}
+.properties :global(.ant-select .ant-select-selection-item) {
+  font-weight: 500;
+}
+.properties :global(.ant-input-number-sm) {
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+.properties :global(.select.ant-select-borderless .ant-select-selector) {
+  background: #F6F6F6 !important;
+}
+.properties :global(.ant-radio-group) {
+  display: grid;
+  grid-template-columns: 48px 73px 172px;
+  gap: 8px 18px;
+}
+.properties :global(.ant-radio-wrapper) {
+  font-size: 12px;
+  line-height: 18px;
+  margin-inline-end: 0;
+}
+.properties :global(.ant-radio-wrapper .ant-radio-inner) {
+  width: 12px;
+  height: 12px;
+  border-color: #A8A9AA;
+}
+.properties :global(.ant-radio-wrapper .ant-radio-inner::after) {
+  width: 12px;
+  height: 12px;
+  margin-block-start: -6px;
+  margin-inline-start: -6px;
+}
+.properties :global(.ant-radio-wrapper .ant-radio-checked .ant-radio-inner) {
+  border-color: #171719;
+}
+.properties :global(.ant-radio-wrapper .ant-radio-checked::after) {
+  border: 4px solid #171719;
+}
+.properties :global(.ant-radio-wrapper span.ant-radio+*) {
+  padding-inline-start: 3px;
+  padding-inline-end: 0;
+}
+.properties :global(.ant-select-multiple.ant-select-sm .ant-select-selection-overflow .ant-select-selection-item) {
+  padding-inline-start: 0px;
+  border-radius: 4px;
+  margin-block: 0px;
 }

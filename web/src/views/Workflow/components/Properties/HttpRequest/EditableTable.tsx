@@ -1,7 +1,6 @@
 import { type FC, useMemo } from 'react';
 import { useTranslation } from 'react-i18next'
-import { Button, Select, Table, Form, type TableProps } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { Button, Select, Table, Form, type TableProps, Flex } from 'antd';
 
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin';
 import Empty from '@/components/Empty';
@@ -48,22 +47,21 @@ const EditableTable: FC<EditableTableProps> = ({
 
   const getColumns = (remove: (index: number) => void): TableProps<TableRow>['columns'] => {
     const hasType = typeOptions.length > 0;
-    const cellClassName="rb:p-1!"
-    const contentClassName ="rb:w-[108px]! rb:text-[12px]! rb:overflow-hidden!"
+    const contentClassName = hasType ? 'rb:w-[110px]!' : "rb:w-[148px]!"
+    const formClassName = 'rb:mb-0! rb:bg-[#F6F6F6] rb:rounded-[8px] rb:py-[2px]! rb:px-[6px]!'
 
     return [
       {
         title: t('workflow.config.name'),
         dataIndex: 'name',
-        className: cellClassName,
         render: (_: any, __: TableRow, index: number) => (
-          <Form.Item name={[index, 'name']} noStyle>
+          <Form.Item name={[index, 'name']} className={formClassName}>
             <Editor
               options={booleanFilterOptions.filter(option => !option.dataType.includes('file'))}
               type="input"
               className={contentClassName}
               size={size}
-              height={16}
+              variant="borderless"
             />
           </Form.Item>
         )
@@ -72,13 +70,12 @@ const EditableTable: FC<EditableTableProps> = ({
         title: t('workflow.config.type'),
         dataIndex: 'type',
         width: '20%',
-        className: cellClassName,
         render: (_: any, __: TableRow, index: number) => (
           <Form.Item shouldUpdate noStyle>
             {(form) => (
               <Form.Item name={[index, 'type']} noStyle>
                 <Select 
-                  placeholder={t('common.pleaseSelect')} 
+                  placeholder={t('workflow.config.type')} 
                   // size="small" 
                   options={typeOptions}
                   popupMatchSelectWidth={false}
@@ -86,6 +83,8 @@ const EditableTable: FC<EditableTableProps> = ({
                     form.setFieldValue([...Array.isArray(parentName) ? parentName : [parentName], index, 'value'], undefined);
                   }}
                   size={size}
+                  variant="borderless"
+                  className="rb:w-17! select"
                 />
               </Form.Item>
             )}
@@ -95,7 +94,6 @@ const EditableTable: FC<EditableTableProps> = ({
       {
         title: t('workflow.config.value'),
         dataIndex: 'value',
-        className: cellClassName,
         render: (_: any, __: TableRow, index: number) => (
           <Form.Item 
             shouldUpdate={(prevValues, currentValues) => {
@@ -107,18 +105,18 @@ const EditableTable: FC<EditableTableProps> = ({
           >
             {(form) => {
               const currentType = form.getFieldValue([...Array.isArray(parentName) ? parentName : [parentName], index, 'type']);
-              const filteredOptions = currentType === 'file' 
+              const filteredOptions = currentType === 'file'
                 ? booleanFilterOptions.filter(option => option.dataType.includes('file'))
                 : booleanFilterOptions.filter(option => !option.dataType.includes('file'));
               
               return (
-                <Form.Item name={[index, 'value']} noStyle>
+                <Form.Item name={[index, 'value']} className={formClassName}>
                   <Editor
                     options={filteredOptions}
                     type="input"
                     className={contentClassName}
                     size={size}
-                    height={16}
+                    variant="borderless"
                   />
                 </Form.Item>
               );
@@ -129,10 +127,10 @@ const EditableTable: FC<EditableTableProps> = ({
       {
         title: '',
         dataIndex: 'actions',
-        className: cellClassName,
+        width: 20,
         render: (_: any, __: TableRow, index: number) => (
           <div
-            className="rb:ml-1 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
+            className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
             onClick={() => remove(index)}
           ></div>
         )
@@ -146,27 +144,26 @@ const EditableTable: FC<EditableTableProps> = ({
         {(fields, { add, remove }) => {
           const AddButton = ({ block = false }: { block?: boolean }) => (
             <Button
-              icon={block ? undefined : <PlusOutlined />} 
               onClick={() => add(createNewRow())} 
               size="small"
               block={block}
-              className={block ? "rb:mt-1 rb:text-[12px]! rb:bg-transparent!" : "rb:text-[12px]!"}
+              className={block ? "rb:mt-2 rb:text-[12px]! rb:bg-transparent! rb:rounded-md" : "rb:text-[12px]! rb:rounded-sm!"}
             >
-              {block && `+${t('common.add')}`}
+              + {t('common.add')}
             </Button>
           );
 
           return (
             <>
               {title && (
-                <div className="rb:flex rb:items-center rb:mb-2 rb:justify-between">
+                <Flex align="center" justify="space-between" className="rb:mb-2!">
                   <div className="rb:font-medium rb:text-[12px] rb:leading-4.5">{title}</div>
                   <AddButton block={false} />
-                </div>
+                </Flex>
               )}
               
               <Table<TableRow>
-                bordered
+                bordered={false}
                 dataSource={fields.map((field) => ({ 
                   key: String(field.key),
                   name: undefined,
@@ -176,9 +173,7 @@ const EditableTable: FC<EditableTableProps> = ({
                 columns={getColumns(remove)}
                 pagination={false}
                 size="small"
-                rowClassName="rb:p-0! rb:bg-[#F6F8FC]!"
                 locale={{ emptyText: <Empty size={88} /> }}
-                style={{ width: '274px' }}
               />
               
               {!title && <AddButton block />}

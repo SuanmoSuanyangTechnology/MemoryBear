@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 6</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="应用管理-工作流-配置-知识检索" transform="translate(-30, -221)">
+            <g id="节点名称" transform="translate(10, 74)">
+                <g id="节点" transform="translate(0, 42)">
+                    <g id="流程控制备份" transform="translate(12, -204)">
+                        <g id="7" transform="translate(0, 301)">
+                            <g id="编组-6" transform="translate(8, 8)">
+                                <rect id="矩形" fill="#FF5D34" x="0" y="0" width="24" height="24" rx="8"></rect>
+                                <g id="数据源管理" transform="translate(2.4, 2.4)" stroke="#FFFFFF" stroke-width="1.2">
+                                    <g id="编组-26" transform="translate(2.4, 2.4)">
+                                        <path d="M6.3,1.21243557 C6.85692194,0.890896534 7.54307806,0.890896534 8.1,1.21243557 L11.9353829,3.42679492 C12.4923048,3.74833395 12.8353829,4.34256258 12.8353829,4.98564065 L12.8353829,9.41435935 C12.8353829,9.73589838 12.7496134,10.0452251 12.5942286,10.3143594 C12.4388439,10.5834936 12.2138439,10.8124356 11.9353829,10.9732051 L8.1,13.1875644 C7.54307806,13.5091035 6.85692194,13.5091035 6.3,13.1875644 L2.46461709,10.9732051 C1.90769515,10.651666 1.56461709,10.0574374 1.56461709,9.41435935 L1.56461709,4.98564065 C1.56461709,4.66410162 1.65038661,4.35477494 1.80577137,4.08564065 C1.96115612,3.81650635 2.18615612,3.58756443 2.46461709,3.42679492 Z" id="多边形"></path>
+                                        <circle id="椭圆形" cx="7.2" cy="7.2" r="1.8"></circle>
+                                        <line x1="7.2" y1="0.898650048" x2="7.2" y2="3.59324015" id="路径-20" stroke-linejoin="round"></line>
+                                        <line x1="1.85111137" y1="4.13170203" x2="4.08337173" y2="5.4" id="路径-21" stroke-linejoin="round"></line>
+                                        <line x1="1.85111137" y1="10.2962271" x2="4.08337173" y2="9" id="路径-22" stroke-linejoin="round"></line>
+                                        <line x1="7.19970469" y1="10.8821968" x2="7.20009" y2="13.4918185" id="路径-23" stroke-linejoin="round"></line>
+                                        <line x1="12.570932" y1="4.13170203" x2="10.31441" y2="5.4" id="路径-24" stroke-linejoin="round"></line>
+                                        <line x1="12.570932" y1="10.271036" x2="10.31441" y2="9" id="路径-25" stroke-linejoin="round"></line>
+                                    </g>
+                                </g>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

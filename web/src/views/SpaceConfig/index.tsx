@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:48:03 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:48:03 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-24 17:01:59
  */
 /**
  * Space Configuration Page
@@ -63,7 +63,7 @@ const SpaceConfig: FC = () => {
   }
 
   return (
-    <div className="rb:h-full rb:max-w-140 rb:mx-auto">
+    <div className="rb:w-250 rb:bg-white rb:rounded-lg rb:py-3 rb:px-3">
       {pageLoading
         ? <Skeleton active />
         : <Form

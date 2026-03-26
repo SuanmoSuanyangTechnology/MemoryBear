@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 class AssignerNode(BaseNode):
-    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
-        super().__init__(node_config, workflow_config)
+    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
+        super().__init__(node_config, workflow_config, down_stream_nodes)
         self.variable_updater = True
         self.typed_config: AssignerNodeConfig | None = None
 

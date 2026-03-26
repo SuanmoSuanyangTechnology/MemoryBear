@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:26:44 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-05 10:31:12
+ * @Last Modified time: 2026-03-20 13:53:05
  */
 /**
  * AI Prompt Assistant Modal
@@ -11,25 +11,24 @@
  */
 
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
-import { Button, Form, Input, App, Row, Col } from 'antd';
+import { Button, Form, Input, App, Flex, Space } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx'
 import copy from 'copy-to-clipboard';
 
 import { updatePromptMessages, createPromptSessions } from '@/api/prompt'
-import { getModelListUrl } from '@/api/models'
 import type { AiPromptModalRef, AiPromptVariableModalRef, AiPromptForm } from '../types'
 import RbModal from '@/components/RbModal'
-import type { ModelListItem } from '@/views/ModelManagement/types'
+import type { Model } from '@/views/ModelManagement/types'
 import ChatContent from '@/components/Chat/ChatContent'
 import Empty from '@/components/Empty'
-import ChatSendIcon from '@/assets/images/application/chatSend.svg'
 import ConversationEmptyIcon from '@/assets/images/conversation/conversationEmpty.svg'
-import type { ChatItem } from '@/components/Chat/types' 
-import CustomSelect from '@/components/CustomSelect'
+import type { ChatItem } from '@/components/Chat/types'
+import ModelSelect from '@/components/ModelSelect'
 import AiPromptVariableModal from './AiPromptVariableModal'
 import { type SSEMessage } from '@/utils/stream'
 import Editor from './Editor'
+import analysisEmptyIcon from '@/assets/images/conversation/analysisEmpty.png'
 
 /**
  * Component props
@@ -38,8 +37,8 @@ interface AiPromptModalProps {
   /** Callback to refresh prompt with optimized value */
   refresh: (value: string) => void;
   /** Default model to pre-select */
-  defaultModel?: ModelListItem | null;
-  source?: 'app' | 'skills'
+  defaultModel?: Model | null;
+  source?: 'application' | 'skills'
 }
 
 /**
@@ -92,7 +91,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
   };
   /** Send user message and get AI response */
   const handleSend = () => {
-    if (!promptSession) return
+    if (!promptSession || loading || !values.message || values.message.trim() == '') return
     if (!values.model_id) {
       message.warning(t('common.selectPlaceholder', { title: t(`${source}.model`) }))
       return
@@ -185,6 +184,13 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
   useImperativeHandle(ref, () => ({
     handleOpen,
   }));
+  const [isFocus, setIsFocus] = useState(false)
+  const handleFocus = () => {
+    setIsFocus(true)
+  }
+  const handleBlur = () => {
+    setIsFocus(false)
+  }
 
   console.log(values)
   return (
@@ -194,69 +200,101 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
       onCancel={handleClose}
       footer={null}
       width={1000}
+      classNames={{
+        content: 'rb:p-0!',
+        header: 'rb:p-6! rb:mb-0!',
+        body: 'rb:p-0! rb:border-t rb:border-t-[#EBEBEB]'
+      }}
     >
-      <Form form={form}>
-        <div className="rb:grid rb:grid-cols-2 rb:border-t rb:border-t-[#EBEBEB]">
-          <div className="rb:border-r rb:border-r-[#EBEBEB] rb:pr-6 rb:pt-3">
+      <Form form={form} className="rb:mx-4!">
+        <div className="rb:grid rb:grid-cols-2">
+          <div className="rb:border-r rb:border-r-[#EBEBEB] rb:pr-4 rb:pt-3 rb:pb-4">
             <Form.Item
-              label={t(`${source}.model`)}
               name="model_id"
               rules={[{ required: true, message: t('common.pleaseSelect') }]}
             >
-              <CustomSelect
-                url={getModelListUrl}
-                params={{ type: 'llm,chat', pagesize: 100, is_active: true }}
-                valueKey="id"
-                labelKey="name"
-                hasAll={false}
-                style={{ width: '100%' }}
+              <ModelSelect
+                params={{ type: 'llm,chat' }}
+                className="rb:w-full!"
               />
             </Form.Item>
 
             <ChatContent
-              classNames="rb:h-100.5 rb:px-[16px] rb:py-[20px] rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-[8px]"
-              contentClassNames="rb:max-w-[260px]!"
-              empty={<Empty url={ConversationEmptyIcon} title={t(`${source}.promptChatEmpty`)} isNeedSubTitle={false} size={[240, 200]} className="rb:h-full" />}
+              classNames="rb:h-105.5 rb:pb-[15px]!"
+              contentClassNames="rb:max-w-75!"
+              empty={<Empty url={ConversationEmptyIcon} title={t(`${source}.promptChatEmpty`)} isNeedSubTitle={false} size={[140, 100]} className="rb:h-full" />}
               data={chatList || []}
               streamLoading={false}
               labelPosition="top"
               labelFormat={(item) => item.role === 'user' ? t(`${source}.you`) : t(`${source}.ai`)}
             />
-
-            <div className="rb:flex rb:items-center rb:gap-2.5 rb:py-4">
-              <Form.Item name="message" className="rb:mb-0!" style={{ width: 'calc(100% - 54px)' }}>
+            <Flex align="center" gap={12} justify="space-between"
+              className={clsx("rb-border rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.1)] rb:rounded-2xl rb:h-13 rb:px-3!", {
+                'rb:border rb:border-[#171719]!': isFocus
+              })}
+            >
+              <Form.Item name="message" className="rb:flex-1 rb:mb-0!">
                 <Input
-                  className="rb:h-11 rb:shadow-[0px_2px_8px_0px_rgba(33,35,50,0.1)]"
                   placeholder={t(`${source}.promptChatPlaceholder`)}
                   onPressEnter={handleSend}
+                  variant="borderless"
+                  className="rb:p-0!"
+                  onFocus={handleFocus}
+                  onBlur={handleBlur}
                 />
               </Form.Item>
-              <img src={ChatSendIcon} className={clsx("rb:w-11 rb:h-11 rb:cursor-pointer", {
-                'rb:opacity-50': loading,
-              })} onClick={handleSend} />
-            </div>
+              
+              <Flex align="center" justify="center"
+                className={clsx('rb:size-7 rb:rounded-full rb:shadow-[0px 2px 12px 0px rgba(23,23,25,0.1)]', {
+                  'rb:cursor-not-allowed rb:bg-[#F6F6F6]': loading || !values || !values?.message || values?.message?.trim() === '',
+                  'rb:cursor-pointer rb:bg-[#171719]': !loading && !(!values || !values?.message || values?.message?.trim() === '')
+                })}
+                onClick={handleSend}
+              >
+                <div className={clsx("rb:size-4 rb:bg-cover", {
+                  "rb:bg-[url('@/assets/images/conversation/loading.svg')]": loading,
+                  "rb:bg-[url('@/assets/images/conversation/sendDisabled.svg')]": !loading && (!values || !values?.message || values?.message?.trim() === ''),
+                  "rb:bg-[url('@/assets/images/conversation/send.svg')]": !loading && !(!values || !values?.message || values?.message?.trim() === '')
+                })}></div>
+              </Flex>
+            </Flex>
           </div>
 
-          <div className="rb:pl-6 rb:pt-3">
-            <Row>
-              <Col span={source === 'application' ? 12 : 24}>
-                <Form.Item label={t(`${source}.conversationOptimizationPrompt`)}></Form.Item>
-              </Col>
-              {source === 'application' && <Col span={12} className="rb:text-right">
-                <Button onClick={handleAdd}>+ {t(`${source}.addVariable`)}</Button>
-              </Col>}
-            </Row>
-            <Form.Item name="current_prompt">
-              <Editor 
-                ref={editorRef}
-                className="rb:h-100.5 " 
-                onChange={(value) => form.setFieldValue('current_prompt', value)}
-              />
+          <div className="rb:pl-4 rb:pt-3.5 rb:pb-4">
+            <Flex justify="space-between" className="rb:mb-3!">
+              <div>
+                {t(`${source}.conversationOptimizationPrompt`)}
+              </div>
+              <Space size={8}>
+                <Button
+                  disabled={!values?.current_prompt}
+                  icon={<div className="rb:size-3.5 rb:bg-cover rb:bg-[url('@/assets/images/application/copy.svg')]"></div>}
+                  onClick={handleCopy}>{t('common.copy')}</Button>
+                <Button
+                  disabled={!values?.current_prompt}
+                  icon={<div className="rb:size-3.5 rb:bg-cover rb:bg-[url('@/assets/images/application/save.svg')]"></div>}
+                  onClick={handleApply}
+                >{t(`${source}.apply`)}</Button>
+                {source === 'application' &&
+                  <Button
+                    disabled={!values?.current_prompt}
+                    icon={<div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/plus_dark.svg')]"></div>}
+                    onClick={handleAdd}
+                  ></Button>
+                }
+              </Space>
+            </Flex>
+
+            <Form.Item name="current_prompt" noStyle>
+              {values?.current_prompt
+                ? <Editor 
+                  ref={editorRef}
+                  className="rb:h-119 rb:bg-white! rb:border-none! rb:p-0!" 
+                  onChange={(value) => form.setFieldValue('current_prompt', value)}
+                />
+                : <Empty url={analysisEmptyIcon} title={t(`${source}.promptOptimizationEmpty`)} isNeedSubTitle={false} size={[270, 170]} className="rb:h-119 rb:w-70 rb:mx-auto! rb:text-center! rb:text-[12px]! rb:leading-4!" />
+              }
             </Form.Item>
-            <div className="rb:grid rb:grid-cols-2 rb:gap-4 rb:mt-6">
-              <Button block disabled={!values?.current_prompt} onClick={handleCopy}>{t('common.copy')}</Button>
-              <Button type="primary" block disabled={!values?.current_prompt} onClick={handleApply}>{t(`${source}.apply`)}</Button>
-            </div>
           </div>
         </div>
       </Form>

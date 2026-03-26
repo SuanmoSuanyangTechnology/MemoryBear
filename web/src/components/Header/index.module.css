@@ -1,13 +1,11 @@
 .header {
-  width: 100%;
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  padding: 16px 46px 16px 21px;
+  padding: 16px 24px 16px 20px;
   height: 64px;
-  border-bottom: 1px solid #EAECEE;
   color: #212332;
   z-index: 0;
-  line-height: 32px;
   font-size: 14px;
 }
 .title {
@@ -17,4 +15,14 @@
 }
 .header :global(.ant-breadcrumb) {
   line-height: 31px;
+}
+.header :global(.ant-breadcrumb .ant-breadcrumb-item a) {
+  height: inherit;
+  color: #5B6167;
+  font-weight: normal;
+}
+.header :global(.ant-breadcrumb .ant-breadcrumb-separator:nth-last-child(2)),
+.header :global(.ant-breadcrumb .ant-breadcrumb-item:last-child a) {
+  color: #212332;
+  font-weight: 600;
 }

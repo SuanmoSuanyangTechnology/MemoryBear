@@ -21,7 +21,6 @@ import { useTranslation } from 'react-i18next';
 import { lightTheme } from './styles/antdThemeConfig.ts'
 import router from './routes';
 import { useI18n } from '@/store/locale'
-import LayoutBg from '@/components/Layout/LayoutBg'
 import dayjs from 'dayjs'
 import 'dayjs/locale/en'
 import 'dayjs/locale/zh-cn'
@@ -61,7 +60,6 @@ function App() {
       theme={lightTheme}
     >
       <AntdApp>
-        <LayoutBg />
         <Suspense fallback={<Spin fullscreen></Spin>}>
           <RouterProvider 
             router={router}

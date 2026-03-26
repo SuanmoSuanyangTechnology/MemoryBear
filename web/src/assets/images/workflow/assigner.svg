@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 6</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="应用管理-工作流-配置-知识检索" transform="translate(-30, -267)">
+            <g id="节点名称" transform="translate(10, 74)">
+                <g id="节点" transform="translate(0, 42)">
+                    <g id="流程控制备份" transform="translate(12, -204)">
+                        <g id="8" transform="translate(0, 347)">
+                            <g id="编组-6" transform="translate(8, 8)">
+                                <rect id="矩形" fill="#FF8A4C" x="0" y="0" width="24" height="24" rx="8"></rect>
+                                <g id="变量赋值" transform="translate(2.4, 2.4)" stroke="#FFFFFF" stroke-width="1.2">
+                                    <g id="编组-18" transform="translate(3.6, 3.6)">
+                                        <path d="M1.8,12 L0.6,12 C0.26862915,12 1.11022302e-16,11.7313708 1.11022302e-16,11.4 L0,0.6 C0,0.26862915 0.26862915,-3.33066907e-16 0.6,-3.33066907e-16 L11.4,0 C11.7313708,-1.11022302e-16 12,0.26862915 12,0.6 L12,3 L12,3 L0.452027596,3" id="路径" stroke-linecap="round" stroke-linejoin="round"></path>
+                                        <line x1="0" y1="7.6704" x2="2.39680674" y2="7.6704" id="路径-5" stroke-linecap="round"></line>
+                                        <polyline id="路径-7" stroke-linecap="round" stroke-linejoin="round" points="3.6 12 6.69007278 5.68344904 7.81864315 12"></polyline>
+                                        <line x1="4.19396207" y1="10.8125728" x2="7.5453342" y2="10.8125728" id="路径-8"></line>
+                                        <line x1="9.6" y1="6" x2="12" y2="6" id="路径-9" stroke-linecap="round"></line>
+                                        <line x1="9.6" y1="9" x2="12" y2="9" id="路径-14" stroke-linecap="round"></line>
+                                        <line x1="9.6" y1="12" x2="12" y2="12" id="路径-15" stroke-linecap="round"></line>
+                                    </g>
+                                </g>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

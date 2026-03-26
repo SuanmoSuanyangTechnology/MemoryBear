@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:24:23 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 15:24:23 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-25 11:15:26
  */
 /**
  * SearchInput Component
@@ -21,10 +21,8 @@ import { useState, type FC, useCallback, useRef } from 'react';
 import { Input, type InputProps } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import searchIcon from '@/assets/images/search.svg'
-
 /** Props interface for SearchInput component */
-interface SearchInputProps {
+interface SearchInputProps extends InputProps {
   /** Placeholder text */
   placeholder?: string;
   /** Callback fired when search value changes */
@@ -53,6 +51,7 @@ const SearchInput: FC<SearchInputProps> = ({
   throttleDelay,
   defaultValue = undefined,
   className = '',
+  variant = 'filled',
   ...props
 }) => {
   const { t } = useTranslation();
@@ -112,12 +111,13 @@ const SearchInput: FC<SearchInputProps> = ({
   return (
     <Input
       allowClear
-      prefix={<img src={searchIcon} alt="search" className="rb:w-4 rb:h-4 rb:mr-1" />}
+      prefix={<div className="rb:size-4 rb:bg-[url('@/assets/images/search.svg')] rb:mr-1"></div>}
       placeholder={placeholder || t('user.searchPlaceholder')}
       value={value}
       onChange={handleChange}
       style={{ width: '300px' }}
       className={className}
+      variant={variant}
       {...props}
     />
   );

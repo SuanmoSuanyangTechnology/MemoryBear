@@ -2,11 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 16:15:43
+ * @Last Modified time: 2026-03-25 11:37:51
  */
 import React, { useState, useEffect, useMemo, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, App, Flex, Row, Col, Collapse } from 'antd';
+import { Button, App, Flex, Collapse } from 'antd';
 import clsx from 'clsx';
 
 import type { MySharedOutItem } from './types';
@@ -112,9 +112,9 @@ const MySharing: React.FC = () => {
                 </Button>
               ),
               children: (
-                <Row gutter={[12, 12]}>
+                <div className="rb:grid rb:grid-cols-4 rb:gap-3">
                   {items.map(item => (
-                    <Col key={item.id} span={6} className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-3! rb:px-4! rb:relative rb:cursor-pointer" onClick={() => handleEdit(item)}>
+                    <div key={item.id} className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-3! rb:px-4! rb:relative rb:cursor-pointer" onClick={() => handleEdit(item)}>
                       <div
                         className="rb:absolute rb:top-3 rb:right-3 rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/close.svg')]"
                         onClick={(e) => handleCancelOne(item, e)}
@@ -153,15 +153,15 @@ const MySharing: React.FC = () => {
                           <span>{item.source_app_is_active ? t('application.sourceActive') : t('application.sourceInactive')}</span>
                         </Flex>
                       </Flex>
-                    </Col>
+                    </div>
                   ))}
-                </Row>
+                </div>
               ),
             }]}
           />
         ))}
       </BodyWrapper>
-      </Flex>
+    </Flex>
   );
 };
 

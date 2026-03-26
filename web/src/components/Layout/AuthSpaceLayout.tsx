@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:11:43 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 15:11:43 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-05 14:57:08
  */
 /**
  * AuthSpaceLayout Component
@@ -63,7 +63,7 @@ const AuthSpaceLayout: FC = () => {
         {/* Header with breadcrumbs and user menu configured for space mode */}
         <AppHeader source="space" />
         {/* Main content area for knowledge base pages - renders child routes */}
-        <Content style={{ padding: '16px 17px 24px 16px', zIndex: 0, height: 'calc(100vh - 64px)', overflowY: 'auto' }}>
+        <Content style={{ padding: '0 12px 12px 12px', zIndex: 0, height: 'calc(100vh - 64px)', overflowY: 'auto' }}>
           <Outlet />
         </Content> 
       </Layout>

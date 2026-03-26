@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="36px" height="36px" viewBox="0 0 36 36" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 5</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="记忆库-个人记忆-短期记忆" transform="translate(-662, -97)">
+            <g id="编组-6" transform="translate(12, 76)">
+                <g id="编组-5" transform="translate(650, 21)">
+                    <rect id="矩形" stroke="#EBEBEB" x="0.5" y="0.5" width="35" height="35" rx="12"></rect>
+                    <g id="编组-18" transform="translate(10, 9)" stroke="#171719" stroke-width="1.2">
+                        <rect id="矩形" x="0" y="0" width="14" height="18" rx="3"></rect>
+                        <circle id="椭圆形" cx="7" cy="7" r="2"></circle>
+                        <rect id="矩形" x="3" y="9" width="8" height="4" rx="2"></rect>
+                        <path d="M13.0494997,1 L14,1 C15.6568542,1 17,2.34314575 17,4 L17,14 C17,15.6568542 15.6568542,17 14,17 L13,17 L13,17" id="路径" stroke-linejoin="round"></path>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

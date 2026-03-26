@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>更多</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="记忆库-个人记忆-感知记忆-文本" transform="translate(-1173, -187)">
+            <g id="编组-8备份" transform="translate(777, 76)">
+                <g id="更多" transform="translate(396, 111)">
+                    <rect id="矩形" fill="#EBEBEB" fill-rule="nonzero" x="0" y="0" width="24" height="24" rx="8"></rect>
+                    <g id="编组-15" transform="translate(4, 4)" stroke="#171719" stroke-linecap="round" stroke-width="1.2">
+                        <g id="编组-54" transform="translate(2, 2)">
+                            <path d="M12,7.2 L12,9 C12,10.6568542 10.6568542,12 9,12 L3,12 C1.34314575,12 0,10.6568542 0,9 L0,7.2 L0,7.2" id="路径"></path>
+                            <g id="编组-11" transform="translate(6, 4.1978) scale(1, -1) translate(-6, -4.1978)translate(2.4, 0)">
+                                <line x1="3.6" y1="0.101999424" x2="3.6" y2="8.39563031" id="路径-24"></line>
+                                <polyline id="路径-25" stroke-linejoin="round" points="0 3.6 3.57606658 7.29957766e-18 7.2 3.6"></polyline>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

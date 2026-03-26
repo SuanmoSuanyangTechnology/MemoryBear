@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:16:38 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:16:38 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-11 14:57:35
  */
 /**
  * Quick Operation Component
@@ -11,15 +11,16 @@
  */
 
 import { type FC } from 'react'
+import clsx from 'clsx';
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom';
+import { Flex } from 'antd';
 
 import Card from './Card';
-import applicationIcon from '@/assets/images/menu/application_active.svg';
-import knowledgeIcon from '@/assets/images/menu/knowledge_active.svg';
-import memoryConversationIcon from '@/assets/images/menu/memoryConversation_active.svg';
+import applicationIcon from '@/assets/images/home/application.svg';
+import knowledgeIcon from '@/assets/images/home/knowledge.svg';
+import memoryConversationIcon from '@/assets/images/home/memoryConversation.svg';
 import helpCenterIcon from '@/assets/images/menu/helpCenter_active.svg'
-import arrowTopRight from '@/assets/images/home/arrow_top_right.svg';
 
 /** Quick operation items configuration */
 const quickOperations = [
@@ -27,6 +28,13 @@ const quickOperations = [
   { key: 'createNewKnowledge', url: '/knowledge-base' },
   { key: 'memoryConversation', url: '/memory-conversation' },
   { key: 'helpCenter', url: '' },
+]
+
+const bgStyleList = [
+  'rb:bg-[rgba(21,94,239,0.1)]',
+  'rb:bg-[rgba(156,111,255,0.1)]',
+  'rb:bg-[rgba(255,176,72,0.1)]',
+  'rb:bg-[rgba(77,168,255,0.1)]'
 ]
 
 /** Icon mapping for quick operations */
@@ -62,17 +70,19 @@ const QuickOperation:FC = () => {
   return (
     <Card
       title={t('dashboard.quickOperation')}
+      bodyClassName="rb:pt-0! rb:pb-[14px]! rb:px-4!"
     >
-      <div className="rb:grid rb:grid-cols-4 rb:gap-4">
-        {quickOperations.map(item => (
-          <div key={item.key} className="rb:rounded-lg rb:p-[20px_16px] rb:border rb:border-[#DFE4ED] rb:cursor-pointer rb:hover:border-[#155EEF]" onClick={() => handleJump(item.url)}>
-            <div className="rb:flex rb:justify-between">
-              <img className="rb:w-8 rb:h-8" src={quickOperationIcons[item.key]} />
-              <img className="rb:w-4 rb:h-4" src={arrowTopRight} />
+      <div className="rb:grid rb:grid-cols-1 rb:gap-3">
+        {quickOperations.map((item, index) => (
+          <Flex key={item.key} align="center" gap={20} className={clsx("rb:relative rb:rounded-xl rb:py-2! rb:px-3! rb:cursor-pointer", bgStyleList[index])} onClick={() => handleJump(item.url)}>
+            <div className="rb:size-8 rb:rounded-lg rb:p-1 rb:bg-[#FFFFFF]">
+              <img className="rb:size-6" src={quickOperationIcons[item.key]} />
             </div>
-            <div className="rb:mt-6 rb:text-[#212332] rb:text-[16px] rb:leading-5 rb:font-medium">{t(`dashboard.${item.key}`)}</div>
-            <div className="rb:mt-2 rb:text-[#5B6167] rb:text-[12px] rb:font-regular">{t(`dashboard.${item.key}Desc`)}</div>
-          </div>
+            <div>
+              <div className="rb:text-[14px] rb:leading-5 rb:font-medium">{t(`dashboard.${item.key}`)}</div>
+              <div className="rb:mt-0.5 rb:text-[#5B6167] rb:text-[12px] rb:font-regular">{t(`dashboard.${item.key}Desc`)}</div>
+            </div>
+          </Flex>
         ))}
       </div>
     </Card>

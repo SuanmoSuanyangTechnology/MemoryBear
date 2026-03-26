@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="20px" height="20px" viewBox="0 0 20 20" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>收起</title>
+    <g id="定稿" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="首页-红熊空间" transform="translate(-210, -28)" stroke="#5B6167" stroke-width="1.2">
+            <g id="收起" transform="translate(210, 28)">
+                <g id="编组-42" transform="translate(3, 3)">
+                    <rect id="矩形" x="0" y="0" width="14" height="14" rx="4"></rect>
+                    <line x1="4.2" y1="-8.99302162e-14" x2="4.2" y2="14" id="路径-20"></line>
+                    <polyline id="路径-21" stroke-linecap="round" stroke-linejoin="round" points="9.33333333 5.13333333 7.46666667 6.98486571 9.33333333 8.86666667"></polyline>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

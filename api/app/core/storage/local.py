@@ -210,7 +210,12 @@ class LocalStorage(StorageBackend):
                 cause=e,
             )
 
-    async def get_url(self, file_key: str, expires: int = 3600) -> str:
+    async def get_url(
+        self,
+        file_key: str,
+        expires: int = 3600,
+        file_name: Optional[str] = None
+    ) -> str:
         """
         Get an access URL for the file.
 
@@ -220,6 +225,7 @@ class LocalStorage(StorageBackend):
         Args:
             file_key: Unique identifier for the file in the storage system.
             expires: URL validity period in seconds (not used for local storage).
+            file_name: If set, adds Content-Disposition: attachment to force download.
 
         Returns:
             A relative URL path for accessing the file.

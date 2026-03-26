@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:12:42 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 15:12:42 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-24 15:07:38
  */
 /**
  * BasicLayout Component
@@ -19,6 +19,7 @@
 
 import { Outlet } from 'react-router-dom';
 import { useEffect, type FC } from 'react';
+import { Layout } from 'antd';
 
 import { useUser } from '@/store/user';
 
@@ -36,10 +37,10 @@ const BasicLayout: FC = () => {
   }, [getUserInfo, getStorageType]);
 
   return (
-    <div className="rb:relative rb:h-full rb:w-full">
+    <Layout className="rb:min-h-screen!">
       {/* Render child routes without additional UI */}
       <Outlet />
-    </div>
+    </Layout>
   )
 };
 

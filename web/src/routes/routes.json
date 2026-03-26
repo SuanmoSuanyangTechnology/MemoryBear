@@ -37,6 +37,7 @@
       { "path": "/space-config", "element": "SpaceConfig" },
       { "path": "/ontology", "element": "Ontology" },
       { "path": "/prompt", "element": "Prompt" },
+      { "path": "/prompt/history", "element": "PromptHistory" },
       { "path": "/no-permission", "element": "NoPermission" },
       { "path": "/*", "element": "NotFound" }
     ]

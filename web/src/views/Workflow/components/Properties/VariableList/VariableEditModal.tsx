@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, Select, InputNumber, Checkbox, Tag } from 'antd';
+import { Form, Input, Select, InputNumber, Checkbox, Tag, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { Variable, VariableEditModalRef } from './types'
@@ -112,8 +112,8 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               label: t(`workflow.config.start.${key}`),
             }))}
             onChange={() => form.setFieldValue('default', undefined)}
-            labelRender={(props) => <div className="rb:flex rb:justify-between rb:items-center">{props.label} <Tag color="blue">{variableType[props.value as keyof typeof variableType]}</Tag></div>}
-            optionRender={(props) => <div className="rb:flex rb:justify-between rb:items-center">{props.label} <Tag color="blue">{variableType[props.value as keyof typeof variableType]}</Tag></div>}
+            labelRender={(props) => <Flex align="center" justify="space-between">{props.label} <Tag color="blue">{variableType[props.value as keyof typeof variableType]}</Tag></Flex>}
+            optionRender={(props) => <Flex align="center" justify="space-between">{props.label} <Tag color="blue">{variableType[props.value as keyof typeof variableType]}</Tag></Flex>}
           />
         </FormItem>
         {/* 变量名称 */}

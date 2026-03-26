@@ -1,7 +1,7 @@
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { Form, message } from 'antd';
+import { Form, App } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { UploadFile } from 'antd';
 import type { CreateSetModalRef, CreateSetMoealRefProps } from '@/views/KnowledgeBase/types';
@@ -19,8 +19,8 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
   ({ refreshTable }, ref) => {
     const { t } = useTranslation();
     const navigate = useNavigate();
+    const { message: messageApi } = App.useApp();
     const [visible, setVisible] = useState(false);
-    const [messageApi, contextHolder] = message.useMessage();
 
     const [form] = Form.useForm<ImageDatasetFormData>();
     const [loading, setLoading] = useState(false);
@@ -227,7 +227,6 @@ const CreateImageDataset = forwardRef<CreateSetModalRef, CreateSetMoealRefProps>
     };
     return (
       <>
-      {contextHolder}
       <RbModal
         title={`${t('knowledgeBase.createA')} ${t('knowledgeBase.mediaDataSet')}`}
         open={visible}

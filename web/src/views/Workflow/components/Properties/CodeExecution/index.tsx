@@ -1,12 +1,13 @@
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Form, Select, Space, Row, Col, Divider, Button, Tooltip } from 'antd'
+import { Form, Select, Flex, Tooltip } from 'antd'
 import { Node } from '@antv/x6'
 
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import MappingList from '../MappingList'
 import OutputList from './OutputList'
 import CodeMirrorEditor from '@/components/CodeMirrorEditor';
+import styles from './index.module.css'
 
 interface MappingItem {
   name?: string
@@ -73,40 +74,31 @@ const CodeExecution: FC<CodeExecutionProps> = ({ options }) => {
 
   return (
     <>
-      <Form.Item name="input_variables" noStyle>
+      <Form.Item name="input_variables">
         <MappingList 
           label={t('workflow.config.code.input_variables')} 
           name="input_variables" 
           options={options}
           valueKey="variable"
           extra={<Tooltip title={t('workflow.config.code.refreshTip')}>
-            <Button
-              onClick={handleRefresh}
-              className="rb:py-0! rb:px-1.5! rb:text-[12px]! rb:group"
-              size="small"
-            >
-              <div onClick={handleRefresh} className="rb:size-3 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/refresh.svg')] rb:group-hover:bg-[url('@/assets/images/refresh_hover.svg')]"></div>
-            </Button>
+            <div onClick={handleRefresh} className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/refresh.svg')]"></div>
           </Tooltip>}
         />
       </Form.Item>
       
-      <Space size={8} direction="vertical" className="rb:w-full rb:border rb:border-[#DFE4ED] rb:rounded-md rb:px-2 rb:py-1.5">
-        <Row>
-          <Col span={12}>
-            <Form.Item name="language" noStyle>
-              <Select 
-                options={[
-                  { label: 'PYTHON3', value: 'python3' },
-                  { label: 'JAVASCRIPT', value: 'javascript' }
-                ]}
-                popupMatchSelectWidth={false}
-                className="rb:font-medium!"
-                onChange={handleChangeLanguage}
-              />
-            </Form.Item>
-          </Col>
-        </Row>
+      <Flex gap={4} vertical className="rb:border rb:bg-[#F6F6F6] rb:border-[#F6F6F6] rb:hover:bg-white rb:hover:border-[#171719] rb:pr-2! rb:rounded-md rb:py-1.5! rb:mb-4!">
+        <Form.Item name="language" noStyle className=" rb:px-2!">
+          <Select 
+            options={[
+              { label: 'PYTHON3', value: 'python3' },
+              { label: 'JAVASCRIPT', value: 'javascript' }
+            ]}
+            popupMatchSelectWidth={false}
+            className={`rb:font-medium! rb:w-25! rb:h-4! rb:p-0! ${styles.editor}`}
+            onChange={handleChangeLanguage}
+            variant="borderless"
+          />
+        </Form.Item>
         <Form.Item noStyle shouldUpdate={(prev, curr) => prev.language !== curr.language}>
           {() => (
             <Form.Item name="code" noStyle>
@@ -117,9 +109,8 @@ const CodeExecution: FC<CodeExecutionProps> = ({ options }) => {
             </Form.Item>
           )}
         </Form.Item>
-      </Space>
-      
-      <Divider />
+      </Flex>
+
       <Form.Item name="output_variables" noStyle>
         <OutputList
           label={t('workflow.config.code.output_variables')} 

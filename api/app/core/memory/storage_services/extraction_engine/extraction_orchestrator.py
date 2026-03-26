@@ -32,9 +32,10 @@ from app.core.memory.models.graph_models import (
     StatementChunkEdge,
     StatementEntityEdge,
     StatementNode,
+    PerceptualEdge,
+    PerceptualNode
 )
 from app.core.memory.models.message_models import DialogData
-from app.core.memory.models.ontology_extraction_models import OntologyTypeList
 from app.core.memory.models.ontology_extraction_models import OntologyTypeList
 from app.core.memory.models.variate_config import (
     ExtractionPipelineConfig,
@@ -46,7 +47,6 @@ from app.core.memory.storage_services.extraction_engine.knowledge_extraction.emb
     embedding_generation,
     generate_entity_embeddings_from_triplets,
 )
-
 # 导入各个提取模块
 from app.core.memory.storage_services.extraction_engine.knowledge_extraction.statement_extraction import (
     StatementExtractor,
@@ -90,16 +90,16 @@ class ExtractionOrchestrator:
     """
 
     def __init__(
-        self,
-        llm_client: LLMClient,
-        embedder_client: OpenAIEmbedderClient,
-        connector: Neo4jConnector,
-        config: Optional[ExtractionPipelineConfig] = None,
-        progress_callback: Optional[Callable[[str, str, Optional[Dict[str, Any]]], Awaitable[None]]] = None,
-        embedding_id: Optional[str] = None,
-        ontology_types: Optional[OntologyTypeList] = None,
-        enable_general_types: bool = True,
-        language: str = "zh",
+            self,
+            llm_client: LLMClient,
+            embedder_client: OpenAIEmbedderClient,
+            connector: Neo4jConnector,
+            config: Optional[ExtractionPipelineConfig] = None,
+            progress_callback: Optional[Callable[[str, str, Optional[Dict[str, Any]]], Awaitable[None]]] = None,
+            embedding_id: Optional[str] = None,
+            ontology_types: Optional[OntologyTypeList] = None,
+            enable_general_types: bool = True,
+            language: str = "zh",
     ):
         """
         初始化流水线编排器
@@ -123,7 +123,7 @@ class ExtractionOrchestrator:
         self.progress_callback = progress_callback  # 保存进度回调函数
         self.embedding_id = embedding_id  # 保存嵌入模型ID
         self.language = language  # 保存语言配置
-    
+
         # 处理本体类型配置
         # 根据 enable_general_types 参数决定是否将通用本体类型与场景特定类型合并
         # 如果启用合并且配置中开启了通用本体功能，则使用 OntologyTypeMerger 进行融合
@@ -146,7 +146,7 @@ class ExtractionOrchestrator:
             self.ontology_types = ontology_types
             if not enable_general_types and ontology_types:
                 logger.info("enable_general_types=False，仅使用场景类型")
-        
+
         # 保存去重消歧的详细记录（内存中的数据结构）
         self.dedup_merge_records: List[Dict[str, Any]] = []  # 实体合并记录
         self.dedup_disamb_records: List[Dict[str, Any]] = []  # 实体消歧记录
@@ -157,19 +157,27 @@ class ExtractionOrchestrator:
             llm_client=llm_client,
             config=self.config.statement_extraction,
         )
-        self.triplet_extractor = TripletExtractor(llm_client=llm_client,ontology_types=self.ontology_types, language=language)
+        self.triplet_extractor = TripletExtractor(llm_client=llm_client, ontology_types=self.ontology_types,
+                                                  language=language)
         self.temporal_extractor = TemporalExtractor(llm_client=llm_client)
 
         logger.info("ExtractionOrchestrator 初始化完成")
 
     async def run(
-        self,
-        dialog_data_list: List[DialogData],
-        is_pilot_run: bool = False,
-    ) -> Tuple[
-        Tuple[List[DialogueNode], List[ChunkNode], List[StatementNode]],
-        Tuple[List[ExtractedEntityNode], List[StatementEntityEdge], List[EntityEntityEdge]],
-        Tuple[List[ExtractedEntityNode], List[StatementEntityEdge], List[EntityEntityEdge]],
+            self,
+            dialog_data_list: List[DialogData],
+            is_pilot_run: bool = False,
+    ) -> tuple[
+        list[DialogueNode],
+        list[ChunkNode],
+        list[StatementNode],
+        list[ExtractedEntityNode],
+        list[PerceptualNode],
+        list[StatementChunkEdge],
+        list[StatementEntityEdge],
+        list[EntityEntityEdge],
+        list[PerceptualEdge],
+        dict
     ]:
         """
         运行完整的知识提取流水线（优化版：并行执行）
@@ -202,13 +210,12 @@ class ExtractionOrchestrator:
             # 步骤 1: 陈述句提取
             logger.info("步骤 1/6: 陈述句提取（全局分块级并行）")
             dialog_data_list = await self._extract_statements(dialog_data_list)
-            
+
             # 收集陈述句内容和统计数量
             all_statements_list = []
             for dialog in dialog_data_list:
                 for chunk in dialog.chunks:
                     all_statements_list.extend(chunk.statements)
-            len(all_statements_list)
 
             # 步骤 2: 并行执行三元组提取、时间信息提取、情绪提取和基础嵌入生成
             logger.info("步骤 2/6: 并行执行三元组提取、时间信息提取、情绪提取和嵌入生成")
@@ -220,7 +227,7 @@ class ExtractionOrchestrator:
                 chunk_embedding_maps,
                 dialog_embeddings,
             ) = await self._parallel_extract_and_embed(dialog_data_list)
-            
+
             # 收集实体和三元组内容，并统计数量
             all_entities_list = []
             all_triplets_list = []
@@ -229,10 +236,6 @@ class ExtractionOrchestrator:
                     if triplet_info:
                         all_entities_list.extend(triplet_info.entities)
                         all_triplets_list.extend(triplet_info.triplets)
-            
-            len(all_entities_list)
-            len(all_triplets_list)
-            sum(len(temporal_map) for temporal_map in temporal_maps)
 
             # 步骤 3: 生成实体嵌入（依赖三元组提取结果）
             logger.info("步骤 3/6: 生成实体嵌入")
@@ -252,17 +255,19 @@ class ExtractionOrchestrator:
 
             # 步骤 5: 创建节点和边
             logger.info("步骤 5/6: 创建节点和边")
-            
+
             # 注意：creating_nodes_edges 消息已在知识抽取完成后立即发送
-            
+
             (
                 dialogue_nodes,
                 chunk_nodes,
                 statement_nodes,
                 entity_nodes,
+                perceptual_nodes,
                 statement_chunk_edges,
                 statement_entity_edges,
                 entity_entity_edges,
+                perceptual_edges
             ) = await self._create_nodes_and_edges(dialog_data_list)
 
             # 导出去重前的测试输入文档（试运行和正式模式都需要，用于生成结果汇总）
@@ -273,10 +278,19 @@ class ExtractionOrchestrator:
                 logger.info("步骤 6/6: 去重和消歧（试运行模式：仅第一层去重）")
             else:
                 logger.info("步骤 6/6: 两阶段去重和消歧")
-            
+
             # 注意：deduplication 消息已在创建节点和边完成后立即发送
-            
-            result = await self._run_dedup_and_write_summary(
+
+            (
+                dialogue_nodes,
+                chunk_nodes,
+                statement_nodes,
+                entity_nodes,
+                statement_chunk_edges,
+                statement_entity_edges,
+                entity_entity_edges,
+                dialog_data_list,
+            ) = await self._run_dedup_and_write_summary(
                 dialogue_nodes,
                 chunk_nodes,
                 statement_nodes,
@@ -287,17 +301,26 @@ class ExtractionOrchestrator:
                 dialog_data_list,
             )
 
-
-
             logger.info(f"知识提取流水线运行完成（{mode_str}）")
-            return result
+            return (
+                dialogue_nodes,
+                chunk_nodes,
+                statement_nodes,
+                entity_nodes,
+                perceptual_nodes,
+                statement_chunk_edges,
+                statement_entity_edges,
+                entity_entity_edges,
+                perceptual_edges,
+                dialog_data_list,
+            )
 
         except Exception as e:
             logger.error(f"知识提取流水线运行失败: {e}", exc_info=True)
             raise
 
     async def _extract_statements(
-        self, dialog_data_list: List[DialogData]
+            self, dialog_data_list: List[DialogData]
     ) -> List[DialogData]:
         """
         从对话中提取陈述句（流式输出版本：边提取边发送进度）
@@ -313,7 +336,7 @@ class ExtractionOrchestrator:
         # 收集所有分块及其元数据
         all_chunks = []
         chunk_metadata = []  # (dialog_idx, chunk_idx)
-        
+
         for d_idx, dialog in enumerate(dialog_data_list):
             dialogue_content = dialog.content if self.config.statement_extraction.include_dialogue_context else None
             for c_idx, chunk in enumerate(dialog.chunks):
@@ -321,7 +344,7 @@ class ExtractionOrchestrator:
                 chunk_metadata.append((d_idx, c_idx))
 
         logger.info(f"收集到 {len(all_chunks)} 个分块，开始全局并行提取")
-        
+
         # 用于跟踪已完成的分块数量
         completed_chunks = 0
         total_chunks = len(all_chunks)
@@ -332,7 +355,7 @@ class ExtractionOrchestrator:
             chunk, end_user_id, dialogue_content = chunk_data
             try:
                 statements = await self.statement_extractor._extract_statements(chunk, end_user_id, dialogue_content)
-                
+
                 #  流式输出：每提取完一个分块的陈述句，立即发送进度
                 # 注意：只在试运行模式下发送陈述句详情，正式模式不发送
                 completed_chunks += 1
@@ -347,11 +370,11 @@ class ExtractionOrchestrator:
                             "statement_index_in_chunk": idx + 1
                         }
                         await self.progress_callback(
-                            "knowledge_extraction_result", 
-                            f"陈述句提取中 ({completed_chunks}/{total_chunks})", 
+                            "knowledge_extraction_result",
+                            f"陈述句提取中 ({completed_chunks}/{total_chunks})",
                             stmt_result
                         )
-                
+
                 return statements
             except Exception as e:
                 logger.error(f"分块 {chunk.id} 陈述句提取失败: {e}")
@@ -381,7 +404,7 @@ class ExtractionOrchestrator:
 
         # 保存陈述句到文件（试运行和正式模式都需要）
         self.statement_extractor.save_statements(all_statements)
-        
+
         logger.info(f"陈述句提取完成，共提取 {len(all_statements)} 条陈述句")
 
         # 试运行模式下，所有分块提取完成后发送完成事件
@@ -395,7 +418,7 @@ class ExtractionOrchestrator:
         return dialog_data_list
 
     async def _extract_triplets(
-        self, dialog_data_list: List[DialogData]
+            self, dialog_data_list: List[DialogData]
     ) -> List[Dict[str, Any]]:
         """
         从对话中提取三元组（流式输出版本：边提取边发送进度）
@@ -411,7 +434,7 @@ class ExtractionOrchestrator:
         # 收集所有陈述句及其元数据
         all_statements = []
         statement_metadata = []  # (dialog_idx, statement_id, chunk_content)
-        
+
         for d_idx, dialog in enumerate(dialog_data_list):
             for chunk in dialog.chunks:
                 for statement in chunk.statements:
@@ -419,7 +442,7 @@ class ExtractionOrchestrator:
                     statement_metadata.append((d_idx, statement.id))
 
         logger.info(f"收集到 {len(all_statements)} 个陈述句，开始全局并行提取三元组")
-        
+
         # 用于跟踪已完成的陈述句数量
         completed_statements = 0
         len(all_statements)
@@ -430,11 +453,11 @@ class ExtractionOrchestrator:
             statement, chunk_content = stmt_data
             try:
                 triplet_info = await self.triplet_extractor._extract_triplets(statement, chunk_content)
-                
+
                 # 注意：不再发送三元组提取的流式输出
                 # 三元组提取在后台执行，但不向前端发送详细信息
                 completed_statements += 1
-                
+
                 return triplet_info
             except Exception as e:
                 logger.error(f"陈述句 {statement.id} 三元组提取失败: {e}")
@@ -450,7 +473,7 @@ class ExtractionOrchestrator:
         # 将结果组织成对话级别的映射
         triplet_maps = [{} for _ in dialog_data_list]
         all_responses = []
-        
+
         for i, result in enumerate(results):
             d_idx, stmt_id = statement_metadata[i]
             if isinstance(result, Exception):
@@ -478,7 +501,7 @@ class ExtractionOrchestrator:
         return triplet_maps
 
     async def _extract_temporal(
-        self, dialog_data_list: List[DialogData]
+            self, dialog_data_list: List[DialogData]
     ) -> List[Dict[str, Any]]:
         """
         从对话中提取时间信息（流式输出版本：边提取边发送进度）
@@ -502,13 +525,13 @@ class ExtractionOrchestrator:
                         temporal_map[statement.id] = TemporalValidityRange(valid_at=None, invalid_at=None)
                 temporal_maps.append(temporal_map)
             return temporal_maps
-        
+
         logger.info("开始时间信息提取（全局陈述句级并行 + 流式输出）")
 
         # 收集所有需要提取时间的陈述句
         all_statements = []
         statement_metadata = []  # (dialog_idx, statement_id, ref_dates)
-        
+
         for d_idx, dialog in enumerate(dialog_data_list):
             # 获取参考日期
             ref_dates = {}
@@ -517,11 +540,11 @@ class ExtractionOrchestrator:
                     ref_dates['conversation_date'] = dialog.metadata['conversation_date']
                 if 'publication_date' in dialog.metadata:
                     ref_dates['publication_date'] = dialog.metadata['publication_date']
-            
+
             if not ref_dates:
                 from datetime import datetime
                 ref_dates = {"today": datetime.now().strftime("%Y-%m-%d")}
-            
+
             for chunk in dialog.chunks:
                 for statement in chunk.statements:
                     # 跳过 ATEMPORAL 类型的陈述句
@@ -531,7 +554,7 @@ class ExtractionOrchestrator:
                         statement_metadata.append((d_idx, statement.id))
 
         logger.info(f"收集到 {len(all_statements)} 个需要时间提取的陈述句，开始全局并行提取")
-        
+
         # 用于跟踪已完成的时间提取数量
         completed_temporal = 0
         len(all_statements)
@@ -542,11 +565,11 @@ class ExtractionOrchestrator:
             statement, ref_dates = stmt_data
             try:
                 temporal_range = await self.temporal_extractor._extract_temporal_ranges(statement, ref_dates)
-                
+
                 # 注意：不再发送时间提取的流式输出
                 # 时间提取在后台执行，但不向前端发送详细信息
                 completed_temporal += 1
-                
+
                 return temporal_range
             except Exception as e:
                 logger.error(f"陈述句 {statement.id} 时间信息提取失败: {e}")
@@ -559,7 +582,7 @@ class ExtractionOrchestrator:
 
         # 将结果组织成对话级别的映射
         temporal_maps = [{} for _ in dialog_data_list]
-        
+
         for i, result in enumerate(results):
             d_idx, stmt_id = statement_metadata[i]
             if isinstance(result, Exception):
@@ -585,7 +608,7 @@ class ExtractionOrchestrator:
         return temporal_maps
 
     async def _extract_emotions(
-        self, dialog_data_list: List[DialogData]
+            self, dialog_data_list: List[DialogData]
     ) -> List[Dict[str, Any]]:
         """
         从对话中提取情绪信息（仅针对用户消息，全局陈述句级并行）
@@ -601,36 +624,36 @@ class ExtractionOrchestrator:
         # 收集所有陈述句及其配置
         all_statements = []
         statement_metadata = []  # (dialog_idx, statement_id)
-        
+
         # 获取第一个对话的config_id来加载配置
         config_id = None
         if dialog_data_list and hasattr(dialog_data_list[0], 'config_id'):
             config_id = dialog_data_list[0].config_id
-        
+
         # 加载MemoryConfig
         memory_config = None
         if config_id:
             try:
                 from app.db import SessionLocal
                 from app.repositories.memory_config_repository import MemoryConfigRepository
-                
+
                 db = SessionLocal()
                 try:
                     memory_config = MemoryConfigRepository.get_by_id(db, config_id)
                 finally:
                     db.close()
-                    
+
                 if memory_config and not memory_config.emotion_enabled:
                     logger.info("情绪提取已在配置中禁用，跳过情绪提取")
                     return [{} for _ in dialog_data_list]
-                    
+
             except Exception as e:
                 logger.warning(f"加载MemoryConfig失败: {e}，将跳过情绪提取")
                 return [{} for _ in dialog_data_list]
         else:
             logger.info("未找到config_id，跳过情绪提取")
             return [{} for _ in dialog_data_list]
-        
+
         # 如果配置未启用情绪提取，直接返回空映射
         if not memory_config or not memory_config.emotion_enabled:
             logger.info("情绪提取未启用，跳过")
@@ -639,7 +662,7 @@ class ExtractionOrchestrator:
         # 收集所有陈述句（只收集 speaker 为 "user" 的）
         total_statements = 0
         filtered_statements = 0
-        
+
         for d_idx, dialog in enumerate(dialog_data_list):
             for chunk in dialog.chunks:
                 for statement in chunk.statements:
@@ -655,12 +678,12 @@ class ExtractionOrchestrator:
         # 初始化情绪提取服务
         # 如果 emotion_model_id 为空，回退到工作空间默认 LLM
         from app.services.emotion_extraction_service import EmotionExtractionService
-        
+
         emotion_model_id = memory_config.emotion_model_id
         if not emotion_model_id and memory_config.workspace_id:
             from app.repositories.workspace_repository import get_workspace_models_configs
             from app.db import SessionLocal
-            
+
             db = SessionLocal()
             try:
                 workspace_models = get_workspace_models_configs(db, memory_config.workspace_id)
@@ -669,7 +692,7 @@ class ExtractionOrchestrator:
                     logger.info(f"emotion_model_id 为空，使用工作空间默认 LLM: {emotion_model_id}")
             finally:
                 db.close()
-        
+
         emotion_service = EmotionExtractionService(
             llm_id=emotion_model_id if emotion_model_id else None
         )
@@ -689,7 +712,7 @@ class ExtractionOrchestrator:
         # 将结果组织成对话级别的映射
         emotion_maps = [{} for _ in dialog_data_list]
         successful_extractions = 0
-        
+
         for i, result in enumerate(results):
             d_idx, stmt_id = statement_metadata[i]
             if isinstance(result, Exception):
@@ -706,7 +729,7 @@ class ExtractionOrchestrator:
         return emotion_maps
 
     async def _parallel_extract_and_embed(
-        self, dialog_data_list: List[DialogData]
+            self, dialog_data_list: List[DialogData]
     ) -> Tuple[
         List[Dict[str, Any]],
         List[Dict[str, Any]],
@@ -757,7 +780,7 @@ class ExtractionOrchestrator:
         triplet_maps = results[0] if not isinstance(results[0], Exception) else [{} for _ in dialog_data_list]
         temporal_maps = results[1] if not isinstance(results[1], Exception) else [{} for _ in dialog_data_list]
         emotion_maps = results[2] if not isinstance(results[2], Exception) else [{} for _ in dialog_data_list]
-        
+
         if isinstance(results[3], Exception):
             logger.error(f"基础嵌入生成失败: {results[3]}")
             statement_embedding_maps = [{} for _ in dialog_data_list]
@@ -777,7 +800,7 @@ class ExtractionOrchestrator:
         )
 
     async def _generate_basic_embeddings(
-        self, dialog_data_list: List[DialogData]
+            self, dialog_data_list: List[DialogData]
     ) -> Tuple[List[Dict[str, List[float]]], List[Dict[str, List[float]]], List[List[float]]]:
         """
         生成基础嵌入向量（陈述句、分块、对话）
@@ -810,7 +833,7 @@ class ExtractionOrchestrator:
             if not self.embedding_id:
                 logger.error("embedding_id is required but was not provided to ExtractionOrchestrator")
                 raise ValueError("embedding_id is required but was not provided")
-            
+
             # 只生成陈述句、分块和对话的嵌入（不包括实体）
             statement_embedding_maps, chunk_embedding_maps, dialog_embeddings = await embedding_generation(
                 dialog_data_list, self.embedding_id
@@ -836,7 +859,7 @@ class ExtractionOrchestrator:
             )
 
     async def _generate_entity_embeddings(
-        self, triplet_maps: List[Dict[str, Any]]
+            self, triplet_maps: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """
         生成实体嵌入向量
@@ -861,7 +884,7 @@ class ExtractionOrchestrator:
             if not self.embedding_id:
                 logger.error("embedding_id is required but was not provided to ExtractionOrchestrator")
                 return triplet_maps
-            
+
             # 生成实体嵌入
             updated_triplet_maps = await generate_entity_embeddings_from_triplets(
                 triplet_maps, self.embedding_id
@@ -874,17 +897,15 @@ class ExtractionOrchestrator:
             logger.error(f"实体嵌入生成失败: {e}", exc_info=True)
             return triplet_maps
 
-
-
     async def _assign_extracted_data(
-        self,
-        dialog_data_list: List[DialogData],
-        temporal_maps: List[Dict[str, Any]],
-        triplet_maps: List[Dict[str, Any]],
-        emotion_maps: List[Dict[str, Any]],
-        statement_embedding_maps: List[Dict[str, List[float]]],
-        chunk_embedding_maps: List[Dict[str, List[float]]],
-        dialog_embeddings: List[List[float]],
+            self,
+            dialog_data_list: List[DialogData],
+            temporal_maps: List[Dict[str, Any]],
+            triplet_maps: List[Dict[str, Any]],
+            emotion_maps: List[Dict[str, Any]],
+            statement_embedding_maps: List[Dict[str, List[float]]],
+            chunk_embedding_maps: List[Dict[str, List[float]]],
+            dialog_embeddings: List[List[float]],
     ) -> List[DialogData]:
         """
         将提取的数据赋值到语句
@@ -906,12 +927,12 @@ class ExtractionOrchestrator:
         # 确保列表长度匹配
         expected_length = len(dialog_data_list)
         if (
-            len(temporal_maps) != expected_length
-            or len(triplet_maps) != expected_length
-            or len(emotion_maps) != expected_length
-            or len(statement_embedding_maps) != expected_length
-            or len(chunk_embedding_maps) != expected_length
-            or len(dialog_embeddings) != expected_length
+                len(temporal_maps) != expected_length
+                or len(triplet_maps) != expected_length
+                or len(emotion_maps) != expected_length
+                or len(statement_embedding_maps) != expected_length
+                or len(chunk_embedding_maps) != expected_length
+                or len(dialog_embeddings) != expected_length
         ):
             logger.warning(
                 f"数据大小不匹配 - 对话: {len(dialog_data_list)}, "
@@ -999,15 +1020,17 @@ class ExtractionOrchestrator:
         return dialog_data_list
 
     async def _create_nodes_and_edges(
-        self, dialog_data_list: List[DialogData]
+            self, dialog_data_list: List[DialogData]
     ) -> Tuple[
         List[DialogueNode],
         List[ChunkNode],
         List[StatementNode],
         List[ExtractedEntityNode],
+        List[PerceptualNode],
         List[StatementChunkEdge],
         List[StatementEntityEdge],
         List[EntityEntityEdge],
+        List[PerceptualEdge]
     ]:
         """
         创建图数据库节点和边
@@ -1021,7 +1044,7 @@ class ExtractionOrchestrator:
             包含所有节点和边的元组
         """
         logger.info("开始创建节点和边")
-        
+
         # 注意：开始消息已在 run 方法中发送，这里不再重复发送
 
         dialogue_nodes = []
@@ -1031,10 +1054,12 @@ class ExtractionOrchestrator:
         statement_chunk_edges = []
         statement_entity_edges = []
         entity_entity_edges = []
+        perceptual_nodes = []
+        perceptual_edges = []
 
         # 用于去重的集合
         entity_id_set = set()
-        
+
         # 用于跟踪进度
         total_dialogs = len(dialog_data_list)
         processed_dialogs = 0
@@ -1075,6 +1100,45 @@ class ExtractionOrchestrator:
                 )
                 chunk_nodes.append(chunk_node)
 
+                for p, file_type in chunk.files:
+
+                    meta = p.meta_data or {}
+                    content_meta = meta.get("content", {})
+
+                    # 生成 summary embedding（如果有 embedder_client）
+                    summary_embedding = None
+                    if self.embedder_client and p.summary:
+                        try:
+                            summary_embedding = (await self.embedder_client.response([p.summary]))[0]
+                        except Exception as emb_err:
+                            print(f"Failed to embed perceptual summary: {emb_err}")
+
+                    perceptual = PerceptualNode(
+                        name=f"Perceptual_{p.id}",
+                        **{
+                        "id": str(p.id),
+                        "end_user_id": str(p.end_user_id),
+                        "perceptual_type": p.perceptual_type,
+                        "file_path": p.file_path or "",
+                        "file_name": p.file_name or "",
+                        "file_ext": p.file_ext or "",
+                        "summary": p.summary or "",
+                        "keywords": content_meta.get("keywords", []),
+                        "topic": content_meta.get("topic", ""),
+                        "domain": content_meta.get("domain", ""),
+                        "created_at": p.created_time.isoformat() if p.created_time else None,
+                        "file_type": file_type,
+                        "summary_embedding": summary_embedding,
+                    })
+                    perceptual_nodes.append(perceptual)
+                    perceptual_edges.append(PerceptualEdge(
+                        source=perceptual.id,
+                        target=chunk.id,
+                        end_user_id=dialog_data.end_user_id,
+                        run_id=dialog_data.run_id,
+                        created_at=dialog_data.created_at,
+                    ))
+
                 # 处理每个陈述句
                 for statement in chunk.statements:
                     # 创建陈述句节点
@@ -1083,15 +1147,19 @@ class ExtractionOrchestrator:
                         name=f"Statement_{statement.id}",  # 添加必需的 name 字段
                         chunk_id=chunk.id,
                         stmt_type=getattr(statement, 'stmt_type', 'general'),  # 添加必需的 stmt_type 字段
-                        temporal_info=getattr(statement, 'temporal_info', TemporalInfo.ATEMPORAL),  # 添加必需的 temporal_info 字段
-                        connect_strength=statement.connect_strength if statement.connect_strength is not None else 'Strong',  # 添加必需的 connect_strength 字段
+                        temporal_info=getattr(statement, 'temporal_info', TemporalInfo.ATEMPORAL),
+                        # 添加必需的 temporal_info 字段
+                        connect_strength=statement.connect_strength if statement.connect_strength is not None else 'Strong',
+                        # 添加必需的 connect_strength 字段
                         end_user_id=dialog_data.end_user_id,
                         run_id=dialog_data.run_id,  # 使用 dialog_data 的 run_id
                         statement=statement.statement,
                         speaker=getattr(statement, 'speaker', None),  # 添加 speaker 字段
                         statement_embedding=statement.statement_embedding,
-                        valid_at=statement.temporal_validity.valid_at if hasattr(statement, 'temporal_validity') and statement.temporal_validity else None,
-                        invalid_at=statement.temporal_validity.invalid_at if hasattr(statement, 'temporal_validity') and statement.temporal_validity else None,
+                        valid_at=statement.temporal_validity.valid_at if hasattr(statement,
+                                                                                 'temporal_validity') and statement.temporal_validity else None,
+                        invalid_at=statement.temporal_validity.invalid_at if hasattr(statement,
+                                                                                     'temporal_validity') and statement.temporal_validity else None,
                         created_at=dialog_data.created_at,
                         expired_at=dialog_data.expired_at,
                         config_id=dialog_data.config_id if hasattr(dialog_data, 'config_id') else None,
@@ -1120,7 +1188,7 @@ class ExtractionOrchestrator:
 
                         # 创建实体索引到ID的映射（支持多种索引方式）
                         entity_idx_to_id = {}
-                        
+
                         # 创建实体节点
                         for entity_idx, entity in enumerate(triplet_info.entities):
                             # 映射实体索引到实体ID（使用多个键以提高容错性）
@@ -1128,7 +1196,7 @@ class ExtractionOrchestrator:
                             entity_idx_to_id[entity.entity_idx] = entity.id
                             # 2. 使用枚举索引（从0开始）
                             entity_idx_to_id[entity_idx] = entity.id
-                            
+
                             if entity.id not in entity_id_set:
                                 entity_connect_strength = getattr(entity, 'connect_strength', 'Strong')
                                 entity_node = ExtractedEntityNode(
@@ -1141,7 +1209,8 @@ class ExtractionOrchestrator:
                                     example=getattr(entity, 'example', ''),  # 新增：传递示例字段
                                     # TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
                                     # fact_summary=getattr(entity, 'fact_summary', ''),  # 添加必需的 fact_summary 字段
-                                    connect_strength=entity_connect_strength if entity_connect_strength is not None else 'Strong',  # 添加必需的 connect_strength 字段
+                                    connect_strength=entity_connect_strength if entity_connect_strength is not None else 'Strong',
+                                    # 添加必需的 connect_strength 字段
                                     aliases=getattr(entity, 'aliases', []) or [],  # 传递从三元组提取阶段获取的aliases
                                     name_embedding=getattr(entity, 'name_embedding', None),
                                     is_explicit_memory=getattr(entity, 'is_explicit_memory', False),  # 新增：传递语义记忆标记
@@ -1171,7 +1240,7 @@ class ExtractionOrchestrator:
                             # 将三元组中的整数索引映射到实体ID
                             subject_entity_id = entity_idx_to_id.get(triplet.subject_id)
                             object_entity_id = entity_idx_to_id.get(triplet.object_id)
-                            
+
                             # 只有当两个实体ID都存在时才创建边
                             if subject_entity_id and object_entity_id:
                                 entity_entity_edge = EntityEntityEdge(
@@ -1186,7 +1255,7 @@ class ExtractionOrchestrator:
                                     expired_at=dialog_data.expired_at,
                                 )
                                 entity_entity_edges.append(entity_entity_edge)
-                                
+
                                 #  流式输出：每创建一个关系边，立即发送进度（限制发送数量）
                                 if self.progress_callback and len(entity_entity_edges) <= 10:
                                     # 获取实体名称
@@ -1202,8 +1271,8 @@ class ExtractionOrchestrator:
                                         "dialog_progress": f"{processed_dialogs}/{total_dialogs}"
                                     }
                                     await self.progress_callback(
-                                        "creating_nodes_edges_result", 
-                                        f"关系创建中 ({processed_dialogs}/{total_dialogs})", 
+                                        "creating_nodes_edges_result",
+                                        f"关系创建中 ({processed_dialogs}/{total_dialogs})",
                                         relationship_result
                                     )
                             else:
@@ -1211,7 +1280,7 @@ class ExtractionOrchestrator:
                                 missing_subject = "subject" if not subject_entity_id else ""
                                 missing_object = "object" if not object_entity_id else ""
                                 missing_both = " and " if (not subject_entity_id and not object_entity_id) else ""
-                                
+
                                 logger.debug(
                                     f"跳过三元组 - 无法找到{missing_subject}{missing_both}{missing_object}实体ID: "
                                     f"subject_id={triplet.subject_id} ({triplet.subject_name}), "
@@ -1228,7 +1297,7 @@ class ExtractionOrchestrator:
             f"陈述句-实体边: {len(statement_entity_edges)}, "
             f"实体-实体边: {len(entity_entity_edges)}"
         )
-        
+
         # 进度回调：创建节点和边完成，传递结果统计
         # 注意：具体的关系创建结果已经在创建过程中实时发送了
         if self.progress_callback:
@@ -1248,25 +1317,32 @@ class ExtractionOrchestrator:
             chunk_nodes,
             statement_nodes,
             entity_nodes,
+            perceptual_nodes,
             statement_chunk_edges,
             statement_entity_edges,
             entity_entity_edges,
+            perceptual_edges
         )
 
     async def _run_dedup_and_write_summary(
-        self,
-        dialogue_nodes: List[DialogueNode],
-        chunk_nodes: List[ChunkNode],
-        statement_nodes: List[StatementNode],
-        entity_nodes: List[ExtractedEntityNode],
-        statement_chunk_edges: List[StatementChunkEdge],
-        statement_entity_edges: List[StatementEntityEdge],
-        entity_entity_edges: List[EntityEntityEdge],
-        dialog_data_list: List[DialogData],
-    ) -> Tuple[
-        Tuple[List[DialogueNode], List[ChunkNode], List[StatementNode]],
-        Tuple[List[ExtractedEntityNode], List[StatementEntityEdge], List[EntityEntityEdge]],
-        Tuple[List[ExtractedEntityNode], List[StatementEntityEdge], List[EntityEntityEdge]],
+            self,
+            dialogue_nodes: List[DialogueNode],
+            chunk_nodes: List[ChunkNode],
+            statement_nodes: List[StatementNode],
+            entity_nodes: List[ExtractedEntityNode],
+            statement_chunk_edges: List[StatementChunkEdge],
+            statement_entity_edges: List[StatementEntityEdge],
+            entity_entity_edges: List[EntityEntityEdge],
+            dialog_data_list: List[DialogData],
+    ) -> tuple[
+        list[DialogueNode],
+        list[ChunkNode],
+        list[StatementNode],
+        list[ExtractedEntityNode],
+        list[StatementChunkEdge],
+        list[StatementEntityEdge],
+        list[EntityEntityEdge],
+        dict
     ]:
         """
         执行两阶段去重并写入汇总
@@ -1288,11 +1364,11 @@ class ExtractionOrchestrator:
             - 第三个元组：去重后的 (实体节点列表, 陈述句-实体边列表, 实体-实体边列表)
         """
         logger.info("开始两阶段实体去重和消歧")
-        
+
         # 进度回调：发送去重消歧开始消息
         if self.progress_callback:
             await self.progress_callback("deduplication", "正在去重消歧...")
-        
+
         logger.info(
             f"去重前: {len(entity_nodes)} 个实体节点, "
             f"{len(statement_entity_edges)} 条陈述句-实体边, "
@@ -1307,7 +1383,7 @@ class ExtractionOrchestrator:
                 from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
                     deduplicate_entities_and_edges,
                 )
-                
+
                 dedup_entity_nodes, dedup_statement_entity_edges, dedup_entity_entity_edges, dedup_details = await deduplicate_entities_and_edges(
                     entity_nodes,
                     statement_entity_edges,
@@ -1317,10 +1393,10 @@ class ExtractionOrchestrator:
                     dedup_config=self.config.deduplication,
                     llm_client=self.llm_client,
                 )
-                
+
                 # 保存去重消歧的详细记录到实例变量
                 self._save_dedup_details(dedup_details, entity_nodes, dedup_entity_nodes)
-                
+
                 result_tuple = (
                     dialogue_nodes,
                     chunk_nodes,
@@ -1330,7 +1406,7 @@ class ExtractionOrchestrator:
                     dedup_statement_entity_edges,
                     dedup_entity_entity_edges,
                 )
-                
+
                 final_entity_nodes = dedup_entity_nodes
                 final_statement_entity_edges = dedup_statement_entity_edges
                 final_entity_entity_edges = dedup_entity_entity_edges
@@ -1361,7 +1437,7 @@ class ExtractionOrchestrator:
                     final_entity_entity_edges,
                     dedup_details,
                 ) = result_tuple
-                
+
                 # 保存去重消歧的详细记录到实例变量
                 self._save_dedup_details(dedup_details, entity_nodes, final_entity_nodes)
 
@@ -1375,12 +1451,12 @@ class ExtractionOrchestrator:
                 f"陈述句-实体边减少 {len(statement_entity_edges) - len(final_statement_entity_edges)}, "
                 f"实体-实体边减少 {len(entity_entity_edges) - len(final_entity_entity_edges)}"
             )
-            
+
             #  流式输出：实时输出去重消歧的具体结果
             if self.progress_callback:
                 # 分析实体合并情况（使用内存中的记录）
                 merge_info = await self._analyze_entity_merges(entity_nodes, final_entity_nodes)
-                
+
                 # 逐个输出去重合并的实体示例
                 for i, merge_detail in enumerate(merge_info[:5]):  # 输出前5个去重结果
                     dedup_result = {
@@ -1391,10 +1467,10 @@ class ExtractionOrchestrator:
                         "message": f"{merge_detail['main_entity_name']}合并{merge_detail['merged_count']}个：相似实体已合并"
                     }
                     await self.progress_callback("dedup_disambiguation_result", "实体去重中", dedup_result)
-                
+
                 # 分析实体消歧情况（使用内存中的记录）
                 disamb_info = await self._analyze_entity_disambiguation(entity_nodes, final_entity_nodes)
-                
+
                 # 逐个输出实体消歧的结果
                 for i, disamb_detail in enumerate(disamb_info[:5]):  # 输出前5个消歧结果
                     disamb_result = {
@@ -1407,14 +1483,13 @@ class ExtractionOrchestrator:
                         "message": f"{disamb_detail['entity_name']}消歧完成：{disamb_detail['disamb_type']}"
                     }
                     await self.progress_callback("dedup_disambiguation_result", "实体消歧中", disamb_result)
-                
+
                 # 进度回调：去重消歧完成，传递去重和消歧的具体效果
                 await self._send_dedup_progress_callback(
                     len(entity_nodes), len(final_entity_nodes),
                     len(statement_entity_edges), len(final_statement_entity_edges),
                     len(entity_entity_edges), len(final_entity_entity_edges)
                 )
- 
 
             # 写入提取结果汇总（试运行和正式模式都需要生成）
             try:
@@ -1436,10 +1511,10 @@ class ExtractionOrchestrator:
             raise
 
     def _save_dedup_details(
-        self,
-        dedup_details: Dict[str, Any],
-        original_entities: List[ExtractedEntityNode],
-        final_entities: List[ExtractedEntityNode]
+            self,
+            dedup_details: Dict[str, Any],
+            original_entities: List[ExtractedEntityNode],
+            final_entities: List[ExtractedEntityNode]
     ):
         """
         保存去重消歧的详细记录到实例变量（基于内存数据结构）
@@ -1452,7 +1527,7 @@ class ExtractionOrchestrator:
         try:
             # 保存ID重定向映射
             self.id_redirect_map = dedup_details.get("id_redirect", {})
-            
+
             # 处理精确匹配的合并记录
             exact_merge_map = dedup_details.get("exact_merge_map", {})
             for key, info in exact_merge_map.items():
@@ -1466,7 +1541,7 @@ class ExtractionOrchestrator:
                         "merged_count": len(merged_ids),
                         "merged_ids": list(merged_ids)
                     })
-            
+
             # 处理模糊匹配的合并记录
             fuzzy_merge_records = dedup_details.get("fuzzy_merge_records", [])
             for record in fuzzy_merge_records:
@@ -1486,7 +1561,7 @@ class ExtractionOrchestrator:
                         })
                 except Exception as e:
                     logger.debug(f"解析模糊匹配记录失败: {record}, 错误: {e}")
-            
+
             # 处理LLM去重的合并记录
             llm_decision_records = dedup_details.get("llm_decision_records", [])
             for record in llm_decision_records:
@@ -1505,7 +1580,7 @@ class ExtractionOrchestrator:
                             })
                     except Exception as e:
                         logger.debug(f"解析LLM去重记录失败: {record}, 错误: {e}")
-            
+
             # 处理消歧记录
             disamb_records = dedup_details.get("disamb_records", [])
             for record in disamb_records:
@@ -1520,14 +1595,14 @@ class ExtractionOrchestrator:
                             entity1_type = match.group(2)
                             match.group(3).strip()
                             entity2_type = match.group(4)
-                            
+
                             # 提取置信度和原因
                             conf_match = re.search(r"conf=([0-9.]+)", str(record))
                             confidence = conf_match.group(1) if conf_match else "unknown"
-                            
+
                             reason_match = re.search(r"reason=([^|]+)", str(record))
                             reason = reason_match.group(1).strip() if reason_match else ""
-                            
+
                             self.dedup_disamb_records.append({
                                 "entity_name": entity1_name,
                                 "disamb_type": f"消歧阻断：{entity1_type} vs {entity2_type}",
@@ -1536,16 +1611,17 @@ class ExtractionOrchestrator:
                             })
                     except Exception as e:
                         logger.debug(f"解析消歧记录失败: {record}, 错误: {e}")
-            
-            logger.info(f"保存去重消歧记录：{len(self.dedup_merge_records)} 个合并记录，{len(self.dedup_disamb_records)} 个消歧记录")
-            
+
+            logger.info(
+                f"保存去重消歧记录：{len(self.dedup_merge_records)} 个合并记录，{len(self.dedup_disamb_records)} 个消歧记录")
+
         except Exception as e:
             logger.error(f"保存去重消歧详情失败: {e}", exc_info=True)
 
     async def _analyze_entity_merges(
-        self,
-        original_entities: List[ExtractedEntityNode],
-        final_entities: List[ExtractedEntityNode]
+            self,
+            original_entities: List[ExtractedEntityNode],
+            final_entities: List[ExtractedEntityNode]
     ) -> List[Dict[str, Any]]:
         """
         分析实体合并情况，直接使用内存中的合并记录（不再解析日志文件）
@@ -1566,28 +1642,28 @@ class ExtractionOrchestrator:
                     key=lambda x: x.get("merged_count", 0),
                     reverse=True
                 )
-                
+
                 merge_info = []
                 for record in sorted_records:
                     merge_info.append({
                         "main_entity_name": record.get("entity_name", "未知实体"),
                         "merged_count": record.get("merged_count", 1)
                     })
-                
+
                 return merge_info
-            
+
             # 如果没有保存的记录，返回空列表
             logger.info("未找到实体合并记录")
             return []
-            
+
         except Exception as e:
             logger.error(f"分析实体合并情况失败: {e}", exc_info=True)
             return []
 
     async def _analyze_entity_disambiguation(
-        self,
-        original_entities: List[ExtractedEntityNode],
-        final_entities: List[ExtractedEntityNode]
+            self,
+            original_entities: List[ExtractedEntityNode],
+            final_entities: List[ExtractedEntityNode]
     ) -> List[Dict[str, Any]]:
         """
         分析实体消歧情况，直接使用内存中的消歧记录（不再解析日志文件）
@@ -1603,11 +1679,11 @@ class ExtractionOrchestrator:
             # 直接使用保存的消歧记录
             if self.dedup_disamb_records:
                 return self.dedup_disamb_records
-            
+
             # 如果没有保存的记录，返回空列表
             logger.info("未找到实体消歧记录")
             return []
-            
+
         except Exception as e:
             logger.error(f"分析实体消歧情况失败: {e}", exc_info=True)
             return []
@@ -1624,7 +1700,7 @@ class ExtractionOrchestrator:
         """
         type_mapping = {
             "Person": "人物实体节点",
-            "Organization": "组织实体节点", 
+            "Organization": "组织实体节点",
             "ORG": "组织实体节点",
             "Location": "地点实体节点",
             "LOC": "地点实体节点",
@@ -1645,9 +1721,9 @@ class ExtractionOrchestrator:
         return type_mapping.get(entity_type, f"{entity_type}实体节点")
 
     async def _output_relationship_creation_results(
-        self, 
-        entity_entity_edges: List[EntityEntityEdge], 
-        entity_nodes: List[ExtractedEntityNode]
+            self,
+            entity_entity_edges: List[EntityEntityEdge],
+            entity_nodes: List[ExtractedEntityNode]
     ):
         """
         输出关系创建结果
@@ -1659,13 +1735,13 @@ class ExtractionOrchestrator:
         try:
             # 创建实体ID到名称的映射
             entity_id_to_name = {node.id: node.name for node in entity_nodes}
-            
+
             # 输出关系创建结果
             for i, edge in enumerate(entity_entity_edges[:10]):  # 只输出前10个关系
                 source_name = entity_id_to_name.get(edge.source, f"Entity_{edge.source}")
                 target_name = entity_id_to_name.get(edge.target, f"Entity_{edge.target}")
                 relation_type = edge.relation_type
-                
+
                 relationship_result = {
                     "result_type": "relationship_creation",
                     "relationship_index": i + 1,
@@ -1674,20 +1750,20 @@ class ExtractionOrchestrator:
                     "target_entity": target_name,
                     "relationship_text": f"{source_name} -[{relation_type}]-> {target_name}"
                 }
-                
+
                 await self.progress_callback("creating_nodes_edges_result", "关系创建", relationship_result)
-                
+
         except Exception as e:
             logger.error(f"输出关系创建结果失败: {e}", exc_info=True)
 
     async def _send_dedup_progress_callback(
-        self,
-        original_entities: int,
-        final_entities: int,
-        original_stmt_edges: int,
-        final_stmt_edges: int,
-        original_ent_edges: int,
-        final_ent_edges: int,
+            self,
+            original_entities: int,
+            final_entities: int,
+            original_stmt_edges: int,
+            final_stmt_edges: int,
+            original_ent_edges: int,
+            final_ent_edges: int,
     ):
         """
         发送去重消歧完成的进度回调，传递具体的去重和消歧效果
@@ -1703,19 +1779,20 @@ class ExtractionOrchestrator:
         try:
             # 解析去重消歧报告文件，获取具体的去重和消歧效果
             dedup_details = await self._parse_dedup_report()
-            
+
             # 计算去重效果统计
             entities_reduced = original_entities - final_entities
             stmt_edges_reduced = original_stmt_edges - final_stmt_edges
             ent_edges_reduced = original_ent_edges - final_ent_edges
-            
+
             # 构建进度回调数据
             dedup_stats = {
                 "entities": {
                     "original_count": original_entities,
                     "final_count": final_entities,
                     "reduced_count": entities_reduced,
-                    "reduction_rate": round(entities_reduced / original_entities * 100, 1) if original_entities > 0 else 0,
+                    "reduction_rate": round(entities_reduced / original_entities * 100,
+                                            1) if original_entities > 0 else 0,
                 },
                 "statement_entity_edges": {
                     "original_count": original_stmt_edges,
@@ -1734,9 +1811,9 @@ class ExtractionOrchestrator:
                     "total_disambiguations": dedup_details.get("total_disambiguations", 0),
                 }
             }
-            
+
             await self.progress_callback("dedup_disambiguation_complete", "去重消歧完成", dedup_stats)
-            
+
         except Exception as e:
             logger.error(f"发送去重消歧进度回调失败: {e}", exc_info=True)
             # 即使解析失败，也发送基本的统计信息
@@ -1766,12 +1843,12 @@ class ExtractionOrchestrator:
             disamb_examples = []
             total_merges = 0
             total_disambiguations = 0
-            
+
             # 处理合并记录
             for record in self.dedup_merge_records:
                 merge_count = record.get("merged_count", 0)
                 total_merges += merge_count
-                
+
                 dedup_examples.append({
                     "type": record.get("type", "未知"),
                     "entity_name": record.get("entity_name", "未知实体"),
@@ -1779,30 +1856,31 @@ class ExtractionOrchestrator:
                     "merge_count": merge_count,
                     "description": f"{record.get('entity_name', '未知实体')}实体去重合并{merge_count}个"
                 })
-            
+
             # 处理消歧记录
             for record in self.dedup_disamb_records:
                 total_disambiguations += 1
-                
+
                 # 从消歧类型中提取实体类型信息
                 disamb_type = record.get("disamb_type", "")
                 entity_name = record.get("entity_name", "未知实体")
-                
+
                 disamb_examples.append({
                     "entity1_name": entity_name,
-                    "entity1_type": disamb_type.split("vs")[0].replace("消歧阻断：", "").strip() if "vs" in disamb_type else "未知",
+                    "entity1_type": disamb_type.split("vs")[0].replace("消歧阻断：",
+                                                                       "").strip() if "vs" in disamb_type else "未知",
                     "entity2_name": entity_name,
                     "entity2_type": disamb_type.split("vs")[1].strip() if "vs" in disamb_type else "未知",
                     "description": f"{entity_name}，消歧区分成功"
                 })
-            
+
             return {
                 "dedup_examples": dedup_examples[:5],  # 只返回前5个示例
                 "disamb_examples": disamb_examples[:5],  # 只返回前5个示例
                 "total_merges": total_merges,
                 "total_disambiguations": total_disambiguations,
             }
-            
+
         except Exception as e:
             logger.error(f"获取去重报告失败: {e}", exc_info=True)
             return {"dedup_examples": [], "disamb_examples": [], "total_merges": 0, "total_disambiguations": 0}
@@ -1815,9 +1893,9 @@ class ExtractionOrchestrator:
 
 
 async def get_chunked_dialogs(
-    chunker_strategy: str = "RecursiveChunker",
-    end_user_id: str = "group_1",
-    indices: Optional[List[int]] = None,
+        chunker_strategy: str = "RecursiveChunker",
+        end_user_id: str = "group_1",
+        indices: Optional[List[int]] = None,
 ) -> List[DialogData]:
     """从测试数据生成分块对话
     
@@ -1831,7 +1909,7 @@ async def get_chunked_dialogs(
     """
     import json
     import re
-    
+
     # 加载测试数据
     testdata_path = os.path.join(os.path.dirname(__file__), "../../data", "testdata.json")
     with open(testdata_path, "r", encoding="utf-8") as f:
@@ -1845,7 +1923,7 @@ async def get_chunked_dialogs(
     else:
         # 默认使用所有数据
         selected_data = test_data
-        
+
     for data in selected_data:
         # 解析对话上下文
         context_text = data["context"]
@@ -1861,7 +1939,7 @@ async def get_chunked_dialogs(
             if m:
                 y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
                 conv_date = f"{y:04d}-{mo:02d}-{d:02d}"
-                
+
         dialog_metadata: Dict[str, Any] = {}
         if conv_date:
             dialog_metadata["conversation_date"] = conv_date
@@ -1890,7 +1968,7 @@ async def get_chunked_dialogs(
             end_user_id=end_user_id,
             metadata=dialog_metadata,
         )
-        
+
         # 创建分块器并处理对话
         from app.core.memory.storage_services.extraction_engine.knowledge_extraction.chunk_extraction import (
             DialogueChunker,
@@ -1913,7 +1991,7 @@ async def get_chunked_dialogs(
     from app.core.config import settings
     settings.ensure_memory_output_dir()
     output_path = settings.get_memory_output_path("chunker_test_output.txt")
-    
+
     import json
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(
@@ -1924,10 +2002,10 @@ async def get_chunked_dialogs(
 
 
 def preprocess_data(
-    input_path: Optional[str] = None, 
-    output_path: Optional[str] = None,
-    skip_cleaning: bool = True,
-    indices: Optional[List[int]] = None
+        input_path: Optional[str] = None,
+        output_path: Optional[str] = None,
+        skip_cleaning: bool = True,
+        indices: Optional[List[int]] = None
 ) -> List[DialogData]:
     """数据预处理
     
@@ -1946,7 +2024,8 @@ def preprocess_data(
     )
     preprocessor = DataPreprocessor()
     try:
-        cleaned_data = preprocessor.preprocess(input_path=input_path, output_path=output_path, skip_cleaning=skip_cleaning, indices=indices)
+        cleaned_data = preprocessor.preprocess(input_path=input_path, output_path=output_path,
+                                               skip_cleaning=skip_cleaning, indices=indices)
         logger.debug(f"数据预处理完成！共处理了 {len(cleaned_data)} 条对话数据")
         return cleaned_data
     except Exception as e:
@@ -1955,9 +2034,9 @@ def preprocess_data(
 
 
 async def get_chunked_dialogs_from_preprocessed(
-    data: List[DialogData],
-    chunker_strategy: str = "RecursiveChunker",
-    llm_client: Optional[Any] = None,
+        data: List[DialogData],
+        chunker_strategy: str = "RecursiveChunker",
+        llm_client: Optional[Any] = None,
 ) -> List[DialogData]:
     """从预处理后的数据中生成分块
     
@@ -1972,31 +2051,31 @@ async def get_chunked_dialogs_from_preprocessed(
     logger.debug(f"=== 批量对话分块处理 (使用 {chunker_strategy}) ===")
     if not data:
         raise ValueError("预处理数据为空，无法进行分块")
-        
+
     all_chunked_dialogs: List[DialogData] = []
     from app.core.memory.storage_services.extraction_engine.knowledge_extraction.chunk_extraction import (
         DialogueChunker,
     )
-    
+
     for dialog_data in data:
         chunker = DialogueChunker(chunker_strategy, llm_client=llm_client)
         chunks = await chunker.process_dialogue(dialog_data)
         dialog_data.chunks = chunks
         all_chunked_dialogs.append(dialog_data)
-        
+
     return all_chunked_dialogs
 
 
 async def get_chunked_dialogs_with_preprocessing(
-    chunker_strategy: str = "RecursiveChunker",
-    end_user_id: str = "default",
-    user_id: str = "default",
-    apply_id: str = "default",
-    indices: Optional[List[int]] = None,
-    input_data_path: Optional[str] = None,
-    llm_client: Optional[Any] = None,
-    skip_cleaning: bool = True,
-    pruning_config: Optional[Dict] = None,
+        chunker_strategy: str = "RecursiveChunker",
+        end_user_id: str = "default",
+        user_id: str = "default",
+        apply_id: str = "default",
+        indices: Optional[List[int]] = None,
+        input_data_path: Optional[str] = None,
+        llm_client: Optional[Any] = None,
+        skip_cleaning: bool = True,
+        pruning_config: Optional[Dict] = None,
 ) -> List[DialogData]:
     """包含数据预处理步骤的完整分块流程
     
@@ -2020,7 +2099,7 @@ async def get_chunked_dialogs_with_preprocessing(
         input_data_path = os.path.join(
             os.path.dirname(__file__), "../../data", "testdata.json"
         )
-        
+
     # 步骤1: 数据预处理（包含索引筛选）
     from app.core.config import settings
     settings.ensure_memory_output_dir()
@@ -2030,37 +2109,38 @@ async def get_chunked_dialogs_with_preprocessing(
         skip_cleaning=skip_cleaning,
         indices=indices,
     )
-            
+
     # 设置 end_user_id
     for dd in preprocessed_data:
         dd.end_user_id = end_user_id
-        
+
     # 步骤2: 语义剪枝
     try:
         from app.core.memory.storage_services.extraction_engine.data_preprocessing.data_pruning import (
             SemanticPruner,
         )
         from app.core.memory.models.config_models import PruningConfig
-        
+
         # 构建剪枝配置
         if pruning_config:
             # 使用传入的配置
             config = PruningConfig(**pruning_config)
-            logger.debug(f"[剪枝] 使用传入配置: switch={config.pruning_switch}, scene={config.pruning_scene}, threshold={config.pruning_threshold}")
+            logger.debug(
+                f"[剪枝] 使用传入配置: switch={config.pruning_switch}, scene={config.pruning_scene}, threshold={config.pruning_threshold}")
         else:
             # 使用默认配置（关闭剪枝）
             config = None
             logger.debug("[剪枝] 未提供配置，使用默认配置（剪枝关闭）")
-        
+
         pruner = SemanticPruner(config=config, llm_client=llm_client)
-        
+
         # 记录单对话场景下剪枝前的消息数量
         single_dialog_original_msgs = None
         if len(preprocessed_data) == 1 and preprocessed_data[0].context:
             single_dialog_original_msgs = len(preprocessed_data[0].context.msgs)
 
         preprocessed_data = await pruner.prune_dataset(preprocessed_data)
-        
+
         # 单对话：打印清洗与剪枝信息
         if len(preprocessed_data) == 1 and single_dialog_original_msgs is not None:
             remaining_msgs = len(preprocessed_data[0].context.msgs) if preprocessed_data[0].context else 0
@@ -2071,7 +2151,7 @@ async def get_chunked_dialogs_with_preprocessing(
             )
         else:
             logger.debug(f"语义剪枝完成！剩余 {len(preprocessed_data)} 条对话")
-            
+
         # 保存剪枝后的数据
         try:
             from app.core.memory.storage_services.extraction_engine.data_preprocessing.data_preprocessor import (
@@ -2084,7 +2164,7 @@ async def get_chunked_dialogs_with_preprocessing(
             logger.error(f"保存剪枝结果失败：{se}")
     except Exception as e:
         logger.error(f"语义剪枝过程中出现错误，跳过剪枝: {e}")
-        
+
     # 步骤3: 对话分块
     return await get_chunked_dialogs_from_preprocessed(
         preprocessed_data,

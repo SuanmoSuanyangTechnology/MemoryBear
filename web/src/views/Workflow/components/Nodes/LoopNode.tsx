@@ -2,7 +2,10 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next'
 import clsx from 'clsx';
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
+import { Flex } from 'antd';
+
 import { graphNodeLibrary, edgeAttrs } from '../../constant';
+import NodeTools from './NodeTools'
 
 const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
   const data = node.getData() || {};
@@ -32,7 +35,7 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
       const addNode = graph.addNode({
         ...graphNodeLibrary.addStart,
         x: cycleStartBBox.x + 84,
-        y: cycleStartBBox.y,
+        y: cycleStartBBox.y + 4,
         data: {
           type: 'add-node',
           label: t('workflow.addNode'),
@@ -67,8 +70,8 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
     if (existingCycleNodes.length > 0) return;
     // 添加默认子节点
     const parentBBox = node.getBBox();
-    const centerX = parentBBox.x + 24; // 默认节点宽度的一半
-    const centerY = parentBBox.y + 50; // 默认节点高度的一半
+    const centerX = parentBBox.x + 24;
+    const centerY = parentBBox.y + 70;
 
     const cycleStartNodeId = `cycle_start_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     const cycleStartNode = graph.addNode({
@@ -87,7 +90,7 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
     const addNode = graph.addNode({
       ...graphNodeLibrary.addStart,
       x: centerX + 84,
-      y: centerY,
+      y: centerY + 4,
       data: {
         type: 'add-node',
         label: t('workflow.addNode'),
@@ -117,25 +120,16 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
   }
 
   return (
-    <div className={clsx('rb:cursor-pointer rb:group rb:relative rb:h-full rb:w-full rb:p-2.5 rb:border rb:rounded-xl rb:bg-white rb:hover:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.12)]', {
-      'rb:border-[#155EEF]': data.isSelected,
+    <div className={clsx('rb:cursor-pointer rb:group rb:relative rb:h-full rb:w-full rb:p-3 rb:border rb:rounded-2xl rb:bg-[#FCFCFD] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)]', {
+      'rb:border-[#171719]': data.isSelected,
       'rb:border-[#DFE4ED]': !data.isSelected
     })}>
-      <div className="rb:flex rb:items-center rb:justify-between">
-        <div className="rb:flex rb:items-center rb:gap-2 rb:flex-1">
-          <img src={data.icon} className="rb:w-5 rb:h-5" />
-          <div className="rb:wrap-break-word rb:line-clamp-1">{data.name ?? t(`workflow.${data.type}`)}</div>
-        </div>
-        
-        <div 
-          className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]" 
-          onClick={(e) => {
-            e.stopPropagation()
-            node.remove()
-          }}
-        ></div>
-      </div>
-      <div className="rb:mt-3 rb:min-h-[calc(100%-36px)] rb:w-full rb:bg-[radial-gradient(circle,#e5e7eb_1px,transparent_1px)] rb:bg-size-[12px_12px]"></div>
+      <NodeTools node={node} />
+      <Flex align="center" gap={8} className="rb:flex-1">
+        <img src={data.icon} className="rb:size-6" />
+        <div className="rb:wrap-break-word rb:line-clamp-1">{data.name ?? t(`workflow.${data.type}`)}</div>
+      </Flex>
+      <div className="rb:mt-3 rb:min-h-[calc(100%-36px)] rb:w-full rb:bg-[radial-gradient(circle,#939AB1_1px,#F0F3F8_1px)] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)] rb:rounded-[10px] rb:bg-size-[12px_12px]"></div>
     </div>
   );
 };

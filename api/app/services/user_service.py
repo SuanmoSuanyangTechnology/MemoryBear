@@ -78,18 +78,7 @@ def create_user(db: Session, user: UserCreate) -> User:
     business_logger.info(f"创建用户: {user.username}, email: {user.email}")
     
     try:
-        # 检查用户名是否已存在
-        business_logger.debug(f"检查用户名是否已存在: {user.username}")
-        db_user_by_username = user_repository.get_user_by_username(db, username=user.username)
-        if db_user_by_username:
-            business_logger.warning(f"用户名已存在: {user.username}")
-            raise BusinessException(
-                "用户名已存在", 
-                code=BizCode.DUPLICATE_NAME,
-                context={"username": user.username, "email": user.email}
-            )
-        
-        # 检查邮箱是否已注册
+        # 检查邮箱是否已注册（邮箱保持唯一）
         business_logger.debug(f"检查邮箱是否已注册: {user.email}")
         db_user_by_email = user_repository.get_user_by_email(db, email=user.email)
         if db_user_by_email:
@@ -164,22 +153,7 @@ def create_superuser(db: Session, user: UserCreate, current_user: User) -> User:
         )
     
     try:
-        # 检查用户名是否已存在
-        business_logger.debug(f"检查用户名是否已存在: {user.username}")
-        db_user_by_username = user_repository.get_user_by_username(db, username=user.username)
-        if db_user_by_username:
-            business_logger.warning(f"用户名已存在: {user.username}")
-            raise BusinessException(
-                "用户名已存在", 
-                code=BizCode.DUPLICATE_NAME,
-                context={
-                    "username": user.username,
-                    "email": user.email,
-                    "created_by": str(current_user.id)
-                }
-            )
-        
-        # 检查邮箱是否已注册
+        # 检查邮箱是否已注册（邮箱保持唯一）
         business_logger.debug(f"检查邮箱是否已注册: {user.email}")
         db_user_by_email = user_repository.get_user_by_email(db, email=user.email)
         if db_user_by_email:
@@ -275,6 +249,20 @@ def deactivate_user(db: Session, user_id_to_deactivate: uuid.UUID, current_user:
                         "username": db_user.username
                     }
                 )
+
+        # 检查是否为租户联系人
+        from app.models.tenant_model import Tenants
+        tenant = db.query(Tenants).filter(Tenants.id == db_user.tenant_id).first()
+        if tenant and tenant.contact_email and tenant.contact_email == db_user.email:
+            business_logger.warning(f"尝试停用租户联系人: {db_user.email}, tenant_id={db_user.tenant_id}")
+            raise BusinessException(
+                "该管理员是租户联系人，请先在租户信息中更换联系邮箱，再禁用此管理员",
+                code=BizCode.FORBIDDEN,
+                context={
+                    "user_id": str(user_id_to_deactivate),
+                    "tenant_id": str(db_user.tenant_id)
+                }
+            )
 
         # 停用用户
         business_logger.debug(f"执行用户停用: {db_user.username} (ID: {user_id_to_deactivate})")

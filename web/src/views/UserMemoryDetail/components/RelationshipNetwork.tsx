@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:00 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 20:23:42
+ * @Last Modified time: 2026-03-24 12:19:12
  */
 /**
  * Relationship Network Component
@@ -10,38 +10,36 @@
  * Interactive force-directed graph visualization
  */
 
-import React, { type FC, useEffect, useState, useRef, useCallback } from 'react'
+import React, { type FC, useEffect, useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Col, Row, Space, Button, Tabs, Flex, Divider } from 'antd'
+import { Space, Flex, Divider, type SegmentedProps, Image } from 'antd'
 import dayjs from 'dayjs'
-import ReactEcharts from 'echarts-for-react'
+import clsx from 'clsx'
 
 import RbCard from '@/components/RbCard/Card'
-import detailEmpty from '@/assets/images/userMemory/detail_empty.png'
-import type { Node, Edge, GraphData, StatementNodeProperties, ExtractedEntityNodeProperties } from '../types'
+import type { GraphData, StatementNodeProperties, ExtractedEntityNodeProperties } from '../types'
 import type { RawCommunityNode } from '@/components/D3Graph/types'
 import {
   getMemorySearchEdges,
 } from '@/api/memory'
-import Empty from '@/components/Empty'
 import Tag from '@/components/Tag'
+import GraphNetworkChart, { type Node, type Edge } from '@/components/Charts/GraphNetworkChart'
 import CommunityNetwork from './CommunityNetwork'
+import PageTabs from '@/components/PageTabs'
+import AudioPlayer from './AudioPlayer'
+import VideoPlayer from './VideoPlayer'
 
-/** Node color palette */
-const colors = ['#155EEF', '#369F21', '#4DA8FF', '#FF5D34', '#9C6FFF', '#FF8A4C', '#8BAEF7', '#FFB048']
-const RelationshipNetwork:FC = () => {
+const RelationshipNetwork: FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()
-  const chartRef = useRef<ReactEcharts>(null)
-  const resizeScheduledRef = useRef(false)
   const [nodes, setNodes] = useState<Node[]>([])
   const [links, setLinks] = useState<Edge[]>([])
   const [categories, setCategories] = useState<{ name: string }[]>([])
   const [selectedNode, setSelectedNode] = useState<Node | RawCommunityNode | null>(null)
   // const [fullScreen, setFullScreen] = useState<boolean>(false)
   const navigate = useNavigate()
-  const [activeTab, setActiveTab] = useState('relationshipNetwork')
+  const [activeTab, setActiveTab] = useState<SegmentedProps['value']>('relationshipNetwork')
 
   console.log('categories', categories)
   const edgeAbortRef = useRef<AbortController | null>(null)
@@ -57,19 +55,19 @@ const RelationshipNetwork:FC = () => {
       const curNodes: Node[] = []
       const curEdges: Edge[] = []
       const curNodeTypes = Object.keys(statistics.node_types).filter(vo => vo !== 'Dialogue')
-      
+
       // Calculate connection count for each node
       const connectionCount: Record<string, number> = {}
       edges.forEach(edge => {
         connectionCount[edge.source] = (connectionCount[edge.source] || 0) + 1
         connectionCount[edge.target] = (connectionCount[edge.target] || 0) + 1
       })
-      
+
       // Process node data
       nodes.filter(vo => vo.label !== 'Dialogue').forEach(node => {
         const connections = connectionCount[node.id] || 0
         const categoryIndex = curNodeTypes.indexOf(node.label)
-        
+
         // Get display name based on node type
         let displayName = ''
         switch (node.label) {
@@ -95,7 +93,7 @@ const RelationshipNetwork:FC = () => {
         } else {
           symbolSize = 35
         }
-        
+
         curNodes.push({
           ...node,
           name: displayName,
@@ -103,7 +101,7 @@ const RelationshipNetwork:FC = () => {
           symbolSize: symbolSize, // Adjust node size based on connection count
         })
       })
-      
+
       // Create mapping from node ID to label
       const nodeIdToLabel: Record<string, string> = {}
       nodes.forEach(node => {
@@ -118,10 +116,10 @@ const RelationshipNetwork:FC = () => {
           value: edge.weight || 1
         })
       })
-      
+
       // Set categories
       const curCategories = curNodeTypes.map(type => ({ name: type }))
-      
+
       setNodes(curNodes)
       setLinks(curEdges)
       setCategories(curCategories)
@@ -132,28 +130,6 @@ const RelationshipNetwork:FC = () => {
     getEdgeData()
     return () => { edgeAbortRef.current?.abort() }
   }, [id])
-  
-  useEffect(() => {
-    const handleResize = () => {
-      if (chartRef.current && !resizeScheduledRef.current) {
-        resizeScheduledRef.current = true
-        requestAnimationFrame(() => {
-          chartRef.current?.getEchartsInstance().resize();
-          resizeScheduledRef.current = false
-        });
-      }
-    }
-
-    const resizeObserver = new ResizeObserver(handleResize)
-    const chartElement = chartRef.current?.getEchartsInstance().getDom().parentElement
-    if (chartElement) {
-      resizeObserver.observe(chartElement)
-    }
-    
-    return () => {
-      resizeObserver.disconnect()
-    }
-  }, [nodes])
 
   /** Navigate to full graph view */
   const handleViewAll = () => {
@@ -165,7 +141,7 @@ const RelationshipNetwork:FC = () => {
     })
     navigate(`/user-memory/detail/${id}/GRAPH?${params.toString()}`)
   }
-  const handleChangeTab = (tab: string) => {
+  const handleChangeTab = (tab: SegmentedProps['value']) => {
     if (tab === 'communityNetwork') {
       edgeAbortRef.current?.abort()
     } else {
@@ -175,117 +151,68 @@ const RelationshipNetwork:FC = () => {
     setSelectedNode(null)
   }
 
+  const [fileSize, setFileSize] = useState<string>('')
+  useEffect(() => {
+    setFileSize('')
+    if (selectedNode && 'file_path' in selectedNode.properties && selectedNode.properties.file_path) {
+      fetch(selectedNode.properties.file_path, { method: 'HEAD' })
+        .then(r => {
+          const bytes = Number(r.headers.get('content-length'))
+          if (!bytes) return
+          setFileSize(bytes < 1024 * 1024
+            ? `${(bytes / 1024).toFixed(1)} KB`
+            : `${(bytes / 1024 / 1024).toFixed(1)} MB`)
+        })
+        .catch(() => {})
+    }
+  }, [selectedNode])
+  const handleDownload = () => {
+    if (!selectedNode?.properties?.file_path) return
+    window.open(selectedNode?.properties?.file_path, '_blank')
+  }
+
   return (
-    <Row gutter={16}>
-      {/* Relationship Network */}
-      <Col span={16}>
-        <RbCard bodyClassName="rb:pt-0!">
-          <Tabs
-            items={['relationshipNetwork', 'communityNetwork'].map(key => ({ key, label: t(`userMemory.${key}`) }))}
-            activeKey={activeTab}
-            onChange={handleChangeTab}
-          />
-          <div className="rb:h-129.5 rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-sm">
-            {activeTab === 'communityNetwork'
-              ? <CommunityNetwork onSelectCommunity={community => setSelectedNode(community)} />
-              : nodes.length === 0
-              ? <Empty className="rb:h-full" />
-              : <ReactEcharts
-                option={{
-                  colors: colors,
-                  tooltip: {
-                    show: false
-                  },
-                  legend: {
-                    show: true,
-                    bottom: 12,
-                  },
-                  series: [
-                    {
-                      type: 'graph',
-                      layout: 'force',
-                      data: nodes || [],
-                      links: links || [],
-                      categories: categories.map(vo => ({
-                        name: t(`userMemory.${vo.name}`)
-                      })) || [],
-                      roam: true,
-                      label: {
-                        show: true,
-                        position: 'right',
-                        formatter: '{b}',
-                      },
-                      lineStyle: {
-                        color: '#5B6167',
-                        curveness: 0.3
-                      },
-                      force: {
-                        repulsion: 100,
-                        // Enable category aggregation
-                        edgeLength: 80,
-                        gravity: 0.3,
-                        // Nodes of the same category attract each other
-                        layoutAnimation: true,
-                        // Prevent layout recalculation on click
-                        preventOverlap: true,
-                        // Keep layout stable after node click
-                        edgeSymbol: ['none', 'arrow'],
-                        edgeSymbolSize: [4, 10],
-                        // Disable force-directed after initial layout
-                        initLayout: 'force'
-                      },
-                      selectedMode: 'single',
-                      draggable: true,
-                      // Prevent layout recalculation on data update
-                      animationDurationUpdate: 0,
-                      select: {
-                        itemStyle: {
-                          borderWidth: 2,
-                          borderColor: '#ffffff',
-                          shadowBlur: 10,
-                        }
-                      }
-                    }
-                  ]
-                }}
-                style={{ height: '518px', width: '100%' }}
-                notMerge={false}
-                lazyUpdate={true}
-                onEvents={{
-                  // Node click event handler
-                  click: (params: { dataType: string; data: Node; name: string }) => {
-                    if (params.dataType === 'node') {
-                      // Handle node click event
-                      console.log('Node clicked:', params.data);
-                      // Use functional update to avoid state dependency issues
-                      setSelectedNode(params.data)
-                    }
-                  }
-                }}
-              />
-            }
-          </div>
-        </RbCard>
-      </Col>
-      {/* Memory Details */}
-      <Col span={8}>
+    <div className="rb:flex-1 rb:relative">
+      <div className="rb:absolute rb:z-111 rb:bottom-10 rb:left-[calc(50%-96px)] rb:transition-transform-[translateX(-50%]">
+        <PageTabs
+          value={activeTab}
+          options={['relationshipNetwork', 'communityNetwork'].map(value => ({
+            value,
+            label: t(`userMemory.${value}`)
+          }))}
+          onChange={handleChangeTab}
+          className=""
+        />
+      </div>
+      {activeTab === 'communityNetwork'
+        ? <CommunityNetwork onSelectCommunity={community => setSelectedNode(community)} />
+        : <GraphNetworkChart
+          nodes={nodes}
+          links={links}
+          categories={categories.map(vo => ({
+            name: t(`userMemory.${vo.name}`)
+          })) || []}
+          onNodeClick={(node) => setSelectedNode(node as Node)}
+        />
+      }
+      {selectedNode &&
         <RbCard
           title={t('userMemory.memoryDetails')}
+          className="rb:absolute! rb:top-4 rb:right-0 rb:w-100! rb:bg-white!"
           headerType="borderless"
-          headerClassName="rb:min-h-[46px]!"
-          bodyClassName="rb:p-0!"
-          extra={selectedNode && !(selectedNode as RawCommunityNode).properties.community_id && (
-            <Button type="text" onClick={handleViewAll}>
-              <div className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/userMemory/view.svg')] rb:hover:bg-[url('@/assets/images/userMemory/view_hover.svg')]" />
-              {t('userMemory.completeMemory')}
-            </Button>
-          )}
+          headerClassName="rb:min-h-[60px]!"
+          bodyClassName={clsx('rb:px-5! rb:pt-0! rb:h-auto!', {
+            'rb:pb-[76px]!': activeTab !== 'communityNetwork',
+            'rb:pb-3!': activeTab === 'communityNetwork',
+          })}
+          extra={<div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/close.svg')]" onClick={() => setSelectedNode(null)}></div>}
         >
-          <div className="rb:h-133.5 rb:overflow-y-auto">
-            {!selectedNode
-              ? <Empty url={detailEmpty} subTitle={activeTab === 'relationshipNetwork' ? t('userMemory.memoryDetailEmptyDesc') : t('userMemory.communityDetailEmptyDesc')} className="rb:h-full rb:mx-10 rb:text-center" size={[197.81, 150]} />
-              : (selectedNode as RawCommunityNode).properties.community_id
-                ? <div className="rb:p-3 rb:pt-0">
+          <div className={clsx("rb:max-h-[calc(100vh-269px)] rb:overflow-auto", {
+            'rb:max-h-[calc(100vh-269px)]': activeTab !== 'communityNetwork',
+            'rb:max-h-[calc(100vh-205px)]': activeTab == 'communityNetwork',
+          })}>
+            {(selectedNode as RawCommunityNode).properties.community_id
+              ? <div>
                   <div className="rb:font-medium rb:text-[#212332] rb:text-[16px] rb:leading-5.5 rb:pl-1">
                     {(selectedNode as RawCommunityNode).properties.name || selectedNode.id}
                   </div>
@@ -308,85 +235,114 @@ const RelationshipNetwork:FC = () => {
                     </ul>
                   </>}
                 </div>
-                : <>
-                  {(selectedNode as Node).name && (
-                    <div className="rb:bg-[#F6F8FC] rb:border-t rb:border-b rb:border-[#DFE4ED] rb:font-medium rb:py-2 rb:px-4 rb:h-10">
-                      {(selectedNode as Node).name}
-                    </div>
-                  )}
-                  <div className="rb:p-4">
+              : <>
+                {(selectedNode as Node).name &&
+                  <div className="rb:font-medium rb:text-[16px] rb:text-[#212332] rb:leading-5.5 rb:mb-3">
+                    {(selectedNode as Node).name}
+                  </div>
+                }
+                <Flex vertical gap={24}>
+                  <div>
                     <div className="rb:font-medium rb:leading-5">{t('userMemory.memoryContent')}</div>
-                    <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
+                    <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2">
                       {['Chunk', 'Dialogue', 'MemorySummary'].includes(selectedNode.label) && 'content' in selectedNode.properties
                         ? selectedNode.properties.content
                         : selectedNode.label === 'ExtractedEntity' && 'description' in selectedNode.properties
                           ? selectedNode.properties.description
                           : selectedNode.label === 'Statement' && 'statement' in selectedNode.properties
                             ? selectedNode.properties.statement
-                            : ''}
-                    </div>
-
-                    <div className="rb:font-medium rb:mb-2 rb:mt-4">
-                      <div className="rb:font-medium rb:leading-5">{t('userMemory.created_at')}</div>
-                      <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
-                        {dayjs((selectedNode as Node).properties.created_at).format('YYYY-MM-DD HH:mm:ss')}
-                      </div>
-
-                      {(selectedNode as Node).properties.associative_memory > 0 && (
-                        <div className="rb:mt-4">
-                          <div className="rb:font-medium rb:leading-5">{t('userMemory.associative_memory')}</div>
-                          <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
-                            <span className="rb:text-[#155EEF] rb:font-medium">{(selectedNode as Node).properties.associative_memory}</span>
-                            {' '}{t('userMemory.unix')}{t('userMemory.associative_memory')}
-                          </div>
-                        </div>
-                      )}
-
-                      {selectedNode.label === 'Statement' && (
-                        (['emotion_keywords', 'emotion_type', 'emotion_subject', 'importance_score'] as const).map(key => {
-                          const p = selectedNode.properties as StatementNodeProperties
-                          if ((key === 'emotion_keywords' && p[key]?.length > 0) || typeof p[key] === 'string') {
-                            return (
-                              <div className="rb:mt-4" key={key}>
-                                {t(`userMemory.Statement_${key}`)}
-                                <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
-                                  {key === 'emotion_keywords'
-                                    ? <Space>{p.emotion_keywords.map((v, i) => <Tag key={i}>{v}</Tag>)}</Space>
-                                    : p[key]}
-                                </div>
-                              </div>
-                            )
-                          }
-                          return null
-                        })
-                      )}
-
-                      {selectedNode.label === 'ExtractedEntity' && (
-                        (['name', 'entity_type', 'aliases', 'connect_strngth', 'importance_score'] as const).map(key => {
-                          const p = selectedNode.properties as ExtractedEntityNodeProperties
-                          if (p[key]) {
-                            return (
-                              <div className="rb:mt-4" key={key}>
-                                {t(`userMemory.ExtractedEntity_${key}`)}
-                                <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
-                                  {Array.isArray(p[key]) && p[key].length > 0
-                                    ? p[key].map((v, i) => <div key={i}>- {v}</div>)
-                                    : p[key]}
-                                </div>
-                              </div>
-                            )
-                          }
-                          return null
-                        })
-                      )}
+                            : selectedNode.label === 'Perceptual' && 'summary' in selectedNode.properties
+                              ? selectedNode.properties.summary
+                            : ''
+                      }
                     </div>
                   </div>
-                </>
-            }
+
+                  <div>
+                    <div className="rb:font-medium rb:leading-5">{t('userMemory.created_at')}</div>
+                    <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2">
+                      {dayjs((selectedNode as Node).properties.created_at).format('YYYY-MM-DD HH:mm:ss')}
+                    </div>
+                  </div>
+
+                  {(selectedNode as Node).properties.associative_memory > 0 && <div>
+                    <div className="rb:font-medium rb:leading-5">{t('userMemory.associative_memory')}</div>
+                    <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-1 rb:pb-4 rb:border-b rb:border-[#DFE4ED]">
+                      <span className="rb:text-[#155EEF] rb:font-medium">{(selectedNode as Node).properties.associative_memory}</span> {t('userMemory.unix')}{t('userMemory.associative_memory')}
+                    </div>
+                  </div>}
+
+                  {selectedNode.label === 'Statement' && (<>
+                    {(['emotion_keywords', 'emotion_type', 'emotion_subject', 'importance_score'] as const).map(key => {
+                      const p = selectedNode.properties as StatementNodeProperties
+                      if ((key === 'emotion_keywords' && p[key]?.length > 0) || typeof p[key] === 'string') {
+                        return (
+                          <div key={key}>
+                            <div className="rb:font-medium rb:leading-5">{t(`userMemory.Statement_${key}`)}</div>
+                            <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2">
+                              {key === 'emotion_keywords'
+                                ? <Space>{p.emotion_keywords.map((v, i) => <Tag key={i}>{v}</Tag>)}</Space>
+                                : p[key]}
+                            </div>
+                          </div>
+                        )
+                      }
+                      return null
+                    })}
+                  </>)}
+
+                  {selectedNode.label === 'ExtractedEntity' && <>
+                    {(['name', 'entity_type', 'aliases', 'connect_strngth', 'importance_score'] as const).map(key => {
+                      const p = selectedNode.properties as ExtractedEntityNodeProperties
+                      if (p[key]) {
+                        return (
+                          <div key={key}>
+                            <div className="rb:font-medium rb:leading-5">{t(`userMemory.ExtractedEntity_${key}`)}</div>
+                            <div className="rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2">
+                              {Array.isArray(p[key]) && p[key].length > 0
+                                ? p[key].map((v, i) => <div key={i}>- {v}</div>)
+                                : p[key]}
+                            </div>
+                          </div>
+                        )
+                      }
+                      return null
+                    })}
+                  </>}
+                  {selectedNode.label === 'Perceptual' && <>
+                    {selectedNode.properties.file_type.includes('image')
+                      ? <Image src={selectedNode.properties.file_path} alt={selectedNode.properties.file_name} className="rb:rounded-xl rb:h-45! rb:w-full" />
+                      : selectedNode.properties.file_type.includes('video')
+                      ? <VideoPlayer src={selectedNode.properties.file_path} />
+                      : selectedNode.properties.file_type.includes('audio')
+                      ? <AudioPlayer src={selectedNode.properties.file_path} fileName={selectedNode.properties.file_name} fileSize={fileSize} />
+                      : <Flex gap={11} align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:min-h-15.5! rb:rounded-xl rb:p-3!">
+                        <Flex gap={12} align="center">
+                          <div className="rb:w-7.5 rb:h-9 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/file.svg')]"></div>
+                          <div>
+                            <div className="rb:leading-5 rb:font-medium rb:mb-1">{selectedNode.properties.file_name}</div>
+                            <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">
+                              {fileSize || '-'}
+                            </div>
+                          </div>
+                        </Flex>
+                        <div
+                          className="rb:size-6 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/userMemory/download.svg')] rb:hover:bg-[url('@/assets/images/userMemory/download_hover.svg')]"
+                          onClick={handleDownload}
+                        ></div>
+                      </Flex>
+                    }
+                  </>}
+                </Flex>
+              </>}
           </div>
+
+          {activeTab !== 'communityNetwork' && <Flex align="center" justify="center" className="rb:absolute rb:bottom-3 rb:left-6 rb:right-6 rb:border rb:border-[#171719] rb:rounded-xl rb:h-11 rb:font-medium rb:leading-5 rb:cursor-pointer" onClick={handleViewAll}>
+            {t('userMemory.completeMemory')}
+          </Flex>}
         </RbCard>
-      </Col>
-    </Row>
+      }
+    </div>
   )
 }
 /** Use React.memo to avoid unnecessary renders */

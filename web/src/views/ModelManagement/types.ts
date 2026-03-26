@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 12:26:11
+ * @Last Modified time: 2026-03-25 12:28:10
  */
 /**
  * Type definitions for Model Management
@@ -115,6 +115,8 @@ export interface ModelApiKey {
   updated_at: number;
   /** Associated model config IDs */
   model_config_ids: string[];
+  capability: Capability[];
+  is_omni?: boolean;
 }
 
 /**
@@ -218,6 +220,7 @@ export interface MultiKeyForm {
 export interface MultiKeyConfigModalRef {
   /** Open modal with model data */
   handleOpen: (vo: ModelListItem, provider?: string) => void;
+  handleClose: () => void;
 }
 
 /**
@@ -269,14 +272,6 @@ export interface ModelPlazaItem {
 }
 
 /**
- * Model square detail ref interface
- */
-export interface ModelSquareDetailRef {
-  /** Open detail drawer with model plaza data */
-  handleOpen: (vo: ModelPlaza) => void;
-}
-
-/**
  * Custom model form data
  */
 export interface CustomModelForm {
@@ -297,6 +292,8 @@ export interface CustomModelForm {
     api_base: string;
   }>
   is_vision?: boolean;
+  is_video?: boolean;
+  is_audio?: boolean;
   is_omni?: boolean;
   capability?: string[];
 }
@@ -307,6 +304,7 @@ export interface CustomModelForm {
 export interface CustomModelModalRef {
   /** Open modal with optional model plaza item */
   handleOpen: (vo?: ModelListItem) => void;
+  handleClose: () => void;
 }
 
 /**
@@ -324,4 +322,24 @@ export interface BaseRef {
   /** Refresh list data */
   getList: () => void;
   modelListDetailRefresh?: () => void;
+}
+
+export type Capability = 'vision' | 'audio' | 'video';
+export interface Model {
+  name: string;
+  type: string;
+  logo: string;
+  description: string | null;
+  provider: string;
+  config: Record<string, unknown>;
+  is_active: boolean;
+  is_public: boolean;
+  load_balance_strategy: string;
+  capability: Capability[];
+  is_omni: boolean;
+  model_id: string | null;
+  id: string;
+  created_at: number;
+  updated_at: number;
+  api_keys: ModelApiKey[];
 }

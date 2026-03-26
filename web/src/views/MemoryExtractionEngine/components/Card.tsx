@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:51 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:30:51 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-19 14:06:38
  */
 /**
  * Card Component
@@ -10,11 +10,10 @@
  */
 
 import { type FC, type ReactNode } from 'react'
-import { useTranslation } from 'react-i18next'
 import clsx from 'clsx';
+import { Flex, Space, Tooltip } from 'antd';
 
 import RbCard from '@/components/RbCard/Card'
-import down from '@/assets/images/userMemory/down.svg'
 
 /**
  * Component props
@@ -29,6 +28,7 @@ interface CardProps {
   className?: string;
   headerClassName?: string;
   bodyClassName?: string;
+  extra?: ReactNode;
 }
 
 const Card: FC<CardProps> = ({
@@ -41,27 +41,33 @@ const Card: FC<CardProps> = ({
   className,
   headerClassName,
   bodyClassName,
+  extra,
 }) => {
-  const { t } = useTranslation()
   return (
     <RbCard
-      title={title}
-      subTitle={subTitle}
-      headerType="borderless"
-      extra={type && handleExpand && (
-        <div 
-          className="rb:flex rb:items-center rb:text-[14px] rb:text-[#5B6167] rb:cursor-pointer rb:font-regular rb:leading-5" 
-          onClick={() => handleExpand(type)}
-        >
-          {expanded ? t('common.foldUp') : t('common.expanded')}
-          <img src={down} className={clsx("rb:w-4 rb:h-4 rb:ml-1", {
+      title={() => <Flex
+        align="center"
+        justify="space-between"
+        className="rb:font-[MiSans-Bold] rb:font-bold rb:cursor-pointer"
+        onClick={type && handleExpand ? () => handleExpand(type) : undefined}
+      >
+        <Space size={4}>
+          {title}
+          {subTitle && <Tooltip title={subTitle}>
+            <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
+          </Tooltip>}
+        </Space>
+        {handleExpand && <div
+          className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')]", {
             'rb:rotate-180': !expanded,
-          })} />
-        </div>
-      )}
+          })}
+        ></div>}
+      </Flex>}
+      headerType="borderless"
       className={className}
-      headerClassName={headerClassName}
-      bodyClassName={bodyClassName}
+      headerClassName={`rb:h-[50px]! rb:pb-[12px]! rb:pt-[16px]! rb:leading-[22px]! rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] ${headerClassName}`}
+      bodyClassName={`rb:px-3! rb:py-0! ${expanded ? 'rb:pb-3!' : 'rb:pb-0!'} ${bodyClassName}`}
+      extra={extra}
     >
       {(expanded || !(type && handleExpand)) && children}
     </RbCard>

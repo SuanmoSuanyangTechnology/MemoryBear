@@ -2,10 +2,10 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-05 10:45:08 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-10 17:59:37
+ * @Last Modified time: 2026-03-25 11:09:01
  */
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
-import { Space, List, Flex, Tooltip } from 'antd';
+import { List, Flex, Tooltip, Form } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx'
 
@@ -31,7 +31,7 @@ interface SkillModalProps {
  * 
  * A modal dialog for selecting skills from a searchable list.
  * Features:
- * - Search functionality to filter skills by search
+ * - Search functionality to filter skills by keywords
  * - Grid layout displaying skill cards with icons and descriptions
  * - Multi-select capability with visual feedback
  * - Excludes already selected skills from the list
@@ -49,9 +49,11 @@ const SkillListModal = forwardRef<SkillModalRef, SkillModalProps>(({
   const [visible, setVisible] = useState(false);
   const [list, setList] = useState<Skill[]>([])
   const [filterList, setFilterList] = useState<Skill[]>([])
-  const [query, setQuery] = useState<{search?: string}>({})
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [selectedRows, setSelectedRows] = useState<Skill[]>([])
+
+  const [form] = Form.useForm()
+  const query = Form.useWatch([], form)
 
   /**
    * Closes the modal and resets all state
@@ -59,7 +61,7 @@ const SkillListModal = forwardRef<SkillModalRef, SkillModalProps>(({
    */
   const handleClose = () => {
     setVisible(false);
-    setQuery({})
+    form.resetFields()
     setSelectedIds([])
     setSelectedRows([])
   };
@@ -70,7 +72,7 @@ const SkillListModal = forwardRef<SkillModalRef, SkillModalProps>(({
    */
   const handleOpen = () => {
     setVisible(true);
-    setQuery({})
+    form.resetFields()
     setSelectedIds([])
     setSelectedRows([])
   };
@@ -82,7 +84,7 @@ const SkillListModal = forwardRef<SkillModalRef, SkillModalProps>(({
     if (visible) {
       getList()
     }
-  }, [query.search, visible])
+  }, [query?.search, visible])
   
   /**
    * Fetches the skill list from API with current search parameters
@@ -96,6 +98,8 @@ const SkillListModal = forwardRef<SkillModalRef, SkillModalProps>(({
       .then(res => {
         const response = res as { items: Skill[] }
         setList(response.items || [])
+        setSelectedIds([])
+        setSelectedRows([])
       })
   }
   
@@ -116,17 +120,6 @@ const SkillListModal = forwardRef<SkillModalRef, SkillModalProps>(({
     handleOpen,
     handleClose
   }));
-  
-  /**
-   * Handles search input changes and resets selection
-   * Clears current selections when search query changes
-   * @param value - Search keyword
-   */
-  const handleSearch = (value?: string) => {
-    setQuery({search: value})
-    setSelectedIds([])
-    setSelectedRows([])
-  }
   
   /**
    * Toggles skill selection state
@@ -154,7 +147,7 @@ const SkillListModal = forwardRef<SkillModalRef, SkillModalProps>(({
     if (list.length && selectedList.length) {
       const unSelectedList = list.filter(item => selectedList.findIndex(vo => vo.id === item.id) < 0)
       setFilterList([...unSelectedList])
-    } else if (list.length) {
+    } else {
       setFilterList([...list])
     }
   }, [list, selectedList])
@@ -169,13 +162,17 @@ const SkillListModal = forwardRef<SkillModalRef, SkillModalProps>(({
         onOk={handleSave}
         width={1000}
       >
-        <Space size={24} direction="vertical" className="rb:w-full">
+        <Flex gap={24} vertical>
           {/* Search input for filtering skills */}
-          <SearchInput
-            placeholder={t('skills.searchPlaceholder')}
-            onSearch={handleSearch}
-            style={{ width: '100%' }}
-          />
+          <Form form={form}>
+            <Form.Item name="search" noStyle>
+              <SearchInput
+                placeholder={t('skills.searchPlaceholder')}
+                className="rb:w-full!"
+                variant="outlined"
+              />
+            </Form.Item>
+          </Form>
           {/* Display empty state or skill grid */}
           {filterList.length === 0 
             ? <Empty />
@@ -185,29 +182,29 @@ const SkillListModal = forwardRef<SkillModalRef, SkillModalProps>(({
               renderItem={(item: Skill) => (
                 <List.Item>
                   {/* Skill card with selection state styling */}
-                  <div key={item.id} className={clsx("rb:border rb:rounded-lg rb:p-[17px_16px] rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
-                    "rb:bg-[rgba(21,94,239,0.06)] rb:border-[#155EEF] rb:text-[#155EEF]": selectedIds.includes(item.id),
-                    "rb:border-[#DFE4ED] rb:text-[#212332]": !selectedIds.includes(item.id),
+                  <div key={item.id} className={clsx("rb:border rb:rounded-lg rb:p-[17px_16px] rb:cursor-pointer rb:hover:bg-[#F6F6F6]", {
+                    "rb:border-[#171719]": selectedIds.includes(item.id),
+                    "rb-border": !selectedIds.includes(item.id),
                   })} onClick={() => handleSelect(item)}>
-                    <Flex>
-                      {/* Skill avatar showing first letter of name */}
-                      <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
-                        {item.name[0]}
-                      </div>
-                      {/* Skill name and description */}
-                      <div className="rb:flex-1 rb:max-w-[calc(100%-60px)]">
-                        <div className="rb:font-medium rb:wrap-break-word rb:line-clamp-1">{item.name}</div>
-                        <Tooltip title={item.description}>
-                          <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.25 rb:font-regular rb:-mt-1 rb:wrap-break-word rb:line-clamp-1">{item.description}</div>
-                        </Tooltip>
-                      </div>
-                    </Flex>
+                    {/* Skill name and description */}
+                    <div className="rb:flex-1 rb:max-w-[calc(100%-60px)]">
+                      <Tooltip title={item.name}>
+                        <div className="rb:flex-1 rb:leading-5.5 rb:min-w-0 rb:whitespace-break-spaces rb:wrap-break-word rb:line-clamp-1 rb:font-medium rb:text-[16px] rb:mb-4">
+                          {item.name}
+                        </div>
+                      </Tooltip>
+                      
+                      {/* Skill description with tooltip */}
+                      <Tooltip title={item.description} placement="topLeft">
+                        <div className="rb:h-10 rb:leading-5 rb:wrap-break-word rb:line-clamp-2">{item.description}</div>
+                      </Tooltip>
+                    </div>
                   </div>
                 </List.Item>
               )}
             />
           }
-        </Space>
+        </Flex>
       </RbModal>
     </>
   );
