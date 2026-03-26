@@ -1,12 +1,13 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:57 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 18:32:57 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-19 11:56:49
  */
 import { type FC, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactEcharts from 'echarts-for-react'
+import { Flex } from 'antd'
 
 import Empty from '@/components/Empty'
 import Loading from '@/components/Empty/Loading'
@@ -41,12 +42,12 @@ const InteractionBar: FC<InteractionBarProps> = ({ chartData, loading }) => {
   }, [chartData, t])
 
   return (
-    <>
-      <div>{t('userMemory.interaction')}</div>
+    <Flex vertical gap={16} className="rb-border rb:rounded-xl rb:p-4! rb:h-78">
+      <div className="rb:text-[#212332] rb:font-medium rb:leading-5">{t('userMemory.emotionLine')}</div>
       {loading
         ? <Loading size={249} />
         : !chartData || chartData.length === 0
-          ? <Empty size={120} className="rb:mt-12 rb:mb-20.25" />
+          ? <Empty size={120} className="rb:flex-1" />
           : <ReactEcharts
             option={{
               color: Colors,
@@ -128,10 +129,10 @@ const InteractionBar: FC<InteractionBarProps> = ({ chartData, loading }) => {
               },
               series
             }}
-            style={{ height: '265px', width: '100%' }}
+            style={{ height: '242px', width: '100%', minWidth: '100%' }}
           />
       }
-    </>
+    </Flex>
   )
 }
 

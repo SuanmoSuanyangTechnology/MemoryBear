@@ -88,6 +88,7 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   Ontology: lazy(() => import('@/views/Ontology')),
   OntologyDetail: lazy(() => import('@/views/Ontology/pages/Detail')),
   Prompt: lazy(() => import('@/views/Prompt')),
+  PromptHistory: lazy(() => import('@/views/Prompt/pages/History')),
   Skills: lazy(() => import('@/views/Skills')),
   SkillConfig: lazy(() => import('@/views/Skills/pages/SkillConfig')),
   Jump: lazy(() => import('@/views/JumpPage')),

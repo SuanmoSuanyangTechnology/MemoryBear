@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:12 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:49:12 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-25 14:14:14
  */
 /**
  * Model Implementation Component
@@ -106,7 +106,7 @@ const ModelImplement: FC<ModelImplementProps> = ({ type, value, onChange }) => {
                 ></div>
               </Flex>
               <div className="rb:text-[#5B6167] rb:my-2">{item.api_key}</div>
-              <Tag className="rb:mb-2">{t(`modelNew.${item.provider}`)}</Tag>
+              <Tag className="rb:mb-2">{String(item.provider).charAt(0).toUpperCase() + String(item.provider).slice(1)}</Tag>
             </div>
           )
         })}

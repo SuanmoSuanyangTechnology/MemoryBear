@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 14</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="应用管理-工作流-配置-大语言模型" transform="translate(-30, -1034)">
+            <g id="节点名称" transform="translate(10, 74)">
+                <g id="节点" transform="translate(0, 42)">
+                    <g id="流程控制备份" transform="translate(12, 793)">
+                        <g id="3" transform="translate(0, 117)">
+                            <g id="编组-14" transform="translate(8, 8)">
+                                <rect id="矩形" fill="#FF8A4C" x="0" y="0" width="24" height="24" rx="8"></rect>
+                                <g id="问题" transform="translate(2.4, 2.4)">
+                                    <g id="编组-10" transform="translate(1.8, 1.8)">
+                                        <path d="M1.11428571,7.86247477 L1.11428571,5.8910462 C1.11428571,3.9028211 2.72606062,2.2910462 4.71428571,2.2910462 L13.3714286,2.2910462 L13.3714286,2.2910462" id="路径" stroke="#FFFFFF" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"></path>
+                                        <path d="M14.2281095,1.00645003 L15.7840148,3.34030791 C15.8943017,3.50573824 15.8495991,3.72925121 15.6841688,3.8395381 C15.6250324,3.87896231 15.5555497,3.9 15.4844767,3.9 L12.3726662,3.9 C12.1738437,3.9 12.0126662,3.7388225 12.0126662,3.53999999 C12.0126662,3.46892699 12.0337039,3.39944422 12.0731281,3.34030791 L13.6290333,1.00645003 C13.7393202,0.841019699 13.9628332,0.796317105 14.1282635,0.906603995 C14.1678103,0.932968545 14.201745,0.966903209 14.2281095,1.00645003 Z" id="三角形" fill="#FFFFFF" transform="translate(13.9286, 2.2286) scale(-1, 1) rotate(-90) translate(-13.9286, -2.2286)"></path>
+                                        <polyline id="路径" stroke="#FFFFFF" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" points="8.91428571 10.6481891 5.57142857 10.6481891 5.57142857 5.07676048 8.91428571 5.07676048"></polyline>
+                                        <path d="M1.97096669,12.1493072 L3.52687194,14.483165 C3.63715883,14.6485954 3.59245623,14.8721084 3.4270259,14.9823952 C3.36788959,15.0218195 3.29840682,15.0428571 3.22733382,15.0428571 L0.115523323,15.0428571 C-0.0832991952,15.0428571 -0.244476692,14.8816796 -0.244476692,14.6828571 C-0.244476692,14.6117841 -0.223439001,14.5423014 -0.184014795,14.483165 L1.37189045,12.1493072 C1.48217734,11.9838768 1.70569032,11.9391742 1.87112065,12.0494611 C1.91066747,12.0758257 1.94460214,12.1097604 1.97096669,12.1493072 Z" id="三角形" fill="#FFFFFF" transform="translate(1.6714, 13.3714) rotate(-90) translate(-1.6714, -13.3714)"></path>
+                                        <path d="M2.22857143,13.4339033 L2.22857143,11.4624748 C2.22857143,9.47424967 3.84034633,7.86247477 5.82857143,7.86247477 L14.4857143,7.86247477 L14.4857143,7.86247477" id="路径" stroke="#FFFFFF" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" transform="translate(8.3571, 10.6482) scale(-1, -1) translate(-8.3571, -10.6482)"></path>
+                                        <polyline id="路径-2" stroke="#FFFFFF" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" points="10.4155671 6.44185403 11.7072229 7.86239292 10.3010762 9.38520842"></polyline>
+                                        <line x1="7.80043109" y1="7.86247477" x2="11.7072229" y2="7.86247477" id="路径-3" stroke="#FFFFFF" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"></line>
+                                    </g>
+                                </g>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

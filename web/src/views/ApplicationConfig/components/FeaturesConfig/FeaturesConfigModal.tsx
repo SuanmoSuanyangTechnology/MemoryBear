@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 15:38:14
+ * @Last Modified time: 2026-03-24 10:59:37
  */
 /**
  * Copy Application Modal
@@ -19,10 +19,12 @@ import RbModal from '@/components/RbModal'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import FileUploadSettingModal from './FileUploadSettingModal'
 import type { Application } from '@/views/ApplicationManagement/types';
+import type { Capability } from '@/views/ModelManagement/types'
 
 interface FeaturesConfigModalProps {
   refresh: (value: FeaturesConfigForm) => void;
   source?: Application['type'];
+  capability?: Capability[];
 }
 const max_file_count = 1;
 /**
@@ -31,6 +33,7 @@ const max_file_count = 1;
 const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigModalProps>(({
   refresh,
   source,
+  capability,
 }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
@@ -47,7 +50,6 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
   /** Open modal */
   const handleOpen = (initValue: FeaturesConfigForm) => {
     setVisible(true);
-    console.log('initValue', initValue)
     form.setFieldsValue(initValue)
   };
   /** Copy application with new name */
@@ -62,6 +64,22 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
 
   const handleSaveSettings = (settings: FeaturesConfigForm['file_upload']) => {
     form.setFieldValue('file_upload', { ...settings, enabled: values?.file_upload?.enabled ?? false })
+  }
+
+  const formatFileTypeOptions = (fu: FeaturesConfigForm['file_upload']) => {
+    let options = [{ type: 'document', enabled: fu.document_enabled, maxSize: fu.document_max_size_mb }]
+    if (!capability) return options
+    
+    if (capability.includes('vision')) {
+      options.push({ type: 'image', enabled: fu.image_enabled, maxSize: fu.image_max_size_mb })
+    }
+    if (capability.includes('audio')) {
+      options.push({ type: 'audio', enabled: fu.audio_enabled, maxSize: fu.audio_max_size_mb })
+    }
+    if (capability.includes('video')) {
+      options.push({ type: 'video', enabled: fu.video_enabled, maxSize: fu.video_max_size_mb })
+    }
+    return options.filter(item => item.enabled)
   }
 
   /** Expose methods to parent component */
@@ -109,22 +127,19 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
               />
               {values?.file_upload?.enabled && (() => {
                 const fu = values.file_upload
-                const types = [
-                  { type: 'image', enabled: fu.image_enabled, maxSize: fu.image_max_size_mb },
-                  { type: 'audio', enabled: fu.audio_enabled, maxSize: fu.audio_max_size_mb },
-                  { type: 'document', enabled: fu.document_enabled, maxSize: fu.document_max_size_mb },
-                  { type: 'video', enabled: fu.video_enabled, maxSize: fu.video_max_size_mb },
-                ].filter(item => item.enabled)
-                return types.length > 0 ? <>
+                // 'vision' | 'audio' | 'video'
+                const filterTypes = formatFileTypeOptions(fu)
+                console.log('filterTypes', filterTypes)
+                return filterTypes.length > 0 ? <>
                   <Flex gap={12} className="rb:py-2!">
                     <div className="rb:flex-1 rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:bg-white rb:text-[12px]">
                       <div className="rb:grid rb:grid-cols-2 rb:gap-2 rb:text-[12px] rb:text-[#5B6167] rb:border-b rb:border-b-[#DFE4ED]">
                         <div className="rb:px-3 rb:py-1">{t(`application.supportedTypes`)}</div>
                         <div className="rb:px-3 rb:py-1">{t('application.singleMaxSize')}</div>
                       </div>
-                      {types.map((item, index) => (
+                      {filterTypes.map((item, index) => (
                         <div key={item.type} className={clsx('rb:grid rb:grid-cols-2 rb:gap-2', {
-                          'rb:border-b rb:border-b-[#DFE4ED]': index !== types.length - 1
+                          'rb:border-b rb:border-b-[#DFE4ED]': index !== filterTypes.length - 1
                         })}>
                           <div className="rb:px-3 rb:py-1">{t(`application.${item.type}`)}</div>
                           <div className="rb:px-3 rb:py-1">{item.maxSize} MB</div>
@@ -148,6 +163,7 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
       <FileUploadSettingModal
         ref={fileUploadSettingModalRef}
         onSave={handleSaveSettings}
+        capability={capability}
       />
     </>
   );

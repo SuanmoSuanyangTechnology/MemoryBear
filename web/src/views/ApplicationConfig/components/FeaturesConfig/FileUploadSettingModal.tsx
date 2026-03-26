@@ -2,15 +2,16 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 20:19:14
+ * @Last Modified time: 2026-03-24 11:00:14
  */
-import { forwardRef, useImperativeHandle, useState } from 'react';
+import { forwardRef, useImperativeHandle, useState, useMemo } from 'react';
 import { Form, InputNumber, Flex, Switch, Row, Col, Radio } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 
 import RbModal from '@/components/RbModal';
 import type { FeaturesConfigForm } from '../../types'
+import type { Capability } from '@/views/ModelManagement/types'
 
 type FileUpload = Omit<FeaturesConfigForm['file_upload'], 'settings'>
 
@@ -21,51 +22,49 @@ interface FileUploadSettingModalRef {
 
 interface FileUploadSettingModalProps {
   onSave: (values: FileUpload) => void;
+  capability?: Capability[];
 }
-
-const fileTypeOptions = [
-  {
-    type: 'document',
-    icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/txt.svg')]"></div>,
-    formats: [
-      "pdf",
-      "docx",
-      "doc",
-      "xlsx",
-      "xls",
-      "txt",
-      "csv",
-      "json",
-      "md",
-    ],
-  },
-  {
-    type: 'image',
-    icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/image.svg')]"></div>,
-    formats: [
-      "png",
-      "jpg",
-      "jpeg"
-    ],
-  },
-  {
-    type: 'audio',
-    icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/audio.svg')]"></div>,
-    formats: [
-      "mp3",
-      "wav",
-      "m4a",
-    ],
-  },
-  {
-    type: 'video',
-    icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/video.svg')]"></div>,
-    formats: [
-      "mp4",
-      "mov",
-    ],
-  },
-];
+const documentType = {
+  type: 'document',
+  icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/txt.svg')]"></div>,
+  formats: [
+    "pdf",
+    "docx",
+    "doc",
+    "xlsx",
+    "xls",
+    "txt",
+    "csv",
+    "json",
+    "md",
+  ],
+}
+const imageType = {
+  type: 'image',
+  icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/image.svg')]"></div>,
+  formats: [
+    "png",
+    "jpg",
+    "jpeg"
+  ],
+}
+const audioType = {
+  type: 'audio',
+  icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/audio.svg')]"></div>,
+  formats: [
+    "mp3",
+    "wav",
+    "m4a",
+  ],
+}
+const videoType = {
+  type: 'video',
+  icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/video.svg')]"></div>,
+  formats: [
+    "mp4",
+    "mov",
+  ],
+}
 
 const defaultValues: FileUpload = {
   enabled: false,
@@ -108,6 +107,7 @@ const defaultValues: FileUpload = {
 
 const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadSettingModalProps>(({
   onSave,
+  capability,
 }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
@@ -148,6 +148,15 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
     handleClose
   }));
 
+  const fileTypeOptions = useMemo(() => {
+    let options = [documentType]
+    if (!capability) return options
+    if (capability.includes('vision')) options = [...options, imageType]
+    if (capability.includes('audio')) options = [...options, audioType]
+    if (capability.includes('video')) options = [...options, videoType]
+    return options
+  }, [capability])
+
   return (
     <RbModal
       title={t('application.settings')}
@@ -167,7 +176,6 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
           </Radio.Group>
         </Form.Item>
 
-        {/* <div className="rb:text-[12px] rb:text-[#5B6167] rb:mb-1">{t('application.maxCount')}</div> */}
         <Form.Item label={t('application.maxCount')} name="max_file_count" hidden>
           <InputNumber min={1} max={20} precision={0} className="rb:w-full!" placeholder={t('common.pleaseEnter')} />
         </Form.Item>

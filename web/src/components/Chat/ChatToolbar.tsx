@@ -2,12 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-17 14:22:25 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 18:59:37
+ * @Last Modified time: 2026-03-23 17:42:38
  */
 // Toolbar component for chat input area, supporting file upload, audio recording, and variable configuration
 import { useRef, forwardRef, useImperativeHandle, type ReactNode, useEffect } from 'react'
-import { Flex, Dropdown, Divider, App, Form, type MenuProps } from 'antd'
-import { SettingOutlined } from '@ant-design/icons'
+import { Flex, Dropdown, Divider, App, Form, type MenuProps, Tooltip } from 'antd'
 import { useTranslation } from 'react-i18next'
 import clsx from 'clsx'
 
@@ -19,6 +18,7 @@ import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types'
 import type { UploadFileListModalRef } from '@/views/Conversation/types'
 import type { VariableConfigModalRef } from '@/views/Workflow/types'
 import type { Variable } from '@/views/Workflow/components/Properties/VariableList/types'
+import { getFileInfoByUrl } from '@/api/fileStorage';
 
 // Exposed methods via ref for parent components to access/set form state
 export interface ChatToolbarRef {
@@ -31,7 +31,8 @@ export interface ChatToolbarRef {
 // Props for configuring toolbar features, upload settings, and event callbacks
 export interface ChatToolbarProps {
   features: FeaturesConfigForm
-  extra?: ReactNode
+  leftExtra?: ReactNode;
+  rightExtra?: ReactNode
   uploadAction?: string
   uploadRequestConfig?: {
     data?: Record<string, string | number | boolean>
@@ -52,7 +53,8 @@ interface FormValues {
 const max_file_count = 1;
 const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
   features,
-  extra,
+  leftExtra,
+  rightExtra,
   uploadAction,
   uploadRequestConfig,
   onFilesChange,
@@ -96,8 +98,6 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
     }
     form.setFieldValue('files', [...lastFiles])
     onFilesChange?.([...lastFiles])
-
-    console.log('lastFiles', lastFiles)
   }
 
   // Append recorded audio file to the file list and notify parent
@@ -111,9 +111,33 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
   // Merge a batch of files (e.g. from remote URL modal) into the file list
   const addFileList = (list?: any[]) => {
     if (!list?.length) return
-    const files = [...(queryValues?.files || []), ...list]
+    const uploadingList = list.map(f => ({ ...f, status: 'uploading' }))
+    const files = [...(queryValues?.files || []), ...uploadingList]
     form.setFieldValue('files', files)
     onFilesChange?.(files)
+
+    uploadingList.forEach(file => {
+      getFileInfoByUrl(file.url)
+        .then((res) => {
+          const { file_name, file_size, content_type } = res as { file_name: string; file_size: number; content_type: string; }
+          const current: any[] = form.getFieldValue('files') || []
+          const updated = current.map(f => f.uid === file.uid ? {
+            ...f,
+            status: 'done',
+            name: file_name,
+            size: file_size,
+            type: content_type,
+           } : f)
+          form.setFieldValue('files', updated)
+          onFilesChange?.(updated)
+        })
+        .catch(() => {
+          const current: any[] = form.getFieldValue('files') || []
+          const updated = current.map(f => f.uid === file.uid ? { ...f, status: 'error' } : f)
+          form.setFieldValue('files', updated)
+          onFilesChange?.(updated)
+        })
+    })
   }
 
   // Persist variable values from the config modal and notify parent
@@ -163,28 +187,34 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
   return (
     <Form form={form} initialValues={{ files: [], variables: [] }}>
       <Flex justify="space-between" className="rb:flex-1">
-        <Flex gap={8} align="center">
+        <Flex gap={8} align="center" justify="start">
           <Form.Item name="files" noStyle hidden={!file_upload?.enabled || fileMenus.length === 0}>
             <Dropdown menu={{ items: fileMenus }}>
-              <div className="rb:size-6 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/link.svg')] rb:hover:bg-[url('@/assets/images/conversation/link_hover.svg')]" />
+              <Flex justify="center" align="center" className="rb:size-7 rb-border rb:cursor-pointer rb:hover:bg-[#F6F6F6] rb:rounded-full rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]">
+                <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/conversation/link.svg')]" />
+              </Flex>
             </Dropdown>
           </Form.Item>
-          {extra}
+
+          {leftExtra}
           <Form.Item name="variables" className="rb:mb-0!" hidden={queryValues?.variables?.length < 1}>
-            <div
-              className={clsx('rb:flex rb:items-center rb:border rb:rounded-lg rb:px-2 rb:text-[12px] rb:h-6 rb:cursor-pointer rb:hover:bg-[#F0F3F8] rb:text-[#212332]', {
-                'rb:border-[#FF5D34] rb:text-[#FF5D34]': isNeedVariableConfig,
-                'rb:border-[#DFE4ED]': !isNeedVariableConfig,
-              })}
-              onClick={() => variableConfigModalRef.current?.handleOpen(queryValues.variables)}
-            >
-              <SettingOutlined className="rb:mr-1" />
-              {t('memoryConversation.variableConfig')}
-            </div>
+            <Tooltip title={t('memoryConversation.variableConfig')}>
+              <Flex justify="center" align="center"
+                className={clsx("rb:size-7 rb:border rb:cursor-pointer rb:hover:bg-[#F6F6F6] rb:rounded-full rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]", {
+                  'rb:border-[#FF5D34]': isNeedVariableConfig,
+                  'rb:border-[#EBEBEB]': !isNeedVariableConfig,
+                })}
+                onClick={() => variableConfigModalRef.current?.handleOpen(queryValues.variables)}
+              >
+                <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/conversation/variables.svg')]" />
+              </Flex>
+            </Tooltip>
           </Form.Item>
         </Flex>
-        {file_upload?.audio_enabled && file_upload?.allowed_transfer_methods?.includes('local_file') && (
-          <Flex align="center">
+        
+        <Flex align="center" justify="end" gap={8}>
+          {rightExtra}
+          {file_upload?.audio_enabled && file_upload?.allowed_transfer_methods?.includes('local_file')  &&
             <AudioRecorder
               disabled={(queryValues?.files?.length || 0) >= max_file_count}
               action={uploadAction}
@@ -192,9 +222,9 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
               onRecordingComplete={handleRecordingComplete}
               maxSize={file_upload?.audio_max_size_mb}
             />
-            <Divider type="vertical" className="rb:ml-1.5! rb:mr-3!" />
-          </Flex>
-        )}
+          }
+          {(rightExtra || (file_upload?.audio_enabled && file_upload?.allowed_transfer_methods?.includes('local_file'))) && <Divider type="vertical" className="rb:ml-1.5! rb:mr-0! rb:h-4!" />}
+        </Flex>
       </Flex>
 
       <UploadFileListModal

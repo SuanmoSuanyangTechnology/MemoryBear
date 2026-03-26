@@ -1,19 +1,22 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:53 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 18:32:53 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-16 14:27:12
  */
-import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
+import { useEffect, useState, forwardRef, useImperativeHandle, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Skeleton, Progress } from 'antd';
+import { Skeleton } from 'antd';
+import ReactEcharts from 'echarts-for-react';
 
-import RbCard from '@/components/RbCard/Card'
 import {
   getImplicitInterestAreas,
 } from '@/api/memory'
 
+/** Default color palette for area line series */
+const Colors = ['#9C6FFF', '#FFB048', '#4DA8FF', '#369F21']
+const keys = ['art', 'music', 'tech', 'lifestyle'] as const
 /**
  * Interest category item structure
  * @property {string} category_name - Category name
@@ -58,6 +61,7 @@ const InterestAreas = forwardRef<{ handleRefresh: () => void; }>((_props, ref) =
   const { id } = useParams()
   const [loading, setLoading] = useState<boolean>(false)
   const [data, setData] = useState<InterestAreasItem>({} as InterestAreasItem)
+  const chartRef = useRef<ReactEcharts>(null)
 
   useEffect(() => {
     if (!id) return
@@ -81,27 +85,46 @@ const InterestAreas = forwardRef<{ handleRefresh: () => void; }>((_props, ref) =
     handleRefresh: getData
   }));
   return (
-    <RbCard
-      title={t('implicitDetail.interestAreas')}
-      headerType="borderless"
-    >
+    <div className="rb-border rb:p-4 rb:rounded-xl rb:mt-4">
+      <div className="rb:text-[#212332] rb:font-medium rb:leading-5 rb:mb-4">{t('implicitDetail.interestAreas')}</div>
       {loading
         ? <Skeleton active />
-        : <div>
-          {(['art', 'music', 'tech', 'lifestyle'] as const).map((key) => {
-            return (
-              <div key={key} >
-                <div className="rb:flex rb:justify-between rb:items-center">
-                  <div className="rb:text-[#5B6167] rb:leading-5 rb:font-regular rb:mb-1">{t(`implicitDetail.${key}`)}</div>
-                  {data[key]?.percentage ?? 0}%
-                </div>
-                <Progress percent={data[key]?.percentage || 0} showInfo={false} />
-              </div>
-            )
-          })}
-          </div>
-        }
-    </RbCard>
+        : <ReactEcharts
+            ref={chartRef}
+            option={{
+              color: Colors,
+              grid: { top: 8, left: 38, right: 8, bottom: 24 },
+              xAxis: {
+                type: 'category',
+                data: keys.map(k => t(`implicitDetail.${k}`)),
+                axisLabel: { color: '#5B6167', fontSize: 12, fontFamily: 'PingFangSC, PingFang SC', interval: 0, overflow: 'break-word', width: 60 },
+                axisLine: { lineStyle: { color: '#EBEBEB' } },
+                axisTick: { show: false },
+              },
+              yAxis: {
+                type: 'value',
+                min: 0,
+                max: 100,
+                axisLabel: { color: '#A8A9AA', fontSize: 12, fontFamily: 'PingFangSC, PingFang SC', formatter: '{value}%' },
+                splitLine: { lineStyle: { color: '#EBEBEB' } },
+              },
+              series: [{
+                type: 'bar',
+                barMaxWidth: 40,
+                borderRadius: [4, 4, 0, 0],
+                data: keys.map((k, i) => ({
+                  value: data[k]?.percentage ?? 0,
+                  itemStyle: { color: Colors[i] }
+                })),
+                label: { show: true, position: 'top', formatter: '{c}%', color: '#5B6167', fontSize: 10 },
+              }]
+            }}
+            style={{ height: '200px', width: '100%' }}
+            notMerge={true}
+            lazyUpdate={true}
+          />
+      }
+    </div>
   )
 })
 export default InterestAreas

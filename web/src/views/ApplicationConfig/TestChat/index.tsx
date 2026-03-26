@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:27:52 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-18 20:54:35 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-24 10:19:31
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -26,6 +26,7 @@ import type { Variable } from '@/views/Workflow/components/Properties/VariableLi
 import type { TestChatProps } from './type'
 import type { SSEMessage } from '@/utils/stream'
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types'
+import { getFileStatusById } from '@/api/fileStorage'
 
 const formatParams = (message: string, conversation_id: string | null, files: any[] = [], variables: Record<string, any>) => {
   return {
@@ -79,6 +80,9 @@ const TestChat: FC<TestChatProps> = ({
   const [message, setMessage] = useState<string | undefined>(undefined)
   const [fileList, setFileList] = useState<any[]>([])
   const [features, setFeatures] = useState<FeaturesConfigForm>({} as FeaturesConfigForm)
+  
+  const audioPollingRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
+  const [audioStatusMap, setAudioStatusMap] = useState<Record<string, string>>({})
 
   useEffect(() => {
     getVariables()
@@ -142,9 +146,12 @@ const TestChat: FC<TestChatProps> = ({
     setChatList(prev => {
       const newList = [...prev]
       const lastMsg = newList[newList.length - 1]
-      if (lastMsg.role === 'assistant') {
-        lastMsg.content += content;
-        lastMsg.meta_data = {audio_url}
+      if (lastMsg?.role === 'assistant') {
+        newList[newList.length - 1] = {
+          ...lastMsg,
+          content: lastMsg.content + content,
+          ...(audio_url !== undefined ? { meta_data: { ...lastMsg.meta_data, audio_url, audio_status: 'pending' } } : {})
+        }
       }
       return newList
     })
@@ -211,6 +218,22 @@ const TestChat: FC<TestChatProps> = ({
       })
   }
 
+  useEffect(() => {
+    if (!Object.keys(audioStatusMap).length) return
+    setChatList(prev => prev.map(msg => {
+      if (msg.role === 'assistant' && msg.meta_data?.audio_url && audioStatusMap[msg.meta_data.audio_url]) {
+        return {
+          ...msg,
+          meta_data: {
+            ...msg.meta_data,
+            audio_status: audioStatusMap[msg.meta_data.audio_url]
+          }
+        }
+      }
+      return msg
+    }))
+  }, [audioStatusMap, chatList.length])
+
   const handleStreamMessage = (data: SSEMessage[]) => {
     data.map(item => {
       const { conversation_id, content, message_length, audio_url } = item.data as { conversation_id: string, content: string, message_length: number; audio_url?: string; };
@@ -223,8 +246,38 @@ const TestChat: FC<TestChatProps> = ({
           if (conversation_id && conversationId !== conversation_id) setConversationId(conversation_id)
           break
         case 'end':
+          if (audio_url && !audioStatusMap[audio_url]) {
+            setAudioStatusMap(prev => ({
+              ...prev,
+              [audio_url]: 'pending'
+            }))
+          }
           if (audio_url) {
-            updateAssistantMessage(content, audio_url)
+            updateAssistantMessage(content || '', audio_url)
+            const { file_id } = item.data as { file_id?: string }
+            const idToPoll = file_id || audio_url || ''
+            const fileId = audio_url.split('/').pop()
+            if (fileId && idToPoll && !audioPollingRef.current.has(idToPoll)) {
+              const timer = setInterval(() => {
+                getFileStatusById(fileId)
+                  .then(res => {
+                    const { status } = res as { status: string }
+                    if (status && status !== 'pending') {
+                      setAudioStatusMap(prev => ({
+                        ...prev,
+                        [audio_url]: status
+                      }))
+                      clearInterval(audioPollingRef.current.get(idToPoll))
+                      audioPollingRef.current.delete(idToPoll)
+                    }
+                  })
+                  .catch(() => {
+                    clearInterval(audioPollingRef.current.get(idToPoll))
+                    audioPollingRef.current.delete(idToPoll)
+                  })
+              }, 2000)
+              audioPollingRef.current.set(idToPoll, timer)
+            }
           }
           updateErrorAssistantMessage(message_length)
           setStreamLoading(false)
@@ -426,7 +479,7 @@ const TestChat: FC<TestChatProps> = ({
   }
 
   const updateWorkflowEndMessage = (data: NodeData) => {
-    const { error, status, audio_url } = data;
+    const { error, status } = data;
     setChatList(prev => {
       const newList = [...prev]
       const lastIndex = newList.length - 1
@@ -436,7 +489,6 @@ const TestChat: FC<TestChatProps> = ({
           status,
           error,
           content: newList[lastIndex].content === '' ? null : newList[lastIndex].content,
-          meta_data: { audio_url: audio_url }
         }
       }
       return newList

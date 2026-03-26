@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 13:50:05
+ * @Last Modified time: 2026-03-24 14:07:35
  */
 /**
  * Memory Extraction Engine Configuration Page
@@ -13,21 +13,24 @@
 import { type FC, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Row, Col, Space, Select, InputNumber, Slider, App, Form, Input } from 'antd'
+import { Row, Col, Space, Select, InputNumber, App, Form, Input, Flex, Tooltip } from 'antd'
 import clsx from 'clsx'
 
 import Card from './components/Card'
 import type { ConfigForm, Variable } from './types'
 import { getMemoryExtractionConfig, updateMemoryExtractionConfig } from '@/api/memory'
 import Markdown from '@/components/Markdown'
-import { getModelListUrl } from '@/api/models';
-import { configList } from './constant'
+import { configList, modelConfigList } from './constant'
 import Result from './components/Result'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
-import CustomSelect from '@/components/CustomSelect'
+import ModelSelect from '@/components/ModelSelect'
+import RbSlider from '@/components/RbSlider';
+import DescWrapper from '@/components/FormItem/DescWrapper'
+import LabelWrapper from '@/components/FormItem/LabelWrapper'
 
 /** Available configuration section keys */
 const keys = [
+  'modelConfig',
   'storageLayerModule', 
   'arrangementLayerModule'
 ]
@@ -35,7 +38,7 @@ const keys = [
 /**
  * Configuration description component
  */
-const ConfigDesc: FC<{ config: Variable, className?: string; onlyMeaning?: boolean; }> = ({ config, className, onlyMeaning = false}) => {
+const Desc: FC<{ config: Variable, className?: string; onlyMeaning?: boolean; }> = ({ config, className, onlyMeaning = false}) => {
   const { t } = useTranslation();
   return (
     <div className={className}>
@@ -44,7 +47,6 @@ const ConfigDesc: FC<{ config: Variable, className?: string; onlyMeaning?: boole
         {config.control && <span className="rb:font-regular">{t('memoryExtractionEngine.control')}: {t(`memoryExtractionEngine.${config.control}`)}</span>}
         {config.type && <span className="rb:font-regular">{t('memoryExtractionEngine.type')}: {config.type}</span>}
       </Space>}
-      {config.meaning && <div className={clsx("rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 ")}>{t('memoryExtractionEngine.Meaning')}: {t(`memoryExtractionEngine.${config.meaning}`)}</div>}
     </div>
   )
 }
@@ -54,8 +56,6 @@ const MemoryExtractionEngine: FC = () => {
   const { id } = useParams()
   const [expandedKeys, setExpandedKeys] = useState<string[]>(keys)
   const [form] = Form.useForm<ConfigForm>()
-  const [modelForm] = Form.useForm()
-  const modelValues = Form.useWatch([], modelForm)
   const values = Form.useWatch<ConfigForm>([], form)
   const [loading, setLoading] = useState(false)
   const [iterationPeriodDisabled, setIterationPeriodDisabled] = useState(false)
@@ -82,11 +82,7 @@ const MemoryExtractionEngine: FC = () => {
         t_type_strict: Number(response.t_type_strict || 0),
         t_overall: Number(response.t_overall || 0),
       }
-      // setData(initialValues)
       form.setFieldsValue(initialValues)
-      modelForm.setFieldsValue({
-        llm_id: response.llm_id,
-      })
     })
   }
   useEffect(() => {
@@ -106,11 +102,9 @@ const MemoryExtractionEngine: FC = () => {
     if (!id) {
       return
     }
-    console.log('values', values)
     setLoading(true)
     updateMemoryExtractionConfig({
       ...values,
-      ...modelValues,
       config_id: id,
     }).then(() => {
       message.success(t('common.saveSuccess'))
@@ -122,163 +116,150 @@ const MemoryExtractionEngine: FC = () => {
 
   return (
     <>
-      <div className="rb:text-[24px] rb:font-semibold rb:leading-8 rb:mb-2">{t('memoryExtractionEngine.title')}</div>
-      <div className="rb:text-[#5B6167] rb:leading-5 rb:mb-6">{t('memoryExtractionEngine.subTitle')}</div>
+      <Flex align="center" gap={4} className="rb:font-[MiSans-Bold] rb:text-[16px] rb:font-bold rb:leading-5.5 rb:mb-4!">
+        {t('memoryExtractionEngine.title')}
+        <Tooltip title={t('memoryExtractionEngine.subTitle')}>
+          <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
+        </Tooltip>
+      </Flex>
 
-      <Row gutter={[16, 16]}>
+      <Row gutter={12}>
         <Col span={12}>
-          <Form form={modelForm}>
-            <Form.Item 
-              label={t('memoryExtractionEngine.model')} 
-              name="llm_id"
-            >
-              <CustomSelect
-                url={getModelListUrl}
-                params={{ type: 'llm,chat', pagesize: 100, is_active: true }}
-                valueKey="id"
-                labelKey="name"
-                hasAll={false}
-                style={{ width: '100%' }}
-              />
-            </Form.Item>
-          </Form>
-        </Col>
-      </Row>
-      <Card
-        type="example"
-        title={t('memoryExtractionEngine.example')}
-        expanded={expandedKeys.includes('example')}
-        handleExpand={handleExpand}
-      >
-        {expandedKeys.includes('example') &&
-          <div className="rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:leading-5">
-            <Markdown content={t('memoryExtractionEngine.exampleText')} />
-          </div>
-        }
-      </Card>
-      <Row gutter={[16, 16]} className="rb:mt-4">
-        <Col span={14}>
-          <Form
-            form={form}
-          >
-            <Space direction="vertical" size={16} style={{ width: '100%' }}>
-              {configList.map((item, index) => (
-                <Card
-                  type={item.type}
-                  title={t(`memoryExtractionEngine.${item.type}`)}
-                  key={index}
-                  expanded={expandedKeys.includes(item.type)}
-                  handleExpand={handleExpand}
+          <Form form={form}>
+            <Flex vertical gap={12} className="rb:h-[calc(100vh-114px)]! rb:overflow-y-auto">
+              <div className="rb:bg-white rb:rounded-xl rb:py-2.5 rb:px-4">
+                <Flex
+                  align="center"
+                  justify="space-between"
+                  className="rb:font-[MiSans-Bold] rb:font-bold rb:cursor-pointer"
+                  onClick={() => handleExpand('example')}
                 >
-                  <Space size={20} direction="vertical" style={{width: '100%'}}>
-                    {item.data.map(vo => (
-                      <div 
-                        key={vo.title} 
-                        className={clsx(
-                          `rb:p-[16px_24px] rb:rounded-lg`,
-                          'rb:border rb:border-[#DFE4ED]',
-                          {
-                            'rb:shadow-[inset_4px_0px_0px_0px_#155EEF]': index % 2 === 0,
-                            'rb:shadow-[inset_4px_0px_0px_0px_#369F21]': index % 2 !== 0,
-                          }
-                        )}
-                      >
-                        <div className="rb:text-[16px] rb:font-medium rb:leading-5.5">{t(`memoryExtractionEngine.${vo.title}`)}</div>
-                        <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`memoryExtractionEngine.${vo.title}SubTitle`)}</div>
+                  {t('memoryExtractionEngine.example')}
+                  <div className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')]", {
+                    'rb:rotate-180': !expandedKeys.includes('example'),
+                    'rb:rotate-0': expandedKeys.includes('example'),
+                  })}></div>
+                </Flex>
 
-                        {vo.list.map(config => (
-                          <div key={config.label}>
-                            {config.control === 'button' &&
-                              <SwitchFormItem
-                                title={<>-{t(`memoryExtractionEngine.${config.label}`)}</>}
-                                name={config.variableName}
-                                desc={<ConfigDesc config={config} className="rb:ml-2" />}
-                                className="rb:mt-6"
-                              />
-                            }
-                            {config.control === 'select' &&
-                              <>
-                                <div className="rb:text-[14px] rb:font-medium rb:leading-5 rb:mt-6 rb:mb-2">
-                                  -{t(`memoryExtractionEngine.${config.label}`)}
-                                </div>
-                                <div className="rb:pl-2">
+                {expandedKeys.includes('example') &&
+                  <div className="rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mt-2.5 rb:mb-1.5">
+                    <Markdown content={t('memoryExtractionEngine.exampleText')} />
+                  </div>
+                }
+              </div>
+
+              <Card
+                title={t('memoryExtractionEngine.modelConfig')}
+                type="modelConfig"
+                expanded={expandedKeys.includes('modelConfig')}
+                handleExpand={handleExpand}
+              >
+                {/* <Form form={modelForm}> */}
+                  <Flex vertical gap={12}>
+                    <Flex gap={12} vertical>
+                      {modelConfigList.map(config => (
+                        <div key={config.key} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3">
+                          <LabelWrapper title={t(`memoryExtractionEngine.${config.key}`)} className="rb:mb-3" />
+                          <Form.Item
+                            name={config.key}
+                            className="rb:mb-0!"
+                          >
+                            <ModelSelect
+                              params={config.params}
+                            />
+                          </Form.Item>
+                        </div>
+                      ))}
+                    </Flex>
+                  </Flex>
+                {/* </Form> */}
+              </Card>
+
+              <Flex vertical gap={16}>
+                {configList.map((item, index) => (
+                  <Card
+                    type={item.type}
+                    title={t(`memoryExtractionEngine.${item.type}`)}
+                    key={index}
+                    expanded={expandedKeys.includes(item.type)}
+                    handleExpand={handleExpand}
+                  >
+                    <Flex gap={16} vertical>
+                      {item.data.map(vo => (
+                        <Flex
+                          key={vo.title}
+                          vertical
+                          gap={10}
+                          className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3! rb:pt-2.5!"
+                        >
+                          <Space size={4} className="rb:text-[#212332] rb:font-medium rb:leading-5">
+                            {t(`memoryExtractionEngine.${vo.title}`)}
+                            <Tooltip title={t(`memoryExtractionEngine.${vo.title}SubTitle`)}>
+                              <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
+                            </Tooltip>
+                          </Space>
+
+                          {vo.list.map(config => (
+                            <div key={config.label} className="rb:bg-white rb:rounded-xl rb:p-3 rb:pr-2.5">
+                              {config.control === 'button'
+                                ? <SwitchFormItem
+                                  title={t(`memoryExtractionEngine.${config.label}`)}
+                                  name={config.variableName}
+                                  desc={<DescWrapper desc={<Desc config={config} />} />}
+                                  className="rb:mt-6"
+                                />
+                                : <>
+                                  {config.meaning
+                                    ? <Space size={4} className="rb:text-[#212332] rb:font-medium rb:leading-5">
+                                      {t(`memoryExtractionEngine.${config.label}`)}
+                                      <Tooltip title={<>{t('memoryExtractionEngine.Meaning')}: {t(`memoryExtractionEngine.${config.meaning}`)}</>}>
+                                        <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
+                                      </Tooltip>
+                                    </Space>
+                                    : <div className="rb:text-[#212332] rb:font-medium rb:leading-5">
+                                      {t(`memoryExtractionEngine.${config.label}`)}
+                                    </div>
+                                  }
+                                  {config.control !== 'text' && <DescWrapper desc={<Desc config={config} />} />}
                                   <Form.Item
                                     name={config.variableName}
+                                    className="rb:mb-0! rb:mt-2!"
                                   >
-                                    <Select 
-                                      disabled={config.variableName === 'iteration_period' && iterationPeriodDisabled}
-                                      options={config.options ? config.options.map(item => ({ ...item, label: t(`memoryExtractionEngine.${item.label}`) })) : []}
-                                    />
+                                    {config.control === 'select'
+                                      ? <Select
+                                        disabled={config.variableName === 'iteration_period' && iterationPeriodDisabled}
+                                        options={config.options ? config.options.map(item => ({ ...item, label: t(`memoryExtractionEngine.${item.label}`) })) : []}
+                                      />
+                                      : config.control === 'slider'
+                                      ? <RbSlider
+                                        min={config.min || 0}
+                                        max={config.max || 1}
+                                        step={config.step || 0.01}
+                                        isInput={true}
+                                        prefix={<span className="rb:text-[#5B6167]">{t('emotionEngine.currentValue')}:</span>}
+                                        inputClassName="rb:w-[155px]!"
+                                      />
+                                      : config.control === 'inputNumber'
+                                      ? <InputNumber min={config.min || 0} style={{ width: '100%' }} placeholder={t('common.pleaseEnter')} />
+                                      : config.control === 'text'
+                                      ? <Input placeholder={t('common.pleaseEnter')} disabled />
+                                      : null
+                                    }
                                   </Form.Item>
-                                  <ConfigDesc config={config} className="rb:-mt-4!" />
-                                </div>
-                              </>
-                            }
-                            {config.control === 'slider' &&
-                              <>
-                                <div className="rb:text-[14px] rb:font-medium rb:leading-5 rb:mt-6 rb:mb-2">
-                                  -{t(`memoryExtractionEngine.${config.label}`)}
-                                </div>
-                                <div className="rb:pl-2">
-                                  <ConfigDesc config={config} className="rb:mb-2.5" />
-                                  <Form.Item
-                                    name={config.variableName}
-                                  >
-                                    <Slider 
-                                      style={{ margin: '0' }} 
-                                      min={config.min || 0} 
-                                      max={config.max || 1} 
-                                      step={config.step || 0.01}
-                                    />
-                                  </Form.Item>
-                                  <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5">
-                                    {config.min || 0}
-                                    <span>{t('memoryExtractionEngine.CurrentValue')}: {values?.[config.variableName as keyof ConfigForm]}</span>
-                                  </div>
-                                </div>
-                              </>
-                            }
-                            {config.control === 'inputNumber' &&
-                              <>
-                                <div className="rb:text-[14px] rb:font-medium rb:leading-5 rb:mt-6 rb:mb-2">
-                                  -{t(`memoryExtractionEngine.${config.label}`)}
-                                </div>
-                                <div className="rb:pl-2">
-                                  <Form.Item
-                                    name={config.variableName}
-                                  >
-                                    <InputNumber min={config.min || 0} style={{ width: '100%' }} placeholder={t('common.pleaseEnter')} />
-                                  </Form.Item>
-                                  <ConfigDesc config={config} className="rb:-mt-4!" />
-                                </div>
-                              </>
-                            }
-                            {config.control === 'text' &&
-                              <>
-                                <div className="rb:text-[14px] rb:font-medium rb:leading-5 rb:mt-6 rb:mb-2">
-                                  -{t(`memoryExtractionEngine.${config.label}`)}
-                                </div>
-                                <div className="rb:pl-2">
-                                  <Form.Item
-                                    name={config.variableName}
-                                  >
-                                    <Input placeholder={t('common.pleaseEnter')} disabled />
-                                  </Form.Item>
-                                  <ConfigDesc config={config} onlyMeaning={true} className="rb:-mt-4!" />
-                                </div>
-                              </>
-                            }
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                  </Space>
-                </Card>
-              ))}
-            </Space>
+                                </>
+                              }
+                            </div>
+                          ))}
+                        </Flex>
+                      ))}
+                    </Flex>
+                  </Card>
+                ))}
+              </Flex>
+            </Flex>
           </Form>
         </Col>
-        <Col span={10}>
+        <Col span={12}>
           <Result
             loading={loading}
             handleSave={handleSave}

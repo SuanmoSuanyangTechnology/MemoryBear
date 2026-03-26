@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:55 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-11 15:11:06
+ * @Last Modified time: 2026-03-25 12:24:41
  */
 /**
  * Multi-Key Configuration Modal
@@ -95,6 +95,7 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
   /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
+    handleClose
   }));
 
   return (

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-03 10:11:48
+ * @Last Modified time: 2026-03-25 10:58:47
  */
 import { type FC, useState, useEffect, useMemo } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
@@ -36,7 +36,7 @@ export interface LexicalEditorProps {
   fontSize?: number;
   lineHeight?: number;
   size?: 'default' | 'small';
-  type?: 'input' | 'textarea',
+  type?: 'input' | 'textarea';
   language?: 'string' | 'jinja2';
   className?: string;
 }
@@ -61,7 +61,7 @@ const jinja2Theme = {
 };
 
 // Main Lexical Editor component
-const Editor: FC<LexicalEditorProps> =(({
+const Editor: FC<LexicalEditorProps> =({
   placeholder = "请输入内容...",
   value = "",
   onChange,
@@ -173,10 +173,10 @@ const Editor: FC<LexicalEditorProps> =(({
   // Calculate minimum height based on type and size
   const minheight = useMemo(() => {
     if (type === 'input') {
-      return `${height ? height : size === 'small' ? 28 : 30}px`
+      return `${height ? height : size === 'small' && variant === 'borderless' ? 18 : size === 'small' ? 26 : 30}px`
     }
     return `${height ? height : size === 'small' ? 60 : 120}px`
-  }, [type, size, height])
+  }, [type, size, height, variant])
 
   // Calculate font size based on size prop
   const fontSize = useMemo(() => {
@@ -185,12 +185,12 @@ const Editor: FC<LexicalEditorProps> =(({
 
   // Calculate line height based on size prop
   const lineHeight = useMemo(() => {
-    return `${height ? height : size === 'small' ? 16 : 20}px`
+    return `${height ? height - 10 : size === 'small' && variant === 'borderless' ? 18 : size === 'small' ? 16 : 20}px`
   }, [size])
 
   // Calculate placeholder minimum height
   const placeHolderMinheight = useMemo(() => {
-    return `${height ? height : size === 'small' ? 16 : 30}px`
+    return `${height ? 16 : size === 'small' ? 16 : 30}px`
   }, [type, size, height])
 
   return (
@@ -199,7 +199,7 @@ const Editor: FC<LexicalEditorProps> =(({
         <RichTextPlugin
           contentEditable={
             enableLineNumbers ? (
-              // Editor with line numbers for Jinja2 mode
+            // Editor with line numbers for Jinja2 mode
               <div className="editor-with-line-numbers" style={{
                 border: variant === 'borderless' ? 'none' : '1px solid #DFE4ED',
                 borderRadius: '6px',
@@ -213,7 +213,7 @@ const Editor: FC<LexicalEditorProps> =(({
                     className="editor-content-with-numbers"
                     style={{
                       minHeight: minheight,
-                      padding: '4px 0',
+                      padding: variant === 'borderless' ? '0' : '4px 0',
                       outline: 'none',
                       resize: 'none',
                       fontSize: fontSize,
@@ -228,9 +228,9 @@ const Editor: FC<LexicalEditorProps> =(({
               <ContentEditable
                 style={{
                   minHeight: minheight,
-                  padding: variant === 'borderless' ? '0' : '4px 11px',
-                  border: variant === 'borderless' ? 'none' : '1px solid #DFE4ED',
-                  borderRadius: '6px',
+                  padding: height ? '4px 6px' : variant === 'borderless' ? '0' : '6px 8px',
+                  border: variant === 'borderless' ? 'none' : '1px solid #EBEBEB',
+                  borderRadius: '8px',
                   outline: 'none',
                   resize: 'none',
                   fontSize: fontSize,
@@ -269,6 +269,6 @@ const Editor: FC<LexicalEditorProps> =(({
       </div>
     </LexicalComposer>
   );
-});
+};
 
 export default Editor;

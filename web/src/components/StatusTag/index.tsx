@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:29:42 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 15:29:42 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-16 11:59:09
  */
 /**
  * StatusTag Component
@@ -14,7 +14,7 @@
  */
 
 import { type FC } from 'react'
-import { Tag } from 'antd';
+import { Tag, Flex } from 'antd';
 import clsx from 'clsx';
 
 /** Props interface for StatusTag component */
@@ -40,13 +40,12 @@ const StatusTag: FC<StatusTagProps> = ({
   status,
   text
 }) => {
-  console.log('status', status)
   return (
-    <Tag style={{ backgroundColor: '#fff', borderColor: '#DFE4ED' }}>
-      <span className='rb:flex rb:items-center rb:text-[#5B6167] rb:pl-px rb:pr-px'>
-        <span className={clsx(' rb:w-1.25 rb:h-1.25 rb:rounded-full rb:mr-1', Colors[status])}></span>
+    <Tag className="rb:bg-white! rb:border-[#EBEBEB]! rb:rounded-md!">
+      <Flex align="center" gap={4} className='rb:text-[#5B6167] rb:py-px rb:px-2'>
+        <span className={clsx('rb:size-1.25 rb:rounded-full', Colors[status])}></span>
         { text }
-      </span>
+      </Flex>
     </Tag>
   )
 }

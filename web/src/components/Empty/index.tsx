@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:03:25 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-25 11:14:25
+ * @Last Modified time: 2026-03-04 14:02:53
  */
 /**
  * Empty Component
@@ -15,6 +15,7 @@
 
 import { type FC, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Flex } from 'antd';
 
 import emptyIcon from '@/assets/images/empty/empty.svg';
 
@@ -48,14 +49,19 @@ const  Empty: FC<EmptyProps> = ({
   // Use custom subtitle or default translation if subtitle is needed
   const curSubTitle = isNeedSubTitle ? (subTitle || t('empty.tableEmpty')) : null;
   return (
-    <div className={`rb:flex rb:items-center rb:justify-center rb:flex-col ${className}`}>
+    <Flex 
+      align="center"
+      justify="center"
+      vertical
+      className={className}
+    >
       {/* Empty state icon */}
       <img src={url || emptyIcon} alt="404" style={{ width: `${width}px`, height: `${height}px` }} />
       {/* Optional title */}
-      {title && <div className="rb:mt-2 rb:leading-5">{title}</div>}
+      {title && <div className="rb:mt-2 rb:leading-5 rb:text-[#212332]">{title}</div>}
       {/* Optional subtitle with conditional styling */}
-      {curSubTitle && <div className={`rb:mt-[${url ? 8 : 5}px] rb:leading-4 rb:text-[12px] rb:text-[#A8A9AA]`}>{curSubTitle}</div>}
-    </div>
+      {curSubTitle && <div className={`rb:mt-[${url ? 8 : 5}px] rb:leading-4 rb:text-[12px] rb:text-[#5B6167]`}>{curSubTitle}</div>}
+    </Flex>
   );
 }
 export default Empty;

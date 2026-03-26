@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:49:09 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:49:09 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-25 11:45:54
  */
 /**
  * Space Modal Component
@@ -17,13 +17,12 @@ import type { SpaceModalData, SpaceModalRef, Space, StorageType } from '../types
 import RbModal from '@/components/RbModal'
 import { createWorkspace } from '@/api/workspaces'
 import RadioGroupCard from '@/components/RadioGroupCard'
-import { getModelListUrl } from '@/api/models'
-import CustomSelect from '@/components/CustomSelect'
 import UploadImages from '@/components/Upload/UploadImages'
 import { getFileLink } from '@/api/fileStorage'
 import ragIcon from '@/assets/images/space/rag.png'
 import neo4jIcon from '@/assets/images/space/neo4j.png'
 import { stringRegExp } from '@/utils/validator';
+import ModelSelect from '@/components/ModelSelect';
 
 const FormItem = Form.Item;
 
@@ -206,12 +205,8 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
             name="llm"
             rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('space.llmModel') }) }]}
           >
-            <CustomSelect
-              url={getModelListUrl}
-              params={{ type: 'llm,chat', pagesize: 100, is_active: true }}
-              valueKey="id"
-              labelKey="name"
-              hasAll={false}
+            <ModelSelect
+              params={{ type: 'llm,chat' }}
               placeholder={t('common.selectPlaceholder', { title: t('space.llmModel') })}
               className="rb:w-full!"
             />
@@ -221,12 +216,8 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
             name="embedding"
             rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('space.embeddingModel') }) }]}
           >
-            <CustomSelect
-              url={getModelListUrl}
-              params={{ type: 'embedding', pagesize: 100, is_active: true }}
-              valueKey="id"
-              labelKey="name"
-              hasAll={false}
+            <ModelSelect
+              params={{ type: 'embedding' }}
               placeholder={t('common.selectPlaceholder', { title: t('space.embeddingModel') })}
               className="rb:w-full!"
             />
@@ -236,12 +227,8 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
             name="rerank"
             rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('space.rerankModel') }) }]}
           >
-            <CustomSelect
-              url={getModelListUrl}
-              params={{ type: 'rerank', pagesize: 100, is_active: true }}
-              valueKey="id"
-              labelKey="name"
-              hasAll={false}
+            <ModelSelect
+              params={{ type: 'rerank' }}
               placeholder={t('common.selectPlaceholder', { title: t('space.rerankModel') })}
               className="rb:w-full!"
             />

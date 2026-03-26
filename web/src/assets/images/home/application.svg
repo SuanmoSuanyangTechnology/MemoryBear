@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>icon_应用管理</title>
+    <g id="定稿" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="首页-红熊空间" transform="translate(-878, -817)" stroke="#171719" stroke-width="1.6">
+            <g id="快速操作" transform="translate(846, 736)">
+                <g id="1" transform="translate(16, 58)">
+                    <g id="icon_应用管理" transform="translate(16, 23)">
+                        <g id="编组-26" transform="translate(3.75, 3.158)">
+                            <rect id="矩形" x="0" y="0.966987659" width="6.75" height="6.75" rx="1.6"></rect>
+                            <rect id="矩形" x="0" y="10.3419877" width="6.75" height="6.75" rx="1.6"></rect>
+                            <rect id="矩形" x="9.375" y="10.3419877" width="6.75" height="6.75" rx="1.6"></rect>
+                            <path d="M11.4301643,1.24264069 L14.2301643,1.24264069 C15.1138199,1.24264069 15.8301643,1.95898509 15.8301643,2.84264069 L15.8301643,5.64264069 C15.8301643,6.52629629 15.1138199,7.24264069 14.2301643,7.24264069 L11.4301643,7.24264069 C10.5465087,7.24264069 9.83016429,6.52629629 9.83016429,5.64264069 L9.83016429,2.84264069 C9.83016429,1.95898509 10.5465087,1.24264069 11.4301643,1.24264069 Z" id="矩形备份-5" transform="translate(12.8302, 4.2426) rotate(45) translate(-12.8302, -4.2426)"></path>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

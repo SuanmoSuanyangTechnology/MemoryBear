@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:27:28 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:27:28 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-26 11:16:09
  */
 /**
  * Card Component
@@ -21,15 +21,19 @@ interface CardProps {
   title: string;
   headerOperate?: ReactNode;
   className?: string;
+  bodyClassName?: string;
 }
 
-const Card: FC<CardProps> = ({ children, title, headerOperate, className }) => {
+const Card: FC<CardProps> = ({ children, title, headerOperate, className, bodyClassName }) => {
   return (
     <RbCard 
       headerType="borderless"
       title={title}
       extra={headerOperate}
-      className={`rb:h-full! ${className}`}
+      variant="borderless"
+      className={`rb:h-full! rb:bg-[#FFFFFF]! ${className}`}
+      bodyClassName={bodyClassName}
+      headerClassName="rb:min-h-[58px]!"
     >
       {children}
     </RbCard>

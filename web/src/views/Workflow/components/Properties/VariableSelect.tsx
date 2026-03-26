@@ -1,12 +1,13 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:40:13 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 15:40:13 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-25 16:54:44
  */
 import { type FC } from 'react'
 import clsx from 'clsx';
-import { Select, type SelectProps } from 'antd'
+import { Select, type SelectProps, Flex, Space } from 'antd'
+
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
 type LabelRender = SelectProps['labelRender'];
 
@@ -39,6 +40,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
   onChange,
   size = 'middle',
   filterBooleanType = false,
+  mode,
   ...resetPorps
 }) => {
 
@@ -62,9 +64,10 @@ const VariableSelect: FC<VariableSelectProps> = ({
     if (filterOption) {
       return (
         <span
-          className={clsx("rb:max-w-full rb:wrap-break-word rb:line-clamp-1 rb:border rb:border-[#DFE4ED] rb:rounded-md rb:bg-white rb:text-[12px] rb:inline-flex rb:items-center rb:px-1.5 rb:cursor-pointer", {
+          className={clsx("rb:max-w-full rb:wrap-break-word rb:line-clamp-1 rb:rounded-md rb:bg-white rb:text-[12px] rb:inline-flex rb:items-center rb:px-1.5 rb:cursor-pointer", {
             'rb:leading-5.5!': size !== 'small',
-            'rb:leading-4! rb:text-[10px]!': size === 'small'
+            'rb:leading-4! rb:text-[10px]!': size === 'small',
+            'rb-border': mode !== "multiple"
           })}
           contentEditable={false}
         >
@@ -79,7 +82,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
               <span className="rb:text-[#DFE4ED] rb:mx-0.5">/</span>
             </>
           )}
-          <span className="rb:text-[#155EEF]">{filterOption.label}</span>
+          <span className="rb:text-[#171719]">{filterOption.label}</span>
         </span>
       )
     }
@@ -107,9 +110,22 @@ const VariableSelect: FC<VariableSelectProps> = ({
    * Format grouped options for Select component
    */
   const groupedOptions = Object.entries(groupedSuggestions).map(([_nodeId, suggestions]) => ({
-    label: suggestions[0].nodeData.name,
+    label: <Flex align="center" gap={4}>
+      {suggestions[0].nodeData.icon && <img
+        src={suggestions[0].nodeData.icon}
+        className="rb:size-3"
+        alt=""
+      />}
+      {suggestions[0].nodeData.name}
+    </Flex>,
     options: suggestions.map(s => ({ 
-      label: <div className="rb:flex rb:items-center rb:gap-1 rb:justify-between"> { s.label } <span>{s.dataType}</span></div>, 
+      label: <Flex align="center" justify="space-between" gap={4}>
+        <Space size={8}>
+          <span className="rb:text-[#155EEF]">{`{x}`}</span>
+          {s.label}
+        </Space>
+        <span className="rb:text-[#5B6167]">{s.dataType}</span>
+      </Flex>, 
       value: `{{${s.value}}}` 
     }))
   }));
@@ -117,6 +133,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
   return (
     <Select
       {...resetPorps}
+      mode={mode}
       size={size}
       placeholder={placeholder}
       value={value}

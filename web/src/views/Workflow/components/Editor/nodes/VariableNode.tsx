@@ -37,7 +37,7 @@ const VariableComponent: React.FC<{ nodeKey: NodeKey; data: Suggestion }> = ({
     <span
       onClick={handleClick}
       className={clsx('rb:border rb:rounded-md rb:bg-white rb:text-[10px] rb:inline-flex rb:items-center rb:py-0 rb:px-1.5 rb:mx-0.5 rb:cursor-pointer', {
-        'rb:border-[#155EEF]': isSelected,
+        'rb:border-[#171719]': isSelected,
         'rb:border-[#DFE4ED]': !isSelected
       })}
       contentEditable={false}
@@ -57,7 +57,7 @@ const VariableComponent: React.FC<{ nodeKey: NodeKey; data: Suggestion }> = ({
           <span style={{ color: '#DFE4ED', margin: '0 2px' }}>/</span>
         </>
       )}
-      <span className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1" style={{ color: '#155EEF' }}>{data.label}</span>
+      <span className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1 rb:text-[#171719]">{data.label}</span>
     </span>
   );
 };

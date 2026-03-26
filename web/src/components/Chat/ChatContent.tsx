@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 19:45:40
+ * @Last Modified time: 2026-03-23 18:24:33
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -38,7 +38,8 @@ const ChatContent: FC<ChatContentProps> = ({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [playingIndex, setPlayingIndex] = useState<number | null>(null)
 
-  const handlePlay = (index: number, audio_url: string) => {
+  const handlePlay = (index: number, audio_url: string, audio_status?: string) => {
+    if (audio_status !== 'completed' && !audio_status) return
     if (playingIndex === index) {
       audioRef.current?.pause()
       setPlayingIndex(null)
@@ -114,7 +115,7 @@ const ChatContent: FC<ChatContentProps> = ({
               : <>
                 {/* Top label (such as timestamp, username, etc.) */}
                 {labelPosition === 'top' &&
-                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
+                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular rb:px-1">
                     {labelFormat(item)}
                   </div>
                 }
@@ -162,14 +163,17 @@ const ChatContent: FC<ChatContentProps> = ({
                   })}
                 </Flex>}
                 {/* Message bubble */}
-                <div className={clsx('rb:border rb:text-left rb:rounded-lg rb:mt-1.5 rb:leading-4.5 rb:p-[10px_12px_2px_12px] rb:inline-block rb:max-w-130 rb:wrap-break-word', contentClassNames, {
+                <div className={clsx('rb:text-left rb:rounded-lg rb:leading-5 rb:p-[10px_12px_2px_12px] rb:inline-block rb:max-w-130 rb:wrap-break-word rb:relative', contentClassNames, {
                   // Error message style (content is null and not assistant message)
-                  'rb:border-[rgba(255,93,52,0.30)] rb:bg-[rgba(255,93,52,0.08)] rb:text-[#FF5D34]': errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime,
+                  'rb:bg-[rgba(255,93,52,0.08)] rb:text-[#FF5D34]': (item.status && item.status !== 'completed') || (errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime),
                   // Assistant message style
-                  'rb:bg-[rgba(21,94,239,0.08)] rb:border-[rgba(21,94,239,0.30)]': item.role === 'user',
+                  'rb:bg-[#E3EBFD]': item.role === 'user',
                   // User message style
-                  'rb:bg-[#FFFFFF] rb:border-[#EBEBEB]': item.role === 'assistant' && (item.content || item.content === '' || typeof renderRuntime === 'function'),
+                  'rb:bg-[#F6F6F6] rb:text-[#212332]': item.role === 'assistant' && (item.content || item.content === '' || typeof renderRuntime === 'function'),
+                  'rb:mt-1.5': labelPosition === 'top',
+                  'rb:mb-1.5': labelPosition === 'bottom',
                 })}>
+                  {item.status && <div className="rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/conversation/exclamation_circle.svg')] rb:absolute rb:-left-7"></div>}
                   {item.subContent && renderRuntime && renderRuntime(item, index)}
                   {/* Render message content using Markdown component */}
                   <Markdown content={renderRuntime ? item.content ?? '' : item.content ?? errorDesc ?? ''} />
@@ -177,11 +181,16 @@ const ChatContent: FC<ChatContentProps> = ({
                   {item.meta_data?.audio_url && <>
                     <Divider className="rb:my-3!" />
                     <Space size={12} className="rb:pb-2 rb:pl-1">
-                      {playingIndex !== index
-                        ? <SoundOutlined className="rb:cursor-pointer rb:hover:text-[#155EEF]! rb:size-5.5" onClick={() => handlePlay(index, item.meta_data?.audio_url!)} />
+                      {playingIndex !== index && item.meta_data?.audio_status === 'pending'
+                        ? <Spin />
+                        : playingIndex !== index
+                        ? <SoundOutlined className={clsx("rb:cursor-pointer rb:size-5.5", {
+                          'rb:text-[#FF5D34]': item.meta_data?.audio_status === 'error',
+                          'rb:hover:text-[#155EEF]!': !item.meta_data?.audio_status || !['pending', 'error'].includes(item.meta_data?.audio_status)
+                        })} onClick={() => handlePlay(index, item.meta_data?.audio_url!, item.meta_data?.audio_status)} />
                         : <div
                             className="rb:size-5.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/audio_ing.gif')]"
-                            onClick={() => handlePlay(index, item.meta_data?.audio_url!)}
+                            onClick={() => handlePlay(index, item.meta_data?.audio_url!, item.meta_data?.audio_status)}
                           />
                       }
                     </Space>
@@ -189,7 +198,7 @@ const ChatContent: FC<ChatContentProps> = ({
                 </div>
                 {/* Bottom label (such as timestamp, username, etc.) */}
                 {labelPosition === 'bottom' &&
-                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular rb:mt-2">
+                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
                     {labelFormat(item)}
                   </div>
                 }

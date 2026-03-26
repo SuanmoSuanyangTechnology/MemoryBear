@@ -2,12 +2,12 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:31:50 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 16:22:03
+ * @Last Modified time: 2026-03-25 11:50:16
  */
 import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { App } from 'antd'
+import { App, Flex } from 'antd'
 
 import Empty from '@/components/Empty'
 import RbCard from '@/components/RbCard/Card'
@@ -82,25 +82,28 @@ const Suggestions = forwardRef<{ handleRefresh: () => void; }, { refresh: () => 
     <RbCard
       title={t('statementDetail.suggestions')}
       headerType="borderless"
-      headerClassName="rb:leading-[24px] rb:bg-[#F6F8FC]! rb:min-h-[46px]! rb:border-b! rb:border-b-[#DFE4ED]!"
-      bodyClassName="rb:px-[16px]! rb:pt-[20px]! rb:pb-[24px]!"
+      headerClassName="rb:min-h-[46px]! rb:font-[MiSans-Bold] rb:font-bold"
+      bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-46px)]! rb:overflow-y-auto!"
+      className="rb:h-[calc(100vh-88px)]!"
     >
       {suggestions?.suggestions && suggestions?.suggestions.length > 0
-        ? <>
-          <RbAlert className="rb:mb-3">{suggestions.health_summary}</RbAlert>
-          <div className="rb:space-y-8">
-            {suggestions.suggestions.map((item, index) => (
-              <div key={index}>
-                <div className="rb:font-medium">{index + 1}. {item.title}</div>
-                <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-2 rb:mb-2 rb:leading-5">{item.content}</div>
+        ? <Flex vertical gap={16} className="rb:h-full! rb:overflow-y-auto!">
+          <RbAlert className="rb:text-[14px] rb:py-2.5! rb:px-3! rb:leading-4">{suggestions.health_summary}</RbAlert>
+          
+          {suggestions.suggestions.map((item, index) => (
+            <div key={index} className="rb:leading-5">
+              <div className="rb:font-medium rb:mb-2">{index + 1}. {item.title}</div>
 
-                <ul className="rb:list-disc rb:ml-4 rb:text-[12px] rb:text-[#5B6167] rb:leading-5">
+              <div className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3">
+                <div className="rb:mb-2">{item.content}</div>
+
+                <ul className="rb:list-disc rb:ml-4">
                   {item.actionable_steps.map((vo, idx) => <li key={idx}>{vo}</li>)}
                 </ul>
               </div>
-            ))}
-          </div>
-        </>
+            </div>
+          ))}
+        </Flex>
         : <Empty size={88} subTitle={t(loading ? 'statementDetail.suggestionLoading' : 'empty.tableEmpty')} className="rb:h-full" />
       }
     </RbCard>

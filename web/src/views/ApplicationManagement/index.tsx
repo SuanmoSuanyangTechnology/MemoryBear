@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 21:00:12
+ * @Last Modified time: 2026-03-25 15:38:13
  */
 /**
  * Application Management Page
@@ -14,13 +14,11 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, App, Select, Space, Dropdown, type SegmentedProps, Flex, Form } from 'antd';
 import clsx from 'clsx';
-import { DeleteOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom'
 
 import ApplicationModal, { types } from './components/ApplicationModal';
 import type { Application, ApplicationModalRef, Query, UploadWorkflowModalRef } from './types';
 import SearchInput from '@/components/SearchInput'
-import RbCard from '@/components/RbCard/Card'
 import { getApplicationListUrl, deleteApplication, copyApplication } from '@/api/application'
 import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
 import { formatDateTime } from '@/utils/format';
@@ -28,6 +26,9 @@ import UploadWorkflowModal from './components/UploadWorkflowModal'
 import UploadModal from './components/UploadModal'
 import PageTabs from '@/components/PageTabs'
 import MySharing from './MySharing'
+import RbCard from '@/components/RbCard'
+import RbButton from '@/components/RbButton'
+import RbDescriptions from '@/components/RbDescriptions'
 
 
 const tabKeys = ['apps', 'sharing', 'myShare']
@@ -92,7 +93,7 @@ const ApplicationManagement: React.FC = () => {
   const handleImport = () => {
     uploadWorkflowModalRef.current?.handleOpen()
   }
-  const handleClick = ({ key }: { key: string } ) => {
+  const handleClick = ({ key }: { key: string }) => {
     switch (key) {
       case 'thirdParty':
         handleImport()
@@ -127,7 +128,7 @@ const ApplicationManagement: React.FC = () => {
   }
   return (
     <>
-      <Flex justify="space-between" className="rb:mb-3!">
+      <Flex justify="space-between" className="rb:mb-4!">
         <PageTabs
           value={activeTab}
           options={formatTabItems}
@@ -136,7 +137,6 @@ const ApplicationManagement: React.FC = () => {
 
         <Form
           form={form}
-          initialValues={{}}
         >
           {activeTab !== 'myShare' &&
             <Space size={8}>
@@ -148,7 +148,8 @@ const ApplicationManagement: React.FC = () => {
                     label: t(`application.${type}`),
                   }))}
                   allowClear
-                  className="rb:w-30"
+                  variant="filled"
+                  className="rb:w-30!"
                 />
               </Form.Item>
               <Form.Item name="search" noStyle>
@@ -157,8 +158,7 @@ const ApplicationManagement: React.FC = () => {
                   className="rb:w-75!"
                 />
               </Form.Item>
-              
-              {activeTab === 'apps' && <>
+              {activeTab === 'apps' && <Space size={10}>
                 <Dropdown
                   menu={{
                     items: [
@@ -172,10 +172,10 @@ const ApplicationManagement: React.FC = () => {
                     {t('application.import')}
                   </Button>
                 </Dropdown>
-                <Button type="primary" onClick={handleCreate}>
+                <RbButton type="primary" icon={<div className="rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/plus.svg')]"></div>} onClick={handleCreate}>
                   {t('application.createApplication')}
-                </Button>
-              </>}
+                </RbButton>
+              </Space>}
             </Space>
           }
         </Form>
@@ -190,23 +190,33 @@ const ApplicationManagement: React.FC = () => {
           renderItem={(item) => (
             <RbCard
               title={item.name}
-              avatar={
-                <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
-                  {item.name[0]}
-                </div>
+              avatarText={item.name.trim()[0]}
+              avatarClassName={clsx({
+                'rb:bg-[#155EEF]': item.type === 'agent',
+                'rb:bg-[#9C6FFF]!': item.type === 'multi_agent',
+                'rb:bg-[#171719]': item.type === 'workflow',
+              })}
+              footer={
+                item.is_shared
+                  ? <Flex justify="space-between" gap={12}>
+                    <RbButton block onClick={() => handleEdit(item)}>{t('common.view')}</RbButton>
+                    {item.share_permission === 'editable' && <RbButton type="primary" ghost className="rb:w-[calc(100%-46px)]" onClick={() => handleCopy(item)}>{t('common.copy')}</RbButton>}
+                  </Flex>
+                  : <Flex justify="space-between" gap={12}>
+                    <RbButton danger className="rb:w-22.25" onClick={() => handleDelete(item)}>{t('common.delete')}</RbButton>
+                    <RbButton type="primary" ghost className="rb:flex-1" onClick={() => handleEdit(item)}>{t('application.configuration')}</RbButton>
+                  </Flex>
               }
             >
-              {['type', 'source', 'created_at'].map((key, index) => (
-                <div key={key} className={clsx("rb:flex rb:justify-between rb:gap-5 rb:font-regular rb:text-[14px]", {
-                  'rb:mt-3': index !== 0
-                })}>
-                  <span className="rb:text-[#5B6167]">{t(`application.${key}`)}</span>
-                  <span className={clsx({
-                    'rb:text-[#155EEF] rb:font-medium': key === 'type' && item[key] === 'agent',
-                    'rb:text-[#369F21] rb:font-medium': key === 'type' && item[key] === 'multi_agent',
+              <RbDescriptions
+                items={['type', 'source', 'created_at'].map(key => ({
+                  key,
+                  label: t(`application.${key}`),
+                  children: <span className={clsx('rb:font-medium', {
+                    'rb:text-[#155EEF]': key === 'type',
                   })}>
                     {key === 'source' && item.is_shared
-                      ? item.source_workspace_name
+                      ? t('application.shared')
                       : key === 'source' && !item.is_shared
                         ? t('application.configuration')
                         : key === 'created_at'
@@ -214,19 +224,8 @@ const ApplicationManagement: React.FC = () => {
                           : t(`application.${item[key as keyof Application]}`)
                     }
                   </span>
-                </div>
-              ))}
-
-              {item.is_shared
-                ? <div className="rb:mt-5 rb:flex rb:justify-between rb:gap-2.5">
-                  <Button type="primary" ghost block onClick={() => handleEdit(item)}>{t('common.view')}</Button>
-                  {item.share_permission === 'editable' && <Button type="primary" className="rb:w-[calc(100%-46px)]" onClick={() => handleCopy(item)}>{t('common.copy')}</Button>}
-                </div>
-                : <div className="rb:mt-5 rb:flex rb:justify-between rb:gap-2.5">
-                  <Button type="primary" ghost className="rb:w-[calc(100%-46px)]" onClick={() => handleEdit(item)}>{t('application.configuration')}</Button>
-                  <Button icon={<DeleteOutlined />} onClick={() => handleDelete(item)}></Button>
-                </div>
-              }
+                }))}
+              />
             </RbCard>
           )}
         />

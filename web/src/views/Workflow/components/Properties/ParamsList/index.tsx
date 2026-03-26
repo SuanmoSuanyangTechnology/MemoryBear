@@ -1,7 +1,6 @@
 import { type FC, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Button, Space } from 'antd'
-
+import { Button, Flex } from 'antd'
 
 import type { ParamItem, ParamEditModalRef } from './types'
 import ParamEditModal from './ParamEditModal'
@@ -45,21 +44,21 @@ const ParamsList: FC<ParamsListProps> = ({
         {label}
       </div>
 
-      <Space size={10} direction="vertical" className="rb:w-full!">
+      <Flex gap={10} vertical>
         <Button type="dashed" block size="middle" className="rb:text-[12px]!" onClick={handleAdd}>+ {t('workflow.config.parameter-extractor.addParams')}</Button>
 
         {value?.map((item, index) => (
           <div
             key={index}
-            className="rb:cursor-pointer rb:group rb:py-2 rb:pl-2.5 rb:pr-2 rb:text-[12px] rb:flex rb:items-center rb:justify-between rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-md"
+            className="rb:cursor-pointer rb:group rb:py-2 rb:pl-2.5 rb:pr-2 rb:text-[12px] rb-border rb:rounded-md rb:relative"
           >
-            <div>
-              <span className="rb:font-medium">{item.name}</span>
-              <span className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular"> ({t(`workflow.config.parameter-extractor.${item.type}`)}) {item.required ? t('workflow.config.parameter-extractor.required') : ''}</span>
-              <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4.25 rb:mt-0.5">{item.desc}</div>
-            </div>
+            <Flex align="center" className="rb:leading-4 rb:w-full! rb:overflow-hidden rb:whitespace-nowrap rb:text-ellipsis rb:line-clamp-2" gap={2}>
+              <span className="rb:font-medium rb:inline-block">{item.name}</span>
+              <span className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular">({t(`workflow.config.parameter-extractor.${item.type}`)}) {item.required ? t('workflow.config.parameter-extractor.required') : ''}</span>
+            </Flex>
+            <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4.25 rb:mt-1">{item.desc}</div>
 
-            <Space size={8}>
+            <Flex gap={10} align="center" justify="end" className="rb:hidden! rb:group-hover:flex! rb:absolute rb:w-22 rb:pr-3! rb:right-0 rb:top-0 rb:bottom-0 rb:bg-[linear-gradient(90deg,rgba(255,255,255,0.5)_0%,#FFFFFF_50%)] rb:shadow-[0px_2px_4px_0px rgba(0,0,0,0.06)] rb:rounded-[0px_8px_8px_0px]">
               <div
                 className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/edit.svg')] rb:hover:bg-[url('@/assets/images/edit_hover.svg')]"
                 onClick={() => handleEdit(index)}
@@ -68,10 +67,10 @@ const ParamsList: FC<ParamsListProps> = ({
                 className="rb:size-4 rb:cursor-pointer rb:bg-cover  rb:bg-[url('@/assets/images/delete.svg')] rb:hover:bg-[url('@/assets/images/delete_hover.svg')]"
                 onClick={() => handleDelete(index)}
               ></div>
-            </Space>
+            </Flex>
           </div>
         ))}
-      </Space>
+      </Flex>
 
       <ParamEditModal
         ref={paramEditModalRef}

@@ -1,8 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-01-12 14:42:02 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-25 11:55:36
+ */
 import { type FC, useEffect, useState, useMemo, useRef } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Row, Col, Skeleton, Button, Divider, Tooltip } from 'antd'
+import { Row, Col, Skeleton, Button, Divider, Tooltip, Flex } from 'antd'
+
 
 import InfiniteScroll from 'react-infinite-scroll-component'
 import RbCard from '@/components/RbCard/Card'
@@ -12,25 +19,45 @@ import {
   getConversationDetail,
 } from '@/api/memory'
 import { formatDateTime } from '@/utils/format'
-import RbAlert from '@/components/RbAlert'
 import Empty from '@/components/Empty'
 import ChatContent from '@/components/Chat/ChatContent'
 import type { ChatItem } from '@/components/Chat/types'
 import PageLoading from '@/components/Empty/PageLoading'
 
+/** A conversation session entry in the sidebar list. */
 interface Conversation {
   title: string;
   id: string;
 }
+
+/**
+ * AI-generated insight for a conversation, including key takeaways,
+ * open questions, and an overall summary.
+ */
 interface Detail {
   theme: string;
   theme_intro: string;
+  /** Core insight summary of the conversation. */
   summary: string;
+  /** Open questions or pitfalls identified during the conversation. */
   question: string[];
+  /** Successful experiences / key takeaways extracted from the conversation. */
   takeaways: string[];
+  /** Information quality score. */
   info_score: number;
 }
 
+/**
+ * WorkingDetail – Three-column working-memory view for a user's conversations.
+ *
+ * Left column (360px): scrollable list of conversation sessions.
+ * Centre column (fluid): real-time chat message stream for the selected conversation,
+ *   with a refresh button and time-range indicator.
+ * Right column (360px): AI-generated conversation insights – successful experiences
+ *   (takeaways), open questions / pitfalls, and a core summary.
+ *
+ * Route param `id` is the end-user ID.
+ */
 const WorkingDetail: FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()
@@ -44,11 +71,13 @@ const WorkingDetail: FC = () => {
   const [detail, setDetail] = useState<Detail | null>(null)
   const [selected, setSelected] = useState<Conversation | null>(null)
 
+  /* Fetch conversation list whenever the route user ID changes. */
   useEffect(() => {
     if (!id) return
     getData()
   }, [id])
 
+  /** Load all conversations for the current user and auto-select the first one. */
   const getData = () => {
     if (!id) return
     setLoading(true)
@@ -84,6 +113,10 @@ const WorkingDetail: FC = () => {
     getDetail(selected.id)
   }, [id, selected])
 
+  /**
+   * Fetch both the chat messages and the AI-generated insight for a conversation.
+   * Both requests run in parallel.
+   */
   const getDetail = (conversationId: string) => {
     if (!id || !conversationId) return
 
@@ -106,6 +139,7 @@ const WorkingDetail: FC = () => {
         setDetailLoading(false)
       })
   }
+  /** Derive a human-readable date range (e.g. "2024.01 - 2024.03") from message timestamps. */
   const timeRange = useMemo(() => {
     const times = messages.filter(m => m.created_at).map(m => Number(m.created_at))
     if (times.length === 0) return ''
@@ -115,7 +149,7 @@ const WorkingDetail: FC = () => {
   }, [messages])
 
   return (
-    <div className="rb:h-[calc(100vh-64px)]! rb:w-full rb:-mx-4 rb:-my-3">
+    <>
       {loading
         ? <PageLoading />
         : data.length === 0
@@ -123,113 +157,128 @@ const WorkingDetail: FC = () => {
         :(
           <Row gutter={16}>
             <Col span={5}>
-              <div id="conversation-list" className="rb:h-[calc(100vh-76px)]! rb:border-r rb:border-[#EAECEE] rb:py-3 rb:px-4 rb:overflow-y-auto">
-                <InfiniteScroll
-                  dataLength={data.length}
-                  next={loadMore}
-                  hasMore={hasMore}
-                  loader={null}
-                  scrollableTarget="conversation-list"
-                >
-                  {data.map(item => (
-                    <div key={item.id} className="rb:mb-3">
-                      <Tooltip title={item.title}>
-                        <div className={clsx("rb:p-[8px_13px] rb:rounded-lg rb:leading-5 rb:cursor-pointer rb:hover:bg-[#F0F3F8] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap", {
-                          'rb:bg-[#FFFFFF] rb:shadow-[0px_2px_4px_0px_rgba(0,0,0,0.15)] rb:font-medium rb:hover:bg-[#FFFFFF]!': item.id === selected?.id,
-                        })}
+              <RbCard
+                title={t('workingDetail.conversation')}
+                headerType="borderless"
+                headerClassName="rb:min-h-[58px]! rb:font-[MiSans-Bold] rb:font-bold"
+                bodyClassName='rb:p-3! rb:pt-0! rb:h-[calc(100%-58px)]'
+                className="rb:h-[calc(100vh-88px)]!"
+              >
+                <div id="conversation-list" className="rb:h-full! rb:overflow-y-auto">
+                  <InfiniteScroll
+                    dataLength={data.length}
+                    next={loadMore}
+                    hasMore={hasMore}
+                    loader={null}
+                    scrollableTarget="conversation-list"
+                  >
+                    <Flex vertical gap={8}>
+                      {data.map(item => (
+                        <Flex
+                          key={item.id}
+                          gap={12}
+                          align="center"
+                          className={clsx("rb:cursor-pointer rb:rounded-xl rb:h-12 rb:py-1! rb:px-3! rb:hover:bg-[#F6F6F6]", {
+                            'rb:bg-[#171719] rb:hover:bg-[#171719]! rb:text-white': item.id === selected?.id,
+                          })}
                           onClick={() => setSelected(item)}
                         >
-                          {item.title}
-                        </div>
-                      </Tooltip>
-                    </div>
-                  ))}
-                </InfiniteScroll>
-              </div>
+                          <div className="rb:size-6 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/chat.svg')]"></div>
+                          <Tooltip title={item.title}>
+                            <div className="rb:leading-5 rb:break-all rb:line-clamp-2 rb:flex-1">
+                              {item.title}
+                            </div>
+                          </Tooltip>
+                        </Flex>
+                      ))}
+                    </Flex>
+                  </InfiniteScroll>
+                </div>
+              </RbCard>
             </Col>
             {selected && <>
-              <Col span={19}>
-                <div className="rb:text-[18px] rb:font-medium rb:leading-6 rb:mt-4">{selected.title}</div>
-                <div className="rb:mt-1 rb:text-[#5B6167] rb:leading-5">{timeRange}</div>
+              <Col flex="auto" className="rb:h-full">
+                <RbCard
+                  title={selected.title}
+                  headerType="borderless"
+                  headerClassName="rb:min-h-[42px]! rb:pt-4! rb:font-[MiSans-Bold] rb:font-bold"
+                  bodyClassName='rb:p-4! rb:pt-0! rb:h-[calc(100%-42px)]'
+                  className="rb:h-[calc(100vh-88px)]!"
+                >
+                  <div className="rb:text-[#5B6167] rb:leading-4.5 rb:text-[12px]">{timeRange}</div>
+                  <Flex justify="space-between" align="center" className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5! rb:pr-2.5! rb:pl-3.25! rb:mt-3!">
+                    {t('workingDetail.conversationStream')}
+                    <Button className="rb:h-6!" onClick={() => getDetail(selected.id)}>{t('workingDetail.refresh')}</Button>
+                  </Flex>
+                  {messagesLoading
+                    ? <Skeleton active />
+                    : messages.length === 0
+                      ? <Empty />
+                      : (
+                        <ChatContent
+                          classNames="rb:h-[calc(100%-77px)] rb:pt-5"
+                          contentClassNames="rb:max-w-110!"
+                          data={messages}
+                          streamLoading={false}
+                          labelFormat={(item) => formatDateTime(item.created_at)}
+                        />
+                      )
+                  }
+                </RbCard>
+              </Col>
+              <Col flex='360px' className="rb:h-full">
+                <RbCard
+                  title={t('workingDetail.successfulTitle')}
+                  headerType="borderless"
+                  headerClassName="rb:min-h-[50px]! rb:font-[MiSans-Bold] rb:font-bold rb:leading-5.5"
+                  bodyClassName='rb:p-4! rb:pt-0! rb:h-[calc(100%-50px)] rb:overflow-y-auto!'
+                  className="rb:h-[calc(100vh-88px)]!"
+                >
+                  {detailLoading
+                    ? <Skeleton active />
+                    : detail
+                      ? <>
+                        {detail.takeaways.length > 0
+                          ? (
+                            <ul className="rb:leading-5 rb:list-disc rb:ml-4">
+                              {detail.takeaways.map(vo => <li>{vo}</li>)}
+                            </ul>
+                          )
+                          : <Empty size={88} />
+                        }
 
-                <Row gutter={16}>
-                  <Col span={16}>
-                    <RbCard
-                      title={t('workingDetail.conversationStream')}
-                      extra={<Button className="rb:h-6!" onClick={() => getDetail(selected.id)}>{t('workingDetail.refresh')}</Button>}
-                      className="rb:mt-4!"
-                      headerClassName='rb:bg-[#F6F8FC]! rb:border-b! rb:border-b-[#DFE4ED]! rb:min-h-11!'
-                      headerType="borderless"
-                      bodyClassName="rb:h-[calc(100vh-210px)]"
-                    >
-                      {messagesLoading
-                        ? <Skeleton active />
-                        : messages.length === 0
-                        ? <Empty />
-                        : (
-                          <ChatContent
-                            classNames="rb:h-[calc(100vh-244px)]"
-                            data={messages}
-                            streamLoading={false}
-                            labelFormat={(item) => formatDateTime(item.created_at)}
-                          />
-                        )
-                      }
-                    </RbCard>
-                  </Col>
-                  <Col span={8}>
-                    <RbCard className="rb:mt-4!" bodyClassName="rb:h-[calc(100vh-166px)] rb:overflow-y-auto">
-                      {detailLoading
-                        ? <Skeleton active />
-                        : detail
-                        ? <>
-                          <>
-                            <div className="rb:text-[#369F21] rb:font-medium rb:text-[18px] rb:leading-4 rb:mb-3">{t('workingDetail.successfulTitle')}</div>
+                        <>
+                          <Divider className="rb:my-4!" />
+                          <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5 rb:mb-3">{t('workingDetail.question')}</div>
 
-                            {detail.takeaways.length > 0
-                              ? (
-                                <ul className="rb:text-[#5B6167] rb:leading-5.5 rb:list-disc rb:ml-4">
-                                  {detail.takeaways.map(vo => <li>{vo}</li>)}
-                                </ul>
-                              )
-                              : <Empty size={88} />
-                            }
-                          </>
-
-                          <>
-                            <Divider />
-                            <div className="rb:text-[#FF5D34] rb:font-medium rb:text-[18px] rb:leading-4 rb:mb-3">{t('workingDetail.question')}</div>
-
-                            {detail.question.length > 0
-                              ? (
-                                <ul className="rb:text-[#5B6167] rb:leading-5.5 rb:list-disc rb:ml-4">
-                                  {detail.question.map(vo => <li>{vo}</li>)}
-                                </ul>
-                              )
-                              : <Empty size={88} />
-                            }
-                          </>
-
-                          <>
-                            <Divider />
-                            <div className="rb:text-[#369F21] rb:font-medium rb:text-[18px] rb:leading-4 rb:mb-3">{t('workingDetail.summary')}</div>
-                            {detail.summary
-                              ? <RbAlert className="rb:text-[#212332]! rb:text-[14px]! rb:leading-5.5! rb:p-3!">{detail.summary}</RbAlert>
-                              : <Empty size={88} />
-                            }
-                          </>
+                          {detail.question.length > 0
+                            ? (
+                              <ul className="rb:leading-5 rb:list-disc rb:ml-4">
+                                {detail.question.map(vo => <li>{vo}</li>)}
+                              </ul>
+                            )
+                            : <Empty size={88} />
+                          }
                         </>
-                        : <Empty />
-                      }
-                    </RbCard>
-                  </Col>
-                </Row>
+
+                        <>
+                          <Divider className="rb:my-4!" />
+                          <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5 rb:mb-3">{t('workingDetail.summary')}</div>
+                          {detail.summary
+                            ? <div className="rb:leading-5.5">{detail.summary}</div>
+                            : <Empty size={88} />
+                          }
+                        </>
+                      </>
+                      : <Empty />
+                  }
+                </RbCard>
               </Col>
             </>}
           </Row>
         )
       }
-    </div>
+    </>
   )
 }
 export default WorkingDetail

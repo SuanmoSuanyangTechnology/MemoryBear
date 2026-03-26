@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:20 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 11:51:01
+ * @Last Modified time: 2026-03-25 14:07:08
  */
 /**
  * Sub-Model Modal
@@ -178,7 +178,7 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
             url={modelProviderUrl}
             hasAll={false}
             format={(items) => items.map((item) => ({ 
-              label: t(`modelNew.${typeof item === 'object' ? item.value : item}`), 
+              label: String(typeof item === 'object' ? item.value : item).charAt(0).toUpperCase() + String(typeof item === 'object' ? item.value : item).slice(1), 
               value: typeof item === 'object' ? item.value : item 
             }))}
             onChange={(value) => handleChangeProvider(value)}

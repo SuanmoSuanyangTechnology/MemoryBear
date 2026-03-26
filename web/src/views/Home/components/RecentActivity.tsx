@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:15:33 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:15:33 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-11 14:48:31
  */
 /**
  * Recent Activity Component
@@ -13,7 +13,7 @@
 import { type FC, useEffect, useState } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
-import { Skeleton } from 'antd';
+import { Skeleton, Flex } from 'antd';
 
 import chunkCountIcon from '@/assets/images/home/chunk_count.svg';
 import statementsCountIcon from '@/assets/images/home/statements_count.svg';
@@ -79,30 +79,31 @@ const RecentActivity:FC = () => {
   return (
     <Card
       title={t('dashboard.recentMemoryActivities')}
+      bodyClassName="rb:pt-0! rb:pb-[14px]! rb:px-4!"
     >
       {loading
         ? <Skeleton />
         : !recentActivities || Object.keys(recentActivities).length === 0
         ? <Empty url={activityEmpty} subTitle={t('dashboard.activityEmpty')} size={120} className="rb:mt-11.25 rb:mb-20.25" />
-        : activityList.map((item, index) => (
-          <div key={item.key} className={clsx("rb:flex rb:justify-between rb:items-center rb:not-italic", {
-            'rb:mt-6': index !== 0
-          })}>
-            <div className="rb:flex rb:items-center rb:text-[#060419] rb:text-[16px] rb:font-medium">
-              <img className="rb:w-10 rb:h-10 rb:mr-4" src={item.icon} />
-              <div>
-                {t(`dashboard.${item.key}`)}
-                <div className="rb:text-[#5B6167] rb:text-[14px] rb:font-normal">
-                  {item.key === 'triplet_count' 
-                    ? t(`dashboard.${item.key}_desc`, { entities_count: recentActivities.triplet_entities_count, relations_count: recentActivities.triplet_relations_count })
-                    : t(`dashboard.${item.key}_desc`, { count: recentActivities[item.key as keyof RecentActivities] })
-                  }
+        : <Flex vertical gap={24} justify="space-around">
+          {activityList.map((item) => (
+            <Flex key={item.key} align="center" justify="space-between" className={clsx("rb:not-italic")}>
+              <Flex align="center" gap={20}>
+                <img className="rb:size-10" src={item.icon} />
+                <div>
+                  <div className="rb:text-[16px] rb:leading-5.5 rb:font-medium">{t(`dashboard.${item.key}`)}</div>
+                  <div className="rb:text-[#7B8085] rb:text-[14px] rb:font-regular rb:mt-1 rb:leading-4.5">
+                    {item.key === 'triplet_count' 
+                      ? t(`dashboard.${item.key}_desc`, { entities_count: recentActivities.triplet_entities_count, relations_count: recentActivities.triplet_relations_count })
+                      : t(`dashboard.${item.key}_desc`, { count: recentActivities[item.key as keyof RecentActivities] })
+                    }
+                  </div>
                 </div>
-              </div>
-            </div>
-            <div className="rb:text-[#5F6266] rb:text-right rb:whitespace-nowrap">{data?.latest_relative || ''}</div>
-          </div>
-        ))
+              </Flex>
+              <div className="rb:text-[#7B8085] rb:text-right rb:whitespace-nowrap">{data?.latest_relative || ''}</div>
+            </Flex>
+          ))}
+        </Flex>
       }
     </Card>
   )

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>知识库</title>
+    <g id="定稿" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="首页-红熊空间" transform="translate(-22, -206)" stroke="#171719" stroke-width="1.2">
+            <g id="知识库" transform="translate(12, 195)">
+                <g transform="translate(10, 11)" id="编组-3">
+                    <g transform="translate(0.5, 1.9994)">
+                        <path d="M13.95,0.727307658 L14.4,11.7904253 L12.1284238,12.2404253 L11.6784238,1.17730766 L13.95,0.727307658 Z" id="矩形"></path>
+                        <path d="M9.3428104,0.727307658 L9.7928104,11.7904253 L7.5212342,12.2404253 L7.0712342,1.17730766 L9.3428104,0.727307658 Z" id="矩形"></path>
+                        <path d="M4.22994905,0.881993546 L4.66970443,11.667554 L2.39825721,12.1192647 L1.95850182,1.33370431 L4.22994905,0.881993546 Z" id="矩形备份-2" transform="translate(3.3141, 6.5006) rotate(13) translate(-3.3141, -6.5006)"></path>
+                        <line x1="11.8258789" y1="9.66321424" x2="14.456153" y2="9.66321424" id="路径-2"></line>
+                        <line x1="7.02875913" y1="9.66321424" x2="9.82341079" y2="9.66321424" id="路径-3"></line>
+                        <line x1="2.70447854" y1="3.22070203" x2="5.36043113" y2="3.85822883" id="路径-4"></line>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

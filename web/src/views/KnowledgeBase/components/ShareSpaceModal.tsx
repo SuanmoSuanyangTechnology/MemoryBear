@@ -3,13 +3,12 @@
  * @Version: 0.0.1
  * @Author: yujiangping
  * @Date: 2025-11-10 18:52:55
- * @LastEditors: yujiangping
- * @LastEditTime: 2026-03-09 16:34:51
+ * @LastEditors: ZhaoYing
+ * @LastEditTime: 2026-03-25 18:30:28
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Switch } from 'antd';
 import { useTranslation } from 'react-i18next';
-import { message } from 'antd';
+import { App } from 'antd';
 import type { ShareModalRef, ShareModalRefProps, KnowledgeBase} from '@/views/KnowledgeBase/types';
 import RbModal from '@/components/RbModal'
 // import betchControlIcon from '@/assets/images/knowledgeBase/betch-control.png';
@@ -21,7 +20,7 @@ import type { SpaceItem } from '@/views/KnowledgeBase/types';
 import { formatDateTime } from '@/utils/format';
 const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: onShare }, ref) => {
   const { t } = useTranslation();
-  const [messageApi, contextHolder] = message.useMessage();
+  const { message: messageApi } = App.useApp()
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false)
   const [curIndex, setCurIndex] = useState(-1);
@@ -97,7 +96,6 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
 
   return (
     <>
-    {contextHolder}
     <RbModal
       title={t('knowledgeBase.toWorkspace')}
       open={visible}

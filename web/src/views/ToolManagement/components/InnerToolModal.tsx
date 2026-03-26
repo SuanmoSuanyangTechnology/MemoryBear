@@ -94,7 +94,7 @@ const InnerToolModal = forwardRef<InnerToolModalRef, InnerToolModalProps>(({
       confirmLoading={loading}
     >
       {editVo?.config_data?.tool_class && config && <>
-        <RbAlert className="rb:mb-3">
+        <RbAlert className="rb:mb-3!">
           <div>
             <div className="rb:text-[14px] rb:font-medium">{t('tool.configDesc')}</div>
             <div className="rb:mt-2">{t(`tool.${editVo?.config_data?.tool_class}_config_desc`)}</div>

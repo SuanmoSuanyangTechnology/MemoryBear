@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:46:47 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:46:47 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-25 11:44:16
  */
 /**
  * Self Reflection Engine Configuration Page
@@ -11,19 +11,19 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Row, Col, Form, App, Button, Space, Select } from 'antd';
+import { Row, Col, Form, App, Button, Space, Select, Flex } from 'antd';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import RbCard from '@/components/RbCard/Card';
-import strategyImpactSimulator from '@/assets/images/memory/strategyImpactSimulator.svg'
 import { getMemoryReflectionConfig, updateMemoryReflectionConfig, pilotRunMemoryReflectionConfig } from '@/api/memory'
 import type { ConfigForm, Result, ReflexionData, MemoryVerify, QualityAssessment } from './types'
-import CustomSelect from '@/components/CustomSelect';
-import { getModelListUrl } from '@/api/models'
 import Tag from '@/components/Tag'
 import { useI18n } from '@/store/locale';
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
+import LabelWrapper from '@/components/FormItem/LabelWrapper'
+import DescWrapper from '@/components/FormItem/DescWrapper'
+import ModelSelect from '@/components/ModelSelect';
 
 /** Configuration list */
 const configList = [
@@ -35,9 +35,8 @@ const configList = [
   // Reflection model
   {
     key: 'reflection_model_id',
-    type: 'customSelect',
-    url: getModelListUrl,
-    params: { type: 'chat,llm', page: 1, pagesize: 100, is_active: true }, // chat,llm
+    type: 'modelSelect',
+    params: { type: 'chat,llm' }, // chat,llm
   },
   // Iteration period
   {
@@ -172,13 +171,16 @@ const SelfReflectionEngine: React.FC = () => {
   return (
     <Row gutter={[16, 16]}>
       <Col span={12}>
-        <RbCard 
-          title={
-            <div className="rb:flex rb:items-center">
-              <img src={strategyImpactSimulator} className="rb:w-5 rb:h-5 rb:mr-2" />
-              {t('reflectionEngine.reflectionEngineConfig')}
-            </div>
-          }
+        <RbCard
+          title={t('reflectionEngine.reflectionEngineConfig')}
+          extra={<Space>
+            <Button block onClick={handleReset}>{t('common.reset')}</Button>
+            <Button type="primary" loading={loading} block onClick={handleSave}>{t('common.save')}</Button>
+          </Space>}
+          headerType="borderless"
+          headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
+          className="rb:h-[calc(100vh-76px)]!"
+          bodyClassName="rb:h-[calc(100%-54px)] rb:overflow-y-auto! rb:p-4! rb:pt-0!"
         >
           <Form 
             form={form}
@@ -189,74 +191,64 @@ const SelfReflectionEngine: React.FC = () => {
               lambda_mem: 0.03,
             }}
           >
-            {configList.map(config => {
-              if (config.type === 'customSelect') {
-                return (
-                  <div key={config.key}>
-                    <div className="rb:text-[14px] rb:font-medium rb:leading-5 rb:mb-2">
-                      {t(`reflectionEngine.${config.key}`)}
+            <Flex vertical gap={24}>
+              {configList.map(config => {
+                if (config.type === 'modelSelect') {
+                  return (
+                    <div key={config.key}>
+                      <LabelWrapper title={t(`reflectionEngine.${config.key}`)} className="rb:mb-3">
+                        <DescWrapper desc={t(`reflectionEngine.${config.key}_desc`)} className="rb:mt-1" />
+                      </LabelWrapper>
+                      <Form.Item
+                        name={config.key}
+                        className="rb:mb-0!"
+                      >
+                        <ModelSelect
+                          params={config.params}
+                          placeholder={t('common.pleaseSelect')}
+                          disabled={!values?.reflection_enabled && config.key !== 'reflection_enabled'}
+                        />
+                      </Form.Item>
                     </div>
-                    <Form.Item
-                      name={config.key}
-                      extra={t(`reflectionEngine.${config.key}_desc`)}
-                    >
-                      <CustomSelect
-                        url={config.url as string}
-                        params={config.params}
-                        valueKey='id'
-                        labelKey='name'
-                        hasAll={false}
-                        placeholder={t('common.pleaseSelect')}
-                        disabled={!values?.reflection_enabled && config.key !== 'reflection_enabled'}
-                      />
-                    </Form.Item>
-                  </div>
-                )
-              }
-              if (config.type === 'select') {
-                return (
-                  <div key={config.key}>
-                    <div className="rb:text-[14px] rb:font-medium rb:leading-5 rb:mb-2">
-                      {t(`reflectionEngine.${config.key}`)}
+                  )
+                }
+                if (config.type === 'select') {
+                  return (
+                    <div key={config.key}>
+                      <LabelWrapper title={t(`reflectionEngine.${config.key}`)} className="rb:mb-3">
+                        <DescWrapper desc={t(`reflectionEngine.${config.key}_desc`)} className="rb:mt-1" />
+                      </LabelWrapper>
+                      <Form.Item
+                        name={config.key}
+                        className="rb:mb-0!"
+                      >
+                        <Select
+                          options={config.options?.map(vo => ({
+                            ...vo,
+                            label: t(`reflectionEngine.${vo.label}`),
+                          }))}
+                          placeholder={t('common.pleaseSelect')}
+                          disabled={!values?.reflection_enabled && config.key !== 'reflection_enabled'}
+                        />
+                      </Form.Item>
                     </div>
-                    <Form.Item
-                      name={config.key}
-                      extra={t(`reflectionEngine.${config.key}_desc`)}
-                    >
-                      <Select
-                        options={config.options?.map(vo => ({
-                          ...vo,
-                          label: t(`reflectionEngine.${vo.label}`),
-                        }))}
-                        placeholder={t('common.pleaseSelect')}
-                        disabled={!values?.reflection_enabled && config.key !== 'reflection_enabled'}
-                      />
-                    </Form.Item>
-                  </div>
-                )
-              }
+                  )
+                }
 
-              return (
-                <SwitchFormItem
-                  title={t(`reflectionEngine.${config.key}`)}
-                  name={config.key}
-                  desc={<>
-                    {(config as any).hasSubTitle && <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`reflectionEngine.${config.key}_subTitle`)}</div>}
-                    <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`reflectionEngine.${config.key}_desc`)}</div>
-                  </>}
-                  className="rb:mb-6"
-                  disabled={!values?.reflection_enabled && config.key !== 'reflection_enabled'}
-                />
-              )
-            })}
-            <Row gutter={16} className="rb:mt-3">
-              <Col span={12}>
-                <Button block onClick={handleReset}>{t('common.reset')}</Button>
-              </Col>
-              <Col span={12}>
-                <Button type="primary" loading={loading} block onClick={handleSave}>{t('common.save')}</Button>
-              </Col>
-            </Row>
+                return (
+                  <SwitchFormItem
+                    title={t(`reflectionEngine.${config.key}`)}
+                    name={config.key}
+                    desc={<>
+                      {(config as any).hasSubTitle && <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`reflectionEngine.${config.key}_subTitle`)}</div>}
+                      <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t(`reflectionEngine.${config.key}_desc`)}</div>
+                    </>}
+                    className="rb:mb-6"
+                    disabled={!values?.reflection_enabled && config.key !== 'reflection_enabled'}
+                  />
+                )
+              })}
+            </Flex>
           </Form>
         </RbCard>
       </Col>

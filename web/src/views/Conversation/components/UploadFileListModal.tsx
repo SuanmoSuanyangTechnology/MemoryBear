@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:47 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 20:32:32
+ * @Last Modified time: 2026-03-23 17:49:42
  */
 /**
  * Upload File List Modal Component
@@ -18,11 +18,8 @@
  * 
  * @component
  */
-import { forwardRef, useImperativeHandle, useState, useMemo } from 'react';
-import { Form, Input, Select,
-  // Button,
-  Flex
-} from 'antd';
+import { forwardRef, useImperativeHandle, useState } from 'react';
+import { Form, Input, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { UploadFileListModalRef } from '../types'
@@ -42,7 +39,6 @@ interface UploadFileListModalProps {
  */
 const UploadFileListModal = forwardRef<UploadFileListModalRef, UploadFileListModalProps>(({
   refresh,
-  featureConfig
 }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
@@ -85,20 +81,6 @@ const UploadFileListModal = forwardRef<UploadFileListModalRef, UploadFileListMod
     handleOpen
   }));
 
-  const fileTypeOptions = useMemo(() => {
-    const options = [];
-    if (featureConfig?.image_enabled) {
-      options.push({ label: t('memoryConversation.image'), value: 'image' });
-    }
-    if (featureConfig?.audio_enabled) {
-      options.push({ label: t('memoryConversation.audio'), value: 'audio' });
-    }
-    if (featureConfig?.video_enabled) {
-      options.push({ label: t('memoryConversation.video'), value: 'video' });
-    }
-    return options;
-  }, [featureConfig, t])
-
   return (
     <RbModal
       title={t('memoryConversation.addRemoteFile')}
@@ -117,20 +99,6 @@ const UploadFileListModal = forwardRef<UploadFileListModalRef, UploadFileListMod
               {/* Render each file entry with type selector and URL input */}
               {fields.map(({ key, name, ...restField }) => (
                 <Flex key={key} gap={8} align="center" className="rb:mb-3!">
-                  <FormItem
-                    {...restField}
-                    name={[name, 'type']}
-                    className="rb:mb-0!"
-                    rules={[
-                      { required: true, message: t('common.pleaseSelect') }
-                    ]}
-                  >
-                    <Select
-                      placeholder={t('memoryConversation.fileType')}
-                      options={fileTypeOptions}
-                      className="rb:w-30!"
-                    />
-                  </FormItem>
                   <FormItem
                     {...restField}
                     name={[name, 'url']}

@@ -1,18 +1,26 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-    <title>链接</title>
-    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
-        <g id="红熊空间-记忆对话-默认对话" transform="translate(-284, -726)">
-            <g id="聊天页面" transform="translate(258, 128)">
-                <g id="输入框" transform="translate(16, 512)">
-                    <g id="链接" transform="translate(10, 86)">
-                        <rect id="矩形" stroke="#DFE4ED" x="0.5" y="0.5" width="23" height="23" rx="6"></rect>
-                        <g id="编组-6" transform="translate(5, 5)" stroke="#212332" stroke-linecap="round" stroke-linejoin="round">
-                            <g transform="translate(7.1064, 7.1064) rotate(45) translate(-7.1064, -7.1064)translate(3.9564, 1.8564)" id="路径">
-                                <path d="M4.14483263e-14,7.00494523 L4.14483263e-14,2.33333333 C4.14483263e-14,1.04466892 0.992435471,0 2.21666667,0 C3.44089786,0 4.43333333,1.04466892 4.43333333,2.33333333 L4.43333333,5.85907842"></path>
-                                <path d="M6.3,2.518727 L6.3,7.175 C6.3,9.01134679 4.88969696,10.5 3.15,10.5 C1.41030304,10.5 0,9.01134679 0,7.175 L0,2.33333333"></path>
-                                <path d="M4.43333333,2.33333333 L4.43333333,7 C4.43333333,7.64433221 3.91099887,8.16666667 3.26666667,8.16666667 C2.62233446,8.16666667 2.1,7.64433221 2.1,7 L2.1,3.5201611"></path>
-                            </g>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 6</title>
+    <defs>
+        <filter x="-2.6%" y="-14.2%" width="105.3%" height="131.7%" filterUnits="objectBoundingBox" id="filter-1">
+            <feOffset dx="0" dy="2" in="SourceAlpha" result="shadowOffsetOuter1"></feOffset>
+            <feGaussianBlur stdDeviation="6" in="shadowOffsetOuter1" result="shadowBlurOuter1"></feGaussianBlur>
+            <feColorMatrix values="0 0 0 0 0.0901960784   0 0 0 0 0.0901960784   0 0 0 0 0.0980392157  0 0 0 0.12 0" type="matrix" in="shadowBlurOuter1" result="shadowMatrixOuter1"></feColorMatrix>
+            <feMerge>
+                <feMergeNode in="shadowMatrixOuter1"></feMergeNode>
+                <feMergeNode in="SourceGraphic"></feMergeNode>
+            </feMerge>
+        </filter>
+    </defs>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="多模态对话" transform="translate(-558, -742)" stroke="#171719" stroke-width="1.1">
+            <g id="输入框" filter="url(#filter-1)" transform="translate(540, 656)">
+                <g id="附件" transform="translate(12, 80)">
+                    <g id="编组-6" transform="translate(6, 6)">
+                        <g transform="translate(8.1216, 8.1216) rotate(45) translate(-8.1216, -8.1216)translate(4.5216, 2.1216)" id="路径">
+                            <path d="M4.44722907e-13,8.0056517 L4.44722907e-13,2.66666667 C4.44722907e-13,1.19390733 1.13421197,1.99211235e-13 2.53333333,1.99211235e-13 C3.9324547,1.99211235e-13 5.06666667,1.19390733 5.06666667,2.66666667 L5.06666667,6.69608962"></path>
+                            <path d="M7.2,2.87854514 L7.2,8.2 C7.2,10.298682 5.5882251,12 3.6,12 C1.6117749,12 1.78485196e-12,10.298682 1.78485196e-12,8.2 L1.78485196e-12,2.66666667"></path>
+                            <path d="M5.06666667,2.66666667 L5.06666667,8 C5.06666667,8.73637967 4.469713,9.33333333 3.73333333,9.33333333 C2.99695367,9.33333333 2.4,8.73637967 2.4,8 L2.4,4.02304126"></path>
                         </g>
                     </g>
                 </g>

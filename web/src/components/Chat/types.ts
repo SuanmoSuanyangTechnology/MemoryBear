@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:45:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 20:47:42
+ * @Last Modified time: 2026-03-23 18:15:05
  */
 import { type ReactNode } from 'react'
 
@@ -25,6 +25,7 @@ export interface ChatItem {
   error?: string;
   meta_data?: {
     audio_url?: string;
+    audio_status?: string;
     files?: any[];
   },
 }
@@ -56,6 +57,7 @@ export interface ChatProps {
   fileList?: any[];
   /** Attachment update */
   fileChange?: (fileList: any[]) => void;
+  className?: string;
   renderRuntime?: (item: ChatItem, index: number) => ReactNode;
 }
 

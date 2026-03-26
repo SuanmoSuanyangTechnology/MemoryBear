@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useMemo, useCallback, type FC } from 'react';
-import { Row, Col, Button, Dropdown, Modal, message, Tooltip } from 'antd'
+import { Row, Col, Button, Dropdown, Tooltip, App } from 'antd'
 import type { MenuProps } from 'antd';
-import { EllipsisOutlined } from '@ant-design/icons';
+import { EllipsisOutlined, RightOutlined, DownOutlined } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 import { useTranslation } from 'react-i18next';
@@ -16,7 +16,7 @@ import RbCard from '@/components/RbCard/Card'
 import SearchInput from '@/components/SearchInput'
 import Empty from '@/components/Empty'
 import { getKnowledgeBaseList, getModelList, getModelTypeList, deleteKnowledgeBase, getKnowledgeBaseTypeList } from '@/api/knowledgeBase'
-const { confirm } = Modal;
+
 import InfiniteScroll from 'react-infinite-scroll-component';
 
 import { useBreadcrumbManager, type BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
@@ -29,6 +29,7 @@ type ModelMenuInfo = {
 const KnowledgeBaseManagement: FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { modal, message: messageApi } = App.useApp()
   const location = useLocation();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<KnowledgeBaseListItem[]>([])
@@ -43,7 +44,6 @@ const KnowledgeBaseManagement: FC = () => {
   const [knowledgeBaseTypes, setKnowledgeBaseTypes] = useState<string[]>([]);
   const modelListCache = useRef<Record<string, string>>({});
   const modalRef = useRef<CreateModalRef>(null)
-  const [messageApi, contextHolder] = message.useMessage();
   const processedStateRef = useRef<any>(null);
   
   // 使用面包屑管理 Hook
@@ -185,7 +185,7 @@ const KnowledgeBaseManagement: FC = () => {
     }
   };
   const formatData = (data: KnowledgeBaseListItem) => {
-    const keys: (keyof KnowledgeBaseListItem)[] = ['type', 'permission_id']
+    const keys: (keyof KnowledgeBaseListItem)[] = ['permission_id','type']
     return keys.map(key => ({
       key,
       label: t(`knowledgeBase.${key}`),
@@ -386,7 +386,7 @@ const KnowledgeBaseManagement: FC = () => {
 
   // 处理删除
   const handleDelete = (item: KnowledgeBaseListItem) => {
-    confirm({
+    modal.confirm({
       title: t('common.deleteWarning'),
       content: t('common.deleteWarningContent', { content: item.name }),
       onOk: () => {
@@ -528,7 +528,6 @@ const KnowledgeBaseManagement: FC = () => {
 
   return (
     <>
-      {contextHolder}
       <div className="rb:flex rb:justify-between rb:px-2 rb:mb-4">
         <SearchInput
           placeholder={t('knowledgeBase.searchPlaceholder')}
@@ -569,7 +568,9 @@ const KnowledgeBaseManagement: FC = () => {
               <Col xs={12} sm={12} md={12} lg={8} xl={8} key={item.id} >
                 <RbCard
                   title={item.name}
-                  className='rb:min-h-[198px]'
+                  headerType="borderless"
+                  headerClassName="rb:py-3!"
+                  className='rb:min-h-[200px]'
                   extra={
                     <div onClick={(e) => e.stopPropagation()}>
                       <Dropdown menu={{ items: getOptMenuItems(item) }} >
@@ -578,41 +579,57 @@ const KnowledgeBaseManagement: FC = () => {
                     </div>
                   }
                 >
-                  <div className='rb:min-h-[158px]' onClick={() => handleToDetail(item)}>
-                    <div className='rb:min-h-[124px]'>
+                  <div className='' onClick={() => handleToDetail(item)}>
+                    <div className="rb:flex rb:text-[#5B6167] rb:h-5 rb:line-clamp-1 rb:text-sm rb:leading-5 rb:mb-3">
+                        {/* <div className="rb:font-medium rb:w-20">{t('knowledgeBase.description')} </div> */}
+                        <Tooltip title={item.description}>
+                            <div className='rb:flex-1 rb:text-left rb:leading-5 rb:text-gray-800 rb:break-words rb:line-clamp-2'>{(item.description && item.description != '') ? item.description : t('knowledgeBase.noDescription')}</div>
+                        </Tooltip>
+                    </div>
+                    <div className='rb:min-h-[60px] rb:py-2.5 rb:px-3 rb:bg-[#F6F6F6] rb:rounded-lg rb:mb-3'>
                     {item.descriptionItems?.map((description: Record<string, unknown>) => (
                         <div 
                         key={description.key as string}
-                        className="rb:flex rb:gap-4 rb:justify-start rb:text-[#5B6167] rb:text-[14px] rb:leading-[20px] rb:mb-[12px]"
+                        className="rb:flex rb:gap-4 rb:justify-start rb:text-[#5B6167] rb:text-[14px] rb:leading-[20px]"
                         >
-                        <div className="rb:whitespace-nowrap rb:w-20">{(description.label as string)}</div>
+                        <div className={clsx('rb:whitespace-nowrap rb:w-20',{"rb:text-gray-800 rb:font-medium" : (description.key as string) === 'permission_id'})}>{(description.label as string)}</div>
                         <div className={clsx('rb:flex-inline rb:text-left rb:py-[1px] rb:rounded rb:font-medium',{
-                            "rb:text-[#155eef] rb:bg-[rgba(21,94,239,0.06)] rb:px-2 rb:border rb:border-[rgba(21,94,239,0.25)] rb:font-medium": (description.key as string) === 'permission_id' && (description.children as string) === t('knowledgeBase.private'),
-                            "rb:text-[#369F21] rb:bg-[rgba(54,159,33,0.06)] rb:px-2 rb:border rb:border-[rgba(54,159,33,0.25);] rb:font-medium": (description.key as string) === 'permission_id' && (description.children as string) === t('knowledgeBase.share'),
+                            "rb:text-[#155eef] rb:font-medium": (description.key as string) === 'permission_id' && (description.children as string) === t('knowledgeBase.private'),
+                            "rb:text-[#FF8A4C] rb:font-medium": (description.key as string) === 'permission_id' && (description.children as string) === t('knowledgeBase.share'),
                         })}>{(description.children as string)}</div>
                         </div>
                     ))}
-                    {item.description && (
-                        <div className="rb:flex rb:text-[#5B6167] rb:h-10 rb:line-clamp-2 rb:text-sm rb:leading-5 rb:mb-3 rb:gap-4">
-                        <div className="rb:font-medium rb:w-20">{t('knowledgeBase.description')} </div>
-                        <Tooltip title={item.description}>
-                          <div className='rb:flex-1 rb:text-left rb:leading-5 rb:text-gray-800 rb:break-words rb:line-clamp-2'>{item.description || t('knowledgeBase.noDescription')}</div>
-                        </Tooltip>
-                        </div>
-                    )}
+                    
                     </div>
                     {hasModelInfo && (
-                      <Dropdown menu={{ items: modelInfo.menu }}>
+                      <div onClick={(e) => e.stopPropagation()}>
                         <div
-                          className="rb:flex rb:text-gray-500 rb:px-3 rb:py-2 rb:text-[12px] rb:leading-4 rb:mb-2 rb:bg-[#F0F3F8] rb:rounded"
-                          onClick={(e) => e.stopPropagation()}
+                          className="rb:flex rb:items-center rb:pt-2 rb:px-2 rb:text-[12px] rb:leading-5 rb:cursor-pointer rb:rounded  rb:transition-colors"
+                          onClick={() => {
+                            setData(prev => prev.map(d => d.id === item.id ? { ...d, _expanded: !d._expanded } : d));
+                          }}
                         >
-                            <span>{t('knowledgeBase.models')}:</span>
-                            <span className="rb:ml-1 rb:truncate rb:max-w-[200px]">
-                              {modelInfo.summary.join('、')}
-                            </span>
+                          {/* <span className='rb:text-gray-500'>{t('knowledgeBase.models')}:</span> */}
+                          <span className="rb:ml-1 rb:truncate rb:flex-1 rb:text-gray-500">
+                            {modelInfo.summary[0].split(':')[0]}:<span className="rb:text-gray-900">{modelInfo.summary[0].split(':').slice(1).join(':')}</span>
+                          </span>
+                          <span className="rb:ml-auto rb:text-gray-400 rb:text-[10px]">
+                            {item._expanded ? <DownOutlined /> : <RightOutlined />}
+                          </span>
                         </div>
-                      </Dropdown>
+                        {item._expanded && (
+                          <div className="rb:py-1 rb:px-2 rb:text-[12px]">
+                            {modelInfo.summary.slice(1).map((text, idx) => {
+                              const [label, value] = text.split(':');
+                              return (
+                                <div key={idx} className="rb:py-1 rb:text-gray-500">
+                                  {label}:<span className="rb:text-gray-900">{value}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 </RbCard>

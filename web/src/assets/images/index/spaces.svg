@@ -7,10 +7,10 @@
             <stop stop-color="#369F21" offset="100%"></stop>
         </linearGradient>
     </defs>
-    <g id="V1.1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
-        <g id="首页" transform="translate(-624, -232)">
-            <g id="核心数据" transform="translate(256, 216)">
-                <g id="编组-19备份" transform="translate(216, 0)">
+    <g id="空间外层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="工作台-首页" transform="translate(-616, -196)">
+            <g id="核心数据" transform="translate(252, 180)">
+                <g id="编组-19备份" transform="translate(212, 0)">
                     <g id="编组-32" transform="translate(152, 16)">
                         <rect id="矩形" fill="url(#linearGradient-1)" x="0" y="0" width="32" height="32" rx="8"></rect>
                         <g id="空间-(1)" transform="translate(5, 7)" fill="#FFFFFF" fill-rule="nonzero">

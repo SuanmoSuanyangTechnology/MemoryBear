@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:06:24 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-02 15:50:49
+ * @Last Modified time: 2026-02-25 14:52:52
  */
 /**
  * SwitchFormItem Component
@@ -13,7 +13,7 @@
  * @component
  */
 
-import { Switch, Form } from "antd";
+import { Switch, Form, Flex } from "antd";
 import type { FC, ReactNode } from "react";
 
 import LabelWrapper from './LabelWrapper'
@@ -43,10 +43,14 @@ const SwitchFormItem: FC<SwitchFormItemProps> = ({
   disabled
 }) => {
   return (
-    <div className={`${className} rb:flex rb:items-center rb:justify-between`}>
+    <Flex
+      align="center"
+      justify="space-between"
+      className={className}
+    >
       {/* Label and description section */}
       <LabelWrapper title={title}>
-        {desc && <DescWrapper desc={desc} className="rb:mt-2" />}
+        {desc && <DescWrapper desc={desc} className="rb:mt-1" />}
       </LabelWrapper>
       {/* Switch control */}
       <Form.Item
@@ -56,7 +60,7 @@ const SwitchFormItem: FC<SwitchFormItemProps> = ({
       >
         <Switch disabled={disabled} size={size} />
       </Form.Item>
-    </div>
+    </Flex>
   )
 }
 

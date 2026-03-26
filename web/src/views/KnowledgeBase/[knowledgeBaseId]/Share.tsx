@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, type FC } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { Popover } from 'antd';
 import type { KnowledgeBaseListItem, RecallTestDrawerRef } from '@/views/KnowledgeBase/types';
 import RecallTest from '../components/RecallTest';
 import InfoPanel, { type InfoItem } from '../components/InfoPanel';
@@ -27,7 +28,7 @@ const Share: FC = () => {
   const recallTestRef = useRef<RecallTestDrawerRef>(null);
   const [infoItems, setInfoItems] = useState<InfoItem[]>([]);
   const [knowledgeBaseFolderPath, setKnowledgeBaseFolderPath] = useState<BreadcrumbItem[]>([]);
-  
+  const [viewInfo,setViewInfo] = useState<boolean>(false);
   const { updateBreadcrumbs } = useBreadcrumbManager({
     breadcrumbType: 'detail'
   });
@@ -160,7 +161,17 @@ const Share: FC = () => {
           <span className='rb:text-gray-500 rb:text-sm rb:ml-2 rb:font-normal'>(ID: {knowledgeBase.id})</span></h1>
         
         {/* <p className="rb:text-gray-600 rb:mt-2">{knowledgeBase.description || t('knowledgeBase.noDescription')}</p> */}
-        <span className='rb:text-gray-800 rb:text-xs rb:border rb:border-[#369F21] rb:bg-[rgba(54,159,33,0.2)] rb:px-1 rb:py-[2px] rb:rounded'>{knowledgeBase.permission_id}</span>
+        <span className='rb:text-white rb:text-xs rb:bg-blue-500 rb:px-1 rb:py-[2px] rb:rounded'>{knowledgeBase.permission_id}</span>
+        <Popover
+          content={<InfoPanel title={t('knowledgeBase.knowledgeBaseInfo')} items={infoItems} />}
+          trigger="hover"
+          placement="bottomLeft"
+          arrow={false}
+        >
+          <span 
+            className='rb:border rb:border-[#171719] rb:px-1 rb:py-[2px] rb:rounded rb:text-gray-900 rb:text-xs rb:cursor-pointer'
+          >{t('knowledgeBase.viewBasicInfo')}</span>
+        </Popover>
       </div>
       <div className="rb:flex rb:w-full rb:items-center rb:mb-5 rb:gap-2">
           <img src={shareUserIcon} className='rb:size-4 rb:ml-2' />
@@ -178,14 +189,10 @@ const Share: FC = () => {
             <RecallTest  ref={recallTestRef} />
           </div>
         </div>
-        <div className='rb:w-80 rb:border rb:overflow-y-auto rb:border-[#DFE4ED] rb:bg-white rb:rounded-xl rb:p-4'>
-          <InfoPanel 
-            title={t('knowledgeBase.knowledgeBaseInfo')} 
-            items={infoItems}
-          />
-        </div>
+        {/* <div className='rb:w-80 rb:border rb:overflow-y-auto rb:border-[#DFE4ED] rb:bg-white rb:rounded-xl rb:p-4'>
+         
+        </div> */}
       </div>
-
 
     </div>
   );

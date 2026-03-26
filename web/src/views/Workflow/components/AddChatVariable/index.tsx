@@ -1,6 +1,7 @@
 import { useState, useImperativeHandle, forwardRef, useRef } from 'react';
-import { Button, Space, List } from 'antd';
+import { Button, List, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
+
 import type { ChatVariable, AddChatVariableRef } from '../../types';
 import type { ChatVariableModalRef } from './types'
 import RbDrawer from '@/components/RbDrawer';
@@ -74,15 +75,15 @@ const AddChatVariable = forwardRef<AddChatVariableRef, AddChatVariableProps>(({
             dataSource={variables}
             renderItem={(item, index) => (
               <List.Item>
-                <div key={index} className="rb:relative rb:p-[12px_16px] rb:bg-[#FBFDFF] rb:cursor-pointer rb:border rb:border-[#DFE4ED] rb:rounded-lg">
-                  <div className="rb:flex rb:items-center rb:justify-between">
+                <div key={index} className="rb:relative rb:p-[12px_16px] rb:bg-[#FBFDFF] rb:cursor-pointer rb-border rb:rounded-lg">
+                  <Flex align="center" justify="space-between">
                     <div className="rb:leading-4">
                       <span className="rb:font-medium">{item.name}</span>
                       <span className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular"> ({t(`workflow.config.parameter-extractor.${item.type}`)})</span>
                     </div>
-                  </div>
+                  </Flex>
                   <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:wrap-break-word rb:line-clamp-1">{item.description}</div>
-                  <Space size={12} className="rb:flex rb:absolute rb:right-4 rb:top-[50%] rb:transform-[translateY(-50%)] rb:bg-white">
+                  <Flex gap={12} className="rb:absolute rb:right-4 rb:top-[50%] rb:transform-[translateY(-50%)] rb:bg-white">
                     <div
                       className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]"
                       onClick={() => handleEdit(index)}
@@ -91,7 +92,7 @@ const AddChatVariable = forwardRef<AddChatVariableRef, AddChatVariableProps>(({
                       className="rb:size-5 rb:cursor-pointer rb:bg-cover  rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]"
                       onClick={() => handleDelete(index)}
                     ></div>
-                  </Space>
+                  </Flex>
                 </div>
               </List.Item>
             )}

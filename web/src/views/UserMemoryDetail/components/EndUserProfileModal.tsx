@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:33:21 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 18:33:21 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-24 17:58:43
  */
 /**
  * End User Profile Modal
@@ -10,13 +10,12 @@
  */
 
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, App, DatePicker } from 'antd';
+import { Form, Input, App } from 'antd';
 import { useTranslation } from 'react-i18next';
-import dayjs from 'dayjs';
 
 import type { EndUser, EndUserProfileModalRef } from '../types'
 import RbModal from '@/components/RbModal'
-import { updatedEndUserProfile, } from '@/api/memory'
+import { updatedEndUserInfo } from '@/api/memory'
 
 const FormItem = Form.Item;
 
@@ -35,6 +34,7 @@ const EndUserProfileModal = forwardRef<EndUserProfileModalRef, EndUserProfileMod
   const [visible, setVisible] = useState(false);
   const [form] = Form.useForm<EndUser>();
   const [loading, setLoading] = useState(false)
+  const [editVo, setEditVo] = useState<EndUser | null>(null)
 
   const values = Form.useWatch([], form);
 
@@ -47,11 +47,8 @@ const EndUserProfileModal = forwardRef<EndUserProfileModalRef, EndUserProfileMod
 
   /** Open modal with user data */
   const handleOpen = (user: EndUser) => {
-    form.setFieldsValue({
-      ...user,
-      end_user_id: user.id,
-      hire_date: user.hire_date ? dayjs(user.hire_date) : undefined
-    });
+    setEditVo(user)
+    form.setFieldsValue(user);
     setVisible(true);
   };
   /** Save profile changes */
@@ -60,9 +57,10 @@ const EndUserProfileModal = forwardRef<EndUserProfileModalRef, EndUserProfileMod
       .validateFields()
       .then(() => {
         setLoading(true)
-        updatedEndUserProfile({
+        updatedEndUserInfo({
+          ...editVo,
           ...values,
-          hire_date: values.hire_date?.valueOf() || null
+          // hire_date: values.hire_date?.valueOf() || null
         })
           .then(() => {
             setLoading(false)
@@ -105,7 +103,7 @@ const EndUserProfileModal = forwardRef<EndUserProfileModalRef, EndUserProfileMod
         >
           <Input placeholder={t('common.enter')} />
         </FormItem>
-        <FormItem
+        {/* <FormItem
           name="position"
           label={t('userMemory.position')}
         >
@@ -134,7 +132,7 @@ const EndUserProfileModal = forwardRef<EndUserProfileModalRef, EndUserProfileMod
           label={t('userMemory.hire_date')}
         >
           <DatePicker className="rb:w-full" allowClear />
-        </FormItem>
+        </FormItem> */}
       </Form>
     </RbModal>
   );

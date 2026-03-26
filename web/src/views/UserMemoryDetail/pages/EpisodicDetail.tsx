@@ -1,8 +1,14 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-01-08 19:46:02 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-16 15:03:50
+ */
 import { type FC, useEffect, useState } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Row, Col, Select, Form, Space, Skeleton, Input } from 'antd'
+import { Row, Col, Select, Form, Skeleton, Input, Flex } from 'antd'
 import RbCard from '@/components/RbCard/Card'
 import {
   getEpisodicOverview,
@@ -10,29 +16,40 @@ import {
 } from '@/api/memory'
 import { formatDateTime } from '@/utils/format'
 import Tag from '@/components/Tag'
-import RbAlert from '@/components/RbAlert'
 import Empty from '@/components/Empty'
 
+/** Single episodic memory item returned by the overview API. */
 interface EpisodicMemory {
   id: string;
   title: string;
   type: string;
   created_at: number;
 }
+
+/** Response shape of the episodic overview API. */
 interface EpisodicOverviewData {
+  /** Count of memories matching the current filter. */
   total: number;
+  /** Total count of all episodic memories (unfiltered). */
   total_all: number;
   episodic_memories: EpisodicMemory[]
 }
+
+/** Full detail of a single episodic memory entry. */
 interface EpisodicMemoryDetail {
   id: string;
   created_at: number;
+  /** People or entities involved in this episode. */
   involved_objects: string[];
+  /** Category such as conversation, learning, decision, etc. */
   episodic_type: string;
+  /** Ordered list of content paragraphs describing the episode. */
   content_records: string[];
+  /** Emotion label associated with this episode (e.g. "joy", "neutral"). */
   emotion: string;
 }
 
+/** Maps episodic type keys to Ant Design Tag color presets. */
 const TAG_COLORS: Record<string, "processing" | "success" | "warning" | "error" | "default"> = {
   conversation: "processing",
   project_work: "success",
@@ -41,16 +58,8 @@ const TAG_COLORS: Record<string, "processing" | "success" | "warning" | "error" 
   important_event: "error",
   default: 'default'
 }
-const BG_COLORS: Record<string, string> = {
-  conversation: "rb:bg-[#155EEF]",
-  project_work: "rb:bg-[#369F21]",
-  learning: "rb:bg-[#FF5D34]",
-  decision: "rb:bg-[#FF5D34]",
-  important_event: "rb:bg-[#5B6167]",
-  default: 'rb:bg-[#F0F3F8] rb:text-[#5B6167]!'
-}
 
-// Map display types to internal keys
+/** Normalise a display-friendly type string (e.g. "Project/Work") to its internal key (e.g. "project_work"). */
 const getTypeKey = (type: string): string => {
   if (!type) return 'default'
   const typeMap: Record<string, string> = {
@@ -62,22 +71,34 @@ const getTypeKey = (type: string): string => {
   }
   return typeMap[type] || type.toLowerCase().replace(/[^a-z0-9]/g, '_')
 }
+/**
+ * EpisodicDetail – Displays a user's episodic memories in a master-detail layout.
+ *
+ * Left panel: filterable & searchable list of episodic memory cards.
+ * Right panel: full detail view of the selected episode including metadata,
+ * content records and emotion label.
+ *
+ * Route param `id` is the end-user ID whose memories are being viewed.
+ */
 const EpisodicDetail: FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()
   const [form] = Form.useForm()
   const [loading, setLoading] = useState<boolean>(false)
   const [data, setData] = useState<EpisodicOverviewData>({} as EpisodicOverviewData)
+  /** Reactive form values used as filter params (time_range, episodic_type, title_keyword). */
   const values = Form.useWatch([], form)
   const [detailLoading, setDetailLoading] = useState<boolean>(false)
   const [detail, setDetail] = useState<EpisodicMemoryDetail | null>(null)
   const [selected, setSelected] = useState<EpisodicMemory | null>(null)
 
+  /* Fetch overview when the route user ID changes. */
   useEffect(() => {
     if (!id) return
     getData()
   }, [id])
 
+  /** Fetch the episodic memory overview list with current filter values. */
   const getData = () => {
     if (!id) return
     setLoading(true)
@@ -99,14 +120,17 @@ const EpisodicDetail: FC = () => {
     })
   }
 
+  /* Re-fetch overview whenever filter form values change. */
   useEffect(() => {
     getData()
   }, [values])
 
+  /* Load detail whenever a different memory card is selected. */
   useEffect(() => {
     getDetail()
   }, [selected])
 
+  /** Fetch full detail for the currently selected episodic memory. */
   const getDetail = () => {
     if (!selected || !selected.id) return
 
@@ -124,133 +148,148 @@ const EpisodicDetail: FC = () => {
   }
 
   return (
-    <div className="rb:h-full rb:max-w-266 rb:mx-auto">
-      <div className="rb:flex rb:justify-between rb:items-center rb:text-[#FFFFFF] rb:leading-5 rb:h-30 rb:p-5 rb:bg-[url('@/assets/images/userMemory/shortTerm.png')] rb:bg-cover rb:mb-6">
-        <div className="rb:max-w-135">{t('episodicDetail.title')}</div>
-
-        <div className="rb:grid rb:grid-cols-1 rb:gap-4">
-          <div className="rb:bg-[rgba(255,255,255,0.2)] rb:rounded-lg rb:p-3.5 rb:text-[12px] rb:text-center">
-            <div className="rb:text-[24px] rb:leading-8 rb:mb-1">{data.total_all ?? 0}</div>
-            {t(`episodicDetail.total_all`)}
-          </div>
-        </div>
-      </div>
-
-      <Form form={form} initialValues={{ time_range: 'all', episodic_type: 'all' }}>
-        <Row gutter={16}>
-          <Col span={6}>
-            <Form.Item name="time_range">
-              <Select
-                placeholder={t('common.pleaseSelect')}
-                options={[
-                  { value: 'all', label: t('episodicDetail.all') },
-                  { value: 'today', label: t('episodicDetail.today') },
-                  { value: 'this_week', label: t('episodicDetail.this_week') },
-                  { value: 'this_month', label: t('episodicDetail.this_month') },
-                ]}
-              />
-            </Form.Item>
-          </Col>
-          <Col span={6}>
-            <Form.Item name="episodic_type">
-              <Select
-                placeholder={t('common.pleaseSelect')}
-                options={[
-                  { value: 'all', label: t('episodicDetail.all') },
-                  { value: 'conversation', label: t('episodicDetail.conversation') },
-                  { value: 'project_work', label: t('episodicDetail.project_work') },
-                  { value: 'learning', label: t('episodicDetail.learning') },
-                  { value: 'decision', label: t('episodicDetail.decision') },
-                  { value: 'important_event', label: t('episodicDetail.important_event') },
-                ]}
-              />
-            </Form.Item>
-          </Col>
-          <Col span={6}>
-            <Form.Item name="title_keyword">
-              <Input placeholder={t('episodicDetail.titleKeywordPlaceholder')} />
-            </Form.Item>
-          </Col>
-        </Row>
-      </Form>
-
-      <Row gutter={16}>
-        <Col span={8}>
-          <RbCard
-            title={<>{t('episodicDetail.curResult')}<span className="rb:text-[#5B6167] rb:font-regular!"> ({data.total || 0}{t('episodicDetail.unix')})</span></>}
-            headerType="borderless"
-            bodyClassName="rb:h-[calc(100vh-349px)] rb:overflow-y-auto"
-          >
-            {loading
-              ? <Skeleton active />
-              : !data.episodic_memories || data.episodic_memories.length === 0
-                ? <Empty />
-                : (
-                  <Space size={8} direction="vertical" className="rb:w-full">
-                    {data.episodic_memories.map((vo, index) => (
-                      <div
-                        key={vo.id}
-                        className={clsx("rb:cursor-pointer rb:flex rb:items-center rb:bg-[#FFFFFF] rb:border  rb:rounded-lg rb:px-3 rb:py-2 rb:leading-5", {
-                          'rb:border-[#DFE4ED] rb:shadow-[0px_2px_4px_0px_rgba(33,35,50,0.16)]': selected?.id !== vo.id,
-                          'rb:border-[#155EEF]': selected?.id === vo.id,
-                        })}
-                        onClick={() => setSelected(vo)}
-                      >
-                        <div className={clsx("rb:rounded-lg rb:text-[#FFFFFF] rb:size-6 rb:text-[12px] rb:leading-6 rb:text-center rb:mr-3", BG_COLORS[getTypeKey(vo.type)])}>{index + 1}</div>
-                        <div className="rb:flex-1 rb:w-[calc(100%-36px)]">
-                          <div className="rb:flex rb:items-center rb:justify-between">
-                            <div className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1">{vo.title}</div>
-                            {vo.type && <Tag color={TAG_COLORS[getTypeKey(vo.type)]}>{t(`episodicDetail.${getTypeKey(vo.type)}`)}</Tag>}
-                          </div>
-                          <div className="rb:text-[#5B6167] rb:text-[12px]">{formatDateTime(vo.created_at)}</div>
-                        </div>
+    <Row gutter={16}>
+      <Col flex="400px">
+        <RbCard
+          title={<div className="rb:leading-5.5!">
+            <span className="rb:font-[MiSans-Bold] rb:font-bold">{t('episodicDetail.curResult')}</span>
+            <span className="rb:text-[#5B6167] rb:font-regular!"> ({data.total || 0}{t('episodicDetail.unix')})</span>
+          </div>}
+          headerType="borderless"
+          className="rb:h-[calc(100vh-88px)]!"
+          headerClassName="rb:min-h-[38px]! rb:pt-3! rb:mb-0!"
+          bodyClassName="rb:p-3! rb:pb-0! rb:h-[calc(100%-38px)]!"
+        >
+          <Form form={form} initialValues={{ time_range: 'all', episodic_type: 'all' }}>
+            <Row gutter={[8, 8]} className="rb:mb-3">
+              <Col span={12}>
+                <Form.Item name="time_range" noStyle>
+                  <Select
+                    placeholder={t('common.pleaseSelect')}
+                    options={[
+                      { value: 'all', label: t('episodicDetail.all') },
+                      { value: 'today', label: t('episodicDetail.today') },
+                      { value: 'this_week', label: t('episodicDetail.this_week') },
+                      { value: 'this_month', label: t('episodicDetail.this_month') },
+                    ]}
+                    className="rb:w-full"
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="episodic_type" noStyle>
+                  <Select
+                    placeholder={t('common.pleaseSelect')}
+                    options={[
+                      { value: 'all', label: t('episodicDetail.all') },
+                      { value: 'conversation', label: t('episodicDetail.conversation') },
+                      { value: 'project_work', label: t('episodicDetail.project_work') },
+                      { value: 'learning', label: t('episodicDetail.learning') },
+                      { value: 'decision', label: t('episodicDetail.decision') },
+                      { value: 'important_event', label: t('episodicDetail.important_event') },
+                    ]}
+                    className="rb:w-full"
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={24}>
+                <Form.Item name="title_keyword" noStyle>
+                  <Input placeholder={t('episodicDetail.titleKeywordPlaceholder')} />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Form>
+          {loading
+            ? <Skeleton active />
+            : !data.episodic_memories || data.episodic_memories.length === 0
+              ? <Empty />
+              : (
+                <Flex gap={12} vertical className="rb:overflow-y-auto rb:h-[calc(100%-84px)] rb:pb-3!">
+                  {data.episodic_memories.map((vo, index) => (
+                    <Flex
+                      key={vo.id}
+                      gap={12}
+                      align="center"
+                      className={clsx("rb:cursor-pointer rb:rounded-xl rb:px-3! rb:py-2!", {
+                        'rb-border': selected?.id !== vo.id,
+                        'rb:border rb:border-[#171719]': selected?.id === vo.id,
+                      })}
+                      onClick={() => setSelected(vo)}
+                    >
+                      <div className="rb:rounded-md rb:text-[#FFFFFF] rb:size-5 rb:text-[10px] rb:leading-3.5 rb:text-center rb:py-0.75 rb:bg-[#171719]">{index + 1}</div>
+                      <div className="rb:flex-1 rb:w-[calc(100%-36px)]">
+                        <div className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1 rb:text-[#212332] rb:font-medium rb:leading-5 rb:mb-1">{vo.title}</div>
+                        <Flex align="center" justify="space-between" className="rb:text-[#5B6167] rb:text-[12px]">
+                          {formatDateTime(vo.created_at)}
+                          {vo.type && <Tag color={TAG_COLORS[getTypeKey(vo.type)]}>{t(`episodicDetail.${getTypeKey(vo.type)}`)}</Tag>}
+                        </Flex>
                       </div>
-                    ))}
-                  </Space>
-                )
-            }
-          </RbCard>
-        </Col>
-        <Col span={16}>
-          <RbCard
-            title={selected?.title}
-            headerType="borderless"
-            bodyClassName="rb:h-[calc(100vh-349px)] rb:overflow-y-auto"
-          >
-            {detailLoading
-              ? <Skeleton active />
-              : !selected || !detail
-                ? <Empty className="rb:mt-14" />
-                : (
-                  <Space size={12} direction="vertical" className="rb:w-full">
-                    <div className="rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:px-3 rb:py-2 rb:leading-5">
-                      <Row gutter={[12, 16]}>
-                        <Col span={12}>
-                          <div className="rb:text-[#5B6167]">{t('episodicDetail.created')}<br />{formatDateTime(detail.created_at)}</div>
-                        </Col>
-                        <Col span={12}>
-                          <div className="rb:text-[#5B6167]">{t('episodicDetail.episodic_type')}<br />{detail.episodic_type}</div>
-                        </Col>
-                        {detail.involved_objects.length > 0 && <Col span={24}>
-                          <div className="rb:font-medium rb:leading-5 rb:mb-1">{t('episodicDetail.involved_objects')}</div>
-                          <Space size={8}>{detail.involved_objects.map((vo, index) => <Tag key={index}>{vo}</Tag>)}</Space>
-                        </Col>}
-                      </Row>
+                    </Flex>
+                  ))}
+                </Flex>
+              )
+          }
+        </RbCard>
+      </Col>
+      <Col flex="1">
+        <RbCard
+          title={selected?.title}
+          headerType="borderless"
+          className="rb:h-[calc(100vh-88px)]!"
+          headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
+          bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-54px)]! rb:overflow-y-auto"
+        >
+          {detailLoading
+            ? <Skeleton active />
+            : !selected || !detail
+              ? <Empty className="rb:mt-14" />
+              : (
+                <Flex gap={16} vertical>
+                  <div className="rb-border rb:rounded-xl rb:px-4 rb:py-3">
+                    <Row gutter={12}>
+                      <Col span={8}>
+                        <div className="rb:text-[#5B6167] rb:leading-5">
+                          {t('episodicDetail.created')}
+                          <div className="rb:font-medium rb:mt-1 rb:text-[#171719]">{formatDateTime(detail.created_at)}</div>
+                        </div>
+                      </Col>
+                      <Col span={8}>
+                        <div className="rb:text-[#5B6167] rb:leading-5">
+                          {t('episodicDetail.episodic_type')}
+                          <div className="rb:font-medium rb:mt-1 rb:text-[#171719]">{detail.episodic_type}</div>
+                        </div>
+                      </Col>
+                      {detail.involved_objects.length > 0 && <Col span={8}>
+                        <div className="rb:text-[#5B6167] rb:leading-5">
+                          {t('episodicDetail.involved_objects')}
+                          <Flex gap={8} className="rb:mt-1!">{detail.involved_objects.map((vo, index) => <Tag key={index}>{vo}</Tag>)}</Flex>
+                        </div>
+                      </Col>}
+                    </Row>
+                  </div>
+                  <div>
+                    <div className="rb:font-medium rb:leading-5 rb:mb-2 rb:pl-1">{t('episodicDetail.content_records')}</div>
+
+                    <ul className="rb:leading-5.5 rb:list-disc rb-border rb:rounded-xl rb:pl-8 rb:pr-4 rb:py-3">
+                      {detail.content_records.map((vo, index) => <li key={index}>{vo}</li>)}
+                    </ul>
+                  </div>
+
+                  <div>
+                    <div className="rb:font-medium rb:leading-5 rb:mb-2 rb:pl-1">{t('episodicDetail.emotion')}</div>
+                    <div className="rb-border rb:rounded-xl rb:px-4 rb:py-3">
+                      {detail.emotion
+                        ? t(`episodicDetail.${detail.emotion || 'none'}`)
+                        : <Empty size={96} className="rb:pt-1! rb:pb-3.5!" />
+                      }
                     </div>
-                    <div className="rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:px-3 rb:py-2 rb:leading-5">
-                      <div className="rb:font-medium rb:leading-5 rb:mb-1">{t('episodicDetail.content_records')}</div>
-                      {detail.content_records.map((vo, index) => <div key={index} className="rb:text-[#5B6167] rb:leading-5">- {vo}</div>)}
-                    </div>
-                    <RbAlert>
-                      {t('episodicDetail.emotion')}: {t(`episodicDetail.${detail.emotion || 'none'}`)}
-                    </RbAlert>
-                  </Space>
-                )
-            }
-          </RbCard>
-        </Col>
-      </Row>
-    </div>
+                  </div>
+                </Flex>
+              )
+          }
+        </RbCard>
+      </Col>
+    </Row>
   )
 }
 export default EpisodicDetail

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 12:26:12
+ * @Last Modified time: 2026-03-25 12:28:07
  */
 /**
  * Model List Detail Drawer
@@ -31,12 +31,13 @@ interface ModelListDetailProps {
   /** Callback to refresh parent list */
   refresh?: () => void;
   handleEdit: (vo?: ModelListItem) => void;
+  handleCloseConfig?: () => void;
 }
 
 /**
  * Model list detail drawer component
  */
-const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ refresh, handleEdit }, ref) => {
+const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ refresh, handleEdit, handleCloseConfig }, ref) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<ProviderModelItem>({} as ProviderModelItem)
@@ -84,6 +85,8 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
     setType(null)
     setOpen(false)
     refresh?.()
+    multiKeyConfigModalRef.current?.handleClose()
+    handleCloseConfig?.()
   }
   /** Refresh model list */
   const handleRefresh = () => {
@@ -108,7 +111,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
 
   return (
     <RbDrawer
-      title={<>{t(`modelNew.${data.provider}`)} {t('modelNew.modelList')} ({list.length}{t('modelNew.item')})</>}
+      title={<>{String(data.provider).charAt(0).toUpperCase() + String(data.provider).slice(1)} {t('modelNew.modelList')} ({list.length}{t('modelNew.item')})</>}
       open={open}
       onClose={handleClose}
     >
@@ -146,16 +149,19 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
               }
               extra={<Switch checked={item.is_active} disabled={loading} onChange={() => handleChange(item)} />}
               bodyClassName="rb:relative rb:pb-[64px]! rb:h-[calc(100%-64px)]!"
+              variant="outlined"
             >
               <Tooltip title={item.description}>
                 <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:font-regular rb:wrap-break-word rb:line-clamp-2">{item.description}</div>
               </Tooltip>
               <div className="rb:absolute rb:bottom-4 rb:left-6 rb:right-6">
                 <Row gutter={12}>
-                  <Col span={12}>
-                    {!item.model_id && <Button block onClick={() => handleEdit(item)}>{t('modelNew.modelConfiguration')}</Button>}
-                  </Col>
-                  <Col span={12}>
+                  {!item.model_id && 
+                    <Col span={12}>
+                      <Button block onClick={() => handleEdit(item)}>{t('modelNew.modelConfiguration')}</Button>
+                    </Col>
+                  }
+                  <Col span={!item.model_id ? 12 : 24}>
                     <Button type="primary" ghost block onClick={() => handleKeyConfig(item)}>{t('modelNew.keyConfig')}</Button>
                   </Col>
                 </Row>

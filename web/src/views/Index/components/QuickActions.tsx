@@ -1,5 +1,6 @@
 import { type FC } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Flex } from 'antd'
 
 import modelIcon from '@/assets/images/index/model_mgt.svg'
 import spaceIcon from '@/assets/images/index/space_mgt.svg'
@@ -89,25 +90,30 @@ const QuickActions: FC<QuickActionsProps> = ({ onNavigate }) => {
   ];
 
   return (
-    <div className='rb:w-full rb:p-4 rb:bg-[#FBFDFF] rb:border-1 rb:border-[#DFE4ED] rb:rounded-xl'>
-        <div className='rb:flex rb:justify-start rb:text-base rb:font-medium rb:text-[#212332]'>
-            { t('quickActions.title') }
-        </div>
-        <div className="rb:grid rb:grid-cols-3 md:rb:grid-cols-4 rb:gap-4 rb:mt-4">
-            
-            {quickActions.map((action) => (
-                <div key={action.key}
-                className="rb:flex rb:flex-col rb:items-center rb:text-center rb:cursor-pointer rb:group"
-                onClick={action.onClick}
-                >
-                <img src={action.icon} className='rb:size-10 rb:mx-auto' />
-                <div className="rb:mt-2 rb:text-xs rb:max-w-[74px] rb:text-[#5B6167] rb:text-center rb:leading-[14px]">
-                    {action.title}
-                </div>
-                </div>
-            ))}
-        </div>
-  </div>);
+    <div className='rb:w-full rb:bg-white rb:rounded-xl rb:mt-2.5 rb:py-3'>
+      <div className='rb:font-[MiSans-Bold] rb:font-bold rb:leading-5 rb:px-4 rb:pb-3.5'>
+        { t('quickActions.title') }
+      </div>
+      <div className="rb:grid rb:grid-cols-3 md:rb:grid-cols-4 rb:gap-4">
+        {quickActions.map((action) => (
+          <Flex
+            key={action.key}
+            vertical
+            gap={8}
+            align="center"
+            justify="center"
+            className="rb:cursor-pointer"
+            onClick={action.onClick}
+          >
+            <img src={action.icon} className='rb:size-10 rb:mx-auto' />
+            <div className="rb:text-[12px] rb:max-w-18.25 rb:text-[#5B6167] rb:text-center rb:leading-3.5">
+              {action.title}
+            </div>
+          </Flex>
+        ))}
+      </div>
+    </div>
+  );
 };
 
 export default QuickActions;

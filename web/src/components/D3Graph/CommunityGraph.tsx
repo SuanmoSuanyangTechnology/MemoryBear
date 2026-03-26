@@ -1,8 +1,15 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-03-13 15:17:06 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-03-24 12:19:57 
+ */
 import React, { useState, useRef, useMemo, useEffect, type FC } from 'react'
-import Empty from '@/components/Empty'
+
 import { GRAPH_COLORS, initCommunityGraph } from './utils'
 import { useD3Graph } from './hooks'
 import type { CommunityD3Node, D3Link, CommunityGraphProps } from './types'
+import PageEmpty from '@/components/Empty/PageEmpty'
 
 // ─── Component ────────────────────────────────────────────────────────────────
 // Renders a D3-powered community graph with optional tooltip and legend.
@@ -51,7 +58,7 @@ const CommunityGraph: FC<CommunityGraphProps> = ({
     ? renderTooltipRef.current(tooltip.node)
     : null
 
-  if (isEmpty) return <Empty className="rb:h-full" />
+  if (isEmpty) return <PageEmpty className="rb:h-full" />
   return (
     <div className="rb:w-full rb:h-full rb:relative">
       <div ref={containerRef} className="rb:w-full rb:h-full" />

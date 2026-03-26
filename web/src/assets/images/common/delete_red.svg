@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="18px" height="18px" viewBox="0 0 18 18" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 33</title>
+    <defs>
+        <filter x="-2.2%" y="-5.4%" width="104.5%" height="112.7%" filterUnits="objectBoundingBox" id="filter-1">
+            <feOffset dx="0" dy="2" in="SourceAlpha" result="shadowOffsetOuter1"></feOffset>
+            <feGaussianBlur stdDeviation="4" in="shadowOffsetOuter1" result="shadowBlurOuter1"></feGaussianBlur>
+            <feColorMatrix values="0 0 0 0 0.0901960784   0 0 0 0 0.0901960784   0 0 0 0 0.0980392157  0 0 0 0.16 0" type="matrix" in="shadowBlurOuter1" result="shadowMatrixOuter1"></feColorMatrix>
+            <feMerge>
+                <feMergeNode in="shadowMatrixOuter1"></feMergeNode>
+                <feMergeNode in="SourceGraphic"></feMergeNode>
+            </feMerge>
+        </filter>
+    </defs>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="记忆管理" transform="translate(-804, -283)" stroke="#FF5D34">
+            <g id="1备份-2" filter="url(#filter-1)" transform="translate(252, 108)">
+                <g id="编组-33" transform="translate(552, 175)">
+                    <g id="编组-32" transform="translate(3.5, 4)">
+                        <line x1="-1.80133686e-14" y1="2.22222222" x2="11" y2="2.22222222" id="路径-29"></line>
+                        <polyline id="路径-30" stroke-linejoin="round" points="3.3 2.2221179 3.3 0 7.7 0 7.7 2.22222222"></polyline>
+                        <path d="M1.65,2.23587458 L1.65,9 C1.65,9.55228475 2.09771525,10 2.65,10 L8.35,10 C8.90228475,10 9.35,9.55228475 9.35,9 L9.35,2.22222222 L9.35,2.22222222" id="路径-31" stroke-linejoin="round"></path>
+                        <line x1="4.4" y1="4.45203738" x2="4.4" y2="7.78537071" id="路径-32"></line>
+                        <line x1="6.6" y1="4.45203738" x2="6.6" y2="7.78537071" id="路径-32"></line>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

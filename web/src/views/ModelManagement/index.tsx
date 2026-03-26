@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:05 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:50:05 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-25 12:28:07
  */
 /**
  * Model Management Main Page
@@ -84,7 +84,7 @@ const tabKeys = ['group', 'list', 'square']
   }
 
   return (
-    <>
+    <Flex vertical gap={16}>
       <Flex justify="space-between" align="center">
         <PageTabs
           value={activeTab}
@@ -100,19 +100,19 @@ const tabKeys = ['group', 'list', 'square']
                   url={modelTypeUrl}
                   hasAll={false}
                   format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
-                  className="rb:w-30"
+                  className="rb:w-40"
                   allowClear={true}
                   placeholder={t('modelNew.type')}
                 />
               </Form.Item>
             }
-            {(activeTab === 'list' || activeTab === 'square') &&
+            {activeTab === 'list' &&
               <Form.Item name="provider" noStyle>
                 <CustomSelect
                   url={modelProviderUrl}
                   hasAll={false}
-                  format={(items) => items.map((item) => ({ label: t(`modelNew.${item}`), value: String(item) }))}
-                  className="rb:w-30"
+                  format={(items) => items.map((item) => ({ label: String(item).charAt(0).toUpperCase() + String(item).slice(1), value: String(item) }))}
+                  className="rb:w-40"
                   allowClear={true}
                   placeholder={t('modelNew.provider')}
                 />
@@ -123,7 +123,6 @@ const tabKeys = ['group', 'list', 'square']
                 <SearchInput
                   maxLength={50}
                   placeholder={t(`modelNew.${activeTab}SearchPlaceholder`)}
-                  className="rb:w-70!"
                 />
               </Form.Item>
             }
@@ -133,9 +132,9 @@ const tabKeys = ['group', 'list', 'square']
         </Form>
       </Flex>
 
-      <div className="rb:w-full rb:h-[calc(100%-48px)] rb:my-4">
+      <div className="rb:w-full rb:h-[calc(100vh-125px)] rb:overflow-y-auto">
         {activeTab === 'group' && <GroupModel ref={groupRef} query={query} handleEdit={handleEdit} />}
-        {activeTab === 'list' && <ModelList ref={modelListRef} query={query} handleEdit={handleEdit} />}
+        {activeTab === 'list' && <ModelList ref={modelListRef} query={query} handleEdit={handleEdit} handleCloseModel={() => customModelModalRef.current?.handleClose() } />}
         {activeTab === 'square' && <ModelSquare query={query} />}
       </div>
       <GroupModelModal
@@ -146,7 +145,7 @@ const tabKeys = ['group', 'list', 'square']
         ref={customModelModalRef}
         refresh={handleRefresh}
       />
-    </>
+    </Flex>
   )
 }
 

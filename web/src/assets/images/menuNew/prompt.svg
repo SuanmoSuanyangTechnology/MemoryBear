@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>提示词</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="工作台-记忆看板" transform="translate(-22, -252)" stroke="#171719" stroke-width="1.2">
+            <g id="左侧导航栏" transform="translate(-391, 0)">
+                <g id="编组-47" transform="translate(403, 74)">
+                    <g id="知识库" transform="translate(0, 167)">
+                        <g id="提示词" transform="translate(10, 11)">
+                            <g id="编组-45" transform="translate(2.5, 2)">
+                                <path d="M3.96581416,12 L1.5,12 C0.671572875,12 0,11.3284271 0,10.5 L0,1.5 C0,0.671572875 0.671572875,0 1.5,0 L9.39685919,0 C10.2252863,0 10.8968592,0.671572875 10.8968592,1.5 L10.8968592,2.99293149 L10.8968592,2.99293149" id="路径"></path>
+                                <path d="M3.26905776,3.27272727 L7.62780143,3.27272727 M5.4484296,3.27272727 L5.4484296,7.63636364" id="形状结合"></path>
+                                <polygon id="路径-11" points="9.22121994 6.54545455 6.91984008 10.2384806 7.8543485 12 9.77860327 12 12 8.17112299"></polygon>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

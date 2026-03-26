@@ -1,0 +1,3 @@
+.select:global(.ant-select-outlined:not(.ant-select-customize-input) .ant-select-selector) {
+  border: none;
+}

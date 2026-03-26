@@ -1,0 +1,27 @@
+.rbButton {
+  border-radius: 8px;
+}
+.rbButton:global(:not(.ant-btn-disabled):hover) {
+  opacity: 0.7;
+}
+.rbButton:global(.ant-btn-color-dangerous.ant-btn-variant-outlined),
+.rbButton:global(.ant-btn-color-dangerous.ant-btn-variant-dashed) {
+  border-color: #EBEBEB;
+  color: #171719;
+}
+.rbButton:global(.ant-btn-color-dangerous.ant-btn-variant-outlined:not(:disabled):not(.ant-btn-disabled):hover),
+.rbButton:global(.ant-btn-color-dangerous.ant-btn-variant-dashed:not(:disabled):not(.ant-btn-disabled):hover) {
+  border-color: #FF5D34;
+  background-color: rgba(255, 93, 52, 0.06);
+  color: #FF5D34;
+  opacity: 1 !important;
+}
+.rbButton:global(.ant-btn-color-primary.ant-btn-background-ghost:not(:disabled):not(.ant-btn-disabled):hover) {
+  color: #171719;
+  border-color: #171719;
+}
+.rbButton:global(.ant-btn-color-primary.ant-btn-background-ghost:not(:disabled):not(.ant-btn-disabled):active) {
+  color: #171719;
+  border-color: #171719;
+  background-color: #FAFAFA;
+}

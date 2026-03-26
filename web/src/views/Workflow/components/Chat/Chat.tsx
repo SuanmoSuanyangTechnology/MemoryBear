@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 18:41:07
+ * @Last Modified time: 2026-03-25 13:57:40
  */
 /**
  * Workflow Chat Component
@@ -23,7 +23,7 @@
  */
 import { forwardRef, useImperativeHandle, useState, useRef, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { App } from 'antd'
+import { App, Flex } from 'antd'
 
 import ChatIcon from '@/assets/images/application/chat.png'
 import RbDrawer from '@/components/RbDrawer';
@@ -45,8 +45,10 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   const { t } = useTranslation()
   const { message: messageApi } = App.useApp()
   const toolbarRef = useRef<ChatToolbarRef>(null)
+  const [toolbarReady, setToolbarReady] = useState(false)
   const toolbarCallbackRef = useCallback((node: ChatToolbarRef | null) => {
     (toolbarRef as React.MutableRefObject<ChatToolbarRef | null>).current = node
+    setToolbarReady(!!node)
   }, [])
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -70,10 +72,10 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   }, [open, data?.features])
 
   useEffect(() => {
-    if (open && graphRef.current && toolbarRef.current) {
+    if (open && toolbarReady) {
       getVariables()
     }
-  }, [open])
+  }, [open, toolbarReady])
   /**
    * Extracts variables from the workflow's start node and merges with previous values
    */
@@ -103,6 +105,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
    */
   const handleClose = () => {
     setOpen(false)
+    setToolbarReady(false)
     setChatList([])
     setVariables([])
     setConversationId(null)
@@ -397,9 +400,9 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
 
   return (
     <RbDrawer
-      title={<div className="rb:flex rb:items-center rb:gap-2.5">
+      title={<Flex align="center" gap={10}>
         {t('workflow.run')}
-      </div>}
+      </Flex>}
       classNames={{
         body: 'rb:p-0!'
       }}
@@ -419,7 +422,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
           return <Runtime item={item} index={index} />
         }}
       />
-      <div className="rb:relative rb:flex rb:items-center rb:gap-2.5 rb:m-4 rb:mb-1">
+      <Flex align="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">
         <ChatInput
           message={message}
           className="rb:relative!"
@@ -436,7 +439,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
             onVariablesChange={setVariables}
           />
         </ChatInput>
-      </div>
+      </Flex>
     </RbDrawer>
   )
 })

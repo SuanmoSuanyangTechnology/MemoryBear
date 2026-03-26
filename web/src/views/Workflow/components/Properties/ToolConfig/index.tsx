@@ -1,6 +1,6 @@
 import { type FC, useEffect, useState } from "react";
 import { useTranslation } from 'react-i18next'
-import { Form, Select, InputNumber, Switch, Cascader, type CascaderProps } from 'antd'
+import { Form, Select, InputNumber, Switch, Cascader, type CascaderProps, Tooltip } from 'antd'
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import { getToolMethods, getToolDetail, getTools } from '@/api/tools'
 import type { ToolType, ToolItem } from '@/views/ToolManagement/types'
@@ -185,8 +185,12 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
           <div key={parameter.name}>
             <Form.Item
               name={['tool_parameters', parameter.name]}
-              label={parameter.name}
-              extra={parameter.type === 'boolean' ? undefined : parameter.description}
+              label={<>
+                {parameter.name}
+                <Tooltip title={parameter.description} placement="right">
+                  <div className="rb:size-3 rb:ml-0.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/question.svg')]"></div>
+                </Tooltip>
+              </>}
               rules={[
                 { required: parameter.required, message: t('common.pleaseEnter') }
               ]}
@@ -208,10 +212,11 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
                     onChange={(value) => form.setFieldValue(['tool_parameters', parameter.name], value)}
                   />
                 : <Editor
-                    height={32}
                     variant="outlined"
-                    options={options} 
+                    type="input"
                     size="small"
+                    height={28}
+                    options={options}
                     placeholder={t('common.pleaseEnter')}
                   />
               }
