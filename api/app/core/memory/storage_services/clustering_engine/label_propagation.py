@@ -240,8 +240,16 @@ class LabelPropagationEngine:
         """
         处理单个新实体的社区分配。
         
+        该函数会为新实体分配社区，可能的情况包括：
+        1. 孤立实体（无邻居）：创建新的单成员社区
+        2. 邻居都没有社区：创建新社区并将实体和邻居都加入
+        3. 邻居有社区：通过加权投票选择最合适的社区加入
+        
         Returns:
-            str: 分配到的社区ID（如果有）
+            Optional[str]: 分配到的社区ID。当前实现总是返回一个有效的社区ID，
+                          但返回类型保留为Optional以支持未来可能的扩展场景
+                          （例如：实体无法分配到任何社区的情况）。
+                          调用方应检查返回值的真假性（truthiness）。
         """
         neighbors = await self.repo.get_entity_neighbors(entity_id, end_user_id)
 
@@ -563,6 +571,11 @@ class LabelPropagationEngine:
         # --- 阶段2：批量调用 LLM 生成 name 和 summary ---
         if self.llm_model_id:
             llm_client = self._get_llm_client()
+            if not llm_client:
+                logger.warning(
+                    f"[Clustering] LLM 已配置（model_id={self.llm_model_id}）但客户端初始化失败，"
+                    f"将跳过社区元数据的 LLM 富化。请检查 model_id 是否正确或数据库连接是否正常。"
+                )
             if llm_client:
                 prompts_to_process = [(i, m) for i, m in enumerate(metadata_list) if m.get("prompt")]
                 
@@ -605,6 +618,11 @@ class LabelPropagationEngine:
         # --- 阶段3：批量生成 summary_embedding ---
         if self.embedding_model_id:
             embedder = self._get_embedder_client()
+            if not embedder:
+                logger.warning(
+                    f"[Clustering] Embedding 已配置（model_id={self.embedding_model_id}）但客户端初始化失败，"
+                    f"将跳过社区摘要的向量化。请检查 model_id 是否正确或数据库连接是否正常。"
+                )
             if embedder:
                 try:
                     summaries = [m["summary"] for m in metadata_list]
