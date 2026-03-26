@@ -22,6 +22,14 @@ class EndUser(Base):
     created_at = Column(DateTime, default=datetime.datetime.now)
     updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
     
+    # 用户档案字段 - User Profile Fields
+    position = Column(String, nullable=True, comment="职位")
+    department = Column(String, nullable=True, comment="部门")
+    contact = Column(String, nullable=True, comment="联系方式")
+    phone = Column(String, nullable=True, comment="电话")
+    hire_date = Column(DateTime, nullable=True, comment="入职日期")
+    updatetime_profile = Column(DateTime, nullable=True, comment="核心档案信息最后更新时间")
+    
     memory_config_id = Column(
         UUID(as_uuid=True), 
         ForeignKey("memory_config.config_id"), 
