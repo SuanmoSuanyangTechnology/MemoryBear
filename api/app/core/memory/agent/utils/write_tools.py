@@ -260,24 +260,24 @@ async def write(
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(f"=== Pipeline Run Completed: {timestamp} ===\n\n")
 
-    # 将提取统计写入 Redis，按 workspace_id 存储
-    try:
-        from app.cache.memory.activity_stats_cache import ActivityStatsCache
+    # # 将提取统计写入 Redis，按 workspace_id 存储
+    # try:
+    #     from app.cache.memory.activity_stats_cache import ActivityStatsCache
 
-        stats_to_cache = {
-            "chunk_count": len(all_chunk_nodes) if all_chunk_nodes else 0,
-            "statements_count": len(all_statement_nodes) if all_statement_nodes else 0,
-            "triplet_entities_count": len(all_entity_nodes) if all_entity_nodes else 0,
-            "triplet_relations_count": len(all_entity_entity_edges) if all_entity_entity_edges else 0,
-            "temporal_count": 0,
-        }
-        await ActivityStatsCache.set_activity_stats(
-            workspace_id=str(memory_config.workspace_id),
-            stats=stats_to_cache,
-        )
-        logger.info(f"[WRITE] 活动统计已写入 Redis: workspace_id={memory_config.workspace_id}")
-    except Exception as cache_err:
-        logger.warning(f"[WRITE] 写入活动统计缓存失败（不影响主流程）: {cache_err}", exc_info=True)
+    #     stats_to_cache = {
+    #         "chunk_count": len(all_chunk_nodes) if all_chunk_nodes else 0,
+    #         "statements_count": len(all_statement_nodes) if all_statement_nodes else 0,
+    #         "triplet_entities_count": len(all_entity_nodes) if all_entity_nodes else 0,
+    #         "triplet_relations_count": len(all_entity_entity_edges) if all_entity_entity_edges else 0,
+    #         "temporal_count": 0,
+    #     }
+    #     await ActivityStatsCache.set_activity_stats(
+    #         workspace_id=str(memory_config.workspace_id),
+    #         stats=stats_to_cache,
+    #     )
+    #     logger.info(f"[WRITE] 活动统计已写入 Redis: workspace_id={memory_config.workspace_id}")
+    # except Exception as cache_err:
+    #     logger.warning(f"[WRITE] 写入活动统计缓存失败（不影响主流程）: {cache_err}", exc_info=True)
 
-    logger.info("=== Pipeline Complete ===")
-    logger.info(f"Total execution time: {total_time:.2f} seconds")
+    # logger.info("=== Pipeline Complete ===")
+    # logger.info(f"Total execution time: {total_time:.2f} seconds")
