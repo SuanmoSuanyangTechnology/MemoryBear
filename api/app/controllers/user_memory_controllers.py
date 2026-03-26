@@ -23,6 +23,7 @@ from app.services.memory_entity_relationship_service import MemoryEntityService,
 from app.schemas.response_schema import ApiResponse
 from app.schemas.memory_storage_schema import GenerateCacheRequest
 from app.repositories.workspace_repository import WorkspaceRepository
+from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.end_user_info_schema import (
     EndUserInfoResponse,
     EndUserInfoCreate,
@@ -361,6 +362,17 @@ async def get_end_user_info(
         f"workspace={workspace_id}"
     )
 
+    # 校验 end_user 是否属于当前工作空间
+    end_user_repo = EndUserRepository(db)
+    end_user = end_user_repo.get_end_user_by_id(end_user_id)
+    if end_user is None:
+        return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", "end_user not found")
+    if str(end_user.workspace_id) != str(workspace_id):
+        api_logger.warning(
+            f"用户 {current_user.username} 尝试查询不属于工作空间 {workspace_id} 的终端用户 {end_user_id}"
+        )
+        return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "end_user workspace mismatch")
+
     result = user_memory_service.get_end_user_info(db, end_user_id)
 
     if result["success"]:
@@ -408,6 +420,17 @@ async def update_end_user_info(
         f"更新终端用户信息请求: end_user_id={end_user_id}, user={current_user.username}, "
         f"workspace={workspace_id}"
     )
+
+    # 校验 end_user 是否属于当前工作空间
+    end_user_repo = EndUserRepository(db)
+    end_user = end_user_repo.get_end_user_by_id(end_user_id)
+    if end_user is None:
+        return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", "end_user not found")
+    if str(end_user.workspace_id) != str(workspace_id):
+        api_logger.warning(
+            f"用户 {current_user.username} 尝试更新不属于工作空间 {workspace_id} 的终端用户 {end_user_id}"
+        )
+        return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "end_user workspace mismatch")
 
     # 获取更新数据（排除 end_user_id）
     update_data = info_update.model_dump(exclude_unset=True, exclude={'end_user_id'})

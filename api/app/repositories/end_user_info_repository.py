@@ -35,9 +35,10 @@ class EndUserInfoRepository:
         """根据ID获取用户信息"""
         return self.db.query(EndUserInfo).filter(EndUserInfo.id == info_id).first()
     
-    def get_by_end_user_id(self, end_user_id: uuid.UUID) -> List[EndUserInfo]:
-        """获取用户的所有信息记录"""
-        return self.db.query(EndUserInfo).filter(EndUserInfo.end_user_id == end_user_id).all()
+
+    def get_by_end_user_id(self, end_user_id: uuid.UUID) -> Optional[EndUserInfo]:
+        """获取用户的信息记录"""
+        return self.db.query(EndUserInfo).filter(EndUserInfo.end_user_id == end_user_id).first()
     
     def update(self, info_id: uuid.UUID, aliases: List[str] = None, meta_data: dict = None) -> Optional[EndUserInfo]:
         """更新用户信息"""

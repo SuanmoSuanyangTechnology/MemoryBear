@@ -1389,9 +1389,8 @@ class ExtractionOrchestrator:
                     logger.debug(f"end_user 表 other_name 保持不变: {end_user.other_name}")
 
                 # 更新或创建 end_user_info 记录
-                existing_infos = EndUserInfoRepository(db).get_by_end_user_id(end_user_uuid)
-                if existing_infos:
-                    info = existing_infos[0]
+                info = EndUserInfoRepository(db).get_by_end_user_id(end_user_uuid)
+                if info:
                     new_name_info = self._resolve_other_name(info.other_name, current_aliases, neo4j_aliases)
                     if new_name_info is not None:
                         info.other_name = new_name_info

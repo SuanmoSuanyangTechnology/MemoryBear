@@ -387,18 +387,15 @@ class UserMemoryService:
             
             # 转换为UUID并查询
             user_uuid = uuid.UUID(end_user_id)
-            end_user_info_records = EndUserInfoRepository(db).get_by_end_user_id(user_uuid)
+            end_user_info_record = EndUserInfoRepository(db).get_by_end_user_id(user_uuid)
             
-            if not end_user_info_records:
+            if not end_user_info_record:
                 logger.warning(f"终端用户信息记录不存在: end_user_id={end_user_id}")
                 return {
                     "success": False,
                     "data": None,
                     "error": "终端用户信息记录不存在"
                 }
-            
-            # 获取第一条记录
-            end_user_info_record = end_user_info_records[0]
             
             # 构建响应数据（转换时间为毫秒时间戳）
             response_data = {
@@ -462,18 +459,15 @@ class UserMemoryService:
             
             # 转换为UUID并查询
             user_uuid = uuid.UUID(end_user_id)
-            end_user_info_records = EndUserInfoRepository(db).get_by_end_user_id(user_uuid)
+            end_user_info_record = EndUserInfoRepository(db).get_by_end_user_id(user_uuid)
             
-            if not end_user_info_records:
+            if not end_user_info_record:
                 logger.warning(f"终端用户信息记录不存在: end_user_id={end_user_id}")
                 return {
                     "success": False,
                     "data": None,
                     "error": "终端用户信息记录不存在"
                 }
-            
-            # 获取第一条记录
-            end_user_info_record = end_user_info_records[0]
             
             # 定义允许更新的字段白名单
             allowed_fields = {'other_name', 'aliases', 'meta_data'}
