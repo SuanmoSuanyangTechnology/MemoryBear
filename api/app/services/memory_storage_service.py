@@ -241,12 +241,8 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 except (ValueError, TypeError):
                     config_id_old = None
 
-            if config_id_old:
-                memory_config = config_id_old
-            else:
-                memory_config = config.config_id
             config_dict = {
-                "config_id": memory_config,
+                "config_id": str(config.config_id),
                 "config_name": config.config_name,
                 "config_desc": config.config_desc,
                 "workspace_id": str(config.workspace_id) if config.workspace_id else None,
