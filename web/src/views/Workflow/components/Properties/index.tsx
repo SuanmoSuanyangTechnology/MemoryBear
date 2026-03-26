@@ -636,6 +636,8 @@ const Properties: FC<PropertiesProps> = ({
                               size="small"
                               parentName={key}
                               options={getFilteredVariableList(selectedNode?.data?.type, key)}
+                              selectedNode={selectedNode}
+                              graphRef={graphRef}
                             />
                           </Form.Item>
                         )
