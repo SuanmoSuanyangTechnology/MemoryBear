@@ -24,6 +24,10 @@ class Tenants(Base):
     default_language = Column(String(10), nullable=False, default='zh', server_default='zh', index=True)  # 租户默认语言
     supported_languages = Column(ARRAY(String(10)), nullable=False, default=lambda: ['zh', 'en'], server_default=text("'{zh,en}'"))  # 租户支持的语言列表
     
+    # 租户功能开关字段
+    feature_billing = Column(Boolean, default=False, nullable=False, server_default='false', comment="是否启用收费管理菜单")
+    feature_user_management = Column(Boolean, default=False, nullable=False, server_default='false', comment="是否启用用户管理菜单")
+    
     # Relationship to users - one tenant has many users
     users = relationship("User", back_populates="tenant")
     
