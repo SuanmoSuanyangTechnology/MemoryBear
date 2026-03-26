@@ -2,15 +2,15 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-23 18:24:33
+ * @Last Modified time: 2026-03-26 13:32:29
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
 import Markdown from '@/components/Markdown'
 import type { ChatContentProps } from './types'
-import { Spin, Divider, Space, Image, Flex } from 'antd'
+import { Spin, Divider, Space, Image, Flex, Button } from 'antd'
 import { SoundOutlined } from '@ant-design/icons'
-
+import { t } from 'i18next'
 
 const getFileUrl = (file: any) => {
   return file.thumbUrl || file.url || (file.originFileObj ? URL.createObjectURL(file.originFileObj) : undefined)
@@ -29,7 +29,8 @@ const ChatContent: FC<ChatContentProps> = ({
   labelPosition = 'bottom',
   labelFormat,
   errorDesc,
-  renderRuntime
+  renderRuntime,
+  onSend
 }) => {
   // Scroll container reference for controlling auto-scroll to bottom
   const scrollContainerRef = useRef<(HTMLDivElement | null)>(null)
@@ -178,6 +179,25 @@ const ChatContent: FC<ChatContentProps> = ({
                   {/* Render message content using Markdown component */}
                   <Markdown content={renderRuntime ? item.content ?? '' : item.content ?? errorDesc ?? ''} />
 
+                  {item.meta_data?.suggested_questions && item.meta_data?.suggested_questions?.length > 0 && <Flex wrap className="rb:my-1!">
+                    {item.meta_data?.suggested_questions?.map((question, idx) => (
+                      <Button key={idx} size="small" className="rb:text-[12px]! rb:text-[#155EEF]!"
+                        onClick={() => onSend?.(question)}
+                      >{question}</Button>
+                    ))}
+                  </Flex>}
+                  {item.meta_data?.citations && item.meta_data?.citations.length > 0 && <div className="rb:mt-2 rb:pt-2 rb:border-t rb:border-[#E3EBFD]">
+                    <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-medium">{t('memoryConversation.citations')}</div>
+                    {item.meta_data?.citations?.map((citation, idx) => (
+                      <Button
+                        type="link"
+                        key={idx}
+                        size="small"
+                        className="rb:text-[12px]!"
+                        onClick={() => window.open(`/knowledge/${citation.knowledge_id}/document/${citation.document_id}`, '_blank')}
+                      >{citation.file_name}</Button>
+                    ))}
+                  </div>}
                   {item.meta_data?.audio_url && <>
                     <Divider className="rb:my-3!" />
                     <Space size={12} className="rb:pb-2 rb:pl-1">

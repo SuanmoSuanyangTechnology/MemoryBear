@@ -787,6 +787,14 @@ export const zh = {
       unix: '个',
       text_to_speech: '文字转语音',
       text_to_speech_desc: '文本可以转换成语音',
+      opening_statement: '对话开场白',
+      opening_statement_desc: '设置对话开场白内容',
+      editOpeningStatement: '编辑开场白',
+      suggested_questions: '开场问题',
+      add_questions: '添加选项',
+      citation: '引用和归属',
+      citation_desc: '显示源文档和生成内容的归属部分',
+      invalidVariablesTitle: "对话开场白中引用了以下未定义的变量，是否保存开场白配置？",
 
       apps: '我的应用',
       sharing: '共享',
@@ -1815,6 +1823,7 @@ export const zh = {
       memoryTipTitle: '确定打开对话记忆功能吗？打开后对话将会保存到记忆库中',
       stopAudioRecorder: '停止录音',
       startAudioRecorder: '开始录音',
+      citations: '引用',
     },
     login: {
       title: '红熊记忆科学',

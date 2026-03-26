@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 10:19:34
+ * @Last Modified time: 2026-03-26 13:35:42
  */
 /**
  * Conversation Page
@@ -142,6 +142,8 @@ const Conversation: FC = () => {
   }
 
   useEffect(() => {
+    audioPollingRef.current.forEach((timer) => clearInterval(timer))
+    audioPollingRef.current.clear()
     if (conversation_id) {
       getConversationDetail(token as string, conversation_id)
         .then(res => {
@@ -149,9 +151,20 @@ const Conversation: FC = () => {
           setChatList(response?.messages || [])
         })
     } else {
-      setChatList([])
+      if (features?.opening_statement?.statement) {
+        setChatList([{
+          role: 'assistant',
+          content: features.opening_statement.statement,
+          created_at: Date.now(),
+          meta_data: {
+            suggested_questions: features.opening_statement?.suggested_questions
+          }
+        }])
+      } else {
+        setChatList([])
+      }
     }
-  }, [conversation_id])
+  }, [conversation_id, features?.opening_statement?.statement])
 
   const addUserMessage = (message: string = '', files?: any[]) => {
     setChatList(prev => [...prev, {
@@ -173,8 +186,8 @@ const Conversation: FC = () => {
     }])
   }
 
-  const updateAssistantMessage = (content: string = '', audio_url?: string, audio_status?: string) => {
-    if (!content && !audio_url) return
+  const updateAssistantMessage = (content: string = '', audio_url?: string, audio_status?: string, citations?: any[]) => {
+    if (!content && !audio_url && (!citations || citations?.length < 1)) return
     if (streamLoading) setStreamLoading(false)
     setChatList(prev => {
       const lastList = [...prev]
@@ -186,7 +199,11 @@ const Conversation: FC = () => {
           {
             ...lastMsg,
             content: lastMsg.content + content,
-            meta_data: { audio_url, audio_status }
+            meta_data: {
+              audio_url: audio_url || lastMsg.meta_data?.audio_url,
+              audio_status: audio_status || lastMsg.meta_data?.audio_status,
+              citations: citations || lastMsg.meta_data?.citations
+            }
           }
         ]
       }
@@ -210,7 +227,7 @@ const Conversation: FC = () => {
   }, [audioStatusMap, chatList.length])
 
   /** Send message and handle streaming response */
-  const handleSend = () => {
+  const handleSend = (msg?: string) => {
     if (!token || !shareToken) return
     const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
     const variables = toolbarRef.current?.getVariables() || []
@@ -234,7 +251,7 @@ const Conversation: FC = () => {
 
     setLoading(true)
     setStreamLoading(true)
-    addUserMessage(message, files)
+    addUserMessage(msg || message, files)
     addAssistantMessage()
     toolbarRef.current?.setFiles([])
     setFileList([])
@@ -242,7 +259,15 @@ const Conversation: FC = () => {
     let currentConversationId: string | null = null
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach((item) => {
-        const { content, conversation_id: curId, audio_url } = item.data as { content: string; conversation_id: string; audio_url?: string; }
+        const { content, conversation_id: curId, audio_url, citations } = item.data as {
+          content: string; conversation_id: string; audio_url?: string;
+          citations?: {
+            document_id: string;
+            file_name: string;
+            knowledge_id: string;
+            score: string;
+          }[]
+        }
         switch (item.event) {
           case 'start':
           case 'node_start':
@@ -256,7 +281,7 @@ const Conversation: FC = () => {
           case 'end':
           case 'workflow_end':
             if (audio_url) {
-              updateAssistantMessage(content, audio_url, 'pending')
+              updateAssistantMessage(content, audio_url, 'pending', citations)
               const { file_id } = item.data as { file_id?: string }
               const idToPoll = file_id || audio_url || ''
               const fileId = audio_url.split('/').pop()
@@ -273,21 +298,33 @@ const Conversation: FC = () => {
                         }))
                         clearInterval(audioPollingRef.current.get(idToPoll))
                         audioPollingRef.current.delete(idToPoll)
+                        getHistory(true)
+                        if (currentConversationId && currentConversationId !== conversation_id) {
+                          setConversationId(currentConversationId)
+                        }
                       }
                     })
                     .catch(() => {
                       clearInterval(audioPollingRef.current.get(idToPoll))
                       audioPollingRef.current.delete(idToPoll)
+                      getHistory(true)
+                      if (currentConversationId && currentConversationId !== conversation_id) {
+                        setConversationId(currentConversationId)
+                      }
                     })
                 }, 2000)
                 audioPollingRef.current.set(idToPoll, timer)
               }
+            } else {
+              getHistory(true)
+              if (currentConversationId && currentConversationId !== conversation_id) {
+                setConversationId(currentConversationId)
+              }
+            }
+            if (citations && citations.length > 0) {
+              updateAssistantMessage(content, audio_url, undefined, citations)
             }
             setLoading(false)
-            if (currentConversationId && currentConversationId !== conversation_id) {
-              setConversationId(currentConversationId)
-            }
-            getHistory(true)
             break
         }
       })
@@ -296,7 +333,7 @@ const Conversation: FC = () => {
     sendConversation({
       web_search: webSearch,
       memory,
-      message: message || '',
+      message: msg || message || '',
       stream: true,
       conversation_id: conversation_id || null,
       files: files.map(file => {
@@ -337,6 +374,8 @@ const Conversation: FC = () => {
       }
     })
   }
+
+  console.log('chatList', chatList)
 
   return (
     <Flex className="rb:w-full rb:p-[-16px]!">

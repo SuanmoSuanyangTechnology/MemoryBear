@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 16:32:26
+ * @Last Modified time: 2026-03-26 12:13:33
  */
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { useTranslation } from 'react-i18next'
@@ -335,8 +335,24 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
    * Save chat variable configuration
    * @param values - Variable values
    */
-  const handleSaveChatVariable = (values: Variable[]) => {
-    setChatVariables(values)
+  const handleSaveChatVariable = (variables: Variable[]) => {
+    setChatVariables(variables)
+    const opening_statement = form.getFieldValue(['features', 'opening_statement'])
+
+    if (opening_statement?.statement && opening_statement?.statement.trim() !== '') {
+      const statement = opening_statement.statement as string
+      const replacedContent = statement.replace(/\{\{([^}]+)\}\}/g, (match, name) => {
+        const v = variables.find(item => item.name === name)
+        return v?.value != null && v.value !== '' ? String(v.value) : match
+      })
+      setChatList(prev => prev.map(item => {
+        const list = [...(item.list || [])]
+        if (list.length > 0 && list[0].role === 'assistant') {
+          list[0] = { ...list[0], content: replacedContent }
+        }
+        return { ...item, list }
+      }))
+    }
   }
   useEffect(() => {
     setChatVariables(values?.variables || [])
@@ -344,11 +360,36 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
 
   const handleSaveFeaturesConfig = (value: FeaturesConfigForm) => {
     form.setFieldValue('features', value)
+
+    if (value?.opening_statement?.statement && value?.opening_statement?.statement.trim() !== '') {
+      setChatList(prev => (prev.map(item => {
+        const firstMsg = item.list?.[0]
+
+        if (firstMsg?.role === 'assistant') {
+          firstMsg.meta_data = {
+            suggested_questions: value.opening_statement?.suggested_questions || []
+          }
+          return item
+        } else {
+          return {
+            ...item,
+            list: [{
+              role: 'assistant',
+              content: value.opening_statement?.statement,
+              meta_data: {
+                suggested_questions: value.opening_statement?.suggested_questions || []
+              }
+            }, ...(item.list || [])]
+          }
+        }
+      })))
+    }
   }
   const modelLogo = useMemo(() => {
     return defaultModel?.name && getListLogoUrl(defaultModel.provider, defaultModel.logo as string)
   }, [defaultModel])
-  console.log('values', values, defaultModel)
+  
+  console.log('agent values', values)
   return (
     <>
       {loading && <Spin fullscreen></Spin>}
@@ -365,7 +406,12 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
                   {defaultModel?.name || t('application.chooseModel')}
                 </Button>
                 <Space size={12}>
-                  <FeaturesConfig value={values?.features as FeaturesConfigForm} capability={values?.capability || []} refresh={handleSaveFeaturesConfig} />
+                  <FeaturesConfig
+                    value={values?.features as FeaturesConfigForm}
+                    capability={values?.capability || []}
+                    refresh={handleSaveFeaturesConfig}
+                    chatVariables={chatVariables}
+                  />
                   <Button type="primary" onClick={() => handleSave()}>
                     {t('common.save')}
                   </Button>
@@ -393,19 +439,19 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
                   <span className="rb:font-regular rb:text-[#5B6167]"> ({t('application.configurationDesc')})</span>
                 </div>
 
-                  <Form.Item name="system_prompt" className="rb:mb-0!">
-                    <Input.TextArea
-                      placeholder={t('application.promptPlaceholder')}
-                      styles={{
-                        textarea: {
-                          minHeight: '200px',
-                          borderRadius: '8px',
-                          padding: '12px'
-                        },
-                      }}
-                    />
-                  </Form.Item>
-                </Card>
+                <Form.Item name="system_prompt" className="rb:mb-0!">
+                  <Input.TextArea
+                    placeholder={t('application.promptPlaceholder')}
+                    styles={{
+                      textarea: {
+                        minHeight: '200px',
+                        borderRadius: '8px',
+                        padding: '12px'
+                      },
+                    }}
+                  />
+                </Form.Item>
+              </Card>
 
                 <Form.Item name="knowledge_retrieval" noStyle>
                   <Knowledge />

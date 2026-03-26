@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 10:12:09
+ * @Last Modified time: 2026-03-26 13:41:44
  */
 /**
  * Chat debugging component for application testing
@@ -77,7 +77,18 @@ const Chat: FC<ChatProps> = ({
   useEffect(() => {
     setCompareLoading(false)
     setLoading(false)
+    return () => {
+      audioPollingRef.current.forEach(timer => clearInterval(timer))
+      audioPollingRef.current.clear()
+    }
   }, [chatList.map(item => item.label).join(',')])
+
+  useEffect(() => {
+    return () => {
+      audioPollingRef.current.forEach(timer => clearInterval(timer))
+      audioPollingRef.current.clear()
+    }
+  }, [])
 
   useEffect(() => {
     if (data?.features) setFeatures(data.features)
@@ -130,8 +141,8 @@ const Chat: FC<ChatProps> = ({
     }
   }
   /** Update assistant message with streaming content */
-  const updateAssistantMessage = (content?: string, model_config_id?: string, conversation_id?: string, audio_url?: string) => {
-    if ((!content && !audio_url) || !model_config_id) return
+  const updateAssistantMessage = (content?: string, model_config_id?: string, conversation_id?: string, audio_url?: string, citations?: any[]) => {
+    if ((!content && !audio_url && (!citations || citations?.length < 1)) || !model_config_id) return
     updateChatList(prev => {
       const targetIndex = prev.findIndex(item => item.model_config_id === model_config_id);
       if (targetIndex !== -1) {
@@ -148,7 +159,10 @@ const Chat: FC<ChatProps> = ({
               {
                 ...lastMsg,
                 content: lastMsg.content + (content || ''),
-                ...(audio_url !== undefined ? { meta_data: { audio_url, audio_status: 'pending' } } : {})
+                meta_data: {
+                  ...(audio_url !== undefined ? { audio_url, audio_status: 'pending' } : {}),
+                  citations: citations || lastMsg.meta_data?.citations
+                }
               }
             ]
           }
@@ -249,7 +263,15 @@ const Chat: FC<ChatProps> = ({
           setCompareLoading(false)
 
           data.map(item => {
-            const { model_config_id, conversation_id, content, message_length, audio_url } = item.data as { model_config_id: string; conversation_id: string; content: string; message_length: number; audio_url: string };
+            const { model_config_id, conversation_id, content, message_length, audio_url, citations } = item.data as {
+              model_config_id: string; conversation_id: string; content: string; message_length: number; audio_url: string;
+              citations?: {
+                document_id: string;
+                file_name: string;
+                knowledge_id: string;
+                score: string;
+              }[]
+            };
             
             switch (item.event) {
               case 'model_message':
@@ -264,7 +286,7 @@ const Chat: FC<ChatProps> = ({
                   }))
                 }
                 if (audio_url) {
-                  updateAssistantMessage(content, model_config_id, conversation_id, audio_url)
+                  updateAssistantMessage(content, model_config_id, conversation_id, audio_url, citations)
                   const fileId = audio_url.split('/').pop()
                   if (fileId && idToPoll && !audioPollingRef.current.has(idToPoll)) {
                     const timer = setInterval(() => {
@@ -288,6 +310,10 @@ const Chat: FC<ChatProps> = ({
                     }, 2000)
                     audioPollingRef.current.set(idToPoll, timer)
                   }
+                }
+
+                if (citations && citations.length > 0) {
+                  updateAssistantMessage(content, model_config_id, conversation_id, audio_url, citations)
                 }
                 updateErrorAssistantMessage(message_length, model_config_id)
                 break;
@@ -481,6 +507,8 @@ const Chat: FC<ChatProps> = ({
   const handleDelete = (index: number) => {
     updateChatList(chatList.filter((_, voIndex) => voIndex !== index))
   }
+
+  console.log('chatList', chatList)
   const isHasLabel = useMemo(() => chatList.some(item => item.label), [chatList])
   const isNeedVariableConfig = useMemo(() => chatVariables?.some(vo => vo.required && !vo.value), [chatVariables])
   return (
@@ -539,6 +567,7 @@ const Chat: FC<ChatProps> = ({
                       "rb:h-[calc(100vh-292px)]": !isHasLabel,
                     })}
                   />}
+                  onSend={isCluster ? handleClusterSend : handleSend}
                   data={chat.list || []}
                   streamLoading={compareLoading}
                   labelPosition="top"
