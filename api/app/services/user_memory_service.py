@@ -361,83 +361,58 @@ class UserMemoryService:
                 if hasattr(original_value, 'timestamp'):
                     data[key] = UserMemoryService._datetime_to_timestamp(original_value)
         return data
-    
-    def update_end_user_profile(
+ # ======================== 用户别名及信息 ========================    
+    def get_end_user_info(
         self,
         db: Session,
-        end_user_id: str,
-        profile_update: Any
+        end_user_id: str
     ) -> Dict[str, Any]:
         """
-        更新终端用户的基本信息
+        查询单个终端用户信息记录
         
         Args:
             db: 数据库会话
             end_user_id: 终端用户ID (UUID)
-            profile_update: 包含更新字段的 Pydantic 模型
             
         Returns:
             {
                 "success": bool,
-                "data": dict,  # 更新后的用户档案数据
+                "data": dict,
                 "error": Optional[str]
             }
         """
         try:
-            # 转换为UUID并查询用户
-            user_uuid = uuid.UUID(end_user_id)
-            repo = EndUserRepository(db)
-            end_user = repo.get_by_id(user_uuid)
+            from app.repositories.end_user_info_repository import EndUserInfoRepository
+            from app.core.api_key_utils import datetime_to_timestamp
             
-            if not end_user:
-                logger.warning(f"终端用户不存在: end_user_id={end_user_id}")
+            # 转换为UUID并查询
+            user_uuid = uuid.UUID(end_user_id)
+            end_user_info_record = EndUserInfoRepository(db).get_by_end_user_id(user_uuid)
+            
+            if not end_user_info_record:
+                logger.warning(f"终端用户信息记录不存在: end_user_id={end_user_id}")
                 return {
                     "success": False,
                     "data": None,
-                    "error": "终端用户不存在"
+                    "error": "终端用户信息记录不存在"
                 }
             
-            # 获取更新数据（排除 end_user_id 字段）
-            update_data = profile_update.model_dump(exclude_unset=True, exclude={'end_user_id'})
+            # 构建响应数据（转换时间为毫秒时间戳）
+            response_data = {
+                "end_user_info_id": str(end_user_info_record.id),
+                "end_user_id": str(end_user_info_record.end_user_id),
+                "other_name": end_user_info_record.other_name,
+                "aliases": end_user_info_record.aliases,
+                "meta_data": end_user_info_record.meta_data,
+                "created_at": datetime_to_timestamp(end_user_info_record.created_at),
+                "updated_at": datetime_to_timestamp(end_user_info_record.updated_at)
+            }
             
-            # 特殊处理 hire_date：如果提供了时间戳，转换为 DateTime
-            if 'hire_date' in update_data:
-                hire_date_timestamp = update_data['hire_date']
-                if hire_date_timestamp is not None:
-                    from app.core.api_key_utils import timestamp_to_datetime
-                    update_data['hire_date'] = timestamp_to_datetime(hire_date_timestamp)
-                # 如果是 None，保持 None（允许清空）
-            
-            # 更新字段
-            for field, value in update_data.items():
-                setattr(end_user, field, value)
-            
-            # 更新时间戳
-            end_user.updated_at = datetime.now()
-            end_user.updatetime_profile = datetime.now()
-            
-            # 提交更改
-            db.commit()
-            db.refresh(end_user)
-            
-            # 构建响应数据
-            from app.schemas.end_user_schema import EndUserProfileResponse
-            profile_data = EndUserProfileResponse(
-                id=end_user.id,
-                other_name=end_user.other_name,
-                position=end_user.position,
-                department=end_user.department,
-                contact=end_user.contact,
-                phone=end_user.phone,
-                hire_date=end_user.hire_date,
-                updatetime_profile=end_user.updatetime_profile
-            )
-            
-            logger.info(f"成功更新用户信息: end_user_id={end_user_id}, updated_fields={list(update_data.keys())}")
+            logger.info(f"成功查询终端用户信息记录: end_user_id={end_user_id}")
             
             return {
                 "success": True,
-                "data": self.convert_profile_to_dict_with_timestamp(profile_data),
+                "data": response_data,
                 "error": None
             }
             
@@ -446,16 +421,165 @@ class UserMemoryService:
             return {
                 "success": False,
                 "data": None,
-                "error": "无效的用户ID格式"
+                "error": "无效的终端用户ID格式"
             }
         except Exception as e:
-            db.rollback()
-            logger.error(f"用户信息更新失败: end_user_id={end_user_id}, error={str(e)}")
+            logger.error(f"查询终端用户信息记录失败: end_user_id={end_user_id}, error={str(e)}")
             return {
                 "success": False,
                 "data": None,
                 "error": str(e)
             }
+    
+    def update_end_user_info(
+        self,
+        db: Session,
+        end_user_id: str,
+        update_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        更新终端用户信息记录
+        
+        Args:
+            db: 数据库会话
+            end_user_id: 终端用户ID (UUID)
+            update_data: 更新数据字典
+            
+        Returns:
+            {
+                "success": bool,
+                "data": dict,
+                "error": Optional[str]
+            }
+        """
+        try:
+            from app.repositories.end_user_info_repository import EndUserInfoRepository
+            from app.repositories.end_user_repository import EndUserRepository
+            from app.core.api_key_utils import datetime_to_timestamp
+            
+            # 转换为UUID并查询
+            user_uuid = uuid.UUID(end_user_id)
+            end_user_info_record = EndUserInfoRepository(db).get_by_end_user_id(user_uuid)
+            
+            if not end_user_info_record:
+                logger.warning(f"终端用户信息记录不存在: end_user_id={end_user_id}")
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": "终端用户信息记录不存在"
+                }
+            
+            # 定义允许更新的字段白名单
+            allowed_fields = {'other_name', 'aliases', 'meta_data'}
+            
+            # 检查是否更新了 aliases 字段
+            aliases_updated = 'aliases' in update_data and update_data['aliases'] != end_user_info_record.aliases
+            
+            # 检查是否更新了 other_name 字段
+            other_name_updated = 'other_name' in update_data and update_data['other_name'] != end_user_info_record.other_name
+            
+            # 更新字段（仅允许白名单中的字段）
+            for field, value in update_data.items():
+                if field in allowed_fields:
+                    setattr(end_user_info_record, field, value)
+            
+            # 更新时间戳
+            end_user_info_record.updated_at = datetime.now()
+            
+            # 如果 other_name 被更新，同步更新 end_user 表
+            if other_name_updated:
+                end_user_record = EndUserRepository(db).get_by_id(user_uuid)
+                if end_user_record:
+                    end_user_record.other_name = update_data['other_name']
+                    end_user_record.updated_at = datetime.now()
+                    logger.info(f"同步更新 end_user 表的 other_name: end_user_id={end_user_id}, other_name={update_data['other_name']}")
+                else:
+                    logger.warning(f"未找到对应的 end_user 记录: end_user_id={end_user_id}")
+            
+            # 提交更改
+            db.commit()
+            db.refresh(end_user_info_record)
+            
+            # 如果 aliases 被更新，同步到 Neo4j
+            if aliases_updated:
+                try:
+                    import asyncio
+                    asyncio.run(self._sync_aliases_to_neo4j(end_user_id, update_data['aliases']))
+                    logger.info(f"已触发 aliases 同步到 Neo4j: end_user_id={end_user_id}, aliases={update_data['aliases']}")
+                except Exception as sync_error:
+                    logger.error(f"触发同步 aliases 到 Neo4j 失败: {sync_error}", exc_info=True)
+                    # 不影响主流程，只记录错误
+            
+            # 构建响应数据（转换时间为毫秒时间戳）
+            response_data = {
+                "end_user_info_id": str(end_user_info_record.id),
+                "end_user_id": str(end_user_info_record.end_user_id),
+                "other_name": end_user_info_record.other_name,
+                "aliases": end_user_info_record.aliases,
+                "meta_data": end_user_info_record.meta_data,
+                "created_at": datetime_to_timestamp(end_user_info_record.created_at),
+                "updated_at": datetime_to_timestamp(end_user_info_record.updated_at)
+            }
+            
+            logger.info(f"成功更新终端用户信息记录: end_user_id={end_user_id}, updated_fields={list(update_data.keys())}")
+            
+            return {
+                "success": True,
+                "data": response_data,
+                "error": None
+            }
+            
+        except ValueError:
+            logger.error(f"无效的 end_user_id 格式: {end_user_id}")
+            return {
+                "success": False,
+                "data": None,
+                "error": "无效的终端用户ID格式"
+            }
+        except Exception as e:
+            db.rollback()
+            logger.error(f"更新终端用户信息记录失败: end_user_id={end_user_id}, error={str(e)}")
+            return {
+                "success": False,
+                "data": None,
+                "error": str(e)
+            }
+    
+    async def _sync_aliases_to_neo4j(self, end_user_id: str, aliases: List[str]) -> None:
+        """
+        将 aliases 同步到 Neo4j 中的用户实体
+        
+        Args:
+            end_user_id: 终端用户ID
+            aliases: 别名列表
+        """
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+        
+        # Cypher 查询：更新用户实体的 aliases
+        cypher_query = """
+        MATCH (e:ExtractedEntity)
+        WHERE e.end_user_id = $end_user_id 
+          AND e.name IN ['用户', '我', 'User', 'I']
+        SET e.aliases = $aliases
+        RETURN e.id AS entity_id, e.name AS entity_name, e.aliases AS updated_aliases
+        """
+        
+        connector = Neo4jConnector()
+        try:
+            result = await connector.execute_query(
+                cypher_query,
+                end_user_id=end_user_id,
+                aliases=aliases
+            )
+            
+            if result:
+                logger.info(f"成功同步 aliases 到 Neo4j: end_user_id={end_user_id}, 更新了 {len(result)} 个实体节点")
+            else:
+                logger.warning(f"未找到需要更新的用户实体节点: end_user_id={end_user_id}")
+                
+        except Exception as e:
+            logger.error(f"同步 aliases 到 Neo4j 失败: {e}", exc_info=True)
+            raise
     
     async def get_cached_memory_insight(
         self, 

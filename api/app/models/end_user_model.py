@@ -30,14 +30,6 @@ class EndUser(Base):
         comment="关联的记忆配置ID"
     )
     
-    # 用户基本信息字段
-    position = Column(String, nullable=True, comment="职位")
-    department = Column(String, nullable=True, comment="部门")
-    contact = Column(String, nullable=True, comment="联系方式")
-    phone = Column(String, nullable=True, comment="电话")
-    hire_date = Column(DateTime, nullable=True, comment="入职日期")
-    updatetime_profile = Column(DateTime, nullable=True, comment="核心档案信息最后更新时间")
-    
     # 用户摘要四个维度 - User Summary Four Dimensions
     user_summary = Column(Text, nullable=True, comment="缓存的用户摘要（基本介绍）")
     personality_traits = Column(Text, nullable=True, comment="性格特点")
@@ -66,3 +58,6 @@ class EndUser(Base):
 
     # 与 WorkSpace 的反向关系
     workspace = relationship("Workspace", back_populates="end_users")
+    
+    # 与 EndUserInfo 的反向关系
+    info = relationship("EndUserInfo", back_populates="end_user", cascade="all, delete-orphan")

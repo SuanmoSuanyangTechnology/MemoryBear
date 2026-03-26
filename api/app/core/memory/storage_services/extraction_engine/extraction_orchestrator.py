@@ -19,6 +19,7 @@
 import asyncio
 import logging
 import os
+import uuid
 from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
@@ -62,6 +63,10 @@ from app.core.memory.storage_services.extraction_engine.pipeline_help import (
     export_test_input_doc,
 )
 from app.core.memory.utils.data.ontology import TemporalInfo
+from app.db import get_db_context
+from app.models.end_user_info_model import EndUserInfo
+from app.repositories.end_user_info_repository import EndUserInfoRepository
+from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 # 配置日志
@@ -1323,6 +1328,151 @@ class ExtractionOrchestrator:
             entity_entity_edges,
             perceptual_edges
         )
+
+    async def _update_end_user_other_name(
+            self,
+            entity_nodes: List[ExtractedEntityNode],
+            dialog_data_list: List[DialogData]
+    ) -> None:
+        """
+        从 Neo4j 读取用户实体的最终 aliases，同步到 end_user 和 end_user_info 表
+
+        注意：
+        1. other_name 使用本次对话提取的第一个别名（保持时间顺序）
+        2. aliases 从 Neo4j 读取（保持完整性）
+
+        Args:
+            entity_nodes: 实体节点列表
+            dialog_data_list: 对话数据列表
+        """
+        try:
+            if not dialog_data_list:
+                logger.warning("dialog_data_list 为空，跳过用户别名同步")
+                return
+
+            end_user_id = dialog_data_list[0].end_user_id
+            if not end_user_id:
+                logger.warning("end_user_id 为空，跳过用户别名同步")
+                return
+
+            # 1. 提取本次对话的用户别名（保持 LLM 提取的原始顺序，不排序）
+            current_aliases = self._extract_current_aliases(entity_nodes)
+
+            # 2. 从 Neo4j 获取完整 aliases（权威数据源）
+            neo4j_aliases = await self._fetch_neo4j_user_aliases(end_user_id)
+
+            if not neo4j_aliases:
+                # Neo4j 中没有别名，使用本次对话提取的别名
+                neo4j_aliases = current_aliases
+                if not neo4j_aliases:
+                    logger.debug(f"aliases 为空，跳过同步: end_user_id={end_user_id}")
+                    return
+
+            logger.info(f"本次对话提取的 aliases: {current_aliases}")
+            logger.info(f"Neo4j 中的完整 aliases: {neo4j_aliases}")
+
+            # 3. 同步到数据库
+            end_user_uuid = uuid.UUID(end_user_id)
+            with get_db_context() as db:
+                # 更新 end_user 表
+                end_user = EndUserRepository(db).get_by_id(end_user_uuid)
+                if not end_user:
+                    logger.warning(f"未找到 end_user_id={end_user_id} 的用户记录")
+                    return
+
+                new_name = self._resolve_other_name(end_user.other_name, current_aliases, neo4j_aliases)
+                if new_name is not None:
+                    end_user.other_name = new_name
+                    logger.info(f"更新 end_user 表 other_name → {new_name}")
+                else:
+                    logger.debug(f"end_user 表 other_name 保持不变: {end_user.other_name}")
+
+                # 更新或创建 end_user_info 记录
+                info = EndUserInfoRepository(db).get_by_end_user_id(end_user_uuid)
+                if info:
+                    new_name_info = self._resolve_other_name(info.other_name, current_aliases, neo4j_aliases)
+                    if new_name_info is not None:
+                        info.other_name = new_name_info
+                        logger.info(f"更新 end_user_info 表 other_name → {new_name_info}")
+                    if info.aliases != neo4j_aliases:
+                        info.aliases = neo4j_aliases
+                        logger.info(f"同步 Neo4j aliases 到 end_user_info: {neo4j_aliases}")
+                else:
+                    first_alias = current_aliases[0].strip() if current_aliases else ""
+                    if first_alias:
+                        db.add(EndUserInfo(
+                            end_user_id=end_user_uuid,
+                            other_name=first_alias,
+                            aliases=neo4j_aliases,
+                            meta_data={}
+                        ))
+                        logger.info(f"创建 end_user_info 记录，other_name={first_alias}, aliases={neo4j_aliases}")
+
+                db.commit()
+
+        except Exception as e:
+            logger.error(f"更新 end_user other_name 失败: {e}", exc_info=True)
+
+
+    
+    def _extract_current_aliases(self, entity_nodes: List[ExtractedEntityNode]) -> List[str]:
+        """从实体节点提取用户别名（保持 LLM 提取的原始顺序，不进行任何排序）
+        
+        这个方法直接返回 LLM 提取的别名列表，不做任何修改。
+        第一个别名将被用作 other_name。
+        
+        Args:
+            entity_nodes: 实体节点列表
+            
+        Returns:
+            别名列表（保持 LLM 提取的原始顺序）
+        """
+        USER_NAMES = {'用户', '我', 'User', 'I'}
+        for entity in entity_nodes:
+            if getattr(entity, 'name', '').strip() in USER_NAMES:
+                aliases = getattr(entity, 'aliases', []) or []
+                logger.debug(f"提取到用户别名（原始顺序）: {aliases}")
+                return aliases
+        return []
+
+
+    async def _fetch_neo4j_user_aliases(self, end_user_id: str) -> List[str]:
+        """从 Neo4j 查询用户实体的完整 aliases 列表"""
+        cypher = """
+        MATCH (e:ExtractedEntity)
+        WHERE e.end_user_id = $end_user_id AND e.name IN ['用户', '我', 'User', 'I']
+        RETURN e.aliases AS aliases
+        LIMIT 1
+        """
+        result = await Neo4jConnector().execute_query(cypher, end_user_id=end_user_id)
+        if not result:
+            logger.debug(f"Neo4j 中未找到用户实体: end_user_id={end_user_id}")
+            return []
+        aliases = result[0].get('aliases') or []
+        if not aliases:
+            logger.debug(f"Neo4j 用户实体 aliases 为空: end_user_id={end_user_id}")
+        return aliases
+
+    def _resolve_other_name(
+            self,
+            current: Optional[str],
+            current_aliases: List[str],
+            neo4j_aliases: List[str]
+    ) -> Optional[str]:
+        """
+        决定 other_name 是否需要更新，返回新值；无需更新返回 None。
+        
+        决策规则：
+        - 为空 → 用本次对话第一个别名
+        - 不在 Neo4j aliases 中 → 用 Neo4j 第一个别名（说明已被删除）
+        - 否则 → 保持不变（返回 None）
+        """
+        if not current or not current.strip():
+            return current_aliases[0].strip() if current_aliases else None
+        if current not in neo4j_aliases:
+            return neo4j_aliases[0].strip() if neo4j_aliases else None
+        
+        return None
 
     async def _run_dedup_and_write_summary(
             self,

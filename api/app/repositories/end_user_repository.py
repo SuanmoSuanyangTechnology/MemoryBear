@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.logging_config import get_db_logger
 from app.models.app_model import App
 from app.models.end_user_model import EndUser
+from app.models.end_user_info_model import EndUserInfo
 from app.models.workspace_model import Workspace
 
 # 获取数据库专用日志器
@@ -70,7 +71,8 @@ class EndUserRepository:
         app_id: uuid.UUID,
         workspace_id: uuid.UUID,
         other_id: str,
-        original_user_id: Optional[str] = None
+        original_user_id: Optional[str] = None,
+        other_name: Optional[str] = None
     ) -> EndUser:
         """获取或创建终端用户
         
@@ -79,6 +81,7 @@ class EndUserRepository:
             workspace_id: 工作空间ID
             other_id: 第三方ID
             original_user_id: 原始用户ID (存储到 other_id)
+            other_name: 用户名称（用于创建 EndUserInfo）
         """
         try:
             # 尝试查找现有用户
@@ -106,10 +109,22 @@ class EndUserRepository:
                 other_id=other_id
             )
             self.db.add(end_user)
+            self.db.flush()  # 刷新以获取 end_user.id，但不提交事务
+            
+            # 创建对应的 EndUserInfo 记录
+            end_user_info = EndUserInfo(
+                end_user_id=end_user.id,
+                other_name=other_name or "",  # 如果没有提供 other_name，使用空字符串
+                aliases=[],
+                meta_data={}  
+            )
+            self.db.add(end_user_info)
+            
+            # 一起提交
             self.db.commit()
             self.db.refresh(end_user)
             
-            db_logger.info(f"创建新终端用户: (other_id: {other_id}) for workspace {workspace_id}")
+            db_logger.info(f"创建新终端用户及其信息: (other_id: {other_id}) for workspace {workspace_id}")
             return end_user
             
         except Exception as e:

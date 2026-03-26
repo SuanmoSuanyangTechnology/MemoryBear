@@ -13,6 +13,7 @@ from app.repositories.neo4j.cypher_queries import (
     SEARCH_COMMUNITIES_BY_KEYWORD,
     SEARCH_DIALOGUE_BY_DIALOG_ID,
     SEARCH_ENTITIES_BY_NAME,
+    SEARCH_ENTITIES_BY_NAME_OR_ALIAS,
     SEARCH_MEMORY_SUMMARIES_BY_KEYWORD,
     SEARCH_STATEMENTS_BY_CREATED_AT,
     SEARCH_STATEMENTS_BY_KEYWORD,
@@ -264,7 +265,7 @@ async def search_graph(
     
     if "entities" in include:
         tasks.append(connector.execute_query(
-            SEARCH_ENTITIES_BY_NAME,
+            SEARCH_ENTITIES_BY_NAME_OR_ALIAS,
             q=q,
             end_user_id=end_user_id,
             limit=limit,
