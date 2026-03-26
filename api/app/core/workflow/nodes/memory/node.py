@@ -14,8 +14,8 @@ from app.tasks import write_message_task
 
 
 class MemoryReadNode(BaseNode):
-    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
-        super().__init__(node_config, workflow_config)
+    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
+        super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: MemoryReadNodeConfig | None = None
 
     def _output_types(self) -> dict[str, VariableType]:
@@ -45,8 +45,8 @@ class MemoryReadNode(BaseNode):
 
 
 class MemoryWriteNode(BaseNode):
-    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
-        super().__init__(node_config, workflow_config)
+    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
+        super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: MemoryWriteNodeConfig | None = None
 
     def _output_types(self) -> dict[str, VariableType]:

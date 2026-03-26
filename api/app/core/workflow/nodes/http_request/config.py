@@ -115,7 +115,7 @@ class HttpRetryConfig(BaseModel):
     )
 
 
-class HttpErrorDefaultTamplete(BaseModel):
+class HttpErrorDefaultTemplate(BaseModel):
     body: str = Field(
         default="",
         description="Default body returned on HTTP error",
@@ -143,7 +143,7 @@ class HttpErrorHandleConfig(BaseModel):
         description="Error handling strategy: 'none', 'default', or 'branch'",
     )
 
-    default: HttpErrorDefaultTamplete | None = Field(
+    default: HttpErrorDefaultTemplate | None = Field(
         default=None,
         description="Default response template for error handling",
     )

@@ -178,7 +178,7 @@ async def window_dialogue(end_user_id, langchain_messages, memory_config, scope)
         count_store.update_sessions_count(end_user_id, is_end_user_id, langchain_messages)
     elif int(is_end_user_id) == int(scope):
         logger.info('写入长期记忆NEO4J')
-        formatted_messages = (redis_messages)
+        formatted_messages = redis_messages
         # Get config_id (if memory_config is an object, extract config_id; otherwise use directly)
         if hasattr(memory_config, 'config_id'):
             config_id = memory_config.config_id

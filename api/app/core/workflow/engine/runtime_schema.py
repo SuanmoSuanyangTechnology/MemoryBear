@@ -12,6 +12,7 @@ class ExecutionContext(BaseModel):
     execution_id: str
     workspace_id: str
     user_id: str
+    conversation_id: str
     memory_storage_type: str
     user_rag_memory_id: str
     checkpoint_config: RunnableConfig
@@ -22,6 +23,7 @@ class ExecutionContext(BaseModel):
             execution_id: str,
             workspace_id: str,
             user_id: str,
+            conversation_id: str,
             memory_storage_type: str,
             user_rag_memory_id: str
     ):
@@ -29,6 +31,7 @@ class ExecutionContext(BaseModel):
             execution_id=execution_id,
             workspace_id=workspace_id,
             user_id=user_id,
+            conversation_id=conversation_id,
             memory_storage_type=memory_storage_type,
             user_rag_memory_id=user_rag_memory_id,
 

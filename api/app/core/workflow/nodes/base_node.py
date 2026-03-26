@@ -28,7 +28,7 @@ class BaseNode(ABC):
     All node types should inherit from this class and implement the `execute` method.
     """
 
-    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
+    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
         """Initialize the node.
 
         Args:
@@ -41,6 +41,7 @@ class BaseNode(ABC):
         self.node_type = node_config["type"]
         self.cycle = node_config.get("cycle")
         self.node_name = node_config.get("name", self.node_id)
+        self.down_stream_nodes = down_stream_nodes
         # 使用 or 运算符处理 None 值
         self.config = node_config.get("config") or {}
         self.error_handling = node_config.get("error_handling") or {}
@@ -93,18 +94,16 @@ class BaseNode(ABC):
             dict: A dict with a single key 'activate', mapping node IDs to
                   their activation status (True/False).
         """
-        edges = self.workflow_config.get("edges")
-        under_stream_nodes = [
-            edge.get("target")
-            for edge in edges
-            if edge.get("source") == self.node_id and self.node_type not in BRANCH_NODES
-        ]
-        return {
-            "activate": {
-                            node_id: self.check_activate(state)
-                            for node_id in under_stream_nodes
-                        } | {self.node_id: self.check_activate(state)}
-        }
+        activate_flag = self.check_activate(state)
+
+        if self.node_type not in BRANCH_NODES:
+            activate = {node_id: activate_flag for node_id in self.down_stream_nodes}
+        else:
+            activate = {}
+
+        activate[self.node_id] = activate_flag
+
+        return {"activate": activate}
 
     @abstractmethod
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
@@ -315,8 +314,8 @@ class BaseNode(ABC):
 
             elapsed_time = (time.time() - start_time) * 1000
 
-            logger.info(f"Node {self.node_id} streaming execution finished, "
-                        f"time elapsed: {elapsed_time:.2f}ms, chunks: {chunk_count}")
+            logger.debug(f"Node {self.node_id} streaming execution finished, "
+                         f"time elapsed: {elapsed_time:.2f}ms, chunks: {chunk_count}")
 
             # Extract processed output (call subclass's _extract_output)
             extracted_output = self._extract_output(final_result)
@@ -428,8 +427,8 @@ class BaseNode(ABC):
             when an error edge exists. If no error edge exists, this method
             raises an exception to stop the workflow.
         """
-        # Check if the node has an error edge defined
-        error_edge = self._find_error_edge()
+        # # Check if the node has an error edge defined
+        # error_edge = self._find_error_edge()
 
         # Extract input data (for logging or audit purposes)
         input_data = self._extract_input(state, variable_pool)
@@ -447,27 +446,26 @@ class BaseNode(ABC):
             "error": error_message
         }
 
-        if error_edge:
-            # If an error edge exists, log a warning and continue to error node
-            logger.warning(
-                f"Node {self.node_id} execution failed, redirecting to error node: {error_edge['target']}"
-            )
-            return {
-                "node_outputs": {
-                    self.node_id: node_output
-                },
-                "error": error_message,
-                "error_node": self.node_id
-            }
-        else:
-            # If no error edge, send the error via stream writer and stop the workflow
-            writer = get_stream_writer()
-            writer({
-                "type": "node_error",
-                **node_output
-            })
-            logger.error(f"Node {self.node_id} execution failed, stopping workflow: {error_message}")
-            raise Exception(f"Node {self.node_id} execution failed: {error_message}")
+        # if error_edge:
+        #     # If an error edge exists, log a warning and continue to error node
+        #     logger.warning(
+        #         f"Node {self.node_id} execution failed, redirecting to error node: {error_edge['target']}"
+        #     )
+        #     return {
+        #         "node_outputs": {
+        #             self.node_id: node_output
+        #         },
+        #         "error": error_message,
+        #         "error_node": self.node_id
+        #     }
+        # else:
+        writer = get_stream_writer()
+        writer({
+            "type": "node_error",
+            **node_output
+        })
+        logger.error(f"Node {self.node_id} execution failed, stopping workflow: {error_message}")
+        raise Exception(f"Node {self.node_id} execution failed: {error_message}")
 
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """Extracts the input data for this node (used for logging or audit).
@@ -644,7 +642,7 @@ class BaseNode(ABC):
             if content.content_cache.get(f"{provider}_{ModelInfo.is_omni}"):
                 return content.content_cache[f"{provider}_{ModelInfo.is_omni}"]
             with get_db_read() as db:
-                multimodel_service = MultimodalService(db, api_config=api_config)
+                multimodal_service = MultimodalService(db, api_config=api_config)
                 file_obj = FileInput(
                     type=content.type,
                     url=content.url,
@@ -653,7 +651,7 @@ class BaseNode(ABC):
                     upload_file_id=uuid.UUID(content.file_id) if content.file_id else None,
                 )
                 file_obj.set_content(content.get_content())
-                message = await multimodel_service.process_files(
+                message = await multimodal_service.process_files(
                     [file_obj],
                 )
                 content.set_content(file_obj.get_content())
@@ -661,7 +659,7 @@ class BaseNode(ABC):
                     content.content_cache[f"{provider}_{ModelInfo.is_omni}"] = message
                     return message
                 return None
-        raise TypeError(f'Unexpect input value type - {type(content)}')
+        raise TypeError(f'Unexpected input value type - {type(content)}')
 
     @staticmethod
     def process_model_output(content) -> str:

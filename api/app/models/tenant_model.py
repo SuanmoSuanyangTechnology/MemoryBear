@@ -23,6 +23,17 @@ class Tenants(Base):
     # 国际化语言配置字段
     default_language = Column(String(10), nullable=False, default='zh', server_default='zh', index=True)  # 租户默认语言
     supported_languages = Column(ARRAY(String(10)), nullable=False, default=lambda: ['zh', 'en'], server_default=text("'{zh,en}'"))  # 租户支持的语言列表
+
+    # 租户联系信息
+    contact_name = Column(String(100), nullable=True)   # 联系人姓名
+    contact_email = Column(String(255), nullable=True)  # 联系人邮箱
+    contact_phone = Column(String(50), nullable=True)   # 联系人电话
+
+    # 租户套餐信息
+    plan = Column(String(50), nullable=True)                        # 套餐类型
+    plan_expired_at = Column(DateTime, nullable=True)               # 套餐到期时间
+    api_ops_rate_limit = Column(String(100), nullable=True)         # API 调用频率限制
+    status = Column(String(50), nullable=True, default='active')    # 租户状态
     
     # Relationship to users - one tenant has many users
     users = relationship("User", back_populates="tenant")

@@ -439,7 +439,6 @@ class ModelConfigRepository:
                         ModelConfig.is_public
                     ),
                     ModelConfig.provider == provider,
-                    ModelConfig.is_active,
                     ~ModelConfig.is_composite
                 )
             ).all()

@@ -1099,7 +1099,6 @@ class ExtractionOrchestrator:
                     metadata=chunk.metadata,
                 )
                 chunk_nodes.append(chunk_node)
-                logger.error(f"chunk file: {chunk.files}")
 
                 for p, file_type in chunk.files:
 

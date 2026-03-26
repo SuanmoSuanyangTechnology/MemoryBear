@@ -669,6 +669,7 @@ async def config_query(
         content = {
             "app_type": release.app.type,
             "variables": release.config.get("variables"),
+            "memory": release.config.get("memory", {}).get("enabled"),
             "features": release.config.get("features")
         }
     elif release.app.type == AppType.MULTI_AGENT:

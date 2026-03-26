@@ -30,17 +30,13 @@ class CycleGraphNode(BaseNode):
     It acts as a container and execution controller for a subgraph.
     """
 
-    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
-        super().__init__(node_config, workflow_config)
-
-        self.cycle_nodes = list()  # Nodes belonging to this cycle
-        self.cycle_edges = list()  # Edges connecting nodes within the cycle
+    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
+        super().__init__(node_config, workflow_config, down_stream_nodes)
+        self.cycle_nodes, self.cycle_edges = self.pure_cycle_graph()
         self.start_node_id = None  # ID of the start node within the cycle
 
         self.graph: StateGraph | CompiledStateGraph | None = None
         self.child_variable_pool: VariablePool | None = None
-        self.build_graph()
-        self.iteration_flag = True
 
     def _output_types(self) -> dict[str, VariableType]:
         outputs = {"__child_state": VariableType.ARRAY_OBJECT}
@@ -119,11 +115,11 @@ class CycleGraphNode(BaseNode):
             else:
                 remain_edges.append(edge)
 
-        # Update workflow_config by removing cycle nodes and internal edges
-        self.workflow_config["nodes"] = [
-            node for node in nodes if node.get("cycle") != self.node_id
-        ]
-        self.workflow_config["edges"] = remain_edges
+        # # Update workflow_config by removing cycle nodes and internal edges
+        # self.workflow_config["nodes"] = [
+        #     node for node in nodes if node.get("cycle") != self.node_id
+        # ]
+        # self.workflow_config["edges"] = remain_edges
 
         return cycle_nodes, cycle_edges
 
@@ -137,18 +133,18 @@ class CycleGraphNode(BaseNode):
         3. Compile the graph for runtime execution
         """
         from app.core.workflow.engine.graph_builder import GraphBuilder
-        self.cycle_nodes, self.cycle_edges = self.pure_cycle_graph()
+
         self.child_variable_pool = VariablePool()
         builder = GraphBuilder(
             {
                 "nodes": self.cycle_nodes,
                 "edges": self.cycle_edges,
             },
-            subgraph=True,
-            variable_pool=self.child_variable_pool
+            variable_pool=self.child_variable_pool,
+            cycle=self.node_id
         )
-        self.start_node_id = builder.start_node_id
         self.graph = builder.build()
+        self.start_node_id = builder.start_node_id
         self.child_variable_pool = builder.variable_pool
 
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
@@ -169,6 +165,7 @@ class CycleGraphNode(BaseNode):
         Raises:
             RuntimeError: If the node type is unsupported.
         """
+        self.build_graph()
         if self.node_type == NodeType.LOOP:
             return await LoopRuntime(
                 start_id=self.start_node_id,
@@ -194,6 +191,7 @@ class CycleGraphNode(BaseNode):
         raise RuntimeError("Unknown cycle node type")
 
     async def execute_stream(self, state: WorkflowState, variable_pool: VariablePool):
+        self.build_graph()
         if self.node_type == NodeType.LOOP:
             yield {
                 "__final__": True,

@@ -104,13 +104,15 @@ class NodeFactory:
     def create_node(
             cls,
             node_config: dict[str, Any],
-            workflow_config: dict[str, Any]
+            workflow_config: dict[str, Any],
+            down_stream_nodes: list[str]
     ) -> WorkflowNode | None:
         """创建节点实例
 
         Args:
             node_config: 节点配置
             workflow_config: 工作流配置
+            down_stream_nodes: 下游节点
 
         Returns:
             节点实例或 None（对于不支持的节点类型）
@@ -127,7 +129,7 @@ class NodeFactory:
 
         # 创建节点实例
         logger.debug(f"create node instance: {node_config.get('id')} (type={node_type})")
-        return node_class(node_config, workflow_config)
+        return node_class(node_config, workflow_config, down_stream_nodes)
 
     @classmethod
     def get_supported_types(cls) -> list[str]:

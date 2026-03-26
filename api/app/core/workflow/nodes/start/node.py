@@ -27,14 +27,8 @@ class StartNode(BaseNode):
     注意：变量的验证和默认值处理由 Executor 在初始化时完成。
     """
 
-    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
-        """初始化 Start 节点
-        
-        Args:
-            node_config: 节点配置
-            workflow_config: 工作流配置
-        """
-        super().__init__(node_config, workflow_config)
+    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
+        super().__init__(node_config, workflow_config, down_stream_nodes)
 
         # 解析并验证配置
         self.typed_config: StartNodeConfig | None = None
@@ -62,7 +56,6 @@ class StartNode(BaseNode):
             包含系统参数、会话变量和自定义变量的字典
         """
         self.typed_config = StartNodeConfig(**self.config)
-        logger.info(f"节点 {self.node_id} (Start) 开始执行")
 
         # 处理自定义变量（传入 pool 避免重复创建）
         custom_vars = self._process_custom_variables(variable_pool)
@@ -77,9 +70,9 @@ class StartNode(BaseNode):
             **custom_vars  # 自定义变量作为节点输出的一部分
         }
 
-        logger.info(
-            f"节点 {self.node_id} (Start) 执行完成，"
-            f"输出了 {len(custom_vars)} 个自定义变量"
+        logger.debug(
+            f"Node {self.node_id} (Start) execution completed, "
+            f"outputting {len(custom_vars)} custom variables"
         )
 
         return result
