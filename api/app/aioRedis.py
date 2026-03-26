@@ -17,7 +17,7 @@ pool = ConnectionPool.from_url(
     db=settings.REDIS_DB,
     password=settings.REDIS_PASSWORD,
     decode_responses=True,
-    max_connections=30  
+    max_connections=30
 )
 
 # 全局 Redis 客户端
@@ -28,7 +28,11 @@ aio_redis = redis.StrictRedis(connection_pool=pool)
 
 async def get_redis_connection():
     """获取 Redis 连接"""
-    return aio_redis
+    try:
+        return aio_redis
+    except Exception as e:
+        logger.error(f"Redis连接失败: {str(e)}")
+        return None
 
 
 async def aio_redis_set(key: str, val: str | dict, expire: int = None):
@@ -45,9 +49,9 @@ async def aio_redis_set(key: str, val: str | dict, expire: int = None):
 
         if expire is not None:
             # 设置带过期时间的键值
-            await aio_redis.set(key, val, ex=expire)
-            # 设置永久键值    
+            await aio_redis.set(key, val, ex=expire) 
         else:
+            # 设置永久键值   
             await aio_redis.set(key, val)
     except Exception as e:
         logger.error(f"Redis set错误: {str(e)}")
@@ -74,7 +78,10 @@ async def aio_redis_delete(key: str):
 async def aio_redis_publish(channel: str, message: Dict[str, Any]) -> bool:
     """发布消息到Redis频道"""
     try:
-        await aio_redis.publish(channel, json.dumps(message, ensure_ascii=False))
+        conn = await get_redis_connection()
+        if not conn:
+            return False
+        await conn.publish(channel, json.dumps(message, ensure_ascii=False))
         return True
     except Exception as e:
         logger.error(f"Redis发布错误: {str(e)}")
@@ -104,6 +111,9 @@ class RedisSubscriber:
         """接收消息"""
         try:
             self.conn = await get_redis_connection()
+            if not self.conn:
+                return
+
             self.pubsub = self.conn.pubsub()
             await self.pubsub.subscribe(self.channel)
 
