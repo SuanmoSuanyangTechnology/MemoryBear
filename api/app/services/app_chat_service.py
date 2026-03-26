@@ -82,12 +82,6 @@ class AppChatService:
             )
             system_prompt = system_prompt_rendered.get_text_content() or system_prompt
 
-        # opening_statement：首轮对话注入开场白
-        is_new_conversation = not self.conversation_service.get_messages(conversation_id, limit=1)
-        system_prompt = self.agent_service._inject_opening_statement(
-            features_config, system_prompt, is_new_conversation
-        )
-
         # 准备工具列表
         tools = []
 
@@ -135,13 +129,32 @@ class AppChatService:
             model_type=ModelType.LLM
         )
 
-        # 加载历史消息
+        # 加载历史消息（包含开场白）
         history = await self.conversation_service.get_conversation_history(
             conversation_id=conversation_id,
             max_history=10,
             current_provider=api_key_obj.provider,
             current_is_omni=api_key_obj.is_omni
         )
+
+        # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
+        is_new_conversation = len(history) == 0
+        if is_new_conversation:
+            opening = self.agent_service._get_opening_statement(features_config, True, variables)
+            if opening:
+                self.conversation_service.add_message(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=opening,
+                    meta_data={}
+                )
+                # 重新加载历史（包含刚写入的开场白）
+                history = await self.conversation_service.get_conversation_history(
+                    conversation_id=conversation_id,
+                    max_history=10,
+                    current_provider=api_key_obj.provider,
+                    current_is_omni=api_key_obj.is_omni
+                )
 
         # 处理多模态文件
         processed_files = None
@@ -184,6 +197,9 @@ class AppChatService:
             tenant_id=tenant_id, workspace_id=workspace_id
         )
 
+        # 过滤 citations（只调用一次）
+        filtered_citations = self.agent_service._filter_citations(features_config, citations_collector)
+
         # 构建用户消息内容（含多模态文件）
         human_meta = {
             "files": [],
@@ -192,7 +208,8 @@ class AppChatService:
         assistant_meta = {
             "model": api_key_obj.model_name,
             "usage": result.get("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}),
-            "audio_url": None
+            "audio_url": None,
+            "citations": filtered_citations
         }
         if files:
             for f in files:
@@ -237,7 +254,7 @@ class AppChatService:
             }),
             "elapsed_time": elapsed_time,
             "suggested_questions": suggested_questions,
-            "citations": self.agent_service._filter_citations(features_config, citations_collector),
+            "citations": filtered_citations,
             "audio_url": audio_url,
             "audio_status": "pending"
         }
@@ -290,12 +307,6 @@ class AppChatService:
                 )
                 system_prompt = system_prompt_rendered.get_text_content() or system_prompt
 
-            # opening_statement：首轮对话注入开场白
-            is_new_conversation = not self.conversation_service.get_messages(conversation_id, limit=1)
-            system_prompt = self.agent_service._inject_opening_statement(
-                features_config, system_prompt, is_new_conversation
-            )
-
             # 准备工具列表
             tools = []
 
@@ -345,13 +356,32 @@ class AppChatService:
                 model_type=ModelType.LLM
             )
 
-            # 加载历史消息
+            # 加载历史消息（包含开场白）
             history = await self.conversation_service.get_conversation_history(
                 conversation_id=conversation_id,
                 max_history=10,
                 current_provider=api_key_obj.provider,
                 current_is_omni=api_key_obj.is_omni
             )
+
+            # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
+            is_new_conversation = len(history) == 0
+            if is_new_conversation:
+                opening = self.agent_service._get_opening_statement(features_config, True, variables)
+                if opening:
+                    self.conversation_service.add_message(
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=opening,
+                        meta_data={}
+                    )
+                    # 重新加载历史（包含刚写入的开场白）
+                    history = await self.conversation_service.get_conversation_history(
+                        conversation_id=conversation_id,
+                        max_history=10,
+                        current_provider=api_key_obj.provider,
+                        current_is_omni=api_key_obj.is_omni
+                    )
 
             # 处理多模态文件
             processed_files = None
@@ -423,7 +453,9 @@ class AppChatService:
                     logger.warning(f"TTS任务异常: {e}")
                     audio_status = "failed"
             end_data["audio_status"] = audio_status if stream_audio_url else None
-            end_data["citations"] = self.agent_service._filter_citations(features_config, citations_collector)
+            # 过滤 citations（只调用一次）
+            filtered_citations = self.agent_service._filter_citations(features_config, citations_collector)
+            end_data["citations"] = filtered_citations
 
             # 保存消息
             human_meta = {
@@ -433,7 +465,8 @@ class AppChatService:
             assistant_meta = {
                 "model": api_key_obj.model_name,
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
-                "audio_url": None
+                "audio_url": None,
+                "citations": filtered_citations
             }
 
             if files:
