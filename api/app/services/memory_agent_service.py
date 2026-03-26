@@ -357,6 +357,7 @@ class MemoryAgentService:
                 if file_object is None:
                     continue
                 message["file_content"].append((file_object, file["type"]))
+        logger.info(messages)
 
         message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
         try:
@@ -606,7 +607,7 @@ class MemoryAgentService:
                                     retrieved_content.append({query: statements})
 
                     # 如果 retrieved_content 为空，设置为空字符串
-                    if retrieved_content == []:
+                    if not retrieved_content:
                         retrieved_content = ''
 
                     # 只有当回答不是"信息不足"且不是快速检索时才保存
