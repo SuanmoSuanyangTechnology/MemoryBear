@@ -35,6 +35,10 @@ class Tenants(Base):
     api_ops_rate_limit = Column(String(100), nullable=True)         # API 调用频率限制
     status = Column(String(50), nullable=True, default='active')    # 租户状态
     
+    # 租户功能开关字段
+    feature_billing = Column(Boolean, default=False, nullable=False, server_default='false', comment="是否启用收费管理菜单")
+    feature_user_management = Column(Boolean, default=False, nullable=False, server_default='false', comment="是否启用用户管理菜单")
+    
     # Relationship to users - one tenant has many users
     users = relationship("User", back_populates="tenant")
     
