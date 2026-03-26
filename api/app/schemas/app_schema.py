@@ -196,6 +196,13 @@ class CitationConfig(BaseModel):
     enabled: bool = Field(default=False)
 
 
+class Citation(BaseModel):
+    document_id: str
+    file_name: str
+    knowledge_id: str
+    score: float
+
+
 class WebSearchConfig(BaseModel):
     """联网搜索配置"""
     enabled: bool = Field(default=False)
