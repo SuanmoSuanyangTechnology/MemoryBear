@@ -8,6 +8,7 @@ import asyncio
 import time
 import uuid
 from datetime import datetime
+from typing import List, Optional
 
 from dotenv import load_dotenv
 
@@ -21,7 +22,7 @@ from app.core.memory.utils.log.logging_utils import log_time
 from app.db import get_db_context
 from app.repositories.neo4j.add_edges import add_memory_summary_statement_edges
 from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
-from app.repositories.neo4j.graph_saver import save_dialog_and_statements_to_neo4j, _trigger_clustering_sync
+from app.repositories.neo4j.graph_saver import save_dialog_and_statements_to_neo4j
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_config_schema import MemoryConfig
 
@@ -177,28 +178,33 @@ async def write(
             if success:
                 logger.info("Successfully saved all data to Neo4j")
                 
-                # 同步用户别名到 PostgreSQL
-                try:
-                    # 创建一个临时的 orchestrator 实例来调用同步方法
-                    temp_orchestrator = ExtractionOrchestrator(
-                        llm_client=llm_client,
-                        embedder_client=embedder_client,
-                        connector=neo4j_connector,
-                        embedding_id=embedding_model_id
-                    )
-                    await temp_orchestrator._update_end_user_other_name(all_entity_nodes, chunked_dialogs)
-                    logger.info("Successfully synced user aliases to PostgreSQL")
-                except Exception as sync_error:
-                    logger.error(f"Failed to sync user aliases to PostgreSQL: {sync_error}", exc_info=True)
-                    # 不影响主流程
+                # 使用 Celery 异步任务触发聚类（不阻塞主流程）
+                if all_entity_nodes:
+                    try:
+                        from app.tasks import run_incremental_clustering
+                        
+                        end_user_id = all_entity_nodes[0].end_user_id
+                        new_entity_ids = [e.id for e in all_entity_nodes]
+                        
+                        # 异步提交 Celery 任务
+                        task = run_incremental_clustering.apply_async(
+                            kwargs={
+                                "end_user_id": end_user_id,
+                                "new_entity_ids": new_entity_ids,
+                                "llm_model_id": str(memory_config.llm_model_id) if memory_config.llm_model_id else None,
+                                "embedding_model_id": str(memory_config.embedding_model_id) if memory_config.embedding_model_id else None,
+                            },
+                            # 设置任务优先级（低优先级，不影响主业务）
+                            priority=3,
+                        )
+                        logger.info(
+                            f"[Clustering] 增量聚类任务已提交到 Celery - "
+                            f"task_id={task.id}, end_user_id={end_user_id}, entity_count={len(new_entity_ids)}"
+                        )
+                    except Exception as e:
+                        # 聚类任务提交失败不影响主流程
+                        logger.error(f"[Clustering] 提交聚类任务失败（不影响主流程）: {e}", exc_info=True)
                 
-                # 写入成功后，同步等待聚类完成（避免与 Memory Summary 并发冲突）
-                await _trigger_clustering_sync(
-                    all_entity_nodes,
-                    llm_model_id=str(memory_config.llm_model_id) if memory_config.llm_model_id else None,
-                    embedding_model_id=str(
-                        memory_config.embedding_model_id) if memory_config.embedding_model_id else None,
-                )
                 break
             else:
                 logger.warning("Failed to save some data to Neo4j")

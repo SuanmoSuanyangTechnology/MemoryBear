@@ -2628,6 +2628,100 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
 # =============================================================================
 
 @celery_app.task(
+    name="app.tasks.run_incremental_clustering",
+    bind=True,
+    ignore_result=False,
+    max_retries=2,
+    acks_late=True,
+    time_limit=1800,  # 30分钟硬超时
+    soft_time_limit=1700,
+)
+def run_incremental_clustering(
+    self,
+    end_user_id: str,
+    new_entity_ids: List[str],
+    llm_model_id: Optional[str] = None,
+    embedding_model_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """增量聚类任务：处理新增实体的社区分配和元数据生成。
+    
+    此任务在后台异步执行，不阻塞 write_message 主流程。
+    
+    Args:
+        end_user_id: 用户 ID
+        new_entity_ids: 新增实体 ID 列表
+        llm_model_id: LLM 模型 ID（可选）
+        embedding_model_id: Embedding 模型 ID（可选）
+    
+    Returns:
+        包含任务执行结果的字典
+    """
+    start_time = time.time()
+    
+    async def _run() -> Dict[str, Any]:
+        from app.core.logging_config import get_logger
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+        from app.core.memory.storage_services.clustering_engine.label_propagation import LabelPropagationEngine
+        
+        logger = get_logger(__name__)
+        logger.info(
+            f"[IncrementalClustering] 开始增量聚类任务 - end_user_id={end_user_id}, "
+            f"实体数={len(new_entity_ids)}, llm_model_id={llm_model_id}"
+        )
+        
+        connector = Neo4jConnector()
+        try:
+            engine = LabelPropagationEngine(
+                connector=connector,
+                llm_model_id=llm_model_id,
+                embedding_model_id=embedding_model_id,
+            )
+            
+            # 执行增量聚类
+            await engine.run(end_user_id=end_user_id, new_entity_ids=new_entity_ids)
+            
+            logger.info(f"[IncrementalClustering] 增量聚类完成 - end_user_id={end_user_id}")
+            
+            return {
+                "status": "SUCCESS",
+                "end_user_id": end_user_id,
+                "entity_count": len(new_entity_ids),
+            }
+        except Exception as e:
+            logger.error(f"[IncrementalClustering] 增量聚类失败: {e}", exc_info=True)
+            raise
+        finally:
+            await connector.close()
+    
+    try:
+        loop = set_asyncio_event_loop()
+        result = loop.run_until_complete(_run())
+        result["elapsed_time"] = time.time() - start_time
+        result["task_id"] = self.request.id
+        
+        logger.info(
+            f"[IncrementalClustering] 任务完成 - task_id={self.request.id}, "
+            f"elapsed_time={result['elapsed_time']:.2f}s"
+        )
+        
+        return result
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error(
+            f"[IncrementalClustering] 任务失败 - task_id={self.request.id}, "
+            f"elapsed_time={elapsed_time:.2f}s, error={str(e)}",
+            exc_info=True
+        )
+        return {
+            "status": "FAILURE",
+            "error": str(e),
+            "end_user_id": end_user_id,
+            "elapsed_time": elapsed_time,
+            "task_id": self.request.id,
+        }
+
+
+@celery_app.task(
     name="app.tasks.init_community_clustering_for_users",
     bind=True,
     ignore_result=False,
