@@ -3,8 +3,7 @@ import json
 import logging
 from typing import Dict, Any, Optional
 
-import redis.asyncio as redis
-from redis.asyncio import ConnectionPool
+from redis.asyncio import Redis, ConnectionPool
 
 from app.core.config import settings
 
@@ -23,11 +22,11 @@ pool = ConnectionPool.from_url(
 # 全局 Redis 客户端
 # redis.asyncio 的客户端是设计为可以跨 event loop 使用的
 # 只要共享同一个连接池即可
-aio_redis = redis.StrictRedis(connection_pool=pool)
+aio_redis = Redis(connection_pool=pool)
 
 
 async def get_redis_connection():
-    """获取 Redis 连接"""
+    """获取Redis连接"""
     try:
         return aio_redis
     except Exception as e:
@@ -49,9 +48,9 @@ async def aio_redis_set(key: str, val: str | dict, expire: int = None):
 
         if expire is not None:
             # 设置带过期时间的键值
-            await aio_redis.set(key, val, ex=expire) 
+            await aio_redis.set(key, val, ex=expire)
         else:
-            # 设置永久键值   
+            # 设置永久键值 
             await aio_redis.set(key, val)
     except Exception as e:
         logger.error(f"Redis set错误: {str(e)}")
