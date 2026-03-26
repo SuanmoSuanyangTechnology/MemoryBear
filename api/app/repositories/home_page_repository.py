@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from uuid import UUID
-from typing import Dict
+from typing import Dict, Optional, Any
 
 from app.models.end_user_model import EndUser
 from app.models.user_model import User
@@ -191,3 +191,62 @@ class HomePageRepository:
         user_count_dict = {workspace_id: count for workspace_id, count in user_counts}
         
         return workspaces, app_count_dict, user_count_dict
+    
+    @staticmethod
+    def get_version_introduction(db: Session, version: str) -> Optional[Dict[str, Any]]:
+        """
+        从数据库获取版本说明（优先读取已发布的版本）
+        使用反射方式读取表结构，不依赖 premium 模型类
+        
+        Args:
+            db: 数据库会话
+            version: 版本号，如 "v0.2.7"
+            
+        Returns:
+            版本说明字典，格式与 version_info.json 一致
+            如果数据库中没有该版本，返回 None
+        """
+        try:
+            from sqlalchemy import Table, MetaData
+            
+            metadata = MetaData()
+            version_notes = Table('version_notes', metadata, autoload_with=db.engine)
+            version_note_items = Table('version_note_items', metadata, autoload_with=db.engine)
+            
+            note = db.query(version_notes).filter(
+                version_notes.c.version == version,
+                version_notes.c.is_published == True
+            ).first()
+            
+            if not note:
+                return None
+            
+            items = db.query(version_note_items).filter(
+                version_note_items.c.note_id == note.id
+            ).order_by(version_note_items.c.sort_order).all()
+            
+            core_upgrades = []
+            for item in items:
+                title = item.title
+                content = item.content
+                if content:
+                    core_upgrades.append(f"{title}<br>{content}")
+                else:
+                    core_upgrades.append(title)
+            
+            return {
+                "introduction": {
+                    "codeName": "",
+                    "releaseDate": note.release_date.isoformat() if note.release_date else "",
+                    "upgradePosition": "",
+                    "coreUpgrades": core_upgrades
+                },
+                "introduction_en": {
+                    "codeName": "",
+                    "releaseDate": note.release_date.isoformat() if note.release_date else "",
+                    "upgradePosition": "",
+                    "coreUpgrades": core_upgrades
+                }
+            }
+        except Exception:
+            return None
