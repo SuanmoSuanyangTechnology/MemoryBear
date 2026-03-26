@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 from typing import Dict, Any, Optional
-from weakref import WeakValueDictionary
 
 from redis.asyncio import Redis, ConnectionPool
 
@@ -12,7 +11,7 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 # 存储每个 event loop 的连接池和客户端
-_loop_clients: WeakValueDictionary = WeakValueDictionary()
+_loop_clients: Dict[int, Redis] = {}
 
 
 def get_redis_client() -> Redis:
