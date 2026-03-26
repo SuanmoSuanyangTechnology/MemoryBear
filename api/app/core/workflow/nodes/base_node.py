@@ -639,8 +639,8 @@ class BaseNode(ABC):
             return content
 
         elif isinstance(content, FileObject):
-            if content.content_cache.get(f"{provider}_{ModelInfo.is_omni}"):
-                return content.content_cache[f"{provider}_{ModelInfo.is_omni}"]
+            if content.content_cache.get(f"{provider}_{api_config.is_omni}"):
+                return content.content_cache[f"{provider}_{api_config.is_omni}"]
             with get_db_read() as db:
                 multimodal_service = MultimodalService(db, api_config=api_config)
                 file_obj = FileInput(
@@ -656,7 +656,7 @@ class BaseNode(ABC):
                 )
                 content.set_content(file_obj.get_content())
                 if message:
-                    content.content_cache[f"{provider}_{ModelInfo.is_omni}"] = message
+                    content.content_cache[f"{provider}_{api_config.is_omni}"] = message
                     return message
                 return None
         raise TypeError(f'Unexpected input value type - {type(content)}')
