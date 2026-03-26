@@ -445,19 +445,27 @@ class AgentRunService:
                     )
 
     @staticmethod
-    def _inject_opening_statement(
+    def _get_opening_statement(
             features_config: Dict[str, Any],
-            system_prompt: str,
-            is_new_conversation: bool
-    ) -> str:
-        """首轮对话时将开场白注入 system_prompt"""
+            is_new_conversation: bool,
+            variables: Optional[Dict[str, Any]] = None
+    ) -> Optional[str]:
+        """首轮对话时返回开场白文本（支持变量替换），否则返回 None"""
         if not is_new_conversation:
-            return system_prompt
+            return None
         opening = features_config.get("opening_statement", {})
         if not (isinstance(opening, dict) and opening.get("enabled") and opening.get("statement")):
-            return system_prompt
+            return None
+        
         statement = opening["statement"]
-        return f"{system_prompt}\n\n[对话开场白]\n{statement}"
+        
+        # 如果有变量，进行替换（仅支持 {{var_name}} 格式）
+        if variables:
+            for var_name, var_value in variables.items():
+                placeholder = f"{{{{{var_name}}}}}"
+                statement = statement.replace(placeholder, str(var_value))
+        
+        return statement
 
     @staticmethod
     def _filter_citations(
@@ -555,10 +563,6 @@ class AgentRunService:
             # 3. 处理系统提示词（支持变量替换）
             system_prompt = system_prompt.get_text_content() or "你是一个专业的AI助手"
 
-            # opening_statement：首轮对话注入开场白
-            is_new_conversation = not conversation_id
-            system_prompt = self._inject_opening_statement(features_config, system_prompt, is_new_conversation)
-
             # 4. 准备工具列表
             tools = []
 
@@ -593,12 +597,15 @@ class AgentRunService:
                 tools=tools,
             )
 
-            # 5. 处理会话ID（创建或验证）
+            # 5. 处理会话ID（创建或验证），新会话时写入开场白
+            is_new_conversation = not conversation_id
+            opening = self._get_opening_statement(features_config, is_new_conversation, variables)
             conversation_id = await self._ensure_conversation(
                 conversation_id=conversation_id,
                 app_id=agent_config.app_id,
                 workspace_id=workspace_id,
-                user_id=user_id
+                user_id=user_id,
+                opening_statement=opening
             )
 
             model_info = ModelInfo(
@@ -611,7 +618,7 @@ class AgentRunService:
                 model_type=model_config.type
             )
 
-            # 6. 加载历史消息
+            # 6. 加载历史消息（包含开场白）
             history = await self._load_conversation_history(
                 conversation_id=conversation_id,
                 max_history=10,
@@ -668,6 +675,9 @@ class AgentRunService:
                 tenant_id=tenant_id, workspace_id=workspace_id
             ) if not sub_agent else None
 
+            # 过滤 citations（只调用一次）
+            filtered_citations = self._filter_citations(features_config, citations_collector)
+
             # 10. 保存会话消息
             if not sub_agent:
                 await self._save_conversation_message(
@@ -686,6 +696,7 @@ class AgentRunService:
                     files=files,
                     processed_files=processed_files,
                     audio_url=audio_url,
+                    citations=filtered_citations,
                     provider=api_key_config.get("provider"),
                     is_omni=api_key_config.get("is_omni", False)
                 )
@@ -702,7 +713,7 @@ class AgentRunService:
                 "suggested_questions": await self._generate_suggested_questions(
                     features_config, result["content"], api_key_config, effective_params
                 ) if not sub_agent else [],
-                "citations": self._filter_citations(features_config, citations_collector),
+                "citations": filtered_citations,
                 "audio_url": audio_url,
                 "audio_status": "pending"
             }
@@ -797,10 +808,6 @@ class AgentRunService:
             # 3. 处理系统提示词（支持变量替换）
             system_prompt = system_prompt.get_text_content() or "你是一个专业的AI助手"
 
-            # opening_statement：首轮对话注入开场白
-            is_new_conversation = not conversation_id
-            system_prompt = self._inject_opening_statement(features_config, system_prompt, is_new_conversation)
-
             # 4. 准备工具列表
             tools = []
 
@@ -836,13 +843,16 @@ class AgentRunService:
                 streaming=True
             )
 
-            # 5. 处理会话ID（创建或验证）
+            # 5. 处理会话ID（创建或验证），新会话时写入开场白
+            is_new_conversation = not conversation_id
+            opening = self._get_opening_statement(features_config, is_new_conversation, variables)
             conversation_id = await self._ensure_conversation(
                 conversation_id=conversation_id,
                 app_id=agent_config.app_id,
                 workspace_id=workspace_id,
                 user_id=user_id,
-                sub_agent=sub_agent
+                sub_agent=sub_agent,
+                opening_statement=opening
             )
 
             model_info = ModelInfo(
@@ -926,6 +936,9 @@ class AgentRunService:
             if sub_agent:
                 yield self._format_sse_event("sub_usage", {"total_tokens": total_tokens})
 
+            # 过滤 citations（只调用一次）
+            filtered_citations = self._filter_citations(features_config, citations_collector)
+
             # 11. 保存会话消息
             if not sub_agent:
                 await self._save_conversation_message(
@@ -940,6 +953,7 @@ class AgentRunService:
                     files=files,
                     processed_files=processed_files,
                     audio_url=stream_audio_url,
+                    citations=filtered_citations,
                     provider=api_key_config.get("provider"),
                     is_omni=api_key_config.get("is_omni", False)
                 )
@@ -966,7 +980,7 @@ class AgentRunService:
                         logger.warning(f"TTS任务异常: {e}")
                         audio_status = "failed"
                 end_data["audio_status"] = audio_status if stream_audio_url else None
-                end_data["citations"] = self._filter_citations(features_config, citations_collector)
+                end_data["citations"] = filtered_citations
             yield self._format_sse_event("end", end_data)
 
             logger.info(
@@ -1046,7 +1060,8 @@ class AgentRunService:
             app_id: uuid.UUID,
             workspace_id: uuid.UUID,
             user_id: Optional[str],
-            sub_agent: bool = False
+            sub_agent: bool = False,
+            opening_statement: Optional[str] = None
     ) -> str:
         """确保会话存在（创建或验证）
 
@@ -1055,6 +1070,8 @@ class AgentRunService:
             app_id: 应用ID
             workspace_id: 工作空间ID（必须）
             user_id: 用户ID
+            sub_agent: 是否为子代理
+            opening_statement: 开场白（新会话时作为第一条消息写入）
 
         Returns:
             str: 会话ID
@@ -1091,6 +1108,16 @@ class AgentRunService:
             self.db.add(new_conversation)
             self.db.commit()
             self.db.refresh(new_conversation)
+
+            # 如果有开场白，作为第一条 assistant 消息写入数据库
+            if opening_statement:
+                conversation_service.add_message(
+                    conversation_id=uuid.UUID(new_conv_id),
+                    role="assistant",
+                    content=opening_statement,
+                    meta_data={}
+                )
+                logger.debug(f"已保存开场白到会话 {new_conv_id}")
 
             logger.info(
                 "创建草稿会话成功",
@@ -1215,6 +1242,7 @@ class AgentRunService:
             files: Optional[List[FileInput]] = None,
             processed_files: Optional[List[Dict[str, Any]]] = None,
             audio_url: Optional[str] = None,
+            citations: Optional[List[Any]] = None,
             provider: Optional[str] = None,
             is_omni: Optional[bool] = None
     ) -> None:
@@ -1230,6 +1258,7 @@ class AgentRunService:
             files: 原始文件输入
             processed_files: 处理后的文件
             audio_url: 音频URL
+            citations: 引用来源列表
             provider: 模型供应商
             is_omni: 是否为全模态模型
         """
@@ -1266,9 +1295,11 @@ class AgentRunService:
                 content=user_message,
                 meta_data=human_meta
             )
-            # 保存助手消息（含 audio_url）
+            # 保存助手消息（含 audio_url 和 citations）
             if audio_url:
                 meta_data["audio_url"] = audio_url
+            if citations:
+                meta_data["citations"] = citations
             conversation_service.add_message(
                 conversation_id=conv_uuid,
                 role="assistant",
