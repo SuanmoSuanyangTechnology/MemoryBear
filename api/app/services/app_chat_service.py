@@ -82,6 +82,12 @@ class AppChatService:
             )
             system_prompt = system_prompt_rendered.get_text_content() or system_prompt
 
+        # opening_statement：首轮对话注入开场白
+        is_new_conversation = not self.conversation_service.get_messages(conversation_id, limit=1)
+        system_prompt = self.agent_service._inject_opening_statement(
+            features_config, system_prompt, is_new_conversation
+        )
+
         # 准备工具列表
         tools = []
 
@@ -93,7 +99,8 @@ class AppChatService:
         tools.extend(skill_tools)
         if skill_prompts:
             system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-        tools.extend(self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval, user_id))
+        kb_tools, citations_collector = self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval, user_id)
+        tools.extend(kb_tools)
         memory_flag = False
         if memory:
             memory_tools, memory_flag = self.agent_service.load_memory_config(
@@ -230,7 +237,7 @@ class AppChatService:
             }),
             "elapsed_time": elapsed_time,
             "suggested_questions": suggested_questions,
-            "citations": self.agent_service._filter_citations(features_config, result.get("citations", [])),
+            "citations": self.agent_service._filter_citations(features_config, citations_collector),
             "audio_url": audio_url,
             "audio_status": "pending"
         }
@@ -283,6 +290,12 @@ class AppChatService:
                 )
                 system_prompt = system_prompt_rendered.get_text_content() or system_prompt
 
+            # opening_statement：首轮对话注入开场白
+            is_new_conversation = not self.conversation_service.get_messages(conversation_id, limit=1)
+            system_prompt = self.agent_service._inject_opening_statement(
+                features_config, system_prompt, is_new_conversation
+            )
+
             # 准备工具列表
             tools = []
 
@@ -295,7 +308,8 @@ class AppChatService:
             tools.extend(skill_tools)
             if skill_prompts:
                 system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-            tools.extend(self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval, user_id))
+            kb_tools, citations_collector = self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval, user_id)
+            tools.extend(kb_tools)
             # 添加长期记忆工具
             memory_flag = False
             if memory:
@@ -409,7 +423,7 @@ class AppChatService:
                     logger.warning(f"TTS任务异常: {e}")
                     audio_status = "failed"
             end_data["audio_status"] = audio_status if stream_audio_url else None
-            end_data["citations"] = self.agent_service._filter_citations(features_config, [])
+            end_data["citations"] = self.agent_service._filter_citations(features_config, citations_collector)
 
             # 保存消息
             human_meta = {
