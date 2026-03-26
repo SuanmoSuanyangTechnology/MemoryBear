@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 from typing import Dict, Any, Optional
+from weakref import WeakValueDictionary
 
 from redis.asyncio import Redis, ConnectionPool
 
@@ -10,25 +11,65 @@ from app.core.config import settings
 # 设置日志记录器
 logger = logging.getLogger(__name__)
 
-# 创建连接池（连接池是线程安全的，可以跨 event loop 共享）
-pool = ConnectionPool.from_url(
-    f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}",
-    db=settings.REDIS_DB,
-    password=settings.REDIS_PASSWORD,
-    decode_responses=True,
-    max_connections=30
-)
+# 存储每个 event loop 的连接池和客户端
+_loop_clients: WeakValueDictionary = WeakValueDictionary()
 
-# 全局 Redis 客户端
-# redis.asyncio 的客户端是设计为可以跨 event loop 使用的
-# 只要共享同一个连接池即可
-aio_redis = Redis(connection_pool=pool)
+
+def get_redis_client() -> Redis:
+    """获取当前 event loop 的 Redis 客户端
+    
+    每个 event loop 会获得自己的连接池和客户端实例。
+    这样可以避免连接对象跨 loop 使用导致的 'attached to a different loop' 错误。
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        loop_id = id(loop)
+        
+        # 检查是否已有该 loop 的客户端
+        if loop_id not in _loop_clients:
+            # 为当前 loop 创建新的连接池和客户端
+            pool = ConnectionPool.from_url(
+                f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}",
+                db=settings.REDIS_DB,
+                password=settings.REDIS_PASSWORD,
+                decode_responses=True,
+                max_connections=50
+            )
+            client = Redis(connection_pool=pool)
+            _loop_clients[loop_id] = client
+            logger.debug(f"为 event loop {loop_id} 创建新的 Redis 客户端和连接池")
+        
+        return _loop_clients[loop_id]
+    except RuntimeError:
+        # 没有运行中的 loop，创建临时客户端
+        logger.warning("没有运行中的 event loop，创建临时 Redis 客户端")
+        pool = ConnectionPool.from_url(
+            f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}",
+            db=settings.REDIS_DB,
+            password=settings.REDIS_PASSWORD,
+            decode_responses=True,
+            max_connections=50
+        )
+        return Redis(connection_pool=pool)
+
+
+# 全局 Redis 客户端代理类
+class RedisProxy:
+    """Redis 代理类，自动获取当前 event loop 的客户端"""
+    
+    def __getattr__(self, name):
+        client = get_redis_client()
+        return getattr(client, name)
+
+
+# 全局实例
+aio_redis = RedisProxy()
 
 
 async def get_redis_connection():
-    """获取Redis连接"""
+    """获取 Redis 连接"""
     try:
-        return aio_redis
+        return get_redis_client()
     except Exception as e:
         logger.error(f"Redis连接失败: {str(e)}")
         return None
@@ -43,15 +84,14 @@ async def aio_redis_set(key: str, val: str | dict, expire: int = None):
         expire: 过期时间(秒)，None表示永不过期
     """
     try:
+        client = get_redis_client()
         if isinstance(val, dict):
             val = json.dumps(val, ensure_ascii=False)
 
         if expire is not None:
-            # 设置带过期时间的键值
-            await aio_redis.set(key, val, ex=expire)
+            await client.set(key, val, ex=expire)
         else:
-            # 设置永久键值 
-            await aio_redis.set(key, val)
+            await client.set(key, val)
     except Exception as e:
         logger.error(f"Redis set错误: {str(e)}")
 
@@ -59,7 +99,8 @@ async def aio_redis_set(key: str, val: str | dict, expire: int = None):
 async def aio_redis_get(key: str):
     """获取Redis键值"""
     try:
-        return await aio_redis.get(key)
+        client = get_redis_client()
+        return await client.get(key)
     except Exception as e:
         logger.error(f"Redis get错误: {str(e)}")
         return None
@@ -68,7 +109,8 @@ async def aio_redis_get(key: str):
 async def aio_redis_delete(key: str):
     """删除Redis键"""
     try:
-        return await aio_redis.delete(key)
+        client = get_redis_client()
+        return await client.delete(key)
     except Exception as e:
         logger.error(f"Redis delete错误: {str(e)}")
         return None
