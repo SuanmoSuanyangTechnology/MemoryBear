@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:23 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 11:13:27
+ * @Last Modified time: 2026-03-27 14:57:34
  */
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -92,7 +92,7 @@ const PerceptualLastInfo: FC = () => {
       setData(response)
       setLoading(false)
       if (response.file_path) {
-        fetch(response.file_path, { method: 'HEAD' })
+        fetch(response.file_path, { method: 'GET' })
           .then(r => {
             const bytes = Number(r.headers.get('content-length'))
             if (!bytes) return
