@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 15:01:52
+ * @Last Modified time: 2026-03-27 17:11:01
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -72,6 +72,7 @@ export interface UseWorkflowGraphReturn {
 
   handleAddNotes: () => void;
   handleSaveFeaturesConfig: (value: FeaturesConfigForm) => void;
+  features?: FeaturesConfigForm;
 }
 
 /**
@@ -1212,6 +1213,7 @@ export const useWorkflowGraph = ({
   }
   const handleSaveFeaturesConfig = (value?: FeaturesConfigForm) => {
     featuresRef.current = value
+    onFeaturesLoad?.(value)
   }
 
   return {
@@ -1233,6 +1235,7 @@ export const useWorkflowGraph = ({
     chatVariables,
     setChatVariables,
     handleAddNotes,
-    handleSaveFeaturesConfig
+    handleSaveFeaturesConfig,
+    features: featuresRef.current,
   };
 };

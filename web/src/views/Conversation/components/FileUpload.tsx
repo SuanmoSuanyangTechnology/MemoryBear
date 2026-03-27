@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-23 17:19:58
+ * @Last Modified time: 2026-03-27 17:55:04
  */
 /**
  * File Upload Component
@@ -59,7 +59,7 @@ interface UploadFilesProps extends Omit<UploadProps, 'onChange'> {
   featureConfig: FeaturesConfigForm['file_upload']
 }
 
-const transform_file_type = {
+export const transform_file_type: Record<string, string> = {
   'text/plain': 'document/text',
   'text/markdown': 'document/markdown',
   'text/x-markdown': 'document/x-markdown',

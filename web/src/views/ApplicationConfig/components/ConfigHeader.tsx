@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 15:58:23
+ * @Last Modified time: 2026-03-27 17:33:44
  */
 import { type FC, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -212,7 +212,12 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         </Flex>}
         extra={application?.type === 'workflow' && source !== 'sharing' && activeTab === 'arrangement'
           ? <Flex align="center" justify="end" gap={10} className="rb:h-8">
-            <FeaturesConfig source={application?.type} value={features as FeaturesConfigForm} refresh={handleSaveFeaturesConfig} />
+            <FeaturesConfig
+              source={application?.type}
+              value={features as FeaturesConfigForm}
+              refresh={handleSaveFeaturesConfig}
+              chatVariables={(workflowRef.current?.chatVariables || []).map(v => ({ ...v, display_name: v.name }))}
+            />
             <Button onClick={clear}>{t('workflow.clear')}</Button>
             <Button onClick={addvariable}>{t('workflow.addvariable')}</Button>
             <Button onClick={run}>{t('workflow.run')}</Button>
