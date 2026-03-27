@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编辑</title>
+    <g id="空间外层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linejoin="round">
+        <g id="平台管理-工具管理--MCP服务" transform="translate(-1032, -135)" stroke="#171719">
+            <g id="编组-16" transform="translate(1020, 126)">
+                <g id="编辑" transform="translate(12, 9)">
+                    <g id="编组-10" transform="translate(3, 3)">
+                        <path d="M10,4.30130765 L10,8 C10,9.1045695 9.1045695,10 8,10 L2,10 C0.8954305,10 0,9.1045695 0,8 L0,2 C0,0.8954305 0.8954305,2.22044605e-16 2,0 L5.73360016,0 L5.73360016,0" id="路径"></path>
+                        <line x1="3.98149359" y1="6.04872089" x2="10" y2="1.12483439e-14" id="路径-2"></line>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

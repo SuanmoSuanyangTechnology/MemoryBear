@@ -104,20 +104,20 @@ const Mcp = forwardRef<McpRef, { getStatusTag: (status: string) => ReactNode; ke
                         items: [
                           {
                             key: 'edit',
-                            icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit.svg')]" />,
+                            icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit_bold.svg')]" />,
                             label: t('common.edit'),
                             onClick: () => handleEdit(item),
                           },
                           {
                             key: 'link',
-                            icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/conversation/link.svg')]" />,
+                            icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/link.svg')]" />,
                             label: t('tool.testLink'),
                             onClick: () => handleTestConnection(item),
                           },
                           {
                             key: 'delete',
                             className: 'rb:text-[#FF5D34]!',
-                            icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red.svg')]" />,
+                            icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red_big.svg')]" />,
                             label: t('common.delete'),
                             onClick: () => handleDeleteService(item),
                           },
@@ -125,7 +125,7 @@ const Mcp = forwardRef<McpRef, { getStatusTag: (status: string) => ReactNode; ke
                       }}
                       placement="bottomRight"
                     >
-                      <div className="rb:cursor-pointer rb:size-6 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
+                      <div className="rb:cursor-pointer rb:size-5.5 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
                     </Dropdown>
                   </Flex>
                 }

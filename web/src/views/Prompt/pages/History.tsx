@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:44:04 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 14:36:33
+ * @Last Modified time: 2026-03-27 15:52:44
  */
 /**
  * Prompt History Component
@@ -12,8 +12,7 @@
 import React, { useRef, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Tooltip, App, Flex, Form, Dropdown } from 'antd';
-import { DashOutlined } from '@ant-design/icons';
+import { Space, App, Flex, Form } from 'antd';
 
 import type { HistoryQuery, HistoryItem, PromptDetailRef } from '../types';
 import RbCard from '@/components/RbCard/Card'
@@ -104,26 +103,30 @@ const History: React.FC = () => {
         renderItem={(item) => (
           <RbCard
             className="rb:cursor-pointer rb:relative"
-            title={<Tooltip title={item.title}>{item.title}</Tooltip>}
-            headerClassName='rb:h-[38px]! rb:pt-3!'
+            title={item.title}
+            headerClassName='rb:min-h-[46px]!'
             headerType="borderless"
+            bodyClassName="rb:px-3! rb:py-0!"
           >
-            <Dropdown
-              menu={{
-                items: [
-                  { key: 'detail', label: t('common.viewDetail') },
-                  { key: 'edit', label: t('common.edit') },
-                  { key: 'delete', label: t('common.delete') },
-                ],
-                onClick: ({key}) =>  handleClick(key, item)
-              }}
-            >
-              <DashOutlined className="rb:absolute rb:right-6 rb:top-3.25 rb:hover:bg-[#F6F6F6] rb:p-1 rb:rounded-md" />
-            </Dropdown>
-            <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5 rb:mb-2">{formatDateTime(item.created_at, 'YYYY/MM/DD HH:mm')}</div>
-            <div className="rb:h-35.5 rb:leading-5 rb:overflow-hidden rb:px-3 rb:py-2.5 rb:bg-[#F6F6F6] rb:rounded-lg rb:hover:shadow-[0px_2px_8px_0px_rgba(23,23,25,0.16)]">
+            <div className="rb:h-35.5 rb:leading-5 rb:overflow-hidden rb:px-3 rb:py-2.5 rb:bg-[#F6F6F6] rb:rounded-lg">
               <Markdown content={item.prompt} className="rb:h-31! rb:overflow-hidden! rb:line-clamp-6! rb:break-word! rb:text-ellipsis!" />
             </div>
+            
+            <Flex align="center" justify="space-between" className="rb:py-3!">
+              <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5">{formatDateTime(item.created_at, 'YYYY/MM/DD HH:mm')}</div>
+
+              <Space size={8}>
+                <div className="rb:size-4.5 rb:bg-cover rb:bg-[url('src/assets/images/prompt/eye.svg')] rb:hover:bg-[url('src/assets/images/prompt/eye_bg.svg')]"
+                  onClick={() => handleClick('detail', item)}
+                ></div>
+                <div className="rb:size-4.5 rb:bg-cover rb:bg-[url('src/assets/images/prompt/edit.svg')] rb:hover:bg-[url('src/assets/images/prompt/edit_bg.svg')]"
+                  onClick={() => handleClick('edit', item)}
+                ></div>
+                <div className="rb:size-4.5 rb:bg-cover rb:bg-[url('src/assets/images/prompt/delete.svg')] rb:hover:bg-[url('src/assets/images/prompt/delete_hover.svg')]"
+                  onClick={() => handleClick('delete', item)}
+                ></div>
+              </Space>
+            </Flex>
           </RbCard>
         )}
         heightClass="rb:h-[calc(100vh-126px)]!"

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:18:19 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 14:43:33
+ * @Last Modified time: 2026-03-27 15:52:37
  */
 /**
  * PageScrollList Component
@@ -156,7 +156,7 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
           {/* Render grid list or empty state */}
           {data.length > 0 ? (
             <Row
-              gutter={[16, 16]}
+              gutter={[12, 12]}
             >
               {data.map((item, index) => (
                 <Col key={(item as any).id || index} span={24/column}>

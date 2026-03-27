@@ -70,7 +70,7 @@ const NodeLibrary: FC<{ collapsed: boolean; handleToggle: () => void }> = ({ col
                         key={nodeIndex}
                         align="center"
                         gap={8}
-                        className="rb:rounded-xl rb:p-2! rb-border rb:cursor-pointer rb:hover:border rb:hover:border-[#171719]!"
+                        className="rb:rounded-xl rb:p-2! rb:border rb:border-[#EBEBEB] rb:cursor-pointer rb:hover:border rb:hover:border-[#171719]!"
                         draggable
                         onDragStart={(e) => {
                           e.dataTransfer.setData('application/reactflow', node.type);
