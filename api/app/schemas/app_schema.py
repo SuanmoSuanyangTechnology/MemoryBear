@@ -276,7 +276,7 @@ class AgentConfigCreate(BaseModel):
 
     # 记忆配置
     memory: MemoryConfig = Field(
-        default_factory=lambda: MemoryConfig(enabled=True),
+        default_factory=lambda: MemoryConfig(enabled=False),
         description="对话历史记忆配置"
     )
 

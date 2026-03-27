@@ -1084,7 +1084,6 @@ class AppService:
                 if not exists:
                     cleaned["memory_config_id"] = None
                     cleaned.pop("memory_content", None)
-                    cleaned["enabled"] = False
                 return cleaned
 
             exists = self.db.query(
@@ -1096,7 +1095,6 @@ class AppService:
             if not exists:
                 cleaned["memory_config_id"] = None
                 cleaned.pop("memory_content", None)
-                cleaned["enabled"] = False
 
         return cleaned
 
