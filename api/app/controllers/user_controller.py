@@ -112,7 +112,7 @@ def get_current_user_info(
     
     api_logger.info(f"当前用户信息获取成功: {result.username}, 角色: {result_schema.role}, 工作空间: {result_schema.current_workspace_name}")
 
-    # 设置权限：如果用户来自 SSO Source，则使用该 Source 的 permissions；否则返回全部权限
+    # 设置权限：如果用户来自 SSO Source，则使用该 Source 的 permissions；否则返回 "all" 表示拥有所有权限
     if current_user.external_source:
         from premium.sso.models import SSOSource
         source = db.query(SSOSource).filter(SSOSource.source_code == current_user.external_source).first()
@@ -121,7 +121,8 @@ def get_current_user_info(
         else:
             result_schema.permissions = []
     else:
-        result_schema.permissions = ["pricing", "user"]
+        from premium.sso.base import SSOPermission
+        result_schema.permissions = [SSOPermission.ALL.value]
 
     return success(data=result_schema, msg=t("users.info.get_success"))
 
@@ -191,7 +192,8 @@ def get_tenant_users(
             source = db.query(SSOSource).filter(SSOSource.source_code == user.external_source).first()
             u_schema.permissions = source.permissions if source and source.permissions else []
         else:
-            u_schema.permissions = ["pricing", "user"]
+            from premium.sso.base import SSOPermission
+            u_schema.permissions = [SSOPermission.ALL.value]
 
     return success(
         data={
