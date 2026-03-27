@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 11:11:46
+ * @Last Modified time: 2026-03-27 18:30:52
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -33,6 +33,7 @@ import assignerIcon from '@/assets/images/workflow/assigner.svg'
 import memoryReadIcon from '@/assets/images/workflow/memory-read.svg'
 import memoryWriteIcon from '@/assets/images/workflow/memory-write.svg'
 import unknownIcon from '@/assets/images/workflow/unknown.svg'
+import documentExtractorIcon from '@/assets/images/workflow/document-extractor.svg'
 
 import { memoryConfigListUrl } from '@/api/memory'
 import type { NodeLibrary } from './types'
@@ -473,8 +474,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
         }
       },
-      {
-        type: "document-extractor", icon: codeExecutionIcon,
+      { type: "document-extractor", icon: documentExtractorIcon,
         config: {
           file_selector: {
             type: 'variableList',

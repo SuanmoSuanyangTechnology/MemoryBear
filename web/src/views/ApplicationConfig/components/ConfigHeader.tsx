@@ -2,11 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 17:33:44
+ * @Last Modified time: 2026-03-27 19:07:24
  */
 import { type FC, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Tabs, Dropdown, Button, Flex } from 'antd';
+import { Tabs, Dropdown, Flex, Popover } from 'antd';
 import type { MenuProps } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
@@ -218,14 +218,36 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
               refresh={handleSaveFeaturesConfig}
               chatVariables={(workflowRef.current?.chatVariables || []).map(v => ({ ...v, display_name: v.name }))}
             />
-            <Button onClick={clear}>{t('workflow.clear')}</Button>
-            <Button onClick={addvariable}>{t('workflow.addvariable')}</Button>
-            <Button onClick={run}>{t('workflow.run')}</Button>
-            <Button type="primary" onClick={save}>{t('workflow.save')}</Button>
-            <div
-              className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/logout.svg')]"
-              onClick={goToApplication}
-            ></div>
+            <Popover content={t('workflow.clear')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+              <div
+                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('src/assets/images/workflow/clear.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                onClick={clear}
+              ></div>
+            </Popover>
+            <Popover content={t('workflow.addvariable')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+              <div
+                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('src/assets/images/workflow/variable.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                onClick={addvariable}
+              ></div>
+            </Popover>
+            <Popover content={t('workflow.run')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+              <div
+                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('src/assets/images/workflow/run.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                onClick={run}
+              ></div>
+            </Popover>
+            <Popover content={t('workflow.save')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+              <div
+                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('src/assets/images/workflow/save.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                onClick={save}
+              ></div>
+            </Popover>
+            <Popover content={t('common.return')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+              <div
+                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('src/assets/images/workflow/return.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                onClick={goToApplication}
+              ></div>
+            </Popover>
           </Flex>
           : <Flex justify="flex-end">
             <Flex align="center" className="rb:leading-5 rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goToApplication}>
