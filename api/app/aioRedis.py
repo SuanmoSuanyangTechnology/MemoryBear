@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+import os
+import threading
 from typing import Dict, Any, Optional
 
 import redis.asyncio as redis
@@ -20,6 +22,41 @@ pool = ConnectionPool.from_url(
     max_connections=30
 )
 aio_redis = redis.StrictRedis(connection_pool=pool)
+
+_REDIS_URL = f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}"
+
+# Thread-local storage for connection pools.
+# Each thread (and each forked process) gets its own pool to avoid
+# "Future attached to a different loop" errors in Celery --pool=threads
+# and stale connections after fork in --pool=prefork.
+_thread_local = threading.local()
+
+
+def get_thread_safe_redis() -> redis.StrictRedis:
+    """Get a Redis client safe for the current execution context.
+    
+    Uses thread-local storage with PID checking to ensure:
+    - Each thread gets its own ConnectionPool (Celery --pool=threads)
+    - Pools are recreated after fork (Celery --pool=prefork)
+    - health_check_interval prevents stale connection errors
+    
+    Returns:
+        redis.StrictRedis: A Redis client with a thread/process-local pool.
+    """
+    current_pid = os.getpid()
+
+    if not hasattr(_thread_local, "pool") or getattr(_thread_local, "pid", None) != current_pid:
+        _thread_local.pid = current_pid
+        _thread_local.pool = ConnectionPool.from_url(
+            _REDIS_URL,
+            db=settings.REDIS_DB,
+            password=settings.REDIS_PASSWORD,
+            decode_responses=True,
+            max_connections=5,
+            health_check_interval=30,
+        )
+
+    return redis.StrictRedis(connection_pool=_thread_local.pool)
 
 
 async def get_redis_connection():
@@ -44,10 +81,8 @@ async def aio_redis_set(key: str, val: str | dict, expire: int = None):
             val = json.dumps(val, ensure_ascii=False)
 
         if expire is not None:
-            # 设置带过期时间的键值
             await aio_redis.set(key, val, ex=expire)
         else:
-            # 设置永久键值
             await aio_redis.set(key, val)
     except Exception as e:
         logger.error(f"Redis set错误: {str(e)}")
