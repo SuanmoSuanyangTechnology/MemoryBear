@@ -182,7 +182,7 @@ class ExtractionOrchestrator:
         list[StatementEntityEdge],
         list[EntityEntityEdge],
         list[PerceptualEdge],
-        dict
+        list[DialogData]
     ]:
         """
         运行完整的知识提取流水线（优化版：并行执行）
@@ -1571,7 +1571,16 @@ class ExtractionOrchestrator:
                 final_entity_entity_edges = dedup_entity_entity_edges
             else:
                 # 正式模式：执行完整的两阶段去重
-                dedup_result_tuple = await dedup_layers_and_merge_and_return(
+                (
+                    dialogue_nodes,
+                    chunk_nodes,
+                    statement_nodes,
+                    final_entity_nodes,
+                    statement_chunk_edges,
+                    final_statement_entity_edges,
+                    final_entity_entity_edges,
+                    dedup_details,
+                ) = await dedup_layers_and_merge_and_return(
                     dialogue_nodes,
                     chunk_nodes,
                     statement_nodes,
@@ -1584,18 +1593,6 @@ class ExtractionOrchestrator:
                     self.connector,
                     llm_client=self.llm_client,
                 )
-
-                # 解包返回值
-                (
-                    dialogue_nodes,
-                    chunk_nodes,
-                    statement_nodes,
-                    final_entity_nodes,
-                    statement_chunk_edges,
-                    final_statement_entity_edges,
-                    final_entity_entity_edges,
-                    dedup_details,
-                ) = dedup_result_tuple
 
                 # 保存去重消歧的详细记录到实例变量
                 self._save_dedup_details(dedup_details, entity_nodes, final_entity_nodes)
