@@ -111,6 +111,18 @@ def get_current_user_info(
                 break
     
     api_logger.info(f"当前用户信息获取成功: {result.username}, 角色: {result_schema.role}, 工作空间: {result_schema.current_workspace_name}")
+
+    # 设置权限：如果用户来自 SSO Source，则使用该 Source 的 permissions；否则返回全部权限
+    if current_user.external_source:
+        from premium.sso.models import SSOSource
+        source = db.query(SSOSource).filter(SSOSource.source_code == current_user.external_source).first()
+        if source and source.permissions:
+            result_schema.permissions = source.permissions
+        else:
+            result_schema.permissions = []
+    else:
+        result_schema.permissions = ["pricing", "user"]
+
     return success(data=result_schema, msg=t("users.info.get_success"))
 
 
@@ -133,6 +145,63 @@ def get_tenant_superusers(
     
     superusers_schema = [user_schema.User.model_validate(u) for u in superusers]
     return success(data=superusers_schema, msg=t("users.list.superusers_success"))
+
+
+@router.get("/tenant/users", response_model=ApiResponse)
+def get_tenant_users(
+    page: int = 1,
+    size: int = 20,
+    is_active: bool = None,
+    is_superuser: bool = None,
+    search: str = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    t: Callable = Depends(get_translator)
+):
+    """获取当前用户所在租户的用户列表（普通用户可访问）"""
+    api_logger.info(f"获取租户用户列表请求: tenant_id={current_user.tenant_id}, 操作者: {current_user.username}")
+
+    if not current_user.tenant_id:
+        raise BusinessException("用户没有租户信息", code=BizCode.TENANT_NOT_FOUND)
+
+    from app.services.tenant_service import TenantService
+    tenant_service = TenantService(db)
+
+    skip = (page - 1) * size
+    users = tenant_service.get_tenant_users(
+        tenant_id=current_user.tenant_id,
+        skip=skip,
+        limit=size,
+        is_active=is_active,
+        is_superuser=is_superuser,
+        search=search
+    )
+    total = tenant_service.count_tenant_users(
+        tenant_id=current_user.tenant_id,
+        is_active=is_active,
+        is_superuser=is_superuser,
+        search=search
+    )
+
+    users_schema = [user_schema.User.model_validate(u) for u in users]
+    for u_schema in users_schema:
+        user = users[[s.id for s in users_schema].index(u_schema.id)]
+        if user.external_source:
+            from premium.sso.models import SSOSource
+            source = db.query(SSOSource).filter(SSOSource.source_code == user.external_source).first()
+            u_schema.permissions = source.permissions if source and source.permissions else []
+        else:
+            u_schema.permissions = ["pricing", "user"]
+
+    return success(
+        data={
+            "users": users_schema,
+            "total": total,
+            "page": page,
+            "size": size,
+        },
+        msg=t("users.list.get_success")
+    )
 
 
 

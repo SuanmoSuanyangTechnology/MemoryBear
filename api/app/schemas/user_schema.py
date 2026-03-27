@@ -1,6 +1,6 @@
 from dataclasses import field
 from pydantic import BaseModel, EmailStr, Field, field_validator, validator, ConfigDict
-from typing import Optional
+from typing import Optional, List
 import datetime
 import uuid
 
@@ -85,6 +85,7 @@ class User(UserBase):
     current_workspace_name: Optional[str] = None
     role: Optional[WorkspaceRole] = None
     preferred_language: Optional[str] = "zh"  # 用户语言偏好
+    permissions: Optional[List[str]] = None  # 用户权限列表，由 external_source 的 permissions 控制
 
     # 将 datetime 转换为毫秒时间戳
     @validator("created_at", pre=True)
