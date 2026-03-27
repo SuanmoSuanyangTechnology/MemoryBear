@@ -158,7 +158,7 @@ _lenient_renderer = TemplateRenderer(strict=False)
 def render_template(
         template: str,
         conv_vars: dict[str, Any] | LazyVariableDict,
-        node_outputs: dict[str, Any] | LazyVariableDict,
+        node_outputs: dict[str, Any] | dict[str, LazyVariableDict],
         system_vars: dict[str, Any] | LazyVariableDict,
         strict: bool = True
 ) -> str:
