@@ -214,13 +214,13 @@ class ConversationService:
 
             conversation.message_count += 1
 
-            self.db.commit()
-            self.db.refresh(message)
-
-            if conversation.is_first_user_message and role == "user":
+            if conversation.message_count <= 2 and role == "user":
                 conversation.title = (
                         content[:50] + ("..." if len(content) > 50 else "")
                 )
+
+            self.db.commit()
+            self.db.refresh(message)
 
             logger.info(
                 "Message added successfully",

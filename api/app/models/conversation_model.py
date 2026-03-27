@@ -57,12 +57,6 @@ class Conversation(Base):
     workspace = relationship("Workspace")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
 
-    @property
-    def is_first_user_message(self):
-        """判断当前是否是用户的第一条消息（无视开场白）"""
-        user_message_count = sum(1 for msg in self.messages if msg.role == "user")
-        return user_message_count == 1
-
 
 class ConversationDetail(Base):
     __tablename__ = "conversation_details"
