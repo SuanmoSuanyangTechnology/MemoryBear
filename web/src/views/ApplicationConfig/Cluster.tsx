@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:33 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 11:51:34
+ * @Last Modified time: 2026-03-27 18:14:25
  */
 import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -79,7 +79,7 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
         saveMultiAgentConfig(id as string, params)
           .then((res) => {
             if (flag) {
-              message.success(t('common.saveSuccess'))
+              message.success({ content: t('common.saveSuccess'), duration: 1 })
             }
             resolve(res)
           })

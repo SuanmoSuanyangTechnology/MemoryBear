@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 17:11:01
+ * @Last Modified time: 2026-03-27 18:14:38
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -1177,7 +1177,7 @@ export const useWorkflowGraph = ({
       saveWorkflowConfig(config.app_id, params as WorkflowConfig)
       .then((res) => {
         if (flag) {
-          message.success(t('common.saveSuccess'))
+          message.success({ content: t('common.saveSuccess'), duration: 1 })
         }
         resolve(res)
       }).catch(error => {

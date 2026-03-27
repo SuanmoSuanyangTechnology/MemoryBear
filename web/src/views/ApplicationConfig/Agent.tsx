@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 13:46:18
+ * @Last Modified time: 2026-03-27 18:13:51
  */
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { useTranslation } from 'react-i18next'
@@ -255,7 +255,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
       saveAgentConfig(data.app_id, params)
       .then((res) => {
         if (flag) {
-          message.success(t('common.saveSuccess'))
+          message.success({ content: t('common.saveSuccess'), duration: 1 })
         }
         setIsSave(false)
         resolve(res)
