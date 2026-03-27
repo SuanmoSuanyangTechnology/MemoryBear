@@ -1753,12 +1753,16 @@ class AppService:
 
             miss_params = []
             if agent_cfg.default_model_config_id is None:
-                miss_params.append("model config")
+                miss_params.append("模型配置")
 
             if agent_cfg.memory.get("enabled") and not agent_cfg.memory.get("memory_config_id"):
-                miss_params.append("memory config")
+                miss_params.append("记忆配置")
             if miss_params:
-                raise BusinessException(f"{', '.join(miss_params)} is required")
+                raise BusinessException(
+                    f"应用发布失败：检测到以下必要配置尚未完成：{', '.join(miss_params)}。请返回应用编辑页面完成相关配置后再尝试发布。",
+                    BizCode.CONFIG_MISSING,
+                    context={"missing_params": miss_params},
+                )
 
             config = {
                 "system_prompt": agent_cfg.system_prompt,
