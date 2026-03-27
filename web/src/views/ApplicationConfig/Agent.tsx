@@ -130,6 +130,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
    * @param type - Source type (model or chat)
    */
   const refresh = (vo: ModelConfig, type: Source) => {
+    const opening_statement = form.getFieldValue(['features', 'opening_statement'])
     if (type === 'model') {
       const { default_model_config_id, capability, ...rest } = vo
       if (default_model_config_id !== values.default_model_config_id) {
@@ -148,11 +149,18 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
         model_parameters: {...rest}
       })
       if (default_model_config_id === values?.default_model_config_id) {
+        const label = defaultModel?.id === default_model_config_id && defaultModel?.name ? defaultModel.name : vo.label || ''
         setChatList([{
           label: defaultModel?.id === default_model_config_id && defaultModel?.name ? defaultModel.name :  vo.label || '',
           model_config_id: default_model_config_id || '',
           model_parameters: {...rest},
-          list: []
+          list: label !== '' ? [{
+            role: 'assistant',
+            content: opening_statement?.statement,
+            meta_data: {
+              suggested_questions: opening_statement?.suggested_questions || []
+            }
+          }] : []
         }])
       }
     } else if (type === 'chat') {
@@ -275,11 +283,18 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
     if (values?.default_model_config_id && modelList.length > 0) {
       const filterValue = modelList.find(item => item.id === values.default_model_config_id)
       setDefaultModel(filterValue as Model | null)
+      const opening_statement = form.getFieldValue(['features', 'opening_statement'])
       setChatList([{
         label: filterValue?.name || '',
         model_config_id: filterValue?.id || '',
         model_parameters: {...(filterValue?.config || {})} as unknown as ModelConfig,
-        list: []
+        list: filterValue?.name ? [{
+          role: 'assistant',
+          content: opening_statement?.statement,
+          meta_data: {
+            suggested_questions: opening_statement?.suggested_questions || []
+          }
+        }] : []
       }])
       form.setFieldValue('capability', filterValue?.capability)
     }
