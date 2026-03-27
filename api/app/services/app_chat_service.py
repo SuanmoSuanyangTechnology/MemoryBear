@@ -140,13 +140,13 @@ class AppChatService:
         # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
         is_new_conversation = len(history) == 0
         if is_new_conversation:
-            opening = self.agent_service._get_opening_statement(features_config, True, variables)
+            opening, suggested_questions = self.agent_service._get_opening_statement(features_config, True, variables)
             if opening:
                 self.conversation_service.add_message(
                     conversation_id=conversation_id,
                     role="assistant",
                     content=opening,
-                    meta_data={}
+                    meta_data={"suggested_questions": suggested_questions}
                 )
                 # 重新加载历史（包含刚写入的开场白）
                 history = await self.conversation_service.get_conversation_history(
@@ -367,13 +367,13 @@ class AppChatService:
             # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
             is_new_conversation = len(history) == 0
             if is_new_conversation:
-                opening = self.agent_service._get_opening_statement(features_config, True, variables)
+                opening, suggested_questions = self.agent_service._get_opening_statement(features_config, True, variables)
                 if opening:
                     self.conversation_service.add_message(
                         conversation_id=conversation_id,
                         role="assistant",
                         content=opening,
-                        meta_data={}
+                        meta_data={"suggested_questions": suggested_questions}
                     )
                     # 重新加载历史（包含刚写入的开场白）
                     history = await self.conversation_service.get_conversation_history(
