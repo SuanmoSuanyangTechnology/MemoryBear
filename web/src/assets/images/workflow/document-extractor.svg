@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>3备份</title>
+    <defs>
+        <filter x="-2.9%" y="-6.6%" width="105.8%" height="118.4%" filterUnits="objectBoundingBox" id="filter-1">
+            <feOffset dx="0" dy="2" in="SourceAlpha" result="shadowOffsetOuter1"></feOffset>
+            <feGaussianBlur stdDeviation="2" in="shadowOffsetOuter1" result="shadowBlurOuter1"></feGaussianBlur>
+            <feColorMatrix values="0 0 0 0 0.0901960784   0 0 0 0 0.0901960784   0 0 0 0 0.0980392157  0 0 0 0.03 0" type="matrix" in="shadowBlurOuter1" result="shadowMatrixOuter1"></feColorMatrix>
+            <feMerge>
+                <feMergeNode in="shadowMatrixOuter1"></feMergeNode>
+                <feMergeNode in="SourceGraphic"></feMergeNode>
+            </feMerge>
+        </filter>
+    </defs>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="应用管理-工作流-配置-开始" transform="translate(-371, -676)">
+            <g id="编组-32" transform="translate(340, 111)">
+                <g id="3备份" filter="url(#filter-1)" transform="translate(19, 553)">
+                    <g id="编组-6" transform="translate(12, 12)">
+                        <rect id="矩形" fill="#02AFD5" x="0" y="0" width="24" height="24" rx="8"></rect>
+                        <g id="编组-36" transform="translate(6, 5.2)" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2">
+                            <path d="M2.5,0 L8.21312992,-1.33226763e-15 C8.73846647,-1.33226763e-15 9.24271021,0.206694977 9.61690184,0.57542133 L11.4037719,2.33619321 C11.7852265,2.7120764 12,3.22523874 12,3.76077188 L12,11.1 C12,12.4807119 10.8807119,13.6 9.5,13.6 L2.5,13.6 C1.11928813,13.6 1.33226763e-15,12.4807119 8.8817842e-16,11.1 L0,2.5 C0,1.11928813 1.11928813,0 2.5,0 Z" id="矩形"></path>
+                            <path d="M8.5,0.264391446 L8.5,2.0328486 C8.5,2.86127573 9.17157288,3.5328486 10,3.5328486 L11.8153307,3.5328486 L11.8153307,3.5328486" id="路径-10"></path>
+                            <line x1="3.66996056" y1="6.5" x2="8.15988708" y2="6.5" id="路径-11"></line>
+                            <line x1="3.66996056" y1="9.5001" x2="7.0221777" y2="9.5001" id="路径-13"></line>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

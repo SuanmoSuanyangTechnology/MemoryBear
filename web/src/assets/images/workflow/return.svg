@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>退出</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="应用管理-工作流-配置-开始" transform="translate(-1402, -24)" stroke="#171719" stroke-width="1.2">
+            <g id="退出" transform="translate(1394, 17)">
+                <g transform="translate(8, 7)" id="编组-7">
+                    <g transform="translate(2.5, 2)">
+                        <path d="M4,12 L1,12 C0.44771525,12 0,11.5522847 0,11 L0,1 C0,0.44771525 0.44771525,1.11022302e-16 1,0 L4,0 L4,0" id="路径"></path>
+                        <line x1="11" y1="6" x2="4.5" y2="6" id="路径-6"></line>
+                        <polyline id="路径" points="8 3 11 6 8 9"></polyline>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

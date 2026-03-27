@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:25:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 16:38:57
+ * @Last Modified time: 2026-03-27 19:11:43
  */
 /**
  * SiderMenu Component
@@ -136,7 +136,7 @@ const Menu: FC<{
       menuList = allMenus[source] || []
     }
 
-    const noAuthList = ['user', 'pricing'].filter(vo => !user.permissions.includes(vo) && !user.permissions?.includes('all'))
+    const noAuthList = ['user', 'pricing'].filter(vo => !user.permissions?.includes(vo) && !user.permissions?.includes('all'))
 
     if (noAuthList && !noAuthList?.includes('all')) {
       const filterMenus = (list: MenuItem[]): MenuItem[] =>{
