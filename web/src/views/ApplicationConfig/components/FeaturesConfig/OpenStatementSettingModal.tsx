@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 14:12:11
+ * @Last Modified time: 2026-03-27 14:38:28
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Button, Form, Input, Flex, App } from 'antd';
@@ -44,12 +44,13 @@ const OpenStatementSettingModal = forwardRef<OpenStatementSettingModalRef, OpenS
 
   const handleSave = async () => {
     form.validateFields().then(values => {
+      const { suggested_questions, ...rest } = values
+      const filterSuggestedQuestions = suggested_questions.filter(vo => vo && vo.trim() !== '' && vo !== null)
       if (values?.enabled && values?.statement && values?.statement?.trim() !== '') {
         const usedVars = [...new Set([...values.statement?.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]))]
 
         const validNames = new Set(chatVariables.map(v => v.name))
         const invalid = usedVars.filter(v => !validNames.has(v))
-        console.log('invalid', invalid)
         if (invalid.length > 0) {
           modal.confirm({
             title: t('application.invalidVariablesTitle'),
@@ -57,14 +58,26 @@ const OpenStatementSettingModal = forwardRef<OpenStatementSettingModalRef, OpenS
             okText: t('common.confirm'),
             cancelText: t('common.cancel'),
             onOk: () => {
-              onSave(values);
+              onSave({
+                ...rest,
+                suggested_questions: filterSuggestedQuestions
+              });
               handleClose();
             },
           })
         } else {
-          onSave(values);
+          onSave({
+            ...rest,
+            suggested_questions: filterSuggestedQuestions
+          });
           handleClose();
         }
+      } else {
+        onSave({
+          ...rest,
+          suggested_questions: filterSuggestedQuestions
+        });
+        handleClose();
       }
     });
   };
