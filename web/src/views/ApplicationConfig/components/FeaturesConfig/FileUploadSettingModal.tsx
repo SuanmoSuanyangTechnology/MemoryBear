@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 11:00:14
+ * @Last Modified time: 2026-03-27 14:02:40
  */
 import { forwardRef, useImperativeHandle, useState, useMemo } from 'react';
 import { Form, InputNumber, Flex, Switch, Row, Col, Radio } from 'antd';
@@ -12,6 +12,7 @@ import clsx from 'clsx';
 import RbModal from '@/components/RbModal';
 import type { FeaturesConfigForm } from '../../types'
 import type { Capability } from '@/views/ModelManagement/types'
+import type { Application } from '@/views/ApplicationManagement/types';
 
 type FileUpload = Omit<FeaturesConfigForm['file_upload'], 'settings'>
 
@@ -23,6 +24,7 @@ interface FileUploadSettingModalRef {
 interface FileUploadSettingModalProps {
   onSave: (values: FileUpload) => void;
   capability?: Capability[];
+  source?: Application['type']
 }
 const documentType = {
   type: 'document',
@@ -108,6 +110,7 @@ const defaultValues: FileUpload = {
 const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadSettingModalProps>(({
   onSave,
   capability,
+  source,
 }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
@@ -149,6 +152,14 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
   }));
 
   const fileTypeOptions = useMemo(() => {
+    if (source === 'workflow') {
+      return [
+        documentType,
+        imageType,
+        audioType,
+        videoType,
+      ]
+    }
     let options = [documentType]
     if (!capability) return options
     if (capability.includes('vision')) options = [...options, imageType]

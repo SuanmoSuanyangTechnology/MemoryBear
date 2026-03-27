@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 13:35:42
+ * @Last Modified time: 2026-03-27 14:28:19
  */
 /**
  * Conversation Page
@@ -30,8 +30,10 @@ import { type SSEMessage } from '@/utils/stream'
 import { shareFileUploadUrlWithoutApiPrefix } from '@/api/fileStorage'
 import ChatToolbar, { type ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import type { Variable } from '@/views/Workflow/components/Properties/VariableList/types'
+import type { Variable as AppVariable } from '@/views/ApplicationConfig/components/VariableList/types'
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
 import { getFileStatusById } from '@/api/fileStorage';
+import { replaceVariables } from '@/views/ApplicationConfig/Agent'
 
 const Conversation: FC = () => {
   const { t } = useTranslation()
@@ -84,11 +86,11 @@ const Conversation: FC = () => {
     if (shareToken && token) {
       getExperienceConfig(token)
         .then(res => {
-          const response = res as { variables: Variable[]; features: FeaturesConfigForm; app_type: string; memory?: boolean; }
+          const response = res as { variables: Variable[]; features: FeaturesConfigForm; app_type: string; memory: boolean; }
           toolbarRef.current?.setVariables(response.variables || [])
           setConfig(response)
           setFeatures(response.features)
-          setIsHasMemory((response.app_type === 'workflow' && response.memory) || (response.app_type !== 'workflow'))
+          setIsHasMemory((response.app_type === 'workflow' && response.memory) || response.memory)
         })
     } else {
       setChatList([])
@@ -375,6 +377,17 @@ const Conversation: FC = () => {
     })
   }
 
+  const handleChangeVariables = (variables: Variable[]) => {
+    setChatList(prev => {
+      const firstMsg = prev[0]
+      console.log('firstMsg', firstMsg)
+      if (firstMsg && firstMsg.role === 'assistant' && firstMsg.content && features?.opening_statement.enabled && features?.opening_statement.statement && variables.length > 0) {
+        firstMsg.content = replaceVariables(features?.opening_statement.statement, variables as unknown as AppVariable[])
+      }
+      return [firstMsg, ...prev.slice(1)]
+    })
+  }
+
   console.log('chatList', chatList)
 
   return (
@@ -460,7 +473,8 @@ const Conversation: FC = () => {
               }
             }}
             rightExtra={
-              <Flex align="center" justify="end" gap={8}>
+              (features?.web_search?.enabled || isHasMemory)
+              ? <Flex align="center" justify="end" gap={8}>
                 {features?.web_search?.enabled &&
                   <Tooltip title={t('memoryConversation.web_search')}>
                     <Flex justify="center" align="center"
@@ -496,7 +510,9 @@ const Conversation: FC = () => {
                   </Tooltip>
                 }
               </Flex>
+              : undefined
             }
+            onVariablesChange={handleChangeVariables}
           />
           </Chat>
         </div>

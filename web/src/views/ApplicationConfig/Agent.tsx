@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 11:39:59
+ * @Last Modified time: 2026-03-27 13:46:18
  */
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { useTranslation } from 'react-i18next'
@@ -44,6 +44,14 @@ import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import DescWrapper from '@/components/FormItem/DescWrapper'
 import FeaturesConfig from './components/FeaturesConfig'
 import { getListLogoUrl } from '@/views/ModelManagement/utils';
+import type { ChatItem } from '@/components/Chat/types'
+
+export const replaceVariables = (statement: string, variables: Variable[]) => {
+  return statement.replace(/\{\{([^}]+)\}\}/g, (match, name) => {
+    const v = variables.find(item => item.name === name)
+    return v?.value != null && v.value !== '' ? String(v.value) : match
+  })
+}
 
 /**
  * Agent configuration component
@@ -130,7 +138,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
    * @param type - Source type (model or chat)
    */
   const refresh = (vo: ModelConfig, type: Source) => {
-    const opening_statement = form.getFieldValue(['features', 'opening_statement'])
     if (type === 'model') {
       const { default_model_config_id, capability, ...rest } = vo
       if (default_model_config_id !== values.default_model_config_id) {
@@ -151,16 +158,10 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
       if (default_model_config_id === values?.default_model_config_id) {
         const label = defaultModel?.id === default_model_config_id && defaultModel?.name ? defaultModel.name : vo.label || ''
         setChatList([{
-          label: defaultModel?.id === default_model_config_id && defaultModel?.name ? defaultModel.name :  vo.label || '',
+          label: label,
           model_config_id: default_model_config_id || '',
           model_parameters: {...rest},
-          list: label !== '' ? [{
-            role: 'assistant',
-            content: opening_statement?.statement,
-            meta_data: {
-              suggested_questions: opening_statement?.suggested_questions || []
-            }
-          }] : []
+          list: []
         }])
       }
     } else if (type === 'chat') {
@@ -283,18 +284,11 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
     if (values?.default_model_config_id && modelList.length > 0) {
       const filterValue = modelList.find(item => item.id === values.default_model_config_id)
       setDefaultModel(filterValue as Model | null)
-      const opening_statement = form.getFieldValue(['features', 'opening_statement'])
       setChatList([{
         label: filterValue?.name || '',
         model_config_id: filterValue?.id || '',
         model_parameters: {...(filterValue?.config || {})} as unknown as ModelConfig,
-        list: filterValue?.name ? [{
-          role: 'assistant',
-          content: opening_statement?.statement,
-          meta_data: {
-            suggested_questions: opening_statement?.suggested_questions || []
-          }
-        }] : []
+        list: []
       }])
       form.setFieldValue('capability', filterValue?.capability)
     }
@@ -346,28 +340,13 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   const handleOpenVariableConfig = () => {
     chatVariableConfigModalRef.current?.handleOpen(chatVariables)
   }
+
   /**
    * Save chat variable configuration
    * @param values - Variable values
    */
   const handleSaveChatVariable = (variables: Variable[]) => {
     setChatVariables(variables)
-    const opening_statement = form.getFieldValue(['features', 'opening_statement'])
-
-    if (opening_statement?.statement && opening_statement?.statement.trim() !== '') {
-      const statement = opening_statement.statement as string
-      const replacedContent = statement.replace(/\{\{([^}]+)\}\}/g, (match, name) => {
-        const v = variables.find(item => item.name === name)
-        return v?.value != null && v.value !== '' ? String(v.value) : match
-      })
-      setChatList(prev => prev.map(item => {
-        const list = [...(item.list || [])]
-        if (list.length > 0 && list[0].role === 'assistant') {
-          list[0] = { ...list[0], content: replacedContent }
-        }
-        return { ...item, list }
-      }))
-    }
   }
   useEffect(() => {
     setChatVariables(values?.variables || [])
@@ -375,34 +354,46 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
 
   const handleSaveFeaturesConfig = (value: FeaturesConfigForm) => {
     form.setFieldValue('features', value)
-
-    if (value?.opening_statement?.statement && value?.opening_statement?.statement.trim() !== '') {
-      setChatList(prev => (prev.map(item => {
-        const firstMsg = item.list?.[0]
-
-        if (firstMsg?.role === 'assistant') {
-          firstMsg.meta_data = {
-            suggested_questions: value.opening_statement?.suggested_questions || []
-          }
-          return item
-        } else {
-          return {
-            ...item,
-            list: [{
-              role: 'assistant',
-              content: value.opening_statement?.statement,
-              meta_data: {
-                suggested_questions: value.opening_statement?.suggested_questions || []
-              }
-            }, ...(item.list || [])]
-          }
-        }
-      })))
-    }
   }
   const modelLogo = useMemo(() => {
     return defaultModel?.name && getListLogoUrl(defaultModel.provider, defaultModel.logo as string)
   }, [defaultModel])
+
+  useEffect(() => {
+    const opening_statement = form.getFieldValue(['features', 'opening_statement'])
+    console.log('opening_statement', opening_statement, defaultModel, chatList)
+
+    if (opening_statement?.enabled && opening_statement?.statement && opening_statement?.statement.trim() !== '') {
+      const assistantMsg: ChatItem = {
+        role: 'assistant',
+        content: replaceVariables(opening_statement.statement, chatVariables),
+        meta_data: {
+          suggested_questions: opening_statement?.suggested_questions
+        }
+      }
+      setChatList(prev => {
+        if (prev.length === 0 && !defaultModel) return prev
+        if (defaultModel && prev.length === 1) {
+          return [{
+            label: defaultModel.name,
+            model_config_id: defaultModel.id,
+            model_parameters: defaultModel.config as unknown as ModelConfig,
+            list: [assistantMsg]
+          }]
+        }
+
+        return prev.map(vo => {
+          if (vo.list?.length === 0) {
+            return { ...vo, list: [assistantMsg] }
+          } else if (vo.list && vo.list[0].role === 'assistant') {
+            return { ...vo, list: [assistantMsg, ...vo.list.slice(1)] }
+          } else {
+            return { ...vo, list: [assistantMsg, ...(vo.list || [])] }
+          }
+        })
+      })
+    }
+  }, [defaultModel, chatList.length, form.getFieldValue(['features', 'opening_statement']), chatVariables])
   
   console.log('agent values', values)
   return (
