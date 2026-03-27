@@ -142,9 +142,9 @@ class TenantService:
 
     # 租户用户管理
     def get_tenant_users(
-        self,
-        tenant_id: uuid.UUID,
-        skip: int = 0,
+        self, 
+        tenant_id: uuid.UUID, 
+        skip: int = 0, 
         limit: int = 100,
         is_active: Optional[bool] = None,
         is_superuser: Optional[bool] = None,
@@ -161,7 +161,7 @@ class TenantService:
         )
 
     def count_tenant_users(
-        self,
+        self, 
         tenant_id: uuid.UUID,
         is_active: Optional[bool] = None,
         is_superuser: Optional[bool] = None,
