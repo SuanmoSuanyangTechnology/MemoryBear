@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:44:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 14:31:50
+ * @Last Modified time: 2026-03-27 15:14:58
  */
 /**
  * Prompt Editor Component
@@ -278,7 +278,7 @@ const Prompt: FC = () => {
                     className="rb:h-[calc(100vh-193px)] rb:bg-white! rb:border-none! rb:p-0! rb:text-[#212332] rb:leading-5"
                     onChange={(value) => form.setFieldValue('current_prompt', value)}
                   />
-                  : <Empty url={analysisEmptyIcon} title={t(`prompt.promptPlaceholder`)} isNeedSubTitle={false} size={[270, 170]} className="rb:h-[calc(100vh-193px)] rb:w-70 rb:mx-auto! rb:text-center! rb:text-[12px]! rb:leading-4!" />
+                  : <Empty url={analysisEmptyIcon} title={t(`prompt.promptPlaceholder`)} isNeedSubTitle={false} size={[270, 170]} className="rb:h-[calc(100vh-193px)] rb:mx-auto! rb:text-center! rb:text-[12px]! rb:leading-4!" />
                 }
               </Form.Item>
             </RbCard>

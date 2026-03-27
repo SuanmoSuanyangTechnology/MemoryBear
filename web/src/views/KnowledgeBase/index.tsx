@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useMemo, useCallback, type FC } from 'react';
-import { Row, Col, Button, Dropdown, Tooltip, App } from 'antd'
+import { Button, Dropdown, Tooltip, App, Flex } from 'antd'
 import type { MenuProps } from 'antd';
-import { EllipsisOutlined, RightOutlined, DownOutlined } from '@ant-design/icons';
+import { RightOutlined, DownOutlined } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 import { useTranslation } from 'react-i18next';
@@ -78,6 +78,7 @@ const KnowledgeBaseManagement: FC = () => {
     if (permissionId !== 'share') {
       items.push({
         key: '1',
+        icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit_bold.svg')]" />,
         label: t('knowledgeBase.edit'),
         onClick: () => {
           handleEdit(item);
@@ -87,6 +88,7 @@ const KnowledgeBaseManagement: FC = () => {
 
     items.push({
       key: '2',
+      icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red_big.svg')]" />,
       label: t('knowledgeBase.delete'),
       onClick: () => {
         handleDelete(item);
@@ -560,21 +562,23 @@ const KnowledgeBaseManagement: FC = () => {
         {data.length === 0 && !loading ? (
           <Empty size={200} />
         ) : (
-          <Row gutter={[16, 16]} className="rb:mb-2" style={{ margin: 0 }}>
+          <div style={{ columns: '3 280px', columnGap: 12, marginBottom: 8 }}>
             {data.map((item) => {
             const modelInfo = modelMenus[item.id];
             const hasModelInfo = modelInfo && modelInfo.menu.length > 1;
             return (
-              <Col xs={12} sm={12} md={12} lg={8} xl={8} key={item.id} >
+              <div key={item.id} className="rb:break-inside-avoid rb:mb-3">
                 <RbCard
                   title={item.name}
                   headerType="borderless"
                   headerClassName="rb:py-3!"
-                  className='rb:min-h-[200px]'
                   extra={
                     <div onClick={(e) => e.stopPropagation()}>
-                      <Dropdown menu={{ items: getOptMenuItems(item) }} >
-                        <EllipsisOutlined className="rb:cursor-pointer" />
+                      <Dropdown
+                        menu={{ items: getOptMenuItems(item) }}
+                        placement="bottomRight"
+                      >
+                        <div onClick={(e) => e.stopPropagation()} className="rb:cursor-pointer rb:size-5.5 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
                       </Dropdown>
                     </div>
                   }
@@ -583,24 +587,23 @@ const KnowledgeBaseManagement: FC = () => {
                     <div className="rb:flex rb:text-[#5B6167] rb:h-5 rb:line-clamp-1 rb:text-sm rb:leading-5 rb:mb-3">
                         {/* <div className="rb:font-medium rb:w-20">{t('knowledgeBase.description')} </div> */}
                         <Tooltip title={item.description}>
-                            <div className='rb:flex-1 rb:text-left rb:leading-5 rb:text-gray-800 rb:break-words rb:line-clamp-2'>{(item.description && item.description != '') ? item.description : t('knowledgeBase.noDescription')}</div>
+                            <div className='rb:flex-1 rb:text-left rb:leading-5 rb:text-gray-800 rb:wrap-break-word rb:line-clamp-2'>{(item.description && item.description != '') ? item.description : t('knowledgeBase.noDescription')}</div>
                         </Tooltip>
                     </div>
-                    <div className='rb:min-h-[60px] rb:py-2.5 rb:px-3 rb:bg-[#F6F6F6] rb:rounded-lg rb:mb-3'>
-                    {item.descriptionItems?.map((description: Record<string, unknown>) => (
+                    <Flex vertical gap={4} className='rb:min-h-15 rb:py-2.5! rb:px-3! rb:bg-[#F6F6F6] rb:rounded-lg rb:mb-3'>
+                      {item.descriptionItems?.map((description: Record<string, unknown>) => (
                         <div 
-                        key={description.key as string}
-                        className="rb:flex rb:gap-4 rb:justify-start rb:text-[#5B6167] rb:text-[14px] rb:leading-[20px]"
+                          key={description.key as string}
+                          className="rb:grid rb:grid-cols-2 rb:text-[#5B6167] rb:text-[14px] rb:leading-5"
                         >
-                        <div className={clsx('rb:whitespace-nowrap rb:w-20',{"rb:text-gray-800 rb:font-medium" : (description.key as string) === 'permission_id'})}>{(description.label as string)}</div>
-                        <div className={clsx('rb:flex-inline rb:text-left rb:py-[1px] rb:rounded rb:font-medium',{
-                            "rb:text-[#155eef] rb:font-medium": (description.key as string) === 'permission_id' && (description.children as string) === t('knowledgeBase.private'),
-                            "rb:text-[#FF8A4C] rb:font-medium": (description.key as string) === 'permission_id' && (description.children as string) === t('knowledgeBase.share'),
-                        })}>{(description.children as string)}</div>
+                          <div className={clsx('rb:whitespace-nowrap rb:w-20', {"rb:text-gray-800 rb:font-medium" : (description.key as string) === 'permission_id'})}>{(description.label as string)}</div>
+                          <div className={clsx('rb:flex-inline rb:text-left rb:py-px rb:rounded',{
+                              "rb:text-[#155eef] rb:font-medium": (description.key as string) === 'permission_id' && (description.children as string) === t('knowledgeBase.private'),
+                              "rb:text-[#FF8A4C] rb:font-medium": (description.key as string) === 'permission_id' && (description.children as string) === t('knowledgeBase.share'),
+                          })}>{(description.children as string)}</div>
                         </div>
-                    ))}
-                    
-                    </div>
+                      ))}
+                    </Flex>
                     {hasModelInfo && (
                       <div onClick={(e) => e.stopPropagation()}>
                         <div
@@ -633,9 +636,9 @@ const KnowledgeBaseManagement: FC = () => {
                     )}
                   </div>
                 </RbCard>
-              </Col>
+              </div>
             )})}
-          </Row>
+          </div>
         )}
       </InfiniteScroll>
 

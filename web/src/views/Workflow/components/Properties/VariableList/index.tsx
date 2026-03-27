@@ -95,7 +95,7 @@ const VariableList: FC<VariableListProps> = ({
       <Divider size="small" />
       <Flex gap={10} vertical>
         {config.sys?.map((vo, index) =>
-          <Flex align="center" justify="space-between" key={index} className="rb:py-2! rb:pl-2.5! rb:pr-2! rb:text-[12px] rb:bg-[#F6F6F6] rb-border rb:rounded-md">
+          <Flex align="center" justify="space-between" key={index} className="rb:py-2! rb:pl-2.5! rb:pr-2! rb:text-[12px] rb:bg-[#F6F6F6] rb:border rb:border-[#EBEBEB] rb:rounded-md">
             <span className="rb:font-medium">sys.{vo.name}</span>
             <span className="rb:py-px rb:px-2 rb:bg-[#FBFDFF] rb-border rb:rounded-sm">{vo.type}</span>
           </Flex>

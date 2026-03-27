@@ -86,7 +86,7 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: s
                     </Space>
                     <Flex align="center" justify="center" className="rb:size-5.5 rb:hover:bg-[#F6F6F6] rb:rounded-md">
                       <div
-                        className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit.svg')]"
+                        className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit_bold.svg')]"
                         onClick={() => handleEdit(item)}
                       />
                     </Flex>
