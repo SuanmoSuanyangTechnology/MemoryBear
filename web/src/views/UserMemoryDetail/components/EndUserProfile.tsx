@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:33:30 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 17:55:02
+ * @Last Modified time: 2026-03-27 11:11:09
  */
 /**
  * End User Profile Component
@@ -85,7 +85,7 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
       }
       headerClassName="rb:min-h-[46px]!! rb:font-medium!"
       className={clsx("rb:bg-[#FFFFFF]! rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.13)]! rb:absolute! rb:w-80 rb:top-29 rb:left-26", className)}
-      bodyClassName="rb:px-5! rb:pb-5! rb:pt-3.75! rb:max-h-[calc(100vh-176px)] rb:overflow-auto"
+      bodyClassName="rb:px-5! rb:pb-5! rb:pt-3.75! rb:max-h-[calc(100vh-186px)] rb:overflow-auto"
     >
       {loading
         ? <Skeleton />

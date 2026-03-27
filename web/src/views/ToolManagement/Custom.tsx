@@ -3,7 +3,6 @@ import {
   Row,
   Col,
   App,
-  List,
   Space,
   Flex,
   Tooltip,
@@ -69,11 +68,12 @@ const Custom = forwardRef<CustomRef, { getStatusTag: (status: string) => ReactNo
   return (
     <>
       <BodyWrapper loading={loading} empty={data.length === 0}>
-        <List
-          grid={{ gutter: 16, column: 3 }}
-          dataSource={data}
-          renderItem={(item) => (
-            <List.Item key={item.id}>
+        <Row
+          gutter={[16, 16]}
+          className="rb:max-h-[calc(100%-48px)] rb:overflow-y-auto"
+        >
+          {data.map((item) => (
+            <Col span={8} key={item.id}>
               <RbCard
                 title={
                   <Flex justify="space-between" gap={16}>
@@ -109,7 +109,6 @@ const Custom = forwardRef<CustomRef, { getStatusTag: (status: string) => ReactNo
                 }
                 isNeedTooltip={false}
               >
-
                 {item.tags?.length > 0
                   ? <Flex gap={8} wrap align="center">
                     <Flex gap={6}>
@@ -142,10 +141,9 @@ const Custom = forwardRef<CustomRef, { getStatusTag: (status: string) => ReactNo
                   </Col>
                 </Row>
               </RbCard>
-            </List.Item>
-          )}
-          className="rb:h-[calc(100vh-178px)] rb:overflow-y-auto rb:overflow-x-hidden"
-        />
+            </Col>
+          ))}
+        </Row>
       </BodyWrapper>
 
       {/* 添加服务弹窗组件 */}

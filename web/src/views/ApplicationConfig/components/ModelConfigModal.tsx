@@ -139,6 +139,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
         >
           {source !== 'multi_agent' &&
             <ModelSelect
+              params={{type: 'llm,chat'}}
               placeholder={t('common.pleaseSelect')}
               onChange={handleChange}
             />

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:29:46 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 17:11:55
+ * @Last Modified time: 2026-03-26 14:52:23
  */
 /**
  * RbTable Component
@@ -199,7 +199,7 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
     if (scrollY !== undefined) {
       config.y = scrollY;
     } else if (isScroll) {
-      config.y = 'calc(100vh - 232px)';
+      config.y = 'calc(100vh - 224px)';
     }
 
     return Object.keys(config).length > 0 ? config : undefined;

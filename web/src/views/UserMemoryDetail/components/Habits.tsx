@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:33:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 14:05:10
+ * @Last Modified time: 2026-03-27 11:18:47
  */
 import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -83,7 +83,7 @@ const Habits = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
       headerType="borderless"
       headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
       bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-54px)] rb:overflow-y-auto!"
-      className="rb:h-[calc(100vh-88px)]!"
+      className="rb:h-full!"
     >
       {loading
         ? <Skeleton active />

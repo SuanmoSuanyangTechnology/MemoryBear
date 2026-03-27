@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect, forwardRef, useImperativeHandle, type ReactNode } from 'react';
 import {
   App,
-  List,
   Space,
   Tooltip,
   Dropdown,
   Flex,
+  Row, Col,
 } from 'antd';
 import { useTranslation } from 'react-i18next';
 
@@ -84,11 +84,12 @@ const Mcp = forwardRef<McpRef, { getStatusTag: (status: string) => ReactNode; ke
   return (
     <>
       <BodyWrapper loading={loading} empty={data?.length === 0}>
-        <List
-          grid={{ gutter: 16, column: 3 }}
-          dataSource={data}
-          renderItem={(item) => (
-            <List.Item key={item.id}>
+        <Row
+          gutter={[16, 16]}
+          className="rb:max-h-[calc(100%-48px)] rb:overflow-y-auto"
+        >
+          {data.map((item) => (
+            <Col span={8} key={item.id}>
               <RbCard
                 title={
                   <Flex justify="space-between" gap={16}>
@@ -137,12 +138,12 @@ const Mcp = forwardRef<McpRef, { getStatusTag: (status: string) => ReactNode; ke
                   </div>
                 </Flex>
                 <div className="rb:text-[#5B6167] rb:leading-4.5 rb:text-[12px] rb:mt-4">{t('tool.last_health_check')}: {formatDateTime(item.config_data?.last_health_check)}</div>
-                
+
               </RbCard>
-            </List.Item>
-          )}
-          className="rb:h-[calc(100vh-124px)] rb:overflow-y-auto rb:overflow-x-hidden"
-        />
+            </Col>
+          ))}
+          <Col span={8}></Col>
+        </Row>
       </BodyWrapper>
 
       {/* 添加服务弹窗组件 */}

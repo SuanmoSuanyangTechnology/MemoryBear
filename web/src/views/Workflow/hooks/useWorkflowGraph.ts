@@ -100,6 +100,7 @@ export const useWorkflowGraph = ({
   const [isHandMode, setIsHandMode] = useState(true);
   const [config, setConfig] = useState<WorkflowConfig | null>(null);
   const [chatVariables, setChatVariables] = useState<ChatVariable[]>([])
+  const featuresRef = useRef<FeaturesConfigForm | undefined>(undefined)
 
   useEffect(() => {
     getConfig()
@@ -121,6 +122,7 @@ export const useWorkflowGraph = ({
         })
         setChatVariables(initChatVariables)
         setConfig({ ...rest, variables: initChatVariables })
+        featuresRef.current = rest.features
         onFeaturesLoad?.(rest.features)
       })
   }
@@ -1016,6 +1018,7 @@ export const useWorkflowGraph = ({
 
       const params = {
         ...config,
+        features: featuresRef.current,
         variables: chatVariables.map(v => {
           const { defaultValue, ...cleanV } = v
           return {
@@ -1208,7 +1211,7 @@ export const useWorkflowGraph = ({
     });
   }
   const handleSaveFeaturesConfig = (value?: FeaturesConfigForm) => {
-    setConfig(prev => prev ? { ...prev, features: value } as WorkflowConfig : prev)
+    featuresRef.current = value
   }
 
   return {

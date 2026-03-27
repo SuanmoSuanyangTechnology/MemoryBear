@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 13:32:29
+ * @Last Modified time: 2026-03-27 14:17:38
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -194,7 +194,10 @@ const ChatContent: FC<ChatContentProps> = ({
                         key={idx}
                         size="small"
                         className="rb:text-[12px]!"
-                        onClick={() => window.open(`/knowledge/${citation.knowledge_id}/document/${citation.document_id}`, '_blank')}
+                        onClick={() => {
+                          const params = new URLSearchParams({ documentId: citation.document_id, parentId: citation.knowledge_id });
+                          window.open(`/#/knowledge-base/${citation.knowledge_id}/DocumentDetails?${params}`, '_blank');
+                        }}
                       >{citation.file_name}</Button>
                     ))}
                   </div>}

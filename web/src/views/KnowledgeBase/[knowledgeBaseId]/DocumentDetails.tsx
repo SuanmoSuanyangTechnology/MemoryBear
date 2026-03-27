@@ -7,7 +7,7 @@
  * @LastEditTime: 2025-12-19 20:19:59
  */
 import { useEffect, useState, useRef, type FC } from 'react';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useNavigate, useParams, useLocation, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useBreadcrumbManager, type BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
 import { Button, Spin, message, Switch } from 'antd';
@@ -29,11 +29,16 @@ const DocumentDetails: FC = () => {
   const { updateBreadcrumbs } = useBreadcrumbManager({
     breadcrumbType: 'detail'
   });
+  const [searchParams] = useSearchParams();
   const { 
     documentId, 
     parentId: locationParentId, 
     breadcrumbPath 
-  } = (location.state || {}) as { 
+  } = ({
+    documentId: searchParams.get('documentId') ?? undefined,
+    parentId: searchParams.get('parentId') ?? undefined,
+    ...(location.state || {})
+  }) as { 
     documentId?: string; 
     parentId?: string; 
     breadcrumbPath?: BreadcrumbPath;

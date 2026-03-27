@@ -434,7 +434,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
                       footer={<Flex justify="space-between" align="center" className="rb:text-[#5B6167] rb:text-[12px] rb:mb-1!">
                         {mcp.publisher && <span>{mcp.publisher.startsWith('@') ? mcp.publisher : `@${mcp.publisher}`}</span>}
                         {mcp.view_count && <Space size={4}>
-                          <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/common/global_outline.svg')]"></div>
+                          <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/global_outline.svg')]"></div>
                           {mcp.view_count.toLocaleString()}
                         </Space>}
                       </Flex>}

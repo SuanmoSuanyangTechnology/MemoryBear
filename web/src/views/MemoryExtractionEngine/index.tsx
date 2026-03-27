@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 14:07:35
+ * @Last Modified time: 2026-03-26 15:45:42
  */
 /**
  * Memory Extraction Engine Configuration Page
@@ -123,10 +123,10 @@ const MemoryExtractionEngine: FC = () => {
         </Tooltip>
       </Flex>
 
-      <Row gutter={12}>
-        <Col span={12}>
-          <Form form={form}>
-            <Flex vertical gap={12} className="rb:h-[calc(100vh-114px)]! rb:overflow-y-auto">
+      <Row gutter={12} className="rb:h-[calc(100%-38px)]!">
+        <Col span={12} className="rb:h-full!">
+          <Form form={form} className="rb:h-full!">
+            <Flex vertical gap={12} className="rb:h-full! rb:overflow-y-auto">
               <div className="rb:bg-white rb:rounded-xl rb:py-2.5 rb:px-4">
                 <Flex
                   align="center"
@@ -259,7 +259,7 @@ const MemoryExtractionEngine: FC = () => {
             </Flex>
           </Form>
         </Col>
-        <Col span={12}>
+        <Col span={12} className="rb:h-full!">
           <Result
             loading={loading}
             handleSave={handleSave}

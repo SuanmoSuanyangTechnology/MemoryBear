@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:07 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 11:49:29
+ * @Last Modified time: 2026-03-27 11:23:11
  */
 import { type FC, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -72,7 +72,7 @@ const RecentTrendsLineCard: FC<RecentTrendsLineCardProps> = ({ chartData, series
       className="rb:h-full!"
     >
       {loading
-        ? <Loading size={249} />
+        ? <Loading size={150} />
         : !chartData || chartData.length === 0
         ? <Empty size={120} className="rb:mt-12 rb:mb-20.25" />
         : <ReactEcharts

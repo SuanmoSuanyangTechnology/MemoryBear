@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:11 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 11:27:53
+ * @Last Modified time: 2026-03-27 10:26:31
  */
 /**
  * RAG User Memory Detail View
@@ -113,10 +113,11 @@ const Rag: FC = () => {
       })
   }
   return (
-    <Row gutter={[16, 16]}>
+    <Row gutter={[16, 16]} className="rb:h-full!">
       <Col span={8}>
         <RbCard
-          bodyClassName="rb:p-3! rb:pt-4! rb:h-[calc(100vh-76px)]"
+          bodyClassName="rb:p-3! rb:pt-4!"
+          className="rb:h-full!"
         >
           <Flex align="center" gap={12} className="rb:mb-6!">
             <div className="rb:size-12 rb:text-center rb:font-semibold rb:text-[28px] rb:leading-12 rb:rounded-xl rb:text-white rb:bg-[#155EEF]">{name?.[0]}</div>

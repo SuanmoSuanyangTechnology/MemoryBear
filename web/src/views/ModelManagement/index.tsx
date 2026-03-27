@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 12:28:07
+ * @Last Modified time: 2026-03-26 15:51:08
  */
 /**
  * Model Management Main Page
@@ -84,8 +84,8 @@ const tabKeys = ['group', 'list', 'square']
   }
 
   return (
-    <Flex vertical gap={16}>
-      <Flex justify="space-between" align="center">
+    <>
+      <Flex justify="space-between" align="center" className="rb:mb-3!">
         <PageTabs
           value={activeTab}
           options={formatTabItems()}
@@ -132,7 +132,7 @@ const tabKeys = ['group', 'list', 'square']
         </Form>
       </Flex>
 
-      <div className="rb:w-full rb:h-[calc(100vh-125px)] rb:overflow-y-auto">
+      <div className="rb:w-full rb:h-[calc(100%-44px)] rb:overflow-y-auto">
         {activeTab === 'group' && <GroupModel ref={groupRef} query={query} handleEdit={handleEdit} />}
         {activeTab === 'list' && <ModelList ref={modelListRef} query={query} handleEdit={handleEdit} handleCloseModel={() => customModelModalRef.current?.handleClose() } />}
         {activeTab === 'square' && <ModelSquare query={query} />}
@@ -145,7 +145,7 @@ const tabKeys = ['group', 'list', 'square']
         ref={customModelModalRef}
         refresh={handleRefresh}
       />
-    </Flex>
+    </>
   )
 }
 
