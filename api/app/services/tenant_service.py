@@ -140,6 +140,41 @@ class TenantService:
             business_logger.error(f"删除租户失败: {str(e)}")
             raise BusinessException(f"删除租户失败：{str(e)}", code=BizCode.DB_ERROR)
 
+    # 租户用户管理
+    def get_tenant_users(
+        self, 
+        tenant_id: uuid.UUID, 
+        skip: int = 0, 
+        limit: int = 100,
+        is_active: Optional[bool] = None,
+        is_superuser: Optional[bool] = None,
+        search: Optional[str] = None
+    ) -> List[UserModel]:
+        """获取租户下的用户列表"""
+        return self.user_repo.get_users_by_tenant(
+            tenant_id=tenant_id,
+            skip=skip,
+            limit=limit,
+            is_active=is_active,
+            is_superuser=is_superuser,
+            search=search
+        )
+
+    def count_tenant_users(
+        self, 
+        tenant_id: uuid.UUID,
+        is_active: Optional[bool] = None,
+        is_superuser: Optional[bool] = None,
+        search: Optional[str] = None
+    ) -> int:
+        """统计租户下的用户数量"""
+        return self.user_repo.count_users_by_tenant(
+            tenant_id=tenant_id,
+            is_active=is_active,
+            is_superuser=is_superuser,
+            search=search
+        )
+
     def assign_user_to_tenant(self, user_id: uuid.UUID, tenant_id: uuid.UUID) -> bool:
         """将用户分配给租户"""
         # 检查租户是否存在

@@ -100,6 +100,15 @@ class TenantRepository:
         db_tenant.is_active = False
         return True
 
+    def get_tenant_users(self, tenant_id: uuid.UUID, is_active: Optional[bool] = None) -> List[User]:
+        """获取租户下的所有用户"""
+        query = self.db.query(User).filter(User.tenant_id == tenant_id)
+        
+        if is_active is not None:
+            query = query.filter(User.is_active == is_active)
+        
+        return query.all()
+
     def get_user_tenant(self, user_id: uuid.UUID) -> Optional[Tenants]:
         """获取用户所属的租户"""
         user = self.db.query(User).filter(User.id == user_id).first()
@@ -121,6 +130,15 @@ class TenantRepository:
         
         user.tenant_id = tenant_id
         self.db.flush()
+        return True
+
+    def count_tenant_users(self, tenant_id: uuid.UUID, is_active: Optional[bool] = None) -> int:
+        """统计租户下的用户数量"""
+        query = self.db.query(func.count(User.id)).filter(User.tenant_id == tenant_id)
+        
+        if is_active is not None:
+            query = query.filter(User.is_active == is_active)
+        
         return query.scalar()
 
 
@@ -144,3 +162,7 @@ def get_tenants(db: Session, skip: int = 0, limit: int = 100) -> List[Tenants]:
 def get_user_tenant(db: Session, user_id: uuid.UUID) -> Optional[Tenants]:
     """获取用户所属的租户"""
     return TenantRepository(db).get_user_tenant(user_id)
+
+def get_tenant_users(db: Session, tenant_id: uuid.UUID) -> List[User]:
+    """获取租户下的所有用户"""
+    return TenantRepository(db).get_tenant_users(tenant_id)
