@@ -19,8 +19,11 @@ class User(Base):
     last_login_at = Column(DateTime, nullable=True)  # 最后登录时间，可为空
     
     # SSO 外部关联字段
-    external_id = Column(String(100), nullable=True)  # 外部用户ID
+    external_id = Column(String(100), nullable=True)  # 外部用户 ID
     external_source = Column(String(50), nullable=True)  # 来源系统
+    
+    # 用户联系方式
+    phone = Column(String(50), nullable=True)  # 用户电话
     
     # 用户语言偏好
     preferred_language = Column(String(10), server_default=text("'zh'"), default='zh', nullable=False, index=True)  # 用户偏好语言，默认中文

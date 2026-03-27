@@ -20,6 +20,7 @@ class UserCreate(UserBase):
 class UserUpdate(BaseModel):
     username: Optional[str] = None
     email: Optional[EmailStr] = None
+    phone: Optional[str] = None
     is_active: Optional[bool] = None
     is_superuser: Optional[bool] = None
 
@@ -85,6 +86,7 @@ class User(UserBase):
     current_workspace_name: Optional[str] = None
     role: Optional[WorkspaceRole] = None
     preferred_language: Optional[str] = "zh"  # 用户语言偏好
+    phone: Optional[str] = None  # 用户电话
     permissions: Optional[List[str]] = None  # 用户权限列表，由 external_source 的 permissions 控制
 
     # 将 datetime 转换为毫秒时间戳
