@@ -128,9 +128,15 @@ class SemanticPruner:
         1. 空消息
         2. 场景特定填充词库精确匹配
         3. 常见寒暄精确匹配
-        4. 组合寒暄模式（前缀+后缀组合，如"好的谢谢"、"同学你好"、"明白了"）
+        4. 组合寒暄模式（前缀 + 后缀组合，如"好的谢谢"、"同学你好"、"明白了"）
         5. 纯表情/标点
+        
+        注意：如果消息包含文件（files 字段非空），则不视为填充消息，予以保留。
         """
+        # 保护带有文件的消息：文件包含感知记忆信息，不应被删除
+        if message.files and len(message.files) > 0:
+            return False
+        
         t = message.msg.strip()
         if not t:
             return True
@@ -482,6 +488,12 @@ class SemanticPruner:
         """
         to_delete_ids: set = set()
         for m in msgs:
+            # 最高优先级保护：带有文件的消息一律保留，不参与任何剪枝判断
+            has_files = m.files and len(m.files) > 0
+            if has_files:
+                self._log(f"  [保护] 带文件的消息（不参与剪枝）：'{m.msg[:40]}'，文件数={len(m.files)}")
+                continue
+                
             # 填充检测优先：先判断是否为填充，再看 LLM 保护
             if self._is_filler_message(m):
                 to_delete_ids.add(id(m))
@@ -549,6 +561,12 @@ class SemanticPruner:
         to_delete_ids: set = set()
         for m in msgs:
             msg_text = m.msg.strip()
+            
+            # 最高优先级保护：带有文件的消息一律保留，不参与任何剪枝判断
+            has_files = m.files and len(m.files) > 0
+            if has_files:
+                self._log(f"  [保护] 带文件的消息（不参与剪枝）：'{msg_text[:40]}'，文件数={len(m.files)}")
+                continue
 
             # 第一优先级：填充消息无论模式直接删除，不参与后续场景判断
             if self._is_filler_message(m):
@@ -759,6 +777,11 @@ class SemanticPruner:
             msgs = dd.context.msgs
             original_count = len(msgs)
             total_original_msgs += original_count
+            
+            # 统计带文件的消息数量
+            files_msg_count = sum(1 for m in msgs if m.files and len(m.files) > 0)
+            if files_msg_count > 0:
+                self._log(f"[剪枝-对话{d_idx+1}] 检测到 {files_msg_count}/{original_count} 条消息带有文件，将予以保护")
 
             # 相关对话：根据阶段决定处理力度
             if extraction.is_related:
@@ -801,6 +824,13 @@ class SemanticPruner:
 
             for idx, m in enumerate(msgs):
                 msg_text = m.msg.strip()
+                
+                # 最高优先级保护：带有文件的消息一律保留，不参与分类
+                has_files = m.files and len(m.files) > 0
+                if has_files:
+                    self._log(f"  [保护] 带文件的消息（不参与分类，直接保留）：索引{idx}, '{msg_text[:40]}', 文件数={len(m.files)}")
+                    llm_protected_msgs.append((idx, m))  # 放入保护列表
+                    continue
 
                 if self._msg_matches_tokens(m, preserve_tokens):
                     llm_protected_msgs.append((idx, m))
