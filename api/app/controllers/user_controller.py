@@ -121,8 +121,7 @@ def get_current_user_info(
         else:
             result_schema.permissions = []
     else:
-        from premium.sso.base import SSOPermission
-        result_schema.permissions = [SSOPermission.ALL.value]
+        result_schema.permissions = ["all"]
 
     return success(data=result_schema, msg=t("users.info.get_success"))
 
@@ -192,8 +191,7 @@ def get_tenant_users(
             source = db.query(SSOSource).filter(SSOSource.source_code == user.external_source).first()
             u_schema.permissions = source.permissions if source and source.permissions else []
         else:
-            from premium.sso.base import SSOPermission
-            u_schema.permissions = [SSOPermission.ALL.value]
+            u_schema.permissions = ["all"]
 
     return success(
         data={
