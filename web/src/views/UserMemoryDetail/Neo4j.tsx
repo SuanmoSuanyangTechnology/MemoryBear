@@ -161,10 +161,12 @@ const Neo4j: FC = () => {
           <RelationshipNetwork />
         </Flex>
       </Flex>
-      <EndUserProfile ref={ref} onDataLoaded={handleNameUpdate} className={selectedKey === 'userProfile' ? 'rb:block!' : 'rb:hidden!'} />
-      <AboutMe ref={aboutMeRef} className={selectedKey === 'aboutMe' ? 'rb:block!' : 'rb:hidden!'} />
-      <InterestDistribution className={selectedKey === 'interestDistribution' ? 'rb:block!' : 'rb:hidden!'} />
-      <MemoryInsight ref={memoryInsightRef} className={selectedKey === 'memoryInsight' ? 'rb:block!' : 'rb:hidden!'} />
+      <div onClick={(e) => e.stopPropagation()}>
+        <EndUserProfile ref={ref} onDataLoaded={handleNameUpdate} className={selectedKey === 'userProfile' ? 'rb:block!' : 'rb:hidden!'} />
+        <AboutMe ref={aboutMeRef} className={selectedKey === 'aboutMe' ? 'rb:block!' : 'rb:hidden!'} />
+        <InterestDistribution className={selectedKey === 'interestDistribution' ? 'rb:block!' : 'rb:hidden!'} />
+        <MemoryInsight ref={memoryInsightRef} className={selectedKey === 'memoryInsight' ? 'rb:block!' : 'rb:hidden!'} />
+      </div>
     </div>
   )
 }

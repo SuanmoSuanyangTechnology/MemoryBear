@@ -42,6 +42,9 @@ const NODE_VARIABLES = {
   'memory-read': [
     { label: 'answer', dataType: 'string', field: 'answer' },
     { label: 'intermediate_outputs', dataType: 'array[object]', field: 'intermediate_outputs' }
+  ],
+  'document-extractor': [
+    { label: 'text', dataType: 'string', field: 'text' },
   ]
 } as const;
 
@@ -177,7 +180,8 @@ const hasOutputNodeTypes = [
   'var-aggregator',
   'http-request',
   'tool',
-  'jinja-render'
+  'jinja-render',
+  'document-extractor'
 ];
 
 /**

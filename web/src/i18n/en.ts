@@ -2163,6 +2163,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       'memory-write': 'Memory Storage',
       unknown: 'Unknown Node',
       notes: 'Sticky Note',
+      'document-extractor': 'Document Extractor',
 
       clickToConfigure: 'Click to configure node parameters',
       nodeProperties: 'Node Properties',
@@ -2360,6 +2361,9 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           enterLink: 'Enter Link URL',
           placeholder: 'Enter note...',
           removeLink: 'Remove Link',
+        },
+        'document-extractor': {
+          file_selector: 'Input Variable',
         },
         name: 'Key',
         type: 'Type',

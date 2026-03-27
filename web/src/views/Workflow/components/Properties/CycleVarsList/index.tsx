@@ -1,10 +1,11 @@
-import { type FC } from 'react'
+import { type FC, useMemo } from 'react'
 import { useTranslation } from 'react-i18next';
 import { Form, Select, Input, Button, InputNumber, Flex } from 'antd'
 
 import VariableSelect from '../VariableSelect'
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import RadioGroupBtn from '../RadioGroupBtn'
+import { getChildNodeVariables } from '../hooks/useVariableList'
 
 interface CycleVar {
   name: string;
@@ -44,40 +45,14 @@ const CycleVarsList: FC<CycleVarsListProps> = ({
   const { t } = useTranslation();
   const form = Form.useFormInstance();
 
-  // 获取循环节点的子节点变量
-  const getChildNodeVariables = () => {
+  const availableOptions = useMemo(() => {
     if (!selectedNode || !graphRef?.current || selectedNode.getData()?.type !== 'loop') {
       return options;
     }
+    const childVars = getChildNodeVariables(selectedNode, graphRef);
 
-    const loopNodeId = selectedNode.getData()?.id;
-    const childNodes = graphRef.current.getNodes().filter((node: any) => 
-      node.getData()?.cycle === loopNodeId
-    );
-
-    const childVariables: Suggestion[] = [];
-    childNodes.forEach((childNode: any) => {
-      const childData = childNode.getData();
-      if (childData?.config) {
-        Object.keys(childData.config).forEach(key => {
-          if (childData.config[key]?.defaultValue) {
-            childVariables.push({
-              key: `${childData.id}.${key}`,
-              label: `${childData.name || childData.type}.${key}`,
-              type: 'output',
-              dataType: 'string',
-              value: `${childData.id}.${key}`,
-              nodeData: childData
-            });
-          }
-        });
-      }
-    });
-
-    return [...options, ...childVariables];
-  };
-
-  const availableOptions = getChildNodeVariables();
+    return options.filter(option => !childVars.some(item => item.value === option.value))
+  }, [options, selectedNode, graphRef]);
 
   return (
     <Form.List name={parentName}>
