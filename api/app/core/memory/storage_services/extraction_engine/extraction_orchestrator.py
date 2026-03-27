@@ -182,7 +182,7 @@ class ExtractionOrchestrator:
         list[StatementEntityEdge],
         list[EntityEntityEdge],
         list[PerceptualEdge],
-        dict
+        list[DialogData]
     ]:
         """
         运行完整的知识提取流水线（优化版：并行执行）
@@ -295,6 +295,7 @@ class ExtractionOrchestrator:
                 statement_entity_edges,
                 entity_entity_edges,
                 dialog_data_list,
+                dedup_details,
             ) = await self._run_dedup_and_write_summary(
                 dialogue_nodes,
                 chunk_nodes,
@@ -305,6 +306,11 @@ class ExtractionOrchestrator:
                 entity_entity_edges,
                 dialog_data_list,
             )
+
+            # 步骤 7: 同步用户别名到数据库表（仅正式模式）
+            if not is_pilot_run:
+                logger.info("步骤 7: 同步用户别名到 end_user 和 end_user_info 表")
+                await self._update_end_user_other_name(entity_nodes, dialog_data_list)
 
             logger.info(f"知识提取流水线运行完成（{mode_str}）")
             return (
@@ -1492,6 +1498,7 @@ class ExtractionOrchestrator:
         list[StatementChunkEdge],
         list[StatementEntityEdge],
         list[EntityEntityEdge],
+        list[DialogData],
         dict
     ]:
         """
@@ -1555,6 +1562,8 @@ class ExtractionOrchestrator:
                     statement_chunk_edges,
                     dedup_statement_entity_edges,
                     dedup_entity_entity_edges,
+                    dialog_data_list,
+                    dedup_details,
                 )
 
                 final_entity_nodes = dedup_entity_nodes
@@ -1562,7 +1571,16 @@ class ExtractionOrchestrator:
                 final_entity_entity_edges = dedup_entity_entity_edges
             else:
                 # 正式模式：执行完整的两阶段去重
-                result_tuple = await dedup_layers_and_merge_and_return(
+                (
+                    dialogue_nodes,
+                    chunk_nodes,
+                    statement_nodes,
+                    final_entity_nodes,
+                    statement_chunk_edges,
+                    final_statement_entity_edges,
+                    final_entity_entity_edges,
+                    dedup_details,
+                ) = await dedup_layers_and_merge_and_return(
                     dialogue_nodes,
                     chunk_nodes,
                     statement_nodes,
@@ -1576,20 +1594,20 @@ class ExtractionOrchestrator:
                     llm_client=self.llm_client,
                 )
 
-                # 解包返回值
-                (
-                    _,
-                    _,
-                    _,
-                    final_entity_nodes,
-                    _,
-                    final_statement_entity_edges,
-                    final_entity_entity_edges,
-                    dedup_details,
-                ) = result_tuple
-
                 # 保存去重消歧的详细记录到实例变量
                 self._save_dedup_details(dedup_details, entity_nodes, final_entity_nodes)
+
+                result_tuple = (
+                    dialogue_nodes,
+                    chunk_nodes,
+                    statement_nodes,
+                    final_entity_nodes,
+                    statement_chunk_edges,
+                    final_statement_entity_edges,
+                    final_entity_entity_edges,
+                    dialog_data_list,
+                    dedup_details,
+                )
 
             logger.info(
                 f"去重后: {len(final_entity_nodes)} 个实体节点, "
