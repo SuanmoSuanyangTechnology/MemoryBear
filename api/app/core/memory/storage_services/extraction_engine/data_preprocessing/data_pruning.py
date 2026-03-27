@@ -30,6 +30,18 @@ from app.core.memory.storage_services.extraction_engine.data_preprocessing.scene
 logger = logging.getLogger(__name__)
 
 
+def message_has_files(message: "ConversationMessage") -> bool:
+    """检查消息是否包含文件。
+    
+    Args:
+        message: 待检查的消息对象
+        
+    Returns:
+        bool: 如果消息包含文件则返回 True，否则返回 False
+    """
+    return message.files and len(message.files) > 0
+
+
 class DialogExtractionResponse(BaseModel):
     """对话级一次性抽取的结构化返回，用于加速剪枝。
 
@@ -130,13 +142,7 @@ class SemanticPruner:
         3. 常见寒暄精确匹配
         4. 组合寒暄模式（前缀 + 后缀组合，如"好的谢谢"、"同学你好"、"明白了"）
         5. 纯表情/标点
-        
-        注意：如果消息包含文件（files 字段非空），则不视为填充消息，予以保留。
         """
-        # 保护带有文件的消息：文件包含感知记忆信息，不应被删除
-        if message.files and len(message.files) > 0:
-            return False
-        
         t = message.msg.strip()
         if not t:
             return True
@@ -489,8 +495,7 @@ class SemanticPruner:
         to_delete_ids: set = set()
         for m in msgs:
             # 最高优先级保护：带有文件的消息一律保留，不参与任何剪枝判断
-            has_files = m.files and len(m.files) > 0
-            if has_files:
+            if message_has_files(m):
                 self._log(f"  [保护] 带文件的消息（不参与剪枝）：'{m.msg[:40]}'，文件数={len(m.files)}")
                 continue
                 
@@ -563,8 +568,7 @@ class SemanticPruner:
             msg_text = m.msg.strip()
             
             # 最高优先级保护：带有文件的消息一律保留，不参与任何剪枝判断
-            has_files = m.files and len(m.files) > 0
-            if has_files:
+            if message_has_files(m):
                 self._log(f"  [保护] 带文件的消息（不参与剪枝）：'{msg_text[:40]}'，文件数={len(m.files)}")
                 continue
 
@@ -777,11 +781,6 @@ class SemanticPruner:
             msgs = dd.context.msgs
             original_count = len(msgs)
             total_original_msgs += original_count
-            
-            # 统计带文件的消息数量
-            files_msg_count = sum(1 for m in msgs if m.files and len(m.files) > 0)
-            if files_msg_count > 0:
-                self._log(f"[剪枝-对话{d_idx+1}] 检测到 {files_msg_count}/{original_count} 条消息带有文件，将予以保护")
 
             # 相关对话：根据阶段决定处理力度
             if extraction.is_related:
@@ -826,8 +825,7 @@ class SemanticPruner:
                 msg_text = m.msg.strip()
                 
                 # 最高优先级保护：带有文件的消息一律保留，不参与分类
-                has_files = m.files and len(m.files) > 0
-                if has_files:
+                if message_has_files(m):
                     self._log(f"  [保护] 带文件的消息（不参与分类，直接保留）：索引{idx}, '{msg_text[:40]}', 文件数={len(m.files)}")
                     llm_protected_msgs.append((idx, m))  # 放入保护列表
                     continue
