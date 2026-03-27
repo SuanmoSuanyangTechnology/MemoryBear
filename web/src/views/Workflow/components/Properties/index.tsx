@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 15:08:02
+ * @Last Modified time: 2026-03-27 11:30:44
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -431,7 +431,7 @@ const Properties: FC<PropertiesProps> = ({
   }
 
   return (
-    <div className={clsx("rb:w-90 rb:fixed rb:right-2.5 rb:top-18.5 rb:bottom-2.5 rb:z-1000", styles.properties)}>
+    <div className={clsx("rb:h-[calc(100vh-88px)] rb:w-90 rb:fixed rb:right-2.5 rb:top-18.5 rb:bottom-2.5 rb:z-1000", styles.properties)}>
       <RbCard
         title={t('workflow.nodeProperties')}
         extra={<Space>
@@ -452,7 +452,7 @@ const Properties: FC<PropertiesProps> = ({
         headerType="borderless"
         headerClassName={clsx("rb:font-[MiSans-Bold] rb:font-bold rb:min-h-[48px]!")}
         className="rb:h-full! rb:hover:shadow-none!"
-        bodyClassName={clsx('rb:overflow-y-auto! rb:h-[calc(100vh-131px)]! rb:px-3! rb:pt-0! rb:pb-3!')}
+        bodyClassName={clsx('rb:overflow-y-auto! rb:h-[calc(100%-48px)]! rb:px-3! rb:pt-0! rb:pb-3!')}
       >
         <Form key={selectedNode?.getData()?.id} form={form} size="small" layout="vertical">
           <Form.Item name="name" label={t('workflow.nodeName')}>

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:29 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 11:18:09
+ * @Last Modified time: 2026-03-26 15:31:36
  */
 import { type FC, useState, useRef, useEffect } from 'react';
 import clsx from 'clsx';
@@ -124,7 +124,7 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
   // Calculate total requests across all API keys
   const totalRequests = apiKeyList.reduce((total, item) => total + item.total_requests, 0);
   return (
-    <div className="rb:w-250 rb:mx-auto">
+    <div className="rb:w-250 rb:mx-auto rb:max-h-[calc(100vh-88px)]! rb:overflow-y-auto">
       <Flex gap={20} vertical>
         <RbCard 
           title={() => (<Flex align="center">

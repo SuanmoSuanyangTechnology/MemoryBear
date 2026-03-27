@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-01-08 19:46:02 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-16 15:09:12 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-27 11:13:19
  */
 import { type FC } from 'react'
 import { Row, Col } from 'antd'
@@ -22,11 +22,11 @@ import Timeline from '../components/Timeline'
 const PerceptualDetail: FC = () => {
 
   return (
-    <Row gutter={12}>
-      <Col flex="480px">
+    <Row gutter={12} className="rb:h-full!">
+      <Col flex="480px" className="rb:h-full!">
         <PerceptualLastInfo />
       </Col>
-      <Col flex="1">
+      <Col flex="1" className="rb:h-full!">
         <Timeline />
       </Col>
     </Row>

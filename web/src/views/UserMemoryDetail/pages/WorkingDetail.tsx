@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-12 14:42:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 11:55:36
+ * @Last Modified time: 2026-03-27 11:15:05
  */
 import { type FC, useEffect, useState, useMemo, useRef } from 'react'
 import clsx from 'clsx'
@@ -155,14 +155,14 @@ const WorkingDetail: FC = () => {
         : data.length === 0
         ? <Empty />
         :(
-          <Row gutter={16}>
-            <Col span={5}>
+          <Row gutter={16} className="rb:h-full!">
+            <Col span={5} className="rb:h-full!">
               <RbCard
                 title={t('workingDetail.conversation')}
                 headerType="borderless"
                 headerClassName="rb:min-h-[58px]! rb:font-[MiSans-Bold] rb:font-bold"
                 bodyClassName='rb:p-3! rb:pt-0! rb:h-[calc(100%-58px)]'
-                className="rb:h-[calc(100vh-88px)]!"
+                className="rb:h-full!"
               >
                 <div id="conversation-list" className="rb:h-full! rb:overflow-y-auto">
                   <InfiniteScroll
@@ -197,13 +197,13 @@ const WorkingDetail: FC = () => {
               </RbCard>
             </Col>
             {selected && <>
-              <Col flex="auto" className="rb:h-full">
+              <Col flex="auto" className="rb:h-full!">
                 <RbCard
                   title={selected.title}
                   headerType="borderless"
                   headerClassName="rb:min-h-[42px]! rb:pt-4! rb:font-[MiSans-Bold] rb:font-bold"
                   bodyClassName='rb:p-4! rb:pt-0! rb:h-[calc(100%-42px)]'
-                  className="rb:h-[calc(100vh-88px)]!"
+                  className="rb:h-full!"
                 >
                   <div className="rb:text-[#5B6167] rb:leading-4.5 rb:text-[12px]">{timeRange}</div>
                   <Flex justify="space-between" align="center" className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5! rb:pr-2.5! rb:pl-3.25! rb:mt-3!">
@@ -226,13 +226,13 @@ const WorkingDetail: FC = () => {
                   }
                 </RbCard>
               </Col>
-              <Col flex='360px' className="rb:h-full">
+              <Col flex='360px' className="rb:h-full!">
                 <RbCard
                   title={t('workingDetail.successfulTitle')}
                   headerType="borderless"
                   headerClassName="rb:min-h-[50px]! rb:font-[MiSans-Bold] rb:font-bold rb:leading-5.5"
                   bodyClassName='rb:p-4! rb:pt-0! rb:h-[calc(100%-50px)] rb:overflow-y-auto!'
-                  className="rb:h-[calc(100vh-88px)]!"
+                  className="rb:h-full!"
                 >
                   {detailLoading
                     ? <Skeleton active />

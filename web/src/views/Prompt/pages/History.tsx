@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:44:04 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 12:18:09
+ * @Last Modified time: 2026-03-26 14:36:33
  */
 /**
  * Prompt History Component
@@ -126,6 +126,7 @@ const History: React.FC = () => {
             </div>
           </RbCard>
         )}
+        heightClass="rb:h-[calc(100vh-126px)]!"
       />
 
       <PromptDetail

@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-01-10 17:35:17 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-16 15:05:06 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-27 11:19:38
  */
 import { type FC, useEffect, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -132,14 +132,14 @@ const ExplicitDetail: FC = () => {
     return () => { chartInstance.current?.dispose(); chartInstance.current = null }
   }, [data.semantic_memories])
   return (
-    <Row gutter={12} className="rb:h-full">
-      <Col span={12}>
+    <Row gutter={12} className="rb:h-full!">
+      <Col span={12} className="rb:h-full!">
         <RbCard
           title={t('explicitDetail.episodic_memories')}
           headerType="borderless"
           headerClassName="rb:min-h-[50px]! rb:font-[MiSans-Bold] rb:font-bold"
           bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-50px)] rb:overflow-y-auto!"
-          className="rb:h-[calc(100vh-88px)]!"
+          className="rb:h-full!"
         >
           {loading ?
             <Skeleton active />
@@ -163,13 +163,13 @@ const ExplicitDetail: FC = () => {
           }
         </RbCard>
       </Col>
-      <Col span={12}>
+      <Col span={12} className="rb:h-full!">
         <RbCard
           title={t('explicitDetail.semantic_memories')}
           headerType="borderless"
           headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
           bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-54px)] rb:overflow-y-auto!"
-          className="rb:h-[calc(100vh-88px)]!"
+          className="rb:h-full!"
         >
           {loading ?
             <Skeleton active />

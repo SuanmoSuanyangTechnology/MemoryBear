@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect, type ReactNode } from 'react';
 import {
-  List,
   Flex,
   Space,
   Tooltip,
@@ -68,13 +67,14 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: s
   }
 
   return (
-    <div>
+    <>
       <BodyWrapper loading={loading} empty={data.length === 0}>
-        <List
-          grid={{ gutter: 16, column: 3 }}
-          dataSource={data}
-          renderItem={(item) => (
-            <List.Item key={item.id} className='rb:h-full!'>
+        <Row
+          gutter={[12, 12]}
+          className="rb:max-h-[calc(100%-48px)] rb:overflow-y-auto"
+        >
+          {data.map((item) => (
+            <Col span={8} key={item.id}>
               <RbCard
                 title={
                   <Flex justify="space-between" gap={16}>
@@ -130,21 +130,20 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: s
                       </Col>
                     </>
                     : item.config_data.tool_class === 'JsonTool'
-                    ? <Col span={24}>
+                      ? <Col span={24}>
                         <div className="rb:text-[#5B6167] rb:mb-1">{t('tool.jsonEg')}</div>
                         {InnerConfigData[item.config_data.tool_class].eg}
                       </Col>
-                    : <Col span={24}>
-                      <div className="rb:text-[#5B6167] rb:mb-1">{t('configStatus')}</div>
-                      {t(`tool.${item.status}_desc`)}
-                    </Col>
+                      : <Col span={24}>
+                        <div className="rb:text-[#5B6167] rb:mb-1">{t('configStatus')}</div>
+                        {t(`tool.${item.status}_desc`)}
+                      </Col>
                   }
                 </Row>
               </RbCard>
-            </List.Item>
-          )}
-          className="rb:h-[calc(100vh-178px)] rb:overflow-y-auto rb:overflow-x-hidden"
-        />
+            </Col>
+          ))}
+        </Row>
       </BodyWrapper>
 
       <TimeToolModal
@@ -157,7 +156,7 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: s
         ref={innerToolModalRef}
         refreshTable={getData}
       />
-    </div>
+    </>
   );
 };
 

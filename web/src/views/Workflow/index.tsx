@@ -60,7 +60,7 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
     handleSaveFeaturesConfig
   }))
   return (
-    <div className="rb:h-[calc(100vh-64px)] rb:relative">
+    <div className="rb:h-full rb:relative">
       {/* 左侧节点面板 */}
       <NodeLibrary collapsed={collapsed} handleToggle={handleToggle} />
       

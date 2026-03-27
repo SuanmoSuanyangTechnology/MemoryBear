@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:33:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-12 15:44:32
+ * @Last Modified time: 2026-03-26 14:56:00
  */
 /**
  * Memory Management Page
@@ -100,7 +100,10 @@ const MemoryManagement: React.FC = () => {
       </div>
       
       <BodyWrapper loading={loading} empty={data.length === 0}>
-        <Row gutter={[12, 12]}>
+        <Row
+          gutter={[12, 12]}
+          className="rb:max-h-[calc(100%-48px)] rb:overflow-y-auto"
+        >
           {data.map((item) => (
             <Col key={item.config_id} span={12}>
               <RbCard

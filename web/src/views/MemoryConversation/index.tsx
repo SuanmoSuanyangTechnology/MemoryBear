@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:09:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 10:22:08
+ * @Last Modified time: 2026-03-26 15:00:15
  */
 /**
  * Memory Conversation Page
@@ -174,14 +174,14 @@ const MemoryConversation: FC = () => {
           />
         </Col>
       </Row>
-      <Row gutter={16}>
+      <Row gutter={16} className="rb:h-[calc(100%-48px)]!">
         <Col span={12}>
           <RbCard 
             title={t('memoryConversation.conversationContent')}
             headerType="borderless"
             headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:font-bold"
             bodyClassName="rb:px-3! rb:py-0! rb:h-[calc(100%-52px)]!"
-            className="rb:h-[calc(100vh-124px)]!"
+            className="rb:h-full!"
           >
             <Chat
               empty={
@@ -213,7 +213,7 @@ const MemoryConversation: FC = () => {
             headerType="borderless"
             headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:font-bold"
             bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-52px)]! rb:overflow-y-auto!"
-            className="rb:h-[calc(100vh-124px)]!"
+            className="rb:h-full!"
           >
             {loading ?
               <Skeleton active />

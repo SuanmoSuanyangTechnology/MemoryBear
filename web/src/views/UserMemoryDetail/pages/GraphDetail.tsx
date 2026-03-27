@@ -113,13 +113,13 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
         }
       />
       <Row gutter={12} className="rb:p-3! rb:pr-0! rb:h-[calc(100vh-64px)] rb:w-full! rb:flex-nowrap! rb:overflow-hidden!">
-        <Col flex="480px">
+        <Col flex="480px" className="rb:h-full!">
           <RbCard
             title={t('userMemory.relationshipEvolution')}
             headerType="borderless"
             headerClassName="rb:min-h-[56px]! rb:font-[MiSans-Bold] rb:font-bold"
             bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-56px)] rb:overflow-y-auto!"
-            className="rb:h-[calc(100vh-88px)]!"
+            className="rb:h-full!"
           >
             <Flex vertical gap={16}>
               <EmotionLine chartData={emotionData} loading={loading} />
@@ -127,13 +127,13 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
             </Flex>
           </RbCard>
         </Col>
-        <Col className="rb:w-[calc(100%-480px)]!">
+        <Col flex="1" className="rb:h-full!">
           <RbCard
             title={t('userMemory.timelineMemories')}
             headerType="borderless"
             headerClassName="rb:min-h-[53px]! rb:font-[MiSans-Bold] rb:font-bold"
-            bodyClassName="rb:p-3! rb:pt-0!"
-            className="rb:w-full!"
+            bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-53px)]!"
+            className="rb:w-full! rb:h-full!"
           >
             <BtnTabs
               className="rb:mb-4!"
@@ -144,7 +144,7 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
               }))}
               onChange={(key: string) => setActiveTab(key)}
             />
-            <div className="rb:h-[calc(100vh-193px)] rb:overflow-y-auto">
+            <div className="rb:h-[calc(100%-42px)] rb:overflow-y-auto">
               {timelineLoading
                 ? <Skeleton active />
                 : !activeContent || activeContent.length === 0
