@@ -9,7 +9,7 @@ import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
-from app.aioRedis import aio_redis
+from app.aioRedis import get_thread_safe_redis
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ class InterestMemoryCache:
                 "cached": True,
             }
             value = json.dumps(payload, ensure_ascii=False)
-            await aio_redis.set(key, value, ex=expire)
+            await get_thread_safe_redis().set(key, value, ex=expire)
             logger.info(f"设置兴趣分布缓存成功: {key}, 过期时间: {expire}秒")
             return True
         except Exception as e:
@@ -86,7 +86,7 @@ class InterestMemoryCache:
         """
         try:
             key = cls._get_key(end_user_id, language)
-            value = await aio_redis.get(key)
+            value = await get_thread_safe_redis().get(key)
             if value:
                 payload = json.loads(value)
                 logger.info(f"命中兴趣分布缓存: {key}")
@@ -114,7 +114,7 @@ class InterestMemoryCache:
         """
         try:
             key = cls._get_key(end_user_id, language)
-            result = await aio_redis.delete(key)
+            result = await get_thread_safe_redis().delete(key)
             logger.info(f"删除兴趣分布缓存: {key}, 结果: {result}")
             return result > 0
         except Exception as e:
