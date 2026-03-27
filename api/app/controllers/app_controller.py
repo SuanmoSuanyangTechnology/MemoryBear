@@ -57,7 +57,6 @@ def list_apps(
         page: int = 1,
         pagesize: int = 10,
         ids: Optional[str] = None,
-        api_key: Optional[str] = None,
         db: Session = Depends(get_db),
         current_user=Depends(get_current_user),
 ):
@@ -66,7 +65,7 @@ def list_apps(
     - 默认包含本工作空间的应用和分享给本工作空间的应用
     - 设置 include_shared=false 可以只查看本工作空间的应用
     - 当提供 ids 参数时，按逗号分割获取指定应用，不分页
-    - 当提供 api_key 参数时，查找该 API Key 关联的应用
+    - search 参数支持：应用名称模糊搜索、API Key 精确搜索
     """
     from sqlalchemy import select as sa_select
     from app.models.api_key_model import ApiKey
@@ -74,23 +73,29 @@ def list_apps(
     workspace_id = current_user.current_workspace_id
     service = app_service.AppService(db)
 
-    # 通过 API Key 搜索：精确匹配，将 resource_id 注入 ids 走统一分页流程
-    if api_key:
-        matched_id = db.execute(
-            sa_select(ApiKey.resource_id).where(
-                ApiKey.workspace_id == workspace_id,
-                ApiKey.api_key == api_key,
-                ApiKey.resource_id.isnot(None),
-            )
-        ).scalar_one_or_none()
-        ids = str(matched_id) if matched_id else ""
+    # 通过 search 参数搜索：支持应用名称模糊搜索和 API Key 精确搜索
+    if search:
+        search = search.strip()
+        # 尝试作为 API Key 精确匹配（API Key 通常较长）
+        if len(search) >= 10:
+            matched_id = db.execute(
+                sa_select(ApiKey.resource_id).where(
+                    ApiKey.workspace_id == workspace_id,
+                    ApiKey.api_key == search,
+                    ApiKey.resource_id.isnot(None),
+                )
+            ).scalar_one_or_none()
+            if matched_id:
+                # 找到 API Key，直接返回关联的应用
+                ids = str(matched_id)
 
-    # 当 ids 存在且不为 None 时，根据 ids 获取应用
+    # 当 ids 存在时，根据 ids 获取应用（不分页）
     if ids is not None:
         app_ids = [app_id.strip() for app_id in ids.split(',') if app_id.strip()]
-        items_orm = app_service.get_apps_by_ids(db, app_ids, workspace_id)
-        items = [service._convert_to_schema(app, workspace_id) for app in items_orm]
-        return success(data=items)
+        if app_ids:
+            items_orm = app_service.get_apps_by_ids(db, app_ids, workspace_id)
+            items = [service._convert_to_schema(app, workspace_id) for app in items_orm]
+            return success(data=items)
 
     # 正常分页查询
     items_orm, total = app_service.list_apps(
