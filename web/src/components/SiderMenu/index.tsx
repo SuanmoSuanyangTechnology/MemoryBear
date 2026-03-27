@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:25:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 12:32:58
+ * @Last Modified time: 2026-03-27 16:38:57
  */
 /**
  * SiderMenu Component
@@ -128,11 +128,35 @@ const Menu: FC<{
 
   /** Filter menus based on user role and source */
   useEffect(() => {
+    let menuList: MenuItem[] = []
+    
     if (user.role === 'member' && source === 'space') {
-      setMenus((allMenus[source] || []).filter(menu => menu.code !== 'member'))
+      menuList = (allMenus[source] || []).filter(menu => menu.code !== 'member')
     } else if (user) {
-      setMenus(allMenus[source] || [])
+      menuList = allMenus[source] || []
     }
+
+    const noAuthList = ['user', 'pricing'].filter(vo => !user.permissions.includes(vo) && !user.permissions?.includes('all'))
+
+    if (noAuthList && !noAuthList?.includes('all')) {
+      const filterMenus = (list: MenuItem[]): MenuItem[] =>{
+        const filterList = list?.filter(menu => !noAuthList?.includes(menu.code as string))
+
+        const showList: MenuItem[] = [] 
+        filterList?.forEach(menu => {
+          const filteredSubs = filterMenus(menu.subs || [])
+          const hadSubs = menu.subs && menu.subs.length > 0
+          if (hadSubs && filteredSubs.length === 0) return
+          if (menu.type === 'group' && (!menu.subs || menu.subs?.length < 1)) return
+          showList.push({ ...menu, subs: filteredSubs })
+        })
+
+        return showList
+      }
+      menuList = filterMenus(menuList)
+    }
+
+    setMenus(menuList)
   }, [source, allMenus, user])
   
   /** Handle menu item click and navigate to path */
@@ -153,7 +177,7 @@ const Menu: FC<{
       const iconKey = selectedKeys.includes(menu.path || '') ? `${menu.code}Active` : menu.code;
       const iconSrc = iconPathMap[iconKey as keyof typeof iconPathMap];
       const subs = (menu.subs || []).filter(sub => sub.display);
-      
+
       /** Leaf node - menu item without children */
       if (!subs || subs.length === 0) {
         if (menu.path) {
