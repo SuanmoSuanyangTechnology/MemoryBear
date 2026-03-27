@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 17:55:04
+ * @Last Modified time: 2026-03-27 18:23:04
  */
 /**
  * File Upload Component
@@ -313,7 +313,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
         </div>
       );
     },
-    className: 'rb:-mb-1.5!',
+    className: 'rb:-mb-1.5! upload-block',
     ...props,
   };
 
@@ -327,7 +327,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
     <Upload
       {...uploadProps}
     >
-      {t('memoryConversation.uploadFile')}
+      <div>{t('memoryConversation.uploadFile')}</div>
     </Upload>
   );
 });
