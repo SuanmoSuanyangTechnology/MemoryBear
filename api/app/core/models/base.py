@@ -67,6 +67,35 @@ class RedBearModelFactory:
                 **config.extra_params
             }
 
+        if provider == ModelProvider.MINIMAX:
+            # MiniMax 使用 OpenAI 兼容模式，需要设置默认 base_url 和温度钳制
+            import httpx
+            if not config.base_url:
+                config.base_url = "https://api.minimax.io/v1"
+            timeout_config = httpx.Timeout(
+                timeout=config.timeout,
+                connect=60.0,
+                read=config.timeout,
+                write=60.0,
+                pool=10.0,
+            )
+            # MiniMax 温度范围为 (0.0, 1.0]，需要钳制
+            extra = dict(config.extra_params)
+            if "temperature" in extra:
+                temp = extra["temperature"]
+                if temp <= 0:
+                    extra["temperature"] = 0.01
+                elif temp > 1.0:
+                    extra["temperature"] = 1.0
+            return {
+                "model": config.model_name,
+                "base_url": config.base_url,
+                "api_key": config.api_key,
+                "timeout": timeout_config,
+                "max_retries": config.max_retries,
+                **extra
+            }
+
         if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.OLLAMA]:
             # 使用 httpx.Timeout 对象来设置详细的超时配置
             # 这样可以分别控制连接超时和读取超时
@@ -165,6 +194,9 @@ def get_provider_llm_class(config: RedBearModelConfig, type: ModelType = ModelTy
             return OpenAI
         elif type == ModelType.CHAT:
             return ChatOpenAI
+    elif provider == ModelProvider.MINIMAX:
+        # MiniMax 使用 OpenAI 兼容 API，始终返回 ChatOpenAI
+        return ChatOpenAI
     elif provider == ModelProvider.DASHSCOPE:
         return ChatTongyi
     elif provider == ModelProvider.OLLAMA:
@@ -178,7 +210,7 @@ def get_provider_llm_class(config: RedBearModelConfig, type: ModelType = ModelTy
 def get_provider_embedding_class(provider: str) -> type[Embeddings]:
     """根据模型提供商获取对应的模型类"""
     provider = provider.lower()
-    if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK]:
+    if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.MINIMAX]:
         from langchain_openai import OpenAIEmbeddings
         return OpenAIEmbeddings
     elif provider == ModelProvider.DASHSCOPE:

@@ -11,6 +11,7 @@
 import bedrockIcon from '@/assets/images/model/bedrock.svg'
 import dashscopeIcon from '@/assets/images/model/dashscope.png'
 import gpustackIcon from '@/assets/images/model/gpustack.png'
+import minimaxIcon from '@/assets/images/model/minimax.svg'
 import ollamaIcon from '@/assets/images/model/ollama.svg'
 import openaiIcon from '@/assets/images/model/openai.svg'
 import xinferenceIcon from '@/assets/images/model/xinference.svg'
@@ -22,6 +23,7 @@ export const ICONS = {
   bedrock: bedrockIcon,
   dashscope: dashscopeIcon,
   gpustack: gpustackIcon,
+  minimax: minimaxIcon,
   ollama: ollamaIcon,
   openai: openaiIcon,
   xinference: xinferenceIcon
