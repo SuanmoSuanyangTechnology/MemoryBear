@@ -41,6 +41,7 @@ class ModelProvider(StrEnum):
     # ZHIPU = "zhipu"
     # MOONSHOT = "moonshot"
     # DEEPSEEK = "deepseek"
+    MINIMAX = "minimax"
     OLLAMA = "ollama"
     XINFERENCE = "xinference"
     GPUSTACK = "gpustack"

@@ -1181,6 +1181,7 @@ export const zh = {
       openai: "Openai",
       dashscope: "Dashscope",
       ollama: "Ollama",
+      minimax: "MiniMax",
       xinference: "Xinference",
       gpustack: "Gpustack",
       bedrock: "Bedrock"
@@ -1239,6 +1240,7 @@ export const zh = {
       openai: "Openai",
       dashscope: "Dashscope",
       ollama: "Ollama",
+      minimax: "MiniMax",
       xinference: "Xinference",
       gpustack: "Gpustack",
       bedrock: "Bedrock",

@@ -226,61 +226,133 @@ class LocalLLMClient(BaseLLMClient):
 
 class MockLLMClient(BaseLLMClient):
     """模拟 LLM 客户端（用于测试）"""
-    
+
     def __init__(self):
         """初始化模拟客户端"""
         self.call_count = 0
-    
+
     async def chat(self, prompt: str, **kwargs) -> str:
         """发送聊天请求（返回模拟结果）"""
         self.call_count += 1
-        
+
         logger.info(f"模拟 LLM 调用 (第 {self.call_count} 次)")
-        
+
         # 简单的规则匹配
         prompt_lower = prompt.lower()
-        
+
         if "数学" in prompt_lower or "方程" in prompt_lower or "计算" in prompt_lower:
             return json.dumps({
                 "agent_id": "math-agent",
                 "confidence": 0.9,
                 "reason": "消息包含数学相关内容"
             }, ensure_ascii=False)
-        
+
         elif "化学" in prompt_lower or "反应" in prompt_lower or "元素" in prompt_lower:
             return json.dumps({
                 "agent_id": "chemistry-agent",
                 "confidence": 0.85,
                 "reason": "消息包含化学相关内容"
             }, ensure_ascii=False)
-        
+
         elif "物理" in prompt_lower or "力" in prompt_lower or "速度" in prompt_lower:
             return json.dumps({
                 "agent_id": "physics-agent",
                 "confidence": 0.88,
                 "reason": "消息包含物理相关内容"
             }, ensure_ascii=False)
-        
+
         elif "语文" in prompt_lower or "古诗" in prompt_lower or "作文" in prompt_lower:
             return json.dumps({
                 "agent_id": "chinese-agent",
                 "confidence": 0.87,
                 "reason": "消息包含语文相关内容"
             }, ensure_ascii=False)
-        
+
         elif "英语" in prompt_lower or "单词" in prompt_lower or "语法" in prompt_lower:
             return json.dumps({
                 "agent_id": "english-agent",
                 "confidence": 0.86,
                 "reason": "消息包含英语相关内容"
             }, ensure_ascii=False)
-        
+
         else:
             return json.dumps({
                 "agent_id": "math-agent",
                 "confidence": 0.5,
                 "reason": "无法明确判断，使用默认 Agent"
             }, ensure_ascii=False)
+
+
+class MiniMaxClient(BaseLLMClient):
+    """MiniMax LLM 客户端（通过 OpenAI 兼容 API）"""
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: str = "MiniMax-M2.7",
+        base_url: str = "https://api.minimax.io/v1"
+    ):
+        """初始化 MiniMax 客户端
+
+        Args:
+            api_key: API 密钥
+            model: 模型名称 (MiniMax-M2.7, MiniMax-M2.7-highspeed)
+            base_url: API 基础 URL
+        """
+        self.api_key = api_key or os.getenv("MINIMAX_API_KEY")
+        self.model = model
+        self.base_url = base_url
+
+        if not self.api_key:
+            raise ValueError("MiniMax API key 未配置，请设置 MINIMAX_API_KEY 环境变量")
+
+        try:
+            from openai import AsyncOpenAI
+            self.client = AsyncOpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url
+            )
+        except ImportError:
+            raise ImportError("请安装 openai 库: pip install openai")
+
+    @staticmethod
+    def _clamp_temperature(temperature: float) -> float:
+        """钳制温度值到 MiniMax 支持的范围 (0.0, 1.0]"""
+        if temperature <= 0:
+            return 0.01
+        if temperature > 1.0:
+            return 1.0
+        return temperature
+
+    async def chat(self, prompt: str, **kwargs) -> str:
+        """发送聊天请求
+
+        Args:
+            prompt: 提示词
+            **kwargs: 其他参数（temperature, max_tokens 等）
+
+        Returns:
+            LLM 响应文本
+        """
+        try:
+            temperature = self._clamp_temperature(kwargs.get("temperature", 0.3))
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                max_tokens=kwargs.get("max_tokens", 500)
+            )
+
+            content = response.choices[0].message.content
+            # 去除 MiniMax M2.7 可能返回的思考标签
+            if content and "<think>" in content:
+                import re
+                content = re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL)
+            return content
+
+        except Exception as e:
+            logger.error(f"MiniMax API 调用失败: {str(e)}")
+            raise
 
 
 class LLMClientFactory:
@@ -292,9 +364,9 @@ class LLMClientFactory:
         **kwargs
     ) -> BaseLLMClient:
         """创建 LLM 客户端
-        
+
         Args:
-            provider: 提供商名称 (openai, azure, anthropic, local, mock)
+            provider: 提供商名称 (openai, azure, anthropic, minimax, local, mock)
             **kwargs: 客户端配置参数
             
         Returns:
@@ -304,16 +376,19 @@ class LLMClientFactory:
         
         if provider == "openai":
             return OpenAIClient(**kwargs)
-        
+
         elif provider == "azure":
             return AzureOpenAIClient(**kwargs)
-        
+
         elif provider == "anthropic":
             return AnthropicClient(**kwargs)
-        
+
+        elif provider == "minimax":
+            return MiniMaxClient(**kwargs)
+
         elif provider == "local":
             return LocalLLMClient(**kwargs)
-        
+
         elif provider == "mock":
             return MockLLMClient()
         
