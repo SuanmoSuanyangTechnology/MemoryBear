@@ -58,7 +58,7 @@ class RedBearModelFactory:
                 write=60.0,
                 pool=10.0,
             )
-            return {
+            params = {
                 "model": config.model_name,
                 "base_url": config.base_url,
                 "api_key": config.api_key,
@@ -66,6 +66,10 @@ class RedBearModelFactory:
                 "max_retries": config.max_retries,
                 **config.extra_params
             }
+            # 流式模式下启用 stream_usage 以获取 token 统计
+            if config.extra_params.get("streaming"):
+                params["stream_usage"] = True
+            return params
 
         if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.OLLAMA, ModelProvider.VOLCANO]:
             # 使用 httpx.Timeout 对象来设置详细的超时配置
@@ -78,7 +82,7 @@ class RedBearModelFactory:
                 write=60.0,  # 写入超时：60秒
                 pool=10.0,  # 连接池超时：10秒
             )
-            return {
+            params = {
                 "model": config.model_name,
                 "base_url": config.base_url,
                 "api_key": config.api_key,
@@ -86,6 +90,10 @@ class RedBearModelFactory:
                 "max_retries": config.max_retries,
                 **config.extra_params
             }
+            # 流式模式下启用 stream_usage 以获取 token 统计
+            if config.extra_params.get("streaming"):
+                params["stream_usage"] = True
+            return params
         elif provider == ModelProvider.DASHSCOPE:
             # DashScope (通义千问) 使用自己的参数格式
             # 注意: DashScopeEmbeddings 不支持 timeout 和 base_url 参数

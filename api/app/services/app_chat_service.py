@@ -631,13 +631,13 @@ class AppChatService:
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id
             ):
-                if "sub_usage" in event:
+                # 拦截 sub_usage 事件，累加 token
+                if "event: sub_usage" in event:
                     if "data:" in event:
                         try:
                             data_line = event.split("data: ", 1)[1].strip()
                             data = json.loads(data_line)
-                            if "total_tokens" in data:
-                                total_tokens += data["total_tokens"]
+                            total_tokens += data.get("total_tokens", 0)
                         except:
                             pass
                 else:
