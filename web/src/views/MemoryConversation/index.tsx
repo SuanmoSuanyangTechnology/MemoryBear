@@ -174,8 +174,8 @@ const MemoryConversation: FC = () => {
           />
         </Col>
       </Row>
-      <Row gutter={16} className="rb:h-[calc(100%-48px)]!">
-        <Col span={12}>
+      <Row gutter={16} className="rb:h-[calc(100vh-118px)]!">
+        <Col span={12} className="rb:h-full!">
           <RbCard 
             title={t('memoryConversation.conversationContent')}
             headerType="borderless"
@@ -207,7 +207,7 @@ const MemoryConversation: FC = () => {
             </Chat>
           </RbCard>
         </Col>
-        <Col span={12}>
+        <Col span={12} className="rb:h-full!">
           <RbCard 
             title={t('memoryConversation.memoryConversationAnalysis')}
             headerType="borderless"
