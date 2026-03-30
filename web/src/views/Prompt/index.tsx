@@ -188,7 +188,7 @@ const Prompt: FC = () => {
 
             <RbCard
               title={t('prompt.chatTitle')}
-              headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:gont-bold"
+              headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:font-bold"
               headerType="borderless"
               bodyClassName="rb:px-4! rb:pt-0! rb:pb-3!"
             >
@@ -249,7 +249,7 @@ const Prompt: FC = () => {
             </Flex>
             <RbCard
               title={t('prompt.conversationOptimizationPrompt')}
-              headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:gont-bold"
+              headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:font-bold"
               headerType="borderless"
               bodyClassName="rb:px-4! rb:pt-0! rb:pb-3!"
               extra={

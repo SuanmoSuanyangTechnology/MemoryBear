@@ -396,6 +396,11 @@ body {
   color: #FFFFFF;
   background-color: #171719;
 }
+.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item.ant-dropdown-menu-item-danger:not(.ant-dropdown-menu-item-disabled):hover,
+.ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-item.ant-dropdown-menu-item-danger:not(.ant-dropdown-menu-item-disabled):hover {
+  background-color: #F6F6F6;
+  color: #FF5D34;
+}
 
 .spin.ant-spin-nested-loading .ant-spin-container::after {
   background: transparent;

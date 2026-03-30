@@ -1375,6 +1375,7 @@ export const zh = {
       scene_id: '本体场景',
     },
     member: {
+      memberList: '成员列表',
       username: '用户名',
       account: '账号',
       role: '角色',
@@ -1905,7 +1906,8 @@ export const zh = {
       permissionInfo: '授权信息',
       is_expired: '状态',
       active: '活跃',
-      inactive: '过期'
+      inactive: '过期',
+      noScopes: '暂无权限信息…',
     },
     tool: {
       mcp: 'MCP 服务',

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:42:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 15:48:43
+ * @Last Modified time: 2026-03-30 11:38:42
  */
 /**
  * Member Management Page
@@ -106,9 +106,10 @@ const MemberManagement: React.FC = () => {
 
   return (
     <div className="rb:h-full rb:overflow-hidden rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
-      <Flex justify="end" className="rb:px-1! rb:mb-3!">
+      <Flex justify="space-between" align="center" className="rb:px-1! rb:mb-3!">
+        <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[#212332] rb:leading-5">{t('member.memberList')}</div>
         <Button type="primary" onClick={() => handleEdit()}>
-          {t('member.createMember')}
+          + {t('member.createMember')}
         </Button>
       </Flex>
       <Table<Member>
