@@ -1682,15 +1682,15 @@ class AppService:
 
         return config.config_id
 
-    def _update_endusers_memory_config_by_workspace(
+    def _update_endusers_memory_config_by_app(
             self,
-            workspace_id: uuid.UUID,
+            app_id: uuid.UUID,
             memory_config_id: uuid.UUID
     ) -> int:
         """批量更新应用下所有终端用户的 memory_config_id
         
         Args:
-            workspace_id: 工作空间ID
+            app_id: 应用ID
             memory_config_id: 新的记忆配置ID
             
         Returns:
@@ -1699,8 +1699,8 @@ class AppService:
         from app.repositories.end_user_repository import EndUserRepository
 
         repo = EndUserRepository(self.db)
-        updated_count = repo.batch_update_memory_config_id_by_workspace(
-            workspace_id=workspace_id,
+        updated_count = repo.batch_update_memory_config_id_by_app(
+            app_id=app_id,
             memory_config_id=memory_config_id
         )
 
@@ -1879,8 +1879,8 @@ class AppService:
         if memory_config_id:
             app = self.db.query(App).filter(App.id == app_id).first()
             if app:
-                updated_count = self._update_endusers_memory_config_by_workspace(
-                    app.workspace_id, memory_config_id
+                updated_count = self._update_endusers_memory_config_by_app(
+                    app_id, memory_config_id
                 )
                 logger.info(
                     f"发布时更新终端用户记忆配置: app_id={app_id}, workspace_id={app.workspace_id}, "
@@ -2016,7 +2016,7 @@ class AppService:
 
         if memory_config_id:
 
-            updated_count = self._update_endusers_memory_config_by_workspace(app.workspace_id, memory_config_id)
+            updated_count = self._update_endusers_memory_config_by_app(app_id, memory_config_id)
             logger.info(
                 f"回滚时更新终端用户记忆配置: app_id={app_id}, version={version}, "
                 f"memory_config_id={memory_config_id}, updated_count={updated_count}"
