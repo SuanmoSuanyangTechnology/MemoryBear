@@ -151,11 +151,6 @@ async def write(
 
     # Step 3: Save all data to Neo4j database
     step_start = time.time()
-    from app.repositories.neo4j.create_indexes import create_fulltext_indexes
-    try:
-        await create_fulltext_indexes()
-    except Exception as e:
-        logger.error(f"Error creating indexes: {e}", exc_info=True)
 
     # 添加死锁重试机制
     max_retries = 3
