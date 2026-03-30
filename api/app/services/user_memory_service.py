@@ -472,6 +472,21 @@ class UserMemoryService:
             # 定义允许更新的字段白名单
             allowed_fields = {'other_name', 'aliases', 'meta_data'}
             
+            # 用户占位名称黑名单，不允许作为 other_name 或出现在 aliases 中
+            _user_placeholder_names = {'用户', '我', 'User', 'I'}
+            
+            # 过滤 other_name：不允许设置为占位名称
+            if 'other_name' in update_data and update_data['other_name'] and update_data['other_name'].strip() in _user_placeholder_names:
+                logger.warning(f"拒绝将占位名称 '{update_data['other_name']}' 设置为 other_name")
+                del update_data['other_name']
+            
+            # 过滤 aliases：移除占位名称和非字符串值
+            if 'aliases' in update_data and update_data['aliases']:
+                update_data['aliases'] = [
+                    a for a in update_data['aliases']
+                    if isinstance(a, str) and a.strip() and a.strip() not in _user_placeholder_names
+                ]
+            
             # 检查是否更新了 aliases 字段
             aliases_updated = 'aliases' in update_data and update_data['aliases'] != end_user_info_record.aliases
             
