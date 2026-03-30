@@ -260,17 +260,39 @@ def get_conversation(
     conv_service = ConversationService(db)
     messages = conv_service.get_messages(conversation_id)
 
-    # 为 assistant 消息查询 audio_url 状态
-    for m in messages:
+    file_ids = []
+    message_file_id_map = {}
+
+    # 第一次遍历：解析 audio_url，收集所有有效的 file_id
+    for idx, m in enumerate(messages):
         if m.role == "assistant" and m.meta_data:
             audio_url = m.meta_data.get("audio_url")
-            if audio_url:
-                try:
-                    file_id = uuid.UUID(audio_url.rstrip("/").split("/")[-1])
-                    file_meta = db.get(FileMetadata, file_id)
-                    m.meta_data["audio_status"] = file_meta.status if file_meta else "unknown"
-                except (ValueError, IndexError):
-                    m.meta_data["audio_status"] = "unknown"
+            if not audio_url:
+                continue
+            try:
+                file_id = uuid.UUID(audio_url.rstrip("/").split("/")[-1])
+            except (ValueError, IndexError):
+                # audio_url 无法解析为 UUID，标记为 unknown
+                m.meta_data["audio_status"] = "unknown"
+                continue
+
+            file_ids.append(file_id)
+            message_file_id_map[idx] = file_id
+
+    # 批量查询所有相关的 FileMetadata
+    file_status_map = {}
+    if file_ids:
+        file_metas = (
+            db.query(FileMetadata)
+            .filter(FileMetadata.id.in_(set(file_ids)))
+            .all()
+        )
+        file_status_map = {fm.id: fm.status for fm in file_metas}
+
+    # 第二次遍历：将查询结果映射回消息
+    for idx, file_id in message_file_id_map.items():
+        m = messages[idx]
+        m.meta_data["audio_status"] = file_status_map.get(file_id, "unknown")
 
     conv_dict = conversation_schema.Conversation.model_validate(conversation).model_dump(mode="json")
     conv_dict["messages"] = [
