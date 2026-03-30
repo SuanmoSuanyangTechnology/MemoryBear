@@ -480,9 +480,12 @@ class UserMemoryService:
                 logger.warning(f"拒绝将占位名称 '{update_data['other_name']}' 设置为 other_name")
                 del update_data['other_name']
             
-            # 过滤 aliases：移除占位名称
+            # 过滤 aliases：移除占位名称和非字符串值
             if 'aliases' in update_data and update_data['aliases']:
-                update_data['aliases'] = [a for a in update_data['aliases'] if a.strip() not in _user_placeholder_names]
+                update_data['aliases'] = [
+                    a for a in update_data['aliases']
+                    if isinstance(a, str) and a.strip() and a.strip() not in _user_placeholder_names
+                ]
             
             # 检查是否更新了 aliases 字段
             aliases_updated = 'aliases' in update_data and update_data['aliases'] != end_user_info_record.aliases
