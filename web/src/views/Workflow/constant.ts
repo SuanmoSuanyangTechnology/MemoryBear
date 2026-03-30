@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 18:30:52
+ * @Last Modified time: 2026-03-30 15:11:56
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -642,6 +642,8 @@ interface NodeConfig {
 
 /** Edge color for normal state */
 export const edge_color = '#D4D5D9';
+/** Edge color for hover state */
+export const edge_hover_color = '#2E90FA';
 /** Edge color for selected state */
 export const edge_selected_color = '#171719'
 export const edge_width = 2;
@@ -882,6 +884,72 @@ export const edgeAttrs = {
         width: 4,
         height: 4,
       },
+    },
+  },
+}
+
+/**
+ * Edge hover tool: circular "+" button shown at midpoint on hover
+ */
+export const edgeHoverTool = {
+  name: 'button',
+  args: {
+    markup: [
+      {
+        tagName: 'circle',
+        selector: 'button',
+        attrs: {
+          r: 6,
+          stroke: port_color,
+          strokeWidth: edge_width,
+          fill: port_color,
+          cursor: 'pointer',
+        },
+      },
+      {
+        tagName: 'text',
+        textContent: '+',
+        selector: 'icon',
+        attrs: {
+          fontSize: 12,
+          fontWeight: 'bold',
+          fill: '#FFFFFF',
+          textAnchor: 'middle',
+          textVerticalAnchor: 'middle',
+          pointerEvents: 'none',
+          y: '0.3em',
+        },
+      },
+    ],
+    distance: 0.5,
+    offset: { x: 0, y: 0 },
+    onClick({ e, cell: edge }: any) {
+      e.stopPropagation();
+      const graph = edge.model?.graph;
+      if (!graph) return;
+      const sourceCell = graph.getCellById(edge.getSourceCellId());
+      const targetCell = graph.getCellById(edge.getTargetCellId());
+      const sourcePort = edge.getSourcePortId();
+      const targetPort = edge.getTargetPortId();
+      if (!sourceCell || !targetCell) return;
+      const rect = (e.target as HTMLElement).getBoundingClientRect();
+      const tempDiv = document.createElement('div');
+      tempDiv.style.position = 'fixed';
+      tempDiv.style.left = rect.left + 'px';
+      tempDiv.style.top = rect.top + 'px';
+      tempDiv.style.width = '1px';
+      tempDiv.style.height = '1px';
+      tempDiv.style.zIndex = '9999';
+      document.body.appendChild(tempDiv);
+      window.dispatchEvent(new CustomEvent('port:click', {
+        detail: {
+          node: sourceCell,
+          port: sourcePort,
+          element: tempDiv,
+          rect,
+          edgeInsertion: { edge, sourceCell, targetCell, sourcePort, targetPort }
+        }
+      }));
     },
   },
 }

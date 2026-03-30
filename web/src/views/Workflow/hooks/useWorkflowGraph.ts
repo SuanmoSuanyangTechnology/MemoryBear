@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 18:14:38
+ * @Last Modified time: 2026-03-30 15:08:14
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -12,7 +12,7 @@ import { Graph, Node, MiniMap, Snapline, Clipboard, Keyboard, type Edge } from '
 import { register } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 
-import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode, defaultPortItems, portItemArgsY, edge_width, conditionNodePortItemArgsY, conditionNodeItemHeight, conditionNodeHeight, notesConfig } from '../constant';
+import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edgeHoverTool, edge_color, edge_hover_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode, defaultPortItems, portItemArgsY, edge_width, conditionNodePortItemArgsY, conditionNodeItemHeight, conditionNodeHeight, notesConfig } from '../constant';
 import type { WorkflowConfig, NodeProperties, ChatVariable } from '../types';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
 import { useUser } from '@/store/user';
@@ -881,12 +881,21 @@ export const useWorkflowGraph = ({
     });
     // Use plugins
     setupPlugins();
-    // Listen to edge mouseleave event
+    // Listen to edge mouseenter event: show hover style and add button
+    graphRef.current.on('edge:mouseenter', ({ edge }: { edge: Edge }) => {
+      if (edge.getAttrByPath('line/stroke') !== edge_selected_color) {
+        edge.setAttrByPath('line/stroke', edge_hover_color);
+        edge.setAttrByPath('line/strokeWidth', edge_width);
+      }
+      edge.addTools([edgeHoverTool]);
+    });
+    // Listen to edge mouseleave event: revert style and remove add button
     graphRef.current.on('edge:mouseleave', ({ edge }: { edge: Edge }) => {
       if (edge.getAttrByPath('line/stroke') !== edge_selected_color) {
         edge.setAttrByPath('line/stroke', edge_color);
         edge.setAttrByPath('line/strokeWidth', edge_width);
       }
+      edge.removeTools();
     });
     // Listen to node selection event
     graphRef.current.on('node:click', nodeClick);
