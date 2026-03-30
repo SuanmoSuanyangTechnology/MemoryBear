@@ -154,6 +154,8 @@ export const analyticsRefresh = (end_user_id: string) => {
 export const getForgetStats = (end_user_id: string) => {
   return request.get(`/memory/forget-memory/stats`, { end_user_id })
 }
+// 获取带遗忘节点列表
+export const getForgetPendingNodesUrl = '/memory/forget-memory/pending-nodes'
 // Implicit Memory - Preferences
 export const getImplicitPreferences = (end_user_id: string) => {
   return request.get(`/memory/implicit-memory/preferences/${end_user_id}`)
