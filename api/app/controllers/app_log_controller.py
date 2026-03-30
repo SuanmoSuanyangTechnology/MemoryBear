@@ -25,14 +25,12 @@ def list_app_logs(
         app_id: uuid.UUID,
         page: int = Query(1, ge=1),
         pagesize: int = Query(20, ge=1, le=100),
-        user_id: Optional[str] = None,
         is_draft: Optional[bool] = None,
         db: Session = Depends(get_db),
         current_user=Depends(get_current_user),
 ):
     """查看应用下所有会话记录（分页）
 
-    - 支持按 user_id 筛选
     - 支持按 is_draft 筛选（草稿会话 / 发布会话）
     - 按最新更新时间倒序排列
     - 所有人（包括共享者和被共享者）都只能查看自己的会话记录
@@ -48,12 +46,6 @@ def list_app_logs(
         Conversation.workspace_id == workspace_id,
         Conversation.is_active.is_(True),
     )
-    
-    # 所有人只能查看自己的会话记录
-    stmt = stmt.where(Conversation.user_id == str(current_user.id))
-
-    if user_id:
-        stmt = stmt.where(Conversation.user_id == user_id)
 
     if is_draft is not None:
         stmt = stmt.where(Conversation.is_draft == is_draft)
@@ -105,7 +97,6 @@ def get_app_log_detail(
             Conversation.app_id == app_id,
             Conversation.workspace_id == workspace_id,
             Conversation.is_active.is_(True),
-            Conversation.user_id == str(current_user.id),
         )
     ).first()
 
