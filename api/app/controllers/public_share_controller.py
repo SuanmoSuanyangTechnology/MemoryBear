@@ -410,30 +410,6 @@ async def chat(
         agent_config = agent_config_4_app_release(release)
 
         if payload.stream:
-            # async def event_generator():
-            #     async for event in service.chat_stream(
-            #         share_token=share_token,
-            #         message=payload.message,
-            #         conversation_id=conversation.id,  # 使用已创建的会话 ID
-            #         user_id=str(new_end_user.id),  # 转换为字符串
-            #         variables=payload.variables,
-            #         password=password,
-            #         web_search=payload.web_search,
-            #         memory=payload.memory,
-            #         storage_type=storage_type,
-            #         user_rag_memory_id=user_rag_memory_id
-            #     ):
-            #         yield event
-
-            # return StreamingResponse(
-            #     event_generator(),
-            #     media_type="text/event-stream",
-            #     headers={
-            #         "Cache-Control": "no-cache",
-            #         "Connection": "keep-alive",
-            #         "X-Accel-Buffering": "no"
-            #     }
-            # )
             async def event_generator():
                 async for event in app_chat_service.agnet_chat_stream(
                         message=payload.message,
@@ -459,20 +435,6 @@ async def chat(
                     "X-Accel-Buffering": "no"
                 }
             )
-        # 非流式返回
-        # result = await service.chat(
-        #     share_token=share_token,
-        #     message=payload.message,
-        #     conversation_id=conversation.id,  # 使用已创建的会话 ID
-        #     user_id=str(new_end_user.id),  # 转换为字符串
-        #     variables=payload.variables,
-        #     password=password,
-        #     web_search=payload.web_search,
-        #     memory=payload.memory,
-        #     storage_type=storage_type,
-        #     user_rag_memory_id=user_rag_memory_id
-        # )
-        # return success(data=conversation_schema.ChatResponse(**result))
         result = await app_chat_service.agnet_chat(
             message=payload.message,
             conversation_id=conversation.id,  # 使用已创建的会话 ID
@@ -531,48 +493,6 @@ async def chat(
         )
 
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
-        # 多 Agent 流式返回
-        # if payload.stream:
-        #     async def event_generator():
-        #         async for event in service.multi_agent_chat_stream(
-        #             share_token=share_token,
-        #             message=payload.message,
-        #             conversation_id=conversation.id,  # 使用已创建的会话 ID
-        #             user_id=str(new_end_user.id),  # 转换为字符串
-        #             variables=payload.variables,
-        #             password=password,
-        #             web_search=payload.web_search,
-        #             memory=payload.memory,
-        #                 storage_type=storage_type,
-        #                 user_rag_memory_id=user_rag_memory_id
-        #         ):
-        #             yield event
-
-        #     return StreamingResponse(
-        #         event_generator(),
-        #         media_type="text/event-stream",
-        #         headers={
-        #             "Cache-Control": "no-cache",
-        #             "Connection": "keep-alive",
-        #             "X-Accel-Buffering": "no"
-        #         }
-        #     )
-
-        # # 多 Agent 非流式返回
-        # result = await service.multi_agent_chat(
-        #     share_token=share_token,
-        #     message=payload.message,
-        #     conversation_id=conversation.id,  # 使用已创建的会话 ID
-        #     user_id=str(new_end_user.id),  # 转换为字符串
-        #     variables=payload.variables,
-        #     password=password,
-        #     web_search=payload.web_search,
-        #     memory=payload.memory,
-        #     storage_type=storage_type,
-        #     user_rag_memory_id=user_rag_memory_id
-        # )
-
-        # return success(data=conversation_schema.ChatResponse(**result))
     elif app_type == AppType.WORKFLOW:
         config = workflow_config_4_app_release(release)
         if not config.id:
