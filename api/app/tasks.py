@@ -1180,8 +1180,8 @@ def write_message_task(
         lock = RedisFairLock(
             key=f"memory_write:{end_user_id}",
             redis_client=redis_client,
-            expire=120,
-            timeout=300,
+            expire=600,
+            timeout=3600,
             auto_renewal=True,
         )
         if not lock.acquire():
