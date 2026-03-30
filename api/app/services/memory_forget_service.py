@@ -203,8 +203,7 @@ class MemoryForgetService:
         connector: Neo4jConnector,
         end_user_id: str,
         forgetting_threshold: float,
-        min_days_since_access: int,
-        limit: int = 20
+        min_days_since_access: int
     ) -> list[Dict[str, Any]]:
         """
         获取待遗忘节点列表
@@ -216,7 +215,6 @@ class MemoryForgetService:
             end_user_id: 组ID
             forgetting_threshold: 遗忘阈值
             min_days_since_access: 最小未访问天数
-            limit: 返回节点数量限制
         
         Returns:
             list: 待遗忘节点列表
@@ -247,14 +245,12 @@ class MemoryForgetService:
           n.activation_value as activation_value,
           n.last_access_time as last_access_time
         ORDER BY n.activation_value ASC
-        LIMIT $limit
         """
         
         params = {
             'end_user_id': end_user_id,
             'threshold': forgetting_threshold,
-            'min_access_time_str': min_access_time_str,
-            'limit': limit
+            'min_access_time_str': min_access_time_str
         }
         
         results = await connector.execute_query(query, **params)
@@ -636,7 +632,7 @@ class MemoryForgetService:
             api_logger.error(f"获取历史趋势数据失败: {str(e)}")
             # 失败时返回空列表，不影响主流程
         
-        # 获取待遗忘节点列表（前20个满足遗忘条件的节点）
+        # 获取待遗忘节点列表
         pending_nodes = []
         try:
             if end_user_id:
@@ -652,8 +648,7 @@ class MemoryForgetService:
                     connector=connector,
                     end_user_id=end_user_id,
                     forgetting_threshold=forgetting_threshold,
-                    min_days_since_access=int(min_days),
-                    limit=20
+                    min_days_since_access=int(min_days)
                 )
                 
                 api_logger.info(f"成功获取 {len(pending_nodes)} 个待遗忘节点")
