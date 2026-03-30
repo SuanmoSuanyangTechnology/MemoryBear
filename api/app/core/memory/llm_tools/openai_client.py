@@ -65,7 +65,7 @@ class OpenAIClient(LLMClient):
             type=type_
         )
 
-        logger.debug(f"OpenAI 客户端初始化完成: type={type_}")
+        logger.info(f"OpenAI 客户端初始化完成: type={type_}")
 
     async def chat(self, messages: List[Dict[str, str]], **kwargs) -> Any:
         """
