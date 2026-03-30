@@ -138,21 +138,13 @@ class CreateEndUserRequest(BaseModel):
     """Request schema for creating an end user.
     
     Attributes:
-        workspace_id: Workspace ID (required)
         other_id: External user identifier (required)
         other_name: Display name for the end user
+        memory_config_id: Optional memory config ID. If not provided, uses workspace default.
     """
-    workspace_id: str = Field(..., description="Workspace ID (required)")
     other_id: str = Field(..., description="External user identifier (required)")
     other_name: Optional[str] = Field("", description="Display name")
-
-    @field_validator("workspace_id")
-    @classmethod
-    def validate_workspace_id(cls, v: str) -> str:
-        """Validate that workspace_id is not empty."""
-        if not v or not v.strip():
-            raise ValueError("workspace_id is required and cannot be empty")
-        return v.strip()
+    memory_config_id: Optional[str] = Field(None, description="Memory config ID. Falls back to workspace default if not provided.")
 
     @field_validator("other_id")
     @classmethod
@@ -171,11 +163,13 @@ class CreateEndUserResponse(BaseModel):
         other_id: External user identifier
         other_name: Display name
         workspace_id: Workspace the user belongs to
+        memory_config_id: Connected memory config ID
     """
     id: str = Field(..., description="End user UUID")
     other_id: str = Field(..., description="External user identifier")
     other_name: str = Field("", description="Display name")
     workspace_id: str = Field(..., description="Workspace ID")
+    memory_config_id: Optional[str] = Field(None, description="Connected memory config ID")
 
 
 class MemoryConfigItem(BaseModel):
