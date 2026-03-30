@@ -128,6 +128,7 @@ const Menu: FC<{
 
   /** Filter menus based on user role and source */
   useEffect(() => {
+    if (!user) return
     let menuList: MenuItem[] = []
     
     if (user.role === 'member' && source === 'space') {
@@ -136,7 +137,7 @@ const Menu: FC<{
       menuList = allMenus[source] || []
     }
 
-    const noAuthList = ['user', 'pricing'].filter(vo => !user.permissions?.includes(vo) && !user.permissions?.includes('all'))
+    const noAuthList = ['user', 'pricing'].filter(vo => (Array.isArray(user.permissions) && !user.permissions?.includes(vo) && !user.permissions?.includes('all')) || !Array.isArray(user.permissions))
 
     if (noAuthList && !noAuthList?.includes('all')) {
       const filterMenus = (list: MenuItem[]): MenuItem[] =>{

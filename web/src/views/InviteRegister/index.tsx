@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:37:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-04 10:05:39
+ * @Last Modified time: 2026-03-27 22:22:18
  */
 /**
  * Invite Register Page
@@ -144,7 +144,7 @@ const InviteRegister: React.FC = () => {
     }).then((res) => {
       const response = res as LoginInfo;
       updateLoginInfo(response);
-      navigate('/');
+      navigate('/', { replace: true });
     }).finally(() => {
       setLoading(false);
     });
