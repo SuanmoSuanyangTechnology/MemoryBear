@@ -274,5 +274,21 @@ async def write(
     except Exception as cache_err:
         logger.warning(f"[WRITE] 写入活动统计缓存失败（不影响主流程）: {cache_err}", exc_info=True)
 
+    # Close LLM/Embedder underlying httpx clients to prevent
+    # 'RuntimeError: Event loop is closed' during garbage collection
+    for client_obj in (llm_client, embedder_client):
+        try:
+            underlying = getattr(client_obj, 'client', None) or getattr(client_obj, 'model', None)
+            if underlying is None:
+                continue
+            # Unwrap RedBearLLM / RedBearEmbeddings to get the LangChain model
+            inner = getattr(underlying, '_model', underlying)
+            # LangChain OpenAI models expose async_client (httpx.AsyncClient)
+            http_client = getattr(inner, 'async_client', None)
+            if http_client is not None and hasattr(http_client, 'aclose'):
+                await http_client.aclose()
+        except Exception:
+            pass
+
     logger.info("=== Pipeline Complete ===")
     logger.info(f"Total execution time: {total_time:.2f} seconds")
