@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-30 15:08:14
+ * @Last Modified time: 2026-03-30 17:18:11
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -441,6 +441,7 @@ export const useWorkflowGraph = ({
       setTimeout(() => {
         if (graphRef.current) {
           graphRef.current.centerContent()
+          graphRef.current.getNodes().forEach(node => node.toFront());
         }
       }, 200)
     }
@@ -719,6 +720,7 @@ export const useWorkflowGraph = ({
   };
   const nodePortClickEvent = ({ e, node, port }: { e: MouseEvent, node: Node, port: string }) => {
     e.stopPropagation();
+    e.preventDefault();
     const portElement = e.target as HTMLElement;
     const rect = portElement.getBoundingClientRect();
 
@@ -903,13 +905,65 @@ export const useWorkflowGraph = ({
     graphRef.current.on('edge:click', edgeClick);
     // Listen to port click event
     graphRef.current.on('node:port:click', nodePortClickEvent);
+    // Port hover: show circle style on right ports
+    graphRef.current.on('node:port:mouseenter', ({ node, port }) => {
+      if (!port) return;
+      const portData = node.getPort(port);
+      if (portData?.group !== 'right') return;
+      node.toFront();
+      node.setPortProp(port, 'attrs/body/opacity', 0);
+      node.setPortProp(port, 'attrs/hoverBody/opacity', 1);
+      node.setPortProp(port, 'attrs/label/opacity', 1);
+    });
+    graphRef.current.on('node:port:mouseleave', ({ node, port }) => {
+      if (!port) return;
+      const portData = node.getPort(port);
+      if (portData?.group !== 'right') return;
+      node.setPortProp(port, 'attrs/body/opacity', 1);
+      node.setPortProp(port, 'attrs/hoverBody/opacity', 0);
+      node.setPortProp(port, 'attrs/label/opacity', 0);
+    });
     // Listen to canvas click event, cancel selection
     graphRef.current.on('blank:click', blankClick);
+    // Node hover: highlight connected edges
+    graphRef.current.on('node:mouseenter', ({ node }) => {
+      graphRef.current?.getEdges().forEach(edge => {
+        const view = graphRef.current?.findViewByCell(edge);
+        view?.removeTools();
+        if (edge.getAttrByPath('line/stroke') !== edge_selected_color) {
+          edge.setAttrByPath('line/stroke', edge_color);
+        }
+      });
+      graphRef.current?.getConnectedEdges(node).forEach(edge => {
+        edge.setAttrByPath('line/stroke', edge_hover_color);
+      });
+      node.getPorts().filter(p => p.group === 'right').forEach(p => {
+        node.setPortProp(p.id!, 'attrs/body/opacity', 0);
+        node.setPortProp(p.id!, 'attrs/hoverBody/opacity', 1);
+        node.setPortProp(p.id!, 'attrs/label/opacity', 1);
+      });
+    });
+    graphRef.current.on('node:mouseleave', ({ node }) => {
+      graphRef.current?.getConnectedEdges(node).forEach(edge => {
+        if (edge.getAttrByPath('line/stroke') !== edge_selected_color) {
+          edge.setAttrByPath('line/stroke', edge_color);
+        }
+      });
+      node.getPorts().filter(p => p.group === 'right').forEach(p => {
+        node.setPortProp(p.id!, 'attrs/body/opacity', 1);
+        node.setPortProp(p.id!, 'attrs/hoverBody/opacity', 0);
+        node.setPortProp(p.id!, 'attrs/label/opacity', 0);
+      });
+    });
     // Listen to zoom event
     graphRef.current.on('scale', scaleEvent);
     // Listen to node move event
     graphRef.current.on('node:moved', nodeMoved);
     graphRef.current.on('node:removed', blankClick)
+    // When edge changes, bring connected nodes' ports to front
+    graphRef.current.on('edge:change', () => {
+      graphRef.current?.getNodes().forEach(node => node.toFront());
+    });
     // Listen to copy keyboard event
     graphRef.current.bindKey(['ctrl+c', 'cmd+c'], copyEvent);
     // Listen to paste keyboard event

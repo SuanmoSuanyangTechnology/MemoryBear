@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-30 15:11:56
+ * @Last Modified time: 2026-03-30 16:52:54
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -695,8 +695,59 @@ export const portArgs = { x: nodeWidth, y: portItemArgsY }
 
 const defaultPortGroup = {
   position: { name: 'absolute' },
-  markup: portMarkup,
-  attrs: portAttrs
+  markup: [
+    { tagName: 'rect', selector: 'body' },
+    { tagName: 'circle', selector: 'hoverBody' },
+    { tagName: 'text', selector: 'label' },
+  ],
+  attrs: {
+    body: {
+      width: 1,
+      height: 8,
+      x: -1,
+      magnet: true,
+      stroke: port_color,
+      strokeWidth: edge_width,
+      fill: port_color,
+    },
+    hoverBody: {
+      r: 6,
+      cy: 2,
+      magnet: true,
+      stroke: port_color,
+      strokeWidth: edge_width,
+      fill: port_color,
+      opacity: 0,
+    },
+    label: {
+      text: '+',
+      fontSize: 12,
+      fontWeight: 'bold',
+      fill: '#FFFFFF',
+      textAnchor: 'middle',
+      textVerticalAnchor: 'middle',
+      pointerEvents: 'none',
+      y: '0.15em',
+      opacity: 0,
+    },
+  },
+}
+
+const leftPortGroup = {
+  position: { name: 'absolute' },
+  markup: [{ tagName: 'rect', selector: 'body' }],
+  attrs: {
+    body: {
+      width: 1,
+      height: 8,
+      x: -1,
+      y: -4,
+      magnet: true,
+      stroke: port_color,
+      strokeWidth: edge_width,
+      fill: port_color,
+    },
+  },
 }
 
 /**
@@ -705,7 +756,7 @@ const defaultPortGroup = {
  */
 export const defaultAbsolutePortGroups = {
   right: defaultPortGroup,
-  left: defaultPortGroup,
+  left: leftPortGroup,
 }
 /**
  * Default port items for standard nodes
@@ -799,7 +850,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 28,
     shape: 'add-node',
     ports: {
-      groups: { left: defaultPortGroup },
+      groups: { left: leftPortGroup },
       items: [{ group: 'left', args: { x: 0, y: 18 }}],
     },
   },
@@ -826,7 +877,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 28,
     shape: 'add-node',
     ports: {
-      groups: { left: defaultPortGroup },
+      groups: { left: leftPortGroup },
       items: [{ group: 'left', args: { x: 0, y: 14 } }],
     },
   },
@@ -835,7 +886,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 76,
     shape: 'normal-node',
     ports: {
-      groups: { left: defaultPortGroup },
+      groups: { left: leftPortGroup },
       items: [defaultPortItems[0]],
     },
   },
