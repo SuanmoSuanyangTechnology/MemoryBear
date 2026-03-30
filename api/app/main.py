@@ -1,5 +1,6 @@
 import os
 import subprocess
+from app.repositories.neo4j.create_indexes import create_all_indexes
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, APIRouter
@@ -60,16 +61,9 @@ async def lifespan(app: FastAPI):
             logger.warning(f"加载预定义模型时出错: {str(e)}")
     else:
         logger.info("预定义模型加载已禁用 (LOAD_MODEL=false)")
-
+    await create_all_indexes()
     logger.info("应用程序启动完成")
 
-    # 初始化 Neo4j 索引和约束（仅启动时执行一次）
-    try:
-        from app.repositories.neo4j.create_indexes import create_all_indexes
-        await create_all_indexes()
-        logger.info("Neo4j 索引和约束初始化完成")
-    except Exception as e:
-        logger.warning(f"Neo4j 索引初始化失败（服务仍可启动，但查询性能可能受影响）: {e}")
 
     yield
     # 应用关闭事件
