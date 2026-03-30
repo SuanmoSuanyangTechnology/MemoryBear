@@ -24,16 +24,17 @@ interface BodyWrapperProps {
   /** Whether to show loading state */
   loading?: boolean
   /** Whether the content is empty */
-  empty: boolean
+  empty: boolean;
+  className?: string;
 }
-const BodyWrapper: FC<BodyWrapperProps> = ({ children, loading = false, empty }) => {
+const BodyWrapper: FC<BodyWrapperProps> = ({ children, loading = false, empty, className = 'rb:max-h-[calc(100%-48px)]!' }) => {
   // Show loading spinner while data is being fetched
   if (loading) {
-    return <PageLoading />
+    return <PageLoading className={className} />
   }
   // Show empty state when no data is available
   if (!loading && empty) {
-    return <PageEmpty />
+    return <PageEmpty className={className} />
   }
   // Render actual content when data is loaded and available
   return children

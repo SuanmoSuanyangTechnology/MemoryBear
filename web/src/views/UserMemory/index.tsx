@@ -78,7 +78,7 @@ export default function UserMemory() {
   }, [search, data])
 
   return (
-    <div>
+    <>
       <Form form={form}>
         <Row gutter={16} className="rb:mb-4">
           <Col span={8}>
@@ -137,6 +137,6 @@ export default function UserMemory() {
           })}
         </Row>
       </BodyWrapper>
-    </div>
+    </>
   );
 }
