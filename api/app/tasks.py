@@ -101,7 +101,12 @@ def get_sync_redis_client() -> Optional[redis.StrictRedis]:
 
 
 def set_asyncio_event_loop():
-    """Set the asyncio event loop for the current thread."""
+    """Ensure an open asyncio event loop exists for the current thread.
+
+    Reuses the existing event loop if one is available and still open.
+    Creates and installs a new event loop only when the current one is
+    closed or missing (e.g. after ``_shutdown_loop_gracefully``).
+    """
     try:
         loop = asyncio.get_event_loop()
         if loop.is_closed():
@@ -111,6 +116,30 @@ def set_asyncio_event_loop():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
     return loop
+
+
+def _shutdown_loop_gracefully(loop: asyncio.AbstractEventLoop):
+    """Gracefully shutdown pending async generators and tasks on the event loop.
+
+    This prevents 'RuntimeError: Event loop is closed' from httpx.AsyncClient.__del__
+    by giving pending aclose() coroutines a chance to run before the loop is discarded.
+
+    Note: This only tears down the given loop. Callers that need a fresh event
+    loop afterwards should use ``set_asyncio_event_loop()`` explicitly.
+    """
+    try:
+        # Cancel and collect all remaining tasks
+        all_tasks = asyncio.all_tasks(loop)
+        if all_tasks:
+            for task in all_tasks:
+                task.cancel()
+            loop.run_until_complete(asyncio.gather(*all_tasks, return_exceptions=True))
+        # Shutdown async generators (triggers __aclose__ on httpx clients etc.)
+        loop.run_until_complete(loop.shutdown_asyncgens())
+    except Exception:
+        pass
+    finally:
+        loop.close()
 
 
 @celery_app.task(name="tasks.process_item")
@@ -1221,6 +1250,12 @@ def write_message_task(
                 lock.release()
             except Exception as e:
                 logger.warning(f"[CELERY WRITE] 释放锁失败: {e}")
+        # Gracefully shutdown the event loop to prevent
+        # 'RuntimeError: Event loop is closed' from httpx.AsyncClient.__del__
+        _shutdown_loop_gracefully(loop)
+
+
+# unused task
 # @celery_app.task(name="app.core.memory.agent.health.check_read_service")
 # def check_read_service_task() -> Dict[str, str]:
 #     """Call read_service and write latest status to Redis.
