@@ -95,7 +95,12 @@ def list_apps(
         if app_ids:
             items_orm = app_service.get_apps_by_ids(db, app_ids, workspace_id)
             items = [service._convert_to_schema(app, workspace_id) for app in items_orm]
-            return success(data=items)
+            # 返回标准分页格式
+            meta = PageMeta(page=1, pagesize=len(items), total=len(items), hasnext=False)
+            return success(data=PageData(page=meta, items=items))
+        # ids 为空时，返回空列表
+        meta = PageMeta(page=1, pagesize=0, total=0, hasnext=False)
+        return success(data=PageData(page=meta, items=[]))
 
     # 正常分页查询
     items_orm, total = app_service.list_apps(

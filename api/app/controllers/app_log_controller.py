@@ -35,6 +35,7 @@ def list_app_logs(
     - 支持按 user_id 筛选
     - 支持按 is_draft 筛选（草稿会话 / 发布会话）
     - 按最新更新时间倒序排列
+    - 所有人（包括共享者和被共享者）都只能查看自己的会话记录
     """
     workspace_id = current_user.current_workspace_id
 
@@ -47,6 +48,9 @@ def list_app_logs(
         Conversation.workspace_id == workspace_id,
         Conversation.is_active.is_(True),
     )
+    
+    # 所有人只能查看自己的会话记录
+    stmt = stmt.where(Conversation.user_id == str(current_user.id))
 
     if user_id:
         stmt = stmt.where(Conversation.user_id == user_id)
@@ -86,6 +90,7 @@ def get_app_log_detail(
 
     - 返回会话基本信息 + 所有消息（按时间正序）
     - 消息 meta_data 包含模型名、token 用量等信息
+    - 所有人（包括共享者和被共享者）都只能查看自己的会话详情
     """
     workspace_id = current_user.current_workspace_id
 
@@ -100,6 +105,7 @@ def get_app_log_detail(
             Conversation.app_id == app_id,
             Conversation.workspace_id == workspace_id,
             Conversation.is_active.is_(True),
+            Conversation.user_id == str(current_user.id),
         )
     ).first()
 
