@@ -478,6 +478,22 @@ class PendingForgettingNode(BaseModel):
     last_access_time: int = Field(..., description="最后访问时间（Unix时间戳，秒）")
 
 
+class PageInfo(BaseModel):
+    """分页信息模型"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    page: int = Field(..., description="当前页码（从1开始）")
+    pagesize: int = Field(..., description="每页数量")
+    total: int = Field(..., description="总记录数")
+    hasnext: bool = Field(..., description="是否有下一页")
+
+
+class PendingNodesResponse(BaseModel):
+    """待遗忘节点列表响应模型（独立分页接口）"""
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    items: List[PendingForgettingNode] = Field(..., description="待遗忘节点列表")
+    page: PageInfo = Field(..., description="分页信息")
+
+
 class ForgettingStatsResponse(BaseModel):
     """遗忘引擎统计信息响应模型"""
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
@@ -485,7 +501,6 @@ class ForgettingStatsResponse(BaseModel):
     node_distribution: Dict[str, int] = Field(..., description="节点类型分布")
     recent_trends: List[ForgettingCycleHistoryPoint] = Field(...,
                                                              description="最近7个日期的遗忘趋势数据（每天取最后一次执行）")
-    pending_nodes: List[PendingForgettingNode] = Field(..., description="待遗忘节点列表（前20个满足遗忘条件的节点）")
     timestamp: int = Field(..., description="统计时间（时间戳）")
 
 
