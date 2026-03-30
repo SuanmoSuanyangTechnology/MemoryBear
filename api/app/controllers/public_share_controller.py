@@ -27,6 +27,7 @@ from app.services.conversation_service import ConversationService
 from app.services.release_share_service import ReleaseShareService
 from app.services.shared_chat_service import SharedChatService
 from app.services.workflow_service import WorkflowService
+from app.models.file_metadata_model import FileMetadata
 from app.utils.app_config_utils import workflow_config_4_app_release, \
     agent_config_4_app_release, multi_agent_config_4_app_release
 
@@ -259,8 +260,19 @@ def get_conversation(
     conv_service = ConversationService(db)
     messages = conv_service.get_messages(conversation_id)
 
-    # 构建响应
-    conv_dict = conversation_schema.Conversation.model_validate(conversation).model_dump()
+    # 为 assistant 消息查询 audio_url 状态
+    for m in messages:
+        if m.role == "assistant" and m.meta_data:
+            audio_url = m.meta_data.get("audio_url")
+            if audio_url:
+                try:
+                    file_id = uuid.UUID(audio_url.rstrip("/").split("/")[-1])
+                    file_meta = db.get(FileMetadata, file_id)
+                    m.meta_data["audio_status"] = file_meta.status if file_meta else "unknown"
+                except (ValueError, IndexError):
+                    m.meta_data["audio_status"] = "unknown"
+
+    conv_dict = conversation_schema.Conversation.model_validate(conversation).model_dump(mode="json")
     conv_dict["messages"] = [
         conversation_schema.Message.model_validate(m) for m in messages
     ]
