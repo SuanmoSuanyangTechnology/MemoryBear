@@ -155,54 +155,6 @@ async def create_vector_indexes():
         await connector.close()
 
 
-async def create_config_id_indexes():
-    """Create indexes on config_id fields for improved query performance.
-    
-    These indexes enable fast filtering of nodes by configuration ID,
-    which is essential for configuration isolation and multi-tenant scenarios.
-    """
-    connector = Neo4jConnector()
-    try:
-        print("\n" + "=" * 70)
-        print("Creating Config ID Indexes")
-        print("=" * 70)
-        
-        # Dialogue.config_id index
-        await connector.execute_query("""
-            CREATE INDEX dialogue_config_id_index IF NOT EXISTS
-            FOR (d:Dialogue) ON (d.config_id)
-        """)
-        print("✓ Created: dialogue_config_id_index")
-        
-        # Statement.config_id index
-        await connector.execute_query("""
-            CREATE INDEX statement_config_id_index IF NOT EXISTS
-            FOR (s:Statement) ON (s.config_id)
-        """)
-        print("✓ Created: statement_config_id_index")
-        
-        # ExtractedEntity.config_id index
-        await connector.execute_query("""
-            CREATE INDEX entity_config_id_index IF NOT EXISTS
-            FOR (e:ExtractedEntity) ON (e.config_id)
-        """)
-        print("✓ Created: entity_config_id_index")
-        
-        # MemorySummary.config_id index
-        await connector.execute_query("""
-            CREATE INDEX summary_config_id_index IF NOT EXISTS
-            FOR (m:MemorySummary) ON (m.config_id)
-        """)
-        print("✓ Created: summary_config_id_index")
-        
-        print("\nConfig ID indexes created successfully!")
-        print("These indexes enable fast filtering by configuration ID.")
-        
-    except Exception as e:
-        print(f"✗ Error creating config_id indexes: {e}")
-    finally:
-        await connector.close()
-
 
 async def create_unique_constraints():
     """Create uniqueness constraints for core node identifiers.
