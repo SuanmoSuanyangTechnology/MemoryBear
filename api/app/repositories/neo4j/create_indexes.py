@@ -144,18 +144,6 @@ async def create_vector_indexes():
         """)
         print("✓ Created: dialogue_embedding_index")
 
-        # Community summary embedding index
-        await connector.execute_query("""
-            CREATE VECTOR INDEX community_summary_embedding_index IF NOT EXISTS
-            FOR (c:Community)
-            ON c.summary_embedding
-            OPTIONS {indexConfig: {
-              `vector.dimensions`: 1024,
-              `vector.similarity_function`: 'cosine'
-            }}
-        """)
-        print("✓ Created: community_summary_embedding_index")
-        
         print("\nVector indexes created successfully!")
         print("\nExpected performance improvement:")
         print("  Before: ~1.4s for embedding search")
