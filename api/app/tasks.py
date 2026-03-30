@@ -1244,6 +1244,11 @@ def write_message_task(
             "task_id": self.request.id
         }
     finally:
+        if lock is not None:
+            try:
+                lock.release()
+            except Exception as e:
+                logger.warning(f"[CELERY WRITE] 释放锁失败: {e}")
         # Gracefully shutdown the event loop to prevent
         # 'RuntimeError: Event loop is closed' from httpx.AsyncClient.__del__
         _shutdown_loop_gracefully(loop)
