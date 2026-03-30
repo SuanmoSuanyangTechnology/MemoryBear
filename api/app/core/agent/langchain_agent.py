@@ -329,7 +329,6 @@ class LangChainAgent:
                     db.close()
             except Exception as e:
                 logger.warning(f"Failed to get db session: {e}")
-        actual_end_user_id = end_user_id if end_user_id is not None else "unknown"
         logger.info(f'写入类型{storage_type, str(end_user_id), message, str(user_rag_memory_id)}')
         print(f'写入类型{storage_type, str(end_user_id), message, str(user_rag_memory_id)}')
         try:

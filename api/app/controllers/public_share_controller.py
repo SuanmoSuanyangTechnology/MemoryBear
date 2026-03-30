@@ -354,6 +354,16 @@ async def chat(
             other_id=other_id,
             original_user_id=user_id
         )
+
+        # Only extract and set memory_config_id when the end user doesn't have one yet
+        if not new_end_user.memory_config_id:
+            from app.services.memory_config_service import MemoryConfigService
+            memory_config_service = MemoryConfigService(db)
+            memory_config_id, _ = memory_config_service.extract_memory_config_id(release.type, release.config or {})
+            if memory_config_id:
+                new_end_user.memory_config_id = memory_config_id
+                db.commit()
+                db.refresh(new_end_user)
         end_user_id = str(new_end_user.id)
 
         # appid = share.app_id
