@@ -34,7 +34,7 @@ const Statistics: FC = () => {
       className: 'rb:text-[#212332]'
     },
     {
-      title: t('application.createTime'),
+      title: t('application.created_at'),
       dataIndex: 'created_at',
       key: 'created_at',
       render: (createdAt: string) => formatDateTime(createdAt, 'YYYY-MM-DD HH:mm:ss'),

@@ -37,11 +37,11 @@ const ChatContent: FC<ChatContentProps> = ({
   const prevDataLengthRef = useRef(data.length);
   const isScrolledToBottomRef = useRef(true);
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const [playingIndex, setPlayingIndex] = useState<number | null>(null)
+  const [playingIndex, setPlayingIndex] = useState<string | null>(null)
 
-  const handlePlay = (index: number, audio_url: string, audio_status?: string) => {
-    if (audio_status !== 'completed' && !audio_status) return
-    if (playingIndex === index) {
+  const handlePlay = (audio_url: string, audio_status?: string) => {
+    if (audio_status !== 'completed' && typeof audio_status === 'string') return
+    if (playingIndex === audio_url) {
       audioRef.current?.pause()
       setPlayingIndex(null)
       return
@@ -52,7 +52,7 @@ const ChatContent: FC<ChatContentProps> = ({
     const audio = new Audio(audio_url)
     audioRef.current = audio
     audio.play()
-    setPlayingIndex(index)
+    setPlayingIndex(audio_url)
     audio.onended = () => setPlayingIndex(null)
   }
   
@@ -79,12 +79,16 @@ const ChatContent: FC<ChatContentProps> = ({
       }
     };
   }, []);
-  
+
   // Auto-scroll to bottom when data changes to show latest messages
   // When data array length remains unchanged, if data is updated and user manually scrolled up, don't auto-scroll to bottom
   // When data array length changes, auto-scroll to bottom
   // If already scrolled to bottom, will auto-scroll to bottom
   useEffect(() => {
+    if (playingIndex && !data.some(item => item.meta_data?.audio_url === playingIndex)) {
+      audioRef.current?.pause()
+      setPlayingIndex(null)
+    }
     setTimeout(() => {
       if (scrollContainerRef.current) {
         // Auto-scroll if data length changed OR user is currently at bottom
@@ -204,16 +208,16 @@ const ChatContent: FC<ChatContentProps> = ({
                   {item.meta_data?.audio_url && <>
                     <Divider className="rb:my-3!" />
                     <Space size={12} className="rb:pb-2 rb:pl-1">
-                      {playingIndex !== index && item.meta_data?.audio_status === 'pending'
+                      {playingIndex !== item.meta_data?.audio_url && item.meta_data?.audio_status === 'pending'
                         ? <Spin />
-                        : playingIndex !== index
+                        : playingIndex !== item.meta_data?.audio_url
                         ? <SoundOutlined className={clsx("rb:cursor-pointer rb:size-5.5", {
                           'rb:text-[#FF5D34]': item.meta_data?.audio_status === 'error',
                           'rb:hover:text-[#155EEF]!': !item.meta_data?.audio_status || !['pending', 'error'].includes(item.meta_data?.audio_status)
-                        })} onClick={() => handlePlay(index, item.meta_data?.audio_url!, item.meta_data?.audio_status)} />
+                        })} onClick={() => handlePlay(item.meta_data?.audio_url!, item.meta_data?.audio_status)} />
                         : <div
                             className="rb:size-5.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/audio_ing.gif')]"
-                            onClick={() => handlePlay(index, item.meta_data?.audio_url!, item.meta_data?.audio_status)}
+                            onClick={() => handlePlay(item.meta_data?.audio_url!, item.meta_data?.audio_status)}
                           />
                       }
                     </Space>
