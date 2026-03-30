@@ -199,6 +199,96 @@ class ConversationRepository:
         )
         return conversations, total
 
+    def list_app_conversations(
+            self,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            is_draft: Optional[bool] = None,
+            page: int = 1,
+            pagesize: int = 20
+    ) -> tuple[list[Conversation], int]:
+        """
+        查询应用日志会话列表（带分页和过滤）
+
+        Args:
+            app_id: 应用 ID
+            workspace_id: 工作空间 ID
+            is_draft: 是否草稿会话（None 表示不过滤）
+            page: 页码（从 1 开始）
+            pagesize: 每页数量
+
+        Returns:
+            Tuple[List[Conversation], int]: (会话列表，总数)
+        """
+        stmt = select(Conversation).where(
+            Conversation.app_id == app_id,
+            Conversation.workspace_id == workspace_id,
+            Conversation.is_active.is_(True)
+        )
+
+        if is_draft is not None:
+            stmt = stmt.where(Conversation.is_draft == is_draft)
+
+        # Calculate total number of records
+        total = int(self.db.execute(
+            select(func.count()).select_from(stmt.subquery())
+        ).scalar_one())
+
+        # Apply pagination
+        stmt = stmt.order_by(desc(Conversation.updated_at))
+        stmt = stmt.offset((page - 1) * pagesize).limit(pagesize)
+
+        conversations = list(self.db.scalars(stmt).all())
+
+        logger.info(
+            "Listed app conversations successfully",
+            extra={
+                "app_id": str(app_id),
+                "workspace_id": str(workspace_id),
+                "returned": len(conversations),
+                "total": total
+            }
+        )
+        return conversations, total
+
+    def get_conversation_for_app_log(
+            self,
+            conversation_id: uuid.UUID,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID
+    ) -> Conversation:
+        """
+        查询应用日志的会话详情
+
+        Args:
+            conversation_id: 会话 ID
+            app_id: 应用 ID
+            workspace_id: 工作空间 ID
+
+        Returns:
+            Conversation: 会话对象
+
+        Raises:
+            ResourceNotFoundException: 当会话不存在时
+        """
+        logger.info(f"Fetching conversation for app log: {conversation_id}")
+
+        stmt = select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.app_id == app_id,
+            Conversation.workspace_id == workspace_id,
+            Conversation.is_active.is_(True)
+        )
+
+        conversation = self.db.scalars(stmt).first()
+
+        if not conversation:
+            logger.warning(f"Conversation not found: {conversation_id}")
+            raise ResourceNotFoundException("会话", str(conversation_id))
+
+        logger.info(f"Conversation fetched successfully: {conversation_id}")
+        return conversation
+
     def soft_delete_conversation_by_conversation_id(
             self,
             conversation_id: uuid.UUID,
@@ -289,6 +379,34 @@ class MessageRepository:
         """
         self.db.add(message)
         return message
+
+    def get_messages_by_conversation(
+            self,
+            conversation_id: uuid.UUID
+    ) -> list[Message]:
+        """
+        查询会话的所有消息（按时间正序）
+
+        Args:
+            conversation_id: 会话 ID
+
+        Returns:
+            List[Message]: 消息列表
+        """
+        stmt = select(Message).where(
+            Message.conversation_id == conversation_id
+        ).order_by(Message.created_at)
+
+        messages = list(self.db.scalars(stmt).all())
+
+        logger.info(
+            "Fetched messages for conversation",
+            extra={
+                "conversation_id": str(conversation_id),
+                "message_count": len(messages)
+            }
+        )
+        return messages
 
     def get_message_by_conversation_id(
             self,

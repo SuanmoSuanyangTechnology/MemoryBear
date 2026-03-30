@@ -3,17 +3,16 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, desc, func
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user, cur_workspace_access_guard
-from app.models.conversation_model import Conversation, Message
-from app.schemas.app_log_schema import AppLogConversation, AppLogConversationDetail, AppLogMessage
+from app.schemas.app_log_schema import AppLogConversation, AppLogConversationDetail
 from app.schemas.response_schema import PageData, PageMeta
 from app.services.app_service import AppService
+from app.services.app_log_service import AppLogService
 
 router = APIRouter(prefix="/apps", tags=["App Logs"])
 logger = get_business_logger()
@@ -38,34 +37,21 @@ def list_app_logs(
     workspace_id = current_user.current_workspace_id
 
     # 验证应用访问权限
-    service = AppService(db)
-    service.get_app(app_id, workspace_id)
+    app_service = AppService(db)
+    app_service.get_app(app_id, workspace_id)
 
-    stmt = select(Conversation).where(
-        Conversation.app_id == app_id,
-        Conversation.workspace_id == workspace_id,
-        Conversation.is_active.is_(True),
+    # 使用 Service 层查询
+    log_service = AppLogService(db)
+    conversations, total = log_service.list_conversations(
+        app_id=app_id,
+        workspace_id=workspace_id,
+        page=page,
+        pagesize=pagesize,
+        is_draft=is_draft
     )
-
-    if is_draft is not None:
-        stmt = stmt.where(Conversation.is_draft == is_draft)
-
-    total = int(db.execute(
-        select(func.count()).select_from(stmt.subquery())
-    ).scalar_one())
-
-    stmt = stmt.order_by(desc(Conversation.updated_at))
-    stmt = stmt.offset((page - 1) * pagesize).limit(pagesize)
-
-    conversations = list(db.scalars(stmt).all())
 
     items = [AppLogConversation.model_validate(c) for c in conversations]
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
-
-    logger.info(
-        "查询应用日志会话列表",
-        extra={"app_id": str(app_id), "total": total, "page": page}
-    )
 
     return success(data=PageData(page=meta, items=items))
 
@@ -87,40 +73,17 @@ def get_app_log_detail(
     workspace_id = current_user.current_workspace_id
 
     # 验证应用访问权限
-    service = AppService(db)
-    service.get_app(app_id, workspace_id)
+    app_service = AppService(db)
+    app_service.get_app(app_id, workspace_id)
 
-    # 查询会话（确保属于该应用和工作空间）
-    conversation = db.scalars(
-        select(Conversation).where(
-            Conversation.id == conversation_id,
-            Conversation.app_id == app_id,
-            Conversation.workspace_id == workspace_id,
-            Conversation.is_active.is_(True),
-        )
-    ).first()
-
-    if not conversation:
-        from app.core.exceptions import ResourceNotFoundException
-        raise ResourceNotFoundException("会话", str(conversation_id))
-
-    # 查询消息（按时间正序）
-    messages = list(db.scalars(
-        select(Message)
-        .where(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at)
-    ).all())
+    # 使用 Service 层查询
+    log_service = AppLogService(db)
+    conversation = log_service.get_conversation_detail(
+        app_id=app_id,
+        conversation_id=conversation_id,
+        workspace_id=workspace_id
+    )
 
     detail = AppLogConversationDetail.model_validate(conversation)
-    detail.messages = [AppLogMessage.model_validate(m) for m in messages]
-
-    logger.info(
-        "查询应用日志会话详情",
-        extra={
-            "app_id": str(app_id),
-            "conversation_id": str(conversation_id),
-            "message_count": len(messages)
-        }
-    )
 
     return success(data=detail)
