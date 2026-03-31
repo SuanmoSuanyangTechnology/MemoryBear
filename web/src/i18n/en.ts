@@ -1827,6 +1827,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       memoryTipTitle: 'Are you sure you want to enable conversation memory? Conversations will be saved to the memory store.',
       stopAudioRecorder: 'Stop Recording',
       startAudioRecorder: 'Start Recording',
+      citations: 'Citations',
     },
     login: {
       title: 'Red Bear Memory Science',
