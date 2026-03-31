@@ -265,6 +265,8 @@ class MemoryPerceptualService:
                     if memory.end_user_id == uuid.UUID(end_user_id):
                         return memory
         llm, model_config = self._get_mutlimodal_client(file.type, memory_config)
+        if model_config is None or llm is None:
+            return None
         multimodel_service = MultimodalService(self.db, ModelInfo(
             model_name=model_config.model_name,
             provider=model_config.provider,
@@ -286,15 +288,20 @@ class MemoryPerceptualService:
             with open(os.path.join(prompt_path, 'perceptual_summary_system.jinja2'), 'r', encoding='utf-8') as f:
                 opt_system_prompt = f.read()
             rendered_system_message = Template(opt_system_prompt).render(file_type=file.type, language='zh')
-        except FileNotFoundError:
-            raise BusinessException(message="System prompt template not found", code=BizCode.NOT_FOUND)
+        except FileNotFoundError as e:
+            business_logger.error(f"Failed to generate perceptual memory: {str(e)}")
+            return None
         messages = [
             {"role": RoleType.SYSTEM.value, "content": [{"type": "text", "text": rendered_system_message}]},
             {"role": RoleType.USER.value, "content": [
                 {"type": "text", "text": "Summarize the following file"}, file_message
             ]}
         ]
-        result = await llm.ainvoke(messages)
+        try:
+            result = await llm.ainvoke(messages)
+        except Exception as e:
+            business_logger.error(f"Failed to generate perceptual memory: {str(e)}")
+            return None
         content = result.content
         final_output = ""
         if isinstance(content, list):
