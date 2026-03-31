@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -47,62 +48,62 @@ def get_workspace_total_end_users(
 
 @router.get("/end_users", response_model=ApiResponse)
 async def get_workspace_end_users(
+    workspace_id: Optional[str] = Query(None, description="工作空间ID（可选，默认当前用户工作空间）"),
+    keyword: Optional[str] = Query(None, description="搜索关键词（同时模糊匹配 other_name 和 id）"),
+    page: int = Query(1, ge=1, description="页码，从1开始"),
+    pagesize: int = Query(10, ge=1, description="每页数量"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    获取工作空间的宿主列表（高性能优化版本 v2）
-    
-    优化策略：
-    1. 批量查询 end_users（一次查询而非循环）
-    2. 并发查询所有用户的记忆数量（Neo4j）
-    3. RAG 模式使用批量查询（一次 SQL）
-    4. 只返回必要字段减少数据传输
-    5. 添加短期缓存减少重复查询
-    6. 并发执行配置查询和记忆数量查询
-    
-    返回格式：
-    {
-        "end_user": {"id": "uuid", "other_name": "名称"},
-        "memory_num": {"total": 数量},
-        "memory_config": {"memory_config_id": "id", "memory_config_name": "名称"}
-    }
+    获取工作空间的宿主列表（分页查询，支持模糊搜索）
+
+    返回工作空间下的宿主列表，支持分页查询和模糊搜索。
+    通过 keyword 参数同时模糊匹配 other_name 和 id 字段。
+
+    Args:
+        workspace_id: 工作空间ID（可选，默认当前用户工作空间）
+        keyword: 搜索关键词（可选，同时模糊匹配 other_name 和 id）
+        page: 页码（从1开始，默认1）
+        pagesize: 每页数量（默认10）
+        db: 数据库会话
+        current_user: 当前用户
+
+    Returns:
+        ApiResponse: 包含宿主列表和分页信息
     """
-    import asyncio
-    import json
-    from app.aioRedis import aio_redis_get, aio_redis_set
-    
-    workspace_id = current_user.current_workspace_id
-    
-    # 尝试从缓存获取（30秒缓存）
-    cache_key = f"end_users:workspace:{workspace_id}"
-    try:
-        cached_data = await aio_redis_get(cache_key)
-        if cached_data:
-            api_logger.info(f"从缓存获取宿主列表: workspace_id={workspace_id}")
-            return success(data=json.loads(cached_data), msg="宿主列表获取成功")
-    except Exception as e:
-        api_logger.warning(f"Redis 缓存读取失败: {str(e)}")
-    
+    # 如果未提供 workspace_id，使用当前用户的工作空间
+    if workspace_id is None:
+        workspace_id = current_user.current_workspace_id
     # 获取当前空间类型
     current_workspace_type = memory_dashboard_service.get_current_workspace_type(db, workspace_id, current_user)
-    api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的宿主列表")
-    
-    # 获取 end_users（已优化为批量查询）
-    end_users = memory_dashboard_service.get_workspace_end_users(
+    api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的宿主列表: keyword={keyword}, page={page}, pagesize={pagesize}")
+
+    # 获取分页的 end_users
+    end_users_result = memory_dashboard_service.get_workspace_end_users_paginated(
         db=db,
         workspace_id=workspace_id,
-        current_user=current_user
+        current_user=current_user,
+        page=page,
+        pagesize=pagesize,
+        keyword=keyword
     )
+
+    end_users = end_users_result.get("items", [])
+    total = end_users_result.get("total", 0)
+
     if not end_users:
-        api_logger.info("工作空间下没有宿主")
-        # 缓存空结果，避免重复查询
-        try:
-            await aio_redis_set(cache_key, json.dumps([]), expire=30)
-        except Exception as e:
-            api_logger.warning(f"Redis 缓存写入失败: {str(e)}")
-        return success(data=[], msg="宿主列表获取成功")
-    
+        api_logger.info(f"工作空间下没有宿主或当前页无数据: total={total}, page={page}")
+        return success(data={
+            "items": [],
+            "page": {
+                "page": page,
+                "pagesize": pagesize,
+                "total": total,
+                "hasnext": (page * pagesize) < total
+            }
+        }, msg="宿主列表获取成功")
+
     end_user_ids = [str(user.id) for user in end_users]
     
     # 并发执行两个独立的查询任务
@@ -170,13 +171,13 @@ async def get_workspace_end_users(
         get_memory_configs(),
         get_memory_nums()
     )
-    
-    # 构建结果（优化：使用列表推导式）
-    result = []
+
+    # 构建结果列表
+    items = []
     for end_user in end_users:
         user_id = str(end_user.id)
         config_info = memory_configs_map.get(user_id, {})
-        result.append({
+        items.append({
             'end_user': {
                 'id': user_id,
                 'other_name': end_user.other_name
@@ -187,12 +188,6 @@ async def get_workspace_end_users(
                 "memory_config_name": config_info.get("memory_config_name")
             }
         })
-    
-    # 写入缓存（30秒过期）
-    try:
-        await aio_redis_set(cache_key, json.dumps(result), expire=30)
-    except Exception as e:
-        api_logger.warning(f"Redis 缓存写入失败: {str(e)}")
 
     # 触发社区聚类补全任务（异步，不阻塞接口响应）
     try:
@@ -202,7 +197,18 @@ async def get_workspace_end_users(
     except Exception as e:
         api_logger.warning(f"触发社区聚类补全任务失败（不影响主流程）: {str(e)}")
 
-    api_logger.info(f"成功获取 {len(end_users)} 个宿主记录")
+    # 构建分页响应
+    result = {
+        "items": items,
+        "page": {
+            "page": page,
+            "pagesize": pagesize,
+            "total": total,
+            "hasnext": (page * pagesize) < total
+        }
+    }
+
+    api_logger.info(f"成功获取 {len(end_users)} 个宿主记录，总计 {total} 条")
     return success(data=result, msg="宿主列表获取成功")
 
 
