@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:11 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 10:26:31
+ * @Last Modified time: 2026-03-31 15:29:45
  */
 /**
  * RAG User Memory Detail View
@@ -114,7 +114,7 @@ const Rag: FC = () => {
   }
   return (
     <Row gutter={[16, 16]} className="rb:h-full!">
-      <Col span={8}>
+      <Col span={8} className="rb:h-full!">
         <RbCard
           bodyClassName="rb:p-3! rb:pt-4!"
           className="rb:h-full!"
@@ -175,7 +175,7 @@ const Rag: FC = () => {
           </>
         </RbCard>
       </Col>
-      <Col span={16}>
+      <Col span={16} className="rb:h-full!">
         <ConversationMemory />
       </Col>
     </Row>

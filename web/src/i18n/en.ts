@@ -627,6 +627,8 @@ export const en = {
       vision: 'Vision',
       audio: 'Audio',
       video: 'Video',
+      thinking: 'Deep Thinking',
+      is_thinking: 'Deep Thinking Support',
     },
     knowledgeBase: {
       home: 'Home',
@@ -1421,6 +1423,7 @@ export const en = {
       citation: 'Citation and Attribution',
       citation_desc: 'Display the attribution of source documents and generated content',
       invalidVariablesTitle: "The following undefined variables are referenced in the conversation opening. Do you want to save the opening configuration?",
+      deep_thinking: 'Enable Deep Thinking',
 
       apps: 'My Apps',
       sharing: 'Sharing',
@@ -1594,6 +1597,8 @@ export const en = {
       core_entities: 'Core Entities',
       communityDetailEmptyDesc: 'Click on a community in the chart on the left to view details',
       communityLoadingTip: 'Generating community graph',
+      assistant: 'AI Assistant',
+      totalRagMemory: 'Total number of memories',
     },
     space: {
       createSpace: 'Create Space',
@@ -1828,6 +1833,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       memoryTipTitle: 'Are you sure you want to enable conversation memory? Conversations will be saved to the memory store.',
       stopAudioRecorder: 'Stop Recording',
       startAudioRecorder: 'Start Recording',
+      citations: 'Citations',
+      reasoning_content: 'Deep reasoning Content',
     },
     login: {
       title: 'Red Bear Memory Science',
