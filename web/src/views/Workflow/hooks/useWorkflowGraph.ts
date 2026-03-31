@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-30 17:18:11
+ * @Last Modified time: 2026-03-31 11:13:23
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -12,7 +12,7 @@ import { Graph, Node, MiniMap, Snapline, Clipboard, Keyboard, type Edge } from '
 import { register } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 
-import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edgeHoverTool, edge_color, edge_hover_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode, defaultPortItems, portItemArgsY, edge_width, conditionNodePortItemArgsY, conditionNodeItemHeight, conditionNodeHeight, notesConfig } from '../constant';
+import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edgeHoverTool, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode, defaultPortItems, portItemArgsY, edge_width, conditionNodePortItemArgsY, conditionNodeItemHeight, conditionNodeHeight, notesConfig } from '../constant';
 import type { WorkflowConfig, NodeProperties, ChatVariable } from '../types';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
 import { useUser } from '@/store/user';
@@ -523,7 +523,9 @@ export const useWorkflowGraph = ({
    * @param edge - Clicked edge
    */
   const edgeClick = ({ edge }: { edge: Edge }) => {
+    clearEdgeSelect();
     edge.setAttrByPath('line/stroke', edge_selected_color);
+    edge.setData({ ...edge.getData(), isSelected: true });
     clearNodeSelect();
   };
   /**
@@ -548,6 +550,7 @@ export const useWorkflowGraph = ({
    */
   const clearEdgeSelect = () => {
     graphRef.current?.getEdges().forEach(e => {
+      e.setData({ ...e.getData(), isSelected: false, isNodeHover: false });
       e.setAttrByPath('line/stroke', edge_color);
       e.setAttrByPath('line/strokeWidth', edge_width);
     });
@@ -840,15 +843,25 @@ export const useWorkflowGraph = ({
           // 1. If both nodes have parent IDs, they must be same to connect
           // 2. If both have no parent ID, can connect normally
           // 3. If one has parent, one doesn't, cannot connect
-          console.log('sourceParentId', sourceParentId, targetParentId)
           if (sourceParentId && targetParentId) {
             // Child nodes under same parent can connect to each other
-            return sourceParentId === targetParentId;
+            if (sourceParentId !== targetParentId) return false;
           } else if (sourceParentId || targetParentId) {
             // One has parent, one doesn't, cannot connect
             return false;
           }
-          
+
+          // Prevent duplicate connections between same ports
+          const sourcePortId = sourceMagnet?.getAttribute('port') ?? sourceMagnet?.closest('[port]')?.getAttribute('port');
+          const targetPortId = targetMagnet?.getAttribute('port') ?? targetMagnet?.closest('[port]')?.getAttribute('port');
+          const duplicate = graphRef.current?.getEdges().some(e =>
+            e.getSourceCellId() === sourceCell?.id &&
+            e.getTargetCellId() === targetCell?.id &&
+            e.getSourcePortId() === sourcePortId &&
+            e.getTargetPortId() === targetPortId
+          );
+          if (duplicate) return false;
+
           return true;
         },
       },
@@ -885,17 +898,20 @@ export const useWorkflowGraph = ({
     setupPlugins();
     // Listen to edge mouseenter event: show hover style and add button
     graphRef.current.on('edge:mouseenter', ({ edge }: { edge: Edge }) => {
-      if (edge.getAttrByPath('line/stroke') !== edge_selected_color) {
-        edge.setAttrByPath('line/stroke', edge_hover_color);
-        edge.setAttrByPath('line/strokeWidth', edge_width);
-      }
-      edge.addTools([edgeHoverTool]);
+      setTimeout(() => {
+        edge.addTools([edgeHoverTool]);
+      }, 0)
     });
     // Listen to edge mouseleave event: revert style and remove add button
     graphRef.current.on('edge:mouseleave', ({ edge }: { edge: Edge }) => {
-      if (edge.getAttrByPath('line/stroke') !== edge_selected_color) {
-        edge.setAttrByPath('line/stroke', edge_color);
-        edge.setAttrByPath('line/strokeWidth', edge_width);
+      const data = edge.getData();
+      if (!data?.isSelected) {
+        if (data?.isNodeHover) {
+          edge.setAttrByPath('line/stroke', edge_selected_color);
+        } else {
+          edge.setAttrByPath('line/stroke', edge_color);
+          edge.setAttrByPath('line/strokeWidth', edge_width);
+        }
       }
       edge.removeTools();
     });
@@ -907,6 +923,7 @@ export const useWorkflowGraph = ({
     graphRef.current.on('node:port:click', nodePortClickEvent);
     // Port hover: show circle style on right ports
     graphRef.current.on('node:port:mouseenter', ({ node, port }) => {
+      console.log('node:port:mouseenter', port)
       if (!port) return;
       const portData = node.getPort(port);
       if (portData?.group !== 'right') return;
@@ -930,12 +947,15 @@ export const useWorkflowGraph = ({
       graphRef.current?.getEdges().forEach(edge => {
         const view = graphRef.current?.findViewByCell(edge);
         view?.removeTools();
-        if (edge.getAttrByPath('line/stroke') !== edge_selected_color) {
+        if (!edge.getData()?.isSelected && edge.getAttrByPath('line/stroke') === edge_selected_color) {
           edge.setAttrByPath('line/stroke', edge_color);
         }
       });
       graphRef.current?.getConnectedEdges(node).forEach(edge => {
-        edge.setAttrByPath('line/stroke', edge_hover_color);
+        if (!edge.getData()?.isSelected) {
+          edge.setAttrByPath('line/stroke', edge_selected_color);
+          edge.setData({ ...edge.getData(), isNodeHover: true });
+        }
       });
       node.getPorts().filter(p => p.group === 'right').forEach(p => {
         node.setPortProp(p.id!, 'attrs/body/opacity', 0);
@@ -945,8 +965,9 @@ export const useWorkflowGraph = ({
     });
     graphRef.current.on('node:mouseleave', ({ node }) => {
       graphRef.current?.getConnectedEdges(node).forEach(edge => {
-        if (edge.getAttrByPath('line/stroke') !== edge_selected_color) {
+        if (!edge.getData()?.isSelected) {
           edge.setAttrByPath('line/stroke', edge_color);
+          edge.setData({ ...edge.getData(), isNodeHover: false });
         }
       });
       node.getPorts().filter(p => p.group === 'right').forEach(p => {
@@ -960,9 +981,73 @@ export const useWorkflowGraph = ({
     // Listen to node move event
     graphRef.current.on('node:moved', nodeMoved);
     graphRef.current.on('node:removed', blankClick)
-    // When edge changes, bring connected nodes' ports to front
-    graphRef.current.on('edge:change', () => {
+    // When edge connected, bring connected nodes' ports to front
+    graphRef.current.on('edge:connected', ({ isNew }) => {
       graphRef.current?.getNodes().forEach(node => node.toFront());
+      // Reset any port hover state left from dragging
+      if (isNew) {
+        graphRef.current?.getNodes().forEach(node => {
+          node.getPorts().filter(p => p.group === 'right').forEach(p => {
+            node.setPortProp(p.id!, 'attrs/body/opacity', 1);
+            node.setPortProp(p.id!, 'attrs/hoverBody/opacity', 0);
+            node.setPortProp(p.id!, 'attrs/label/opacity', 0);
+          });
+        });
+      }
+    });
+
+    // During edge dragging, manually detect port hover since the dragging edge blocks mouse events
+    let lastHoveredPort: { node: Node; portId: string } | null = null;
+    graphRef.current.on('edge:mousemove', ({ e }: { e: MouseEvent }) => {
+      if (!graphRef.current) return;
+      const { clientX, clientY } = e;
+      let found: { node: Node; portId: string } | null = null;
+
+      for (const node of graphRef.current.getNodes()) {
+        for (const port of node.getPorts().filter(p => p.group === 'right')) {
+          const portView = graphRef.current.findViewByCell(node);
+          if (!portView) continue;
+          const portEl = (portView as any).findPortElem(port.id!, 'body') as SVGElement | null;
+          if (!portEl) continue;
+          const rect = portEl.getBoundingClientRect();
+          const hitRadius = 16;
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          if (Math.abs(clientX - cx) <= hitRadius && Math.abs(clientY - cy) <= hitRadius) {
+            found = { node, portId: port.id! };
+            break;
+          }
+        }
+        if (found) break;
+      }
+
+      if (found?.node.id !== lastHoveredPort?.node.id || found?.portId !== lastHoveredPort?.portId) {
+        // Leave previous
+        if (lastHoveredPort) {
+          const { node, portId } = lastHoveredPort;
+          node.setPortProp(portId, 'attrs/body/opacity', 1);
+          node.setPortProp(portId, 'attrs/hoverBody/opacity', 0);
+          node.setPortProp(portId, 'attrs/label/opacity', 0);
+        }
+        // Enter new
+        if (found) {
+          const { node, portId } = found;
+          node.toFront();
+          node.setPortProp(portId, 'attrs/body/opacity', 0);
+          node.setPortProp(portId, 'attrs/hoverBody/opacity', 1);
+          node.setPortProp(portId, 'attrs/label/opacity', 1);
+        }
+        lastHoveredPort = found;
+      }
+    });
+    graphRef.current.on('edge:mouseup', () => {
+      if (lastHoveredPort) {
+        const { node, portId } = lastHoveredPort;
+        node.setPortProp(portId, 'attrs/body/opacity', 1);
+        node.setPortProp(portId, 'attrs/hoverBody/opacity', 0);
+        node.setPortProp(portId, 'attrs/label/opacity', 0);
+        lastHoveredPort = null;
+      }
     });
     // Listen to copy keyboard event
     graphRef.current.bindKey(['ctrl+c', 'cmd+c'], copyEvent);

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-30 16:52:54
+ * @Last Modified time: 2026-03-31 10:08:26
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -642,8 +642,6 @@ interface NodeConfig {
 
 /** Edge color for normal state */
 export const edge_color = '#D4D5D9';
-/** Edge color for hover state */
-export const edge_hover_color = '#2E90FA';
 /** Edge color for selected state */
 export const edge_selected_color = '#171719'
 export const edge_width = 2;
@@ -930,11 +928,8 @@ export const edgeAttrs = {
     line: {
       stroke: edge_color,
       strokeWidth: edge_width,
-      targetMarker: {
-        name: 'block',
-        width: 4,
-        height: 4,
-      },
+      targetMarker: null,
+      sourceMarker: null,
     },
   },
 }
