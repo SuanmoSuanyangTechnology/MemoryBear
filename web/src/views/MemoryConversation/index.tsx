@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:09:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 15:00:15
+ * @Last Modified time: 2026-03-31 12:21:56
  */
 /**
  * Memory Conversation Page
@@ -12,16 +12,18 @@
 
 import { type FC, type ReactNode, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Col, Row, App, Skeleton, Select, Segmented, Tooltip, Flex } from 'antd'
+import { Col, Row, App, Skeleton, Segmented, Tooltip, Flex } from 'antd'
 import dayjs from 'dayjs'
 import type { AnyObject } from 'antd/es/_util/type';
 
 import ConversationEmptyIcon from '@/assets/images/conversation/conversationEmpty.svg'
 import AnalysisEmptyIcon from '@/assets/images/conversation/analysisEmpty.png'
-import { readService, getUserMemoryList } from '@/api/memory'
+import { readService, userMemoryListUrl } from '@/api/memory'
 import Empty from '@/components/Empty'
+import DebounceSelect from '@/components/DebounceSelect'
 import Markdown from '@/components/Markdown'
 import type { Data } from '@/views/UserMemory/types'
+import type { DefaultOptionType } from 'antd/es/select'
 import Chat from '@/components/Chat'
 import type { ChatItem } from '@/components/Chat/types'
 import RbCard from '@/components/RbCard/Card';
@@ -60,7 +62,7 @@ export interface TestParams {
   search_switch: string;
   /** Conversation history */
   history: { role: string; content: string }[];
-  /** Enable web search */
+  /** Enable web keyword */
   web_search?: boolean;
   /** Enable memory function */
   memory?: boolean;
@@ -108,20 +110,9 @@ const MemoryConversation: FC = () => {
   const [loading, setLoading] = useState<boolean>(false)
   const [chatData, setChatData] = useState<ChatItem[]>([])
   const [logs, setLogs] = useState<LogItem[]>([])
-  const [userList, setUserList] = useState<Data[]>([])
   const [search_switch, setSearchSwitch] = useState('0')
   const [msg, setMsg] = useState<string>('')
   const [expandedLogs, setExpandedLogs] = useState<Record<number, boolean>>({})
-
-  /** Load user list on mount */
-  useEffect(() => {
-    getUserMemoryList().then(res => {
-      setUserList((res as Data[] || []).map(item => ({
-        ...item,
-        name: item.end_user?.other_name && item.end_user?.other_name !== '' ? item.end_user?.other_name : item.end_user?.id
-      })))
-    })
-  }, [])
 
   /** Handle message send */
   const handleSend = () => {
@@ -149,7 +140,7 @@ const MemoryConversation: FC = () => {
       })
   }
 
-  /** Handle search mode change */
+  /** Handle keyword mode change */
   const handleChange = (value: string) => {
     setSearchSwitch(value)
   }
@@ -158,19 +149,21 @@ const MemoryConversation: FC = () => {
     <>
       <Row gutter={16}>
         <Col span={12}>
-          <Select
-            options={userList.map(item => ({
+          <DebounceSelect
+            url={userMemoryListUrl}
+            searchKey="keyword"
+            format={(items) => (items as Data[]).map(item => ({
+              ...item,
+              'end_user.id': item.end_user?.id,
+              label: item.end_user?.other_name || item.end_user?.id,
               value: item.end_user?.id,
-              label: item?.name,
             }))}
-            filterOption={(inputValue, option) => option?.label?.toLowerCase().indexOf(inputValue.toLowerCase()) !== -1}
-            showSearch={true}
-            // filterOption={(inputValue, option) => option.label?.toLowerCase().indexOf(inputValue.toLowerCase()) !== -1}
             placeholder={t('memoryConversation.searchPlaceholder')}
             style={{ width: '100%', marginBottom: '16px' }}
-            onChange={setUserId}
+            onChange={(opt: DefaultOptionType) => setUserId(opt?.value as string)}
             variant="borderless"
             className="rb:bg-white rb:rounded-lg"
+            showSearch
           />
         </Col>
       </Row>
