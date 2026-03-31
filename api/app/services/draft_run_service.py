@@ -24,7 +24,7 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_db_context
-from app.models import AgentConfig, ModelConfig, ModelType
+from app.models import AgentConfig, ModelConfig
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput, Citation
 from app.schemas.model_schema import ModelInfo
@@ -37,7 +37,6 @@ from app.services.model_parameter_merger import ModelParameterMerger
 from app.services.model_service import ModelApiKeyService
 from app.services.multimodal_service import MultimodalService
 from app.services.tool_service import ToolService
-from app.schemas import FileType
 
 logger = get_business_logger()
 
@@ -657,11 +656,6 @@ class AgentRunService:
                 message=message,
                 history=history,
                 context=context,
-                end_user_id=user_id,
-                config_id=config_id,
-                storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id,
-                memory_flag=memory_flag,
                 files=processed_files  # 传递处理后的文件
             )
 
@@ -911,11 +905,6 @@ class AgentRunService:
                     message=message,
                     history=history,
                     context=context,
-                    end_user_id=user_id,
-                    config_id=config_id,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id,
-                    memory_flag=memory_flag,
                     files=processed_files
             ):
                 if isinstance(chunk, int):
