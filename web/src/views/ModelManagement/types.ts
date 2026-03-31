@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 12:28:10
+ * @Last Modified time: 2026-03-31 15:48:02
  */
 /**
  * Type definitions for Model Management
@@ -295,7 +295,8 @@ export interface CustomModelForm {
   is_video?: boolean;
   is_audio?: boolean;
   is_omni?: boolean;
-  capability?: string[];
+  is_thinking?: boolean;
+  capability?: Capability[];
 }
 
 /**
@@ -324,7 +325,7 @@ export interface BaseRef {
   modelListDetailRefresh?: () => void;
 }
 
-export type Capability = 'vision' | 'audio' | 'video';
+export type Capability = 'vision' | 'audio' | 'video' | 'thinking';
 export interface Model {
   name: string;
   type: string;
