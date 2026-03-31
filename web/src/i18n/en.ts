@@ -1508,7 +1508,7 @@ export const en = {
       EPISODIC_MEMORY: 'Episodic Memory',
       FORGET_MEMORY: 'Forget Memory',
 
-      endUserProfile: 'Profile',
+      endUserProfile: 'Permanent Memory',
       editEndUserProfile: 'Edit',
       other_name: 'Name',
       position: 'Position',
