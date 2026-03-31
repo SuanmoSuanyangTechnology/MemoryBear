@@ -50,7 +50,12 @@ def get_thread_safe_redis() -> redis.StrictRedis:
             or getattr(_thread_local, "pid", None) != current_pid \
             or loop_stale:
         _thread_local.pid = current_pid
-        _thread_local.loop = asyncio.get_event_loop()
+        # Python 3.10+: get_event_loop() raises RuntimeError in threads
+        # where no loop has been set yet (e.g. Celery --pool=threads).
+        try:
+            _thread_local.loop = asyncio.get_event_loop()
+        except RuntimeError:
+            _thread_local.loop = None
         _thread_local.pool = ConnectionPool.from_url(
             _REDIS_URL,
             db=settings.REDIS_DB,
