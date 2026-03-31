@@ -169,8 +169,8 @@ const MemoryConversation: FC = () => {
             placeholder={t('memoryConversation.searchPlaceholder')}
             style={{ width: '100%', marginBottom: '16px' }}
             onChange={setUserId}
-            variant="borderless"
             className="rb:bg-white rb:rounded-lg"
+            variant="filled"
           />
         </Col>
       </Row>

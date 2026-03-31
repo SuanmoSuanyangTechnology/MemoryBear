@@ -377,9 +377,10 @@ body {
 .ant-input-filled,
 .ant-select-filled:not(.ant-select-customize-input) .ant-select-selector {
   background-color: #FFFFFF;
+  border-color: #FFFFFF;
 }
 .ant-input-filled:hover,
-.ant-select-filled:not(.ant-select-customize-input) .ant-select-selector {
+.ant-select-filled:not(.ant-select-disabled):not(.ant-select-customize-input):not(.ant-pagination-size-changer):hover .ant-select-selector {
   background-color: #FFFFFF;
   border-color: #171719;
 }
