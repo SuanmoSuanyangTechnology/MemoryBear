@@ -695,6 +695,37 @@ async def search_edges(end_user_id: Optional[str] = None) -> List[Dict[str, Any]
     return result
 
 
+async def search_all_batch(end_user_ids: List[str]) -> Dict[str, int]:
+    """批量查询多个用户的记忆数量（简化版本，只返回total）
+
+    Args:
+        end_user_ids: 用户ID列表
+
+    Returns:
+        Dict[str, int]: 以user_id为key的记忆数量字典
+        格式: {"user_id": total_count}
+    """
+    if not end_user_ids:
+        return {}
+
+    result = await _neo4j_connector.execute_query(
+        MemoryConfigRepository.SEARCH_FOR_ALL_BATCH,
+        end_user_ids=end_user_ids,
+    )
+
+    # 转换结果为字典格式，字典格式在查询中无需遍历结果集，直接返回
+    data = {}
+    for row in result:
+        data[row["user_id"]] = row["total"]
+
+    # 为没有数据的用户填充默认值，转换字典格式还为无数据填充默认值
+    for user_id in end_user_ids:
+        if user_id not in data:
+            data[user_id] = 0
+
+    return data
+
+
 async def analytics_hot_memory_tags(
         db: Session,
         current_user: User,

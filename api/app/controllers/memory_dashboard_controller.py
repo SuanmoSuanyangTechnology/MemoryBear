@@ -77,7 +77,7 @@ async def get_workspace_end_users(
         workspace_id = current_user.current_workspace_id
     # 获取当前空间类型
     current_workspace_type = memory_dashboard_service.get_current_workspace_type(db, workspace_id, current_user)
-    api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的宿主列表: keyword={keyword}, page={page}, pagesize={pagesize}")
+    api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的宿主列表, 类型: {current_workspace_type}")
 
     # 获取分页的 end_users
     end_users_result = memory_dashboard_service.get_workspace_end_users_paginated(
@@ -105,7 +105,7 @@ async def get_workspace_end_users(
         }, msg="宿主列表获取成功")
 
     end_user_ids = [str(user.id) for user in end_users]
-    
+
     # 并发执行两个独立的查询任务
     async def get_memory_configs():
         """获取记忆配置（在线程池中执行同步查询）"""
@@ -117,7 +117,7 @@ async def get_workspace_end_users(
         except Exception as e:
             api_logger.error(f"批量获取记忆配置失败: {str(e)}")
             return {}
-    
+
     async def get_memory_nums():
         """获取记忆数量"""
         if current_workspace_type == "rag":
@@ -131,26 +131,18 @@ async def get_workspace_end_users(
             except Exception as e:
                 api_logger.error(f"批量获取 RAG chunk 数量失败: {str(e)}")
                 return {uid: {"total": 0} for uid in end_user_ids}
-        
+
         elif current_workspace_type == "neo4j":
-            # Neo4j 模式：并发查询（带并发限制）
-            # 使用信号量限制并发数，避免大量用户时压垮 Neo4j
-            MAX_CONCURRENT_QUERIES = 10
-            semaphore = asyncio.Semaphore(MAX_CONCURRENT_QUERIES)
-            
-            async def get_neo4j_memory_num(end_user_id: str):
-                async with semaphore:
-                    try:
-                        return await memory_storage_service.search_all(end_user_id)
-                    except Exception as e:
-                        api_logger.error(f"获取用户 {end_user_id} Neo4j 记忆数量失败: {str(e)}")
-                        return {"total": 0}
-            
-            memory_nums_list = await asyncio.gather(*[get_neo4j_memory_num(uid) for uid in end_user_ids])
-            return {end_user_ids[i]: memory_nums_list[i] for i in range(len(end_user_ids))}
-        
+            # Neo4j 模式：批量查询（简化版本，只返回total）
+            try:
+                batch_result = await memory_storage_service.search_all_batch(end_user_ids)
+                return {uid: {"total": count} for uid, count in batch_result.items()}
+            except Exception as e:
+                api_logger.error(f"批量获取 Neo4j 记忆数量失败: {str(e)}")
+                return {uid: {"total": 0} for uid in end_user_ids}
+
         return {uid: {"total": 0} for uid in end_user_ids}
-    
+
     # 触发按需初始化：为 implicit_emotions_storage 中没有记录的用户异步生成数据
     try:
         from app.celery_app import celery_app as _celery_app
