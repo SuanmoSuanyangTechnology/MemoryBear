@@ -243,6 +243,7 @@ const Prompt: FC = () => {
                 <ModelSelect
                   params={{ type: 'llm,chat' }}
                   className={`rb:w-75! ${styles.select}`}
+                  variant="filled"
                 />
               </Form.Item>
               <Button className="rb:border-none!" onClick={handleJump}>{t('prompt.history')}</Button>
