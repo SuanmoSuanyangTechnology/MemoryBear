@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 14:17:38
+ * @Last Modified time: 2026-03-31 15:01:53
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -38,6 +38,22 @@ const ChatContent: FC<ChatContentProps> = ({
   const isScrolledToBottomRef = useRef(true);
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [playingIndex, setPlayingIndex] = useState<number | null>(null)
+  const [expandedReasoning, setExpandedReasoning] = useState<Set<number>>(new Set())
+  const [manualToggledReasoning, setManualToggledReasoning] = useState<Set<number>>(new Set())
+
+  const toggleReasoning = (index: number) => {
+    setManualToggledReasoning(prev => new Set(prev).add(index))
+    setExpandedReasoning(prev => {
+      const next = new Set(prev)
+      next.has(index) ? next.delete(index) : next.add(index)
+      return next
+    })
+  }
+
+  const isReasoningExpanded = (index: number) => {
+    if (manualToggledReasoning.has(index)) return expandedReasoning.has(index)
+    return !data[index]?.content
+  }
 
   const handlePlay = (index: number, audio_url: string, audio_status?: string) => {
     if (audio_status !== 'completed' && !audio_status) return
@@ -120,7 +136,7 @@ const ChatContent: FC<ChatContentProps> = ({
                     {labelFormat(item)}
                   </div>
                 }
-                {item.meta_data?.files && item.meta_data?.files.length > 0 && <Flex gap={8} vertical align="end">
+                {item.meta_data?.files && item.meta_data?.files.length > 0 && <Flex gap={8} vertical align="end" className="rb:mb-2!">
                   {item.meta_data?.files?.map((file) => {
                     if (file.type.includes('image')) {
                       return (
@@ -174,6 +190,22 @@ const ChatContent: FC<ChatContentProps> = ({
                   'rb:mt-1.5': labelPosition === 'top',
                   'rb:mb-1.5': labelPosition === 'bottom',
                 })}>
+                  {item.meta_data?.reasoning_content && <div className="rb:mb-2 rb:border rb:rounded-md rb:px-3 rb:pt-2 rb:bg-white rb:text-[12px]">
+                    <Flex
+                      align="center"
+                      justify="space-between"
+                      className="rb:text-[#5B6167] rb:font-medium rb:cursor-pointer rb:pb-2!"
+                      onClick={() => toggleReasoning(index)}
+                    >
+                      <span>{t('memoryConversation.reasoning_content')}</span>
+                      <div
+                        className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')]", {
+                          'rb:rotate-180': !isReasoningExpanded(index),
+                        })}
+                      ></div>
+                    </Flex>
+                    {isReasoningExpanded(index) && <Markdown content={item.meta_data.reasoning_content} />}
+                  </div>}
                   {item.status && <div className="rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/conversation/exclamation_circle.svg')] rb:absolute rb:-left-7"></div>}
                   {item.subContent && renderRuntime && renderRuntime(item, index)}
                   {/* Render message content using Markdown component */}

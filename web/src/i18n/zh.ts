@@ -1783,6 +1783,11 @@ export const zh = {
       vision_id: '视觉模型',
       audio_id: '音频模型',
       video_id: '视频模型',
+      onlyDelete: '仅删填充',
+      semanticFiltering: '语义过滤',
+      sceneFocus: '场景聚焦',
+      loose: '宽松',
+      strict: '严格',
     },
     memoryConversation: {
       chatEmpty:'有什么我可以帮您的吗？',
