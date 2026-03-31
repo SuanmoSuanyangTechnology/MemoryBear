@@ -3,9 +3,9 @@
 """
 
 import uuid
-from typing import Any, Annotated
+from typing import Any, Annotated, Literal
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, select
 from fastapi import Depends
 
 from app.models.workflow_model import (
@@ -128,29 +128,36 @@ class WorkflowExecutionRepository:
         Returns:
             执行记录列表
         """
-        return self.db.query(WorkflowExecution).filter(
+        stmt = select(WorkflowExecution).filter(
             WorkflowExecution.app_id == app_id
         ).order_by(
             desc(WorkflowExecution.started_at)
-        ).limit(limit).offset(offset).all()
+        ).limit(limit).offset(offset)
+        return list(self.db.execute(stmt).scalars())
     
     def get_by_conversation_id(
         self,
-        conversation_id: uuid.UUID
+        conversation_id: uuid.UUID,
+        status: Literal["running", "completed", "failed"] = None,
+        limit_count: int = 50
     ) -> list[WorkflowExecution]:
         """根据会话 ID 获取执行记录列表
         
         Args:
+            limit_count:
             conversation_id: 会话 ID
+            status: 状态（可选）
         
         Returns:
             执行记录列表
         """
-        return self.db.query(WorkflowExecution).filter(
+        stmt = select(WorkflowExecution).filter(
             WorkflowExecution.conversation_id == conversation_id
-        ).order_by(
-            desc(WorkflowExecution.started_at)
-        ).all()
+        )
+        if status:
+            stmt = stmt.filter(WorkflowExecution.status == status)
+        stmt = stmt.order_by(desc(WorkflowExecution.started_at)).limit(limit_count)
+        return list(self.db.execute(stmt).scalars())
     
     def count_by_app_id(self, app_id: uuid.UUID) -> int:
         """统计应用的执行次数
@@ -199,11 +206,12 @@ class WorkflowNodeExecutionRepository:
         Returns:
             节点执行记录列表（按执行顺序排序）
         """
-        return self.db.query(WorkflowNodeExecution).filter(
+        stmt = select(WorkflowNodeExecution).filter(
             WorkflowNodeExecution.execution_id == execution_id
         ).order_by(
             WorkflowNodeExecution.execution_order
-        ).all()
+        )
+        return list(self.db.execute(stmt).scalars())
     
     def get_by_node_id(
         self,
@@ -219,12 +227,13 @@ class WorkflowNodeExecutionRepository:
         Returns:
             节点执行记录列表
         """
-        return self.db.query(WorkflowNodeExecution).filter(
+        stmt = select(WorkflowNodeExecution).filter(
             WorkflowNodeExecution.execution_id == execution_id,
             WorkflowNodeExecution.node_id == node_id
         ).order_by(
             WorkflowNodeExecution.retry_count
-        ).all()
+        )
+        return list(self.db.execute(stmt).scalars())
 
 
 # ==================== 依赖注入函数 ====================

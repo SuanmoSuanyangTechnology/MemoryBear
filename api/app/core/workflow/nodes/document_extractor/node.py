@@ -89,7 +89,7 @@ class DocExtractorNode(BaseNode):
                     # Reuse cached bytes if already fetched
                     if f.get_content():
                         file_input.set_content(f.get_content())
-                    text = await svc._extract_document_text(file_input)
+                    text = await svc.extract_document_text(file_input)
                     chunks.append(text)
                 except Exception as e:
                     logger.error(

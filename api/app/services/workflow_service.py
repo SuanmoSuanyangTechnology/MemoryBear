@@ -561,6 +561,24 @@ class WorkflowService:
                 storage_type = 'neo4j'
         return storage_type, user_rag_memory_id
 
+    def _get_history_info(self, conversation_id: uuid.UUID) -> tuple[dict, list] | None:
+        executions = self.execution_repo.get_by_conversation_id(
+            conversation_id=conversation_id,
+            status="completed",
+            limit_count=1
+        )
+
+        if executions:
+            last_state = executions[0].output_data
+            if isinstance(last_state, dict):
+                variables = last_state.get("variables", {})
+                conv_vars = variables.get("conv", {})
+                # input_data["conv"] = conv_vars
+                # input_data["conv_messages"] = last_state.get("messages") or []
+                conv_messages = last_state.get("messages") or []
+                return conv_vars, conv_messages
+        return None
+
     # ==================== 工作流执行 ====================
 
     async def run(
@@ -634,18 +652,11 @@ class WorkflowService:
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
 
-            executions = self.execution_repo.get_by_conversation_id(conversation_id=conversation_id_uuid)
-
-            for exec_res in executions:
-                if exec_res.status == "completed":
-                    last_state = exec_res.output_data
-                    if isinstance(last_state, dict):
-                        variables = last_state.get("variables", {})
-                        conv_vars = variables.get("conv", {})
-                        input_data["conv"] = conv_vars
-                        input_data["conv_messages"] = last_state.get("messages") or []
-                        break
-
+            history = self._get_history_info(conversation_id_uuid)
+            if history:
+                conv_vars, conv_messages = history
+                input_data["conv"] = conv_vars
+                input_data["conv_messages"] = conv_messages
             init_message_length = len(input_data.get("conv_messages", []))
 
             result = await execute_workflow(
@@ -807,17 +818,11 @@ class WorkflowService:
             storage_type, user_rag_memory_id = self._get_memory_store_info(workspace_id)
             input_data["files"] = files
             self.update_execution_status(execution.execution_id, "running")
-            executions = self.execution_repo.get_by_conversation_id(conversation_id=conversation_id_uuid)
-
-            for exec_res in executions:
-                if exec_res.status == "completed":
-                    last_state = exec_res.output_data
-                    if isinstance(last_state, dict):
-                        variables = last_state.get("variables", {})
-                        conv_vars = variables.get("conv", {})
-                        input_data["conv"] = conv_vars
-                        input_data["conv_messages"] = last_state.get("messages") or []
-                        break
+            history = self._get_history_info(conversation_id_uuid)
+            if history:
+                conv_vars, conv_messages = history
+                input_data["conv"] = conv_vars
+                input_data["conv_messages"] = conv_messages
             init_message_length = len(input_data.get("conv_messages", []))
             message_id = uuid.uuid4()
             async for event in execute_workflow_stream(

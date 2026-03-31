@@ -552,9 +552,9 @@ class BaseNode(ABC):
 
         return render_template(
             template=template,
-            conv_vars=variable_pool.get_all_conversation_vars(literal=True),
-            node_outputs=variable_pool.get_all_node_outputs(literal=True),
-            system_vars=variable_pool.get_all_system_vars(literal=True),
+            conv_vars=variable_pool.lazy_namespace("conv", literal=True),
+            node_outputs=variable_pool.lazy_all_node_outputs(literal=True),
+            system_vars=variable_pool.lazy_namespace("sys", literal=True),
             strict=strict
         )
 
@@ -579,9 +579,9 @@ class BaseNode(ABC):
 
         return evaluate_condition(
             expression=expression,
-            conv_var=variable_pool.get_all_conversation_vars(),
-            node_outputs=variable_pool.get_all_node_outputs(),
-            system_vars=variable_pool.get_all_system_vars()
+            conv_var=variable_pool.lazy_namespace("conv"),
+            node_outputs=variable_pool.lazy_all_node_outputs(),
+            system_vars=variable_pool.lazy_namespace("sys")
         )
 
     @staticmethod

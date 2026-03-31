@@ -438,13 +438,13 @@ class MultimodalService:
         if file.transfer_method == TransferMethod.REMOTE_URL:
             return True, {
                 "type": "text",
-                "text": f"<document url=\"{file.url}\">\n{await self._extract_document_text(file)}\n</document>"
+                "text": f"<document url=\"{file.url}\">\n{await self.extract_document_text(file)}\n</document>"
             }
         else:
             # 本地文件，提取文本内容
             server_url = settings.FILE_LOCAL_SERVER_URL
             file.url = f"{server_url}/storage/permanent/{file.upload_file_id}"
-            text = await self._extract_document_text(file)
+            text = await self.extract_document_text(file)
             file_metadata = self.db.query(FileMetadata).filter(
                 FileMetadata.id == file.upload_file_id
             ).first()
@@ -542,7 +542,7 @@ class MultimodalService:
             server_url = settings.FILE_LOCAL_SERVER_URL
             return f"{server_url}/storage/permanent/{file_id}"
 
-    async def _extract_document_text(self, file: FileInput) -> str:
+    async def extract_document_text(self, file: FileInput) -> str:
         """
         提取文档文本内容
         

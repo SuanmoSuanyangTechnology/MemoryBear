@@ -9,10 +9,10 @@ from app.core.workflow.nodes.enums import NodeType
 
 
 def merge_activate_state(x, y):
-    return {
-        k: x.get(k, False) or y.get(k, False)
-        for k in set(x) | set(y)
-    }
+    merged = dict(x)
+    for k, v in y.items():
+        merged[k] = merged.get(k, False) or v
+    return merged
 
 
 def merge_looping_state(x, y):
