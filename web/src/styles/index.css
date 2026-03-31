@@ -397,7 +397,7 @@ body {
   background-color: #171719;
 }
 
-.spin.ant-spin-nested-loading .ant-spin-container::after {
+.spin .ant-spin-nested-loading .ant-spin-container::after {
   background: transparent;
 }
 .upload-block,
