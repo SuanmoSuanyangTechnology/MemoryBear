@@ -638,7 +638,24 @@ def get_rag_content(
                 business_logger.error(f"获取文档 {document.id} 的chunks失败: {str(e)}")
                 continue
         
-        # 4. 返回结果
+        # 4. 将所有 page_content 拼接后按角色分割为对话列表
+        merged_text = "\n".join(page_contents)
+        conversations = []
+        if merged_text.strip():
+            import re
+            # 在任意位置匹配 "user:" 或 "assistant:"，不限于行首
+            parts = re.split(r'(user|assistant):', merged_text)
+            # parts 结构: ['', 'user', ' content...', 'assistant', ' content...', ...]
+            i = 1
+            while i < len(parts) - 1:
+                role = parts[i].strip()
+                content = parts[i + 1].strip()
+                # 将 content 中的 \n 还原为真实换行
+                content = content.replace("\\n", "\n")
+                if role in ("user", "assistant") and content:
+                    conversations.append({"role": role, "content": content})
+                i += 2
+
         result = {
             "page": {
                 "page": page,
@@ -646,10 +663,10 @@ def get_rag_content(
                 "total": global_total,
                 "hasnext": offset_end < global_total,
             },
-            "items": page_contents
+            "items": conversations
         }
         
-        business_logger.info(f"成功获取RAG内容: total={global_total}, page={page}, 返回={len(page_contents)} 条")
+        business_logger.info(f"成功获取RAG内容: total={global_total}, page={page}, 返回={len(conversations)} 条对话")
         return result
         
     except Exception as e:
