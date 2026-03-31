@@ -2,13 +2,14 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:33:39 
  * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 18:33:39 
+ * @Last Modified time: 2026-03-16 15:01:39 
  */
 import { type FC, useEffect, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import * as echarts from 'echarts'
 import 'echarts-wordcloud'
+import { Flex, Divider } from 'antd';
 
 import Empty from '@/components/Empty'
 import RbCard from '@/components/RbCard/Card'
@@ -57,12 +58,12 @@ const EmotionTags: FC = () => {
    */
   const getEmotionColor = (emotionType: string) => {
     const colors: Record<string, string> = {
-      joy: '#52c41a',
-      anger: '#ff4d4f', 
-      sadness: '#1890ff',
-      fear: '#fa8c16',
-      neutral: '#8c8c8c',
-      surprise: '#722ed1'
+      joy: '#FF8A4C',
+      anger: '#FF5D34', 
+      sadness: '#155EEF',
+      fear: '#9C6FFF',
+      neutral: '#4DA8FF',
+      surprise: '#369F21'
     }
     return colors[emotionType] || '#8c8c8c'
   }
@@ -126,21 +127,26 @@ const EmotionTags: FC = () => {
     <RbCard
       title={t('statementDetail.emotionTags')}
       headerType="borderless"
-      headerClassName="rb:leading-[24px] rb:bg-[#F6F8FC]! rb:min-h-[46px]! rb:border-b! rb:border-b-[#DFE4ED]!"
+      headerClassName="rb:min-h-[46px]! rb:font-[MiSans-Bold] rb:font-bold"
       bodyClassName="rb:p-0!"
+      className="rb:h-full!"
     >
       {data?.keywords && data?.keywords.length > 0
         ? <div>
-          <div ref={chartRef} className="rb:mt-6 rb:px-6" style={{ height: '320px', width: '100%' }} />
-          <div className="rb:flex rb:flex-wrap rb:items-center rb:justify-center rb:gap-10 rb:text-sm rb:mt-3 rb:p-3 rb:bg-[#F0F3F8] rb:rounded-[0_0_8px_8px]">
-            {Object.entries(emotionStats).map(([type, count]) => {
-              return (
-                <div key={type} className="rb:flex rb:items-center rb:gap-2">
-                  <div className="rb:w-3 rb:h-3 rb:rounded-full" style={{ backgroundColor: getEmotionColor(type) }}></div>
-                  <span className="rb:leading-5">{t(`statementDetail.${type || 'neutral'}`)} ({count}{t('statementDetail.item')})</span>
-                </div>
-              )
-            })}
+          <div ref={chartRef} className="rb:mt-4 rb:px-3" style={{ height: '212px', width: '100%' }} />
+          
+          <div className="rb:px-4 rb:pb-2.5">
+            <Divider className="rb:my-2.5!" />
+            <Flex wrap justify="space-between" className="rb:px-1.5!">
+              {Object.keys(emotionStats).map((type) => {
+                return (
+                  <Flex key={type} align="center" gap={4}>
+                    <div className="rb:size-1 rb:rounded-full" style={{ backgroundColor: getEmotionColor(type) }}></div>
+                    <span className="rb:leading-5">{t(`statementDetail.${type || 'neutral'}`)}</span>
+                  </Flex>
+                )
+              })}
+            </Flex>
           </div>
         </div>
         : <Empty size={88} className="rb:h-full rb:mb-4" />

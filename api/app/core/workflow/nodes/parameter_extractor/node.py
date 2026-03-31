@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 
 
 class ParameterExtractorNode(BaseNode):
-    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
-        super().__init__(node_config, workflow_config)
+    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
+        super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: ParameterExtractorNodeConfig | None = None
         self.response_metadata = {}
 

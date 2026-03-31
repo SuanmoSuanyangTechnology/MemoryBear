@@ -3,6 +3,7 @@
 # @Email: 1533512157@qq.com
 # @Time : 2026/2/9 13:51
 import datetime
+import time
 import logging
 from typing import Any
 
@@ -82,13 +83,15 @@ class WorkflowExecutor:
             CompiledStateGraph: The compiled and ready-to-run state graph.
         """
         logger.info(f"Starting workflow graph build: execution_id={self.execution_context.execution_id}")
+        start_time = time.time()
         builder = GraphBuilder(
             self.workflow_config,
             stream=stream,
         )
+
+        self.graph = builder.build()
         self.start_node_id = builder.start_node_id
         self.variable_pool = builder.variable_pool
-        self.graph = builder.build()
 
         self.stream_coordinator.initialize_end_outputs(builder.end_node_map)
         self.event_handler = EventStreamHandler(
@@ -96,7 +99,8 @@ class WorkflowExecutor:
             variable_pool=self.variable_pool,
             execution_id=self.execution_context.execution_id
         )
-        logger.info(f"Workflow graph build completed: execution_id={self.execution_context.execution_id}")
+        logger.info(f"Workflow graph build completed: execution_id={self.execution_context.execution_id}, "
+                    f"cost: {time.time() - start_time:.4f}s")
 
         return self.graph
 
@@ -128,89 +132,18 @@ class WorkflowExecutor:
                   - token_usage: aggregated token usage if available
                   - error: error message if any
         """
-        logger.info(f"Starting workflow execution: execution_id={self.execution_context.execution_id}")
-
-        start_time = datetime.datetime.now()
-
-        # Execute the workflow
-        try:
-            # Build the workflow graph
-            graph = self.build_graph()
-
-            # Initialize the variable pool with input data
-            await self.variable_initializer.initialize(
-                variable_pool=self.variable_pool,
-                input_data=input_data,
-                execution_context=self.execution_context
-            )
-            initial_state = self.state_manager.create_initial_state(
-                workflow_config=self.workflow_config,
-                input_data=input_data,
-                execution_context=self.execution_context,
-                start_node_id=self.start_node_id
-            )
-
-            result = await graph.ainvoke(initial_state, config=self.execution_context.checkpoint_config)
-
-            # Aggregate output from all End nodes
-            full_content = ''
-            for end_id in self.stream_coordinator.end_outputs.keys():
-                full_content += self.variable_pool.get_value(f"{end_id}.output", default="", strict=False)
-
-            # Append messages for user and assistant
-            if input_data.get("files"):
-                result["messages"].extend(
-                    [
-                        {
-                            "role": "user",
-                            "content": input_data.get("message", '')
-                        },
-                        {
-                            "role": "user",
-                            "content": input_data.get("files")
-                        },
-                        {
-                            "role": "assistant",
-                            "content": full_content
-                        }
-                    ]
-                )
-            else:
-                result["messages"].extend(
-                    [
-                        {
-                            "role": "user",
-                            "content": input_data.get("message", '')
-                        },
-                        {
-                            "role": "assistant",
-                            "content": full_content
-                        }
-                    ]
-                )
-            # Calculate elapsed time
-            end_time = datetime.datetime.now()
-            elapsed_time = (end_time - start_time).total_seconds()
-
-            logger.info(
-                f"Workflow execution completed: execution_id={self.execution_context.execution_id}, elapsed_time={elapsed_time:.2f}ms")
-
-            return self.result_builder.build_final_output(result, self.variable_pool, elapsed_time, full_content)
-
-        except Exception as e:
-            end_time = datetime.datetime.now()
-            elapsed_time = (end_time - start_time).total_seconds()
-
-            logger.error(f"Workflow execution failed: execution_id={self.execution_context.execution_id}, error={e}",
-                         exc_info=True)
-            return {
-                "status": "failed",
-                "error": str(e),
-                "output": None,
-                "node_outputs": {},
-                "elapsed_time": elapsed_time,
-                "token_usage": None
-            }
+        start = datetime.datetime.now()
+        async for event in self.execute_stream(input_data):
+            if event.get("event") == "workflow_end":
+                return event.get("data")
+        return self.result_builder.build_final_output(
+            {"error": "Workflow execution did not end as expected"},
+            self.execution_context,
+            self.variable_pool,
+            (datetime.datetime.now() - start).total_seconds(),
+            "",
+            success=False
+        )
 
     async def execute_stream(
             self,
@@ -244,11 +177,12 @@ class WorkflowExecutor:
             "data": {
                 "execution_id": self.execution_context.execution_id,
                 "workspace_id": self.execution_context.workspace_id,
-                "conversation_id": input_data.get("conversation_id"),
+                "conversation_id": self.execution_context.conversation_id,
                 "timestamp": int(start_time.timestamp() * 1000)
             }
         }
-
+        result = None
+        full_content = ''
         try:
             # Build the workflow graph in streaming mode
             graph = self.build_graph(stream=True)
@@ -266,7 +200,6 @@ class WorkflowExecutor:
                 start_node_id=self.start_node_id
             )
 
-            full_content = ''
             self.stream_coordinator.update_scope_activation("sys")
 
             # Execute the workflow with streaming
@@ -363,7 +296,13 @@ class WorkflowExecutor:
 
             yield {
                 "event": "workflow_end",
-                "data": self.result_builder.build_final_output(result, self.variable_pool, elapsed_time, full_content)
+                "data": self.result_builder.build_final_output(
+                    result,
+                    self.execution_context,
+                    self.variable_pool,
+                    elapsed_time,
+                    full_content,
+                    success=True)
             }
 
         except Exception as e:
@@ -372,16 +311,20 @@ class WorkflowExecutor:
 
             logger.error(f"Workflow execution failed: execution_id={self.execution_context.execution_id}, error={e}",
                          exc_info=True)
-
+            if result is None:
+                result = {"error": str(e)}
+            else:
+                result["error"] = str(e)
             yield {
                 "event": "workflow_end",
-                "data": {
-                    "execution_id": self.execution_context.execution_id,
-                    "status": "failed",
-                    "error": str(e),
-                    "elapsed_time": elapsed_time,
-                    "timestamp": end_time.isoformat()
-                }
+                "data": self.result_builder.build_final_output(
+                    result,
+                    self.execution_context,
+                    self.variable_pool,
+                    elapsed_time,
+                    full_content,
+                    success=False
+                )
             }
 
 
@@ -390,7 +333,9 @@ async def execute_workflow(
         input_data: dict[str, Any],
         execution_id: str,
         workspace_id: str,
-        user_id: str
+        user_id: str,
+        memory_storage_type: str,
+        user_rag_memory_id: str
 ) -> dict[str, Any]:
     """
     Execute a workflow (convenience function, non-streaming).
@@ -401,6 +346,8 @@ async def execute_workflow(
         execution_id (str): Execution ID.
         workspace_id (str): Workspace ID.
         user_id (str): User ID.
+        user_rag_memory_id: rag knowledge db id
+        memory_storage_type: neo4j / rag
 
     Returns:
         dict: Workflow execution result.
@@ -408,7 +355,10 @@ async def execute_workflow(
     execution_context = ExecutionContext.create(
         execution_id=execution_id,
         workspace_id=workspace_id,
-        user_id=user_id
+        user_id=user_id,
+        conversation_id=input_data.get("conversation_id"),
+        memory_storage_type=memory_storage_type,
+        user_rag_memory_id=user_rag_memory_id
     )
     executor = WorkflowExecutor(
         workflow_config=workflow_config,
@@ -422,7 +372,9 @@ async def execute_workflow_stream(
         input_data: dict[str, Any],
         execution_id: str,
         workspace_id: str,
-        user_id: str
+        user_id: str,
+        memory_storage_type: str,
+        user_rag_memory_id: str
 ):
     """
     Execute a workflow in streaming mode (convenience function).
@@ -433,6 +385,8 @@ async def execute_workflow_stream(
         execution_id (str): Execution ID.
         workspace_id (str): Workspace ID.
         user_id (str): User ID.
+        user_rag_memory_id: rag knowledge db id
+        memory_storage_type: neo4j / rag
 
     Yields:
         dict: Streaming workflow events, e.g. node start, node end, chunk messages, workflow end.
@@ -440,7 +394,10 @@ async def execute_workflow_stream(
     execution_context = ExecutionContext.create(
         execution_id=execution_id,
         workspace_id=workspace_id,
-        user_id=user_id
+        user_id=user_id,
+        memory_storage_type=memory_storage_type,
+        conversation_id=input_data.get("conversation_id"),
+        user_rag_memory_id=user_rag_memory_id
     )
     executor = WorkflowExecutor(
         workflow_config=workflow_config,

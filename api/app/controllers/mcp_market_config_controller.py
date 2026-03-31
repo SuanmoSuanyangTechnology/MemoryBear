@@ -91,9 +91,11 @@ async def get_mcp_servers(
 
     try:
         cookies = api.get_cookies(token)
+        headers=api.builder_headers(api.headers)
+        headers['Authorization'] = f'Bearer {token}'
         r = api.session.put(
             url=api.mcp_base_url,
-            headers=api.builder_headers(api.headers),
+            headers=headers,
             json=body,
             cookies=cookies)
         raise_for_http_status(r)
@@ -173,6 +175,7 @@ async def get_operational_mcp_servers(
 
     url = f'{api.mcp_base_url}/operational'
     headers = api.builder_headers(api.headers)
+    headers['Authorization'] = f'Bearer {token}'
 
     try:
         cookies = api.get_cookies(access_token=token, cookies_required=True)
@@ -260,7 +263,9 @@ async def create_mcp_market_config(
             api.login(create_data.token)
             body = {'filter': {}, 'page_number': 1, 'page_size': 1, 'search': None}
             cookies = api.get_cookies(create_data.token)
-            r = api.session.put(url=api.mcp_base_url, headers=api.builder_headers(api.headers), json=body, cookies=cookies)
+            headers = api.builder_headers(api.headers)
+            headers['Authorization'] = f'Bearer {create_data.token}'
+            r = api.session.put(url=api.mcp_base_url, headers=headers, json=body, cookies=cookies)
             raise_for_http_status(r)
         except Exception as e:
             api_logger.warning(f"Token validation failed for ModelScope MCP market: {str(e)}")
@@ -290,9 +295,11 @@ async def create_mcp_market_config(
                 'search': ""
             }
             cookies = api.get_cookies(token)
+            headers = api.builder_headers(api.headers)
+            headers['Authorization'] = f'Bearer {token}'
             r = api.session.put(
                 url=api.mcp_base_url,
-                headers=api.builder_headers(api.headers),
+                headers=headers,
                 json=body,
                 cookies=cookies)
             raise_for_http_status(r)
@@ -393,7 +400,9 @@ async def update_mcp_market_config(
             api.login(update_data.token)
             body = {'filter': {}, 'page_number': 1, 'page_size': 1, 'search': None}
             cookies = api.get_cookies(update_data.token)
-            r = api.session.put(url=api.mcp_base_url, headers=api.builder_headers(api.headers), json=body, cookies=cookies)
+            headers = api.builder_headers(api.headers)
+            headers['Authorization'] = f'Bearer {update_data.token}'
+            r = api.session.put(url=api.mcp_base_url, headers=headers, json=body, cookies=cookies)
             raise_for_http_status(r)
         except Exception as e:
             api_logger.warning(f"Token validation failed for ModelScope MCP market: {str(e)}")

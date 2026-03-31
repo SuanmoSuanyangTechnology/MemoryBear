@@ -2,15 +2,15 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 19:45:40
+ * @Last Modified time: 2026-03-27 14:17:38
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
 import Markdown from '@/components/Markdown'
 import type { ChatContentProps } from './types'
-import { Spin, Divider, Space, Image, Flex } from 'antd'
+import { Spin, Divider, Space, Image, Flex, Button } from 'antd'
 import { SoundOutlined } from '@ant-design/icons'
-
+import { t } from 'i18next'
 
 const getFileUrl = (file: any) => {
   return file.thumbUrl || file.url || (file.originFileObj ? URL.createObjectURL(file.originFileObj) : undefined)
@@ -29,17 +29,19 @@ const ChatContent: FC<ChatContentProps> = ({
   labelPosition = 'bottom',
   labelFormat,
   errorDesc,
-  renderRuntime
+  renderRuntime,
+  onSend
 }) => {
   // Scroll container reference for controlling auto-scroll to bottom
   const scrollContainerRef = useRef<(HTMLDivElement | null)>(null)
   const prevDataLengthRef = useRef(data.length);
   const isScrolledToBottomRef = useRef(true);
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const [playingIndex, setPlayingIndex] = useState<number | null>(null)
+  const [playingIndex, setPlayingIndex] = useState<string | null>(null)
 
-  const handlePlay = (index: number, audio_url: string) => {
-    if (playingIndex === index) {
+  const handlePlay = (audio_url: string, audio_status?: string) => {
+    if (audio_status !== 'completed' && typeof audio_status === 'string') return
+    if (playingIndex === audio_url) {
       audioRef.current?.pause()
       setPlayingIndex(null)
       return
@@ -50,7 +52,7 @@ const ChatContent: FC<ChatContentProps> = ({
     const audio = new Audio(audio_url)
     audioRef.current = audio
     audio.play()
-    setPlayingIndex(index)
+    setPlayingIndex(audio_url)
     audio.onended = () => setPlayingIndex(null)
   }
   
@@ -77,12 +79,16 @@ const ChatContent: FC<ChatContentProps> = ({
       }
     };
   }, []);
-  
+
   // Auto-scroll to bottom when data changes to show latest messages
   // When data array length remains unchanged, if data is updated and user manually scrolled up, don't auto-scroll to bottom
   // When data array length changes, auto-scroll to bottom
   // If already scrolled to bottom, will auto-scroll to bottom
   useEffect(() => {
+    if (playingIndex && !data.some(item => item.meta_data?.audio_url === playingIndex)) {
+      audioRef.current?.pause()
+      setPlayingIndex(null)
+    }
     setTimeout(() => {
       if (scrollContainerRef.current) {
         // Auto-scroll if data length changed OR user is currently at bottom
@@ -114,7 +120,7 @@ const ChatContent: FC<ChatContentProps> = ({
               : <>
                 {/* Top label (such as timestamp, username, etc.) */}
                 {labelPosition === 'top' &&
-                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
+                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular rb:px-1">
                     {labelFormat(item)}
                   </div>
                 }
@@ -162,26 +168,56 @@ const ChatContent: FC<ChatContentProps> = ({
                   })}
                 </Flex>}
                 {/* Message bubble */}
-                <div className={clsx('rb:border rb:text-left rb:rounded-lg rb:mt-1.5 rb:leading-4.5 rb:p-[10px_12px_2px_12px] rb:inline-block rb:max-w-130 rb:wrap-break-word', contentClassNames, {
+                <div className={clsx('rb:text-left rb:rounded-lg rb:leading-5 rb:p-[10px_12px_2px_12px] rb:inline-block rb:max-w-130 rb:wrap-break-word rb:relative', contentClassNames, {
                   // Error message style (content is null and not assistant message)
-                  'rb:border-[rgba(255,93,52,0.30)] rb:bg-[rgba(255,93,52,0.08)] rb:text-[#FF5D34]': errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime,
+                  'rb:bg-[rgba(255,93,52,0.08)] rb:text-[#FF5D34]': (item.status && item.status !== 'completed') || (errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime),
                   // Assistant message style
-                  'rb:bg-[rgba(21,94,239,0.08)] rb:border-[rgba(21,94,239,0.30)]': item.role === 'user',
+                  'rb:bg-[#E3EBFD]': item.role === 'user',
                   // User message style
-                  'rb:bg-[#FFFFFF] rb:border-[#EBEBEB]': item.role === 'assistant' && (item.content || item.content === '' || typeof renderRuntime === 'function'),
+                  'rb:bg-[#F6F6F6] rb:text-[#212332]': item.role === 'assistant' && (item.content || item.content === '' || typeof renderRuntime === 'function'),
+                  'rb:mt-1.5': labelPosition === 'top',
+                  'rb:mb-1.5': labelPosition === 'bottom',
                 })}>
+                  {item.status && <div className="rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/conversation/exclamation_circle.svg')] rb:absolute rb:-left-7"></div>}
                   {item.subContent && renderRuntime && renderRuntime(item, index)}
                   {/* Render message content using Markdown component */}
                   <Markdown content={renderRuntime ? item.content ?? '' : item.content ?? errorDesc ?? ''} />
 
+                  {item.meta_data?.suggested_questions && item.meta_data?.suggested_questions?.length > 0 && <Flex wrap className="rb:my-1!">
+                    {item.meta_data?.suggested_questions?.map((question, idx) => (
+                      <Button key={idx} size="small" className="rb:text-[12px]! rb:text-[#155EEF]!"
+                        onClick={() => onSend?.(question)}
+                      >{question}</Button>
+                    ))}
+                  </Flex>}
+                  {item.meta_data?.citations && item.meta_data?.citations.length > 0 && <div className="rb:mt-2 rb:pt-2 rb:border-t rb:border-[#E3EBFD]">
+                    <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-medium">{t('memoryConversation.citations')}</div>
+                    {item.meta_data?.citations?.map((citation, idx) => (
+                      <Button
+                        type="link"
+                        key={idx}
+                        size="small"
+                        className="rb:text-[12px]!"
+                        onClick={() => {
+                          const params = new URLSearchParams({ documentId: citation.document_id, parentId: citation.knowledge_id });
+                          window.open(`/#/knowledge-base/${citation.knowledge_id}/DocumentDetails?${params}`, '_blank');
+                        }}
+                      >{citation.file_name}</Button>
+                    ))}
+                  </div>}
                   {item.meta_data?.audio_url && <>
                     <Divider className="rb:my-3!" />
                     <Space size={12} className="rb:pb-2 rb:pl-1">
-                      {playingIndex !== index
-                        ? <SoundOutlined className="rb:cursor-pointer rb:hover:text-[#155EEF]! rb:size-5.5" onClick={() => handlePlay(index, item.meta_data?.audio_url!)} />
+                      {playingIndex !== item.meta_data?.audio_url && item.meta_data?.audio_status === 'pending'
+                        ? <Spin />
+                        : playingIndex !== item.meta_data?.audio_url
+                        ? <SoundOutlined className={clsx("rb:cursor-pointer rb:size-5.5", {
+                          'rb:text-[#FF5D34]': item.meta_data?.audio_status === 'error',
+                          'rb:hover:text-[#155EEF]!': !item.meta_data?.audio_status || !['pending', 'error'].includes(item.meta_data?.audio_status)
+                        })} onClick={() => handlePlay(item.meta_data?.audio_url!, item.meta_data?.audio_status)} />
                         : <div
                             className="rb:size-5.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/audio_ing.gif')]"
-                            onClick={() => handlePlay(index, item.meta_data?.audio_url!)}
+                            onClick={() => handlePlay(item.meta_data?.audio_url!, item.meta_data?.audio_status)}
                           />
                       }
                     </Space>
@@ -189,7 +225,7 @@ const ChatContent: FC<ChatContentProps> = ({
                 </div>
                 {/* Bottom label (such as timestamp, username, etc.) */}
                 {labelPosition === 'bottom' &&
-                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular rb:mt-2">
+                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
                     {labelFormat(item)}
                   </div>
                 }

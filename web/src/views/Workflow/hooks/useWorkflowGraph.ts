@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 16:08:17
+ * @Last Modified time: 2026-03-27 18:14:38
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -12,11 +12,12 @@ import { Graph, Node, MiniMap, Snapline, Clipboard, Keyboard, type Edge } from '
 import { register } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 
-import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode, notesConfig } from '../constant';
+import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode, defaultPortItems, portItemArgsY, edge_width, conditionNodePortItemArgsY, conditionNodeItemHeight, conditionNodeHeight, notesConfig } from '../constant';
 import type { WorkflowConfig, NodeProperties, ChatVariable } from '../types';
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
 import { useUser } from '@/store/user';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types'
+import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils'
 
 /**
  * Props for useWorkflowGraph hook
@@ -71,6 +72,7 @@ export interface UseWorkflowGraphReturn {
 
   handleAddNotes: () => void;
   handleSaveFeaturesConfig: (value: FeaturesConfigForm) => void;
+  features?: FeaturesConfigForm;
 }
 
 /**
@@ -99,6 +101,7 @@ export const useWorkflowGraph = ({
   const [isHandMode, setIsHandMode] = useState(true);
   const [config, setConfig] = useState<WorkflowConfig | null>(null);
   const [chatVariables, setChatVariables] = useState<ChatVariable[]>([])
+  const featuresRef = useRef<FeaturesConfigForm | undefined>(undefined)
 
   useEffect(() => {
     getConfig()
@@ -120,6 +123,7 @@ export const useWorkflowGraph = ({
         })
         setChatVariables(initChatVariables)
         setConfig({ ...rest, variables: initChatVariables })
+        featuresRef.current = rest.features
         onFeaturesLoad?.(rest.features)
       })
   }
@@ -140,8 +144,8 @@ export const useWorkflowGraph = ({
         const { id, type, name, position, config = {} } = node
         let nodeLibraryConfig: NodeProperties | undefined = [...nodeLibrary, { nodes: [unknownNode, notesConfig] }]
           .flatMap(category => category.nodes)
-          .find(n => n.type === type)
-        nodeLibraryConfig = JSON.parse(JSON.stringify({ config: {}, ...nodeLibraryConfig })) as NodeProperties
+          .find(n => n.type === type) as NodeProperties
+        nodeLibraryConfig = JSON.parse(JSON.stringify({ ...nodeLibraryConfig, config: nodeLibraryConfig.config || {} }))
 
         if (nodeLibraryConfig?.config) {
           Object.keys(nodeLibraryConfig.config).forEach(key => {
@@ -218,11 +222,9 @@ export const useWorkflowGraph = ({
         // Generate ports dynamically for if-else node based on cases
         if (type === 'if-else' && config.cases && Array.isArray(config.cases)) {
           const totalPorts = config.cases.length + 1; // IF/ELIF + ELSE
-          const baseHeight = 88;
-          const newHeight = baseHeight + (totalPorts - 2) * 30;
           
           const portItems: PortMetadata[] = [
-            { group: 'left' },
+            defaultPortItems[0],
           ];
           // Add IF/ELIF/ELSE ports
           for (let i = 0; i < totalPorts; i++) {
@@ -231,9 +233,8 @@ export const useWorkflowGraph = ({
               id: `CASE${i + 1}`,
               args: {
                 x: nodeWidth,
-                y: 30 * i + 42,
+                y: getConditionNodeCasePortY(config.cases, i),
               },
-              attrs: { text: { text: i === 0 ? 'IF' : i === totalPorts - 1 ? 'ELSE' : 'ELIF', ...portTextAttrs } }
             });
           }
           
@@ -242,17 +243,16 @@ export const useWorkflowGraph = ({
             items: portItems
           };
           
-          nodeConfig.height = newHeight;
+          nodeConfig.height = calcConditionNodeTotalHeight(config.cases);
         }
         
         // Generate ports dynamically for question-classifier node based on categories
         if (type === 'question-classifier' && config.categories && Array.isArray(config.categories)) {
           const categoryCount = config.categories.length;
-          const baseHeight = 88;
-          const newHeight = baseHeight + (categoryCount - 2) * 30;
+          const newHeight = conditionNodeHeight + (categoryCount - 2) * conditionNodeItemHeight;
           
           const portItems: PortMetadata[] = [
-            { group: 'left' }
+            defaultPortItems[0]
           ];
           
           // Add category ports
@@ -262,9 +262,8 @@ export const useWorkflowGraph = ({
               id: `CASE${index + 1}`,
               args: {
                 x: nodeWidth,
-                y: 30 * index + 42,
+                y: portItemArgsY * index + conditionNodePortItemArgsY,
               },
-              attrs: { text: { text: `分类${index + 1}`, ...portTextAttrs }}
             });
           });
           
@@ -277,16 +276,22 @@ export const useWorkflowGraph = ({
         }
         
         // Check error_handle.method config for http-request node
-        if (type === 'http-request' && (config as any).error_handle?.method === 'branch') {
+        if (type === 'http-request' && (nodeConfig as any).error_handle?.method === 'branch') {
           nodeConfig.ports = {
             groups: {
               right: { position: 'right', markup: portMarkup, attrs: portAttrs },
               left: { position: 'left', markup: portMarkup, attrs: portAttrs },
             },
             items: [
-              { group: 'left' },
-              { group: 'right', id: 'right' },
-              { group: 'right', id: 'ERROR', attrs: { text: { text: t('workflow.config.http-request.errorBranch'), ...portTextAttrs }}}
+              defaultPortItems[0],
+              { ...defaultPortItems[1], id: 'right' },
+              {
+                ...defaultPortItems[1],
+                args: {
+                  x: nodeWidth,
+                  y: portItemArgsY + portItemArgsY,
+                },
+                id: 'ERROR', attrs: { text: { text: t('workflow.config.http-request.errorBranch'), ...portTextAttrs }}}
             ]
           };
         }
@@ -343,6 +348,14 @@ export const useWorkflowGraph = ({
               console.log('newWidth', newHeight, newWidth)
               
               parentNode.prop('size', { width: newWidth, height: newHeight })
+              
+              // Update x position of right group ports
+              const ports = (parentNode as Node).getPorts()
+              ports.forEach(port => {
+                if (port.group === 'right' && port.args) {
+                  (parentNode as Node).portProp(port.id!, 'args/x', newWidth)
+                }
+              })
             }
           }
         })
@@ -499,6 +512,7 @@ export const useWorkflowGraph = ({
       ...nodeData,
       isSelected: true,
     });
+    clearEdgeSelect()
     if (nodeData.type !== 'notes') {
       setSelectedNode(node);
     }
@@ -534,7 +548,7 @@ export const useWorkflowGraph = ({
   const clearEdgeSelect = () => {
     graphRef.current?.getEdges().forEach(e => {
       e.setAttrByPath('line/stroke', edge_color);
-      e.setAttrByPath('line/strokeWidth', 1);
+      e.setAttrByPath('line/strokeWidth', edge_width);
     });
   };
   /**
@@ -544,6 +558,7 @@ export const useWorkflowGraph = ({
     clearNodeSelect();
     clearEdgeSelect();
     graphRef.current?.cleanSelection();
+    setSelectedNode(null);
   };
   /**
    * Handle canvas scale/zoom event
@@ -702,6 +717,28 @@ export const useWorkflowGraph = ({
     }
     return false;
   };
+  const nodePortClickEvent = ({ e, node, port }: { e: MouseEvent, node: Node, port: string }) => {
+    e.stopPropagation();
+    const portElement = e.target as HTMLElement;
+    const rect = portElement.getBoundingClientRect();
+
+    // Create temporary popover trigger element
+    const tempDiv = document.createElement('div');
+    tempDiv.style.position = 'fixed';
+    tempDiv.style.left = rect.left + 'px';
+    tempDiv.style.top = rect.top + 'px';
+    tempDiv.style.width = '1px';
+    tempDiv.style.height = '1px';
+    tempDiv.style.zIndex = '9999';
+    document.body.appendChild(tempDiv);
+
+    // Trigger custom event to show node selection popover
+    const customEvent = new CustomEvent('port:click', {
+      detail: { node, port, element: tempDiv, rect }
+    });
+    window.dispatchEvent(customEvent);
+    clearNodeSelect();
+  }
 
   /**
    * Handle window resize event
@@ -787,15 +824,11 @@ export const useWorkflowGraph = ({
           
           // Node cannot connect to itself
           if (sourceCell?.id === targetCell?.id) return false;
-          
-          const sourceType = sourceCell?.getData()?.type;
+
           const targetType = targetCell?.getData()?.type;
           
           // Start node cannot be connection target
           if (targetType === 'start') return false;
-          
-          // End node cannot be connection source
-          if (sourceType === 'end') return false;
           
           // Get source node and target node parent IDs
           const sourceParentId = sourceCell?.getData()?.cycle;
@@ -852,7 +885,7 @@ export const useWorkflowGraph = ({
     graphRef.current.on('edge:mouseleave', ({ edge }: { edge: Edge }) => {
       if (edge.getAttrByPath('line/stroke') !== edge_selected_color) {
         edge.setAttrByPath('line/stroke', edge_color);
-        edge.setAttrByPath('line/strokeWidth', 1);
+        edge.setAttrByPath('line/strokeWidth', edge_width);
       }
     });
     // Listen to node selection event
@@ -860,33 +893,14 @@ export const useWorkflowGraph = ({
     // Listen to edge selection event
     graphRef.current.on('edge:click', edgeClick);
     // Listen to port click event
-    graphRef.current.on('node:port:click', ({ e, node, port }: { e: MouseEvent, node: Node, port: string }) => {
-      e.stopPropagation();
-      const portElement = e.target as HTMLElement;
-      const rect = portElement.getBoundingClientRect();
-      
-      // Create temporary popover trigger element
-      const tempDiv = document.createElement('div');
-      tempDiv.style.position = 'fixed';
-      tempDiv.style.left = rect.left + 'px';
-      tempDiv.style.top = rect.top + 'px';
-      tempDiv.style.width = '1px';
-      tempDiv.style.height = '1px';
-      tempDiv.style.zIndex = '9999';
-      document.body.appendChild(tempDiv);
-      
-      // Trigger custom event to show node selection popover
-      const customEvent = new CustomEvent('port:click', {
-        detail: { node, port, element: tempDiv, rect }
-      });
-      window.dispatchEvent(customEvent);
-    });
+    graphRef.current.on('node:port:click', nodePortClickEvent);
     // Listen to canvas click event, cancel selection
     graphRef.current.on('blank:click', blankClick);
     // Listen to zoom event
     graphRef.current.on('scale', scaleEvent);
     // Listen to node move event
     graphRef.current.on('node:moved', nodeMoved);
+    graphRef.current.on('node:removed', blankClick)
     // Listen to copy keyboard event
     graphRef.current.bindKey(['ctrl+c', 'cmd+c'], copyEvent);
     // Listen to paste keyboard event
@@ -956,7 +970,7 @@ export const useWorkflowGraph = ({
       name: t(`workflow.${dragData.type}`),
       ...nodeLibraryConfig
     };
-    
+
     if (dragData.type === 'loop' || dragData.type === 'iteration') {
       graphRef.current.addNode({
         ...graphNodeLibrary[dragData.type],
@@ -1005,6 +1019,7 @@ export const useWorkflowGraph = ({
 
       const params = {
         ...config,
+        features: featuresRef.current,
         variables: chatVariables.map(v => {
           const { defaultValue, ...cleanV } = v
           return {
@@ -1162,7 +1177,7 @@ export const useWorkflowGraph = ({
       saveWorkflowConfig(config.app_id, params as WorkflowConfig)
       .then((res) => {
         if (flag) {
-          message.success(t('common.saveSuccess'))
+          message.success({ content: t('common.saveSuccess'), duration: 1 })
         }
         resolve(res)
       }).catch(error => {
@@ -1197,7 +1212,8 @@ export const useWorkflowGraph = ({
     });
   }
   const handleSaveFeaturesConfig = (value?: FeaturesConfigForm) => {
-    setConfig(prev => prev ? { ...prev, features: value } as WorkflowConfig : prev)
+    featuresRef.current = value
+    onFeaturesLoad?.(value)
   }
 
   return {
@@ -1219,6 +1235,7 @@ export const useWorkflowGraph = ({
     chatVariables,
     setChatVariables,
     handleAddNotes,
-    handleSaveFeaturesConfig
+    handleSaveFeaturesConfig,
+    features: featuresRef.current,
   };
 };

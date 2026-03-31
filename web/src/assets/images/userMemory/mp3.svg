@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="30px" height="36px" viewBox="0 0 30 36" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 9</title>
+    <defs>
+        <linearGradient x1="19.6271261%" y1="2.96958193%" x2="77.6760062%" y2="100%" id="linearGradient-1">
+            <stop stop-color="#C8A0FF" offset="0%"></stop>
+            <stop stop-color="#CEB2FF" offset="28.2176577%"></stop>
+            <stop stop-color="#DED3FF" offset="56.8717564%"></stop>
+            <stop stop-color="#CEC8FF" offset="100%"></stop>
+        </linearGradient>
+        <path d="M4,0 L21,0 L21,0 L30,9 L30,32 C30,34.209139 28.209139,36 26,36 L4,36 C1.790861,36 0,34.209139 0,32 L0,4 C0,1.790861 1.790861,4.4408921e-16 4,0 Z" id="path-2"></path>
+        <path d="M21,0 L30,9 L23,9 C21.8954305,9 21,8.1045695 21,7 L21,0 L21,0 Z" id="path-4"></path>
+        <filter x="0.0%" y="5.6%" width="100.0%" height="100.0%" filterUnits="objectBoundingBox" id="filter-5">
+            <feGaussianBlur stdDeviation="0" in="SourceGraphic"></feGaussianBlur>
+        </filter>
+        <filter x="-2.8%" y="2.8%" width="105.6%" height="105.6%" filterUnits="objectBoundingBox" id="filter-6">
+            <feOffset dx="0" dy="0.5" in="SourceAlpha" result="shadowOffsetOuter1"></feOffset>
+            <feColorMatrix values="0 0 0 0 0.549610893   0 0 0 0 0.306104714   0 0 0 0 0.920120018  0 0 0 1 0" type="matrix" in="shadowOffsetOuter1"></feColorMatrix>
+        </filter>
+        <linearGradient x1="10.8151203%" y1="88.7329544%" x2="78.1240461%" y2="-12.5894595%" id="linearGradient-7">
+            <stop stop-color="#A58DFF" offset="0%"></stop>
+            <stop stop-color="#E1CCFD" offset="100%"></stop>
+        </linearGradient>
+        <linearGradient x1="50%" y1="0%" x2="50%" y2="100%" id="linearGradient-8">
+            <stop stop-color="#FFFFFF" offset="0%"></stop>
+            <stop stop-color="#FEF1FF" offset="100%"></stop>
+        </linearGradient>
+        <path d="M20.9537909,4.7911898 C20.9844648,4.88869378 21,4.98960921 21,5.0910182 L21,7.18442503 C20.9997643,7.67093277 20.6448148,8.09843113 20.1300157,8.23222728 L14.4000666,9.71940987 L14.4000666,16.1838768 C14.4001236,18.2405707 12.6063244,19.9273263 10.3440772,19.9978279 L10.2000782,20 C8.39084593,20 6.78498055,18.9471679 6.21451509,17.3871485 C5.64404963,15.8271291 6.23720366,14.1104967 7.68665148,13.126675 C9.13609929,12.1428533 11.1160585,12.1129691 12.6006702,13.0525061 L12.6000796,6.37105777 L12.6390606,6.37105777 C12.7470034,5.99870854 13.0630937,5.70569931 13.4706545,5.60018728 L19.4706298,4.04214267 C20.1078438,3.87690767 20.7718463,4.21224531 20.9538191,4.7911898 L20.9537909,4.7911898 Z" id="path-9"></path>
+        <filter x="-2.7%" y="-2.5%" width="105.3%" height="110.0%" filterUnits="objectBoundingBox" id="filter-10">
+            <feOffset dx="0" dy="0.8" in="SourceAlpha" result="shadowOffsetOuter1"></feOffset>
+            <feColorMatrix values="0 0 0 0 0.549019608   0 0 0 0 0.305882353   0 0 0 0 0.921568627  0 0 0 1 0" type="matrix" in="shadowOffsetOuter1"></feColorMatrix>
+        </filter>
+    </defs>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="记忆库-个人记忆-感知记忆-听觉" transform="translate(-41, -181)">
+            <g id="编组-14" transform="translate(28, 168)">
+                <g id="编组-9" transform="translate(13, 13)">
+                    <g id="矩形">
+                        <mask id="mask-3" fill="white">
+                            <use xlink:href="#path-2"></use>
+                        </mask>
+                        <use id="蒙版" fill="url(#linearGradient-1)" xlink:href="#path-2"></use>
+                        <g filter="url(#filter-5)" mask="url(#mask-3)" fill="black" fill-opacity="1">
+                            <use filter="url(#filter-6)" xlink:href="#path-4"></use>
+                        </g>
+                    </g>
+                    <path d="M21,0 L30,9 L23,9 C21.8954305,9 21,8.1045695 21,7 L21,0 L21,0 Z" id="矩形" fill="url(#linearGradient-7)"></path>
+                    <rect id="矩形" fill="#8652FF" x="2" y="25" width="26" height="9" rx="3"></rect>
+                    <text id="MP3" font-family="MiSans-Semibold, MiSans" font-size="8" font-weight="400" line-spacing="8" fill="#FFFFFF">
+                        <tspan x="6" y="33.5">MP3</tspan>
+                    </text>
+                    <g id="路径" fill-rule="nonzero" transform="translate(13.5, 12) scale(-1, 1) translate(-13.5, -12)">
+                        <use fill="black" fill-opacity="1" filter="url(#filter-10)" xlink:href="#path-9"></use>
+                        <use fill="url(#linearGradient-8)" xlink:href="#path-9"></use>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

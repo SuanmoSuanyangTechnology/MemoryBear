@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 15:38:14
+ * @Last Modified time: 2026-03-27 17:32:10
  */
 /**
  * Copy Application Modal
@@ -19,10 +19,15 @@ import RbModal from '@/components/RbModal'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import FileUploadSettingModal from './FileUploadSettingModal'
 import type { Application } from '@/views/ApplicationManagement/types';
+import type { Capability } from '@/views/ModelManagement/types'
+import OpenStatementSettingModal, { type OpenStatementSettingModalRef } from './OpenStatementSettingModal'
+import type { Variable } from '../VariableList/types'
 
 interface FeaturesConfigModalProps {
   refresh: (value: FeaturesConfigForm) => void;
   source?: Application['type'];
+  capability?: Capability[];
+  chatVariables: Variable[];
 }
 const max_file_count = 1;
 /**
@@ -31,12 +36,15 @@ const max_file_count = 1;
 const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigModalProps>(({
   refresh,
   source,
+  capability,
+  chatVariables
 }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [form] = Form.useForm<FeaturesConfigForm>();
   const values = Form.useWatch([], form)
   const fileUploadSettingModalRef = useRef<any>(null)
+  const openStatementSettingModalRef = useRef<OpenStatementSettingModalRef>(null)
 
   /** Close modal and reset form */
   const handleClose = () => {
@@ -47,13 +55,14 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
   /** Open modal */
   const handleOpen = (initValue: FeaturesConfigForm) => {
     setVisible(true);
-    console.log('initValue', initValue)
     form.setFieldsValue(initValue)
   };
   /** Copy application with new name */
   const handleSave = () => {
-    setVisible(false);
-    refresh(form.getFieldsValue())
+    form.validateFields().then((values) => {
+      setVisible(false);
+      refresh(values)
+    })
   }
 
   const handleOpenSettings = () => {
@@ -62,6 +71,29 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
 
   const handleSaveSettings = (settings: FeaturesConfigForm['file_upload']) => {
     form.setFieldValue('file_upload', { ...settings, enabled: values?.file_upload?.enabled ?? false })
+  }
+
+  const formatFileTypeOptions = (fu: FeaturesConfigForm['file_upload']) => {
+    let options = fu.document_enabled ? [{ type: 'document', enabled: fu.document_enabled, maxSize: fu.document_max_size_mb }] : []
+    if (!capability && source !== 'workflow') return options
+    
+    if ((capability?.includes('vision') || source === 'workflow') && fu.image_enabled) {
+      options.push({ type: 'image', enabled: fu.image_enabled, maxSize: fu.image_max_size_mb })
+    }
+    if ((capability?.includes('audio') || source === 'workflow') && fu.audio_enabled) {
+      options.push({ type: 'audio', enabled: fu.audio_enabled, maxSize: fu.audio_max_size_mb })
+    }
+    if ((capability?.includes('video') || source === 'workflow') && fu.video_enabled) {
+      options.push({ type: 'video', enabled: fu.video_enabled, maxSize: fu.video_max_size_mb })
+    }
+    return options.filter(item => item.enabled)
+  }
+
+  const handleOpenStatementSettings = () => {
+    openStatementSettingModalRef.current?.handleOpen(values?.opening_statement)
+  }
+  const handleSaveStatement = (settings: FeaturesConfigForm['opening_statement']) => {
+    form.setFieldValue('opening_statement', settings)
   }
 
   /** Expose methods to parent component */
@@ -87,6 +119,23 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
             {source !== 'workflow' && <>
               <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
                 <SwitchFormItem
+                  title={t('application.opening_statement')}
+                  name={['opening_statement', "enabled"]}
+                  desc={values?.opening_statement?.enabled ? undefined : t('application.opening_statement_desc')}
+                />
+                {values?.opening_statement?.enabled && (() => {
+                  const statement = values.opening_statement?.statement
+                  return statement && statement.trim() !== '' ? <>
+                    <div className="rb:bg-white rb:rounded-lg rb:py-1 rb:px-3 rb:mb-1">
+                      {statement}
+                    </div>
+                    <Button block onClick={handleOpenStatementSettings}>{t('application.editOpeningStatement')}</Button>
+                  </> : <Button block onClick={handleOpenStatementSettings}>{t('application.editOpeningStatement')}</Button>
+                })()}
+                <Form.Item name="opening_statement" hidden />
+              </div>
+              <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
+                <SwitchFormItem
                   title={t(`memoryConversation.web_search`)}
                   name={['web_search', "enabled"]}
                 />
@@ -99,6 +148,13 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
                   desc={t('application.text_to_speech_desc')}
                 />
               </div>
+              <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
+                <SwitchFormItem
+                  title={t(`application.citation`)}
+                  name={['citation', "enabled"]}
+                  desc={t('application.citation_desc')}
+                />
+              </div>
             </>}
 
             <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
@@ -109,22 +165,18 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
               />
               {values?.file_upload?.enabled && (() => {
                 const fu = values.file_upload
-                const types = [
-                  { type: 'image', enabled: fu.image_enabled, maxSize: fu.image_max_size_mb },
-                  { type: 'audio', enabled: fu.audio_enabled, maxSize: fu.audio_max_size_mb },
-                  { type: 'document', enabled: fu.document_enabled, maxSize: fu.document_max_size_mb },
-                  { type: 'video', enabled: fu.video_enabled, maxSize: fu.video_max_size_mb },
-                ].filter(item => item.enabled)
-                return types.length > 0 ? <>
+                // 'vision' | 'audio' | 'video'
+                const filterTypes = formatFileTypeOptions(fu)
+                return filterTypes.length > 0 ? <>
                   <Flex gap={12} className="rb:py-2!">
                     <div className="rb:flex-1 rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:bg-white rb:text-[12px]">
                       <div className="rb:grid rb:grid-cols-2 rb:gap-2 rb:text-[12px] rb:text-[#5B6167] rb:border-b rb:border-b-[#DFE4ED]">
                         <div className="rb:px-3 rb:py-1">{t(`application.supportedTypes`)}</div>
                         <div className="rb:px-3 rb:py-1">{t('application.singleMaxSize')}</div>
                       </div>
-                      {types.map((item, index) => (
+                      {filterTypes.map((item, index) => (
                         <div key={item.type} className={clsx('rb:grid rb:grid-cols-2 rb:gap-2', {
-                          'rb:border-b rb:border-b-[#DFE4ED]': index !== types.length - 1
+                          'rb:border-b rb:border-b-[#DFE4ED]': index !== filterTypes.length - 1
                         })}>
                           <div className="rb:px-3 rb:py-1">{t(`application.${item.type}`)}</div>
                           <div className="rb:px-3 rb:py-1">{item.maxSize} MB</div>
@@ -148,6 +200,13 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
       <FileUploadSettingModal
         ref={fileUploadSettingModalRef}
         onSave={handleSaveSettings}
+        capability={capability}
+        source={source}
+      />
+      <OpenStatementSettingModal
+        ref={openStatementSettingModalRef}
+        chatVariables={chatVariables}
+        onSave={handleSaveStatement}
       />
     </>
   );

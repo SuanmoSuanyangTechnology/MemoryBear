@@ -8,11 +8,13 @@ from fastapi import APIRouter
 from . import (
     api_key_controller,
     app_controller,
+    app_log_controller,
     auth_controller,
     chunk_controller,
     document_controller,
     emotion_config_controller,
     emotion_controller,
+    end_user_controller,
     file_controller,
     file_storage_controller,
     home_page_controller,
@@ -69,6 +71,7 @@ manager_router.include_router(chunk_controller.router)
 manager_router.include_router(test_controller.router)
 manager_router.include_router(knowledgeshare_controller.router)
 manager_router.include_router(app_controller.router)
+manager_router.include_router(app_log_controller.router)
 manager_router.include_router(upload_controller.router)
 manager_router.include_router(memory_agent_controller.router)
 manager_router.include_router(memory_dashboard_controller.router)
@@ -96,5 +99,6 @@ manager_router.include_router(file_storage_controller.router)
 manager_router.include_router(ontology_controller.router)
 manager_router.include_router(skill_controller.router)
 manager_router.include_router(i18n_controller.router)
+manager_router.include_router(end_user_controller.router)
 
 __all__ = ["manager_router"]

@@ -64,9 +64,7 @@ class AgentNode(BaseNode):
         
         if not release:
             raise ValueError(f"Agent 不存在: {agent_id}")
-        
 
-        
         return release, message
     
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:

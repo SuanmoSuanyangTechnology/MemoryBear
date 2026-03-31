@@ -1,4 +1,3 @@
-
 import { forwardRef, useImperativeHandle, useState, useRef, useLayoutEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import RbDrawer from '@/components/RbDrawer';
@@ -51,6 +50,7 @@ const RecallTestDrawer = forwardRef<RecallTestDrawerRef>(({},ref) => {
         title={t('knowledgeBase.recallTest')}
         open={open}
         onClose={() => setOpen(false)}
+        width={1000}
     >
       <RecallTest ref={setRecallTestRef} />
     </RbDrawer>

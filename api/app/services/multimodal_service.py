@@ -9,17 +9,18 @@
 - OpenAI: 支持 URL 和 base64 格式
 """
 import base64
+import csv
 import io
-import uuid
+import json
+import re
+import olefile
+import struct
 import zipfile
-import chardet
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 
-import csv
-import json
-
 import PyPDF2
+import chardet
 import httpx
 import magic
 import openpyxl
@@ -35,7 +36,6 @@ from app.models.file_metadata_model import FileMetadata
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.services.audio_transcription_service import AudioTranscriptionService
-from app.tasks import write_perceptual_memory
 
 logger = get_business_logger()
 
@@ -297,6 +297,7 @@ PROVIDER_STRATEGIES = {
     "bedrock": BedrockFormatStrategy,
     "anthropic": BedrockFormatStrategy,
     "openai": OpenAIFormatStrategy,
+    "volcano": OpenAIFormatStrategy,
 }
 
 
@@ -342,15 +343,12 @@ class MultimodalService:
 
     async def process_files(
             self,
-            end_user_id: uuid.UUID | str,
             files: Optional[List[FileInput]],
-
     ) -> List[Dict[str, Any]]:
         """
         处理文件列表，返回 LLM 可用的格式
         
         Args:
-            end_user_id: 用户ID
             files: 文件输入列表
             
         Returns:
@@ -358,81 +356,6 @@ class MultimodalService:
         """
         if not files:
             return []
-        if isinstance(end_user_id, uuid.UUID):
-            end_user_id = str(end_user_id)
-
-        # 获取对应的策略
-        # dashscope 的 omni 模型使用 OpenAI 兼容格式
-        if self.provider == "dashscope" and self.is_omni:
-            strategy_class = OpenAIFormatStrategy
-        else:
-            strategy_class = PROVIDER_STRATEGIES.get(self.provider)
-            if not strategy_class:
-                logger.warning(f"未找到 provider '{self.provider}' 的策略，使用默认策略")
-                strategy_class = DashScopeFormatStrategy
-
-        result = []
-        for idx, file in enumerate(files):
-            strategy = strategy_class(file)
-            if not file.url:
-                file.url = await self.get_file_url(file)
-            try:
-                if file.type == FileType.IMAGE and "vision" in self.capability:
-                    is_support, content = await self._process_image(file, strategy)
-                    result.append(content)
-                    if is_support:
-                        self.write_perceptual_memory(end_user_id, file.type, file.url, content)
-                elif file.type == FileType.DOCUMENT:
-                    is_support, content = await self._process_document(file, strategy)
-                    result.append(content)
-                    if is_support:
-                        self.write_perceptual_memory(end_user_id, file.type, file.url, content)
-                elif file.type == FileType.AUDIO and "audio" in self.capability:
-                    is_support, content = await self._process_audio(file, strategy)
-                    result.append(content)
-                    if is_support:
-                        self.write_perceptual_memory(end_user_id, file.type, file.url, content)
-                elif file.type == FileType.VIDEO and "video" in self.capability:
-                    is_support, content = await self._process_video(file, strategy)
-                    result.append(content)
-                    if is_support:
-                        self.write_perceptual_memory(end_user_id, file.type, file.url, content)
-                else:
-                    logger.warning(f"不支持的文件类型: {file.type}")
-            except Exception as e:
-                logger.error(
-                    f"处理文件失败",
-                    extra={
-                        "file_index": idx,
-                        "file_type": file.type,
-                        "error": str(e)
-                    },
-                    exc_info=True
-                )
-                # 继续处理其他文件，不中断整个流程
-                result.append({
-                    "type": "text",
-                    "text": f"[文件处理失败: {str(e)}]"
-                })
-
-        logger.info(f"成功处理 {len(result)}/{len(files)} 个文件，provider={self.provider}")
-        return result
-
-    async def history_process_files(
-            self,
-            files: Optional[List[FileInput]],
-    ) -> List[Dict[str, Any]]:
-        """
-        处理文件列表，返回 LLM 可用的格式
-
-        Args:
-            files: 文件输入列表
-
-        Returns:
-            List[Dict]: LLM 可用的内容格式列表（根据 provider 返回不同格式）
-        """
-        if not files:
-            return []
 
         # 获取对应的策略
         # dashscope 的 omni 模型使用 OpenAI 兼容格式
@@ -482,17 +405,6 @@ class MultimodalService:
 
         logger.info(f"成功处理 {len(result)}/{len(files)} 个文件，provider={self.provider}")
         return result
-
-    def write_perceptual_memory(
-            self,
-            end_user_id: str,
-            file_type: str,
-            file_url: str,
-            file_message: dict
-    ):
-        """写入感知记忆"""
-        if end_user_id and self.api_config:
-            write_perceptual_memory.delay(end_user_id, self.api_config.model_dump(), file_type, file_url, file_message)
 
     async def _process_image(self, file: FileInput, strategy) -> tuple[bool, Dict[str, Any]]:
         """
@@ -693,31 +605,75 @@ class MultimodalService:
             try:
                 word_file = io.BytesIO(file_content)
                 doc = Document(word_file)
-                return '\n'.join(p.text for p in doc.paragraphs)
+                text_lines = []
+                for p in doc.paragraphs:
+                    text = p.text.strip()
+                    if text:
+                        text_lines.append(text)
+
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            text = cell.text.strip()
+                            if text:
+                                text_lines.append(text)
+
+                full_text = "\n".join(text_lines)
+                return full_text.strip() or "[docx 文件无文本内容]"
             except Exception as e:
-                logger.error(f"提取 docx 文本失败: {e}")
+                logger.error(f"提取 docx 文本失败: {str(e)}", exc_info=True)
                 return f"[docx 提取失败: {str(e)}]"
 
-        # 旧版 .doc（OLE2 格式）
+        # 旧版 .doc（OLE2/CFB 格式），按 Word Binary Format 规范解析 piece table
         try:
-            import olefile
             ole = olefile.OleFileIO(io.BytesIO(file_content))
-            if not ole.exists('WordDocument'):
-                return "[doc 提取失败: 未找到 WordDocument 流]"
-            # 读取 WordDocument 流，提取可见 ASCII/Unicode 文本
-            stream = ole.openstream('WordDocument').read()
-            # Word Binary Format: 文本在流中以 UTF-16-LE 编码存储
-            # 简单提取：过滤出可打印字符段
-            try:
-                text = stream.decode('utf-16-le', errors='ignore')
-            except Exception:
-                text = stream.decode('latin-1', errors='ignore')
-            # 过滤控制字符，保留可打印内容
-            import re
-            text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
-            text = re.sub(r' +', ' ', text).strip()
+            word_stream = ole.openstream('WordDocument').read()
+
+            # FIB offset 0xA bit9 决定使用 0Table 还是 1Table
+            fib_flags = struct.unpack_from('<H', word_stream, 0xA)[0]
+            table_name = '1Table' if (fib_flags & 0x0200) else '0Table'
+            table_stream = ole.openstream(table_name).read()
+
+            # 从 FIB 读取 fcClx/lcbClx 定位 piece table
+            fc_clx, lcb_clx = struct.unpack_from("<II", word_stream, 0x1A2)
+            clx = table_stream[fc_clx: fc_clx + lcb_clx]
+
+            # 解析 CLX，找到 PlcPcd（piece table）
+            i, plc_pcd = 0, None
+            while i < len(clx):
+                clxt = clx[i]
+                if clxt == 0x01:
+                    i += 3 + struct.unpack_from('<H', clx, i + 1)[0]
+                elif clxt == 0x02:
+                    cb = struct.unpack_from('<I', clx, i + 1)[0]
+                    plc_pcd = clx[i + 5: i + 5 + cb]
+                    break
+                else:
+                    break
+
+            if plc_pcd is None:
+                raise ValueError("PlcPcd not found")
+
+            # PlcPcd: (n+1) 个 CP（4字节）+ n 个 PCD（8字节）
+            n_pieces = (len(plc_pcd) - 4) // 12
+            cp_array = [struct.unpack_from('<I', plc_pcd, k * 4)[0] for k in range(n_pieces + 1)]
+
+            parts = []
+            for k in range(n_pieces):
+                fc_value = struct.unpack_from('<I', plc_pcd, (n_pieces + 1) * 4 + k * 8 + 2)[0]
+                is_ansi = bool(fc_value & 0x40000000)
+                fc = fc_value & 0x3FFFFFFF
+                char_count = cp_array[k + 1] - cp_array[k]
+
+                if is_ansi:
+                    parts.append(word_stream[fc: fc + char_count].decode('cp1252', errors='replace'))
+                else:
+                    parts.append(word_stream[fc: fc + char_count * 2].decode('utf-16-le', errors='replace'))
+
             ole.close()
-            return text
+            result = re.sub(r'[\x00-\x1f\x7f]', '', ''.join(parts))
+            return result.strip()
+
         except Exception as e:
             logger.error(f"提取 doc 文本失败: {e}")
             return f"[doc 提取失败: {str(e)}]"

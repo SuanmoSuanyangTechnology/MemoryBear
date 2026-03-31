@@ -22,13 +22,18 @@ from app.core.memory.models.graph_models import (
     StatementNode,
     ExtractedEntityNode,
     EntityEntityEdge,
+    PerceptualNode,
+    PerceptualEdge,
 )
 import logging
+
 logger = logging.getLogger(__name__)
+
+
 async def save_entities_and_relationships(
-    entity_nodes: List[ExtractedEntityNode],
-    entity_entity_edges: List[EntityEntityEdge],
-    connector: Neo4jConnector
+        entity_nodes: List[ExtractedEntityNode],
+        entity_entity_edges: List[EntityEntityEdge],
+        connector: Neo4jConnector
 ):
     """Save entities and their relationships using graph models"""
     all_entities = [entity.model_dump() for entity in entity_nodes]
@@ -73,8 +78,8 @@ async def save_entities_and_relationships(
 
 
 async def save_chunk_nodes(
-    chunk_nodes: List[ChunkNode],
-    connector: Neo4jConnector
+        chunk_nodes: List[ChunkNode],
+        connector: Neo4jConnector
 ):
     """Save chunk nodes using graph models"""
     if not chunk_nodes:
@@ -89,8 +94,8 @@ async def save_chunk_nodes(
 
 
 async def save_statement_chunk_edges(
-    statement_chunk_edges: List[StatementChunkEdge],
-    connector: Neo4jConnector
+        statement_chunk_edges: List[StatementChunkEdge],
+        connector: Neo4jConnector
 ):
     """Save statement-chunk edges using graph models"""
     if not statement_chunk_edges:
@@ -118,8 +123,8 @@ async def save_statement_chunk_edges(
 
 
 async def save_statement_entity_edges(
-    statement_entity_edges: List[StatementEntityEdge],
-    connector: Neo4jConnector
+        statement_entity_edges: List[StatementEntityEdge],
+        connector: Neo4jConnector
 ):
     """Save statement-entity edges using graph models"""
     if not statement_entity_edges:
@@ -142,7 +147,7 @@ async def save_statement_entity_edges(
     if all_se_edges:
         try:
             await connector.execute_query(
-                STATEMENT_ENTITY_EDGE_SAVE, 
+                STATEMENT_ENTITY_EDGE_SAVE,
                 relationships=all_se_edges
             )
         except Exception:
@@ -154,23 +159,28 @@ async def save_dialog_and_statements_to_neo4j(
         chunk_nodes: List[ChunkNode],
         statement_nodes: List[StatementNode],
         entity_nodes: List[ExtractedEntityNode],
+        perceptual_nodes: List[PerceptualNode],
         entity_edges: List[EntityEntityEdge],
         statement_chunk_edges: List[StatementChunkEdge],
         statement_entity_edges: List[StatementEntityEdge],
+        perceptual_edges: List[PerceptualEdge],
         connector: Neo4jConnector,
-        config_id: Optional[str] = None,
-        llm_model_id: Optional[str] = None,
 ) -> bool:
     """Save dialogue nodes, chunk nodes, statement nodes, entities, and all relationships to Neo4j using graph models.
+
+    只负责数据写入，不触发聚类。聚类由调用方在写入成功后通过
+    _trigger_clustering_sync() 显式触发。
 
     Args:
         dialogue_nodes: List of DialogueNode objects to save
         chunk_nodes: List of ChunkNode objects to save
         statement_nodes: List of StatementNode objects to save
         entity_nodes: List of ExtractedEntityNode objects to save
+        perceptual_nodes: List of PerceptualNode objects to save
         entity_edges: List of EntityEntityEdge objects to save
         statement_chunk_edges: List of StatementChunkEdge objects to save
         statement_entity_edges: List of StatementEntityEdge objects to save
+        perceptual_edges: List of PerceptualEdge objects to save
         connector: Neo4j connector instance
 
     Returns:
@@ -189,7 +199,7 @@ async def save_dialog_and_statements_to_neo4j(
             result = await tx.run(DIALOGUE_NODE_SAVE, dialogues=dialogue_data)
             dialogue_uuids = [record["uuid"] async for record in result]
             results['dialogues'] = dialogue_uuids
-            print(f"Dialogues saved to Neo4j with UUIDs: {dialogue_uuids}")
+            logger.info(f"Dialogues saved to Neo4j with UUIDs: {dialogue_uuids}")
 
         # 2. Save all chunk nodes in batch
         if chunk_nodes:
@@ -199,6 +209,14 @@ async def save_dialog_and_statements_to_neo4j(
             chunk_uuids = [record["uuid"] async for record in result]
             results['chunks'] = chunk_uuids
             logger.info(f"Successfully saved {len(chunk_uuids)} chunk nodes to Neo4j")
+
+        if perceptual_nodes:
+            from app.repositories.neo4j.cypher_queries import PERCEPTUAL_NODE_SAVE
+            perceptual_data = [node.model_dump() for node in perceptual_nodes]
+            result = await tx.run(PERCEPTUAL_NODE_SAVE, perceptuals=perceptual_data)
+            perceptual_uuids = [record["uuid"] async for record in result]
+            results["perceptuals"] = perceptual_uuids
+            logger.info(f"Successfully saved {len(perceptual_uuids)} perceptual nodes to Neo4j")
 
         # 3. Save all statement nodes in batch
         if statement_nodes:
@@ -280,6 +298,22 @@ async def save_dialog_and_statements_to_neo4j(
             results['statement_entity_edges'] = se_uuids
             logger.info(f"Successfully saved {len(se_uuids)} statement-entity edges to Neo4j")
 
+        if perceptual_edges:
+            from app.repositories.neo4j.cypher_queries import PERCEPTUAL_CHUNK_EDGE_SAVE
+            perceptual_edge_data = []
+            for edge in perceptual_edges:
+                print(edge.source, edge.target)
+                perceptual_edge_data.append({
+                    "perceptual_id": edge.source,
+                    "chunk_id": edge.target,
+                    "end_user_id": edge.end_user_id,
+                    "created_at": edge.created_at.isoformat() if edge.created_at else None,
+                })
+            result = await tx.run(PERCEPTUAL_CHUNK_EDGE_SAVE, edges=perceptual_edge_data)
+            perceptual_edges_uuids = [record["uuid"] async for record in result]
+            results['perceptual_chunk_edges'] = perceptual_edges_uuids
+            logger.info(f"Successfully saved {len(perceptual_edges_uuids)} perceptual-chunk edges to Neo4j")
+
         return results
 
     try:
@@ -293,9 +327,6 @@ async def save_dialog_and_statements_to_neo4j(
         logger.info("Transaction completed. Summary: %s", summary)
         logger.debug("Full transaction results: %r", results)
 
-        # 写入成功后，异步触发聚类（不阻塞写入响应）
-        schedule_clustering_after_write(entity_nodes, config_id=config_id, llm_model_id=llm_model_id)
-
         return True
 
     except Exception as e:
@@ -305,16 +336,13 @@ async def save_dialog_and_statements_to_neo4j(
         return False
 
 
-def schedule_clustering_after_write(
-    entity_nodes: List,
-    config_id: Optional[str] = None,
-    llm_model_id: Optional[str] = None,
+async def _trigger_clustering_sync(
+        entity_nodes: List,
+        llm_model_id: Optional[str] = None,
+        embedding_model_id: Optional[str] = None,
 ) -> None:
     """
-    写入 Neo4j 成功后，调度后台聚类任务。
-
-    可通过环境变量 CLUSTERING_ENABLED=false 禁用（用于基准测试对比）。
-    使用 asyncio.create_task 异步触发，不阻塞写入响应。
+    同步等待聚类完成，避免与其他 LLM 任务并发冲突。
     """
     if not entity_nodes:
         return
@@ -326,15 +354,16 @@ def schedule_clustering_after_write(
 
     end_user_id = entity_nodes[0].end_user_id
     new_entity_ids = [e.id for e in entity_nodes]
-    logger.info(f"[Clustering] 准备触发聚类，实体数: {len(new_entity_ids)}, end_user_id: {end_user_id}")
-    asyncio.create_task(_trigger_clustering(new_entity_ids, end_user_id, config_id=config_id, llm_model_id=llm_model_id))
+    logger.info(f"[Clustering] 准备触发聚类（同步），实体数: {len(new_entity_ids)}, end_user_id: {end_user_id}")
+    await _trigger_clustering(new_entity_ids, end_user_id, llm_model_id=llm_model_id,
+                              embedding_model_id=embedding_model_id)
 
 
 async def _trigger_clustering(
-    new_entity_ids: List[str],
-    end_user_id: str,
-    config_id: Optional[str] = None,
-    llm_model_id: Optional[str] = None,
+        new_entity_ids: List[str],
+        end_user_id: str,
+        llm_model_id: Optional[str] = None,
+        embedding_model_id: Optional[str] = None,
 ) -> None:
     """
     聚类触发函数，自动判断全量初始化还是增量更新。
@@ -344,7 +373,7 @@ async def _trigger_clustering(
         from app.core.memory.storage_services.clustering_engine import LabelPropagationEngine
         logger.info(f"[Clustering] 开始聚类，end_user_id={end_user_id}, 实体数={len(new_entity_ids)}")
         connector = Neo4jConnector()
-        engine = LabelPropagationEngine(connector, config_id=config_id, llm_model_id=llm_model_id)
+        engine = LabelPropagationEngine(connector, llm_model_id=llm_model_id, embedding_model_id=embedding_model_id)
         await engine.run(end_user_id=end_user_id, new_entity_ids=new_entity_ids)
         logger.info(f"[Clustering] 聚类完成，end_user_id={end_user_id}")
     except Exception as e:

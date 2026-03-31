@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 33</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="应用管理-工作流-配置-条件分支" transform="translate(-1713, -316)" stroke="#171719" stroke-width="0.8">
+            <g id="节点属性备份" transform="translate(1450, 74)">
+                <g id="编组-43备份-3" transform="translate(12, 234)">
+                    <g id="编组-28备份" transform="translate(247, 7)">
+                        <g id="编组-33" transform="translate(4, 1)">
+                            <g id="编组-32" transform="translate(3.5, 4)">
+                                <line x1="-1.47382107e-14" y1="1.77777778" x2="9" y2="1.77777778" id="路径-29"></line>
+                                <polyline id="路径-30" stroke-linejoin="round" points="2.7 1.77769432 2.7 0 6.3 0 6.3 1.77777778"></polyline>
+                                <path d="M1.35,1.78869966 L1.35,7.1 C1.35,7.59705627 1.75294373,8 2.25,8 L6.75,8 C7.24705627,8 7.65,7.59705627 7.65,7.1 L7.65,1.77777778 L7.65,1.77777778" id="路径-31" stroke-linejoin="round"></path>
+                                <line x1="3.6" y1="3.5616299" x2="3.6" y2="6.22829657" id="路径-32"></line>
+                                <line x1="5.4" y1="3.5616299" x2="5.4" y2="6.22829657" id="路径-32"></line>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

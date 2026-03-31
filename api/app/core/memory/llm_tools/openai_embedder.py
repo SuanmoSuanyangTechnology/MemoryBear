@@ -2,6 +2,7 @@
 OpenAI Embedder 客户端实现
 
 基于 LangChain 和 RedBearEmbeddings 的 OpenAI 嵌入模型客户端实现。
+自动支持火山引擎的多模态 Embedding。
 """
 
 from typing import List
@@ -13,6 +14,7 @@ from app.core.memory.llm_tools.embedder_client import (
 )
 from app.core.models.base import RedBearModelConfig
 from app.core.models.embedding import RedBearEmbeddings
+from app.models.models_model import ModelProvider
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,7 @@ class OpenAIEmbedderClient(EmbedderClient):
     - 批量文本嵌入
     - 自动重试机制
     - 错误处理
+    - 火山引擎多模态 Embedding（自动识别）
     """
 
     def __init__(self, model_config: RedBearModelConfig):
@@ -36,7 +39,7 @@ class OpenAIEmbedderClient(EmbedderClient):
         """
         super().__init__(model_config)
 
-        # 初始化 RedBearEmbeddings 模型
+        # 初始化 RedBearEmbeddings（自动支持火山引擎多模态）
         self.model = RedBearEmbeddings(
             RedBearModelConfig(
                 model_name=self.model_name,
@@ -47,8 +50,9 @@ class OpenAIEmbedderClient(EmbedderClient):
                 timeout=self.timeout,
             )
         )
+        self.is_multimodal = self.model.is_multimodal_supported()
 
-        logger.info("OpenAI Embedder 客户端初始化完成")
+        logger.info(f"OpenAI Embedder 客户端初始化完成 (provider={self.provider}, multimodal={self.is_multimodal})")
 
     async def response(
         self,
@@ -77,7 +81,14 @@ class OpenAIEmbedderClient(EmbedderClient):
                 return []
 
             # 生成嵌入向量
-            embeddings = await self.model.aembed_documents(texts)
+            if self.is_multimodal:
+                # 火山引擎多模态 Embedding
+                embeddings = await self.model.aembed_multimodal(
+                    [{"type": "text", "text": text} for text in texts]
+                )
+            else:
+                # 普通 Embedding
+                embeddings = await self.model.aembed_documents(texts)
 
             logger.debug(f"成功生成 {len(embeddings)} 个嵌入向量")
             return embeddings

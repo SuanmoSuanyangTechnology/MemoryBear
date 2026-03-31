@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="22px" height="22px" viewBox="0 0 22 22" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>更多@3x</title>
+    <defs>
+        <filter x="-3.4%" y="-6.2%" width="106.8%" height="114.8%" filterUnits="objectBoundingBox" id="filter-1">
+            <feOffset dx="0" dy="2" in="SourceAlpha" result="shadowOffsetOuter1"></feOffset>
+            <feGaussianBlur stdDeviation="4" in="shadowOffsetOuter1" result="shadowBlurOuter1"></feGaussianBlur>
+            <feColorMatrix values="0 0 0 0 0.0901960784   0 0 0 0 0.0901960784   0 0 0 0 0.0980392157  0 0 0 0.16 0" type="matrix" in="shadowBlurOuter1" result="shadowMatrixOuter1"></feColorMatrix>
+            <feMerge>
+                <feMergeNode in="shadowMatrixOuter1"></feMergeNode>
+                <feMergeNode in="SourceGraphic"></feMergeNode>
+            </feMerge>
+        </filter>
+    </defs>
+    <g id="空间外层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="平台管理-工具管理--MCP服务" transform="translate(-998, -128)" fill-rule="nonzero">
+            <g id="卡片1备份" filter="url(#filter-1)" transform="translate(648, 112)">
+                <g id="更多" transform="translate(350, 16)">
+                    <rect id="矩形" fill="#F6F6F6" x="0" y="0" width="22" height="22" rx="8"></rect>
+                    <path d="M5.4,12.4 C6.17319865,12.4 6.8,11.7731986 6.8,11 C6.8,10.2268014 6.17319865,9.6 5.4,9.6 C4.62680135,9.6 4,10.2268014 4,11 C4,11.7731986 4.62680135,12.4 5.4,12.4 Z M11,12.4 C11.7731986,12.4 12.4,11.7731986 12.4,11 C12.4,10.2268014 11.7731986,9.6 11,9.6 C10.2268014,9.6 9.6,10.2268014 9.6,11 C9.6,11.7731986 10.2268014,12.4 11,12.4 Z M16.6,12.4 C17.3731986,12.4 18,11.7731986 18,11 C18,10.2268014 17.3731986,9.6 16.6,9.6 C15.8268014,9.6 15.2,10.2268014 15.2,11 C15.2,11.7731986 15.8268014,12.4 16.6,12.4 Z" id="形状" fill="#5B6167"></path>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

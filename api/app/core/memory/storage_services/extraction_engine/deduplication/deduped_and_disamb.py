@@ -203,6 +203,7 @@ def accurate_match(
 ) -> Tuple[List[ExtractedEntityNode], Dict[str, str], Dict[str, Dict]]:
     """
     精确匹配：按 (end_user_id, name, entity_type) 合并实体并建立重定向与合并记录。
+    同时检测某实体的 name 是否命中另一实体的 aliases，若命中则直接合并。
     返回: (deduped_entities, id_redirect, exact_merge_map)
     """
     exact_merge_map: Dict[str, Dict] = {}
@@ -240,6 +241,48 @@ def accurate_match(
             pass
 
     deduped_entities = list(canonical_map.values())
+
+    # 2) 第二轮：检测某实体的 name 是否命中另一实体的 aliases（alias-to-name 精确合并）
+    #    场景：LLM 把 aliases 中的词（如"齐齐"）又单独抽取为独立实体，需在此阶段合并掉
+    #    优化：先构建 (end_user_id, alias_lower) -> canonical 的反向索引，查找 O(1)
+    alias_index: Dict[tuple, ExtractedEntityNode] = {}
+    for canonical in deduped_entities:
+        uid = getattr(canonical, "end_user_id", None)
+        for alias in (getattr(canonical, "aliases", []) or []):
+            alias_lower = alias.strip().lower()
+            if alias_lower:
+                alias_index[(uid, alias_lower)] = canonical
+
+    i = 0
+    while i < len(deduped_entities):
+        ent = deduped_entities[i]
+        ent_name = (getattr(ent, "name", "") or "").strip().lower()
+        ent_uid = getattr(ent, "end_user_id", None)
+        canonical = alias_index.get((ent_uid, ent_name))
+        # 确保不是自身
+        if canonical is not None and canonical.id != ent.id:
+            _merge_attribute(canonical, ent)
+            id_redirect[ent.id] = canonical.id
+            for k, v in list(id_redirect.items()):
+                if v == ent.id:
+                    id_redirect[k] = canonical.id
+            try:
+                k = f"{canonical.end_user_id}|{(canonical.name or '').strip()}|{(canonical.entity_type or '').strip()}"
+                if k not in exact_merge_map:
+                    exact_merge_map[k] = {
+                        "canonical_id": canonical.id,
+                        "end_user_id": canonical.end_user_id,
+                        "name": canonical.name,
+                        "entity_type": canonical.entity_type,
+                        "merged_ids": set(),
+                    }
+                exact_merge_map[k]["merged_ids"].add(ent.id)
+            except Exception:
+                pass
+            deduped_entities.pop(i)
+        else:
+            i += 1
+
     return deduped_entities, id_redirect, exact_merge_map
 
 def fuzzy_match(

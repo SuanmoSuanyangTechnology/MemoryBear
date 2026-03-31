@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:00:12 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:00:12 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-26 15:47:37
  */
 /**
  * Forgetting Engine Configuration Page
@@ -11,16 +11,17 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Row, Col, Form, Slider, Button, Space, message } from 'antd';
+import { Row, Col, Form, Button, Space, App, Flex, Tooltip } from 'antd';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import RbCard from '@/components/RbCard/Card';
-import strategyImpactSimulator from '@/assets/images/memory/strategyImpactSimulator.svg'
 import LineChart from './components/LineChart'
 import { getMemoryForgetConfig, updateMemoryForgetConfig } from '@/api/memory'
 import type { ConfigForm } from './types'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
+import RbSlider from '@/components/RbSlider';
+import DescWrapper from '@/components/FormItem/DescWrapper'
 
 /**
  * Configuration field definitions
@@ -106,7 +107,7 @@ const ForgettingEngine: React.FC = () => {
   const { id } = useParams();
   const [configData, setConfigData] = useState<ConfigForm>();
   const [form] = Form.useForm<ConfigForm>();
-  const [messageApi, contextHolder] = message.useMessage();
+  const { message: messageApi } = App.useApp();
   const [loading, setLoading] = useState(false)
 
   const values = Form.useWatch([], form);
@@ -154,16 +155,18 @@ const ForgettingEngine: React.FC = () => {
   }
 
   return (
-    <Row gutter={[16, 16]}>
-      <Col span={9}>
-        <RbCard 
-          title={
-            <div className="rb:flex rb:items-center">
-              <img src={strategyImpactSimulator} className="rb:w-5 rb:h-5 rb:mr-2" />
-              {t('forgettingEngine.forgettingEngineConfigParams')}
-            </div>
-          }
-          className='rb:h-full!'
+    <Row gutter={12} className="rb:h-full!">
+      <Col span={12} className="rb:h-full!">
+        <RbCard
+          title={t('forgettingEngine.forgettingEngineConfigParams')}
+          extra={<Space>
+            <Button block onClick={handleReset}>{t('common.reset')}</Button>
+            <Button type="primary" loading={loading} block onClick={handleSave}>{t('common.save')}</Button>
+          </Space>}
+          headerType="borderless"
+          headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
+          className="rb:h-full!"
+          bodyClassName="rb:h-[calc(100%-54px)] rb:overflow-y-auto! rb:p-3! rb:pt-0!"
         >
           <Form 
             form={form}
@@ -174,7 +177,7 @@ const ForgettingEngine: React.FC = () => {
               lambda_mem: 0.03,
             }}
           >
-            <Space size={24} direction="vertical" style={{ width: '100%' }}>
+            <Flex vertical gap={12}>
               {configList.map(config => {
                 if (config.type === 'button') {
                   return (
@@ -182,58 +185,59 @@ const ForgettingEngine: React.FC = () => {
                       title={t(`forgettingEngine.${config.key}`)}
                       name={config.name}
                       desc={config.type && <span>{t(`forgettingEngine.type`)}: {config.type}</span>}
-                      className="rb:mb-2"
+                      className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3!"
                     />
                   )
                 }
                 return (
-                  <div key={config.key}>
-                    <div className="rb:text-[14px] rb:font-medium rb:leading-5 rb:mb-2">
+                  <div key={config.key} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3">
+                    <Flex align="center" gap={4} className="rb:text-[14px] rb:font-medium rb:leading-5 rb:mb-2">
                       {t(`forgettingEngine.${config.key}`)}
-                    </div>
-                    {!config.hiddenDesc && <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 ">
-                      {t(`forgettingEngine.${config.key}Desc`)}
-                    </div>}
+                      {!config.hiddenDesc && <Tooltip title={t(`forgettingEngine.${config.key}Desc`)}>
+                        <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
+                      </Tooltip>}
+                    </Flex>
                     
                     <Form.Item
                       name={config.name}
+                      extra={<DescWrapper
+                        desc={<>
+                          <span className="rb:text-[12px]">{t(`forgettingEngine.range`)}: {config.range?.join('-')}</span> | <span>{t(`forgettingEngine.type`)}: {config.type}</span>
+                        </>}
+                      />}
+                      className="rb:mb-0!"
                     >
                       {config.type === 'decimal'
-                        ? <Slider tooltip={{ open: false }} max={config.range?.[1] || 1} min={config.range?.[0] || 0} step={config.step ?? 0.01} style={{ margin: '0' }} />
+                        ? <RbSlider
+                          max={config.range?.[1] || 1}
+                          min={config.range?.[0] || 0}
+                          step={config.step ?? 0.01}
+                          isInput={true}
+                          prefix={<span className="rb:text-[#5B6167]">{t('emotionEngine.currentValue')}:</span>}
+                          inputClassName="rb:w-[155px]!"
+                        />
                         : null
                       }
                     </Form.Item>
-                    <div className="rb:flex rb:text-[12px] rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5">
-                      <Space size={4}>
-                        {config.range && <span>{t(`forgettingEngine.range`)}: {config.range?.join('-')}</span>}
-                        {config.type && <span>{t(`forgettingEngine.type`)}: {config.type}</span>}
-                      </Space>
-                      <>{t('forgettingEngine.CurrentValue')}: {values?.[config.name] || 0}</>
-                    </div>
                   </div>
                 )
               })}
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Button block onClick={handleReset}>{t('common.reset')}</Button>
-                </Col>
-                <Col span={12}>
-                  <Button type="primary" loading={loading} block onClick={handleSave}>{t('common.save')}</Button>
-                </Col>
-              </Row>
-            </Space>
+            </Flex>
           </Form>
         </RbCard>
       </Col>
-      <Col span={15}>
+      <Col span={12} className="rb:h-full!">
         <RbCard
+          title={t('forgettingEngine.forgettingCurve')}
+          headerType="borderless"
+          headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
+          bodyClassName="rb:p-3! rb:pt-0!"
         >
           <LineChart
             config={values}
           />
         </RbCard>
       </Col>
-      {contextHolder}
     </Row>
   );
 };

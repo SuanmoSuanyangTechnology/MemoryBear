@@ -93,7 +93,8 @@ class AppChatService:
         tools.extend(skill_tools)
         if skill_prompts:
             system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-        tools.extend(self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval, user_id))
+        kb_tools, citations_collector = self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval, user_id)
+        tools.extend(kb_tools)
         memory_flag = False
         if memory:
             memory_tools, memory_flag = self.agent_service.load_memory_config(
@@ -128,46 +129,38 @@ class AppChatService:
             model_type=ModelType.LLM
         )
 
-        # 加载历史消息
-        messages = self.conversation_service.get_messages(
+        # 加载历史消息（包含开场白）
+        history = await self.conversation_service.get_conversation_history(
             conversation_id=conversation_id,
-            limit=10
+            max_history=10,
+            current_provider=api_key_obj.provider,
+            current_is_omni=api_key_obj.is_omni
         )
-        history = []
-        for msg in messages:
-            content = [{"type": "text", "text": msg.content}]
 
-            # 处理 meta_data 中的 files
-            if msg.meta_data and msg.meta_data.get("files"):
-                files = msg.meta_data.get("files", [])
-                # 使用 MultimodalService 处理文件
-                multimodal_service = MultimodalService(self.db, api_config=model_info)
-
-                # 将 files 转换为 FileInput 格式
-                file_inputs = []
-                for file in files:
-                    from app.schemas.app_schema import FileInput, TransferMethod
-                    file_input = FileInput(
-                        type=file.get("type"),
-                        transfer_method=TransferMethod.REMOTE_URL,
-                        url=file.get("url")
-                    )
-                    file_inputs.append(file_input)
-
-                history_processed_files = await multimodal_service.history_process_files(files=file_inputs)
-
-                content.extend(history_processed_files)
-
-            history.append({
-                "role": msg.role,
-                "content": content
-            })
+        # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
+        is_new_conversation = len(history) == 0
+        if is_new_conversation:
+            opening, suggested_questions = self.agent_service._get_opening_statement(features_config, True, variables)
+            if opening:
+                self.conversation_service.add_message(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=opening,
+                    meta_data={"suggested_questions": suggested_questions}
+                )
+                # 重新加载历史（包含刚写入的开场白）
+                history = await self.conversation_service.get_conversation_history(
+                    conversation_id=conversation_id,
+                    max_history=10,
+                    current_provider=api_key_obj.provider,
+                    current_is_omni=api_key_obj.is_omni
+                )
 
         # 处理多模态文件
         processed_files = None
         if files:
             multimodal_service = MultimodalService(self.db, model_info)
-            processed_files = await multimodal_service.process_files(user_id, files)
+            processed_files = await multimodal_service.process_files(files)
             logger.info(f"处理了 {len(processed_files)} 个文件")
 
         # 调用 Agent（支持多模态）
@@ -204,14 +197,19 @@ class AppChatService:
             tenant_id=tenant_id, workspace_id=workspace_id
         )
 
+        # 过滤 citations（只调用一次）
+        filtered_citations = self.agent_service._filter_citations(features_config, citations_collector)
+
         # 构建用户消息内容（含多模态文件）
         human_meta = {
-            "files": []
+            "files": [],
+            "history_files": {}
         }
         assistant_meta = {
             "model": api_key_obj.model_name,
             "usage": result.get("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}),
-            "audio_url": None
+            "audio_url": None,
+            "citations": filtered_citations
         }
         if files:
             for f in files:
@@ -220,6 +218,13 @@ class AppChatService:
                     "type": f.type,
                     "url": f.url
                 })
+
+        if processed_files:
+            human_meta["history_files"] = {
+                "content": processed_files,
+                "provider": api_key_obj.provider,
+                "is_omni": api_key_obj.is_omni
+            }
 
         # 保存消息
         if audio_url:
@@ -249,8 +254,9 @@ class AppChatService:
             }),
             "elapsed_time": elapsed_time,
             "suggested_questions": suggested_questions,
-            "citations": self.agent_service._filter_citations(features_config, result.get("citations", [])),
+            "citations": filtered_citations,
             "audio_url": audio_url,
+            "audio_status": "pending"
         }
 
     async def agnet_chat_stream(
@@ -313,7 +319,8 @@ class AppChatService:
             tools.extend(skill_tools)
             if skill_prompts:
                 system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-            tools.extend(self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval, user_id))
+            kb_tools, citations_collector = self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval, user_id)
+            tools.extend(kb_tools)
             # 添加长期记忆工具
             memory_flag = False
             if memory:
@@ -349,46 +356,38 @@ class AppChatService:
                 model_type=ModelType.LLM
             )
 
-            # 加载历史消息
-            messages = self.conversation_service.get_messages(
+            # 加载历史消息（包含开场白）
+            history = await self.conversation_service.get_conversation_history(
                 conversation_id=conversation_id,
-                limit=10
+                max_history=10,
+                current_provider=api_key_obj.provider,
+                current_is_omni=api_key_obj.is_omni
             )
-            history = []
-            for msg in messages:
-                content = [{"type": "text", "text": msg.content}]
 
-                # 处理 meta_data 中的 files
-                if msg.meta_data and msg.meta_data.get("files"):
-                    history_files = msg.meta_data.get("files", [])
-                    # 使用 MultimodalService 处理文件
-                    multimodal_service = MultimodalService(self.db, api_config=model_info)
-
-                    # 将 files 转换为 FileInput 格式
-                    file_inputs = []
-                    for file in history_files:
-                        from app.schemas.app_schema import FileInput, TransferMethod
-                        file_input = FileInput(
-                            type=file.get("type"),
-                            transfer_method=TransferMethod.REMOTE_URL,
-                            url=file.get("url")
-                        )
-                        file_inputs.append(file_input)
-
-                    history_processed_files = await multimodal_service.history_process_files(files=file_inputs)
-
-                    content.extend(history_processed_files)
-
-                history.append({
-                    "role": msg.role,
-                    "content": content
-                })
+            # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
+            is_new_conversation = len(history) == 0
+            if is_new_conversation:
+                opening, suggested_questions = self.agent_service._get_opening_statement(features_config, True, variables)
+                if opening:
+                    self.conversation_service.add_message(
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=opening,
+                        meta_data={"suggested_questions": suggested_questions}
+                    )
+                    # 重新加载历史（包含刚写入的开场白）
+                    history = await self.conversation_service.get_conversation_history(
+                        conversation_id=conversation_id,
+                        max_history=10,
+                        current_provider=api_key_obj.provider,
+                        current_is_omni=api_key_obj.is_omni
+                    )
 
             # 处理多模态文件
             processed_files = None
             if files:
                 multimodal_service = MultimodalService(self.db, model_info)
-                processed_files = await multimodal_service.process_files(user_id, files)
+                processed_files = await multimodal_service.process_files(files)
                 logger.info(f"处理了 {len(processed_files)} 个文件")
 
             # 流式调用 Agent（支持多模态），同时并行启动 TTS
@@ -433,7 +432,7 @@ class AppChatService:
             elapsed_time = time.time() - start_time
             ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
 
-            # 发送结束事件（包含 suggested_questions、tts、citations）
+            # 发送结束事件（包含 suggested_questions、tts、audio_status、citations）
             end_data: dict = {"elapsed_time": elapsed_time, "message_length": len(full_content), "error": None}
             sq_config = features_config.get("suggested_questions_after_answer", {})
             if isinstance(sq_config, dict) and sq_config.get("enabled"):
@@ -443,25 +442,45 @@ class AppChatService:
                      "api_base": api_key_obj.api_base}, {}
                 )
             end_data["audio_url"] = stream_audio_url
-            end_data["citations"] = self.agent_service._filter_citations(features_config, [])
+            # 检查TTS是否已完成（非阻塞，不取消任务）
+            audio_status = "pending"
+            if tts_task is not None and tts_task.done():
+                # 任务已完成，检查是否有异常
+                try:
+                    tts_task.result()
+                    audio_status = "completed"
+                except Exception as e:
+                    logger.warning(f"TTS任务异常: {e}")
+                    audio_status = "failed"
+            end_data["audio_status"] = audio_status if stream_audio_url else None
+            # 过滤 citations（只调用一次）
+            filtered_citations = self.agent_service._filter_citations(features_config, citations_collector)
+            end_data["citations"] = filtered_citations
 
             # 保存消息
             human_meta = {
-                "files":[]
+                "files":[],
+                "history_files": {}
             }
             assistant_meta = {
                 "model": api_key_obj.model_name,
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
-                "audio_url": None
+                "audio_url": None,
+                "citations": filtered_citations
             }
 
             if files:
                 for f in files:
-                    # url = await MultimodalService(self.db).get_file_url(f)
                     human_meta["files"].append({
                         "type": f.type,
                         "url": f.url
                     })
+            if processed_files:
+                human_meta["history_files"] = {
+                    "content": processed_files,
+                    "provider": api_key_obj.provider,
+                    "is_omni": api_key_obj.is_omni
+                }
 
             if stream_audio_url:
                 assistant_meta["audio_url"] = stream_audio_url

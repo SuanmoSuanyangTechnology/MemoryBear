@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 18:35:10
+ * @Last Modified time: 2026-03-24 17:48:01
  */
 import { request } from '@/utils/request'
 import type { AxiosRequestConfig } from 'axios'
@@ -87,12 +87,13 @@ export const getUserSummary = (end_user_id: string) => {
 export const getNodeStatistics = (end_user_id: string) => {
   return request.get(`/memory-storage/analytics/node_statistics`, { end_user_id })
 }
-// Basic information
-export const getEndUserProfile = (end_user_id: string) => {
-  return request.get(`/memory-storage/read_end_user/profile`, { end_user_id })
+// 查询用户别名及信息
+export const getEndUserInfo = (end_user_id: string) => {
+  return request.get(`/memory-storage/end_user_info`, { end_user_id })
 }
-export const updatedEndUserProfile = (values: EndUser) => {
-  return request.post(`/memory-storage/updated_end_user/profile`, values)
+// 更新用户别名及信息
+export const updatedEndUserInfo = (values: EndUser) => {
+  return request.post(`/memory-storage/end_user_info/updated`, values)
 }
 // User Memory - Relationship network
 export const getMemorySearchEdges = (end_user_id: string, config?: AxiosRequestConfig) => {
@@ -153,6 +154,8 @@ export const analyticsRefresh = (end_user_id: string) => {
 export const getForgetStats = (end_user_id: string) => {
   return request.get(`/memory/forget-memory/stats`, { end_user_id })
 }
+// 获取带遗忘节点列表
+export const getForgetPendingNodesUrl = '/memory/forget-memory/pending-nodes'
 // Implicit Memory - Preferences
 export const getImplicitPreferences = (end_user_id: string) => {
   return request.get(`/memory/implicit-memory/preferences/${end_user_id}`)

@@ -33,6 +33,8 @@ class WorkflowState(dict):
         "workspace_id",
         "user_id",
         "activate",
+        "memory_storage_type",
+        "user_rag_memory_id"
     })
     __optional_keys__ = frozenset({
         "error",
@@ -62,6 +64,9 @@ class WorkflowState(dict):
     # node activate status
     activate: Annotated[dict[str, bool], merge_activate_state]
 
+    memory_storage_type: str
+    user_rag_memory_id: str
+
 
 class WorkflowStateManager:
     def create_initial_state(
@@ -85,7 +90,9 @@ class WorkflowStateManager:
             looping=0,
             activate={
                 start_node_id: True
-            }
+            },
+            memory_storage_type=execution_context.memory_storage_type,
+            user_rag_memory_id=execution_context.user_rag_memory_id
         )
 
     @staticmethod

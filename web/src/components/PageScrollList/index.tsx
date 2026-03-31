@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:18:19 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-12 18:36:19
+ * @Last Modified time: 2026-03-27 15:52:37
  */
 /**
  * PageScrollList Component
@@ -17,7 +17,7 @@
  */
 
 import React, { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react';
-import { List } from 'antd';
+import { Row, Col } from 'antd';
 import InfiniteScroll from 'react-infinite-scroll-component';
 
 import { request } from '@/utils/request';
@@ -56,7 +56,10 @@ interface PageScrollListProps<T, Q = Record<string, unknown>> {
   /** Additional CSS classes */
   className?: string;
   needLoading?: boolean;
+  heightClass?: string;
 }
+
+const defaultHeightClass = 'rb:h-[calc(100vh-116px)]!';
 
 /** Infinite scroll list component with pagination support */
 const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
@@ -66,6 +69,7 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
   column = 4,
   className = '',
   needLoading = true,
+  heightClass,
 }: PageScrollListProps<T, Q>, ref: React.Ref<PageScrollListRef>) => {
   /** Expose refresh method to parent component */
   useImperativeHandle(ref, () => ({
@@ -138,29 +142,29 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
       <div
         ref={scrollRef}
         id="scrollableDiv"
-        className={`rb:overflow-y-auto rb:overflow-x-hidden rb:h-[calc(100vh-148px)] ${className}`}
+        className={`rb:overflow-y-auto rb:overflow-x-hidden ${heightClass || defaultHeightClass} ${className}`}
       >
         <InfiniteScroll
           dataLength={data.length}
           next={() => loadMoreData()}
           hasMore={hasMore}
-          loader={loading && needLoading ? <PageLoading /> : false}
+          loader={loading && needLoading ? <PageLoading className={heightClass || defaultHeightClass} /> : false}
           // endMessage={<Divider plain>It is all, nothing more 🤐</Divider>}
           scrollableTarget="scrollableDiv"
           className='rb:h-full!'
         >
           {/* Render grid list or empty state */}
           {data.length > 0 ? (
-            <List
-              grid={{ gutter: 16, column: column }}
-              dataSource={data}
-              renderItem={(item) => (
-                <List.Item>
+            <Row
+              gutter={[12, 12]}
+            >
+              {data.map((item, index) => (
+                <Col key={(item as any).id || index} span={24/column}>
                   {renderItem(item)}
-                </List.Item>
-              )}
-            />
-          ) : !loading ? <PageEmpty /> : null}
+                </Col>
+              ))}
+            </Row>
+          ) : !loading ? <PageEmpty className={heightClass || defaultHeightClass} /> : null}
         </InfiniteScroll>
       </div>
     </>

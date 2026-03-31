@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>删除</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="应用管理-工作流-配置-结束" transform="translate(-660, -303)" stroke="#212332">
+            <g id="删除" transform="translate(660, 303)">
+                <g id="编组-12" transform="translate(4, 3.5)">
+                    <line x1="-1.01849618e-18" y1="1.66525252" x2="8" y2="1.66525252" id="路径-3"></line>
+                    <path d="M0.666666667,1.66666667 L0.666666667,7.5 C0.666666667,8.32842712 1.33823954,9 2.16666667,9 L5.83333333,9 C6.66176046,9 7.33333333,8.32842712 7.33333333,7.5 L7.33333333,1.96699599 L7.33333333,1.96699599" id="路径-4"></path>
+                    <line x1="2.66666667" y1="6.99690638" x2="5.33333333" y2="6.99690638" id="路径-5"></line>
+                    <path d="M2,1.66666667 L2,0.45 C2,0.201471863 2.20147186,0 2.45,-5.55111512e-17 L5.55,5.55111512e-17 C5.79852814,0 6,0.201471863 6,0.45 L6,1.66666667 L6,1.66666667" id="路径"></path>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

@@ -51,8 +51,8 @@ console.log(result)
 
 
 class CodeNode(BaseNode):
-    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
-        super().__init__(node_config, workflow_config)
+    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
+        super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: CodeNodeConfig | None = None
 
     def _output_types(self) -> dict[str, VariableType]:
@@ -128,7 +128,7 @@ class CodeNode(BaseNode):
         else:
             raise ValueError(f"Unsupported language: {self.typed_config.language}")
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
                 "http://sandbox:8194/v1/sandbox/run",
                 headers={

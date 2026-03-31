@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="40px" height="40px" viewBox="0 0 40 40" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>播放</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="记忆库-个人记忆-感知记忆-视觉" transform="translate(-232, -238)" fill-rule="nonzero">
+            <g id="视觉" transform="translate(28, 168)">
+                <g id="播放" transform="translate(204, 70)">
+                    <rect id="矩形" fill="#000000" opacity="0" x="0" y="0" width="40" height="40"></rect>
+                    <path d="M20,0 C9,0 0,9 0,20 C0,31 9,40 20,40 C31,40 40,31 40,20 C40,9 31,0 20,0 Z" id="路径" fill-opacity="0.5" fill="#171719"></path>
+                    <path d="M26.25,17.25 L19.5833203,12.8333203 C17.3333203,11.3333203 15.4166797,12.3333203 15.4166797,15.0833203 L15.4166797,25.0833203 C15.4166797,27.8333203 17.25,28.8333203 19.5833203,27.3333203 L26.25,22.9166797 C28.5,21.25 28.5,18.75 26.25,17.25 Z" id="路径" fill="#FFFFFF"></path>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

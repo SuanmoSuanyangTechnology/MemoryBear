@@ -2,18 +2,19 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:22 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-27 10:22:46
+ * @Last Modified time: 2026-03-25 18:35:13
  */
 /**
  * Utility functions for Model Management
  */
 
-import bedrockIcon from '@/assets/images/model/bedrock.svg'
+import bedrockIcon from '@/assets/images/model/bedrock.png'
 import dashscopeIcon from '@/assets/images/model/dashscope.png'
 import gpustackIcon from '@/assets/images/model/gpustack.png'
-import ollamaIcon from '@/assets/images/model/ollama.svg'
-import openaiIcon from '@/assets/images/model/openai.svg'
-import xinferenceIcon from '@/assets/images/model/xinference.svg'
+import ollamaIcon from '@/assets/images/model/ollama.png'
+import openaiIcon from '@/assets/images/model/openai.png'
+import xinferenceIcon from '@/assets/images/model/xinference.png'
+import volcanoIcon from '@/assets/images/model/volcano.png'
 
 /**
  * Provider icon mapping
@@ -24,7 +25,8 @@ export const ICONS = {
   gpustack: gpustackIcon,
   ollama: ollamaIcon,
   openai: openaiIcon,
-  xinference: xinferenceIcon
+  xinference: xinferenceIcon,
+  volcano: volcanoIcon,
 }
 
 /**

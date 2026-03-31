@@ -1,7 +1,8 @@
 import { type FC, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Node } from '@antv/x6';
-import { Space, Button, Divider, App } from 'antd'
+import { Space, Button, Divider, App, Flex } from 'antd'
+
 import type { Variable, VariableEditModalRef } from './types'
 import type { NodeConfig } from '../../../types'
 import VariableEditModal from './VariableEditModal'
@@ -64,40 +65,42 @@ const VariableList: FC<VariableListProps> = ({
   }
   return (
     <div>
-      <Space size={10} direction="vertical" className="rb:w-full">
+      <Flex gap={10} vertical>
         <div className="rb:leading-4.25 rb:text-[12px] rb:font-medium">
           {t(`workflow.config.${selectedNode?.data?.type}.${parentName}`)}
         </div>
         <Button type="dashed" block size="middle" className="rb:text-[12px]!" onClick={handleAddVariable}>+ {t('workflow.config.addVariable')}</Button>
         {Array.isArray(value) && value?.map((vo, index) =>
-          <div 
+          <Flex 
             key={`${vo.name}}-${index}`} 
-            className="rb:cursor-pointer rb:group rb:py-2 rb:pl-2.5 rb:pr-2 rb:text-[12px] rb:flex rb:items-center rb:justify-between rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-md"
+            align="center"
+            justify="space-between"
+            className="rb:cursor-pointer rb:group rb:py-2! rb:pl-2.5! rb:pr-2! rb:text-[12px] rb:bg-[#F6F6F6] rb-border rb:rounded-lg"
             onClick={() => handleEditVariable(index, vo)}
           >
-            <span className="rb:font-medium">{vo.name}·{vo.description}</span>
+            <span className="rb:font-medium rb:flex-1">{vo.name}·{vo.description}</span>
 
             <Space size={8}>
-              {vo.required && <span className="rb:py-px rb:px-2 rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-sm">{t('workflow.config.start.required')}</span>}
-              <span className="rb:py-px rb:px-2 rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-sm">{vo.type}</span>
+              {vo.required && <span className="rb:py-px rb:px-2 rb:bg-white rb-border rb:rounded-sm">{t('workflow.config.start.required')}</span>}
+              <span className="rb:py-px rb:px-2 rb:bg-white rb-border rb:rounded-sm">{vo.type}</span>
               <div
-                className="rb:size-3 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/close.svg')] rb:hover:bg-[url('@/assets/images/close_hover.svg')]"
+                className="rb:size-3 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/close.svg')]"
                 onClick={(e) => handleDeleteVariable(index, vo, e)}
               ></div>
             </Space>
-          </div>
+          </Flex>
         )}
 
-      </Space>
+      </Flex>
       <Divider size="small" />
-      <Space size={10} direction="vertical" className="rb:w-full">
+      <Flex gap={10} vertical>
         {config.sys?.map((vo, index) =>
-          <div key={index} className="rb:py-2 rb:pl-2.5 rb:pr-2 rb:text-[12px] rb:flex rb:items-center rb:justify-between rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-md">
+          <Flex align="center" justify="space-between" key={index} className="rb:py-2! rb:pl-2.5! rb:pr-2! rb:text-[12px] rb:bg-[#F6F6F6] rb:border rb:border-[#EBEBEB] rb:rounded-md">
             <span className="rb:font-medium">sys.{vo.name}</span>
-            <span className="rb:py-px rb:px-2 rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-sm">{vo.type}</span>
-          </div>
+            <span className="rb:py-px rb:px-2 rb:bg-[#FBFDFF] rb-border rb:rounded-sm">{vo.type}</span>
+          </Flex>
         )}
-      </Space>
+      </Flex>
       <VariableEditModal
         ref={variableModalRef}
         refresh={handleRefreshVariable}

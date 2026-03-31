@@ -1,13 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-    <title>下拉备份</title>
-    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
-        <g id="红熊空间-记忆管理-忆溯引擎" transform="translate(-878, -666)" fill="#5B6167" fill-rule="nonzero">
-            <g id="存储层模块" transform="translate(256, 648)">
-                <g id="编组-3" transform="translate(569, 16)">
-                    <g id="下拉备份" transform="translate(61, 10) scale(1, -1) translate(-61, -10)translate(53, 2)">
-                        <rect id="矩形" opacity="0" x="0" y="0" width="16" height="16"></rect>
-                        <path d="M8,9.4241206 C7.82311558,9.4241206 7.64824121,9.35778894 7.51356784,9.22311558 L5.14773869,6.85728643 C4.95075377,6.66231156 4.95075377,6.34271357 5.14773869,6.14773869 C5.34472362,5.95075377 5.66231156,5.95075377 5.85728643,6.14773869 L8,8.29045226 L10.1427136,6.14773869 C10.3396985,5.95075377 10.6572864,5.95075377 10.8522613,6.14773869 C11.0492462,6.34472362 11.0492462,6.66231156 10.8522613,6.85728643 L8.48643216,9.22311558 C8.35175879,9.35778894 8.17688442,9.4241206 8,9.4241206 Z" id="路径"></path>
+    <title>下拉</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="记忆库-个人记忆-短期记忆" transform="translate(-662, -336)">
+            <g id="编组-13" transform="translate(12, 166)">
+                <g id="编组-5备份-3" transform="translate(12, 54)">
+                    <g id="编组-12" transform="translate(12, 104)">
+                        <g id="下拉" transform="translate(626, 12)">
+                            <rect id="矩形" opacity="0.236839658" fill-rule="nonzero" x="0" y="0" width="16" height="16"></rect>
+                            <polyline id="路径" stroke="#5B6167" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" points="12 6 8 10 4 6"></polyline>
+                        </g>
                     </g>
                 </g>
             </g>

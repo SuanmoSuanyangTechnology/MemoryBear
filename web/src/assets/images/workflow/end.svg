@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 13</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="应用管理-工作流-配置-开始" transform="translate(-30, -242)">
+            <g id="节点" transform="translate(10, 116)">
+                <g id="编组-21" transform="translate(12, 0)">
+                    <g id="编组-9" transform="translate(0, 118)">
+                        <g id="编组-13" transform="translate(8, 8)">
+                            <rect id="矩形" fill="#FF8A4C" x="0" y="0" width="24" height="24" rx="8"></rect>
+                            <g id="编组-2" transform="translate(2.4, 2.4)" stroke="#FFFFFF" stroke-width="1.2">
+                                <g id="编组-3" transform="translate(3, 3)">
+                                    <path d="M6.6,0 C10.2450793,0 13.2,2.95492065 13.2,6.6 C13.2,10.2450793 10.2450793,13.2 6.6,13.2 C5.39062108,13.2 4.25721526,12.8747205 3.28249837,12.3068775 L1.27529432,12.9262671 C0.990320207,13.0142053 0.688015015,12.8544762 0.600076772,12.5695021 C0.572477054,12.480062 0.568599704,12.3849837 0.588825045,12.2935932 L1.05601523,10.1825428 L1.05601523,10.1825428 C0.387912403,9.15077832 0,7.92069006 0,6.6 C0,2.95492065 2.95492065,0 6.6,0 Z" id="路径" stroke-linejoin="round"></path>
+                                    <path d="M3.66666667,7.33333333 C3.66666667,8.9533686 4.97996473,10.2666667 6.6,10.2666667 C8.22003527,10.2666667 9.53333333,8.9533686 9.53333333,7.33333333" id="路径"></path>
+                                </g>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

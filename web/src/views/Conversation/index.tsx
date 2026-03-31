@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 12:30:41
+ * @Last Modified time: 2026-03-27 14:28:19
  */
 /**
  * Conversation Page
@@ -14,7 +14,7 @@ import { type FC, useState, useEffect, useRef } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import InfiniteScroll from 'react-infinite-scroll-component';
-import { Flex, Skeleton, App } from 'antd'
+import { Flex, Skeleton, App, Tooltip } from 'antd'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 
@@ -23,20 +23,17 @@ import type { HistoryItem } from './types'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
 import { randomString } from '@/utils/common'
-import BgImg from '@/assets/images/conversation/bg.png'
 import ChatEmpty from '@/assets/images/empty/chatEmpty.png'
 import Chat from '@/components/Chat'
 import type { ChatItem } from '@/components/Chat/types'
-import ButtonCheckbox from '@/components/ButtonCheckbox'
-import MemoryFunctionIcon from '@/assets/images/conversation/memoryFunction.svg'
-import OnlineIcon from '@/assets/images/conversation/online.svg'
-import OnlineCheckedIcon from '@/assets/images/conversation/onlineChecked.svg'
-import MemoryFunctionCheckedIcon from '@/assets/images/conversation/memoryFunctionChecked.svg'
 import { type SSEMessage } from '@/utils/stream'
 import { shareFileUploadUrlWithoutApiPrefix } from '@/api/fileStorage'
 import ChatToolbar, { type ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import type { Variable } from '@/views/Workflow/components/Properties/VariableList/types'
+import type { Variable as AppVariable } from '@/views/ApplicationConfig/components/VariableList/types'
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
+import { getFileStatusById } from '@/api/fileStorage';
+import { replaceVariables } from '@/views/ApplicationConfig/Agent'
 
 const Conversation: FC = () => {
   const { t } = useTranslation()
@@ -57,6 +54,7 @@ const Conversation: FC = () => {
   const [hasMore, setHasMore] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<ChatToolbarRef>(null)
+  const audioPollingRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
   const [shareToken, setShareToken] = useState<string | null>(localStorage.getItem(`shareToken_${token}`))
   const [fileList, setFileList] = useState<any[]>([])
   const [webSearch, setWebSearch] = useState(false)
@@ -64,6 +62,14 @@ const Conversation: FC = () => {
   const [memory, setMemory] = useState(true)
   const [features, setFeatures] = useState<FeaturesConfigForm>({} as FeaturesConfigForm)
   const [config, setConfig] = useState<Record<string, any>>({})
+  const [audioStatusMap, setAudioStatusMap] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    return () => {
+      audioPollingRef.current.forEach((timer) => clearInterval(timer))
+      audioPollingRef.current.clear()
+    }
+  }, [])
 
   useEffect(() => {
     const shareToken = localStorage.getItem(`shareToken_${token}`)
@@ -87,11 +93,11 @@ const Conversation: FC = () => {
     if (shareToken && token) {
       getExperienceConfig(token)
         .then(res => {
-          const response = res as { variables: Variable[]; features: FeaturesConfigForm; app_type: string; memory?: boolean; }
+          const response = res as { variables: Variable[]; features: FeaturesConfigForm; app_type: string; memory: boolean; }
           toolbarRef.current?.setVariables(response.variables || [])
           setConfig(response)
           setFeatures(response.features)
-          setIsHasMemory((response.app_type === 'workflow' && response.memory) || (response.app_type !== 'workflow'))
+          setIsHasMemory((response.app_type === 'workflow' && response.memory) || response.memory)
         })
     } else {
       setChatList([])
@@ -149,12 +155,41 @@ const Conversation: FC = () => {
       getConversationDetail(token as string, conversation_id)
         .then(res => {
           const response = res as { messages: ChatItem[] }
-          setChatList(response?.messages || [])
+          const messages = response?.messages || []
+          const historyAudioUrls = new Set(messages.map(m => m.meta_data?.audio_url).filter(Boolean))
+          audioPollingRef.current.forEach((timer, key) => {
+            if (!historyAudioUrls.has(key)) {
+              clearInterval(timer)
+              audioPollingRef.current.delete(key)
+            }
+          })
+          messages.forEach(msg => {
+            if (msg.role === 'assistant' && msg.meta_data?.audio_url && msg.meta_data?.audio_status === 'pending') {
+              startAudioPolling(msg.meta_data.audio_url, msg.meta_data.audio_url)
+            }
+          })
+          setChatList(messages.map(msg => {
+            if (msg.role === 'assistant' && msg.meta_data?.audio_url && audioPollingRef.current.has(msg.meta_data.audio_url)) {
+              return { ...msg, meta_data: { ...msg.meta_data, audio_status: 'pending' } }
+            }
+            return msg
+          }))
         })
     } else {
-      setChatList([])
+      if (features?.opening_statement?.statement) {
+        setChatList([{
+          role: 'assistant',
+          content: features.opening_statement.statement,
+          created_at: Date.now(),
+          meta_data: {
+            suggested_questions: features.opening_statement?.suggested_questions
+          }
+        }])
+      } else {
+        setChatList([])
+      }
     }
-  }, [conversation_id])
+  }, [conversation_id, features?.opening_statement?.statement])
 
   const addUserMessage = (message: string = '', files?: any[]) => {
     setChatList(prev => [...prev, {
@@ -176,8 +211,8 @@ const Conversation: FC = () => {
     }])
   }
 
-  const updateAssistantMessage = (content: string = '', audio_url?: string) => {
-    if (!content && !audio_url) return
+  const updateAssistantMessage = (content: string = '', audio_url?: string, audio_status?: string, citations?: any[]) => {
+    if (!content && !audio_url && (!citations || citations?.length < 1)) return
     if (streamLoading) setStreamLoading(false)
     setChatList(prev => {
       const lastList = [...prev]
@@ -189,16 +224,57 @@ const Conversation: FC = () => {
           {
             ...lastMsg,
             content: lastMsg.content + content,
-            meta_data: { audio_url }
+            meta_data: {
+              audio_url: audio_url || lastMsg.meta_data?.audio_url,
+              audio_status: audio_status || lastMsg.meta_data?.audio_status,
+              citations: citations || lastMsg.meta_data?.citations
+            }
           }
         ]
       }
       return prev
     })
   }
+  useEffect(() => {
+    if (!Object.keys(audioStatusMap).length) return
+    setChatList(prev => prev.map(msg => {
+      if (msg.role === 'assistant' && msg.meta_data?.audio_url && audioStatusMap[msg.meta_data.audio_url]) {
+        return {
+          ...msg,
+          meta_data: {
+            ...msg.meta_data,
+            audio_status: audioStatusMap[msg.meta_data.audio_url]
+          }
+        }
+      }
+      return msg
+    }))
+  }, [audioStatusMap, chatList.length])
+
+  const startAudioPolling = (audioUrl: string, idToPoll: string) => {
+    if (audioPollingRef.current.has(idToPoll)) return
+    const fileId = audioUrl.split('/').pop()
+    if (!fileId) return
+    const timer = setInterval(() => {
+      getFileStatusById(fileId)
+        .then(res => {
+          const { status } = res as { status: string }
+          if (status && status !== 'pending') {
+            setAudioStatusMap(prev => ({ ...prev, [idToPoll]: status }))
+            clearInterval(audioPollingRef.current.get(idToPoll))
+            audioPollingRef.current.delete(idToPoll)
+          }
+        })
+        .catch(() => {
+          clearInterval(audioPollingRef.current.get(idToPoll))
+          audioPollingRef.current.delete(idToPoll)
+        })
+    }, 2000)
+    audioPollingRef.current.set(idToPoll, timer)
+  }
 
   /** Send message and handle streaming response */
-  const handleSend = () => {
+  const handleSend = (msg?: string) => {
     if (!token || !shareToken) return
     const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
     const variables = toolbarRef.current?.getVariables() || []
@@ -222,7 +298,7 @@ const Conversation: FC = () => {
 
     setLoading(true)
     setStreamLoading(true)
-    addUserMessage(message, files)
+    addUserMessage(msg || message, files)
     addAssistantMessage()
     toolbarRef.current?.setFiles([])
     setFileList([])
@@ -230,7 +306,15 @@ const Conversation: FC = () => {
     let currentConversationId: string | null = null
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach((item) => {
-        const { content, conversation_id: curId, audio_url } = item.data as { content: string; conversation_id: string; audio_url?: string; }
+        const { content, conversation_id: curId, audio_url, citations } = item.data as {
+          content: string; conversation_id: string; audio_url?: string;
+          citations?: {
+            document_id: string;
+            file_name: string;
+            knowledge_id: string;
+            score: string;
+          }[]
+        }
         switch (item.event) {
           case 'start':
           case 'node_start':
@@ -238,19 +322,33 @@ const Conversation: FC = () => {
             currentConversationId = newId
             break
           case 'message':
-            updateAssistantMessage(content, audio_url)
+            updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined)
             if (curId) currentConversationId = curId;
             break
           case 'end':
           case 'workflow_end':
             if (audio_url) {
-              updateAssistantMessage(content, audio_url)
+              updateAssistantMessage(content, audio_url, 'pending', citations)
+              const { file_id } = item.data as { file_id?: string }
+              const idToPoll = file_id || audio_url || ''
+              const fileId = audio_url.split('/').pop()
+              if (fileId && idToPoll) {
+                startAudioPolling(audio_url, idToPoll)
+              }
+            } else {
+              getHistory(true)
+              if (currentConversationId && currentConversationId !== conversation_id) {
+                setConversationId(currentConversationId)
+              }
+            }
+            if (citations && citations.length > 0) {
+              updateAssistantMessage(content, audio_url, undefined, citations)
             }
             setLoading(false)
+            getHistory(true)
             if (currentConversationId && currentConversationId !== conversation_id) {
               setConversationId(currentConversationId)
             }
-            getHistory(true)
             break
         }
       })
@@ -259,7 +357,7 @@ const Conversation: FC = () => {
     sendConversation({
       web_search: webSearch,
       memory,
-      message: message || '',
+      message: msg || message || '',
       stream: true,
       conversation_id: conversation_id || null,
       files: files.map(file => {
@@ -285,8 +383,9 @@ const Conversation: FC = () => {
       })
   }
 
-  const handleChangeMemory = (value: boolean) => {
+  const handleChangeMemory = () => {
     if (config.app_type === 'workflow') return;
+    let value = !memory
     modal.confirm({
       title: value ? t('memoryConversation.memoryTipTitle') : t('memoryConversation.memoryCancelTipTitle'),
       okText: t('common.confirm'),
@@ -300,22 +399,41 @@ const Conversation: FC = () => {
     })
   }
 
+  const handleChangeVariables = (variables: Variable[]) => {
+    setChatList(prev => {
+      const firstMsg = prev[0]
+      console.log('firstMsg', firstMsg)
+      if (firstMsg && firstMsg.role === 'assistant' && firstMsg.content && features?.opening_statement.enabled && features?.opening_statement.statement && variables.length > 0) {
+        firstMsg.content = replaceVariables(features?.opening_statement.statement, variables as unknown as AppVariable[])
+      }
+      return [firstMsg, ...prev.slice(1)]
+    })
+  }
+
+  console.log('chatList', chatList)
+
   return (
     <Flex className="rb:w-full rb:p-[-16px]!">
-      <div className="rb:w-86.25 rb:h-screen rb:overflow-hidden rb:border-r rb:border-[#EAECEE] rb:p-3">
-        <div className="rb:group rb:flex rb:items-center rb:justify-center rb:font-regular rb:cursor-pointer rb:mb-5 rb:border rb:border-[#DFE4ED] rb:hover:border-[#155EEF] rb:hover:text-[#155EEF] rb:rounded-lg rb:py-2.5"
+      <div className="rb:w-80 rb:h-screen rb:bg-[#F6F6F6] rb:overflow-hidden">
+        <Flex align="center" gap={8} className="rb:p-5!">
+          <div className="rb:size-6 rb:bg-cover rb:bg-[url('@/assets/images/conversation/redbear.png')]"></div>
+          <div className="rb:text-[16px] rb:leading-5 rb:font-[Gilroy-Extrabold] rb:font-extrabold">{t('memoryConversation.chatTitle')}</div>
+        </Flex>
+
+        <Flex align="center" gap={12}
+          className="rb:cursor-pointer rb:border rb:border-[#155EEF] rb:rounded-xl rb:p-3! rb:mx-4! rb:text-[16px] rb:font-medium rb:text-[#155EEF] rb:h-12! rb:mb-5!"
           onClick={() => handleChangeHistory(null)}
         >
           <div
             className="rb:w-5 rb:h-5 rb:cursor-pointer rb:mr-2 rb:bg-cover rb:bg-[url('@/assets/images/conversation/conversation.svg')] rb:group-hover:bg-[url('@/assets/images/conversation/conversation_hover.svg')]"
           ></div>
           {t('memoryConversation.startANewConversation')}
-        </div>
+        </Flex>
         {historyList.length > 0 &&
           <div
             ref={scrollRef}
             id="scrollableDiv"
-            className="rb:overflow-y-auto rb:h-[calc(100vh-255px)]"
+            className="rb:overflow-y-auto rb:h-[calc(100vh-144px)] rb:px-3!"
           >
             <InfiniteScroll
               dataLength={historyList.length}
@@ -327,7 +445,9 @@ const Conversation: FC = () => {
               {Object.entries(groupHistoryList).map(([date, items]) => (
                 <div key={date} className="rb:mt-6 rb:first:mt-0">
                   <div className="rb:leading-5 rb:text-[#5B6167] rb:mb-2 rb:pl-1 rb:font-regular">{date.replace(/\u200e|\u200f/g, '')}</div>
-                  {items.map(item => (
+
+                  <Flex vertical gap={4}>
+                    {items.map(item => (
                     <div key={item.updated_at} className="rb:mb-3">
                       <div className={clsx("rb:p-[8px_13px] rb:rounded-lg rb:leading-5 rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
                         'rb:bg-[#FFFFFF] rb:shadow-[0px_2px_4px_0px_rgba(0,0,0,0.15)] rb:font-medium rb:hover:bg-[#FFFFFF]!': item.id === conversation_id,
@@ -337,20 +457,20 @@ const Conversation: FC = () => {
                         {item.title}
                       </div>
                     </div>
-                  ))}
+                    ))}
+                  </Flex>
                 </div>
               ))}
             </InfiniteScroll>
           </div>
         }
-        <img src={BgImg} className="rb:absolute rb:bottom-0 rb:left-0 rb:w-86.25" />
       </div>
 
       <div className="rb:relative rb:h-screen rb:px-4 rb:flex-[1_1_auto]">
-        <div className='rb:w-190 rb:h-screen rb:mx-auto rb:pt-10'>
+        <div className='rb:w-190  rb:h-screen rb:mx-auto rb:pt-10 rb:pb-3'>
           <Chat
-            empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320, 180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
-            contentClassName={!fileList.length ? "rb:h-[calc(100%-144px)]" : "rb:h-[calc(100%-208px)]"}
+            empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
+            contentClassName={!fileList.length ? "rb:h-[calc(100%-144px)] rb:w-full" : "rb:h-[calc(100%-208px)] rb:w-full"}
             data={chatList}
             streamLoading={streamLoading}
             loading={loading}
@@ -374,31 +494,47 @@ const Conversation: FC = () => {
                 Authorization: `Bearer ${shareToken || ''}`,
               }
             }}
-            extra={
-              <>
+            rightExtra={
+              (features?.web_search?.enabled || isHasMemory)
+              ? <Flex align="center" justify="end" gap={8}>
                 {features?.web_search?.enabled &&
-                  <ButtonCheckbox
-                    icon={OnlineIcon}
-                    checkedIcon={OnlineCheckedIcon}
-                    checked={webSearch}
-                    onChange={setWebSearch}
-                  >
-                    {t('memoryConversation.web_search')}
-                  </ButtonCheckbox>
+                  <Tooltip title={t('memoryConversation.web_search')}>
+                    <Flex justify="center" align="center"
+                      className={clsx("rb:size-7 rb:border rb:cursor-pointer rb:hover:bg-[#F6F6F6] rb:rounded-full rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]", {
+                        'rb:bg-[rgba(21,94,239,0.06)] rb:border-[rgba(21,94,239,0.25)]': webSearch,
+                        'rb:border-[#EBEBEB]': !webSearch,
+                      })}
+                      onClick={() => setWebSearch(prev => !prev)}
+                    >
+                      <div className={clsx("rb:size-4 rb:bg-cover", {
+                        "rb:bg-[url('@/assets/images/conversation/online.svg')]": !webSearch,
+                        "rb:bg-[url('@/assets/images/conversation/onlineChecked.svg')]": webSearch
+                      })} />
+                    </Flex>
+                  </Tooltip>
                 }
                 {isHasMemory &&
-                  <ButtonCheckbox
-                    icon={MemoryFunctionIcon}
-                    checkedIcon={MemoryFunctionCheckedIcon}
-                    checked={memory}
-                    disabled={config.app_type === 'workflow'}
-                    onChange={handleChangeMemory}
-                  >
-                    {t('memoryConversation.memory')}
-                  </ButtonCheckbox>
+                  <Tooltip title={t('memoryConversation.memory')}>
+                    <Flex justify="center" align="center"
+                      className={clsx("rb:size-7 rb:border rb:hover:bg-[#F6F6F6] rb:rounded-full rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]", {
+                        'rb:bg-[rgba(21,94,239,0.06)] rb:border-[rgba(21,94,239,0.25)]': memory,
+                        'rb:border-[#EBEBEB]': !memory,
+                        'rb:cursor-pointer': config.app_type !== 'workflow',
+                        'rb:cursor-not-allowed rb:opacity-65': config.app_type === 'workflow',
+                      })}
+                      onClick={handleChangeMemory}
+                    >
+                      <div className={clsx("rb:size-4 rb:bg-cover", {
+                        "rb:bg-[url('@/assets/images/conversation/memoryFunction.svg')]": !memory,
+                        "rb:bg-[url('@/assets/images/conversation/memoryFunctionChecked.svg')]": memory
+                      })} />
+                    </Flex>
+                  </Tooltip>
                 }
-              </>
+              </Flex>
+              : undefined
             }
+            onVariablesChange={handleChangeVariables}
           />
           </Chat>
         </div>

@@ -6,14 +6,17 @@ pipeline. Only MemoryConfig is needed - clients are constructed internally.
 """
 import asyncio
 import time
+import uuid
 from datetime import datetime
+from typing import List, Optional
 
 from dotenv import load_dotenv
 
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
 from app.core.memory.storage_services.extraction_engine.extraction_orchestrator import ExtractionOrchestrator
-from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import memory_summary_generation
+from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import \
+    memory_summary_generation
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.memory.utils.log.logging_utils import log_time
 from app.db import get_db_context
@@ -23,18 +26,17 @@ from app.repositories.neo4j.graph_saver import save_dialog_and_statements_to_neo
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_config_schema import MemoryConfig
 
-
 load_dotenv()
 
 logger = get_agent_logger(__name__)
 
 
 async def write(
-    end_user_id: str,
-    memory_config: MemoryConfig,
-    messages: list,
-    ref_id: str = "wyl20251027",
-    language: str = "zh",
+        end_user_id: str,
+        memory_config: MemoryConfig,
+        messages: list,
+        ref_id: str = "",
+        language: str = "zh",
 ) -> None:
     """
     Execute the complete knowledge extraction pipeline.
@@ -43,9 +45,11 @@ async def write(
         end_user_id: Group identifier
         memory_config: MemoryConfig object containing all configuration
         messages: Structured message list [{"role": "user", "content": "..."}, ...]
-        ref_id: Reference ID, defaults to "wyl20251027"
+        ref_id: Reference ID, defaults to ""
         language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
     """
+    if not ref_id:
+        ref_id = uuid.uuid4().hex
     # Extract config values
     embedding_model_id = str(memory_config.embedding_model_id)
     chunker_strategy = memory_config.chunker_strategy
@@ -99,14 +103,14 @@ async def write(
     if memory_config.scene_id:
         try:
             from app.core.memory.ontology_services.ontology_type_loader import load_ontology_types_for_scene
-            
+
             with get_db_context() as db:
                 ontology_types = load_ontology_types_for_scene(
                     scene_id=memory_config.scene_id,
                     workspace_id=memory_config.workspace_id,
                     db=db
                 )
-                
+
                 if ontology_types:
                     logger.info(
                         f"Loaded {len(ontology_types.types)} ontology types for scene_id: {memory_config.scene_id}"
@@ -135,9 +139,11 @@ async def write(
         all_chunk_nodes,
         all_statement_nodes,
         all_entity_nodes,
+        all_perceptual_nodes,
         all_statement_chunk_edges,
         all_statement_entity_edges,
         all_entity_entity_edges,
+        all_perceptual_edges,
         all_dedup_details,
     ) = await orchestrator.run(chunked_dialogs, is_pilot_run=False)
 
@@ -145,11 +151,6 @@ async def write(
 
     # Step 3: Save all data to Neo4j database
     step_start = time.time()
-    from app.repositories.neo4j.create_indexes import create_fulltext_indexes
-    try:
-        await create_fulltext_indexes()
-    except Exception as e:
-        logger.error(f"Error creating indexes: {e}", exc_info=True)
 
     # 添加死锁重试机制
     max_retries = 3
@@ -162,15 +163,43 @@ async def write(
                 chunk_nodes=all_chunk_nodes,
                 statement_nodes=all_statement_nodes,
                 entity_nodes=all_entity_nodes,
+                perceptual_nodes=all_perceptual_nodes,
                 statement_chunk_edges=all_statement_chunk_edges,
                 statement_entity_edges=all_statement_entity_edges,
                 entity_edges=all_entity_entity_edges,
+                perceptual_edges=all_perceptual_edges,
                 connector=neo4j_connector,
-                config_id=config_id,
-                llm_model_id=str(memory_config.llm_model_id) if memory_config.llm_model_id else None,
             )
             if success:
                 logger.info("Successfully saved all data to Neo4j")
+                
+                # 使用 Celery 异步任务触发聚类（不阻塞主流程）
+                if all_entity_nodes:
+                    try:
+                        from app.tasks import run_incremental_clustering
+                        
+                        end_user_id = all_entity_nodes[0].end_user_id
+                        new_entity_ids = [e.id for e in all_entity_nodes]
+                        
+                        # 异步提交 Celery 任务
+                        task = run_incremental_clustering.apply_async(
+                            kwargs={
+                                "end_user_id": end_user_id,
+                                "new_entity_ids": new_entity_ids,
+                                "llm_model_id": str(memory_config.llm_model_id) if memory_config.llm_model_id else None,
+                                "embedding_model_id": str(memory_config.embedding_model_id) if memory_config.embedding_model_id else None,
+                            },
+                            # 设置任务优先级（低优先级，不影响主业务）
+                            priority=3,
+                        )
+                        logger.info(
+                            f"[Clustering] 增量聚类任务已提交到 Celery - "
+                            f"task_id={task.id}, end_user_id={end_user_id}, entity_count={len(new_entity_ids)}"
+                        )
+                    except Exception as e:
+                        # 聚类任务提交失败不影响主流程
+                        logger.error(f"[Clustering] 提交聚类任务失败（不影响主流程）: {e}", exc_info=True)
+                
                 break
             else:
                 logger.warning("Failed to save some data to Neo4j")
@@ -204,9 +233,8 @@ async def write(
         summaries = await memory_summary_generation(
             chunked_dialogs, llm_client=llm_client, embedder_client=embedder_client, language=language
         )
-
+        ms_connector = Neo4jConnector()
         try:
-            ms_connector = Neo4jConnector()
             await add_memory_summary_nodes(summaries, ms_connector)
             await add_memory_summary_statement_edges(summaries, ms_connector)
         finally:
@@ -245,6 +273,22 @@ async def write(
         logger.info(f"[WRITE] 活动统计已写入 Redis: workspace_id={memory_config.workspace_id}")
     except Exception as cache_err:
         logger.warning(f"[WRITE] 写入活动统计缓存失败（不影响主流程）: {cache_err}", exc_info=True)
+
+    # Close LLM/Embedder underlying httpx clients to prevent
+    # 'RuntimeError: Event loop is closed' during garbage collection
+    for client_obj in (llm_client, embedder_client):
+        try:
+            underlying = getattr(client_obj, 'client', None) or getattr(client_obj, 'model', None)
+            if underlying is None:
+                continue
+            # Unwrap RedBearLLM / RedBearEmbeddings to get the LangChain model
+            inner = getattr(underlying, '_model', underlying)
+            # LangChain OpenAI models expose async_client (httpx.AsyncClient)
+            http_client = getattr(inner, 'async_client', None)
+            if http_client is not None and hasattr(http_client, 'aclose'):
+                await http_client.aclose()
+        except Exception:
+            pass
 
     logger.info("=== Pipeline Complete ===")
     logger.info(f"Total execution time: {total_time:.2f} seconds")

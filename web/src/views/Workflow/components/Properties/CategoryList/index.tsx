@@ -1,17 +1,17 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:34:33 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-09 18:34:33 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-05 18:18:35
  */
 import { type FC } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Form, Space } from 'antd';
+import { Button, Form, Flex } from 'antd';
 import { Graph, Node } from '@antv/x6';
 
 import Editor from '../../Editor';
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
-import { edgeAttrs, portTextAttrs, nodeWidth } from '../../../constant'
+import { edgeAttrs, conditionNodeItemHeight, nodeWidth, portItemArgsY, conditionNodePortItemArgsY, conditionNodeHeight } from '../../../constant'
 
 interface CategoryListProps {
   parentName: string;
@@ -51,10 +51,17 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
     });
 
     // Calculate new node height: base height 88px + 30px for each additional port
-    const baseHeight = 88;
-    const newHeight = baseHeight + (caseCount - 2) * 30;
+    const newHeight = conditionNodeHeight + (caseCount - 2) * conditionNodeItemHeight;
 
-    selectedNode.prop('size', { width: nodeWidth, height: newHeight < baseHeight ? baseHeight : newHeight })
+    selectedNode.prop('size', { width: nodeWidth, height: newHeight < conditionNodeHeight ? conditionNodeHeight : newHeight })
+
+    // Update right port x position
+    const currentPorts = selectedNode.getPorts();
+    currentPorts.forEach(port => {
+      if (port.group === 'right' && port.args) {
+        selectedNode.portProp(port.id!, 'args/x', nodeWidth);
+      }
+    });
 
     // Add category ports
     for (let i = 0; i < caseCount; i++) {
@@ -63,9 +70,8 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
         group: 'right',
         args: {
           x: nodeWidth,
-          y: 30 * i + 42,
+          y: portItemArgsY * i + conditionNodePortItemArgsY,
         },
-        attrs: { text: { text: `分类${i + 1}`, ...portTextAttrs } }
       });
     }
     // Restore edge connections
@@ -137,36 +143,36 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
   return (
     <Form.List name={parentName}>
       {(fields, { add, remove }) => (
-        <Space direction="vertical" size={12} className="rb:w-full">
+        <Flex gap={8} vertical>
           {fields.map(({ key, name, ...restField }, index) => {
             const currentItem = formValues?.[key] || {};
             const contentLength = (currentItem.class_name || '').length;
             
             return (
-            <div key={key} className="rb:border rb:border-[#DFE4ED] rb:rounded-md rb:p-2 rb:bg-[#F8F9FB]">
-              <div className="rb:flex rb:items-center rb:justify-between rb:mb-2">
-                <div className="rb:text-[12px] rb:font-medium rb:py-1 rb:leading-2">{t('workflow.config.question-classifier.class_name')} {index + 1}</div>
-                <div className="rb:flex rb:items-center rb:gap-1">
-                  <span className="rb:text-xs rb:text-gray-500">{contentLength}</span>
-                  <div
-                    className="rb:ml-1 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
-                    onClick={() => handleRemoveCategory(remove, name, index)}
-                  ></div>
-                </div>
+              <div key={key} className="rb-border rb:rounded-md rb:p-2">
+                <Flex align="center" justify="space-between" className="rb:mb-2!">
+                  <div className="rb:text-[12px] rb:font-medium rb:py-1 rb:leading-4">{t('workflow.config.question-classifier.class_name')} {index + 1}</div>
+                  <Flex align="center" gap={4}>
+                    <span className="rb:text-xs rb:text-[#667085]">{contentLength}</span>
+                    <div
+                      className="rb:ml-1 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
+                      onClick={() => handleRemoveCategory(remove, name, index)}
+                    ></div>
+                  </Flex>
+                </Flex>
+                <Form.Item
+                  {...restField}
+                    name={[name, 'class_name']}
+                  noStyle
+                >
+                  <Editor
+                    placeholder={t('common.pleaseEnter')}
+                    options={options}
+                    size="small"
+                  />
+                </Form.Item>
               </div>
-              <Form.Item
-                {...restField}
-                  name={[name, 'class_name']}
-                noStyle
-              >
-                <Editor
-                  placeholder={t('common.pleaseEnter')}
-                  options={options}
-                  size="small"
-                />
-              </Form.Item>
-            </div>
-          )})}
+            )})}
           
           <Button
             type="dashed"
@@ -177,7 +183,7 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
           >
             + {t('workflow.config.question-classifier.addClassName')}
           </Button>
-        </Space>
+        </Flex>
       )}
     </Form.List>
   );

@@ -49,7 +49,7 @@ const Jinja2HighlightPlugin = () => {
               newNode.setStyle('color: #008000');
               break;
             case 'brace-0':
-              newNode.setStyle('color: #155EEF; font-family: monospace; font-weight: bold;');
+              newNode.setStyle('color: #171719; font-family: monospace; font-weight: bold;');
               break;
             case 'brace-1':
               newNode.setStyle('color: #369F21; font-family: monospace; font-weight: bold;');

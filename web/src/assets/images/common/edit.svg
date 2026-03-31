@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="18px" height="18px" viewBox="0 0 18 18" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编辑</title>
+    <defs>
+        <filter x="-2.2%" y="-5.4%" width="104.5%" height="112.7%" filterUnits="objectBoundingBox" id="filter-1">
+            <feOffset dx="0" dy="2" in="SourceAlpha" result="shadowOffsetOuter1"></feOffset>
+            <feGaussianBlur stdDeviation="4" in="shadowOffsetOuter1" result="shadowBlurOuter1"></feGaussianBlur>
+            <feColorMatrix values="0 0 0 0 0.0901960784   0 0 0 0 0.0901960784   0 0 0 0 0.0980392157  0 0 0 0.16 0" type="matrix" in="shadowBlurOuter1" result="shadowMatrixOuter1"></feColorMatrix>
+            <feMerge>
+                <feMergeNode in="shadowMatrixOuter1"></feMergeNode>
+                <feMergeNode in="SourceGraphic"></feMergeNode>
+            </feMerge>
+        </filter>
+    </defs>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="记忆管理" transform="translate(-778, -283)" stroke="#5B6167">
+            <g id="1备份-2" filter="url(#filter-1)" transform="translate(252, 108)">
+                <g id="编辑" transform="translate(526, 175)">
+                    <g id="编组-10" transform="translate(4.3, 4.3)">
+                        <path d="M9.4,4.04322919 L9.4,7.4 C9.4,8.5045695 8.5045695,9.4 7.4,9.4 L2,9.4 C0.8954305,9.4 0,8.5045695 0,7.4 L0,2 C0,0.8954305 0.8954305,2.22044605e-16 2,0 L5.38958415,0 L5.38958415,0" id="路径"></path>
+                        <line x1="3.74260398" y1="5.68579764" x2="9.4" y2="1.05734433e-14" id="路径-2"></line>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

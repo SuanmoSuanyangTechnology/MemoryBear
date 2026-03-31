@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:26:44 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 15:26:44 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-25 18:14:20
  */
 /**
  * SliderInput Component
@@ -107,7 +107,7 @@ const SliderInput: FC<SliderInputProps> = ({
     <div className={`rb:w-full ${className}`}>
       {/* Optional label */}
       {label && (
-        <div className="rb:text-sm rb:font-medium rb:text-gray-700">
+        <div className="rb:text-[#5B6167] rb:leading-5 rb:mb-1">
           {label}
         </div>
       )}
@@ -127,7 +127,7 @@ const SliderInput: FC<SliderInputProps> = ({
           />
         </Col>
         {/* Input number component */}
-        <Col flex="120px">
+        <Col flex="80px">
           <InputNumber
             min={min}
             max={max}
@@ -135,7 +135,7 @@ const SliderInput: FC<SliderInputProps> = ({
             value={internalValue}
             onChange={handleInputChange}
             disabled={disabled}
-            className={`rb:w-full ${inputClassName}`}
+            className={`rb:w-full! ${inputClassName}`}
             controls
           />
         </Col>

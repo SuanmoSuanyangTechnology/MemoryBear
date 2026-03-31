@@ -329,7 +329,6 @@ class LangChainAgent:
                     db.close()
             except Exception as e:
                 logger.warning(f"Failed to get db session: {e}")
-        actual_end_user_id = end_user_id if end_user_id is not None else "unknown"
         logger.info(f'写入类型{storage_type, str(end_user_id), message, str(user_rag_memory_id)}')
         print(f'写入类型{storage_type, str(end_user_id), message, str(user_rag_memory_id)}')
         try:
@@ -598,8 +597,10 @@ class LangChainAgent:
                 for msg in reversed(output_messages):
                     if isinstance(msg, AIMessage):
                         response_meta = msg.response_metadata if hasattr(msg, 'response_metadata') else None
-                        total_tokens = response_meta.get("token_usage", {}).get("total_tokens",
-                                                                                0) if response_meta else 0
+                        total_tokens = response_meta.get("token_usage", {}).get(
+                            "total_tokens",
+                            0
+                        ) if response_meta else 0
                         yield total_tokens
                         break
                 if memory_flag:

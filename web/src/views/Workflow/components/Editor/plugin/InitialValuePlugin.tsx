@@ -16,6 +16,8 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
   const prevValueRef = useRef<string>('');
   const prevEnableLineNumbersRef = useRef<boolean>(enableLineNumbers);
   const isUserInputRef = useRef(false);
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   useEffect(() => {
     const removeListener = editor.registerUpdateListener(({ editorState, tags }) => {
@@ -41,80 +43,90 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
         isUserInputRef.current = false;
         return;
       }
+      // Update refs BEFORE editor.update to prevent re-entry
+      prevValueRef.current = value;
+      prevEnableLineNumbersRef.current = enableLineNumbers;
+      isUserInputRef.current = false;
+
       queueMicrotask(() => {
         editor.update(() => {
-        const root = $getRoot();
-        root.clear();
+          const root = $getRoot();
+          root.clear();
 
-        const parts = value.split(/(\{\{[^}]+\}\})/);
+          const parts = value.split(/(\{\{[^}]+\}\}|\n)/);
 
-        if (enableLineNumbers) {
-          // Handle newlines properly in Jinja2 mode
-          const lines = value.split('\n');
-          lines.forEach((line) => {
-            const paragraph = $createParagraphNode();
-            paragraph.append($createTextNode(line));
-            root.append(paragraph);
-          });
-        } else {
-          const paragraph = $createParagraphNode();
-          parts.forEach(part => {
-            const match = part.match(/^\{\{([^.]+)\.([^}]+)\}\}$/);
-            const contextMatch = part.match(/^\{\{context\}\}$/);
-            const conversationMatch = part.match(/^\{\{conv\.([^}]+)\}\}$/);
+          if (enableLineNumbers) {
+            const lines = value.split('\n');
+            lines.forEach((line) => {
+              const paragraph = $createParagraphNode();
+              paragraph.append($createTextNode(line));
+              root.append(paragraph);
+            });
+          } else {
+            let paragraph = $createParagraphNode();
 
-            if (contextMatch) {
-              const contextSuggestion = options.find(s => s.isContext && s.label === 'context');
-              if (contextSuggestion) {
-                paragraph.append($createVariableNode(contextSuggestion));
-              } else {
-                paragraph.append($createTextNode(part));
+            parts.forEach(part => {
+              if (part === '\n') {
+                root.append(paragraph);
+                paragraph = $createParagraphNode();
+                return;
               }
-              return
-            }
-            
-            if (conversationMatch) {
-              const [_, variableName] = conversationMatch;
-              const conversationSuggestion = options.find(s => 
-                s.group === 'CONVERSATION' && s.label === variableName
-              );
-              if (conversationSuggestion) {
-                paragraph.append($createVariableNode(conversationSuggestion));
-              } else {
-                paragraph.append($createTextNode(part));
-              }
-              return
-            }
-            
-            if (match) {
-              const [_, nodeId, label] = match;
+              const match = part.match(/^\{\{([^.]+)\.([^}]+)\}\}$/);
+              const contextMatch = part.match(/^\{\{context\}\}$/);
+              const conversationMatch = part.match(/^\{\{conv\.([^}]+)\}\}$/);
 
-              const suggestion = options.find(s => {
-                if (nodeId === 'sys') {
-                  return s.nodeData.type === 'start' && s.label === `sys.${label}`
+              if (contextMatch) {
+                const contextSuggestion = optionsRef.current.find(s => s.isContext && s.label === 'context');
+                if (contextSuggestion) {
+                  paragraph.append($createVariableNode(contextSuggestion));
+                } else {
+                  paragraph.append($createTextNode(part));
                 }
-                return s.nodeData.id === nodeId && s.label === label
-              });
+                return
+              }
 
-              if (suggestion) {
-                paragraph.append($createVariableNode(suggestion));
-              } else {
+              if (conversationMatch) {
+                const [_, variableName] = conversationMatch;
+                const conversationSuggestion = optionsRef.current.find(s =>
+                  s.group === 'CONVERSATION' && s.label === variableName
+                );
+                if (conversationSuggestion) {
+                  paragraph.append($createVariableNode(conversationSuggestion));
+                } else {
+                  paragraph.append($createTextNode(part));
+                }
+                return
+              }
+
+              if (match) {
+                const [_, nodeId, label] = match;
+
+                const suggestion = optionsRef.current.find(s => {
+                  if (nodeId === 'sys') {
+                    return s.nodeData.type === 'start' && s.label === `sys.${label}`
+                  }
+                  return s.nodeData.id === nodeId && s.label === label
+                });
+
+                if (suggestion) {
+                  paragraph.append($createVariableNode(suggestion));
+                } else {
+                  paragraph.append($createTextNode(part));
+                }
+              } else if (part) {
                 paragraph.append($createTextNode(part));
               }
-            } else if (part) {
-              paragraph.append($createTextNode(part));
-            }
-          });
-          root.append(paragraph);
-        }
-        }, { discrete: true, tag: 'programmatic' });
+            });
+            root.append(paragraph);
+          }
+        }, { tag: 'programmatic' });
       });
+    } else {
+      prevValueRef.current = value;
+      prevEnableLineNumbersRef.current = enableLineNumbers;
+      isUserInputRef.current = false;
     }
-    
-    prevValueRef.current = value;
-    prevEnableLineNumbersRef.current = enableLineNumbers;
-    isUserInputRef.current = false;
-  }, [value, options, editor, enableLineNumbers]);
+  }, [value, editor, enableLineNumbers]);
 
   return null;
 };

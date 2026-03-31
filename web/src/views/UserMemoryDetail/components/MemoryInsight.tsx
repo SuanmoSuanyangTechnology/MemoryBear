@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:41 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 18:32:41 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-27 11:11:46
  */
 /**
  * Memory Insight Component
@@ -10,10 +10,10 @@
  */
 
 import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
-import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Skeleton, Space } from 'antd';
+import { Skeleton, Divider } from 'antd';
+import clsx from 'clsx'
 
 import RbCard from '@/components/RbCard/Card'
 import Empty from '@/components/Empty';
@@ -34,7 +34,7 @@ interface Data {
   is_cached: boolean;
 }
 
-const MemoryInsight = forwardRef<MemoryInsightRef>((_props, ref) => {
+const MemoryInsight = forwardRef<MemoryInsightRef, { className?: string; }>(({ className }, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const [loading, setLoading] = useState<boolean>(false)
@@ -63,24 +63,25 @@ const MemoryInsight = forwardRef<MemoryInsightRef>((_props, ref) => {
   }));
   return (
     <RbCard 
-      title={t('userMemory.memoryInsight')} 
-      headerType="borderless"
-      headerClassName="rb:min-h-[46px]!"
+      title={t('userMemory.memoryInsight')}
+      headerClassName="rb:min-h-[46px]!! rb:font-medium!"
+      className={clsx("rb:bg-[#FFFFFF]! rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.13)]! rb:absolute! rb:w-100 rb:top-29 rb:left-26", className)}
+      bodyClassName="rb:px-5! rb:pb-5! rb:pt-3.75! rb:max-h-[calc(100vh-186px)] rb:overflow-auto"
     >
       {loading
         ? <Skeleton />
         : Object.keys(data).length > 0
-        ? <Space size={16} direction="vertical" className="rb:w-full">
-            {['memory_insight', 'key_findings', 'behavior_pattern', 'growth_trajectory'].map(key => {
+        ? <div>
+            {['memory_insight', 'key_findings', 'behavior_pattern', 'growth_trajectory'].map((key, index) => {
               const value = data[key as keyof Data];
               if (Array.isArray(value) && value.length > 0 || (!Array.isArray(value) && value)) {
                 return (
-                  <div key={key} className="rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:py-3 rb:text-[#5B6167] rb:leading-5">
-                    <div className={clsx(`rb:relative rb:before:content-[''] rb:before:block rb:before:h-4 rb:before:absolute rb:before:top-0.5 rb:before:left-0 rb:before:w-1 rb:pl-4 rb:mb-2 rb:font-medium rb:leading-5`, {
-                      'rb:before:bg-[#155EEF]': key === 'memory_insight',
-                      'rb:before:bg-[#369F21]': key !== 'memory_insight'
-                    })}>{t(`userMemory.${key}`)}</div>
-                    <div className="rb:px-4">
+                  <div key={key}>
+                    {index > 0 && <Divider className="rb:my-4! rb:border-t-[0.5px]!" />}
+                    <div className="rb:font-medium rb:leading-5">
+                      {t(`userMemory.${key}`)}
+                    </div>
+                    <div className="rb:font-regular rb:leading-5 rb:text-[#5B6167] rb:mt-2">
                       {Array.isArray(data[key as keyof Data])
                         ? <>
                           {(data[key as keyof Data] as string[])?.map((item: string, index: number) => (
@@ -98,7 +99,7 @@ const MemoryInsight = forwardRef<MemoryInsightRef>((_props, ref) => {
               return null
             })}
             
-        </Space>
+          </div>
         : <Empty size={80} />
       }
     </RbCard>

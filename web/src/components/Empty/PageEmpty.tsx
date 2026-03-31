@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:04:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-02 15:49:01
+ * @Last Modified time: 2026-02-09 13:50:04
  */
 /**
  * PageEmpty Component
@@ -22,7 +22,7 @@ import Empty from './index'
 /**
  * @param size - Icon size in pixels - single number or [width, height] array (default: [240, 210])
  */
-const PageEmpty: FC<{ size?: number | number[] }> = ({ size = [240, 210] }) => {
+const PageEmpty: FC<{ size?: number | number[]; className?: string; }> = ({ size = [240, 210], className = '' }) => {
   const { t } = useTranslation()
   return (
     <Empty
@@ -30,7 +30,7 @@ const PageEmpty: FC<{ size?: number | number[] }> = ({ size = [240, 210] }) => {
       title={t('empty.pageEmpty')}
       subTitle={t('empty.pageEmptyDesc')}
       size={size}
-      className="rb:h-full"
+      className={`rb:h-full ${className}`}
     />
   )
 }

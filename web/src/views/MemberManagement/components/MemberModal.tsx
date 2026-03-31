@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:42:17 
  * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:42:17 
+ * @Last Modified time: 2026-03-25 18:30:48 
  */
 /**
  * Member Modal
@@ -39,7 +39,7 @@ const MemberModal = forwardRef<MemberModalRef, MemberModalProps>(({
   refreshTable
 }, ref) => {
   const { t } = useTranslation();
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const initialForm = {
     // role: 'member',
   }
@@ -47,7 +47,6 @@ const MemberModal = forwardRef<MemberModalRef, MemberModalProps>(({
   const [editingUser, setEditingUser] = useState<Member | null>(null);
   const [form] = Form.useForm<MemberModalData>();
   const [loading, setLoading] = useState(false)
-  const [modal, contextHolder] = Modal.useModal();
 
   const roleOptions = [
     'member',
@@ -179,7 +178,6 @@ const MemberModal = forwardRef<MemberModalRef, MemberModalProps>(({
           </Select>
         </FormItem>
       </Form>
-      {contextHolder}
     </RbModal>
   );
 });

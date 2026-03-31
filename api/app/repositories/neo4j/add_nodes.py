@@ -1,16 +1,21 @@
+import logging
 from typing import List, Optional
 
-from app.repositories.neo4j.cypher_queries import DIALOGUE_NODE_SAVE, STATEMENT_NODE_SAVE, CHUNK_NODE_SAVE,MEMORY_SUMMARY_NODE_SAVE
 from app.core.memory.models.graph_models import DialogueNode, StatementNode, ChunkNode, MemorySummaryNode
+from app.repositories.neo4j.cypher_queries import DIALOGUE_NODE_SAVE, STATEMENT_NODE_SAVE, CHUNK_NODE_SAVE, \
+    MEMORY_SUMMARY_NODE_SAVE
 # 使用新的仓储层
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+logger = logging.getLogger(__name__)
 
 
 async def delete_all_nodes(end_user_id: str, connector: Neo4jConnector):
     """Delete all nodes in the database."""
     result = await connector.execute_query(f"MATCH (n {{end_user_id: '{end_user_id}'}}) DETACH DELETE n")
-    print(f"All end_user_id: {end_user_id} node and edge deleted successfully")
+    logger.warning(f"All end_user_id: {end_user_id} node and edge deleted successfully")
     return result
+
 
 async def add_dialogue_nodes(dialogues: List[DialogueNode], connector: Neo4jConnector) -> Optional[List[str]]:
     """Add dialogue nodes to Neo4j database.
@@ -23,7 +28,7 @@ async def add_dialogue_nodes(dialogues: List[DialogueNode], connector: Neo4jConn
         List of created node UUIDs or None if failed
     """
     if not dialogues:
-        print("No dialogues to save")
+        logger.info("No dialogues to save")
         return []
 
     try:
@@ -48,11 +53,11 @@ async def add_dialogue_nodes(dialogues: List[DialogueNode], connector: Neo4jConn
         )
 
         created_uuids = [record["uuid"] for record in result]
-        print(f"Successfully created {len(created_uuids)} dialogue nodes: {created_uuids}")
+        logger.info(f"Successfully created {len(created_uuids)} dialogue nodes: {created_uuids}")
         return created_uuids
 
     except Exception as e:
-        print(f"Error creating dialogue nodes: {e}")
+        logger.error(f"Error creating dialogue nodes: {e}")
         return None
 
 
@@ -67,7 +72,7 @@ async def add_statement_nodes(statements: List[StatementNode], connector: Neo4jC
         List of created node UUIDs or None if failed
     """
     if not statements:
-        print("No statements to save")
+        logger.info("No statements to save")
         return []
 
     try:
@@ -120,12 +125,13 @@ async def add_statement_nodes(statements: List[StatementNode], connector: Neo4jC
         )
 
         created_uuids = [record["uuid"] for record in result]
-        print(f"Successfully created {len(created_uuids)} statement nodes")
+        logger.info(f"Successfully created {len(created_uuids)} statement nodes")
         return created_uuids
 
     except Exception as e:
-        print(f"Error creating statement nodes: {e}")
+        logger.error(f"Error creating statement nodes: {e}")
         return None
+
 
 async def add_chunk_nodes(chunks: List[ChunkNode], connector: Neo4jConnector) -> Optional[List[str]]:
     """Add chunk nodes to Neo4j in batch.
@@ -138,7 +144,7 @@ async def add_chunk_nodes(chunks: List[ChunkNode], connector: Neo4jConnector) ->
         List of created chunk UUIDs or None if failed
     """
     if not chunks:
-        print("No chunk nodes to add")
+        logger.info("No chunk nodes to add")
         return []
 
     try:
@@ -171,16 +177,18 @@ async def add_chunk_nodes(chunks: List[ChunkNode], connector: Neo4jConnector) ->
         )
 
         created_uuids = [record["uuid"] for record in result]
-        print(f"Successfully created {len(created_uuids)} chunk nodes")
+        logger.info(f"Successfully created {len(created_uuids)} chunk nodes")
         return created_uuids
 
     except Exception as e:
-        print(f"Error creating chunk nodes: {e}")
+        logger.error(f"Error creating chunk nodes: {e}")
         return None
 
 
-
-async def add_memory_summary_nodes(summaries: List[MemorySummaryNode], connector: Neo4jConnector) -> Optional[List[str]]:
+async def add_memory_summary_nodes(
+        summaries: List[MemorySummaryNode],
+        connector: Neo4jConnector
+) -> Optional[List[str]]:
     """Add memory summary nodes to Neo4j in batch.
 
     Args:
@@ -191,7 +199,7 @@ async def add_memory_summary_nodes(summaries: List[MemorySummaryNode], connector
         List of created summary node ids or None if failed
     """
     if not summaries:
-        print("No memory summary nodes to add")
+        logger.info("No memory summary nodes to add")
         return []
 
     try:
@@ -211,16 +219,14 @@ async def add_memory_summary_nodes(summaries: List[MemorySummaryNode], connector
                 "summary_embedding": s.summary_embedding if s.summary_embedding else None,
                 "config_id": s.config_id,  # 添加 config_id
             })
-        
+
         result = await connector.execute_query(
             MEMORY_SUMMARY_NODE_SAVE,
             summaries=flattened
         )
         created_ids = [record.get("uuid") for record in result]
-        print(f"Successfully saved {len(created_ids)} MemorySummary nodes to Neo4j")
+        logger.info(f"Successfully saved {len(created_ids)} MemorySummary nodes to Neo4j")
         return created_ids
     except Exception as e:
-        print(f"Failed to save MemorySummary nodes to Neo4j: {e}")
+        logger.error(f"Failed to save MemorySummary nodes to Neo4j: {e}")
         return None
-
-

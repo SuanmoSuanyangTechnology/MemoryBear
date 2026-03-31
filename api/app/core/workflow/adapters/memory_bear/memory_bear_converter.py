@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 from app.core.workflow.adapters.base_converter import BaseConverter
-from app.core.workflow.adapters.errors import ExceptionDefineition, ExceptionType
+from app.core.workflow.adapters.errors import ExceptionDefinition, ExceptionType
 from app.core.workflow.nodes.base_config import BaseNodeConfig
 from app.core.workflow.nodes.configs import (
     StartNodeConfig,
@@ -65,7 +65,7 @@ class MemoryBearConverter(BaseConverter):
         try:
             return config_cls.model_validate(value)
         except Exception as e:
-            self.errors.append(ExceptionDefineition(
+            self.errors.append(ExceptionDefinition(
                 type=ExceptionType.CONFIG,
                 node_id=node_id,
                 node_name=node_name,

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:53:44 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-03 17:54:33
+ * @Last Modified time: 2026-03-26 14:58:48
  */
 /**
  * User Memory Page
@@ -12,14 +12,15 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom'
-import { Row, Col, List, Skeleton } from 'antd';
+import { Row, Col, Form, Flex, Tooltip } from 'antd';
 
-import Empty from '@/components/Empty'
 import type { Data } from './types'
 import { getUserMemoryList } from '@/api/memory';
 import { useUser } from '@/store/user'
 import RbCard from '@/components/RbCard/Card'
 import SearchInput from '@/components/SearchInput';
+import RbStatistic from '@/components/RbStatistic';
+import BodyWrapper from '@/components/Empty/BodyWrapper'
 
 export default function UserMemory() {
   const { t } = useTranslation();
@@ -27,7 +28,9 @@ export default function UserMemory() {
   const { storageType } = useUser()
   const [loading, setLoading] = useState<boolean>(false);
   const [data, setData] = useState<Data[]>([]);
-  const [search, setSearch] = useState<string | undefined>(undefined);
+
+  const [form] = Form.useForm()
+  const search = Form.useWatch(['search'], form)
 
   /** Fetch user memory list */
   useEffect(() => {
@@ -75,61 +78,65 @@ export default function UserMemory() {
   }, [search, data])
 
   return (
-    <div>
-      <Row gutter={16} className="rb:mb-4">
-        <Col span={8}>
-          <SearchInput
-            placeholder={t('userMemory.searchPlaceholder')}
-            onSearch={(value) => setSearch(value)}
-            style={{ width: '100%' }}
-          />
-        </Col>
-      </Row>
-      {loading ?
-        <Skeleton active />
-        : filterData.length > 0 ? (
-          <List
-            grid={{ gutter: 16, column: 3 }}
-            dataSource={filterData}
-            renderItem={(item, index) => {
-              const { end_user, memory_num, memory_config } = item as Data;
-              const name = end_user?.other_name && end_user?.other_name !== '' ? end_user?.other_name : end_user?.id
-              return (
-                <List.Item key={index}>
-                  <RbCard
-                    avatar={<div className="rb:w-12 rb:h-12 rb:text-center rb:font-semibold rb:text-[28px] rb:leading-12 rb:rounded-lg rb:text-[#FBFDFF] rb:bg-[#155EEF] rb:mr-2">{name[0]}</div>}
-                    title={name || '-'}
-                    extra={<div
-                      className="rb:w-7 rb:h-7 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/userMemory/goto.svg')]"
-                    ></div>}
-                    className="rb:cursor-pointer"
-                    onClick={() => handleViewDetail(end_user.id)}
-                  >
-                    <div className="rb:flex rb:justify-between rb:items-center">
-                      <div>{t('userMemory.capacity')}</div>
-                      <div>{memory_num?.total || 0} {t('userMemory.memoryNum')}</div>
-                    </div>
-                    <div className="rb:flex rb:justify-between rb:items-center rb:mt-2.5">
-                      <div>{t('userMemory.type')}</div>
-                      <div>{t(`userMemory.${item.type || 'person'}`)}</div>
-                    </div>
+    <>
+      <Form form={form}>
+        <Row gutter={16} className="rb:mb-4">
+          <Col span={8}>
+            <Form.Item name="search" noStyle>
+              <SearchInput
+                placeholder={t('userMemory.searchPlaceholder')}
+                className="rb:w-full!"
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+      </Form>
+      <BodyWrapper loading={loading} empty={data.length === 0}>
+        <Row
+          gutter={[12, 12]}
+          className="rb:max-h-[calc(100%-48px)] rb:overflow-y-auto"
+        >
+          {filterData.map((item, index) => {
+            const { end_user, memory_num, memory_config } = item as Data;
+            const name = end_user?.other_name && end_user?.other_name !== '' ? end_user?.other_name : end_user?.id
+            return (
+              <Col key={index} span={8}>
+                <RbCard
+                  title={<Flex gap={4}>
+                    <div className="rb:size-6 rb:text-center rb:font-semibold rb:leading-6 rb:rounded-md rb:text-white rb:bg-[#155EEF]">{name[0]}</div>
 
-                    <div className="rb:relative rb:z-2 rb:mt-3 rb:bg-[#F6F8FC] rb:rounded-lg rb:border rb:border-[#DFE4ED] rb:py-2 rb:px-3" onClick={handleViewMemoryConfig}>
-                      <div className="rb:text-[#5B6167] rb:leading-5 rb:flex rb:justify-between rb:items-center">
-                        {t('userMemory.memory_config_name')}
-                        <div
-                          className="rb:w-7 rb:h-7 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/userMemory/arrow_right.svg')]"
-                        ></div>
-                      </div>
-                      <div className="rb:font-medium rb:leading-5 rb:mt-1">{memory_config?.memory_config_name || '-'}</div>
-                    </div>
-                  </RbCard>
-                </List.Item>
-              )
-            }}
-          />
-        ) : <Empty />
-      }
-    </div>
+                    <Tooltip title={name || '-'}><div className={`rb:flex-1 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap`}>{name || '-'}</div></Tooltip>
+                  </Flex>}
+                  headerType="border"
+                  headerClassName="rb:h-[48px]! rb:mx-4!"
+                  bodyClassName="rb:py-3! rb:px-4!"
+                  className="rb:cursor-pointer"
+                  onClick={() => handleViewDetail(end_user.id)}
+                >
+                  <Row>
+                    <Col span={12}>
+                      <RbStatistic title={t('userMemory.capacity')} value={memory_num?.total || 0} suffix={t('userMemory.memoryNum')} />
+                    </Col>
+                    <Col span={12}>
+                      <RbStatistic title={t('userMemory.type')} value={t(`userMemory.${item.type || 'person'}`)} />
+                    </Col>
+                  </Row>
+
+                  <div className="rb:relative rb:z-2 rb:mt-3 rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2 rb:px-3 rb:leading-5" onClick={handleViewMemoryConfig}>
+                    <Flex align="center" justify="space-between" className="rb:text-[#5B6167]">
+                      {t('userMemory.memory_config_name')}
+                      <div
+                        className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/userMemory/arrow_right_dark.svg')]"
+                      ></div>
+                    </Flex>
+                    <div className="rb:font-medium rb:text-[#212332] rb:mt-1">{memory_config?.memory_config_name || '-'}</div>
+                  </div>
+                </RbCard>
+              </Col>
+            )
+          })}
+        </Row>
+      </BodyWrapper>
+    </>
   );
 }

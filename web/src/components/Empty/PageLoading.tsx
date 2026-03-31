@@ -22,7 +22,7 @@ import Empty from './index'
 /**
  * @param size - Icon size in pixels - single number or [width, height] array (default: [240, 210])
  */
-const PageLoading: FC<{ size?: number | number[] }> = ({ size = [240, 210] }) => {
+const PageLoading: FC<{ size?: number | number[]; className?: string; }> = ({ size = [240, 210], className = '' }) => {
   const { t } = useTranslation()
   return (
     <Empty
@@ -30,7 +30,7 @@ const PageLoading: FC<{ size?: number | number[] }> = ({ size = [240, 210] }) =>
       title={t('empty.loadingEmpty')}
       subTitle={t('empty.loadingEmptyDesc')}
       size={size}
-      className="rb:h-full"
+      className={`rb:h-full ${className}`}
     />
   )
 }

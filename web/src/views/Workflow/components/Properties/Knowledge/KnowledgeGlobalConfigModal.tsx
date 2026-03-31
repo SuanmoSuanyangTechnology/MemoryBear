@@ -1,11 +1,10 @@
 import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
-import { Form, InputNumber, Switch } from 'antd';
+import { Form, InputNumber, Switch, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { RerankerConfig, KnowledgeGlobalConfigModalRef } from './types'
 import RbModal from '@/components/RbModal'
-import CustomSelect from '@/components/CustomSelect'
-import { getModelListUrl } from '@/api/models'
+import ModelSelect from '@/components/ModelSelect'
 
 const FormItem = Form.Item;
 
@@ -75,7 +74,7 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
         <div className="rb:text-[#5B6167] rb:mb-6">{t('application.globalConfigDesc')}</div>
 
         {/* 结果重排 */}
-        <div className="rb:flex rb:items-center rb:justify-between rb:my-6">
+        <Flex align="center" justify="space-between" className="rb:my-6!">
           <div className="rb:text-[14px] rb:font-medium rb:leading-5">
             {t('application.rerankModel')}
             <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t('application.rerankModelDesc')}</div>
@@ -87,7 +86,7 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
           >
             <Switch />
           </FormItem>
-        </div>
+        </Flex>
 
         {values?.rerank_model && <>
           <FormItem
@@ -96,12 +95,9 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
             rules={[{ required: true, message: t('common.pleaseSelect') }]}
             extra={t('application.rearrangementModelDesc')}
           >
-            <CustomSelect
-              url={getModelListUrl}
-              params={{ type: 'rerank', pagesize: 100, is_active: true }}
-              valueKey="id"
-              labelKey="name"
-              hasAll={false}
+            <ModelSelect
+              params={{ type: 'rerank' }}
+              className="rb:w-full!"
             />
           </FormItem>
           {/* Top K */}

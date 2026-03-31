@@ -336,6 +336,53 @@ ORDER BY score DESC
 LIMIT $limit
 """
 
+SEARCH_ENTITIES_BY_NAME_OR_ALIAS = """
+CALL db.index.fulltext.queryNodes("entitiesFulltext", $q) YIELD node AS e, score
+WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
+WITH e, score
+WITH collect({entity: e, score: score}) AS fulltextResults
+
+OPTIONAL MATCH (ae:ExtractedEntity)
+WHERE ($end_user_id IS NULL OR ae.end_user_id = $end_user_id)
+  AND ae.aliases IS NOT NULL
+  AND ANY(alias IN ae.aliases WHERE toLower(alias) CONTAINS toLower($q))
+WITH fulltextResults, collect(ae) AS aliasEntities
+
+UNWIND (fulltextResults + [x IN aliasEntities | {entity: x, score:
+     CASE 
+       WHEN ANY(alias IN x.aliases WHERE toLower(alias) = toLower($q)) THEN 1.0
+       WHEN ANY(alias IN x.aliases WHERE toLower(alias) STARTS WITH toLower($q)) THEN 0.9
+       ELSE 0.8
+     END
+}]) AS row
+WITH row.entity AS e, row.score AS score
+WITH DISTINCT e, MAX(score) AS score
+OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
+RETURN e.id AS id,
+       e.name AS name,
+       e.end_user_id AS end_user_id,
+       e.entity_type AS entity_type,
+       e.created_at AS created_at,
+       e.expired_at AS expired_at,
+       e.entity_idx AS entity_idx,
+       e.statement_id AS statement_id,
+       e.description AS description,
+       e.aliases AS aliases,
+       e.name_embedding AS name_embedding,
+       e.connect_strength AS connect_strength,
+       collect(DISTINCT s.id) AS statement_ids,
+       collect(DISTINCT c.id) AS chunk_ids,
+       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
+       COALESCE(e.importance_score, 0.5) AS importance_score,
+       e.last_access_time AS last_access_time,
+       COALESCE(e.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+
 SEARCH_CHUNKS_BY_CONTENT = """
 CALL db.index.fulltext.queryNodes("chunksFulltext", $q) YIELD node AS c, score
 WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
@@ -709,7 +756,6 @@ SET r.end_user_id = e.end_user_id,
 RETURN elementId(r) AS uuid
 """
 
-
 # Entity Merge Query
 MERGE_ENTITIES = """
 MATCH (canonical:ExtractedEntity {id: $canonical_id})
@@ -829,9 +875,8 @@ neo4j_query_all = """
                 other as entity2
                           """
 
-
 '''针对当前节点下扩长的句子，实体和总结'''
-Memory_Timeline_ExtractedEntity="""
+Memory_Timeline_ExtractedEntity = """
 MATCH (n)-[r1]-(e)-[r2]-(ms)
 WHERE elementId(n) = $id
   AND (ms:ExtractedEntity OR ms:MemorySummary)
@@ -869,7 +914,7 @@ RETURN
 
 
 """
-Memory_Timeline_MemorySummary=""" 
+Memory_Timeline_MemorySummary = """ 
 MATCH (n)-[r1]-(e)-[r2]-(ms)
 WHERE elementId(n) =$id
   AND (ms:MemorySummary OR ms:ExtractedEntity)
@@ -904,7 +949,7 @@ RETURN
     }
   ) AS statement;
 """
-Memory_Timeline_Statement="""
+Memory_Timeline_Statement = """
 MATCH (n)
 WHERE elementId(n) = $id
 
@@ -947,7 +992,7 @@ RETURN
 """
 
 '''针对当前节点，主要获取更加完整的句子节点'''
-Memory_Space_Emotion_Statement="""
+Memory_Space_Emotion_Statement = """
 MATCH (n)
 WHERE elementId(n) = $id
 RETURN
@@ -957,7 +1002,7 @@ RETURN
   n.statement         AS statement;
 
 """
-Memory_Space_Emotion_MemorySummary="""
+Memory_Space_Emotion_MemorySummary = """
 MATCH (n)-[]-(e)
 WHERE elementId(n) = $id
   AND EXISTS {
@@ -970,7 +1015,7 @@ RETURN DISTINCT
   e.emotion_type      AS emotion_type,
   e.statement         AS statement;
 """
-Memory_Space_Emotion_ExtractedEntity="""
+Memory_Space_Emotion_ExtractedEntity = """
 MATCH (n)-[]-(e)
 WHERE elementId(n) = $id
   AND EXISTS {
@@ -985,18 +1030,18 @@ RETURN DISTINCT
 
 '''获取实体'''
 
-Memory_Space_User="""
+Memory_Space_User = """
 MATCH (n)-[r]->(m)
 WHERE n.end_user_id = $end_user_id  AND m.name="用户" 
 return DISTINCT elementId(m) as id
 """
-Memory_Space_Entity="""
+Memory_Space_Entity = """
 MATCH (n)-[]-(m)
 WHERE elementId(m) = $id AND  m.entity_type = "Person"
 RETURN
 DISTINCT m.name as name,m.end_user_id as end_user_id
 """
-Memory_Space_Associative="""
+Memory_Space_Associative = """
 MATCH (u)-[]-(x)-[]-(h)
 WHERE elementId(u) = $user_id
   AND elementId(h) = $id
@@ -1005,61 +1050,69 @@ RETURN DISTINCT
 """
 
 Graph_Node_query = """
-            MATCH (n:MemorySummary)
-                WHERE n.end_user_id = $end_user_id
-                RETURN
-                  elementId(n) AS id,
-                  labels(n) AS labels,
-                  properties(n) AS properties,
-                  0 AS priority
-                LIMIT $limit
+MATCH (n:MemorySummary)
+WHERE n.end_user_id = $end_user_id
+RETURN
+  elementId(n) AS id,
+  labels(n) AS labels,
+  properties(n) AS properties,
+  0 AS priority
+LIMIT $limit
                 
-                UNION ALL
+UNION ALL
 
-                    MATCH (n:Dialogue)
-                    WHERE n.end_user_id =  $end_user_id
-                    RETURN
-                      elementId(n) AS id,
-                      labels(n) AS labels,
-                      properties(n) AS properties,
-                      1 AS priority
-                    LIMIT 1
+MATCH (n:Dialogue)
+WHERE n.end_user_id =  $end_user_id
+RETURN
+  elementId(n) AS id,
+  labels(n) AS labels,
+  properties(n) AS properties,
+  1 AS priority
+LIMIT 1
 
-                UNION ALL
+UNION ALL
 
-                MATCH (n:Statement)
-                WHERE n.end_user_id =  $end_user_id
-                RETURN
-                  elementId(n) AS id,
-                  labels(n) AS labels,
-                  properties(n) AS properties,
-                  1 AS priority
-                LIMIT $limit
+MATCH (n:Statement)
+WHERE n.end_user_id =  $end_user_id
+RETURN
+  elementId(n) AS id,
+  labels(n) AS labels,
+  properties(n) AS properties,
+  1 AS priority
+LIMIT $limit
 
-                UNION ALL
+UNION ALL
 
-                MATCH (n:ExtractedEntity)
-                WHERE n.end_user_id =  $end_user_id
-                RETURN
-                  elementId(n) AS id,
-                  labels(n) AS labels,
-                  properties(n) AS properties,
-                  2 AS priority
-                LIMIT $limit
+MATCH (n:ExtractedEntity)
+WHERE n.end_user_id =  $end_user_id
+RETURN
+  elementId(n) AS id,
+  labels(n) AS labels,
+  properties(n) AS properties,
+  2 AS priority
+LIMIT $limit
 
-                UNION ALL
+UNION ALL
 
-                MATCH (n:Chunk)
-                WHERE n.end_user_id =  $end_user_id
-                RETURN
-                  elementId(n) AS id,
-                  labels(n) AS labels,
-                  properties(n) AS properties,
-                  3 AS priority
-                LIMIT $limit
+MATCH (n:Chunk)
+WHERE n.end_user_id =  $end_user_id
+RETURN
+  elementId(n) AS id,
+  labels(n) AS labels,
+  properties(n) AS properties,
+  3 AS priority
+LIMIT $limit
 
-            """
+UNION ALL
+MATCH (n:Perceptual)
+WHERE n.end_user_id = $end_user_id
+RETURN
+  elementId(n) AS id,
+  labels(n) AS labels,
+  properties(n) AS properties,
+  4 AS priority
 
+"""
 
 # ============================================================
 # Community 节点 & BELONGS_TO_COMMUNITY 边
@@ -1069,6 +1122,7 @@ Graph_Node_query = """
 
 COMMUNITY_NODE_UPSERT = """
 MERGE (c:Community {community_id: $community_id})
+ON CREATE SET c.id = $community_id
 SET c.end_user_id = $end_user_id,
     c.member_count = $member_count,
     c.updated_at = datetime()
@@ -1122,21 +1176,43 @@ RETURN e.id AS id,
        CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
+GET_ENTITY_COUNT_FOR_USER = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+RETURN count(e) AS entity_count
+"""
+
+GET_ALL_ENTITY_IDS_FOR_USER = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+RETURN e.id AS id
+"""
+
 GET_COMMUNITY_MEMBERS = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community {community_id: $community_id})
 RETURN e.id AS id, e.name AS name, e.entity_type AS entity_type,
        e.importance_score AS importance_score, e.activation_value AS activation_value,
-       e.name_embedding AS name_embedding
+       e.name_embedding AS name_embedding,
+       e.aliases AS aliases, e.description AS description,
+       e.example AS example
 ORDER BY coalesce(e.activation_value, 0) DESC
+"""
+
+GET_COMMUNITY_RELATIONSHIPS = """
+MATCH (e1:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community {community_id: $community_id})
+MATCH (e2:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c)
+MATCH (e1)-[r:EXTRACTED_RELATIONSHIP]->(e2)
+RETURN e1.name AS subject, r.predicate AS predicate, e2.name AS object
+ORDER BY e1.name, r.predicate, e2.name
+LIMIT 20
 """
 
 GET_ALL_COMMUNITY_MEMBERS_BATCH = """
 MATCH (e:ExtractedEntity {end_user_id: $end_user_id})-[:BELONGS_TO_COMMUNITY]->(c:Community)
-WHERE c.community_id IN $community_ids
 RETURN c.community_id AS community_id,
-       e.id AS id,
+       e.id AS id, e.name AS name, e.entity_type AS entity_type,
+       e.importance_score AS importance_score, e.activation_value AS activation_value,
        e.name_embedding AS name_embedding,
-       e.activation_value AS activation_value
+       e.aliases AS aliases, e.description AS description
+ORDER BY c.community_id, coalesce(e.activation_value, 0) DESC
 """
 
 CHECK_USER_HAS_COMMUNITIES = """
@@ -1153,12 +1229,58 @@ RETURN c.community_id AS community_id, cnt AS member_count
 
 UPDATE_COMMUNITY_METADATA = """
 MATCH (c:Community {community_id: $community_id, end_user_id: $end_user_id})
-SET c.name             = $name,
+SET c.id               = coalesce(c.id, $community_id),
+    c.name             = $name,
     c.summary          = $summary,
     c.core_entities    = $core_entities,
     c.summary_embedding = $summary_embedding,
     c.updated_at       = datetime()
 RETURN c.community_id AS community_id
+"""
+
+BATCH_UPDATE_COMMUNITY_METADATA = """
+UNWIND $communities AS row
+MATCH (c:Community {community_id: row.community_id, end_user_id: row.end_user_id})
+SET c.id               = coalesce(c.id, row.community_id),
+    c.name             = row.name,
+    c.summary          = row.summary,
+    c.core_entities    = row.core_entities,
+    c.summary_embedding = row.summary_embedding,
+    c.updated_at       = datetime()
+RETURN c.community_id AS community_id
+"""
+
+GET_ENTITIES_PAGE = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+OPTIONAL MATCH (e)-[:BELONGS_TO_COMMUNITY]->(c:Community)
+RETURN e.id AS id,
+       e.name AS name,
+       e.name_embedding AS name_embedding,
+       e.activation_value AS activation_value,
+       CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
+ORDER BY e.id
+SKIP $skip LIMIT $limit
+"""
+
+GET_ENTITY_NEIGHBORS_BATCH_FOR_IDS = """
+// 批量拉取指定实体列表的邻居（用于分批全量聚类）
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+WHERE e.id IN $entity_ids
+OPTIONAL MATCH (e)-[:EXTRACTED_RELATIONSHIP]-(nb1:ExtractedEntity {end_user_id: $end_user_id})
+OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(nb2:ExtractedEntity {end_user_id: $end_user_id})
+WHERE nb2.id <> e.id
+WITH e, collect(DISTINCT nb1) + collect(DISTINCT nb2) AS all_neighbors
+UNWIND all_neighbors AS nb
+WITH e, nb WHERE nb IS NOT NULL
+OPTIONAL MATCH (nb)-[:BELONGS_TO_COMMUNITY]->(c:Community)
+RETURN DISTINCT
+    e.id                AS entity_id,
+    nb.id               AS id,
+    nb.name             AS name,
+    nb.name_embedding   AS name_embedding,
+    nb.activation_value AS activation_value,
+    CASE WHEN c IS NOT NULL THEN c.community_id ELSE null END AS community_id
 """
 
 GET_ALL_ENTITY_NEIGHBORS_BATCH = """
@@ -1237,4 +1359,93 @@ WHERE c.name IS NULL OR c.name = ''
    OR c.core_entities IS NULL
    OR (c.summary_embedding IS NULL AND c.summary IS NOT NULL AND c.summary <> '(empty)')
 RETURN c.community_id AS community_id
+"""
+
+# Community keyword search: matches name or summary via fulltext index
+SEARCH_COMMUNITIES_BY_KEYWORD = """
+CALL db.index.fulltext.queryNodes("communitiesFulltext", $q) YIELD node AS c, score
+WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
+RETURN c.community_id AS id,
+       c.name AS name,
+       c.summary AS content,
+       c.core_entities AS core_entities,
+       c.member_count AS member_count,
+       c.end_user_id AS end_user_id,
+       c.updated_at AS updated_at,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+# Community 向量检索 ──────────────────────────────────────────────────
+# Community embedding-based search: cosine similarity on Community.summary_embedding
+COMMUNITY_EMBEDDING_SEARCH = """
+CALL db.index.vector.queryNodes('community_summary_embedding_index', $limit * 100, $embedding)
+YIELD node AS c, score
+WHERE c.summary_embedding IS NOT NULL
+  AND ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
+RETURN c.community_id AS id,
+       c.name AS name,
+       c.summary AS content,
+       c.core_entities AS core_entities,
+       c.member_count AS member_count,
+       c.end_user_id AS end_user_id,
+       c.updated_at AS updated_at,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+# Community 展开检索 ──────────────────────────────────────────────────
+# 命中社区后，拉取该社区所有成员实体关联的 Statement 节点（主题→细节两级检索）
+EXPAND_COMMUNITY_STATEMENTS = """
+MATCH (c:Community {community_id: $community_id})
+MATCH (e:ExtractedEntity)-[:BELONGS_TO_COMMUNITY]->(c)
+MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+WHERE s.end_user_id = $end_user_id
+RETURN s.statement AS statement,
+       s.id AS id,
+       s.end_user_id AS end_user_id,
+       s.created_at AS created_at,
+       s.valid_at AS valid_at,
+       s.invalid_at AS invalid_at,
+       COALESCE(s.activation_value, s.importance_score, 0.5) AS activation_value,
+       COALESCE(s.importance_score, 0.5) AS importance_score,
+       e.name AS source_entity,
+       c.name AS community_name
+ORDER BY COALESCE(s.activation_value, 0) DESC
+LIMIT $limit
+"""
+
+# 感知记忆节点保存
+PERCEPTUAL_NODE_SAVE = """
+UNWIND $perceptuals AS p
+MERGE (n:Perceptual {id: p.id})
+SET n += {
+    id: p.id,
+    end_user_id: p.end_user_id,
+    perceptual_type: p.perceptual_type,
+    file_path: p.file_path,
+    file_name: p.file_name,
+    file_ext: p.file_ext,
+    summary: p.summary,
+    keywords: p.keywords,
+    topic: p.topic,
+    domain: p.domain,
+    created_at: p.created_at,
+    file_type: p.file_type,
+    summary_embedding: p.summary_embedding
+}
+RETURN n.id AS uuid
+"""
+
+# 感知记忆与对话的关联边
+PERCEPTUAL_CHUNK_EDGE_SAVE = """
+UNWIND $edges AS edge
+MATCH (p:Perceptual {id: edge.perceptual_id, end_user_id: edge.end_user_id})
+MATCH (c:Chunk {id: edge.chunk_id, end_user_id: edge.end_user_id})
+MERGE (c)-[r:HAS_PERCEPTUAL]->(p)
+ON CREATE SET r.end_user_id = edge.end_user_id,
+    r.created_at = edge.created_at
+RETURN elementId(r) AS uuid
 """

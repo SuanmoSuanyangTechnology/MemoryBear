@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:28:46 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-03 14:03:44
+ * @Last Modified time: 2026-03-04 10:32:29
  */
 /**
  * Release Share Modal
@@ -10,7 +10,7 @@
  */
 
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Button, App } from 'antd';
+import { Button, App, Flex } from 'antd';
 import { ExclamationCircleFilled } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import copy from 'copy-to-clipboard'
@@ -86,13 +86,15 @@ const ReleaseShareModal = forwardRef<ReleaseShareModalRef, ReleaseShareModalProp
     >
       <>
         <div className="rb:leading-5 rb:mb-2">{t('application.shareLink')}</div>
-        <div className="rb:mb-3 rb:flex rb:items-center rb:gap-2.5 rb:justify-between">
-          <div className="rb:overflow-hidden rb:whitespace-nowrap rb:text-ellipsis rb:cursor-pointer rb:h-8 rb:p-[6px_10px] rb:bg-[#FFFFFF] rb:border rb:border-[#EBEBEB] rb:rounded-md rb:leading-5">{shareLink}</div>
+        <Flex align="center" justify="space-between" gap={10} className="rb:mb-3!">
+          <div className="rb:overflow-hidden rb:whitespace-nowrap rb:text-ellipsis rb:cursor-pointer rb:h-8 rb:p-[6px_10px] rb:bg-[#FFFFFF] rb:border rb:border-[#EBEBEB] rb:rounded-md rb:leading-5" onClick={handleCopy}>
+            {shareLink}
+          </div>
 
           <Button type="primary" loading={loading} disabled={!shareLink} onClick={handleCopy}>
             {t('common.copy')}
           </Button>
-        </div>
+        </Flex>
         <RbAlert color="orange" icon={<ExclamationCircleFilled />}>
           {t('application.shareLinkTip')}
         </RbAlert>

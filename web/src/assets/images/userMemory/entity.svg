@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="36px" height="36px" viewBox="0 0 36 36" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 5</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="记忆库-个人记忆-短期记忆" transform="translate(-424, -97)">
+            <g id="编组-6" transform="translate(12, 76)">
+                <g id="编组-5" transform="translate(412, 21)">
+                    <rect id="矩形" stroke="#EBEBEB" x="0.5" y="0.5" width="35" height="35" rx="12"></rect>
+                    <g id="编组-15" transform="translate(10, 8)" stroke="#171719" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2">
+                        <polyline id="路径" points="11.0162937 4.13111013 16 6 8 9 0 6 5.01480335 4.11944874"></polyline>
+                        <polyline id="路径" points="6 2 8 0 10 2"></polyline>
+                        <polygon id="矩形" points="8 9 16 6 16 17 8 20"></polygon>
+                        <polygon id="矩形" transform="translate(4, 13) scale(-1, 1) translate(-4, -13)" points="0 9 8 6 8 17 0 20"></polygon>
+                        <line x1="8.00108238" y1="0.0117655085" x2="8.00108238" y2="6.00434021" id="路径-58"></line>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

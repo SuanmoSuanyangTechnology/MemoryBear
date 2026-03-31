@@ -24,7 +24,7 @@ interface CardProps {
 
 const Card: FC<CardProps> = ({ title, children, theme = 'default', className }) => {
   return (
-    <div className={clsx('rb:h-full rb:border rb:rounded-xl rb:p-4 rb:border-[#DFE4ED]', {
+    <div className={clsx('rb:h-full rb:rounded-xl rb:p-4 rb-border', {
       'rb:bg-[#FBFDFF]': theme === 'default',
       'rb:bg-[linear-gradient(180deg,#F1F9FE_0%,#FBFCFF_100%)]': theme === 'custom',
     }, className)}>

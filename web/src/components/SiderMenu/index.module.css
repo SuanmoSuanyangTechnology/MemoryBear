@@ -1,10 +1,10 @@
 .sider {
-  border-right: 1px solid #EAECEE;
+  /* border-right: 1px solid #EAECEE; */
   max-height: 100vh;
 }
 .title {
   height: 64px;
-  padding: 24px 12px 12px 12px;
+  padding: 24px 10px 12px 12px;
   font-family: Gilroy, Gilroy;
   font-weight: 800;
   font-size: 16px;
@@ -13,7 +13,7 @@
   text-align: left;
   font-style: normal;
   display: flex;
-  border-bottom: 1px solid #EAECEE;
+  /* border-bottom: 1px solid #EAECEE; */
   justify-content: space-between;
   gap: 12px;
 }
@@ -27,8 +27,12 @@
   height: 24px;
   margin-right: 8px;
 }
-.menuIcon {
-  cursor: pointer;
-  width: 28px;
-  height: 28px;
+.sider :global(.ant-menu .ant-menu-item-group-title) {
+  padding-left: 20px;
+  padding-top: 10px;
+  padding-bottom: 4px;
+  font-weight: 500;
+}
+.sider :global(.ant-menu .ant-menu-item-divider) {
+  margin: 20px 20px 10px 20px;
 }

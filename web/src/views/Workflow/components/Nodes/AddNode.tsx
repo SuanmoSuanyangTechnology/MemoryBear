@@ -1,11 +1,11 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:31:30 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-09 18:31:30 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-06 11:43:58
  */
 import { useState } from 'react';
-import { Popover } from 'antd';
+import { Popover, Flex } from 'antd';
 import clsx from 'clsx';
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import { nodeLibrary, graphNodeLibrary, edgeAttrs, nodeWidth } from '../../constant';
@@ -20,13 +20,13 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
   const handleNodeSelect = (selectedNodeType: any) => {
     const parentBBox = node.getBBox();
     const cycleId = data.cycle;
-    const horizontalSpacing = 20;
+    const horizontalSpacing = 0;
 
     const id = `${selectedNodeType.type.replace(/-/g, '_') }_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     const newNode = graph.addNode({
       ...(graphNodeLibrary[selectedNodeType.type] || graphNodeLibrary.default),
       x: parentBBox.x + horizontalSpacing,
-      y: parentBBox.y,
+      y: parentBBox.y - 12,
       id,
       data: {
         id,
@@ -91,11 +91,19 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
             };
           }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
           
-          const padding = 20;
+          const padding = 50;
           const newWidth = Math.max(nodeWidth, bounds.maxX - bounds.minX + padding * 2);
           const newHeight = Math.max(120, bounds.maxY - bounds.minY + padding * 2);
           
           loopNode.prop('size', { width: newWidth, height: newHeight });
+          
+          // Update right port x position
+          const ports = loopNode.getPorts();
+          ports.forEach(port => {
+            if (port.group === 'right' && port.args) {
+              loopNode.portProp(port.id!, 'args/x', newWidth);
+            }
+          });
         }
       };
       
@@ -161,16 +169,18 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
       onOpenChange={setOpen}
       placement="bottomLeft"
     >
-      <div 
-        className={clsx('rb:group rb:relative rb:h-11 rb:w-22 rb:border rb:rounded-xl rb:flex rb:items-center rb:justify-center rb:text-[12px] rb:p-1 rb:box-border rb:cursor-pointer', {
-          'rb:border-orange-500 rb:border-[3px] rb:bg-white rb:text-gray-700': data.isSelected,
-          'rb:border-[#d1d5db] rb:bg-white rb:text-[#374151]': !data.isSelected
+      <Flex
+        align="center"
+        justify="center"
+        gap={4}
+        className={clsx('rb:text-[#212332] rb:font-medium rb:text-[12px] rb:cursor-pointer rb:group rb:relative rb:h-full rb:w-full rb:border rb:rounded-lg rb:bg-[#FCFCFD] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)] rb:border-[#DFE4ED] rb:flex rb:items-center rb:justify-center', {
+          'rb:border-orange-500 rb:border-[3px] rb:bg-[#FCFCFD] rb:text-[#475467]': data.isSelected,
+          'rb:border-[#d1d5db] rb:bg-[#FCFCFD] rb:text-[#374151]': !data.isSelected
         })}
       >
-        <span className="rb:overflow-hidden rb:whitespace-nowrap rb:text-ellipsis">
-          {data.icon} {data.label}
-        </span>
-      </div>
+        <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/workflow/node_plus.png')]"></div>
+        {data.label}
+      </Flex>
     </Popover>
   );
 };

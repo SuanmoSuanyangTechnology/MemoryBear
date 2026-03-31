@@ -334,13 +334,22 @@ async def Input_Summary(state: ReadState) -> ReadState:
         "end_user_id": end_user_id,
         "question": data,
         "return_raw_results": True,
-        "include": ["summaries"]  # Only search summary nodes for faster performance
+        "include": ["summaries", "communities"]  # MemorySummary 和 Community 同为高维度概括节点
     }
 
     try:
         if storage_type != "rag":
-            retrieve_info, question, raw_results = await SearchService().execute_hybrid_search(**search_params,
-                                                                                               memory_config=memory_config)
+            retrieve_info, question, raw_results = await SearchService().execute_hybrid_search(
+                **search_params,
+                memory_config=memory_config,
+                expand_communities=False,  # 路径 "2" 只需要 community 的 summary 文本，不展开到 Statement
+            )
+            # 调试：打印 community 检索结果数量
+            if raw_results and isinstance(raw_results, dict):
+                reranked = raw_results.get('reranked_results', {})
+                community_hits = reranked.get('communities', [])
+                logger.debug(f"[Input_Summary] community 命中数: {len(community_hits)}, "
+                             f"summary 命中数: {len(reranked.get('summaries', []))}")
         else:
             retrieval_knowledge, retrieve_info, question, raw_results = await rag_knowledge(state, data)
     except Exception as e:

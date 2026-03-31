@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:28:07 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:28:07 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-25 11:28:02
  */
 /**
  * Model Configuration Modal
@@ -11,13 +11,14 @@
  */
 
 import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
-import { Form, Select } from 'antd';
+import { Form, type SelectProps } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { ModelConfig, ModelConfigModalRef, Config, Source } from '../types'
-import type { ModelListItem } from '@/views/ModelManagement/types'
+import type { Model } from '@/views/ModelManagement/types'
 import RbModal from '@/components/RbModal'
 import RbSlider from '@/components/RbSlider'
+import ModelSelect from '@/components/ModelSelect'
 
 const FormItem = Form.Item;
 
@@ -25,8 +26,6 @@ const FormItem = Form.Item;
  * Component props
  */
 interface ModelConfigModalProps {
-  /** List of available models */
-  modelList?: ModelListItem[];
   /** Callback to update model configuration */
   refresh: (values: ModelConfig, type: Source) => void;
   /** Application configuration data */
@@ -51,7 +50,6 @@ const configFields = [
 const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(({
   refresh,
   data,
-  modelList = []
 }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
@@ -102,9 +100,11 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
       });
   }
   /** Handle model selection change */
-  const handleChange = (_value: string, option: ModelListItem | ModelListItem[] | undefined) => {
+  const handleChange: SelectProps['onChange'] = (_value, option) => {
     if (source === 'chat') {
-      form.setFieldValue('label', (option as ModelListItem).name)
+      form.setFieldValue('label', (option as Model).name)
+    } else {
+      form.setFieldValue('capability', (option as Model).capability)
     }
   }
 
@@ -137,16 +137,15 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
           rules={[{ required: source !== 'multi_agent', message: t('common.pleaseSelect') }]}
           hidden={source === 'multi_agent'}
         >
-          {source !== 'multi_agent' && <Select
-            placeholder={t('common.pleaseSelect')}
-            fieldNames={{
-              label: 'name',
-              value: 'id',
-            }}
-            options={modelList}
-            onChange={handleChange}
-          />}
+          {source !== 'multi_agent' &&
+            <ModelSelect
+              params={{type: 'llm,chat'}}
+              placeholder={t('common.pleaseSelect')}
+              onChange={handleChange}
+            />
+          }
         </FormItem>
+        {source === 'model' && <FormItem name="capability" hidden />}
         {source === 'chat' && <FormItem name="label" hidden />}
 
         <div className="rb:text-[14px] rb:font-medium rb:text-[#5B6167] rb:mb-4">{t('application.parameterConfig')}</div>

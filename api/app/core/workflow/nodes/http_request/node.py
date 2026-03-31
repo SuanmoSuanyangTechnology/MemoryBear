@@ -16,7 +16,7 @@ from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.enums import HttpRequestMethod, HttpErrorHandle, HttpAuthType, HttpContentType
 from app.core.workflow.nodes.http_request.config import HttpRequestNodeConfig, HttpRequestNodeOutput
-from app.core.workflow.utils.file_processer import mime_to_file_type
+from app.core.workflow.utils.file_processor import mime_to_file_type
 from app.core.workflow.variable.base_variable import VariableType, FileObject
 from app.core.workflow.variable.variable_objects import FileVariable, ArrayVariable
 from app.schemas import FileType, TransferMethod
@@ -157,8 +157,8 @@ class HttpRequestNode(BaseNode):
     or a branch identifier string when error branching is enabled.
     """
 
-    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
-        super().__init__(node_config, workflow_config)
+    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
+        super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: HttpRequestNodeConfig | None = None
 
     def _output_types(self) -> dict[str, VariableType]:

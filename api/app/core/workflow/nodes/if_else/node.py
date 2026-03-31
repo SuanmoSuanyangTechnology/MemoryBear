@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 class IfElseNode(BaseNode):
-    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
-        super().__init__(node_config, workflow_config)
+    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
+        super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: IfElseNodeConfig | None = None
 
     def _output_types(self) -> dict[str, VariableType]:
@@ -31,13 +31,13 @@ class IfElseNode(BaseNode):
                 expressions.append({
                     "left": self.get_variable(expression.left, variable_pool, strict=False),
                     "right": expression.right
-                    if expression.input_type == ValueInputType.CONSTANT
+                    if expression.input_type == ValueInputType.CONSTANT or expression.right is None
                     else self.get_variable(expression.right, variable_pool, strict=False),
-                    "operator": expression.operator,
+                    "operator": str(expression.operator),
                 })
             result.append({
                 "expressions": expressions,
-                "logical_operator": case.logical_operator,
+                "logical_operator": str(case.logical_operator),
             })
         return {
             "cases": result

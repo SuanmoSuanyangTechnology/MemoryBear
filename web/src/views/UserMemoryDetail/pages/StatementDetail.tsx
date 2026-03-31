@@ -2,10 +2,10 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-19 16:54:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 16:28:00
+ * @Last Modified time: 2026-03-27 11:35:37
  */
 import { forwardRef, useImperativeHandle, useRef } from 'react'
-import { Row, Col, Space } from 'antd';
+import { Row, Col } from 'antd';
 import { useParams } from 'react-router-dom'
 
 import WordCloud from '../components/WordCloud'
@@ -46,15 +46,21 @@ const StatementDetail = forwardRef<{ handleRefresh: () => void },{ refresh: () =
     handleRefresh
   }));
   return (
-    <Row gutter={[16, 16]}>
-      <Col span={12}>
-        <Space size={16} direction="vertical" className="rb:w-full">
-          <WordCloud />
-          <EmotionTags />
-          <Health />
-        </Space>
+    <Row gutter={[12, 12]} className="rb:h-full!">
+      <Col span={12} className="rb:h-full!">
+        <Row gutter={[12, 12]}>
+          <Col span={24}>
+            <WordCloud />
+          </Col>
+          <Col span={12}>
+            <EmotionTags />
+          </Col>
+          <Col span={12}>
+            <Health />
+          </Col>
+        </Row>
       </Col>
-      <Col span={12}>
+      <Col span={12} className="rb:h-full!">
         <Suggestions ref={suggestionsRef} refresh={refresh} />
       </Col>
     </Row>

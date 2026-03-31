@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 6</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="应用管理-工作流-配置-大语言模型" transform="translate(-30, -1080)">
+            <g id="节点名称" transform="translate(10, 74)">
+                <g id="节点" transform="translate(0, 42)">
+                    <g id="流程控制备份" transform="translate(12, 793)">
+                        <g id="4" transform="translate(0, 163)">
+                            <g id="编组-6" transform="translate(8, 8)">
+                                <rect id="矩形" fill="#155EEF" x="0" y="0" width="24" height="24" rx="8"></rect>
+                                <g id="交互" transform="translate(2.4, 2.4)" stroke="#FFFFFF" stroke-width="1.152">
+                                    <g id="编组-11" transform="translate(3, 3)">
+                                        <rect id="矩形" x="0.576" y="0.576" width="12.048" height="12.048" rx="3.072"></rect>
+                                        <g id="编组-8" transform="translate(3.3, 2.64)" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M5.94,1.32 L1.536,1.32 C0.687690624,1.32 2.22044605e-16,2.00769062 4.4408921e-16,2.856 L0,3.3 L0,3.3" id="路径-4"></path>
+                                            <polyline id="路径-6" points="5.28 0 6.6 1.32 5.28 2.64"></polyline>
+                                        </g>
+                                        <g id="编组-8" transform="translate(6.6, 8.91) scale(-1, -1) translate(-6.6, -8.91)translate(3.3, 7.26)" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M5.94,1.32 L1.536,1.32 C0.687690624,1.32 2.22044605e-16,2.00769062 4.4408921e-16,2.856 L0,3.3 L0,3.3" id="路径-4"></path>
+                                            <polyline id="路径-6" points="5.28 0 6.6 1.32 5.28 2.64"></polyline>
+                                        </g>
+                                    </g>
+                                </g>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

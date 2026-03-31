@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:14 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:50:14 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-25 12:19:24
  */
 /**
  * Model Square View
@@ -10,17 +10,17 @@
  * Allows adding models and viewing details
  */
 
-import { useRef, useState, useEffect, forwardRef, useImperativeHandle } from 'react';
-import { Button, Space, App, Divider, Flex, Tooltip } from 'antd'
+import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
+import { Button, Space, App, Flex, Tooltip } from 'antd'
 import { UsergroupAddOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import clsx from 'clsx';
 
-import type { ModelPlaza, ModelPlazaItem, ModelSquareDetailRef, BaseRef } from './types'
-import RbCard from '@/components/RbCard/Card'
+import type { ModelPlaza, ModelPlazaItem, BaseRef } from './types'
+import RbCard from '@/components/RbCard'
 import { getModelPlaza, addModelPlaza } from '@/api/models'
 import PageEmpty from '@/components/Empty/PageEmpty';
 import Tag from '@/components/Tag';
-import ModelSquareDetail from './components/ModelSquareDetail'
 import { getLogoUrl } from './utils'
 
 /**
@@ -29,7 +29,6 @@ import { getLogoUrl } from './utils'
 const ModelSquare = forwardRef <BaseRef, { query: any; }>(({ query }, ref) => {
   const { t } = useTranslation();
   const { message } = App.useApp()
-  const modelSquareDetailRef = useRef<ModelSquareDetailRef>(null)
   const [list, setList] = useState<ModelPlaza[]>([])
   useEffect(() => {
     getList()
@@ -38,14 +37,14 @@ const ModelSquare = forwardRef <BaseRef, { query: any; }>(({ query }, ref) => {
   const getList = () => {
     getModelPlaza(query)
       .then(res => {
-        setList((res as ModelPlaza[]) || [])
+        const response = res as ModelPlaza[]
+        setList(response || [])
+        if (!activeProvider) {
+          setActiveProvider(response[0]?.provider || null)
+        }
       })
   }
 
-  /** Open model detail drawer */
-  const handleMore = (vo: ModelPlaza) => {
-    modelSquareDetailRef.current?.handleOpen(vo)
-  }
   /** Add model to workspace */
   const handleAdd = (item: ModelPlazaItem) => {
     addModelPlaza(item.id)
@@ -59,61 +58,86 @@ const ModelSquare = forwardRef <BaseRef, { query: any; }>(({ query }, ref) => {
   useImperativeHandle(ref, () => ({
     getList,
   }));
+
+  const [activeProvider, setActiveProvider] = useState<string | null>(null)
   return (
     <>
       {list.length === 0
         ? <PageEmpty />
-        : list.map(vo => (
-          <div key={vo.provider}>
-            <div className="rb:flex rb:justify-between rb:items-center rb:bg-[rgba(21,94,239,0.12)] rb:px-4 rb:py-2.5 rb:leading-5 rb:mb-4 rb:mt-6 rb:rounded-md">
-              <div className="rb:font-medium">{t(`modelNew.${vo.provider}`)}</div>
-              <Button type="link" onClick={() => handleMore(vo)}>{t('modelNew.viewAll')}({t(`modelNew.modelCount`, { count: vo.models.length })})&gt;</Button>
-            </div>
-
-            <div className="rb:grid rb:grid-cols-3 rb:gap-4">
-              {vo.models.slice(0, 6).map(item => (
-                <RbCard
-                  key={item.id}
-                  title={item.name}
-                  subTitle={<Space size={8}>
-                    <Tag className="rb:mt-1">{t(`modelNew.${item.type}`)}</Tag>
-                    {item.is_official && <Tag color="success" className="rb:mt-1">{t(`modelNew.official`)}</Tag>}
-                  </Space>}
-                  avatarUrl={getLogoUrl(item.logo)}
-                  avatar={
-                    <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
-                      {item.name[0]}
-                    </div>
-                  }
-                  bodyClassName="rb:relative rb:pb-[80px]! rb:h-[calc(100%-64px)]!"
-                >
-                  <Tooltip title={item.description}>
-                    <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:font-regular rb:wrap-break-word rb:line-clamp-2 rb:mt-3">{item.description}</div>
-                  </Tooltip>
-                  <Flex gap={8} wrap className="rb:mt-3!">{item.tags.map((tag, tagIndex) => <Tag key={tagIndex}>{tag}</Tag>)}</Flex>
-                  <div className="rb:absolute rb:bottom-4 rb:left-6 rb:right-6">
-                    <Divider size="middle" />
-                    <Flex justify="space-between">
-                      <Space size={8}><UsergroupAddOutlined /> {item.add_count}</Space>
-                      <Space>
-                        {item.is_added
-                          ? <Button type="primary" disabled>{t('modelNew.added')}</Button>
-                          : <Button type="primary" ghost disabled={item.is_deprecated} onClick={() => handleAdd(item)}>{item.is_deprecated ? t('modelNew.deprecated') : `+ ${t('common.add')}`}</Button>
-                        }
-                      </Space>
+        : <>
+          <Space size={8} className="rb:mb-3!">
+            {list.map(vo => (
+              <div
+                key={vo.provider}
+                className={clsx('rb:border rb:border-[#171719] rb:rounded-full rb:px-2 rb:py-1 rb:cursor-pointer', {
+                  'rb:text-white rb:bg-[#171719]': activeProvider === vo.provider,
+                  'rb:text-[#171719]': activeProvider === vo.provider,
+                })}
+                onClick={() => setActiveProvider(vo.provider)}
+              >{String(vo.provider).charAt(0).toUpperCase() + String(vo.provider).slice(1)}</div>
+            ))}
+          </Space>
+          {list.filter(vo => vo.provider === activeProvider).map(vo => (
+            <div key={vo.provider} className="rb:max-h-[calc(100%-50px)] rb:overflow-y-auto">
+              <div className="rb:grid rb:grid-cols-3 rb:gap-4">
+                {vo.models.map(item => (
+                  <RbCard
+                    key={item.id}
+                    avatarUrl={getLogoUrl(item.logo)}
+                    avatarText={item.name[0]}
+                    title={
+                      <Flex justify="space-between" gap={16}>
+                        <Flex vertical gap={6}>
+                          <Tooltip title={item.name}>
+                            <div className="rb:wrap-break-word rb:line-clamp-1">{item.name}</div>
+                          </Tooltip>
+                          <Space size={8} className="rb:mt-1!">
+                            <Tag>{t(`modelNew.${item.type}`)}</Tag>
+                            {item.is_official && <Tag color="success">{t(`modelNew.official`)}</Tag>}
+                          </Space>
+                        </Flex>
+                        <Button
+                          size="small"
+                          disabled={item.is_added || item.is_deprecated}
+                          onClick={() => handleAdd(item)}
+                        >{item.is_deprecated ? t('modelNew.deprecated') : '+'}</Button>
                     </Flex>
-                  </div>
-                </RbCard>
-              ))}
-            </div>
-          </div>
-        ))
-      }
+                    }
+                    isNeedTooltip={false}
+                    footer={<Flex justify="space-between" align="center" className="rb:text-[#5B6167] rb:text-[12px]">
+                      @{String(item.provider).charAt(0).toUpperCase() + String(item.provider).slice(1)}
+                      <Space size={4}><UsergroupAddOutlined /> {item.add_count}</Space>
+                    </Flex>}
+                  >
+                    <Tooltip title={item.description}>
+                      <div className="rb:h-10 rb:leading-5 rb:wrap-break-word rb:line-clamp-2">{item.description}</div>
+                    </Tooltip>
 
-      <ModelSquareDetail
-        ref={modelSquareDetailRef}
-        refresh={getList}
-      />
+                    <Flex gap={8} wrap align="center" className="rb:mt-2!">
+                      <Flex gap={6}>
+                        {item.tags?.slice(0, 2).map((type, i) => (
+                          <div key={i} className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">{type}</div>
+                        ))}
+                      </Flex>
+                      {item.tags.length > 2 && (
+                        <Tooltip
+                          title={<Flex wrap gap={6}>{item.tags?.slice(2, item.tags.length).map((type, i) => (
+                            <div key={i} className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5 rb:text-[#171719]">{type}</div>
+                          ))}</Flex>}
+                          color="white"
+                          placement="bottom"
+                        >
+                          <div className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">+{item.tags.length - 2}</div>
+                        </Tooltip>
+                      )}
+                    </Flex>
+                  </RbCard>
+                ))}
+              </div>
+            </div>
+          ))}
+        </>
+      }
     </>
   )
 })

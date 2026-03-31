@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:51:08 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-25 15:44:54
+ * @Last Modified time: 2026-03-26 14:53:41
  */
 /**
  * User Management Page
@@ -10,7 +10,7 @@
  */
 
 import React, { useRef } from 'react';
-import { Button, Space, App } from 'antd';
+import { Button, App, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
 
@@ -63,33 +63,38 @@ const UserManagement: React.FC = () => {
   };
 
   /** Table column configuration */
-  const columns: ColumnsType = [
+  const columns: ColumnsType<User> = [
     {
       title: t('user.userId'),
       dataIndex: 'id',
       key: 'id',
-      fixed: 'left',
+      width: 190,
+      className: 'rb:text-[#212332]'
     },
     {
-      title: <>{t('user.username')}<div className="rb:text-[#5B6167] rb:text-[12px] rb:font-medium">({t(`user.subUsername`)})</div></>,
+      title: <>{t('user.username')}<div>({t(`user.subUsername`)})</div></>,
       dataIndex: 'email',
       key: 'email',
+      width: 210,
     },
     {
       title: t('user.displayName'),
       dataIndex: 'username',
       key: 'username',
+      width: 130,
     },
     {
       title: t('user.role'),
       dataIndex: 'is_superuser',
       key: 'is_superuser',
+      width: 70,
       render: (isSuperuser: boolean) => isSuperuser ? t('user.superuser') : t('user.normalUser'),
     },
     {
       title: t('user.status'),
       dataIndex: 'is_active',
       key: 'is_active',
+      width: 80,
       render: (isActive: boolean) => (
         <StatusTag 
           text={isActive ? t('user.enabled') : t('user.disabled')}
@@ -101,20 +106,22 @@ const UserManagement: React.FC = () => {
       title: t('user.createTime'),
       dataIndex: 'created_at',
       key: 'created_at',
+      width: 110,
       render: (createdAt: string) => formatDateTime(createdAt, 'YYYY-MM-DD HH:mm:ss'),
     },
     {
       title: t('user.lastLoginTime'),
       dataIndex: 'last_login_at',
       key: 'last_login_at',
+      width: 110,
       render: (lastLoginAt: string) => lastLoginAt ? formatDateTime(lastLoginAt, 'YYYY-MM-DD HH:mm:ss') : '-',
     },
     {
       title: t('common.operation'),
       key: 'action',
-      fixed: 'right',
+      width: 137,
       render: (_, record) => (
-        <Space size="large">
+        <Flex vertical justify="start" align="start">
           {record.is_active &&
             <Button
               type="link"
@@ -129,20 +136,21 @@ const UserManagement: React.FC = () => {
           >
             {t(`user.${record.is_active ? 'disabledOpera' : 'enabledOpera'}`)}
           </Button>
-        </Space>
+        </Flex>
       ),
     },
   ];
 
   return (
-    <div className="rb:h-[calc(100vh-80px)] rb:overflow-hidden">
-      <div className="rb:flex rb:justify-end rb:mb-3">
+    <div className="rb:h-full rb:overflow-hidden rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
+      <Flex justify="space-between" align="center" className="rb:px-1! rb:mb-3!">
+        <div className="rb:gont-[MiSans-Bold] rb:font-bold rb:text-[#212332] rb:leading-5">{t('user.userList')}</div>
         <Button type="primary" onClick={handleCreate}>
-          {t('user.createUser')}
+          + {t('user.createUser')}
         </Button>
-      </div>
+      </Flex>
 
-      <Table
+      <Table<User>
         ref={tableRef}
         apiUrl={getUserListUrl}
         apiParams={{
@@ -151,6 +159,7 @@ const UserManagement: React.FC = () => {
         columns={columns}
         rowKey="id"
         isScroll={true}
+        scrollY="calc(100vh - 248px)"
       />
 
       <CreateModal

@@ -94,29 +94,38 @@ class HomePageService:
     @staticmethod
     def load_version_introduction(version: str) -> Dict[str, Any]:
         """
-        从 JSON 文件加载对应版本的介绍
+        加载对应版本的介绍（优先从数据库读取，fallback 到 JSON 文件）
         :param version: 系统版本号（如 "0.2.0"）
         :return: 对应版本的详细介绍
         """
-        # 2. 定义 JSON 文件路径（简化路径处理，保留绝对路径调试特性）
+        from copy import deepcopy
+        from app.db import SessionLocal
+        from app.repositories.home_page_repository import HomePageRepository
+        
+        result = deepcopy(HomePageService.DEFAULT_RETURN_DATA)
+        
+        try:
+            db = SessionLocal()
+            try:
+                db_result = HomePageRepository.get_version_introduction(db, version)
+                if db_result:
+                    return db_result
+            finally:
+                db.close()
+        except Exception as e:
+            pass
+        
         json_abs_path = Path(__file__).parent.parent / "version_info.json"
         json_abs_path = json_abs_path.resolve()
 
-        # 3. 初始化返回结果（深拷贝默认模板，避免修改原常量）
-        from copy import deepcopy
-        result = deepcopy(HomePageService.DEFAULT_RETURN_DATA)
-
         try:
-            # 4. 简化文件存在性判断（合并逻辑，减少分支）
             if not json_abs_path.exists():
                 result["message"] = f"版本介绍文件不存在：{json_abs_path}"
                 return result
 
-            # 5. 读取并解析 JSON 文件（简化文件操作流程）
             with open(json_abs_path, "r", encoding="utf-8") as f:
                 changelogs = json.load(f)
 
-            # 6. 简化版本匹配逻辑，直接返回结果或更新提示信息
             if version in changelogs:
                 return changelogs[version]
             result["message"] = f"暂未查询到 {version} 版本的详细介绍"

@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:22 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:27:22 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-11 11:52:32
  */
 /**
  * API Key Configuration Modal
@@ -10,7 +10,7 @@
  */
 
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Slider } from 'antd';
+import { Form, Slider, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type {  ApiKeyConfigModalRef } from '../types'
@@ -111,10 +111,10 @@ interface ApiKeyConfigModalProps {
                 step={1}
               />
             </Form.Item>
-            <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5">
+            <Flex align="center" justify="space-between" className="rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5!">
               1
-              <span>{t('application.currentValue')}: {values?.rate_limit}{t('application.qpsLimitUnit')}</span>
-            </div>
+              <span>{t('application.currentValue')}: {values?.rate_limit} {t('application.qpsLimitUnit')}</span>
+            </Flex>
           </div>
         </>
         {/* Daily usage limit */}
@@ -136,10 +136,10 @@ interface ApiKeyConfigModalProps {
                 step={100}
               />
             </Form.Item>
-            <div className="rb:flex rb:items-center rb:justify-between rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5">
+            <Flex align="center" justify="space-between" className="rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5!">
               100
-              <span>{t('application.currentValue')}: {values?.daily_request_limit}{t('application.dailyUsageLimitUnit')}</span>
-            </div>
+              <span>{t('application.currentValue')}: {values?.daily_request_limit} {t('application.dailyUsageLimitUnit')}</span>
+            </Flex>
           </div>
         </>
       </Form>

@@ -1,17 +1,18 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-05 10:42:56 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-05 10:42:56 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-26 10:18:56
  */
 import { useEffect, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Space, Button, Switch, Form, Flex } from 'antd'
+import { Space, Switch, Form, Flex } from 'antd'
+import clsx from 'clsx'
 
 import type {
   SkillConfigForm,
 } from './types'
-import Card from '../Card'
+import RbCard from '@/components/RbCard/Card'
 import SkillsItem from './SkillsItem'
 import { getSkillList } from '@/api/skill'
 import type { Skill } from '@/views/Skills/types'
@@ -94,15 +95,15 @@ const SkillList: FC<{value?: SkillConfigForm; onChange?: (config: SkillConfigFor
 
 
   return (
-    <Card
+    <RbCard
       title={<>
-        {t('application.skill')}
-        <span className="rb:font-regular rb:text-[12px] rb:text-[#5B6167]"> ({t('application.skillTitle')})</span>
+        <div className="rb:font-[MiSans-Bold] rb:font-bold">{t('application.skill')}</div>
+        <div className="rb:font-regular! rb:text-[12px] rb:text-[#5B6167]"> {t('application.skillTitle')}</div>
       </>}
       extra={
         <Space>
           {/* Help button for skill configuration guidance */}
-          <Button style={{ padding: '0 8px', height: '24px' }}>{t('application.skillHelp')}</Button>
+          {/* <Button style={{ padding: '0 8px', height: '24px' }}>{t('application.skillHelp')}</Button> */}
           {/* Toggle switch to enable/disable skill functionality */}
           <Form.Item 
             valuePropName="checked"
@@ -113,9 +114,28 @@ const SkillList: FC<{value?: SkillConfigForm; onChange?: (config: SkillConfigFor
           </Form.Item>
         </Space>
       }
+      headerType="borderless"
+      headerClassName={clsx("rb:py-[16px]! rb:leading-[22px]! rb:font-regular", {
+        'rb:h-[76px]! rb:py-[16px]!': !skillConfig?.enabled,
+        'rb:h-[68px]! rb:pb-2!': skillConfig?.enabled,
+      })}
     >
       {/* Render skill configuration UI only when enabled */}
-      {skillConfig?.enabled && <Flex vertical gap={12}>
+      {skillConfig?.enabled && <Flex vertical gap={8} className="rb:bg-[#FAFAFA] rb:rounded-xl rb:pt-2.5! rb:pb-3! rb:px-3!">
+        <div className="rb:text-[#212332] rb:font-medium rb:leading-4.5 rb:px-1">{t('application.executeProcessPreview')}</div>
+        <Flex align="center" justify="space-between" gap={14} className="rb:text-[12px] rb:bg-[#FFFFFF]! rb:rounded-lg rb-border rb:py-2.5! rb:pl-4! rb:pr-3.25! rb:mb-2!">
+          {/* Render each step in the process flow with numbered badges */}
+          {processObj.map((key, index) => (<>
+            <Flex align="center" gap={8}>
+              {/* Step number badge */}
+              <Flex align="center" justify="center" className="rb:size-4 rb:rounded-full rb:bg-[#171719] rb:text-white rb:font-medium">{index + 1}</Flex>
+              {/* Step label */}
+              <span className="rb:inline-block rb:max-w-16">{t(`application.${key}`)}</span>
+            </Flex>
+            {/* Arrow separator between steps (except after last step) */}
+            {index !== processObj.length - 1 && <div className="rb:w-10 rb:h-4.5 rb:bg-cover rb:bg-[url('@/assets/images/application/arrow_right.svg')]"></div>}
+          </>))}
+        </Flex>
         {/* Dynamic skill binding configuration section */}
         <Form.Item noStyle>
           <SkillsItem
@@ -125,27 +145,8 @@ const SkillList: FC<{value?: SkillConfigForm; onChange?: (config: SkillConfigFor
             emptyTitle={t('application.dynamicBindingSkill_empty')}
           />
         </Form.Item>
-        {/* Execution process preview card showing workflow steps */}
-        <Card
-          title={t('application.executeProcessPreview')}
-          variant="borderL"
-        >
-          <Flex align="center" gap={8} className="rb:text-[12px]">
-            {/* Render each step in the process flow with numbered badges */}
-            {processObj.map((key, index) => (<>
-              <Flex align="center" gap={8} className="rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:bg-white rb:p-2!">
-                {/* Step number badge */}
-                <div className="rb:size-4 rb:rounded-full rb:bg-[#155EEF] rb:text-white rb:flex rb:items-center rb:justify-center rb:font-medium">{index + 1}</div>
-                {/* Step label */}
-                <span>{t(`application.${key}`)}</span>
-              </Flex>
-              {/* Arrow separator between steps (except after last step) */}
-              {index !== processObj.length - 1 && <div className="rb:text-[#8C9196]">→</div>}
-            </>))}
-          </Flex>
-        </Card>
       </Flex>}
-    </Card>
+    </RbCard>
   )
 }
 export default SkillList

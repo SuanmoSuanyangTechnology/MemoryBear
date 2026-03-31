@@ -148,3 +148,10 @@ export interface MarketQuery {
   pagesize?: number;
   keywords?: string;
 }
+export interface McpRef {
+  handleEdit: (data?: ToolItem) => void;
+  getData: () => void;
+}
+export interface CustomRef {
+  handleEdit: (data?: ToolItem) => void;
+}

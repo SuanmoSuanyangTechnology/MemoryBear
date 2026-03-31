@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:33:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 13:53:53
+ * @Last Modified time: 2026-03-26 14:56:00
  */
 /**
  * Memory Management Page
@@ -11,10 +11,9 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { List, Button, Space, App, Tooltip } from 'antd';
+import { Button, Space, App, Flex, Row, Col } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import clsx from 'clsx'
 
 import MemoryForm from './components/MemoryForm';
 import type { Memory, MemoryFormRef } from '@/views/MemoryManagement/types'
@@ -22,7 +21,6 @@ import RbCard from '@/components/RbCard/Card'
 import { getMemoryConfigList, deleteMemoryConfig } from '@/api/memory'
 import BodyWrapper from '@/components/Empty/BodyWrapper'
 import { formatDateTime } from '@/utils/format';
-import RbAlert from '@/components/RbAlert'
 
 const MemoryManagement: React.FC = () => {
   const { t } = useTranslation();
@@ -102,68 +100,72 @@ const MemoryManagement: React.FC = () => {
       </div>
       
       <BodyWrapper loading={loading} empty={data.length === 0}>
-        <List
-          grid={{ gutter: 16, column: 2 }}
-          loading={loading}
-          dataSource={data}
-          renderItem={(item) => (
-            <List.Item key={item.config_id}>
-              <RbCard 
+        <Row
+          gutter={[12, 12]}
+          className="rb:max-h-[calc(100%-48px)] rb:overflow-y-auto"
+        >
+          {data.map((item) => (
+            <Col key={item.config_id} span={12}>
+              <RbCard
                 title={item.config_name}
-                className="rb:relative"
+                className="rb:relative rb:hover:shadow-[0px_2px_8px_0px_rgba(23,23,25,0.16)]!"
+                headerType="borderless"
+                headerClassName="rb:h-[46px]"
+                bodyClassName="rb:p-3! rb:pt-0!"
               >
                 {item.is_system_default &&
-                  <div className="rb:absolute rb:-right-px rb:-top-px rb:bg-[#FF5D34] rb:rounded-[0px_7px_0px_8px] rb:text-[12px] rb:text-white rb:font-regular rb:leading-4 rb:py-0.5 rb:px-1">
+                  <div className="rb:absolute rb:right-0 rb:top-0 rb:bg-[#FF5D34] rb:rounded-[0px_12px_0px_12px] rb:text-[12px] rb:text-white rb:font-medium rb:leading-4 rb:py-0.75 rb:px-2">
                     {t('common.default')}
                   </div>
                 }
-                <Tooltip title={item.config_desc}>
-                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.25 rb:font-regular rb:-mt-1 rb:wrap-break-word rb:line-clamp-1 rb:h-4.25">{item.config_desc}</div>
-                </Tooltip>
-                <RbAlert className="rb:mt-3 ">
-                  <div className={clsx("rb:flex rb:gap-5 rb:font-regular rb:text-[14px]")}>
-                    <span className="rb:text-[#5B6167]">{t('memory.scene_id')}: </span>
-                    <span className="rb:font-medium">
-                      {item.scene_name || '-'}
-                    </span>
+                <Flex vertical gap={12}>
+                  <div className="rb:bg-[rgba(21,94,239,0.06)] rb:rounded-lg rb:text-[#155EEF] rb:font-medium rb:leading-5 rb:py-1.5 rb:px-2">
+                    {t('memory.scene_id')}: {item.scene_name || '-'}
                   </div>
-                </RbAlert>
 
-                <div className="rb:grid rb:grid-cols-2 rb:gap-x-4 rb:gap-y-3 rb:mt-3">
-                  {['memoryExtractionEngine', 'forgottenEngine', 'emotionEngine', 'reflectionEngine'].map((key) => (
-                    <div key={key} className="rb:group rb:cursor-pointer rb:bg-[#F0F3F8] rb:h-10 rb:rounded-md rb:flex rb:items-center rb:justify-between rb:p-[0_8px_0_12px] rb:text-[#5B6167] rb:font-medium"
-                      onClick={() => handleClick(item.config_id, key)}
-                    >
-                      {t(`memory.${key}`)}
-                      <span className='rb:flex rb:items-center rb:justify-end'>
-                        {/* <StatusTag status={item[key] === 'active' ? 'success' : 'error'} text={item[key] === 'active' ? t('memory.active') : t('memory.inactive')} /> */}
-                        <div 
-                          className="rb:w-4 rb:h-4 rb:-ml-0.75 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/memory/arrow_right.svg')] rb:group-hover:bg-[url('@/assets/images/memory/arrow_right_hover.svg')]" 
+                  <div className="rb:grid rb:grid-cols-2 rb:gap-x-3 rb:gap-y-2">
+                    {['memoryExtractionEngine', 'forgottenEngine', 'emotionEngine', 'reflectionEngine'].map((key) => (
+                      <Flex
+                        key={key}
+                        align="center"
+                        justify="space-between"
+                        className="rb:cursor-pointer rb:bg-[#F6F6F6] rb:h-8 rb:rounded-lg rb:font-medium rb:leading-5 rb:pl-2! rb:pr-1! rb:hover:shadow-[0px_2px_8px_0px_rgba(23,23,25,0.16)]"
+                        onClick={() => handleClick(item.config_id, key)}
+                      >
+                        {t(`memory.${key}`)}
+                        <div
+                          className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/memory/arrow_right.svg')] rb:hover:shadow-[0px_2px_8px_0px_rgba(23,23,25,0.16)]"
                         ></div>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <div className={clsx("rb:mt-4 rb:text-[12px] rb:leading-4 rb:font-regular rb:text-[#5B6167] rb:flex rb:items-center", {
-                  'rb:justify-between': item.updated_at,
-                  'rb:justify-end': !item.updated_at
-                })}>
-                  {formatDateTime(item.updated_at, 'YYYY-MM-DD HH:mm:ss')}
-                  <Space size={16}>
-                    <div 
-                      className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/edit.svg')] rb:hover:bg-[url('@/assets/images/edit_hover.svg')]" 
-                      onClick={() => handleEdit(item)}
-                    ></div>
-                    {!item.is_system_default && <div 
-                      className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/delete.svg')] rb:hover:bg-[url('@/assets/images/delete_hover.svg')]" 
-                      onClick={() => handleDelete(item)}
-                    ></div>}
-                  </Space>
-                </div>
+                      </Flex>
+                    ))}
+                  </div>
+
+                  <Flex
+                    align="center"
+                    justify={item.updated_at ? "space-between" : "flex-end"}
+                    className="rb:text-[12px] rb:leading-4.5 rb:font-regular rb:text-[#5B6167] rb:pl-1!"
+                  >
+                    {formatDateTime(item.updated_at, 'YYYY-MM-DD HH:mm:ss')}
+                    <Space size={8}>
+                      <div className="rb:size-4.5 rb:hover:bg-[#EBEBEB] rb:rounded-md">
+                        <div
+                          className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/edit.svg')]"
+                          onClick={() => handleEdit(item)}
+                        ></div>
+                      </div>
+                      {!item.is_system_default &&
+                        <div
+                          className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')] rb:hover:bg-[url('@/assets/images/common/delete_hover.svg')]"
+                          onClick={() => handleDelete(item)}
+                        ></div>
+                      }
+                    </Space>
+                  </Flex>
+                </Flex>
               </RbCard>
-            </List.Item>
-          )}
-        />
+            </Col>
+          ))}
+        </Row>
       </BodyWrapper>
 
       <MemoryForm

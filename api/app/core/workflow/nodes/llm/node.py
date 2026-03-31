@@ -70,8 +70,8 @@ class LLMNode(BaseNode):
     - ai/assistant: AI 消息（AIMessage）
     """
 
-    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any]):
-        super().__init__(node_config, workflow_config)
+    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
+        super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: LLMNodeConfig | None = None
         self.messages = []
 
@@ -144,7 +144,6 @@ class LLMNode(BaseNode):
             f"创建 LLM 实例: provider={model_info.provider}, model={model_info.model_name}, streaming={stream}")
 
         messages_config = self.typed_config.messages
-
         if messages_config:
             # 使用 LangChain 消息格式
             messages = []
@@ -153,7 +152,6 @@ class LLMNode(BaseNode):
                 content_template = msg_config.content
                 content_template = self._render_context(content_template, variable_pool)
                 content = self._render_template(content_template, variable_pool)
-                user_id = self.get_variable("sys.user_id", variable_pool)
                 # 根据角色创建对应的消息对象
                 if role == "system":
                     messages.append({
@@ -161,32 +159,31 @@ class LLMNode(BaseNode):
                         "content": await self.process_message(
                             model_info,
                             content,
-                            user_id,
                             self.typed_config.vision,
                         )
                     })
                 elif role in ["user", "human"]:
                     messages.append({
                         "role": "user",
-                        "content": await self.process_message(model_info, content, user_id, self.typed_config.vision)
+                        "content": await self.process_message(model_info, content, self.typed_config.vision)
                     })
                 elif role in ["ai", "assistant"]:
                     messages.append({
                         "role": "assistant",
-                        "content": await self.process_message(model_info, content, user_id, self.typed_config.vision)
+                        "content": await self.process_message(model_info, content, self.typed_config.vision)
                     })
                 else:
                     logger.warning(f"未知的消息角色: {role}，默认使用 user")
                     messages.append({
                         "role": "user",
-                        "content": await self.process_message(model_info, content, user_id, self.typed_config.vision)
+                        "content": await self.process_message(model_info, content, self.typed_config.vision)
                     })
 
             if self.typed_config.vision_input and self.typed_config.vision:
                 file_content = []
                 files = variable_pool.get_instance(self.typed_config.vision_input)
                 for file in files.value:
-                    content = await self.process_message(model_info, file.value, user_id, self.typed_config.vision)
+                    content = await self.process_message(model_info, file.value, self.typed_config.vision)
                     if content:
                         file_content.extend(content)
                 if messages and messages[-1]["role"] == 'user':
@@ -200,7 +197,7 @@ class LLMNode(BaseNode):
                     if isinstance(message["content"], list):
                         file_content = []
                         for file in message["content"]:
-                            content = await self.process_message(model_info, file, user_id, self.typed_config.vision)
+                            content = await self.process_message(model_info, file, self.typed_config.vision)
                             if content:
                                 file_content.extend(content)
                         history_message.append(
@@ -210,7 +207,6 @@ class LLMNode(BaseNode):
                         message["content"] = await self.process_message(
                             model_info,
                             message["content"],
-                            user_id,
                             self.typed_config.vision
                         )
                         history_message.append(message)

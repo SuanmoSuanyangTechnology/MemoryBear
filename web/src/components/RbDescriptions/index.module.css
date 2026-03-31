@@ -1,0 +1,21 @@
+.rbDescriptions:global(.ant-descriptions.ant-descriptions-bordered>.ant-descriptions-view),
+.rbDescriptions:global(.ant-descriptions.ant-descriptions-bordered>.ant-descriptions-view .ant-descriptions-row) {
+  border: none;
+}
+.rbDescriptions:global(.ant-descriptions.ant-descriptions-bordered>.ant-descriptions-view .ant-descriptions-row>.ant-descriptions-item-label),
+.rbDescriptions:global(.ant-descriptions.ant-descriptions-bordered>.ant-descriptions-view .ant-descriptions-row>.ant-descriptions-item-content) {
+  border-inline-end: none;
+}
+.rbDescriptions:global(.ant-descriptions.ant-descriptions-bordered>.ant-descriptions-view .ant-descriptions-row>.ant-descriptions-item-label) {
+  color: #5B6167;
+  background: transparent;
+}
+.rbDescriptions:global(.ant-descriptions.ant-descriptions-bordered>.ant-descriptions-view .ant-descriptions-row>.ant-descriptions-item-label),
+.rbDescriptions:global(.ant-descriptions.ant-descriptions-bordered>.ant-descriptions-view .ant-descriptions-row>.ant-descriptions-item-content) {
+  padding: 0;
+  line-height: 20px;
+}
+.rbDescriptions:global(.ant-descriptions.ant-descriptions-bordered>.ant-descriptions-view .ant-descriptions-row:not(:last-child)>.ant-descriptions-item-label),
+.rbDescriptions:global(.ant-descriptions.ant-descriptions-bordered>.ant-descriptions-view .ant-descriptions-row:not(:last-child)>.ant-descriptions-item-content) {
+  padding-bottom: 8px;
+}

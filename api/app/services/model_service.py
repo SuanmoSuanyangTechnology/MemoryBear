@@ -154,10 +154,17 @@ class ModelConfigService:
                 }
 
             elif model_type_lower == "embedding":
-                # Embedding 模型验证（在线程中运行同步方法）
+                # Embedding 模型验证
+                # 统一使用 RedBearEmbeddings（自动支持火山引擎多模态）
                 embedding = RedBearEmbeddings(model_config)
                 test_texts = [test_message, "测试文本"]
-                vectors = await asyncio.to_thread(embedding.embed_documents, test_texts)
+                
+                # 火山引擎使用 embed_batch，其他使用 embed_documents
+                if provider.lower() == "volcano":
+                    vectors = await asyncio.to_thread(embedding.embed_batch, test_texts)
+                else:
+                    vectors = await asyncio.to_thread(embedding.embed_documents, test_texts)
+                
                 elapsed_time = time.time() - start_time
 
                 return {
@@ -190,6 +197,56 @@ class ModelConfigService:
                         "query_length": len(query),
                         "document_count": len(documents),
                         "result_count": len(results) if results else 0
+                    },
+                    "error": None
+                }
+            
+            elif model_type_lower == "image":
+                # 图片生成模型验证
+                from app.core.models.generation import RedBearImageGenerator
+                
+                generator = RedBearImageGenerator(model_config)
+                result = await generator.agenerate(
+                    prompt="a cute panda",
+                    size="2K"
+                )
+                elapsed_time = time.time() - start_time
+                logger.info(f"成功生成图片，结果: {result}")
+                
+                return {
+                    "valid": True,
+                    "message": "图片生成模型配置验证成功",
+                    "response": f"成功生成图片，结果: {result}",
+                    "elapsed_time": elapsed_time,
+                    "usage": {
+                        "prompt_length": len("a cute panda"),
+                        "image_count": 1
+                    },
+                    "error": None
+                }
+            
+            elif model_type_lower == "video":
+                # 视频生成模型验证
+                from app.core.models.generation import RedBearVideoGenerator
+                
+                generator = RedBearVideoGenerator(model_config)
+                result = await generator.agenerate(
+                    prompt="a cute panda playing in bamboo forest",
+                    duration=5
+                )
+                elapsed_time = time.time() - start_time
+                
+                # 视频生成是异步任务，返回任务ID
+                task_id = result.get("task_id") if isinstance(result, dict) else None
+                
+                return {
+                    "valid": True,
+                    "message": "视频生成模型配置验证成功",
+                    "response": f"成功创建视频生成任务，任务ID: {task_id}",
+                    "elapsed_time": elapsed_time,
+                    "usage": {
+                        "prompt_length": len("a cute panda playing in bamboo forest"),
+                        "task_id": task_id
                     },
                     "error": None
                 }

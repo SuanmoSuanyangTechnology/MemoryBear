@@ -7,7 +7,7 @@
  * @LastEditTime: 2025-12-19 20:19:59
  */
 import { useEffect, useState, useRef, type FC } from 'react';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useNavigate, useParams, useLocation, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useBreadcrumbManager, type BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
 import { Button, Spin, message, Switch } from 'antd';
@@ -29,11 +29,16 @@ const DocumentDetails: FC = () => {
   const { updateBreadcrumbs } = useBreadcrumbManager({
     breadcrumbType: 'detail'
   });
+  const [searchParams] = useSearchParams();
   const { 
     documentId, 
     parentId: locationParentId, 
     breadcrumbPath 
-  } = (location.state || {}) as { 
+  } = ({
+    documentId: searchParams.get('documentId') ?? undefined,
+    parentId: searchParams.get('parentId') ?? undefined,
+    ...(location.state || {})
+  }) as { 
     documentId?: string; 
     parentId?: string; 
     breadcrumbPath?: BreadcrumbPath;
@@ -350,9 +355,9 @@ const DocumentDetails: FC = () => {
   }
 
   return (<>
-    <div className="rb:flex rb:flex-col rb:h-full rb:p-4">
+    <div className="rb:flex rb:flex-col rb:h-full rb:p-1">
       {/* Header */}
-      <div className="rb:flex rb:flex-col rb:text-left rb:mb-6">
+      <div className="rb:flex rb:flex-col rb:text-left rb:mb-4">
         <div className='rb:flex rb:items-center rb:justify-between'>
             <div className='rb:flex rb:items-center rb:gap-2 rb:mb-4 rb:cursor-pointer' onClick={handleBack}>
                 <img src={exitIcon} alt='exit' className='rb:w-4 rb:h-4' />
@@ -379,10 +384,10 @@ const DocumentDetails: FC = () => {
       </div>
 
       {/* Content area */}
-      <div className="rb:flex rb:h-full rb:gap-4 rb:flex-1 rb:overflow-hidden">
+      <div className="rb:flex rb:h-full rb:flex-1 rb:overflow-hidden rb:bg-white rb:rounded-xl rb:border rb:border-[#DFE4ED]">
         {/* Left: Document info */}
         <div className='rb:w-80 rb:h-full rb:flex rb:flex-col rb:gap-4 rb:overflow-hidden'>
-          <div className='rb:border rb:border-[#DFE4ED] rb:bg-white rb:rounded-xl rb:p-4'>
+          <div className='rb:h-full rb:border-r rb:border-[#DFE4ED] rb:p-4'>
             <InfoPanel 
               title={t('knowledgeBase.documentInfo') || '文档信息'} 
               items={infoItems}
@@ -396,7 +401,7 @@ const DocumentDetails: FC = () => {
         {/* Right: Chunk list */}
         <div 
           id="chunkScrollableDiv"
-          className="rb:flex-1 rb:bg-white rb:rounded-lg rb:border rb:border-gray-200 rb:p-6 rb:overflow-y-auto"
+          className="rb:flex-1 rb:bg-white rb:rounded-lg rb:p-4 rb:overflow-y-auto"
         >
           <h2 className="rb:text-lg rb:font-medium rb:mb-4">
             {t('knowledgeBase.chunkList') || '分块列表'}

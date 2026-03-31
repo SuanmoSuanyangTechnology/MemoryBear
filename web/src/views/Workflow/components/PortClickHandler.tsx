@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:30:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-18 12:06:27
+ * @Last Modified time: 2026-03-24 11:11:56
  */
 import { useEffect, useState } from 'react';
 import { Popover } from 'antd';
@@ -47,7 +47,8 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
     
     // If it's a cycle-start node, handle the add-node placeholder
     let addNodePosition = null;
-    if (sourceNodeType === 'cycle-start' && sourceNodeData.cycle) {
+    const isCycleSubNode = sourceNodeData.cycle
+    if (isCycleSubNode && sourceNodeType === 'cycle-start') {
       const cycleId = sourceNodeData.cycle;
       const addNodes = graph.getNodes().filter((n: any) => 
         n.getData()?.type === 'add-node' && n.getData()?.cycle === cycleId
@@ -64,7 +65,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
     const sourceBBox = sourceNode.getBBox();
     const nodeWidth = graphNodeLibrary[selectedNodeType.type]?.width || 120;
     const nodeHeight = graphNodeLibrary[selectedNodeType.type]?.height || 88;
-    const horizontalSpacing = sourceNodeType === 'cycle-start' ? 40 : 80;
+    const horizontalSpacing = isCycleSubNode ? 48 : 80;
     const verticalSpacing = 10;
     
     // Get source port group information
@@ -119,7 +120,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
     const newNode = graph.addNode({
       ...(graphNodeLibrary[selectedNodeType.type] || graphNodeLibrary.default),
       x: newX,
-      y: newY,
+      y: newY - (isCycleSubNode && sourceNodeType === 'cycle-start' ? 12 : 0),
       id,
       data: {
         id,
@@ -182,15 +183,22 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
                   maxY: Math.max(acc.maxY, bbox.y + bbox.height)
                 };
               }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
-              
-              const padding = 20;
-              const bottomPadding = 50;
+
+              const padding = 50;
               const newWidth = Math.max(nodeWidth, bounds.maxX - bounds.minX + padding * 2);
-              const newHeight = Math.max(120, bounds.maxY - bounds.minY + padding + bottomPadding);
+              const newHeight = Math.max(120, bounds.maxY - bounds.minY + padding * 2);
 
               parentNode.prop('size', { width: newWidth, height: newHeight });
+              
+              // Update right port x position
+              const ports = parentNode.getPorts();
+              ports.forEach((port: any) => {
+                if (port.group === 'right' && port.args) {
+                  parentNode.portProp(port.id!, 'args/x', newWidth);
+                }
+              });
             }
-          };
+          }; 
           
           adjustLoopSize();
           
@@ -226,10 +234,6 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
         const sourceNodeData = sourceNode?.getData();
         const isChildOfLoop = sourceNodeData?.cycle && graph?.getNodes().find((n: any) => n.getData()?.id === sourceNodeData.cycle && n.getData()?.type === 'loop');
         const isChildOfIteration = sourceNodeData?.cycle && graph?.getNodes().find((n: any) => n.getData()?.id === sourceNodeData.cycle && n.getData()?.type === 'iteration');
-        
-        const sourcePortInfo = sourceNode?.getPorts().find((p: any) => p.id === sourcePort);
-        const sourcePortGroup = sourcePortInfo?.group || sourcePort;
-        const isLeftPort = sourcePortGroup === 'left';
 
         let filteredNodes;
         if (isChildOfLoop) {
@@ -243,10 +247,6 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
           filteredNodes = category.nodes.filter(nodeType =>
             nodeType.type !== 'start' && nodeType.type !== 'cycle-start' && nodeType.type !== 'break'
           );
-        }
-
-        if (isLeftPort) {
-          filteredNodes = filteredNodes.filter(nodeType => nodeType.type !== 'end');
         }
         
         if (filteredNodes.length === 0) return null;

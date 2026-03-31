@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:12:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-28 17:28:41
+ * @Last Modified time: 2026-03-26 15:36:25
  */
 /**
  * BasicAuthLayout Component
@@ -35,7 +35,7 @@ const BasicAuthLayout: FC = () => {
   }, [getUserInfo]);
 
   return (
-    <div className="rb:relative rb:h-full rb:w-full">
+    <div className="rb:relative rb:min-h-screen rb:w-screen">
       {/* Render child routes without additional UI */}
       <Outlet />
     </div>

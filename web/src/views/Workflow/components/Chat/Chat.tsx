@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 18:41:07
+ * @Last Modified time: 2026-03-27 17:30:47
  */
 /**
  * Workflow Chat Component
@@ -23,7 +23,7 @@
  */
 import { forwardRef, useImperativeHandle, useState, useRef, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { App } from 'antd'
+import { App, Flex } from 'antd'
 
 import ChatIcon from '@/assets/images/application/chat.png'
 import RbDrawer from '@/components/RbDrawer';
@@ -41,12 +41,16 @@ import type { ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import Runtime from './Runtime';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
 
-const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: WorkflowConfig | null }>(({ appId, graphRef, data }, ref) => {
+const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: WorkflowConfig | null; features?: FeaturesConfigForm }>(({
+  appId, graphRef, features
+}, ref) => {
   const { t } = useTranslation()
   const { message: messageApi } = App.useApp()
   const toolbarRef = useRef<ChatToolbarRef>(null)
+  const [toolbarReady, setToolbarReady] = useState(false)
   const toolbarCallbackRef = useCallback((node: ChatToolbarRef | null) => {
     (toolbarRef as React.MutableRefObject<ChatToolbarRef | null>).current = node
+    setToolbarReady(!!node)
   }, [])
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -56,7 +60,6 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [fileList, setFileList] = useState<any[]>([])
   const [message, setMessage] = useState<string | undefined>(undefined)
-  const [features, setFeatures] = useState<FeaturesConfigForm>({} as FeaturesConfigForm)
 
   /**
    * Opens the chat drawer and loads workflow variables from the start node
@@ -66,14 +69,10 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   }
 
   useEffect(() => {
-    if (data?.features && open) setFeatures(data.features)
-  }, [open, data?.features])
-
-  useEffect(() => {
-    if (open && graphRef.current && toolbarRef.current) {
+    if (open && toolbarReady) {
       getVariables()
     }
-  }, [open])
+  }, [open, toolbarReady])
   /**
    * Extracts variables from the workflow's start node and merges with previous values
    */
@@ -103,6 +102,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
    */
   const handleClose = () => {
     setOpen(false)
+    setToolbarReady(false)
     setChatList([])
     setVariables([])
     setConversationId(null)
@@ -397,9 +397,9 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
 
   return (
     <RbDrawer
-      title={<div className="rb:flex rb:items-center rb:gap-2.5">
+      title={<Flex align="center" gap={10}>
         {t('workflow.run')}
-      </div>}
+      </Flex>}
       classNames={{
         body: 'rb:p-0!'
       }}
@@ -419,7 +419,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
           return <Runtime item={item} index={index} />
         }}
       />
-      <div className="rb:relative rb:flex rb:items-center rb:gap-2.5 rb:m-4 rb:mb-1">
+      <Flex align="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">
         <ChatInput
           message={message}
           className="rb:relative!"
@@ -431,12 +431,12 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
         >
           <ChatToolbar
             ref={toolbarCallbackRef}
-            features={features}
+            features={features as FeaturesConfigForm}
             onFilesChange={setFileList}
             onVariablesChange={setVariables}
           />
         </ChatInput>
-      </div>
+      </Flex>
     </RbDrawer>
   )
 })

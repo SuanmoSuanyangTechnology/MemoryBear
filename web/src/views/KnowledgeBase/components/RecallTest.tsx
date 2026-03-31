@@ -108,11 +108,11 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
               <span className='rb:text-[#155eef]'>{ t('knowledgeBase.loadSampleQuestions')}</span>
           </div> */}
         </div>
-        <Form form={form} >
+        <Form form={form} layout="vertical">
           <Form.Item name="query">
               <TextArea rows={4} placeholder={t('knowledgeBase.testQuestionPlaceholder')}/>
           </Form.Item>
-          <div className='rb:grid rb:grid-cols-2 rb:gap-x-4'>
+          <div className='rb:grid rb:grid-cols-5 rb:gap-x-4'>
               <Form.Item 
                   name="retrieve_type" 
                   label={t('knowledgeBase.retrieveMode')}
@@ -179,7 +179,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
               {/* <Form.Item name="hybrid" valuePropName="checked" initialValue={true} label={t('knowledgeBase.hybrid') || 'Hybrid'}>
                   <Switch checkedChildren={t('common.yes') || 'Yes'} unCheckedChildren={t('common.no') || 'No'} />
               </Form.Item>  */}
-              <Form.Item>
+              <Form.Item className="rb:flex rb:items-end rb:justify-end">
                   <Button type="primary" onClick={handleStartTest} loading={loading}>{ t('knowledgeBase.startTesting')}</Button>
               </Form.Item> 
           </div>

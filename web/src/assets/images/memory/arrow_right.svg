@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-    <title>下拉备份</title>
-    <g id="V1.0版" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
-        <g id="红熊空间-记忆管理" transform="translate(-594, -270)" stroke="#5B6167" stroke-width="1.2">
-            <g id="1" transform="translate(256, 127)">
-                <g id="编组-7" transform="translate(16, 131)">
-                    <g id="下拉备份" transform="translate(330, 20) rotate(-90) translate(-330, -20)translate(322, 12)">
-                        <polyline id="路径" points="11 7 8 10 5 7"></polyline>
+    <title>下拉</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="记忆管理" transform="translate(-802, -422)" stroke="#A8A9AA" stroke-width="1.3">
+            <g id="1备份-4" transform="translate(252, 324)">
+                <g id="编组-6备份" transform="translate(297, 90)">
+                    <g id="下拉" transform="translate(261, 16) rotate(-90) translate(-261, -16)translate(253, 8)">
+                        <polyline id="路径" points="11.5 6 8 9.5 4.5 6"></polyline>
                     </g>
                 </g>
             </g>

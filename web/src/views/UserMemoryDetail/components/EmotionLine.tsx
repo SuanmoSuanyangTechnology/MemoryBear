@@ -1,12 +1,13 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:33:44 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 18:33:44 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-19 11:55:42
  */
 import { type FC, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactEcharts from 'echarts-for-react';
+import { Flex } from 'antd';
 
 import Empty from '@/components/Empty'
 import Loading from '@/components/Empty/Loading'
@@ -63,12 +64,12 @@ const EmotionLine: FC<EmotionLineProps> = ({ chartData, loading }) => {
   }
 
   return (
-    <>
-      <div>{t('userMemory.emotionLine')}</div>
+    <Flex vertical gap={16} className="rb-border rb:rounded-xl rb:p-4! rb:h-78">
+      <div className="rb:text-[#212332] rb:font-medium rb:leading-5">{t('userMemory.emotionLine')}</div>
       {loading
         ? <Loading size={249} />
         : !chartData || chartData.length === 0
-        ? <Empty size={120} className="rb:mt-12 rb:mb-20.25" />
+        ? <Empty size={120} className="rb:flex-1" />
         : <ReactEcharts
             ref={chartRef}
             option={{
@@ -175,12 +176,12 @@ const EmotionLine: FC<EmotionLineProps> = ({ chartData, loading }) => {
               },
               series: getSeries()
             }}
-            style={{ height: '265px', width: '100%', minWidth: '100%' }}
+            style={{ height: '242px', width: '100%', minWidth: '100%' }}
             notMerge={true}
             lazyUpdate={true}
           />
       }
-    </>
+    </Flex>
   )
 }
 

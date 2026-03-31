@@ -1,13 +1,14 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:31:36 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 18:31:36 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-27 11:13:44
  */
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Skeleton, Space, Divider } from 'antd';
+import { Skeleton, Row, Col, Flex } from 'antd';
+import clsx from 'clsx'
 
 import RbCard from '@/components/RbCard/Card'
 import {
@@ -15,7 +16,6 @@ import {
 } from '@/api/memory'
 import { formatDateTime } from '@/utils/format';
 import Empty from '@/components/Empty'
-import Tag from '@/components/Tag'
 
 /**
  * Timeline item structure
@@ -81,30 +81,41 @@ const Timeline: FC = () => {
   }
 
   return (
-    <RbCard>
+    <RbCard
+      title={t('perceptualDetail.timeLine')}
+      headerType="borderless"
+      headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
+      bodyClassName="rb:pl-5! rb:pt-0! rb:pr-3! rb:pb-4! rb:h-[calc(100%-54px)] rb:overflow-y-auto"
+      className="rb:h-full!"
+    >
       {loading
         ? <Skeleton active />
         : data.length === 0
         ? <Empty />
-        : <Space size={8} direction="vertical" className="rb:w-full">
+        : <Flex gap={12} vertical>
             {data.map((vo, index) => (
-              <div key={vo.id} className="rb:flex rb:gap-6 rb:min-h-16">
-                <div className="rb:text-[#155EEF] rb:leading-5 rb:font-medium rb:flex rb:flex-col rb:gap-2 rb:items-center">
-                  {formatDateTime(vo.created_time)}
-                  {index !== data.length - 1 && <Divider type="vertical" className="rb:flex-1 rb:w-px rb:border-[#155EEF]!" />}
-                </div>
-                <div className="rb:flex-1 rb:pb-4">
-                  <div className="rb:flex rb:justify-between">
-                    <div className="rb:w-150 rb:leading-5 rb:font-medium">{vo.summary}</div>
-                    <div className="rb:text-[#5B6167] rb:font-medium rb:flex-1 rb:text-right">{t(`perceptualDetail.${perceptual_type[vo.perceptual_type]}`)}</div>
-                  </div>
-                  <div className="rb:text-[#5B6167] rb:leading-5 rb:mt-2">{[vo.domain, vo.topic].join(' | ')}</div>
+              <Row key={vo.id}className="rb:flex rb:gap-6 rb:min-h-16">
+                <Col flex="90px" className="rb:leading-5 rb:font-semibold">
+                  <Flex vertical gap={12} align="center" justify="center" className="rb:h-full!">
+                    <span className="rb:text-center">{formatDateTime(vo.created_time)}</span>
+                    <div className={clsx("rb:flex-1 rb:w-px", {
+                      'rb:bg-[#5B6167]!': index !== data.length - 1
+                    })} />
+                  </Flex>
+                </Col>
+                <Col flex="1" className="rb:mb-1! rb:bg-[#F6F6F6] rb:rounded-xl rb:py-3 rb:px-4">
+                  <div className="rb:leading-4.5 rb:font-bold rb:text-[12px] rb:font-[MiSans-Bold]">{t(`perceptualDetail.${perceptual_type[vo.perceptual_type]}`)}</div>
                   
-                  <Space size={8} className="rb:mt-2">{vo.keywords.map(tag => <Tag>{tag}</Tag>)}</Space>
-                </div>
-              </div>
+                  <div className="rb:leading-5 rb:mt-2">{vo.summary}</div>
+                  <div className="rb:leading-5 rb:text-[#5B6167] rb:mt-2">{[vo.domain, vo.topic].join(' | ')}</div>
+                  
+                  <Flex gap={8} wrap className="rb:mt-2!">
+                    {vo.keywords.map((tag, index) => <div key={index} className="rb:bg-white rb:rounded-[13px] rb:py-1 rb:px-2 rb:font-medium rb:leading-4.5 rb:text-[12px]">{tag}</div>)}
+                  </Flex>
+                </Col>
+              </Row>
             ))}
-        </Space>
+          </Flex>
         }
     </RbCard>
   )

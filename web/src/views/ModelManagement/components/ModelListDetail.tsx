@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 12:26:12
+ * @Last Modified time: 2026-03-27 18:06:23
  */
 /**
  * Model List Detail Drawer
@@ -12,7 +12,7 @@
 
 import { useState, useImperativeHandle, forwardRef, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Switch, Row, Col, Space, Tooltip } from 'antd'
+import { Button, Switch, Row, Col, Space, Tooltip, Popover } from 'antd'
 
 import type { ProviderModelItem, ModelListItem, ModelListDetailRef, MultiKeyConfigModalRef } from '../types';
 import RbDrawer from '@/components/RbDrawer';
@@ -31,12 +31,13 @@ interface ModelListDetailProps {
   /** Callback to refresh parent list */
   refresh?: () => void;
   handleEdit: (vo?: ModelListItem) => void;
+  handleCloseConfig?: () => void;
 }
 
 /**
  * Model list detail drawer component
  */
-const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ refresh, handleEdit }, ref) => {
+const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ refresh, handleEdit, handleCloseConfig }, ref) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<ProviderModelItem>({} as ProviderModelItem)
@@ -84,6 +85,8 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
     setType(null)
     setOpen(false)
     refresh?.()
+    multiKeyConfigModalRef.current?.handleClose()
+    handleCloseConfig?.()
   }
   /** Refresh model list */
   const handleRefresh = () => {
@@ -108,7 +111,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
 
   return (
     <RbDrawer
-      title={<>{t(`modelNew.${data.provider}`)} {t('modelNew.modelList')} ({list.length}{t('modelNew.item')})</>}
+      title={<>{String(data.provider).charAt(0).toUpperCase() + String(data.provider).slice(1)} {t('modelNew.modelList')} ({list.length}{t('modelNew.item')})</>}
       open={open}
       onClose={handleClose}
     >
@@ -133,11 +136,19 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
             <RbCard
               key={item.id}
               title={item.name}
-              subTitle={<Space size={8} className="rb:mt-1!">
-                <Tag>{t(`modelNew.${item.type}`)}</Tag>
-                <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag>
-                {item.capability?.filter(item => item !=='video').map(vo => <Tag key={vo}>{t(`modelNew.${vo}`)}</Tag>)}
-              </Space>}
+              subTitle={
+                <Popover content={
+                  <Space size={8} className="rb:mt-1!">
+                    <Tag>{t(`modelNew.${item.type}`)}</Tag>
+                    <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag>
+                    {item.capability?.map(vo => <Tag key={vo}>{t(`modelNew.${vo}`)}</Tag>)}
+                  </Space>}>
+                  <Space size={8} className="rb:mt-1!">
+                    <Tag>{t(`modelNew.${item.type}`)}</Tag>
+                    <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag>
+                    {item.capability?.map(vo => <Tag key={vo}>{t(`modelNew.${vo}`)}</Tag>)}
+                  </Space>
+                </Popover>}
               avatarUrl={getLogoUrl(item.logo)}
               avatar={
                 <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
@@ -146,16 +157,19 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
               }
               extra={<Switch checked={item.is_active} disabled={loading} onChange={() => handleChange(item)} />}
               bodyClassName="rb:relative rb:pb-[64px]! rb:h-[calc(100%-64px)]!"
+              variant="outlined"
             >
               <Tooltip title={item.description}>
                 <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:font-regular rb:wrap-break-word rb:line-clamp-2">{item.description}</div>
               </Tooltip>
               <div className="rb:absolute rb:bottom-4 rb:left-6 rb:right-6">
                 <Row gutter={12}>
-                  <Col span={12}>
-                    {!item.model_id && <Button block onClick={() => handleEdit(item)}>{t('modelNew.modelConfiguration')}</Button>}
-                  </Col>
-                  <Col span={12}>
+                  {!item.model_id && 
+                    <Col span={12}>
+                      <Button block onClick={() => handleEdit(item)}>{t('modelNew.modelConfiguration')}</Button>
+                    </Col>
+                  }
+                  <Col span={!item.model_id ? 12 : 24}>
                     <Button type="primary" ghost block onClick={() => handleKeyConfig(item)}>{t('modelNew.keyConfig')}</Button>
                   </Col>
                 </Row>

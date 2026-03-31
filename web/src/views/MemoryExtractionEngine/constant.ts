@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 13:49:00
+ * @Last Modified time: 2026-03-24 15:11:30
  */
 /**
  * Memory Extraction Engine Configuration Constants
@@ -211,6 +211,28 @@ export const configList: ConfigVo[] = [
       // },
     ]
   }
+]
+export const modelConfigList = [
+  {
+    key: 'llm_id',
+    type: 'modelSelect',
+    params: { type: 'chat,llm' },
+  },
+  {
+    key: 'vision_id',
+    type: 'modelSelect',
+    params: { type: 'chat,llm', capability: 'vision' },
+  },
+  {
+    key: 'audio_id',
+    type: 'modelSelect',
+    params: { type: 'chat,llm', capability: 'audio' },
+  },
+  {
+    key: 'video_id',
+    type: 'modelSelect',
+    params: { type: 'chat,llm', capability: 'video' },
+  },
 ]
 
 /**

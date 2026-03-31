@@ -1,0 +1,10 @@
+.progressCustom :global(.ant-progress-inner) {
+  width: 64px !important;
+  height: 64px !important;
+}
+.progressCustom :global(.ant-progress-text) {
+  color: #155EEF !important;
+  font-weight: bold !important;
+  font-family: 'MiSans-Bold' !important;
+  font-size: 16px !important;
+}

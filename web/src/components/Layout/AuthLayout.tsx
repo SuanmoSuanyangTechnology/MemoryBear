@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:11:02 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 15:11:02 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-26 15:01:02
  */
 /**
  * AuthLayout Component
@@ -54,14 +54,14 @@ const AuthLayout: FC = () => {
   }, []);
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout className="rb:min-h-screen!">
       {/* Sidebar navigation */}
       <Sider />
-      <Layout style={{maxHeight: '100vh', width: '100vh', overflowY: 'auto' }}>
+      <Layout className="rb:max-h-screen! rb:w-screen! rb:overflow-y-auto!">
         {/* Header with breadcrumbs and user menu */}
         <AppHeader />
         {/* Main content area - renders child routes */}
-        <Content style={{ padding: '16px 17px 24px 16px', zIndex: 0 }}>
+        <Content className="rb:px-3! rb:pb-3! rb:z-0! rb:flex-1!">
           <Outlet />
         </Content> 
       </Layout>

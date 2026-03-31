@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>播放</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="记忆库-个人记忆-感知记忆-文本" transform="translate(-404, -187)">
+            <g id="编组-8" transform="translate(12, 76)">
+                <g id="编组-14" transform="translate(16, 92)">
+                    <g id="播放" transform="translate(376, 19)">
+                        <rect id="矩形" fill="#000000" fill-rule="nonzero" opacity="0" x="0" y="0" width="24" height="24"></rect>
+                        <path d="M12,0 C5.4,0 0,5.4 0,12 C0,18.6 5.4,24 12,24 C18.6,24 24,18.6 24,12 C24,5.4 18.6,0 12,0 Z" id="路径" fill="#171719" fill-rule="nonzero"></path>
+                        <g id="编组-4" transform="translate(8, 8)" fill="#FFFFFF">
+                            <rect id="矩形" x="0" y="0" width="2" height="8" rx="0.5"></rect>
+                            <rect id="矩形备份-2" x="6" y="0" width="2" height="8" rx="0.5"></rect>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

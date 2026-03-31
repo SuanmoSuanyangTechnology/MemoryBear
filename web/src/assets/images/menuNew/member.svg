@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>用户总数总计</title>
+    <g id="定稿" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linejoin="round">
+        <g id="首页-红熊空间" transform="translate(-22, -560)" stroke="#171719" stroke-width="1.2">
+            <g id="成员管理" transform="translate(12, 549)">
+                <g id="用户总数总计" transform="translate(10, 11)">
+                    <g id="编组-9" transform="translate(1, 2.75)">
+                        <circle id="椭圆形" stroke-linecap="round" cx="4.9" cy="2.8" r="2.8"></circle>
+                        <path d="M10.5,6.3 C11.659798,6.3 12.6,5.35979797 12.6,4.2 C12.6,3.04020203 11.659798,2.1 10.5,2.1 C10.2565187,2.1 10.0227155,2.14143694 9.80525771,2.21764357" id="路径" stroke-linecap="round"></path>
+                        <path d="M14,9.8 C14,7.86700338 12.4329966,6.3 10.5,6.3" id="路径" stroke-linecap="round"></path>
+                        <path d="M9.8,10.5 C9.8,7.79380473 7.60619527,5.6 4.9,5.6 C2.19380473,5.6 0,7.79380473 0,10.5 L9.8,10.5 Z" id="路径"></path>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

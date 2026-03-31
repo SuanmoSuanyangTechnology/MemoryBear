@@ -2,16 +2,16 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 17:13:54
+ * @Last Modified time: 2026-03-27 19:07:24
  */
 import { type FC, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Layout, Tabs, Dropdown, Button, Flex } from 'antd';
+import { Tabs, Dropdown, Flex, Popover } from 'antd';
 import type { MenuProps } from 'antd';
 import { useTranslation } from 'react-i18next';
+import clsx from 'clsx';
 
 import styles from '../index.module.css'
-import logoutIcon from '@/assets/images/logout.svg'
 import editIcon from '@/assets/images/edit_hover.svg'
 import copyIcon from '@/assets/images/copy_hover.svg'
 import exportIcon from '@/assets/images/export_hover.svg'
@@ -21,17 +21,16 @@ import ApplicationModal from '@/views/ApplicationManagement/components/Applicati
 import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef, FeaturesConfigForm } from '../types'
 import { deleteApplication, appExport } from '@/api/application'
 import CopyModal from './CopyModal'
+import PageHeader from '@/components/Layout/PageHeader'
 import FeaturesConfig from './FeaturesConfig'
-
-const { Header } = Layout;
 
 /**
  * Tab keys for application configuration
  */
-const tabKeys = ['arrangement', 'api', 'release', 'statistics']
+const tabKeys = ['arrangement', 'api', 'release', 'log', 'statistics']
 const sharingTabKeys = [
   'test',
-  // 'log',
+  'log',
   'api'
 ]
 
@@ -186,50 +185,81 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
   
   return (
     <>
-      <Header className="rb:w-full rb:h-16 rb:grid rb:grid-cols-3 rb:p-[16px_16px_16px_24px]! rb:border-b rb:border-[#EAECEE] rb:leading-8">
-        <div className="rb:h-8 rb:flex rb:items-center rb:font-medium">
-          <div className="rb:w-8 rb:h-8 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[24px] rb:text-[#ffffff]">
-            {application?.name[0]}
-          </div>
-          
-          <div className="rb:max-w-[100%-80px] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{application?.name}</div>
-          {source !== 'sharing' && <Dropdown 
-            menu={{ items: formatMenuItems, onClick: handleClick }} 
-            trigger={['click']}
-            placement="bottomRight"
-          >
-            <div 
-              className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/edit.svg')] rb:hover:bg-[url('@/assets/images/edit_hover.svg')]" 
-            ></div>
-          </Dropdown>}
-        </div>
-        
-        <div className="rb:flex rb:justify-center">
-          <Tabs 
-            activeKey={activeTab} 
-            items={formatTabItems} 
-            onChange={handleChangeTab} 
+      <PageHeader
+        avatarText={application?.name?.trim()[0]}
+        avatarClassName={clsx({
+          'rb:bg-[#155EEF]': application?.type === 'agent',
+          'rb:bg-[#9C6FFF]!': application?.type === 'multi_agent',
+          'rb:bg-[#171719]': application?.type === 'workflow',
+        })}
+        title={application?.name || ''}
+        operation={source !== 'sharing' && <Dropdown
+          menu={{ items: formatMenuItems, onClick: handleClick }}
+          trigger={['click']}
+          placement="bottomRight"
+        >
+          <div
+            className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/edit_active.svg')] rb:hover:bg-[url('@/assets/images/edit_hover.svg')]"
+          ></div>
+        </Dropdown>}
+        centerContent={<Flex justify="center" className="rb:h-16!">
+          <Tabs
+            activeKey={activeTab}
+            items={formatTabItems}
+            onChange={handleChangeTab}
             className={styles.tabs}
           />
-        </div>
-        {application?.type === 'workflow' && source !== 'sharing' && activeTab === 'arrangement'
-          ? <div className="rb:h-8 rb:flex rb:items-center rb:justify-end rb:gap-2.5">
-            <FeaturesConfig source={application?.type} value={features as FeaturesConfigForm} refresh={handleSaveFeaturesConfig} />
-            <Button onClick={clear}>{t('workflow.clear')}</Button>
-            <Button onClick={addvariable}>{t('workflow.addvariable')}</Button>
-            <Button onClick={run}>{t('workflow.run')}</Button>
-            <Button type="primary" onClick={save}>{t('workflow.save')}</Button>
-            {/* <Button type="primary">{t('workflow.export')}</Button> */}
-            <img src={logoutIcon} className="rb:w-4 rb:h-4 rb:cursor-pointer" onClick={goToApplication} />
-          </div>
+        </Flex>}
+        extra={application?.type === 'workflow' && source !== 'sharing' && activeTab === 'arrangement'
+          ? <Flex align="center" justify="end" gap={10} className="rb:h-8">
+            <FeaturesConfig
+              source={application?.type}
+              value={features as FeaturesConfigForm}
+              refresh={handleSaveFeaturesConfig}
+              chatVariables={(workflowRef.current?.chatVariables || []).map(v => ({ ...v, display_name: v.name }))}
+            />
+            <Popover content={t('workflow.clear')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+              <div
+                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/clear.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                onClick={clear}
+              ></div>
+            </Popover>
+            <Popover content={t('workflow.addvariable')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+              <div
+                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/variable.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                onClick={addvariable}
+              ></div>
+            </Popover>
+            <Popover content={t('workflow.run')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+              <div
+                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/run.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                onClick={run}
+              ></div>
+            </Popover>
+            <Popover content={t('workflow.save')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+              <div
+                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/save.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                onClick={save}
+              ></div>
+            </Popover>
+            <Popover content={t('common.return')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+              <div
+                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/return.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                onClick={goToApplication}
+              ></div>
+            </Popover>
+          </Flex>
           : <Flex justify="flex-end">
-            <div className="rb:h-8 rb:flex rb:items-center rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goToApplication}>
-              <img src={logoutIcon} className="rb:mr-2 rb:w-4 rb:h-4" />
-              {t('application.returnToApplicationList')}
-            </div>
+            <Flex align="center" className="rb:leading-5 rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goToApplication}>
+              <div
+                className="rb:mr-2 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/logout.svg')]"
+              ></div>
+              {t('common.return')}
+            </Flex>
           </Flex>
         }
-      </Header>
+      >
+      </PageHeader>
       <ApplicationModal
         ref={applicationModalRef}
         refresh={refresh}

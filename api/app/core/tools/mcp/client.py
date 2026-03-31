@@ -99,7 +99,7 @@ class SimpleMCPClient:
             # 建立 SSE 连接
             response = await self._session.get(self.server_url)
             
-            if response.status != 200:
+            if response.status not in (200, 202):
                 error_text = await response.text()
                 raise MCPConnectionError(f"SSE 连接失败 {response.status}: {error_text}")
             
@@ -190,7 +190,9 @@ class SimpleMCPClient:
         
         try:
             async with self._session.post(self._endpoint_url, json=request) as response:
-                if response.status != 200:
+                # MCP SSE 协议：POST 请求返回 200 或 202 均为正常
+                # 202 Accepted 表示请求已接受，结果通过 SSE 流异步返回
+                if response.status not in (200, 202):
                     error_text = await response.text()
                     raise MCPConnectionError(f"请求失败 {response.status}: {error_text}")
             
@@ -205,7 +207,7 @@ class SimpleMCPClient:
             raise MCPConnectionError("endpoint URL 未初始化")
         
         async with self._session.post(self._endpoint_url, json=notification) as response:
-            if response.status != 200:
+            if response.status not in (200, 202):
                 logger.warning(f"通知发送失败: {response.status}")
     
     async def _initialize_modelscope_session(self):

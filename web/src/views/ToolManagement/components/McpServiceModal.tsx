@@ -355,9 +355,10 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
           {requestHeaderList.length === 0
             ? <Empty size={88} />
             : 
-            <Table
+            <Table<RequestHeader>
               rowKey="key"
               pagination={false}
+              bordered={true}
               columns={[
                 {
                   title: t('tool.requestHeaderName'),
@@ -381,7 +382,7 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
                     <Space size="middle">
                       <Button
                         type="link"
-                        onClick={() => handleEditRequestHeader(index, record as RequestHeader)}
+                        onClick={() => handleEditRequestHeader(index, record)}
                       >
                         {t('common.edit')}
                       </Button>

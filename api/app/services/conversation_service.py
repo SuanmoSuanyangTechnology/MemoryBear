@@ -214,7 +214,7 @@ class ConversationService:
 
             conversation.message_count += 1
 
-            if conversation.message_count == 1 and role == "user":
+            if conversation.message_count <= 2 and role == "user":
                 conversation.title = (
                         content[:50] + ("..." if len(content) > 50 else "")
                 )
@@ -274,7 +274,8 @@ class ConversationService:
             self,
             conversation_id: uuid.UUID,
             max_history: Optional[int] = None,
-            api_config: Optional[ModelInfo] = None
+            current_provider: Optional[str] = None,
+            current_is_omni: Optional[bool] = None
     ) -> List[dict]:
         """
         Retrieve historical conversation messages formatted as dictionaries.
@@ -282,7 +283,8 @@ class ConversationService:
         Args:
             conversation_id (uuid.UUID): Conversation UUID.
             max_history (Optional[int]): Maximum number of messages to retrieve.
-            api_config (Optional[ModelInfo]): Model API configuration for multimodal processing.
+            current_provider (Optional[str]): Current provider for file handling.
+            current_is_omni (Optional[bool]): Current omni flag for file handling.
 
         Returns:
             List[dict]: List of message dictionaries with keys 'role' and 'content'.
@@ -292,38 +294,30 @@ class ConversationService:
             limit=max_history
         )
 
-        # 转换为字典格式
         history = []
         for msg in messages:
-            content = [{"type": "text", "text": msg.content}]
-            
-            # 处理 meta_data 中的 files
-            if msg.meta_data and msg.meta_data.get("files"):
-                files = msg.meta_data.get("files", [])
-                if api_config:
-                    # 使用 MultimodalService 处理文件
-                    from app.services.multimodal_service import MultimodalService
-                    multimodal_service = MultimodalService(self.db, api_config=api_config)
-                    
-                    # 将 files 转换为 FileInput 格式
-                    file_inputs = []
-                    for file in files:
-                        from app.schemas.app_schema import FileInput, TransferMethod
-                        file_input = FileInput(
-                            type=file.get("type"),
-                            transfer_method=TransferMethod.REMOTE_URL,
-                            url=file.get("url")
-                        )
-                        file_inputs.append(file_input)
-
-                    processed_files = await multimodal_service.history_process_files(files=file_inputs)
-
-                    content.extend(processed_files)
-            
-            history.append({
+            msg_dict = {
                 "role": msg.role,
-                "content": content
-            })
+                "content": [{"type": "text", "text": msg.content}]
+            }
+
+            # 处理用户消息中的多模态文件
+            if msg.role == "user" and msg.meta_data:
+                history_files = msg.meta_data.get("history_files", {})
+
+                if history_files and current_provider and current_is_omni is not None:
+                    # 检查是否需要重新处理文件
+                    stored_provider = history_files.get("provider")
+                    stored_is_omni = history_files.get("is_omni")
+
+                    # 如果provider或is_omni不匹配，需要重新处理
+                    if stored_provider != current_provider or stored_is_omni != current_is_omni:
+                        continue
+
+                    # provider和is_omni匹配，直接使用存储的内容
+                    msg_dict["content"].extend(history_files.get("content"))
+
+            history.append(msg_dict)
 
         return history
 
@@ -539,6 +533,7 @@ class ConversationService:
         provider = api_config.provider
         api_key = api_config.api_key
         api_base = api_config.api_base
+        is_omni = api_config.is_omni
         model_type = config.type
 
         llm = RedBearLLM(
@@ -546,7 +541,8 @@ class ConversationService:
                 model_name=model_name,
                 provider=provider,
                 api_key=api_key,
-                base_url=api_base
+                base_url=api_base,
+                is_omni=is_omni
             ),
             type=ModelType(model_type)
         )
@@ -554,15 +550,8 @@ class ConversationService:
         conversation_messages = await self.get_conversation_history(
             conversation_id=conversation_id,
             max_history=20,
-            api_config=ModelInfo(
-                model_name=model_name,
-                provider=provider,
-                api_key=api_key,
-                api_base=api_base,
-                capability=api_config.capability,
-                is_omni=api_config.is_omni,
-                model_type=model_type
-            )
+            current_provider=provider,
+            current_is_omni=is_omni
         )
         if len(conversation_messages) == 0:
             return ConversationOut(

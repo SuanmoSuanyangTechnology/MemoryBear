@@ -1,0 +1,3 @@
+.select:global(.ant-select-single.ant-select-sm .ant-select-selector) {
+  background: #F6F6F6;
+}

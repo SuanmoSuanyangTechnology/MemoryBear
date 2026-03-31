@@ -15,7 +15,7 @@
  */
 
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
-import { Button, Space } from 'antd';
+import { Button, Flex, Space } from 'antd';
 import { UnlockOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 
@@ -79,49 +79,67 @@ const UserInfoModal = forwardRef<UserInfoModalRef>((_props, ref) => {
       footer={null}
     >
       {/* Basic Information Section */}
-      <div className="rb:text-[#5B6167] rb:font-medium">{t('header.basicInfo')}</div>
-
-      {/* Username */}
-      <div className="rb:flex rb:justify-between rb:text-[#5B6167] rb:text-[14px] rb:leading-5 rb:mb-3 rb:mt-3">
-        <span className="rb:whitespace-nowrap">{t('user.username')}</span>
-        <span className="rb:text-[#212332]">{user.username}</span>
-      </div>
-      {/* Email */}
-      <div className="rb:flex rb:justify-between rb:text-[#5B6167] rb:text-[14px] rb:leading-5 rb:mb-3">
-        <span className="rb:whitespace-nowrap">{t('user.email')}</span>
-        <Space size={8} className="rb:text-[#212332]">
-          {user.email}
-          <div
-            className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]"
-            onClick={handleEditEmail}
-          ></div>
-        </Space>
-      </div>
-      {/* Role */}
-      <div className="rb:flex rb:justify-between rb:text-[#5B6167] rb:text-[14px] rb:leading-5 rb:mb-3">
-        <span className="rb:whitespace-nowrap">{t('user.role')}</span>
-        <span className="rb:text-[#212332]">{user.is_superuser ? t('user.superuser') : t('user.normalUser')}</span>
-      </div>
-      {/* Created Date */}
-      <div className="rb:flex rb:justify-between rb:text-[#5B6167] rb:text-[14px] rb:leading-5 rb:mb-3">
-        <span className="rb:whitespace-nowrap">{t('user.createdAt')}</span>
-        <span className="rb:text-[#212332]">{formatDateTime(user.created_at, 'YYYY-MM-DD HH:mm:ss')}</span>
-      </div>
+      <Flex vertical gap={12}>
+        <div className="rb:text-[#5B6167] rb:font-medium">{t('header.basicInfo')}</div>
+        {/* Username */}
+        <Flex
+          justify="space-between"
+          className="rb:text-[#5B6167] rb:leading-5"
+        >
+          <span className="rb:whitespace-nowrap">{t('user.username')}</span>
+          <span className="rb:text-[#212332]">{user.username}</span>
+        </Flex>
+        {/* Email */}
+        <Flex
+          justify="space-between"
+          className="rb:text-[#5B6167] rb:leading-5"
+        >
+          <span className="rb:whitespace-nowrap">{t('user.email')}</span>
+          <Space size={8} className="rb:text-[#212332]">
+            {user.email}
+            <div
+              className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]"
+              onClick={handleEditEmail}
+            ></div>
+          </Space>
+        </Flex>
+        {/* Role */}
+        <Flex
+          justify="space-between"
+          className="rb:text-[#5B6167] rb:leading-5"
+        >
+          <span className="rb:whitespace-nowrap">{t('user.role')}</span>
+          <span className="rb:text-[#212332]">{user.is_superuser ? t('user.superuser') : t('user.normalUser')}</span>
+        </Flex>
+        {/* Created Date */}
+        <Flex
+          justify="space-between"
+          className="rb:text-[#5B6167] rb:leading-5"
+        >
+          <span className="rb:whitespace-nowrap">{t('user.createdAt')}</span>
+          <span className="rb:text-[#212332]">{formatDateTime(user.created_at, 'YYYY-MM-DD HH:mm:ss')}</span>
+        </Flex>
+      </Flex>
       
       {/* Security Settings Section */}
-      <div className="rb:text-[#5B6167] rb:font-medium rb:mt-6">{t('header.securitySettings')}</div>
+      <div className="rb:text-[#5B6167] rb:font-medium rb:mt-6 rb:mb-3">{t('header.securitySettings')}</div>
 
       {/* Password Change Card */}
-       <div className="rb:mt-3 rb:bg-[#F0F3F8] rb:p-[10px_12px] rb:rounded-md rb:flex rb:items-center rb:justify-between rb:gap-2">
-        <div className="rb:flex rb:items-center rb:gap-3">
+      <Flex
+        align="center"
+        justify="space-between"
+        gap={8}
+        className="rb:bg-[#F0F3F8] rb:px-3! rb:py-2.5! rb:rounded-md"
+      >
+        <Flex align="center" gap={12}>
           <UnlockOutlined className="rb:text-[24px]" />
           <div>
             <div className="rb:leading-5">{t('header.changePassword')}</div>
             <div className="rb:text-[#5B6167] rb:text-[12px] rb:mt-1 rb:leading-4">{t('header.changePasswordDesc')}</div>
           </div>
-        </div>
+        </Flex>
         <Button onClick={() => resetPasswordModalRef.current?.handleOpen(user)}>{t('common.change')}</Button>
-      </div>
+      </Flex>
 
       <ResetPasswordModal
         ref={resetPasswordModalRef}

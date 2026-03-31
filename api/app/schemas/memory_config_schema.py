@@ -387,6 +387,12 @@ class MemoryConfig:
     
     rerank_model_id: Optional[UUID] = None
     rerank_model_name: Optional[str] = None
+    video_model_id: Optional[UUID] = None
+    video_model_name: Optional[str] = None
+    vision_model_id: Optional[UUID] = None
+    vision_model_name: Optional[str] = None
+    audio_model_id: Optional[UUID] = None
+    audio_model_name: Optional[str] = None
     
     llm_params: Dict[str, Any] = field(default_factory=dict)
     embedding_params: Dict[str, Any] = field(default_factory=dict)
@@ -417,7 +423,7 @@ class MemoryConfig:
     
     # Ontology scene association
     scene_id: Optional[UUID] = None
-    ontology_classes: Optional[list] = field(default=None)
+    ontology_class_infos: list[dict] = field(default_factory=list)
     
     def __post_init__(self):
         """Validate configuration after initialization."""

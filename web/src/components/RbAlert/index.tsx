@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:19:59 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 15:19:59 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-02-11 15:02:24
  */
 /**
  * RbAlert Component
@@ -14,6 +14,7 @@
  */
 
 import { type FC, type ReactNode } from 'react'
+import { Flex } from 'antd';
 
 /** Props interface for RbAlert component */
 interface RbAlertProps {
@@ -38,10 +39,10 @@ const colors = {
 /** Custom alert component with color themes and optional icon */
 const RbAlert: FC<RbAlertProps> = ({ color = 'blue', icon, className, children }) => {
   return (
-    <div className={`${colors[color]} ${className} rb:p-[6px_9px] rb:flex rb:items-center rb:text-[12px] rb:font-regular rb:leading-4 rb:border rb:rounded-md`}>
+    <Flex align="center" className={`${colors[color]} ${className} rb:px-2.25! rb:py-1.5! rb:text-[12px] rb:font-regular rb:leading-4 rb:border rb:rounded-md`}>
       {icon && <span className="rb:text-[16px] rb:mr-2.25">{icon}</span>}
       {children}
-    </div>
+    </Flex>
   )
 }
 export default RbAlert

@@ -1,30 +1,27 @@
 import React, { useState, useRef, useEffect, type ReactNode } from 'react';
 import {
+  Flex,
+  Space,
+  Tooltip,
   Row,
   Col,
-  Tag,
-  List,
-  Flex
 } from 'antd';
-import { EyeOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import dayjs, { type Dayjs } from 'dayjs'
 
-import type { Query, ToolItem, TimeToolModalRef, JsonToolModalRef, InnerToolModalRef } from './types';
-import SearchInput from '@/components/SearchInput'
+import type { ToolItem, TimeToolModalRef, JsonToolModalRef, InnerToolModalRef } from './types';
 import BodyWrapper from '@/components/Empty/BodyWrapper'
-import RbCard from '@/components/RbCard/Card'
+import RbCard from '@/components/RbCard'
 import TimeToolModal from './components/TimeToolModal'
 import JsonToolModal from './components/JsonToolModal'
 import InnerToolModal from './components/InnerToolModal'
 import { getTools } from '@/api/tools'
 import { InnerConfigData } from './constant'
 
-const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ getStatusTag }) => {
+const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: string | undefined }> = ({ getStatusTag, keyword }) => {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ToolItem[]>([]);
-  const [query, setQuery] = useState<Query>({ name: undefined, tool_type: 'builtin' });
   const [curTime, setCurTime] = useState<Dayjs>(dayjs())
   const timeToolModalRef = useRef<TimeToolModalRef>(null)
   const jsonToolModalRef = useRef<JsonToolModalRef>(null)
@@ -38,20 +35,20 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ getS
     return () => {
       clearInterval(timer)
     }
-  }, [query.name])
+  }, [keyword])
 
   const getData = () => {
     setLoading(true)
-    getTools(query)
+    getTools({
+      tool_type: 'builtin',
+      name: keyword
+    })
       .then((res) => {
         setData(res as ToolItem[])
       })
       .finally(() => {
         setLoading(false)
       })
-  }
-  const handleSearch = (value?: string) => {
-    setQuery(prev => ({ ...prev, name: value }))
   }
 
   // 打开添加服务弹窗
@@ -70,84 +67,83 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ getS
   }
 
   return (
-    <div>
-      <Row gutter={16} className='rb:mb-4 rb:w-full'>
-        <Col span={8}>
-          <SearchInput
-            placeholder={t('tool.innerSearchPlaceholder')}
-            onSearch={handleSearch}
-            style={{width: '100%'}}
-          />
-        </Col>
-      </Row>
+    <>
       <BodyWrapper loading={loading} empty={data.length === 0}>
-        <List
-          grid={{ gutter: 16, column: 2 }}
-          dataSource={data}
-          renderItem={(item) => (
-            <List.Item key={item.id} className='rb:h-full!'>
+        <Row
+          gutter={[12, 12]}
+          className="rb:max-h-[calc(100%-48px)] rb:overflow-y-auto"
+        >
+          {data.map((item) => (
+            <Col span={8} key={item.id}>
               <RbCard
-                // className={clsx({
-                //   'rb:h-85.5!': item.config_data.tool_class === 'DateTimeTool' || item.config_data.tool_class === 'JsonTool'
-                // })}
-                // avatar={
-                //   <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
-                //     {item.name[0]}
-                //   </div>
-                // }
-                title={item.name}
-                extra={getStatusTag(item.status)}
-                bodyClassName='rb:h-[calc(100%-40px)]'
-              >
-                <div className="rb:h-full rb:flex rb:flex-col rb:justify-between">
-                  <div className="rb:text-[12px] rb:leading-4 rb:font-regular rb:text-[#5B6167]">
-                    {t(`tool.${item.config_data.tool_class}_features`)} <br />
-                    <Flex gap={4} wrap className="rb:mt-2 rb:w-full">
-                      {InnerConfigData[item.config_data.tool_class].features.map(vo => <Tag key={vo} color="default">{ t(`tool.${vo}`) }</Tag>) }
+                title={
+                  <Flex justify="space-between" gap={16}>
+                    <Space size={8}>
+                      <Tooltip title={item.name}>
+                        <div className="rb:wrap-break-word rb:line-clamp-1">{item.name}</div>
+                      </Tooltip>
+                      {getStatusTag(item.status)}
+                    </Space>
+                    <Flex align="center" justify="center" className="rb:size-5.5 rb:hover:bg-[#F6F6F6] rb:rounded-md">
+                      <div
+                        className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit_bold.svg')]"
+                        onClick={() => handleEdit(item)}
+                      />
                     </Flex>
+                  </Flex>
+                }
+                isNeedTooltip={false}
+              >
+                <Tooltip title={t(`tool.${item.config_data.tool_class}_features`)}>
+                  <div className="rb:h-10 rb:wrap-break-word rb:line-clamp-2 rb:leading-5">{t(`tool.${item.config_data.tool_class}_features`)}</div>
+                </Tooltip>
 
-                    {item.config_data.tool_class === 'DateTimeTool'
-                      ? <div className="rb:mt-3 rb:bg-[#F0F3F8] rb:px-3 rb:py-2.5 rb:rounded-md">
-                        {t('tool.currentTime')}
-                        <div className="rb:font-medium rb:bg-white rb:px-3 rb:py-2.5 rb:rounded-md rb:my-2">
-                          {curTime.format('YYYY-MM-DD HH:mm:ss')}
-                        </div>
-                        {t('tool.timestamp')}
-                        <div className="rb:font-medium rb:bg-white rb:px-3 rb:py-2.5 rb:rounded-md rb:mt-2">
-                          {curTime.unix()}
-                        </div>
-                      </div>
-                      :item.config_data.tool_class === 'JsonTool'
-                      ? <div className="rb:mt-3 rb:bg-[#F0F3F8] rb:px-3 rb:py-2.5 rb:rounded-md">
-                        {t('tool.jsonEg')}
-                        <div className="rb:font-medium rb:bg-white rb:px-3 rb:py-2.5 rb:rounded-md rb:my-2">
-                          {InnerConfigData[item.config_data.tool_class].eg}
-                        </div>
-                      </div>
-                        : <div className="rb:mt-3 rb:bg-[#F0F3F8] rb:px-3 rb:py-2.5 rb:rounded-md">
-                          {t('tool.configStatus')}
-                          <div className="rb:font-medium rb:bg-white rb:px-3 rb:py-2.5 rb:rounded-md rb:my-2">
-                            {t(`tool.${item.status}_desc`)}
-                          </div>
-                        </div>
-                    }
-                  </div>
+                <Flex gap={8} wrap align="center" className="rb:mt-2! rb:mb-4!">
+                  <Flex gap={6}>
+                    {InnerConfigData[item.config_data.tool_class].features?.slice(0, 2).map((type, i) => (
+                      <div key={i} className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">{type}</div>
+                    ))}
+                  </Flex>
+                  {InnerConfigData[item.config_data.tool_class].features.length > 2 && (
+                    <Tooltip
+                      title={<Flex wrap gap={6}>{InnerConfigData[item.config_data.tool_class].features?.slice(2, InnerConfigData[item.config_data.tool_class].features.length).map((type, i) => (
+                        <div key={i} className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5 rb:text-[#171719]">{type}</div>
+                      ))}</Flex>}
+                      color="white"
+                      placement="bottom"
+                    >
+                      <div className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">+{InnerConfigData[item.config_data.tool_class].features.length - 2}</div>
+                    </Tooltip>
+                  )}
+                </Flex>
 
-                  <div className="rb:mt-4 rb:flex rb:items-center rb:justify-end">
-                    {item.config_data.tool_class === 'DateTimeTool' || item.config_data.tool_class === 'JsonTool' ? 
-                        <EyeOutlined className="rb:text-5 rb:text-[#5B6167]! rb:hover:text-[#212332]!" onClick={() => handleEdit(item)} />
-                    : <div
-                        className="rb:w-5 rb:h-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/edit.svg')] rb:hover:bg-[url('@/assets/images/edit_hover.svg')]"
-                      onClick={() => handleEdit(item)}
-                    ></div>
-                    }
-                  </div>
-                </div>
+                <Row className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2! rb:px-3! rb:leading-5">
+                  {item.config_data.tool_class === 'DateTimeTool'
+                    ? <>
+                      <Col span={12}>
+                        <div className="rb:text-[#5B6167] rb:mb-1">{t('tool.currentTime')}</div>
+                        {curTime.format('YYYY-MM-DD HH:mm:ss')}
+                      </Col>
+                      <Col span={12}>
+                        <div className="rb:text-[#5B6167] rb:mb-1">{t('tool.timestamp')}</div>
+                        {curTime.unix()}
+                      </Col>
+                    </>
+                    : item.config_data.tool_class === 'JsonTool'
+                      ? <Col span={24}>
+                        <div className="rb:text-[#5B6167] rb:mb-1">{t('tool.jsonEg')}</div>
+                        {InnerConfigData[item.config_data.tool_class].eg}
+                      </Col>
+                      : <Col span={24}>
+                        <div className="rb:text-[#5B6167] rb:mb-1">{t('configStatus')}</div>
+                        {t(`tool.${item.status}_desc`)}
+                      </Col>
+                  }
+                </Row>
               </RbCard>
-            </List.Item>
-          )}
-          className="rb:h-[calc(100vh-178px)] rb:overflow-y-auto rb:overflow-x-hidden"
-        />
+            </Col>
+          ))}
+        </Row>
       </BodyWrapper>
 
       <TimeToolModal
@@ -160,7 +156,7 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode }> = ({ getS
         ref={innerToolModalRef}
         refreshTable={getData}
       />
-    </div>
+    </>
   );
 };
 

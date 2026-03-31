@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="14px" height="14px" viewBox="0 0 14 14" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>保存</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linejoin="round">
+        <g id="应用管理-Agent-配置-提示词" transform="translate(-1105, -183)" stroke="#171719">
+            <g id="提示词" transform="translate(220, 89)">
+                <g id="副操作" transform="translate(876, 85)">
+                    <g id="保存" transform="translate(9, 9)">
+                        <g id="编组-12" transform="translate(1.925, 1.75)">
+                            <path d="M1.5,0 L7.33055996,0 L7.33055996,0 L10.15,2.91453026 L10.15,9 C10.15,9.82842712 9.47842712,10.5 8.65,10.5 L1.5,10.5 C0.671572875,10.5 0,9.82842712 0,9 L0,1.5 C0,0.671572875 0.671572875,0 1.5,0 Z" id="矩形"></path>
+                            <polyline id="路径-12" stroke-linecap="round" points="2.45 0 2.45 3.5 6.825 3.5"></polyline>
+                            <rect id="矩形" stroke-linecap="round" x="2.45" y="6.125" width="5.25" height="4.375"></rect>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

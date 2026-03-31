@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="36px" height="36px" viewBox="0 0 36 36" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 5</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="记忆库-个人记忆-短期记忆" transform="translate(-186, -97)">
+            <g id="编组-6" transform="translate(12, 76)">
+                <g id="编组-5" transform="translate(174, 21)">
+                    <rect id="矩形" stroke="#EBEBEB" x="0.5" y="0.5" width="35" height="35" rx="12"></rect>
+                    <g id="编组-17" transform="translate(10, 9)" stroke="#171719" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.3">
+                        <path d="M9.05541135,18 L3.2,18 C1.4326888,18 4.4408921e-16,16.5673112 4.4408921e-16,14.8 L0,3.2 C0,1.4326888 1.4326888,8.8817842e-16 3.2,8.8817842e-16 L12.8,0 C14.5673112,-4.4408921e-16 16,1.4326888 16,3.2 L16,7.38850463 L16,7.38850463" id="路径"></path>
+                        <circle id="椭圆形" cx="12.2777778" cy="14.1363636" r="2.5"></circle>
+                        <path d="M3,6 L7,6 M5,4 L5,8" id="形状结合"></path>
+                        <line x1="10" y1="6" x2="13" y2="6" id="路径-60"></line>
+                        <line x1="3.5" y1="12" x2="6.5" y2="12" id="路径-60备份"></line>
+                        <line x1="3.5" y1="14.5" x2="6.5" y2="14.5" id="路径-60备份"></line>
+                        <line x1="14.0018295" y1="16.0124157" x2="16" y2="18.0205574" id="路径-61"></line>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

@@ -2,9 +2,9 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-08 19:46:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 16:26:55
+ * @Last Modified time: 2026-03-27 11:18:50
  */
-import { forwardRef, useImperativeHandle, useRef, useEffect } from 'react'
+import { forwardRef, useImperativeHandle, useRef, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Row, Col, App } from 'antd'
 import { useParams } from 'react-router-dom'
@@ -17,6 +17,8 @@ import {
   generateProfile,
   implicitCheckData,
 } from '@/api/memory'
+import RbCard from '@/components/RbCard/Card'
+import RadioGroupButton from '@/components/RadioGroupButton'
 
 /**
  * ImplicitDetail Component - Displays user's implicit memory profile
@@ -75,25 +77,45 @@ const ImplicitDetail = forwardRef<{ handleRefresh: () => void; }, { refresh: () 
     handleRefresh
   }));
 
+  const [activeTab, setActiveTab] = useState('preferences')
+  const handleChangeTab = (value: unknown) => {
+    setActiveTab(value as string)
+  }
+
   return (
-    <div className="rb:h-full rb:max-w-266 rb:mx-auto">
-      <div className="rb:text-[#5B6167] rb:leading-5 rb:mt-3">{t('implicitDetail.title')}</div>
-      
-      <Preferences ref={preferencesRef} />
+    <Row gutter={12} className="rb:h-full!">
+      <Col span={12} className="rb:h-full!">
+        <RbCard
+          title={t('implicitDetail.subconscious')}
+          headerType="borderless"
+          headerClassName="rb:min-h-[50px]! rb:font-[MiSans-Bold] rb:font-bold"
+          bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-54px)]"
+          className="rb:h-full!"
+        >
+          <RadioGroupButton
+            value={activeTab}
+            options={[
+              { value: 'preferences', label: t('implicitDetail.preferences') },
+              { value: 'portrait', label: t('implicitDetail.portrait') },
+            ]}
+            onChange={handleChangeTab}
+          />
 
-      <div className="rb:bg-[rgba(21,94,239,0.12)] rb:px-3 rb:py-2.5 rb:font-medium rb:leading-5 rb:mb-4 rb:mt-6 rb:rounded-md">{t('implicitDetail.portraitTitle')}</div>
-      <div className="rb:my-3 rb:text-[#5B6167] rb:leading-5">{t('implicitDetail.portraitSubTitle')}</div>
-      <Row gutter={[16, 16]} className="rb:mt-4">
-        <Col span={12}>
-          <Portrait ref={portraitRef} />
-        </Col>
-        <Col span={12}>
-          <InterestAreas ref={interestAreasRef} />
-        </Col>
-      </Row>
-
-      <Habits ref={habitsRef} />
-    </div>
+          <div className="rb:mt-3 rb:h-[calc(100%-32px)]">
+            {activeTab === 'preferences'
+              ? <Preferences ref={preferencesRef} />
+              : <div className="rb:h-full rb:overflow-y-auto">
+                <Portrait ref={portraitRef} />
+                <InterestAreas ref={interestAreasRef} />
+              </div>
+            }
+          </div>
+        </RbCard>
+      </Col>
+      <Col span={12} className="rb:h-full!">
+        <Habits ref={habitsRef} />
+      </Col>
+    </Row>
   )
 })
 export default ImplicitDetail

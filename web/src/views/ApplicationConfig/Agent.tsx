@@ -2,13 +2,12 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-17 14:24:29
+ * @Last Modified time: 2026-03-27 18:13:51
  */
-import { type FC, type ReactNode, useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
-import clsx from 'clsx'
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom';
-import { Row, Col, Space, Form, Input, Switch, Button, App, Spin } from 'antd'
+import { Row, Col, Space, Form, Input, Button, App, Spin, Flex } from 'antd'
 
 import Chat from './components/Chat'
 import RbCard from '@/components/RbCard/Card'
@@ -28,7 +27,7 @@ import type {
 } from './types'
 import type { Variable } from './components/VariableList/types'
 import type { KnowledgeConfig } from './components/Knowledge/types'
-import type { ModelListItem } from '@/views/ModelManagement/types'
+import type { Model } from '@/views/ModelManagement/types'
 import { getModelList } from '@/api/models';
 import { saveAgentConfig } from '@/api/application'
 import Knowledge from './components/Knowledge/Knowledge'
@@ -36,93 +35,22 @@ import VariableList from './components/VariableList/VariableList'
 import { getApplicationConfig } from '@/api/application'
 import { memoryConfigListUrl } from '@/api/memory'
 import CustomSelect from '@/components/CustomSelect'
-import aiPrompt from '@/assets/images/application/aiPrompt.png'
 import AiPromptModal from './components/AiPromptModal'
 import ToolList from './components/ToolList/ToolList'
 import SkillList from './components/Skill'
 import ChatVariableConfigModal from './components/ChatVariableConfigModal';
 import type { Skill } from '@/views/Skills/types'
+import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
+import DescWrapper from '@/components/FormItem/DescWrapper'
 import FeaturesConfig from './components/FeaturesConfig'
+import { getListLogoUrl } from '@/views/ModelManagement/utils';
+import type { ChatItem } from '@/components/Chat/types'
 
-/**
- * Description wrapper component
- * @param desc - Description text
- * @param className - Additional CSS classes
- */
-const DescWrapper: FC<{desc: string, className?: string}> = ({desc, className}) => {
-  return (
-    <div className={clsx(className, "rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 ")}>
-      {desc}
-    </div>
-  )
-}
-/**
- * Label wrapper component
- * @param title - Label title
- * @param className - Additional CSS classes
- * @param children - Child elements
- */
-const LabelWrapper: FC<{title: string, className?: string; children?: ReactNode}> = ({title, className, children}) => {
-  return (
-    <div className={clsx(className, "rb:text-[14px] rb:font-medium rb:leading-5")}>
-      {title}
-      {children}
-    </div>
-  )
-}
-/**
- * Switch wrapper component with label and description
- * @param title - Switch title
- * @param desc - Optional description
- * @param name - Form field name
- * @param needTransition - Whether to translate text
- */
-const SwitchWrapper: FC<{ title: string, desc?: string, name: string | string[]; needTransition?: boolean; }> = ({ title, desc, name, needTransition = true }) => {
-  const { t } = useTranslation();
-  return (
-    <div className="rb:flex rb:items-center rb:justify-between">
-      <LabelWrapper title={needTransition ? t(`application.${title}`) : title}>
-        {desc && <DescWrapper desc={needTransition ? t(`application.${desc}`) : desc} className="rb:mt-2" />}
-      </LabelWrapper>
-      <Form.Item
-        name={name}
-        valuePropName="checked"
-        className="rb:mb-0!"
-      >
-        <Switch />
-      </Form.Item>
-    </div>
-  )
-}
-/**
- * Select wrapper component with label and description
- * @param title - Select title
- * @param desc - Description text
- * @param name - Form field name
- * @param url - API URL for options
- */
-const SelectWrapper: FC<{ title: string, desc: string, name: string | string[], url: string; disabled?: boolean }> = ({ title, desc, name, url, disabled }) => {
-  const { t } = useTranslation();
-  return (
-    <>
-      <LabelWrapper title={t(`application.${title}`)} className="rb:mb-2">
-      </LabelWrapper>
-      <Form.Item
-        name={name}
-        className="rb:mb-0!"
-      >
-        <CustomSelect
-          placeholder={t('common.pleaseSelect')}
-          url={url}
-          hasAll={false}
-          valueKey='config_id'
-          labelKey="config_name"
-          disabled={disabled}
-        />
-      </Form.Item>
-      <DescWrapper desc={t(`application.${desc}`)} className="rb:mt-2" />
-    </>
-  )
+export const replaceVariables = (statement: string, variables: Variable[]) => {
+  return statement.replace(/\{\{([^}]+)\}\}/g, (match, name) => {
+    const v = variables.find(item => item.name === name)
+    return v?.value != null && v.value !== '' ? String(v.value) : match
+  })
 }
 
 /**
@@ -137,14 +65,12 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<Config | null>(null);
   const modelConfigModalRef = useRef<ModelConfigModalRef>(null)
-  const [modelList, setModelList] = useState<ModelListItem[]>([])
-  const [defaultModel, setDefaultModel] = useState<ModelListItem | null>(null)
+  const [modelList, setModelList] = useState<Model[]>([])
+  const [defaultModel, setDefaultModel] = useState<Model | null>(null)
   const [chatList, setChatList] = useState<ChatData[]>([])
   const values = Form.useWatch<Config>([], form) 
   const [isSave, setIsSave] = useState(false)
   const initialized = useRef(false)
-
-  console.log('chatList', chatList)
   
   // Initialization flag
   useEffect(() => {
@@ -162,7 +88,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   useEffect(() => {
     getModels()
     getData()
-  }, [])
+  }, [id])
 
   /**
    * Fetch agent configuration data
@@ -175,8 +101,8 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
       const allSkills = Array.isArray(skills?.skill_ids) ? skills?.skill_ids.map(vo => ({ id: vo })) : []
       const allTools = Array.isArray(response.tools) ? response.tools : []
       const memoryContent = response.memory?.memory_config_id
-      const parsedMemoryContent = memoryContent === null || memoryContent === '' 
-        ? undefined 
+      const parsedMemoryContent = memoryContent === null || memoryContent === ''
+        ? undefined
         : !isNaN(Number(memoryContent)) ? Number(memoryContent) : memoryContent
       const variableList = variables?.map((item, index) => ({
         ...item,
@@ -213,14 +139,26 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
    */
   const refresh = (vo: ModelConfig, type: Source) => {
     if (type === 'model') {
-      const { default_model_config_id, ...rest } = vo
+      const { default_model_config_id, capability, ...rest } = vo
+      if (default_model_config_id !== values.default_model_config_id) {
+        const fileUpload = { ...values.features?.file_upload }
+        Object.keys(fileUpload).forEach(key => {
+          if (key.includes('enabled')) {
+            (fileUpload as Record<string, any>)[key] = false
+          }
+        })
+        form.setFieldValue(['features', 'file_upload'], fileUpload)
+        message.warning(t('application.resetFeaturesTip'))
+      }
       form.setFieldsValue({
         default_model_config_id,
+        capability,
         model_parameters: {...rest}
       })
       if (default_model_config_id === values?.default_model_config_id) {
+        const label = defaultModel?.id === default_model_config_id && defaultModel?.name ? defaultModel.name : vo.label || ''
         setChatList([{
-          label: defaultModel?.id === default_model_config_id && defaultModel?.name ? defaultModel.name :  vo.label || '',
+          label: label,
           model_config_id: default_model_config_id || '',
           model_parameters: {...rest},
           list: []
@@ -317,7 +255,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
       saveAgentConfig(data.app_id, params)
       .then((res) => {
         if (flag) {
-          message.success(t('common.saveSuccess'))
+          message.success({ content: t('common.saveSuccess'), duration: 1 })
         }
         setIsSave(false)
         resolve(res)
@@ -332,7 +270,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   const getModels = () => {
     getModelList({ type: 'llm,chat', pagesize: 100, page: 1, is_active: true })
       .then(res => {
-        const response = res as { items: ModelListItem[] }
+        const response = res as { items: Model[] }
         setModelList(response.items)
       })
   }
@@ -345,13 +283,14 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   useEffect(() => {
     if (values?.default_model_config_id && modelList.length > 0) {
       const filterValue = modelList.find(item => item.id === values.default_model_config_id)
-      setDefaultModel(filterValue as ModelListItem | null)
+      setDefaultModel(filterValue as Model | null)
       setChatList([{
         label: filterValue?.name || '',
         model_config_id: filterValue?.id || '',
         model_parameters: {...(filterValue?.config || {})} as unknown as ModelConfig,
         list: []
       }])
+      form.setFieldValue('capability', filterValue?.capability)
     }
   }, [modelList, values?.default_model_config_id])
 
@@ -401,12 +340,13 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   const handleOpenVariableConfig = () => {
     chatVariableConfigModalRef.current?.handleOpen(chatVariables)
   }
+
   /**
    * Save chat variable configuration
    * @param values - Variable values
    */
-  const handleSaveChatVariable = (values: Variable[]) => {
-    setChatVariables(values)
+  const handleSaveChatVariable = (variables: Variable[]) => {
+    setChatVariables(variables)
   }
   useEffect(() => {
     setChatVariables(values?.variables || [])
@@ -415,103 +355,176 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   const handleSaveFeaturesConfig = (value: FeaturesConfigForm) => {
     form.setFieldValue('features', value)
   }
-  console.log('agent', values)
+  const modelLogo = useMemo(() => {
+    return defaultModel?.name && getListLogoUrl(defaultModel.provider, defaultModel.logo as string)
+  }, [defaultModel])
+
+  useEffect(() => {
+    const opening_statement = form.getFieldValue(['features', 'opening_statement'])
+    console.log('opening_statement', opening_statement, defaultModel, chatList)
+
+    if (opening_statement?.enabled && opening_statement?.statement && opening_statement?.statement.trim() !== '') {
+      const assistantMsg: ChatItem = {
+        role: 'assistant',
+        content: replaceVariables(opening_statement.statement, chatVariables),
+        meta_data: {
+          suggested_questions: opening_statement?.suggested_questions
+        }
+      }
+      setChatList(prev => {
+        if (prev.length === 0 && !defaultModel) return prev
+        if (defaultModel && prev.length === 1) {
+          return [{
+            label: defaultModel.name,
+            model_config_id: defaultModel.id,
+            model_parameters: defaultModel.config as unknown as ModelConfig,
+            list: [assistantMsg]
+          }]
+        }
+
+        return prev.map(vo => {
+          if (vo.list?.length === 0) {
+            return { ...vo, list: [assistantMsg] }
+          } else if (vo.list && vo.list[0].role === 'assistant') {
+            return { ...vo, list: [assistantMsg, ...vo.list.slice(1)] }
+          } else {
+            return { ...vo, list: [assistantMsg, ...(vo.list || [])] }
+          }
+        })
+      })
+    }
+  }, [defaultModel, chatList.length, form.getFieldValue(['features', 'opening_statement']), chatVariables])
+  
+  console.log('agent values', values)
   return (
     <>
       {loading && <Spin fullscreen></Spin>}
-      <Row className="rb:h-[calc(100vh-64px)]">
-        <Col span={12} className="rb:h-full rb:overflow-x-auto rb:border-r rb:border-[#DFE4ED] rb:p-[20px_16px_24px_16px]">
-          <div className="rb:flex rb:items-center rb:justify-end rb:mb-5">
-            <Space size={10}>
-              <Button onClick={handleModelConfig} className="rb:group">
-                {defaultModel?.name ? <div className="rb:w-4 rb:h-4 rb:bg-[url('@/assets/images/application/model.svg')] rb:group-hover:bg-[url('@/assets/images/application/model_hover.svg')]"></div> : null}
-                {defaultModel?.name || t('application.chooseModel')}
-              </Button>
-              <FeaturesConfig value={values?.features as FeaturesConfigForm} refresh={handleSaveFeaturesConfig} />
-              <Button type="primary" onClick={() => handleSave()}>
-                {t('common.save')}
-              </Button>
-            </Space>
-          </div>
+      <Row className="rb:h-full!" gutter={12}>
+        <Col span={12} className="rb:h-full!">
           <Form form={form}>
-            <Form.Item name="default_model_config_id" hidden noStyle></Form.Item>
-            <Form.Item name="model_parameters" hidden noStyle></Form.Item>
-            <Form.Item name="features" hidden noStyle></Form.Item>
-            <Space size={16} direction="vertical" style={{ width: '100%' }}>
-              <Card title={t('application.promptConfiguration')}>
-                <div className="rb:flex rb:items-center rb:justify-between rb:mb-2.75">
-                  <div className="rb:font-medium rb:leading-5">
-                    {t('application.configuration')}
-                    <span className="rb:font-regular rb:text-[12px] rb:text-[#5B6167]"> ({t('application.configurationDesc')})</span>
-                  </div>
-                  <Button style={{ padding: '0 8px', height: '24px' }} onClick={handlePrompt}>
-                    <img src={aiPrompt} className="rb:size-5" />
-                    {t('application.aiPrompt')}
+            <Flex gap={12} vertical>
+              <Flex align="center" justify="space-between" className="rb:p-3! rb:bg-white rb:rounded-xl">
+                <Button type="primary" ghost onClick={handleModelConfig} className="rb:group">
+                  {modelLogo
+                    ? <img src={modelLogo} className="rb:size-4 rb:rounded-md" alt="" />
+                    : defaultModel?.name
+                    ? <div className="rb:size-4 rb:bg-[url('@/assets/images/application/model.svg')]"></div> : null}
+                  {defaultModel?.name || t('application.chooseModel')}
+                </Button>
+                <Space size={12}>
+                  <FeaturesConfig
+                    value={values?.features as FeaturesConfigForm}
+                    capability={values?.capability || []}
+                    refresh={handleSaveFeaturesConfig}
+                    chatVariables={chatVariables}
+                  />
+                  <Button type="primary" onClick={() => handleSave()}>
+                    {t('common.save')}
                   </Button>
-                </div>
-
-                <Form.Item
-                  name="system_prompt"
-                  className="rb:mb-0!"
-                  rules={[{ max: 10000 }]}
-                >
-                  <Input.TextArea
-                    placeholder={t('application.promptPlaceholder')}
-                    styles={{
-                      textarea: {
-                        minHeight: '200px',
-                        borderRadius: '8px'
-                      },
-                    }}
-                  />
-                </Form.Item>
-              </Card>
-
-              <Form.Item name="knowledge_retrieval" noStyle>
-                <Knowledge />
-              </Form.Item>
-
-              {/* Memory Configuration */}
-              <Card title={t('application.memoryConfiguration')}>
-                <Space size={24} direction='vertical' style={{ width: '100%' }}>
-                  <SwitchWrapper title="dialogueHistoricalMemory" desc="dialogueHistoricalMemoryDesc" name={['memory', 'enabled']} />
-                  <SelectWrapper
-                    title="selectMemoryContent"
-                    desc="selectMemoryContentDesc"
-                    name={['memory', 'memory_config_id']}
-                    url={memoryConfigListUrl}
-                    disabled={!values?.memory?.enabled}
-                  />
                 </Space>
-              </Card>
+              </Flex>
 
-              <Form.Item name="variables" noStyle>
-                <VariableList />
-              </Form.Item>
+              <Flex gap={12} vertical className="rb:h-[calc(100vh-156px)]! rb:overflow-y-auto!">
+                <Form.Item name="default_model_config_id" hidden noStyle></Form.Item>
+                <Form.Item name="capability" hidden noStyle></Form.Item>
+                <Form.Item name="model_parameters" hidden noStyle></Form.Item>
+                <Form.Item name="features" hidden noStyle></Form.Item>
+                <Card
+                  title={t('application.promptConfiguration')}
+                  extra={
+                    <Space
+                      size={1}
+                      className="rb:px-2 rb:h-5.5 rb:rounded-md rb:cursor-pointer rb:border rb:border-[rgba(21,94,239,0.3)] rb:text-[#155EEF]"
+                      onClick={handlePrompt}
+                    >
+                      <div className="rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/application/aiPrompt.png')]"></div>
+                      <span className="rb:font-[PingFangSC, PingFang_SC]!">{t('application.aiPrompt')}</span>
+                    </Space>
+                  }
+                >
+                  <div className="rb:leading-4.5 rb:text-[12px] rb:mb-2">
+                    <span className="rb:font-medium">{t('application.configuration')}</span>
+                    <span className="rb:font-regular rb:text-[#5B6167]"> ({t('application.configurationDesc')})</span>
+                  </div>
 
-              <Form.Item name="skills" noStyle>
-                <SkillList />
-              </Form.Item>
+                  <Form.Item name="system_prompt" className="rb:mb-0!">
+                    <Input.TextArea
+                      placeholder={t('application.promptPlaceholder')}
+                      styles={{
+                        textarea: {
+                          minHeight: '200px',
+                          borderRadius: '8px',
+                          padding: '12px'
+                        },
+                      }}
+                    />
+                  </Form.Item>
+                </Card>
 
-              {/* Tool Configuration */}
-              <Form.Item name="tools" noStyle>
-                <ToolList />
-              </Form.Item>
-            </Space>
+                <Form.Item name="knowledge_retrieval" noStyle>
+                  <Knowledge />
+                </Form.Item>
+
+                  {/* Memory Configuration */}
+                <Card title={t('application.memoryConfiguration')}>
+                  <Flex gap={16} vertical className="rb:bg-[#FAFAFA] rb:rounded-xl rb:p-3!">
+                    <SwitchFormItem
+                      title={t('application.dialogueHistoricalMemory')}
+                      name={['memory', 'enabled']}
+                      desc={t('application.dialogueHistoricalMemoryDesc')}
+                    />
+                    <Form.Item
+                      name={['memory', 'memory_config_id']}
+                      label={t('application.selectMemoryContent')}
+                      extra={<DescWrapper desc={t('application.selectMemoryContentDesc')} className="rb:mt-1" />}
+                      layout="vertical"
+                      className="rb:mb-0!"
+                    >
+                      <CustomSelect
+                        placeholder={t('common.pleaseSelect')}
+                        url={memoryConfigListUrl}
+                        hasAll={false}
+                        valueKey='config_id'
+                        labelKey="config_name"
+                        disabled={!values?.memory?.enabled}
+                      />
+                    </Form.Item>
+                  </Flex>
+                </Card>
+
+                <Form.Item name="variables" noStyle>
+                  <VariableList />
+                </Form.Item>
+
+                <Form.Item name="skills" noStyle>
+                  <SkillList />
+                </Form.Item>
+
+                {/* Tool Configuration */}
+                <Form.Item name="tools" noStyle>
+                  <ToolList />
+                </Form.Item>
+              </Flex>
+            </Flex>
           </Form>
         </Col>
-        <Col span={12} className="rb:h-full rb:overflow-x-hidden rb:p-[20px_16px_24px_16px]">
-          <div className="rb:flex rb:items-center rb:justify-between rb:mb-5">
-            {t('application.debuggingAndPreview')}
-
-            <Space size={10}>
-              <Button type="primary" ghost onClick={handleAddModel}>
-                + {t('application.addModel')}
-              </Button>
-              <div className="rb:w-8 rb:h-8 rb:cursor-pointer rb:bg-[url('@/assets/images/application/clean.svg')]" onClick={handleClearDebugging}></div>
-            </Space>
-          </div>
-          <RbCard height="calc(100vh - 160px)" bodyClassName="rb:p-[0]! rb:h-full rb:overflow-hidden">
+        <Col span={12} className="rb:h-full! rb:overflow-y-hidden">
+          <RbCard
+            title={t('application.debuggingAndPreview')}
+            extra={
+              <Space size={10}>
+                <Button type="primary" ghost onClick={handleAddModel}>
+                  + {t('application.addModel')}
+                </Button>
+                <div className="rb:w-8 rb:h-8 rb:cursor-pointer rb:bg-[url('@/assets/images/application/clean.svg')]" onClick={handleClearDebugging}></div>
+              </Space>
+            }
+            headerType="borderless"
+            headerClassName="rb:h-[56px]! rb:leading-[22px]!"
+            titleClassName="rb:font-[MiSans-Bold] rb:font-bold"
+            bodyClassName="rb:p-4! rb:pt-0! rb:h-[calc(100%-56px)]!"
+            className="rb:h-full!"
+          >
             <Chat
               data={values as Config}
               chatList={chatList}
@@ -525,7 +538,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
       </Row>
 
       <ModelConfigModal
-        modelList={modelList}
         data={values}
         ref={modelConfigModalRef}
         refresh={refresh}

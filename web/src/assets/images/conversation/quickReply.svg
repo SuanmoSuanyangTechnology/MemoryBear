@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>快速回复</title>
+    <defs>
+        <filter x="-3.4%" y="-14.2%" width="106.8%" height="131.7%" filterUnits="objectBoundingBox" id="filter-1">
+            <feOffset dx="0" dy="2" in="SourceAlpha" result="shadowOffsetOuter1"></feOffset>
+            <feGaussianBlur stdDeviation="6" in="shadowOffsetOuter1" result="shadowBlurOuter1"></feGaussianBlur>
+            <feColorMatrix values="0 0 0 0 0.0901960784   0 0 0 0 0.0901960784   0 0 0 0 0.0980392157  0 0 0 0.1 0" type="matrix" in="shadowBlurOuter1" result="shadowMatrixOuter1"></feColorMatrix>
+            <feMerge>
+                <feMergeNode in="shadowMatrixOuter1"></feMergeNode>
+                <feMergeNode in="SourceGraphic"></feMergeNode>
+            </feMerge>
+        </filter>
+    </defs>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="记忆验证" transform="translate(-285, -742)" stroke="#171719">
+            <g id="编组-16" transform="translate(252, 108)">
+                <g id="输入框" filter="url(#filter-1)" transform="translate(11, 548)">
+                    <g id="快速/深度" transform="translate(12, 80)">
+                        <g id="快速回复" transform="translate(10, 6)">
+                            <path d="M7.87421377,2.54726615 L3.90048515,8.12578128 C3.64414483,8.48564439 3.72806663,8.98517595 4.08792974,9.24151627 C4.22344723,9.33804908 4.38569112,9.38992649 4.55207494,9.38992649 L6.7255258,9.38992649 C6.83598275,9.38992649 6.9255258,9.47946954 6.9255258,9.58992649 L6.9255258,12.7661445 C6.9255258,13.3184293 7.37324105,13.7661445 7.9255258,13.7661445 C8.2557012,13.7661445 8.56459514,13.6031667 8.75097255,13.3306245 L12.1441069,8.36879823 C12.3935099,8.00409291 12.3000389,7.50625978 11.9353335,7.25685682 C11.8023068,7.1658868 11.6449067,7.11721421 11.4837495,7.11721421 L9.888701,7.11721421 C9.77824405,7.11721421 9.688701,7.02767116 9.688701,6.91721421 L9.688701,3.12744764 C9.688701,2.57516289 9.24098575,2.12744764 8.688701,2.12744764 C8.36529181,2.12744764 8.0618498,2.2838535 7.87421377,2.54726615 Z" id="路径-2"></path>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

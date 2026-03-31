@@ -1084,7 +1084,6 @@ class AppService:
                 if not exists:
                     cleaned["memory_config_id"] = None
                     cleaned.pop("memory_content", None)
-                    cleaned["enabled"] = False
                 return cleaned
 
             exists = self.db.query(
@@ -1096,7 +1095,6 @@ class AppService:
             if not exists:
                 cleaned["memory_config_id"] = None
                 cleaned.pop("memory_content", None)
-                cleaned["enabled"] = False
 
         return cleaned
 
@@ -1638,7 +1636,7 @@ class AppService:
 
     # ==================== 记忆配置提取方法 ====================
 
-    def _extract_memory_config_id(
+    def _get_memory_config_id_from_release(
             self,
             app_type: str,
             config: Dict[str, Any]
@@ -1684,15 +1682,15 @@ class AppService:
 
         return config.config_id
 
-    def _update_endusers_memory_config_by_workspace(
+    def _update_endusers_memory_config_by_app(
             self,
-            workspace_id: uuid.UUID,
+            app_id: uuid.UUID,
             memory_config_id: uuid.UUID
     ) -> int:
         """批量更新应用下所有终端用户的 memory_config_id
         
         Args:
-            workspace_id: 工作空间ID
+            app_id: 应用ID
             memory_config_id: 新的记忆配置ID
             
         Returns:
@@ -1701,8 +1699,8 @@ class AppService:
         from app.repositories.end_user_repository import EndUserRepository
 
         repo = EndUserRepository(self.db)
-        updated_count = repo.batch_update_memory_config_id_by_workspace(
-            workspace_id=workspace_id,
+        updated_count = repo.batch_update_memory_config_id_by_app(
+            app_id=app_id,
             memory_config_id=memory_config_id
         )
 
@@ -1753,12 +1751,16 @@ class AppService:
 
             miss_params = []
             if agent_cfg.default_model_config_id is None:
-                miss_params.append("model config")
+                miss_params.append("模型配置")
 
             if agent_cfg.memory.get("enabled") and not agent_cfg.memory.get("memory_config_id"):
-                miss_params.append("memory config")
+                miss_params.append("记忆配置")
             if miss_params:
-                raise BusinessException(f"{', '.join(miss_params)} is required")
+                raise BusinessException(
+                    f"应用发布失败：检测到以下必要配置尚未完成：{', '.join(miss_params)}。请返回应用编辑页面完成相关配置后再尝试发布。",
+                    BizCode.CONFIG_MISSING,
+                    context={"missing_params": miss_params},
+                )
 
             config = {
                 "system_prompt": agent_cfg.system_prompt,
@@ -1863,7 +1865,7 @@ class AppService:
         self.db.flush()  # 先 flush，确保 release 已插入数据库
 
         # 提取记忆配置ID并更新终端用户
-        memory_config_id, is_legacy_int = self._extract_memory_config_id(app.type, config)
+        memory_config_id, is_legacy_int = self._get_memory_config_id_from_release(app.type, config)
 
         # 如果检测到旧格式 int 数据，回退到工作空间默认配置
         if is_legacy_int and not memory_config_id:
@@ -1877,8 +1879,8 @@ class AppService:
         if memory_config_id:
             app = self.db.query(App).filter(App.id == app_id).first()
             if app:
-                updated_count = self._update_endusers_memory_config_by_workspace(
-                    app.workspace_id, memory_config_id
+                updated_count = self._update_endusers_memory_config_by_app(
+                    app_id, memory_config_id
                 )
                 logger.info(
                     f"发布时更新终端用户记忆配置: app_id={app_id}, workspace_id={app.workspace_id}, "
@@ -2001,7 +2003,7 @@ class AppService:
             raise ResourceNotFoundException("发布版本", f"app_id={app_id}, version={version}")
 
         # 提取记忆配置ID并更新终端用户
-        memory_config_id, is_legacy_int = self._extract_memory_config_id(release.type, release.config)
+        memory_config_id, is_legacy_int = self._get_memory_config_id_from_release(release.type, release.config)
 
         # 如果检测到旧格式 int 数据，回退到工作空间默认配置
         if is_legacy_int and not memory_config_id:
@@ -2014,7 +2016,7 @@ class AppService:
 
         if memory_config_id:
 
-            updated_count = self._update_endusers_memory_config_by_workspace(app.workspace_id, memory_config_id)
+            updated_count = self._update_endusers_memory_config_by_app(app_id, memory_config_id)
             logger.info(
                 f"回滚时更新终端用户记忆配置: app_id={app_id}, version={version}, "
                 f"memory_config_id={memory_config_id}, updated_count={updated_count}"

@@ -1,7 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
-import { Space, List } from 'antd';
+import { List, Form, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx'
+
 import type { KnowledgeModalRef, KnowledgeBase } from './types'
 import type { KnowledgeBaseListItem } from '@/views/KnowledgeBase/types'
 import RbModal from '@/components/RbModal'
@@ -22,21 +23,23 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
   const [visible, setVisible] = useState(false);
   const [list, setList] = useState<KnowledgeBaseListItem[]>([])
   const [filterList, setFilterList] = useState<KnowledgeBaseListItem[]>([])
-  const [query, setQuery] = useState<{keywords?: string}>({})
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [selectedRows, setSelectedRows] = useState<KnowledgeBase[]>([])
+
+  const [form] = Form.useForm()
+  const query = Form.useWatch([], form)
 
   // 封装取消方法，添加关闭弹窗逻辑
   const handleClose = () => {
     setVisible(false);
-    setQuery({})
+    form.resetFields()
     setSelectedIds([])
     setSelectedRows([])
   };
 
   const handleOpen = () => {
     setVisible(true);
-    setQuery({})
+    form.resetFields()
     setSelectedIds([])
     setSelectedRows([])
   };
@@ -45,7 +48,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
     if (visible) {
       getList()
     }
-  }, [query.keywords, visible])
+  }, [query?.keywords, visible])
   const getList = () => {
     getKnowledgeBaseList(undefined, {
       ...query,
@@ -77,11 +80,6 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
     handleOpen,
     handleClose
   }));
-  const handleSearch = (value?: string) => {
-    setQuery({keywords: value})
-    setSelectedIds([])
-    setSelectedRows([])
-  }
   const handleSelect = (item: KnowledgeBase) => {
     const index = selectedIds.indexOf(item.id)
     if (index === -1) {
@@ -112,22 +110,28 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
         onOk={handleSave}
         width={1000}
       >
-        <Space size={24} direction="vertical" className="rb:w-full">
-          <SearchInput
-            placeholder={t('knowledgeBase.searchPlaceholder')}
-            onSearch={handleSearch}
-            style={{ width: '100%' }}
-            size="middle"
-          />
+        <Flex gap={24} vertical>
+          <Form form={form}>
+            <Form.Item name="keywords" noStyle>
+              <SearchInput
+                placeholder={t('knowledgeBase.searchPlaceholder')}
+                className="rb:w-full!"
+                variant="outlined"
+              />
+            </Form.Item>
+          </Form>
           {filterList.length === 0 
             ? <Empty />
             : <List
               grid={{ gutter: 16, column: 2 }}
               dataSource={filterList}
               renderItem={(item: KnowledgeBase) => (
-                <List.Item>
-                  <div key={item.id} className={clsx("rb:flex rb:items-center rb:justify-between rb:border rb:rounded-lg rb:p-[17px_16px] rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
-                    "rb:bg-[rgba(21,94,239,0.06)] rb:border-[#155EEF] rb:text-[#155EEF]": selectedIds.includes(item.id),
+                <List.Item key={item.id}>
+                  <Flex
+                    align="center"
+                    justify="space-between"
+                    className={clsx("rb:border rb:rounded-lg rb:p-[17px_16px]! rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
+                    "rb:bg-[rgba(21,94,239,0.06)] rb:border-[#171719] rb:text-[#171719]": selectedIds.includes(item.id),
                     "rb:border-[#DFE4ED] rb:text-[#212332]": !selectedIds.includes(item.id),
                   })} onClick={() => handleSelect(item)}>
                     <div className="rb:text-[16px] rb:leading-5.5">
@@ -135,12 +139,12 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
                       <div className="rb:text-[12px] rb:leading-4 rb:text-[#5B6167] rb:mt-2">{t('application.contains', {include_count: item.doc_num})}</div>
                     </div>
                     <div className="rb:text-[12px] rb:leading-4 rb:text-[#5B6167]">{formatDateTime(item.created_at, 'YYYY-MM-DD HH:mm:ss')}</div>
-                  </div>
+                  </Flex>
                 </List.Item>
               )}
             />
           }
-        </Space>
+        </Flex>
       </RbModal>
     </>
   );

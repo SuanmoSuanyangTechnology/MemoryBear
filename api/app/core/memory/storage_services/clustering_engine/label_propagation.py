@@ -7,6 +7,7 @@
 - 增量更新（incremental_update）：新实体到达时，只处理新实体及其邻居
 """
 
+import asyncio
 import logging
 import uuid
 from math import sqrt
@@ -19,8 +20,9 @@ logger = logging.getLogger(__name__)
 
 # 全量迭代最大轮数，防止不收敛
 MAX_ITERATIONS = 10
-# 社区摘要核心实体数量
-CORE_ENTITY_LIMIT = 5
+
+# 社区核心实体取 top-N 数量
+CORE_ENTITY_LIMIT = 10
 
 
 def _cosine_similarity(v1: Optional[List[float]], v2: Optional[List[float]]) -> float:
@@ -67,15 +69,16 @@ class LabelPropagationEngine:
     def __init__(
         self,
         connector: Neo4jConnector,
-        config_id: Optional[str] = None,
         llm_model_id: Optional[str] = None,
         embedding_model_id: Optional[str] = None,
     ):
         self.connector = connector
         self.repo = CommunityRepository(connector)
-        self.config_id = config_id
         self.llm_model_id = llm_model_id
         self.embedding_model_id = embedding_model_id
+        # 缓存客户端实例，避免重复初始化
+        self._llm_client = None
+        self._embedder_client = None
 
     # ──────────────────────────────────────────────────────────────────────────
     # 公开接口
@@ -105,58 +108,81 @@ class LabelPropagationEngine:
 
     async def full_clustering(self, end_user_id: str) -> None:
         """
-        全量标签传播初始化。
+        全量标签传播初始化（分批处理，控制内存峰值）。
 
-        1. 拉取所有实体，初始化每个实体为独立社区
-        2. 迭代：每轮对所有实体做邻居投票，更新社区标签
-        3. 直到标签不再变化或达到 MAX_ITERATIONS
-        4. 将最终标签写入 Neo4j
+        策略：
+        - 每次只加载 BATCH_SIZE 个实体及其邻居进内存
+        - labels 字典跨批次共享（只存 id→community_id，内存极小）
+        - 每批独立跑 MAX_ITERATIONS 轮 LPA，批次间通过 labels 传递社区信息
+        - 所有批次完成后统一 flush 和 merge
         """
-        entities = await self.repo.get_all_entities(end_user_id)
-        if not entities:
+        BATCH_SIZE = 888  # 每批实体数，可按需调整
+
+        # 轻量查询：只获取总数和 ID 列表，不加载 embedding 等大字段
+        total_count = await self.repo.get_entity_count(end_user_id)
+        if not total_count:
             logger.info(f"[Clustering] 用户 {end_user_id} 无实体，跳过全量聚类")
             return
 
-        # 初始化：每个实体持有自己 id 作为社区标签
-        labels: Dict[str, str] = {e["id"]: e["id"] for e in entities}
-        embeddings: Dict[str, Optional[List[float]]] = {
-            e["id"]: e.get("name_embedding") for e in entities
-        }
+        all_entity_ids = await self.repo.get_all_entity_ids(end_user_id)
+        logger.info(f"[Clustering] 用户 {end_user_id} 共 {total_count} 个实体，"
+                    f"分批大小 {BATCH_SIZE}，共 {(total_count + BATCH_SIZE - 1) // BATCH_SIZE} 批")
 
-        # 预加载所有实体的邻居，避免迭代内 O(iterations * |E|) 次 Neo4j 往返
-        logger.info(f"[Clustering] 预加载 {len(entities)} 个实体的邻居图...")
-        neighbors_cache: Dict[str, List[Dict]] = await self.repo.get_all_entity_neighbors_batch(end_user_id)
-        logger.info(f"[Clustering] 邻居预加载完成，覆盖实体数: {len(neighbors_cache)}")
+        # labels 跨批次共享：只存 id→community_id，内存极小
+        labels: Dict[str, str] = {eid: eid for eid in all_entity_ids}
+        del all_entity_ids  # 释放 ID 列表，后续按批次加载完整数据
 
-        for iteration in range(MAX_ITERATIONS):
-            changed = 0
-            # 随机顺序（Python dict 在 3.7+ 保持插入顺序，这里直接遍历）
-            for entity in entities:
-                eid = entity["id"]
-                # 直接从缓存取邻居，不再发起 Neo4j 查询
-                neighbors = neighbors_cache.get(eid, [])
-
-                # 将邻居的当前内存标签注入（覆盖 Neo4j 中的旧值）
-                enriched = []
-                for nb in neighbors:
-                    nb_copy = dict(nb)
-                    nb_copy["community_id"] = labels.get(nb["id"], nb.get("community_id"))
-                    enriched.append(nb_copy)
-
-                new_label = _weighted_vote(enriched, embeddings.get(eid))
-                if new_label and new_label != labels[eid]:
-                    labels[eid] = new_label
-                    changed += 1
-
-            logger.info(
-                f"[Clustering] 全量迭代 {iteration + 1}/{MAX_ITERATIONS}，"
-                f"标签变化数: {changed}"
+        for batch_start in range(0, total_count, BATCH_SIZE):
+            batch_entities = await self.repo.get_entities_page(
+                end_user_id, skip=batch_start, limit=BATCH_SIZE
             )
-            if changed == 0:
-                logger.info("[Clustering] 标签已收敛，提前结束迭代")
+            if not batch_entities:
                 break
 
-        # 将最终标签写入 Neo4j
+            batch_ids = [e["id"] for e in batch_entities]
+            batch_embeddings: Dict[str, Optional[List[float]]] = {
+                e["id"]: e.get("name_embedding") for e in batch_entities
+            }
+
+            logger.info(
+                f"[Clustering] 批次 {batch_start // BATCH_SIZE + 1}："
+                f"加载 {len(batch_entities)} 个实体的邻居图..."
+            )
+            neighbors_cache = await self.repo.get_entity_neighbors_for_ids(
+                batch_ids, end_user_id
+            )
+            logger.info(f"[Clustering] 邻居预加载完成，覆盖实体数: {len(neighbors_cache)}")
+
+            for iteration in range(MAX_ITERATIONS):
+                changed = 0
+                for entity in batch_entities:
+                    eid = entity["id"]
+                    neighbors = neighbors_cache.get(eid, [])
+
+                    # 注入跨批次的最新标签（邻居可能在其他批次，labels 里有其最新值）
+                    enriched = []
+                    for nb in neighbors:
+                        nb_copy = dict(nb)
+                        nb_copy["community_id"] = labels.get(nb["id"], nb.get("community_id"))
+                        enriched.append(nb_copy)
+
+                    new_label = _weighted_vote(enriched, batch_embeddings.get(eid))
+                    if new_label and new_label != labels[eid]:
+                        labels[eid] = new_label
+                        changed += 1
+
+                logger.info(
+                    f"[Clustering] 批次 {batch_start // BATCH_SIZE + 1} "
+                    f"迭代 {iteration + 1}/{MAX_ITERATIONS}，标签变化数: {changed}"
+                )
+                if changed == 0:
+                    logger.info("[Clustering] 标签已收敛，提前结束本批迭代")
+                    break
+
+            # 释放本批次的大对象
+            del neighbors_cache, batch_embeddings, batch_entities
+
+        # 所有批次完成，统一写入 Neo4j
         await self._flush_labels(labels, end_user_id)
         pre_merge_count = len(set(labels.values()))
         logger.info(
@@ -164,7 +190,6 @@ class LabelPropagationEngine:
             f"{len(labels)} 个实体，开始后处理合并"
         )
 
-        # 全量初始化后做一轮社区合并（基于 name_embedding 余弦相似度）
         all_community_ids = list(set(labels.values()))
         await self._evaluate_merge(all_community_ids, end_user_id)
 
@@ -172,17 +197,15 @@ class LabelPropagationEngine:
             f"[Clustering] 全量聚类完成，合并前 {pre_merge_count} 个社区，"
             f"{len(labels)} 个实体"
         )
-        # 为所有社区生成元数据
-        # 注意：_evaluate_merge 后部分社区已被合并消解，需重新从 Neo4j 查询实际存活的社区
-        # 不能复用 labels.values()，那里包含已被 dissolve 的旧社区 ID
+
+        # 查询存活社区并生成元数据
         surviving_communities = await self.repo.get_all_entities(end_user_id)
         surviving_community_ids = list({
             e.get("community_id") for e in surviving_communities
             if e.get("community_id")
         })
         logger.info(f"[Clustering] 合并后实际存活社区数: {len(surviving_community_ids)}")
-        for cid in surviving_community_ids:
-            await self._generate_community_metadata(cid, end_user_id)
+        await self._generate_community_metadata(surviving_community_ids, end_user_id)
 
     async def incremental_update(
         self, new_entity_ids: List[str], end_user_id: str
@@ -195,8 +218,17 @@ class LabelPropagationEngine:
         3. 若邻居无社区 → 创建新社区
         4. 若邻居分属多个社区 → 评估是否合并
         """
+        # 收集所有需要生成元数据的社区ID
+        communities_to_update = set()
+        
         for entity_id in new_entity_ids:
-            await self._process_single_entity(entity_id, end_user_id)
+            cid = await self._process_single_entity(entity_id, end_user_id)
+            if cid:
+                communities_to_update.add(cid)
+        
+        # 批量生成所有社区的元数据
+        if communities_to_update:
+            await self._generate_community_metadata(list(communities_to_update), end_user_id, force=True)
 
     # ──────────────────────────────────────────────────────────────────────────
     # 内部方法
@@ -204,8 +236,21 @@ class LabelPropagationEngine:
 
     async def _process_single_entity(
         self, entity_id: str, end_user_id: str
-    ) -> None:
-        """处理单个新实体的社区分配。"""
+    ) -> Optional[str]:
+        """
+        处理单个新实体的社区分配。
+        
+        该函数会为新实体分配社区，可能的情况包括：
+        1. 孤立实体（无邻居）：创建新的单成员社区
+        2. 邻居都没有社区：创建新社区并将实体和邻居都加入
+        3. 邻居有社区：通过加权投票选择最合适的社区加入
+        
+        Returns:
+            Optional[str]: 分配到的社区ID。当前实现总是返回一个有效的社区ID，
+                          但返回类型保留为Optional以支持未来可能的扩展场景
+                          （例如：实体无法分配到任何社区的情况）。
+                          调用方应检查返回值的真假性（truthiness）。
+        """
         neighbors = await self.repo.get_entity_neighbors(entity_id, end_user_id)
 
         # 查询自身 embedding（从邻居查询结果中无法获取，需单独查）
@@ -217,7 +262,7 @@ class LabelPropagationEngine:
             await self.repo.upsert_community(new_cid, end_user_id, member_count=1)
             await self.repo.assign_entity_to_community(entity_id, new_cid, end_user_id)
             logger.debug(f"[Clustering] 孤立实体 {entity_id} → 新社区 {new_cid}")
-            return
+            return new_cid
 
         # 统计邻居社区分布
         community_ids_in_neighbors = set(
@@ -239,7 +284,7 @@ class LabelPropagationEngine:
             logger.debug(
                 f"[Clustering] 新实体 {entity_id} 与 {len(neighbors)} 个无社区邻居 → 新社区 {new_cid}"
             )
-            await self._generate_community_metadata(new_cid, end_user_id)
+            return new_cid
         else:
             # 加入得票最多的社区
             await self.repo.assign_entity_to_community(entity_id, target_cid, end_user_id)
@@ -251,7 +296,8 @@ class LabelPropagationEngine:
                 await self._evaluate_merge(
                     list(community_ids_in_neighbors), end_user_id
                 )
-            await self._generate_community_metadata(target_cid, end_user_id)
+            # 返回目标社区ID，稍后批量生成元数据
+            return target_cid
 
     async def _evaluate_merge(
         self, community_ids: List[str], end_user_id: str
@@ -415,93 +461,222 @@ class LabelPropagationEngine:
         except Exception:
             return None
 
+    @staticmethod
+    def _build_entity_lines(members: List[Dict]) -> List[str]:
+        """将实体列表格式化为 prompt 行，包含 name、aliases、description、example。"""
+        lines = []
+        for m in members:
+            m_name = m.get("name", "")
+            aliases = m.get("aliases") or []
+            description = m.get("description") or ""
+            example = m.get("example") or ""
+            aliases_str = f"（别名：{'、'.join(aliases)}）" if aliases else ""
+            desc_str = f"：{description}" if description else ""
+            example_str = f"（示例：{example}）" if example else ""
+            lines.append(f"- {m_name}{aliases_str}{desc_str}{example_str}")
+        return lines
+
     async def _generate_community_metadata(
-        self, community_id: str, end_user_id: str
+        self, community_ids: List[str], end_user_id: str, force: bool = False
     ) -> None:
         """
-        为社区生成并写入元数据：名称、摘要、核心实体。
+        为一个或多个社区生成并写入元数据（优化版：批量 LLM 调用）。
 
-        - core_entities：按 activation_value 排序取 top-N 实体名称列表（无需 LLM）
-        - name / summary：若有 llm_model_id 则调用 LLM 生成，否则用实体名称拼接兜底
+        流程：
+        1. 批量准备所有社区的 prompt
+        2. 并发调用 LLM 生成所有社区的 name / summary
+        3. 批量 embed 所有 summary
+        4. 批量写入数据库
+
+        Args:
+            force: 为 True 时跳过完整性检查，强制重新生成（用于增量更新成员变化后）
         """
-        try:
-            # 先检查属性是否已完整，完整则跳过，避免重复生成
-            check_embedding = bool(self.embedding_model_id)
-            if await self.repo.is_community_complete(community_id, end_user_id, check_embedding=check_embedding):
-                logger.debug(f"[Clustering] 社区 {community_id} 属性已完整，跳过生成")
-                return
+        async def _prepare_one(cid: str) -> Optional[Dict]:
+            """准备单个社区的数据和 prompt"""
+            try:
+                if not force:
+                    check_embedding = bool(self.embedding_model_id)
+                    if await self.repo.is_community_complete(cid, end_user_id, check_embedding=check_embedding):
+                        return None
 
-            members = await self.repo.get_community_members(community_id, end_user_id)
-            if not members:
-                return
+                members = await self.repo.get_community_members(cid, end_user_id)
+                if not members:
+                    logger.warning(f"[Clustering] 社区 {cid} 无成员，跳过元数据生成")
+                    return None
 
-            # 核心实体：按 activation_value 降序取 top-N
-            sorted_members = sorted(
-                members,
-                key=lambda m: m.get("activation_value") or 0,
-                reverse=True,
-            )
-            core_entities = [m["name"] for m in sorted_members[:CORE_ENTITY_LIMIT] if m.get("name")]
-            all_names = [m["name"] for m in members if m.get("name")]
+                sorted_members = sorted(
+                    members,
+                    key=lambda m: m.get("activation_value") or 0,
+                    reverse=True,
+                )
+                core_entities = [m["name"] for m in sorted_members[:CORE_ENTITY_LIMIT] if m.get("name")]
+                all_names = [m["name"] for m in members if m.get("name")]
 
-            name = "、".join(core_entities[:3]) if core_entities else community_id[:8]
-            summary = f"包含实体：{', '.join(all_names)}"
+                # 默认值
+                name = "、".join(core_entities[:3]) if core_entities else cid[:8]
+                summary = f"包含实体：{', '.join(all_names)}"
 
-            # 若有 LLM 配置，调用 LLM 生成更好的名称和摘要
-            if self.llm_model_id:
-                try:
-                    from app.db import get_db_context
-                    from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-
-                    entity_list_str = "、".join(all_names)
+                # 准备 LLM prompt（如果配置了 LLM）
+                prompt = None
+                if self.llm_model_id:
+                    entity_list_str = "\n".join(self._build_entity_lines(members))
+                    relationships = await self.repo.get_community_relationships(cid, end_user_id)
+                    rel_lines = [
+                        f"- {r['subject']} → {r['predicate']} → {r['object']}"
+                        for r in relationships
+                        if r.get("subject") and r.get("predicate") and r.get("object")
+                    ]
+                    rel_section = (
+                        f"\n实体间关系：\n" + "\n".join(rel_lines)
+                        if rel_lines else ""
+                    )
                     prompt = (
-                        f"以下是一组语义相关的实体：{entity_list_str}\n\n"
+                        f"以下是一组语义相关的实体：\n{entity_list_str}{rel_section}\n\n"
                         f"请为这组实体所代表的主题：\n"
                         f"1. 起一个简洁的中文名称（不超过10个字）\n"
-                        f"2. 写一句话摘要（不超过50个字）\n\n"
+                        f"2. 写一句话摘要（不超过80个字）\n\n"
                         f"严格按以下格式输出，不要有其他内容：\n"
                         f"名称：<名称>\n摘要：<摘要>"
                     )
-                    with get_db_context() as db:
-                        factory = MemoryClientFactory(db)
-                        llm_client = factory.get_llm_client(self.llm_model_id)
-                        response = await llm_client.chat([{"role": "user", "content": prompt}])
-                        text = response.content if hasattr(response, "content") else str(response)
 
-                    for line in text.strip().splitlines():
-                        if line.startswith("名称："):
-                            name = line[3:].strip()
-                        elif line.startswith("摘要："):
-                            summary = line[3:].strip()
-                except Exception as e:
-                    logger.warning(f"[Clustering] LLM 生成社区元数据失败，使用兜底值: {e}")
+                return {
+                    "community_id": cid,
+                    "end_user_id": end_user_id,
+                    "name": name,
+                    "summary": summary,
+                    "core_entities": core_entities,
+                    "prompt": prompt,
+                    "summary_embedding": None,
+                }
+            except Exception as e:
+                logger.error(f"[Clustering] 社区 {cid} 元数据准备失败: {e}", exc_info=True)
+                return None
 
-            # 生成 summary_embedding
-            summary_embedding: Optional[List[float]] = None
-            if self.embedding_model_id and summary:
+        # --- 阶段1：并发准备所有社区数据 ---
+        results = await asyncio.gather(
+            *[_prepare_one(cid) for cid in community_ids],
+            return_exceptions=True,
+        )
+        metadata_list = []
+        for cid, res in zip(community_ids, results):
+            if isinstance(res, Exception):
+                logger.error(f"[Clustering] 社区 {cid} 元数据准备失败: {res}", exc_info=res)
+            elif res is not None:
+                metadata_list.append(res)
+
+        if not metadata_list:
+            logger.warning(f"[Clustering] 无有效元数据可写入，community_ids={community_ids}")
+            return
+
+        # --- 阶段2：批量调用 LLM 生成 name 和 summary ---
+        if self.llm_model_id:
+            llm_client = self._get_llm_client()
+            if not llm_client:
+                logger.warning(
+                    f"[Clustering] LLM 已配置（model_id={self.llm_model_id}）但客户端初始化失败，"
+                    f"将跳过社区元数据的 LLM 富化。请检查 model_id 是否正确或数据库连接是否正常。"
+                )
+            if llm_client:
+                prompts_to_process = [(i, m) for i, m in enumerate(metadata_list) if m.get("prompt")]
+                
+                if prompts_to_process:
+                    logger.info(f"[Clustering] 批量调用 LLM 生成 {len(prompts_to_process)} 个社区元数据")
+                    
+                    async def _call_llm(idx: int, meta: Dict) -> tuple:
+                        """单个 LLM 调用"""
+                        try:
+                            response = await llm_client.chat([{"role": "user", "content": meta["prompt"]}])
+                            text = response.content if hasattr(response, "content") else str(response)
+                            return (idx, text, None)
+                        except Exception as e:
+                            logger.warning(f"[Clustering] 社区 {meta['community_id']} LLM 生成失败: {e}")
+                            return (idx, None, e)
+                    
+                    # 并发调用所有 LLM 请求
+                    llm_results = await asyncio.gather(
+                        *[_call_llm(idx, meta) for idx, meta in prompts_to_process],
+                        return_exceptions=True
+                    )
+                    
+                    # 解析 LLM 响应
+                    for result in llm_results:
+                        if isinstance(result, Exception):
+                            continue
+                        idx, text, error = result
+                        if error or not text:
+                            continue
+                        
+                        meta = metadata_list[idx]
+                        for line in text.strip().splitlines():
+                            if line.startswith("名称："):
+                                meta["name"] = line[3:].strip()
+                            elif line.startswith("摘要："):
+                                meta["summary"] = line[3:].strip()
+                    
+                    logger.info(f"[Clustering] LLM 批量生成完成")
+
+        # --- 阶段3：批量生成 summary_embedding ---
+        if self.embedding_model_id:
+            embedder = self._get_embedder_client()
+            if not embedder:
+                logger.warning(
+                    f"[Clustering] Embedding 已配置（model_id={self.embedding_model_id}）但客户端初始化失败，"
+                    f"将跳过社区摘要的向量化。请检查 model_id 是否正确或数据库连接是否正常。"
+                )
+            if embedder:
                 try:
-                    from app.db import get_db_context
-                    from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-
-                    with get_db_context() as db:
-                        embedder = MemoryClientFactory(db).get_embedder_client(self.embedding_model_id)
-                        vectors = await embedder.response([summary])
-                        if vectors:
-                            summary_embedding = vectors[0]
+                    summaries = [m["summary"] for m in metadata_list]
+                    logger.info(f"[Clustering] 批量生成 {len(summaries)} 个 summary embedding")
+                    embeddings = await embedder.response(summaries)
+                    for i, meta in enumerate(metadata_list):
+                        meta["summary_embedding"] = embeddings[i] if i < len(embeddings) else None
+                    logger.info(f"[Clustering] Embedding 批量生成完成")
                 except Exception as e:
-                    logger.warning(f"[Clustering] 社区 {community_id} 生成 summary_embedding 失败: {e}")
+                    logger.error(f"[Clustering] 批量生成 summary_embedding 失败: {e}", exc_info=True)
 
-            await self.repo.update_community_metadata(
-                community_id=community_id,
-                end_user_id=end_user_id,
-                name=name,
-                summary=summary,
-                core_entities=core_entities,
-                summary_embedding=summary_embedding,
+        # --- 阶段4：批量写入数据库 ---
+        # 移除 prompt 字段（不需要存储）
+        for m in metadata_list:
+            m.pop("prompt", None)
+        
+        if len(metadata_list) == 1:
+            m = metadata_list[0]
+            result = await self.repo.update_community_metadata(
+                community_id=m["community_id"],
+                end_user_id=m["end_user_id"],
+                name=m["name"],
+                summary=m["summary"],
+                core_entities=m["core_entities"],
+                summary_embedding=m["summary_embedding"],
             )
-            logger.debug(f"[Clustering] 社区 {community_id} 元数据已更新: name={name}")
-        except Exception as e:
-            logger.error(f"[Clustering] _generate_community_metadata failed for {community_id}: {e}")
+            if not result:
+                logger.error(f"[Clustering] 社区 {m['community_id']} 元数据写入失败")
+        else:
+            ok = await self.repo.batch_update_community_metadata(metadata_list)
+            if not ok:
+                logger.error(f"[Clustering] 批量写入 {len(metadata_list)} 个社区元数据失败")
+            else:
+                logger.info(f"[Clustering] 批量写入 {len(metadata_list)} 个社区元数据成功")
+
+    def _get_llm_client(self):
+        """获取或创建 LLM 客户端（单例模式）"""
+        if self._llm_client is None and self.llm_model_id:
+            from app.db import get_db_context
+            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+            with get_db_context() as db:
+                self._llm_client = MemoryClientFactory(db).get_llm_client(self.llm_model_id)
+            logger.info(f"[Clustering] LLM 客户端初始化完成（单例）: model_id={self.llm_model_id}")
+        return self._llm_client
+
+    def _get_embedder_client(self):
+        """获取或创建 Embedder 客户端（单例模式）"""
+        if self._embedder_client is None and self.embedding_model_id:
+            from app.db import get_db_context
+            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+            with get_db_context() as db:
+                self._embedder_client = MemoryClientFactory(db).get_embedder_client(self.embedding_model_id)
+            logger.info(f"[Clustering] Embedder 客户端初始化完成（单例）: model_id={self.embedding_model_id}")
+        return self._embedder_client
 
     @staticmethod
     def _new_community_id() -> str:

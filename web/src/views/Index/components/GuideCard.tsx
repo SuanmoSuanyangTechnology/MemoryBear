@@ -9,10 +9,8 @@
 import React, { useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import guideBgImg from '@/assets/images/index/guide_bg@2x.png'
 import { Button, Tour } from 'antd';
 import type { TourProps } from 'antd';
-import arrowRight from '@/assets/images/index/arrow_right_blue.svg'
 
 const GuideCard: React.FC = () => {
   const { t } = useTranslation();
@@ -67,22 +65,18 @@ const GuideCard: React.FC = () => {
 
   return (
     <>
-    <div className='rb:w-full rb:p-4' style={{ backgroundImage: `url(${guideBgImg})`, backgroundSize: '100% 100%' }}>
-        <div className='rb:flex rb:justify-start rb:text-white rb:text-base rb:font-semibold' >
-            { t('index.getStarted')}
+      <div className='rb:w-full rb:bg-white rb:rounded-xl rb:pb-3'>
+        <div className='rb:font-[MiSans-Bold] rb:font-bold rb:leading-5 rb:p-3 rb:bg-cover rb:rounded-tl-xl rb:rounded-tr-xl rb:bg-[url("@/assets/images/index/guide_bg@2x.png")]' >
+          { t('index.getStarted')}
         </div>
-        <div className='rb:flex rb:text-xs rb:text-white rb:leading-[18px] rb:mt-3'>
+        <div className='rb:leading-4.5 rb:text-[12px] rb:-mt-2 rb:pl-3 rb:pr-1.75'>
             { t('index.startedDesc')}
         </div>
-        <div className='rb:flex rb:w-full rb:items-center rb:justify-between rb:gap-3 rb:mt-4'>
-            <Button ref={startButtonRef} className='rb:gap-2 rb:w-full rb:flex rb:items-center rb:text-[#155EEF]'  onClick={handleStartGuide}>
-                <span className='rb:text-xs'>{ t('index.viewGuide')}</span>
-                <img src={arrowRight} className='rb:size-4' />
-            </Button>
-            {/* <Button className='rb:gap-2 rb:flex rb:items-center rb:text-[#155EEF]'>
-                <span className='rb:text-xs'>{ t('index.watchVideo')}</span>
-                <img src={arrowRight} className='rb:size-4' />
-            </Button> */}
+        <div className="rb:mt-2 rb:pl-3 rb:pr-4">
+          <Button ref={startButtonRef} block className='rb:gap-1 rb:flex rb:items-center' onClick={handleStartGuide}>
+            <span className='rb:text-xs'>{t('index.viewGuide')}</span>
+            <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_right_dark.svg')]"></div>
+          </Button>
         </div>
     </div>
     

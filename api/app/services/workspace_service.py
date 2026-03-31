@@ -863,7 +863,7 @@ def get_workspace_storage_type(
 def get_workspace_storage_type_without_auth(
         db: Session,
         workspace_id: uuid.UUID,
-) -> Optional[str]:
+) -> str:
     """获取工作空间的存储类型（无需权限验证，用于公开分享等场景）
 
     Args:

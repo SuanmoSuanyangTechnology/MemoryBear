@@ -1,0 +1,11 @@
+.segmented {
+  background: #F6F6F6;
+  border: 1px solid #EBEBEB;
+}
+.segmented:global(.ant-segmented .ant-segmented-item-label) {
+  min-height: 24px;
+  line-height: 24px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+}

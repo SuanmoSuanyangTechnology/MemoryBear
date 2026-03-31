@@ -1,7 +1,8 @@
 import { type FC, type ReactNode, useMemo } from 'react';
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
-import { Input, Form, Space, Button, Row, Col, Select, type FormListOperation } from 'antd';
+import { Input, Form, Button, Row, Col, Select, type FormListOperation, Flex } from 'antd';
+
 import Editor, { type LexicalEditorProps } from '../Editor'
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
 
@@ -16,7 +17,8 @@ interface MessageEditor {
   value?: string;
   language?: LexicalEditorProps['language'];
   onChange?: (value?: string) => void;
-  size?: 'small' | 'default'
+  size?: 'small' | 'default';
+  className?: string;
 }
 const roleOptions = [
   // { label: 'SYSTEM', value: 'SYSTEM' },
@@ -31,7 +33,8 @@ const MessageEditor: FC<MessageEditor> = ({
   placeholder,
   options = [],
   language,
-  size = 'default'
+  size = 'default',
+  className
 }) => {
   const { t } = useTranslation()
   const form = Form.useFormInstance();
@@ -78,12 +81,12 @@ const MessageEditor: FC<MessageEditor> = ({
 
   if (!isArray) {
     return (
-      <Space size={8} direction="vertical" className="rb:w-full rb:border rb:border-[#DFE4ED] rb:rounded-md rb:px-2 rb:py-1.5" data-editor-type={parentName === 'template' ? 'template' : undefined}>
+      <Flex gap={8} vertical className={clsx("rb-border rb:rounded-lg rb:px-2! rb:py-1.5!", className)} data-editor-type={parentName === 'template' ? 'template' : undefined}>
         <Row>
           <Col span={12}>
             {typeof title === 'string'
-            ? <div className={clsx("rb:text-[12px] rb:font-medium rb:py-1 rb:leading-2", {
-              'rb:bg-[#F6F8FC] rb:border rb:border-[#DFE4ED] rb:rounded-sm rb:px-2': titleVariant === 'outlined'
+            ? <div className={clsx("rb:text-[12px] rb:text-[#212332] rb:font-medium rb:leading-4", {
+              'rb:bg-[#F6F6F6] rb-border rb:rounded-md rb:px-2 rb:py-1': titleVariant === 'outlined'
             })}>{title ?? t('workflow.answerDesc')}</div>
             : title}
           </Col>
@@ -91,14 +94,14 @@ const MessageEditor: FC<MessageEditor> = ({
         <Form.Item name={parentName} noStyle>
           <Editor size={size} language={language} placeholder={placeholder} options={processedOptions} />
         </Form.Item>
-      </Space>
+      </Flex>
     );
   }
 
   return (
     <Form.List name={parentName}>
       {(fields, { add, remove }) => (
-        <Space size={8} direction="vertical" className="rb:w-full">
+        <Flex gap={8} vertical>
           {fields.map(({ key, name, ...restField }) => {
             const fieldValue = Array.isArray(parentName) 
               ? parentName.reduce((obj, key) => obj?.[key], values)
@@ -107,12 +110,12 @@ const MessageEditor: FC<MessageEditor> = ({
             const currentRole = (fieldValue?.[name]?.role || 'USER').toUpperCase();
             
             return (
-              <Space key={key} size={12} direction="vertical" className="rb:w-full rb:border rb:border-[#DFE4ED] rb:rounded-md rb:p-2">
+              <Flex key={key} gap={8} vertical className="rb-border rb:rounded-md rb:p-2!">
                 <Row>
                   <Col span={12}>
                     <Form.Item {...restField} name={[name, 'role']} noStyle>
                       {currentRole === 'SYSTEM' ? (
-                        <Input disabled className="rb:font-medium!" />
+                        <Input disabled className="rb:font-medium! rb:text-[#212332]!" />
                       ) : (
                         <Select
                           options={roleOptions}
@@ -124,19 +127,19 @@ const MessageEditor: FC<MessageEditor> = ({
                   </Col>
                   {currentRole !== 'SYSTEM' && (
                     <Col span={12}>
-                      <div className="rb:h-full rb:flex rb:justify-end rb:items-center">
+                      <Flex align="center" justify="end" className="rb:h-full">
                         <div
                           className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/delete_cycle.svg')]"
                           onClick={() => remove(name)}
                         ></div>
-                      </div>
+                      </Flex>
                     </Col>
                   )}
                 </Row>
                 <Form.Item {...restField} name={[name, 'content']} noStyle>
                   <Editor size={size} language={language} placeholder={placeholder} options={processedOptions} />
                 </Form.Item>
-              </Space>
+              </Flex>
             );
           })}
           <Form.Item noStyle>
@@ -144,7 +147,7 @@ const MessageEditor: FC<MessageEditor> = ({
               + {t('workflow.addMessage')}
             </Button>
           </Form.Item>
-        </Space>
+        </Flex>
       )}
     </Form.List>
   );
