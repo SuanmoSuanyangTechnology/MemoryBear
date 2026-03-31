@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-17 14:22:25 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-23 17:42:38
+ * @Last Modified time: 2026-03-27 17:54:47
  */
 // Toolbar component for chat input area, supporting file upload, audio recording, and variable configuration
 import { useRef, forwardRef, useImperativeHandle, type ReactNode, useEffect } from 'react'
@@ -19,6 +19,7 @@ import type { UploadFileListModalRef } from '@/views/Conversation/types'
 import type { VariableConfigModalRef } from '@/views/Workflow/types'
 import type { Variable } from '@/views/Workflow/components/Properties/VariableList/types'
 import { getFileInfoByUrl } from '@/api/fileStorage';
+import { transform_file_type } from '@/views/Conversation/components/FileUpload'
 
 // Exposed methods via ref for parent components to access/set form state
 export interface ChatToolbarRef {
@@ -126,7 +127,7 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
             status: 'done',
             name: file_name,
             size: file_size,
-            type: content_type,
+            type: transform_file_type[content_type] || content_type,
            } : f)
           form.setFieldValue('files', updated)
           onFilesChange?.(updated)

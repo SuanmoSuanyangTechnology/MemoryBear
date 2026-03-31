@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:51:08 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 16:45:18
+ * @Last Modified time: 2026-03-26 14:53:41
  */
 /**
  * User Management Page
@@ -142,9 +142,9 @@ const UserManagement: React.FC = () => {
   ];
 
   return (
-    <div className="rb:h-[calc(100vh-80px)] rb:overflow-hidden rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
+    <div className="rb:h-full rb:overflow-hidden rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
       <Flex justify="space-between" align="center" className="rb:px-1! rb:mb-3!">
-        <div className="rb:gont-[MiSans-Bold] rb:font-bold rb:text-[#212332] rb:leading-5">{t('user.userList')}</div>
+        <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[#212332] rb:leading-5">{t('user.userList')}</div>
         <Button type="primary" onClick={handleCreate}>
           + {t('user.createUser')}
         </Button>
@@ -159,7 +159,7 @@ const UserManagement: React.FC = () => {
         columns={columns}
         rowKey="id"
         isScroll={true}
-        scrollY="calc(100vh - 256px)"
+        scrollY="calc(100vh - 248px)"
       />
 
       <CreateModal

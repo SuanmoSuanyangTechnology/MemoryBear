@@ -66,7 +66,7 @@ const CommunityNetwork: FC<{ onSelectCommunity?: (node: RawCommunityNode) => voi
 
   if (loading) {
     return <Flex align="center" justify="center" className="rb:w-full rb:h-full">
-      <Spin tip={t('userMemory.communityLoadingTip')} size="large" className="rb:text-[#5B6167]!">
+      <Spin tip={t('userMemory.communityLoadingTip')} size="large" className="rb:text-[#5B6167]! spin">
         <div className="rb:w-64 rb:h-64" />
       </Spin>
       </Flex>

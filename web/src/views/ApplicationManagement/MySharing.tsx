@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 11:37:51
+ * @Last Modified time: 2026-03-26 14:39:18
  */
 import React, { useState, useEffect, useMemo, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -81,7 +81,7 @@ const MySharing: React.FC = () => {
   }
 
   return (
-    <Flex vertical gap={12} className="rb:h-[calc(100vh-148px)]! rb:overflow-y-auto!">
+    <Flex vertical gap={12} className="rb:max-h-[calc(100%-48px)]! rb:overflow-y-auto!">
       <BodyWrapper loading={false} empty={data.length === 0}>
         {grouped.map(({ workspace, items }) => (
           <Collapse

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-16 15:00:07 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 12:09:39
+ * @Last Modified time: 2026-03-27 15:23:14
  */
 import { type FC, useRef, useState, useEffect } from 'react'
 import { Flex, Dropdown, type MenuProps, Slider } from 'antd'
@@ -128,7 +128,7 @@ const AudioPlayer: FC<AudioPlayerProps> = ({ src, fileName, fileSize }) => {
           ></div>
           
           <Dropdown menu={mainMenu} trigger={['click']} placement="bottomRight">
-            <div className="rb:cursor-pointer rb:size-6 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
+            <div className="rb:cursor-pointer rb:size-5.5 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
           </Dropdown>
         </Flex>
       </Flex>

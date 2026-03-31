@@ -2,10 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:37 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 15:59:47
+ * @Last Modified time: 2026-03-26 15:37:18
  */
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
+import { Flex } from 'antd'
 
 import ConfigHeader from './components/ConfigHeader'
 import type { AgentRef, ClusterRef, WorkflowRef, Config } from './types'
@@ -108,7 +109,7 @@ const ApplicationConfig: React.FC = () => {
   }
 
   return (
-    <>
+    <Flex vertical className="rb:h-screen!">
       <ConfigHeader 
         activeTab={activeTab}
         handleChangeTab={handleChangeTab}
@@ -119,7 +120,7 @@ const ApplicationConfig: React.FC = () => {
         features={features}
         onFeaturesChange={setFeatures}
       />
-      <div className="rb:p-3 rb:max-h-[calc(100vh-65px)] rb:overflow-auto">
+      <div className="rb:p-3 rb:flex-1 rb:overflow-auto">
         {activeTab === 'arrangement' && application?.type === 'agent' && <Agent ref={agentRef} onFeaturesLoad={setFeatures} />}
         {activeTab === 'arrangement' && application?.type === 'multi_agent' && <Cluster ref={clusterRef} onFeaturesLoad={setFeatures} />}
         {activeTab === 'arrangement' && application?.type === 'workflow' && <Workflow ref={workflowRef} onFeaturesLoad={setFeatures} />}
@@ -129,7 +130,7 @@ const ApplicationConfig: React.FC = () => {
         {activeTab === 'test' && <TestChat application={application} config={config} />}
         {activeTab === 'log' && <Logs />}
       </div>
-    </>
+    </Flex>
   );
 };
 

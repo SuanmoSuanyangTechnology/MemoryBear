@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 17:48:01
+ * @Last Modified time: 2026-03-31 12:25:53
  */
 import { request } from '@/utils/request'
 import type { AxiosRequestConfig } from 'axios'
@@ -63,8 +63,8 @@ export const getDashboardData = () => {
 
 /****************** User Memory APIs *******************************/
 export const userMemoryListUrl = '/dashboard/end_users'
-export const getUserMemoryList = () => {
-  return request.get(userMemoryListUrl)
+export const getUserMemoryList = (query?: { keyword?: string }) => {
+  return request.get(userMemoryListUrl, query)
 }
 // User Memory - Total end users
 export const getTotalEndUsers = () => {

@@ -8,7 +8,7 @@ import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
 import type { ToolOption } from './components/ToolList/types'
 import type { ChatItem } from '@/components/Chat/types'
-import type { GraphRef, WorkflowConfig } from '@/views/Workflow/types';
+import type { ChatVariable, GraphRef, WorkflowConfig } from '@/views/Workflow/types';
 import type { ApiKey } from '@/views/ApiKeyManagement/types'
 import type { SkillConfigForm } from './components/Skill/types'
 import type { Capability } from '@/views/ModelManagement/types'
@@ -164,6 +164,7 @@ export interface WorkflowRef {
   graphRef: GraphRef;
   /** Add variable */
   addVariable: () => void;
+  chatVariables: ChatVariable[];
   config: WorkflowConfig | null;
   features: WorkflowConfig['features'];
   handleSaveFeaturesConfig?: (value: FeaturesConfigForm) => void;

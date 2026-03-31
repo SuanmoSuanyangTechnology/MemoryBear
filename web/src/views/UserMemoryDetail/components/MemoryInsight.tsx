@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:41 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-05 18:35:01
+ * @Last Modified time: 2026-03-27 11:11:46
  */
 /**
  * Memory Insight Component
@@ -66,7 +66,7 @@ const MemoryInsight = forwardRef<MemoryInsightRef, { className?: string; }>(({ c
       title={t('userMemory.memoryInsight')}
       headerClassName="rb:min-h-[46px]!! rb:font-medium!"
       className={clsx("rb:bg-[#FFFFFF]! rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.13)]! rb:absolute! rb:w-100 rb:top-29 rb:left-26", className)}
-      bodyClassName="rb:px-5! rb:pb-5! rb:pt-3.75! rb:max-h-[calc(100vh-176px)] rb:overflow-auto"
+      bodyClassName="rb:px-5! rb:pb-5! rb:pt-3.75! rb:max-h-[calc(100vh-186px)] rb:overflow-auto"
     >
       {loading
         ? <Skeleton />

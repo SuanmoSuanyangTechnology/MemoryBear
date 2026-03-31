@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:56:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 18:28:18
+ * @Last Modified time: 2026-03-26 15:43:29
  */
 /**
  * Emotion Engine Configuration Page
@@ -118,8 +118,8 @@ const EmotionEngine: React.FC = () => {
   }
 
   return (
-    <Row gutter={[16, 16]}>
-      <Col span={12}>
+    <Row gutter={[16, 16]} className="rb:h-full!">
+      <Col span={12} className="rb:h-full!">
         <RbCard 
           title={t('emotionEngine.emotionEngineConfig')}
           headerType="borderless"
@@ -128,7 +128,7 @@ const EmotionEngine: React.FC = () => {
             <Button block onClick={handleReset}>{t('common.reset')}</Button>
             <Button type="primary" loading={loading} block onClick={handleSave}>{t('common.save')}</Button>
           </Space>}
-          className="rb:h-[calc(100vh-76px)]!"
+          className="rb:h-full!"
           bodyClassName="rb:h-[calc(100%-54px)] rb:overflow-y-auto! rb:p-3! rb:pt-0!"
         >
           <Form 
@@ -207,12 +207,12 @@ const EmotionEngine: React.FC = () => {
           </Form>
         </RbCard>
       </Col>
-      <Col span={12}>
+      <Col span={12} className="rb:h-full!">
         <RbCard
           title={t('emotionEngine.emotionEngineConfig')}
           headerType="borderless"
           headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
-          className="rb:h-[calc(100vh-76px)]!"
+          className="rb:h-full!"
           bodyClassName="rb:h-[calc(100%-54px)] rb:overflow-y-auto! rb:p-3! rb:pt-0!"
         >
           <Flex vertical gap={24} className="rb:text-[#212332]">

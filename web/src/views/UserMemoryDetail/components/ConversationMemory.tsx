@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:34:04 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 11:04:52
+ * @Last Modified time: 2026-03-27 10:28:53
  */
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -20,8 +20,10 @@ const ConversationMemory: FC = () => {
   return (
     <RbCard
       title={t('userMemory.conversationMemory')}
-      headerClassName="rb:text-[18px]! rb:leading-[24px]"
-      bodyClassName="rb:h-[100%]! rb:overflow-hidden rb:py-0!"
+      headerType="borderless"
+      headerClassName="rb:min-h-[54px]! rb:pt-0! rb:mb-0! rb:font-[MiSans-Bold] rb:font-bold"
+      bodyClassName="rb:p-4! rb:pt-0! rb:h-[calc(100%-54px)]!"
+      className="rb:h-full!"
     >
       <PageScrollList<string>
         url={getRagContentUrl}

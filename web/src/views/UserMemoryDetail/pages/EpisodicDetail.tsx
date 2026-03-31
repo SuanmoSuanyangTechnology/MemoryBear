@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-08 19:46:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 15:03:50
+ * @Last Modified time: 2026-03-27 11:20:40
  */
 import { type FC, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -148,15 +148,15 @@ const EpisodicDetail: FC = () => {
   }
 
   return (
-    <Row gutter={16}>
-      <Col flex="400px">
+    <Row gutter={16} className="rb:h-full!">
+      <Col flex="400px" className="rb:h-full!">
         <RbCard
           title={<div className="rb:leading-5.5!">
             <span className="rb:font-[MiSans-Bold] rb:font-bold">{t('episodicDetail.curResult')}</span>
             <span className="rb:text-[#5B6167] rb:font-regular!"> ({data.total || 0}{t('episodicDetail.unix')})</span>
           </div>}
           headerType="borderless"
-          className="rb:h-[calc(100vh-88px)]!"
+          className="rb:h-full!"
           headerClassName="rb:min-h-[38px]! rb:pt-3! rb:mb-0!"
           bodyClassName="rb:p-3! rb:pb-0! rb:h-[calc(100%-38px)]!"
         >
@@ -231,11 +231,11 @@ const EpisodicDetail: FC = () => {
           }
         </RbCard>
       </Col>
-      <Col flex="1">
+      <Col flex="1" className="rb:h-full!">
         <RbCard
           title={selected?.title}
           headerType="borderless"
-          className="rb:h-[calc(100vh-88px)]!"
+          className="rb:h-full!"
           headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
           bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-54px)]! rb:overflow-y-auto"
         >

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 12:28:07
+ * @Last Modified time: 2026-03-27 18:06:23
  */
 /**
  * Model List Detail Drawer
@@ -12,7 +12,7 @@
 
 import { useState, useImperativeHandle, forwardRef, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Switch, Row, Col, Space, Tooltip } from 'antd'
+import { Button, Switch, Row, Col, Space, Tooltip, Popover } from 'antd'
 
 import type { ProviderModelItem, ModelListItem, ModelListDetailRef, MultiKeyConfigModalRef } from '../types';
 import RbDrawer from '@/components/RbDrawer';
@@ -136,11 +136,19 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
             <RbCard
               key={item.id}
               title={item.name}
-              subTitle={<Space size={8} className="rb:mt-1!">
-                <Tag>{t(`modelNew.${item.type}`)}</Tag>
-                <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag>
-                {item.capability?.filter(item => item !=='video').map(vo => <Tag key={vo}>{t(`modelNew.${vo}`)}</Tag>)}
-              </Space>}
+              subTitle={
+                <Popover content={
+                  <Space size={8} className="rb:mt-1!">
+                    <Tag>{t(`modelNew.${item.type}`)}</Tag>
+                    <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag>
+                    {item.capability?.map(vo => <Tag key={vo}>{t(`modelNew.${vo}`)}</Tag>)}
+                  </Space>}>
+                  <Space size={8} className="rb:mt-1!">
+                    <Tag>{t(`modelNew.${item.type}`)}</Tag>
+                    <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag>
+                    {item.capability?.map(vo => <Tag key={vo}>{t(`modelNew.${vo}`)}</Tag>)}
+                  </Space>
+                </Popover>}
               avatarUrl={getLogoUrl(item.logo)}
               avatar={
                 <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">

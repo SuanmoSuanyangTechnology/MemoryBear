@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:30:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 11:11:56
+ * @Last Modified time: 2026-03-30 15:14:02
  */
 import { useEffect, useState } from 'react';
 import { Popover } from 'antd';
@@ -20,13 +20,15 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
   const [sourceNode, setSourceNode] = useState<any>(null);
   const [sourcePort, setSourcePort] = useState<string>('');
   const [tempElement, setTempElement] = useState<HTMLElement | null>(null);
+  const [edgeInsertion, setEdgeInsertion] = useState<any>(null);
 
   useEffect(() => {
     const handlePortClick = (event: CustomEvent) => {
-      const { node, port, element, rect } = event.detail;
+      const { node, port, element, rect, edgeInsertion } = event.detail;
       setSourceNode(node);
       setSourcePort(port);
       setTempElement(element);
+      setEdgeInsertion(edgeInsertion || null);
       setPopoverPosition({ x: rect.left, y: rect.top });
       setPopoverVisible(true);
     };
@@ -72,15 +74,47 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
     const sourcePortInfo = sourceNode.getPorts().find((p: any) => p.id === sourcePort);
     const sourcePortGroup = sourcePortInfo?.group || sourcePort;
     
-    // If add-node position exists, use it; otherwise calculate new position
+    // Calculate new node position
     let newX, newY;
-    if (addNodePosition) {
+    if (edgeInsertion) {
+      // Edge insertion: place new node on the same row as target, between source and target
+      const targetBBox = edgeInsertion.targetCell.getBBox();
+      const gap = targetBBox.x - (sourceBBox.x + sourceBBox.width);
+      const requiredSpace = nodeWidth + horizontalSpacing * 4;
+
+      // New node x: right after source + spacing
+      newX = sourceBBox.x + sourceBBox.width + horizontalSpacing;
+      // Same row as target node
+      newY = targetBBox.y + (targetBBox.height - nodeHeight) / 2;
+
+      // If not enough space, shift target and all downstream nodes to the right
+      if (gap < requiredSpace) {
+        const shiftX = requiredSpace - gap;
+        const visited = new Set<string>();
+        const shiftDownstream = (cell: any) => {
+          const cellId = cell.id;
+          if (visited.has(cellId)) return;
+          visited.add(cellId);
+          const pos = cell.getPosition();
+          cell.setPosition(pos.x + shiftX, pos.y);
+          // Recursively shift nodes connected from right ports
+          graph.getConnectedEdges(cell, { outgoing: true }).forEach((e: any) => {
+            const tId = e.getTargetCellId();
+            if (tId && !visited.has(tId)) {
+              const tCell = graph.getCellById(tId);
+              if (tCell?.isNode()) shiftDownstream(tCell);
+            }
+          });
+        };
+        shiftDownstream(edgeInsertion.targetCell);
+      }
+    } else if (addNodePosition) {
       newX = addNodePosition.x;
       newY = addNodePosition.y;
     } else {
       // Determine node placement direction based on port position
       if (sourcePortGroup === 'left') {
-        // Left port: add node to the left
+      // Left port: add node to the left
         newX = sourceBBox.x - nodeWidth*2 - horizontalSpacing;
         newY = sourceBBox.y;
       } else {
@@ -91,7 +125,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
       
       // Check if position overlaps with existing nodes (only consider connected nodes)
       const checkOverlap = (x: number, y: number) => {
-        // Get nodes connected to the source node
+      // Get nodes connected to the source node
         const connectedNodes = new Set();
         graph.getConnectedEdges(sourceNode).forEach((edge: any) => {
           const sourceId = edge.getSourceCellId();
@@ -108,7 +142,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
                   y + nodeHeight < bbox.y || y > bbox.y + bbox.height);
         });
       };
-      
+
       // If position is occupied, search downward for empty space
       while (checkOverlap(newX, newY)) {
         newY += nodeHeight + verticalSpacing;
@@ -140,28 +174,51 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
       }
     }
 
+    // Edge insertion: remove old edge immediately before creating new edges
+    if (edgeInsertion) {
+      const { edge: oldEdge } = edgeInsertion;
+      if (oldEdge.id && graph.getCellById(oldEdge.id)) {
+        graph.removeCell(oldEdge.id);
+      } else {
+        graph.removeEdge(oldEdge);
+      }
+    }
+
     // Create edge connection
     setTimeout(() => {
-      const targetPorts = newNode.getPorts();
-      let targetPort;
-      
-      if (sourcePortGroup === 'left') {
+      const newPorts = newNode.getPorts();
+
+      if (edgeInsertion) {
+        // Edge insertion: create source→new and new→target edges
+        const { targetCell, targetPort: origTargetPort } = edgeInsertion;
+        const newLeftPort = newPorts.find((p: any) => p.group === 'left')?.id || 'left';
+        const newRightPort = newPorts.find((p: any) => p.group === 'right')?.id || 'right';
+        graph.addEdge({
+          source: { cell: sourceNode.id, port: sourcePort },
+          target: { cell: newNode.id, port: newLeftPort },
+          ...edgeAttrs
+        });
+        graph.addEdge({
+          source: { cell: newNode.id, port: newRightPort },
+          target: { cell: targetCell.id, port: origTargetPort },
+          ...edgeAttrs
+        });
+        setEdgeInsertion(null);
+      } else if (sourcePortGroup === 'left') {
         // Connect from left port to new node's right side
-        targetPort = targetPorts.find((port: any) => port.group === 'right')?.id || 'right';
+        const targetPort = newPorts.find((port: any) => port.group === 'right')?.id || 'right';
         graph.addEdge({
           source: { cell: newNode.id, port: targetPort },
           target: { cell: sourceNode.id, port: sourcePort },
           ...edgeAttrs
-          // zIndex: sourceNodeData.cycle && sourceNodeType == 'cycle-start' ? 1 : sourceNodeData.cycle ? 2 : 0
         });
       } else {
         // Connect from right port to new node's left side
-        targetPort = targetPorts.find((port: any) => port.group === 'left')?.id || 'left';
+        const targetPort = newPorts.find((port: any) => port.group === 'left')?.id || 'left';
         graph.addEdge({
           source: { cell: sourceNode.id, port: sourcePort },
           target: { cell: newNode.id, port: targetPort },
           ...edgeAttrs
-          // zIndex: sourceNodeData.cycle && sourceNodeType == 'cycle-start' ? 1 : sourceNodeData.cycle ? 2 : 0
         });
       }
       

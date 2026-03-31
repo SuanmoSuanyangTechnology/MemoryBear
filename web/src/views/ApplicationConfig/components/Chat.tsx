@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 13:41:44
+ * @Last Modified time: 2026-03-27 17:59:07
  */
 /**
  * Chat debugging component for application testing
@@ -224,11 +224,11 @@ const Chat: FC<ChatProps> = ({
     if (loading || !id) return
     setLoading(true)
     setCompareLoading(true)
+    const files = (fileList || []).filter(item => !['uploading', 'error'].includes(item.status))
     handleSave(false)
       .then(() => {
         const message = msg
         if (!message?.trim()) return
-        const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
         // Validate required variables before sending
         let isCanSend = true
         const params: Record<string, any> = {}
@@ -427,11 +427,11 @@ const Chat: FC<ChatProps> = ({
     if (loading || !id) return
     setLoading(true)
     setCompareLoading(true)
+    const files = (fileList || []).filter(item => !['uploading', 'error'].includes(item.status))
     handleSave(false)
       .then(() => {
         const message = msg
         if (!message || message.trim() === '') return
-        const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
         addUserMessage(message, files)
         setMessage(undefined)
         toolbarRef.current?.setFiles([])

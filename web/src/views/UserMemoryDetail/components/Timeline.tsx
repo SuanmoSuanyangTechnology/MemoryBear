@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:31:36 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-16 15:02:11 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-27 11:13:44
  */
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -86,7 +86,7 @@ const Timeline: FC = () => {
       headerType="borderless"
       headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
       bodyClassName="rb:pl-5! rb:pt-0! rb:pr-3! rb:pb-4! rb:h-[calc(100%-54px)] rb:overflow-y-auto"
-      className="rb:h-[calc(100vh-88px)]!"
+      className="rb:h-full!"
     >
       {loading
         ? <Skeleton active />

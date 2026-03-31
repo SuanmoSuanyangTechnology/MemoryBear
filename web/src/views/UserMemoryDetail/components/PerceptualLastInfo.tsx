@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:23 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 12:09:53
+ * @Last Modified time: 2026-03-27 14:57:34
  */
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -92,7 +92,7 @@ const PerceptualLastInfo: FC = () => {
       setData(response)
       setLoading(false)
       if (response.file_path) {
-        fetch(response.file_path, { method: 'HEAD' })
+        fetch(response.file_path, { method: 'GET' })
           .then(r => {
             const bytes = Number(r.headers.get('content-length'))
             if (!bytes) return
@@ -119,7 +119,7 @@ const PerceptualLastInfo: FC = () => {
       headerType="borderless"
       headerClassName="rb:min-h-[50px]! rb:font-[MiSans-Bold] rb:font-bold"
       bodyClassName="rb:p-4! rb:pt-0! rb:h-[calc(100%-50px)] rb:overflow-y-auto"
-      className="rb:h-[calc(100vh-88px)]! rb:w-full!"
+      className="rb:h-full! rb:w-full!"
     >
       <Flex align="center" gap={8} className="rb:mb-4!">
         {Object.keys(KEYS).map(key => (

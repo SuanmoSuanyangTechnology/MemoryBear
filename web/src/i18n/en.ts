@@ -980,6 +980,7 @@ export const en = {
       scene_id: 'Ontology Scenario',
     },
     member: {
+      memberList: 'Member List',
       username: 'Username',
       account: 'Account',
       role: 'Role',
@@ -1908,7 +1909,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       permissionInfo: 'Permission Information',
       is_expired: 'Status',
       active: 'Active',
-      inactive: 'Expired'
+      inactive: 'Expired',
+      noScopes: 'There is no permission information here…',
     },
     tool: {
       mcp: 'MCP Services',

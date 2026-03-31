@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 12:13:33
+ * @Last Modified time: 2026-03-27 18:13:51
  */
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { useTranslation } from 'react-i18next'
@@ -44,6 +44,14 @@ import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import DescWrapper from '@/components/FormItem/DescWrapper'
 import FeaturesConfig from './components/FeaturesConfig'
 import { getListLogoUrl } from '@/views/ModelManagement/utils';
+import type { ChatItem } from '@/components/Chat/types'
+
+export const replaceVariables = (statement: string, variables: Variable[]) => {
+  return statement.replace(/\{\{([^}]+)\}\}/g, (match, name) => {
+    const v = variables.find(item => item.name === name)
+    return v?.value != null && v.value !== '' ? String(v.value) : match
+  })
+}
 
 /**
  * Agent configuration component
@@ -148,8 +156,9 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
         model_parameters: {...rest}
       })
       if (default_model_config_id === values?.default_model_config_id) {
+        const label = defaultModel?.id === default_model_config_id && defaultModel?.name ? defaultModel.name : vo.label || ''
         setChatList([{
-          label: defaultModel?.id === default_model_config_id && defaultModel?.name ? defaultModel.name :  vo.label || '',
+          label: label,
           model_config_id: default_model_config_id || '',
           model_parameters: {...rest},
           list: []
@@ -246,7 +255,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
       saveAgentConfig(data.app_id, params)
       .then((res) => {
         if (flag) {
-          message.success(t('common.saveSuccess'))
+          message.success({ content: t('common.saveSuccess'), duration: 1 })
         }
         setIsSave(false)
         resolve(res)
@@ -331,28 +340,13 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   const handleOpenVariableConfig = () => {
     chatVariableConfigModalRef.current?.handleOpen(chatVariables)
   }
+
   /**
    * Save chat variable configuration
    * @param values - Variable values
    */
   const handleSaveChatVariable = (variables: Variable[]) => {
     setChatVariables(variables)
-    const opening_statement = form.getFieldValue(['features', 'opening_statement'])
-
-    if (opening_statement?.statement && opening_statement?.statement.trim() !== '') {
-      const statement = opening_statement.statement as string
-      const replacedContent = statement.replace(/\{\{([^}]+)\}\}/g, (match, name) => {
-        const v = variables.find(item => item.name === name)
-        return v?.value != null && v.value !== '' ? String(v.value) : match
-      })
-      setChatList(prev => prev.map(item => {
-        const list = [...(item.list || [])]
-        if (list.length > 0 && list[0].role === 'assistant') {
-          list[0] = { ...list[0], content: replacedContent }
-        }
-        return { ...item, list }
-      }))
-    }
   }
   useEffect(() => {
     setChatVariables(values?.variables || [])
@@ -360,43 +354,55 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
 
   const handleSaveFeaturesConfig = (value: FeaturesConfigForm) => {
     form.setFieldValue('features', value)
-
-    if (value?.opening_statement?.statement && value?.opening_statement?.statement.trim() !== '') {
-      setChatList(prev => (prev.map(item => {
-        const firstMsg = item.list?.[0]
-
-        if (firstMsg?.role === 'assistant') {
-          firstMsg.meta_data = {
-            suggested_questions: value.opening_statement?.suggested_questions || []
-          }
-          return item
-        } else {
-          return {
-            ...item,
-            list: [{
-              role: 'assistant',
-              content: value.opening_statement?.statement,
-              meta_data: {
-                suggested_questions: value.opening_statement?.suggested_questions || []
-              }
-            }, ...(item.list || [])]
-          }
-        }
-      })))
-    }
   }
   const modelLogo = useMemo(() => {
     return defaultModel?.name && getListLogoUrl(defaultModel.provider, defaultModel.logo as string)
   }, [defaultModel])
+
+  useEffect(() => {
+    const opening_statement = form.getFieldValue(['features', 'opening_statement'])
+    console.log('opening_statement', opening_statement, defaultModel, chatList)
+
+    if (opening_statement?.enabled && opening_statement?.statement && opening_statement?.statement.trim() !== '') {
+      const assistantMsg: ChatItem = {
+        role: 'assistant',
+        content: replaceVariables(opening_statement.statement, chatVariables),
+        meta_data: {
+          suggested_questions: opening_statement?.suggested_questions
+        }
+      }
+      setChatList(prev => {
+        if (prev.length === 0 && !defaultModel) return prev
+        if (defaultModel && prev.length === 1) {
+          return [{
+            label: defaultModel.name,
+            model_config_id: defaultModel.id,
+            model_parameters: defaultModel.config as unknown as ModelConfig,
+            list: [assistantMsg]
+          }]
+        }
+
+        return prev.map(vo => {
+          if (vo.list?.length === 0) {
+            return { ...vo, list: [assistantMsg] }
+          } else if (vo.list && vo.list[0].role === 'assistant') {
+            return { ...vo, list: [assistantMsg, ...vo.list.slice(1)] }
+          } else {
+            return { ...vo, list: [assistantMsg, ...(vo.list || [])] }
+          }
+        })
+      })
+    }
+  }, [defaultModel, chatList.length, form.getFieldValue(['features', 'opening_statement']), chatVariables])
   
   console.log('agent values', values)
   return (
     <>
       {loading && <Spin fullscreen></Spin>}
-      <Row className="rb:h-[calc(100vh-88px)]" gutter={12}>
-        <Col span={12} className="rb:h-full rb:overflow-y-auto">
+      <Row className="rb:h-full!" gutter={12}>
+        <Col span={12} className="rb:h-full!">
           <Form form={form}>
-            <Flex gap={16} vertical>
+            <Flex gap={12} vertical>
               <Flex align="center" justify="space-between" className="rb:p-3! rb:bg-white rb:rounded-xl">
                 <Button type="primary" ghost onClick={handleModelConfig} className="rb:group">
                   {modelLogo
@@ -417,89 +423,92 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
                   </Button>
                 </Space>
               </Flex>
-              <Form.Item name="default_model_config_id" hidden noStyle></Form.Item>
-              <Form.Item name="capability" hidden noStyle></Form.Item>
-              <Form.Item name="model_parameters" hidden noStyle></Form.Item>
-              <Form.Item name="features" hidden noStyle></Form.Item>
-              <Card
-                title={t('application.promptConfiguration')}
-                extra={
-                  <Space
-                    size={1}
-                    className="rb:px-2 rb:h-5.5 rb:rounded-md rb:cursor-pointer rb:border rb:border-[rgba(21,94,239,0.3)] rb:text-[#155EEF]"
-                    onClick={handlePrompt}
-                  >
-                    <div className="rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/application/aiPrompt.png')]"></div>
-                    <span className="rb:font-[PingFangSC, PingFang_SC]!">{t('application.aiPrompt')}</span>
-                  </Space>
-                }
-              >
-                <div className="rb:leading-4.5 rb:text-[12px] rb:mb-2">
-                  <span className="rb:font-medium">{t('application.configuration')}</span>
-                  <span className="rb:font-regular rb:text-[#5B6167]"> ({t('application.configurationDesc')})</span>
-                </div>
 
-                <Form.Item name="system_prompt" className="rb:mb-0!">
-                  <Input.TextArea
-                    placeholder={t('application.promptPlaceholder')}
-                    styles={{
-                      textarea: {
-                        minHeight: '200px',
-                        borderRadius: '8px',
-                        padding: '12px'
-                      },
-                    }}
-                  />
-                </Form.Item>
-              </Card>
+              <Flex gap={12} vertical className="rb:h-[calc(100vh-156px)]! rb:overflow-y-auto!">
+                <Form.Item name="default_model_config_id" hidden noStyle></Form.Item>
+                <Form.Item name="capability" hidden noStyle></Form.Item>
+                <Form.Item name="model_parameters" hidden noStyle></Form.Item>
+                <Form.Item name="features" hidden noStyle></Form.Item>
+                <Card
+                  title={t('application.promptConfiguration')}
+                  extra={
+                    <Space
+                      size={1}
+                      className="rb:px-2 rb:h-5.5 rb:rounded-md rb:cursor-pointer rb:border rb:border-[rgba(21,94,239,0.3)] rb:text-[#155EEF]"
+                      onClick={handlePrompt}
+                    >
+                      <div className="rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/application/aiPrompt.png')]"></div>
+                      <span className="rb:font-[PingFangSC, PingFang_SC]!">{t('application.aiPrompt')}</span>
+                    </Space>
+                  }
+                >
+                  <div className="rb:leading-4.5 rb:text-[12px] rb:mb-2">
+                    <span className="rb:font-medium">{t('application.configuration')}</span>
+                    <span className="rb:font-regular rb:text-[#5B6167]"> ({t('application.configurationDesc')})</span>
+                  </div>
+
+                  <Form.Item name="system_prompt" className="rb:mb-0!">
+                    <Input.TextArea
+                      placeholder={t('application.promptPlaceholder')}
+                      styles={{
+                        textarea: {
+                          minHeight: '200px',
+                          borderRadius: '8px',
+                          padding: '12px'
+                        },
+                      }}
+                    />
+                  </Form.Item>
+                </Card>
 
                 <Form.Item name="knowledge_retrieval" noStyle>
                   <Knowledge />
                 </Form.Item>
 
-                {/* Memory Configuration */}
-              <Card title={t('application.memoryConfiguration')}>
-                <Flex gap={16} vertical className="rb:bg-[#FAFAFA] rb:rounded-xl rb:p-3!">
-                  <SwitchFormItem
-                    title={t('application.dialogueHistoricalMemory')}
-                    name={['memory', 'enabled']}
-                    desc={t('application.dialogueHistoricalMemoryDesc')}
-                  />
-                  <Form.Item
-                    name={['memory', 'memory_config_id']}
-                    label={t('application.selectMemoryContent')}
-                    extra={<DescWrapper desc={t('application.selectMemoryContentDesc')} className="rb:mt-1" />}
-                    layout="vertical"
-                    className="rb:mb-0!"
-                  >
-                    <CustomSelect
-                      placeholder={t('common.pleaseSelect')}
-                      url={memoryConfigListUrl}
-                      hasAll={false}
-                      valueKey='config_id'
-                      labelKey="config_name"
-                      disabled={!values?.memory?.enabled}
+                  {/* Memory Configuration */}
+                <Card title={t('application.memoryConfiguration')}>
+                  <Flex gap={16} vertical className="rb:bg-[#FAFAFA] rb:rounded-xl rb:p-3!">
+                    <SwitchFormItem
+                      title={t('application.dialogueHistoricalMemory')}
+                      name={['memory', 'enabled']}
+                      desc={t('application.dialogueHistoricalMemoryDesc')}
                     />
-                  </Form.Item>
-                </Flex>
-              </Card>
+                    <Form.Item
+                      name={['memory', 'memory_config_id']}
+                      label={t('application.selectMemoryContent')}
+                      extra={<DescWrapper desc={t('application.selectMemoryContentDesc')} className="rb:mt-1" />}
+                      layout="vertical"
+                      className="rb:mb-0!"
+                    >
+                      <CustomSelect
+                        placeholder={t('common.pleaseSelect')}
+                        url={memoryConfigListUrl}
+                        hasAll={false}
+                        valueKey='config_id'
+                        labelKey="config_name"
+                        disabled={!values?.memory?.enabled}
+                      />
+                    </Form.Item>
+                  </Flex>
+                </Card>
 
-              <Form.Item name="variables" noStyle>
-                <VariableList />
-              </Form.Item>
+                <Form.Item name="variables" noStyle>
+                  <VariableList />
+                </Form.Item>
 
-              <Form.Item name="skills" noStyle>
-                <SkillList />
-              </Form.Item>
+                <Form.Item name="skills" noStyle>
+                  <SkillList />
+                </Form.Item>
 
-              {/* Tool Configuration */}
-              <Form.Item name="tools" noStyle>
-                <ToolList />
-              </Form.Item>
+                {/* Tool Configuration */}
+                <Form.Item name="tools" noStyle>
+                  <ToolList />
+                </Form.Item>
+              </Flex>
             </Flex>
           </Form>
         </Col>
-        <Col span={12} className="rb:h-full rb:overflow-y-hidden">
+        <Col span={12} className="rb:h-full! rb:overflow-y-hidden">
           <RbCard
             title={t('application.debuggingAndPreview')}
             extra={
@@ -513,7 +522,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
             headerType="borderless"
             headerClassName="rb:h-[56px]! rb:leading-[22px]!"
             titleClassName="rb:font-[MiSans-Bold] rb:font-bold"
-            bodyClassName="rb:p-4! rb:pt-0!"
+            bodyClassName="rb:p-4! rb:pt-0! rb:h-[calc(100%-56px)]!"
             className="rb:h-full!"
           >
             <Chat

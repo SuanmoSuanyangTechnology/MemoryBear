@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:48:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 15:33:38
+ * @Last Modified time: 2026-03-26 14:43:20
  */
 /**
  * Space Management Page
@@ -12,7 +12,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { List, Button, Flex, Space as AntSpace, Tooltip } from 'antd';
+import { Button, Flex, Space as AntSpace, Tooltip, Row, Col } from 'antd';
 
 import type { Space, SpaceModalRef } from './types';
 import SpaceModal from './components/SpaceModal';
@@ -68,11 +68,12 @@ const SpaceManagement: React.FC = () => {
         {t('space.createSpace')}
       </Button>
       <BodyWrapper loading={loading} empty={data.length === 0}>
-        <List
-          grid={{ gutter: 16, column: 4 }}
-          dataSource={data}
-          renderItem={(item) => (
-            <List.Item key={item.id}>
+        <Row
+          gutter={[16, 16]}
+          className="rb:max-h-[calc(100%-48px)] rb:overflow-y-auto"
+        >
+          {data.map(item => (
+            <Col key={item.id} span={6}>
               <RbCard
                 avatarUrl={item.icon}
                 avatarText={item.name[0]}
@@ -91,10 +92,9 @@ const SpaceManagement: React.FC = () => {
                 </Button>}
               >
               </RbCard>
-            </List.Item>
-          )}
-          className="rb:h-[calc(100vh-124px)] rb:overflow-y-auto rb:overflow-x-hidden"
-        />
+            </Col>
+          ))}
+        </Row>
       </BodyWrapper>
 
       <SpaceModal

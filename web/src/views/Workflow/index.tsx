@@ -34,7 +34,8 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
     chatVariables,
     setChatVariables,
     handleAddNotes,
-    handleSaveFeaturesConfig
+    handleSaveFeaturesConfig,
+    features
   } = useWorkflowGraph({ containerRef, miniMapRef, onFeaturesLoad });
 
   const onDragOver = (event: React.DragEvent) => {
@@ -55,12 +56,13 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
     handleRun,
     graphRef,
     addVariable,
+    chatVariables,
     config,
-    features: config?.features,
+    features: features,
     handleSaveFeaturesConfig
   }))
   return (
-    <div className="rb:h-[calc(100vh-64px)] rb:relative">
+    <div className="rb:h-full rb:relative">
       {/* 左侧节点面板 */}
       <NodeLibrary collapsed={collapsed} handleToggle={handleToggle} />
       
@@ -99,6 +101,7 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
       <Chat
         ref={chatRef}
         data={config}
+        features={features}
         graphRef={graphRef}
         appId={config?.app_id as string}
       />

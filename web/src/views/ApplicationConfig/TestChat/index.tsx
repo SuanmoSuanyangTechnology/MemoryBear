@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 13:43:02
+ * @Last Modified time: 2026-03-26 15:35:13
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -531,11 +531,11 @@ const TestChat: FC<TestChatProps> = ({
   }
 
   return (
-    <div className="rb:w-250 rb:p-3 rb:mx-auto">
+    <div className="rb:w-250 rb:mx-auto rb:h-full">
       <RbCard
         title={t('application.test')}
         headerClassName="rb:min-h-[56px]!"
-        className="rb:h-[calc(100vh-88px)]!"
+        className="rb:h-full!"
         bodyClassName="rb:h-[calc(100%-56px)]! rb:overflow-y-auto rb:px-3! rb:py-0!"
       >
         <Chat

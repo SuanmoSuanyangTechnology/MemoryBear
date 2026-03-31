@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>保存</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linejoin="round">
+        <g id="应用管理-工作流-配置-开始" transform="translate(-1363, -24)" stroke="#171719" stroke-width="1.2">
+            <g id="保存" transform="translate(1356, 17)">
+                <g transform="translate(7, 7)" id="编组-12">
+                    <g transform="translate(2, 1.5)">
+                        <path d="M1.5,0 L8.66667187,0 L8.66667187,0 L12,3.60846604 L12,11.5 C12,12.3284271 11.3284271,13 10.5,13 L1.5,13 C0.671572875,13 0,12.3284271 0,11.5 L0,1.5 C0,0.671572875 0.671572875,0 1.5,0 Z" id="矩形"></path>
+                        <path d="M3,0.5 L3,3.5 C3,4.05228475 3.44771525,4.5 4,4.5 L8,4.5 L8,4.5" id="路径-12" stroke-linecap="round"></path>
+                        <path d="M3,12.5 L3,8.5 C3,7.94771525 3.44771525,7.5 4,7.5 L8,7.5 C8.55228475,7.5 9,7.94771525 9,8.5 L9,12.5 L9,12.5" id="路径" stroke-linecap="round"></path>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

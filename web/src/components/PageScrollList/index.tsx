@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:18:19 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-19 20:47:34
+ * @Last Modified time: 2026-03-27 15:52:37
  */
 /**
  * PageScrollList Component
@@ -56,9 +56,10 @@ interface PageScrollListProps<T, Q = Record<string, unknown>> {
   /** Additional CSS classes */
   className?: string;
   needLoading?: boolean;
+  heightClass?: string;
 }
 
-const heightClass = 'rb:h-[calc(100vh-124px)]!';
+const defaultHeightClass = 'rb:h-[calc(100vh-116px)]!';
 
 /** Infinite scroll list component with pagination support */
 const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
@@ -68,6 +69,7 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
   column = 4,
   className = '',
   needLoading = true,
+  heightClass,
 }: PageScrollListProps<T, Q>, ref: React.Ref<PageScrollListRef>) => {
   /** Expose refresh method to parent component */
   useImperativeHandle(ref, () => ({
@@ -140,13 +142,13 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
       <div
         ref={scrollRef}
         id="scrollableDiv"
-        className={`rb:overflow-y-auto rb:overflow-x-hidden ${heightClass} ${className}`}
+        className={`rb:overflow-y-auto rb:overflow-x-hidden ${heightClass || defaultHeightClass} ${className}`}
       >
         <InfiniteScroll
           dataLength={data.length}
           next={() => loadMoreData()}
           hasMore={hasMore}
-          loader={loading && needLoading ? <PageLoading className={heightClass} /> : false}
+          loader={loading && needLoading ? <PageLoading className={heightClass || defaultHeightClass} /> : false}
           // endMessage={<Divider plain>It is all, nothing more 🤐</Divider>}
           scrollableTarget="scrollableDiv"
           className='rb:h-full!'
@@ -154,7 +156,7 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
           {/* Render grid list or empty state */}
           {data.length > 0 ? (
             <Row
-              gutter={[16, 16]}
+              gutter={[12, 12]}
             >
               {data.map((item, index) => (
                 <Col key={(item as any).id || index} span={24/column}>
@@ -162,7 +164,7 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
                 </Col>
               ))}
             </Row>
-          ) : !loading ? <PageEmpty className={heightClass} /> : null}
+          ) : !loading ? <PageEmpty className={heightClass || defaultHeightClass} /> : null}
         </InfiniteScroll>
       </div>
     </>

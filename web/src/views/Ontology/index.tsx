@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:10:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 13:38:59
+ * @Last Modified time: 2026-03-27 15:03:09
  */
 import { type FC, useState, useRef } from 'react';
 import type { MenuInfo } from 'rc-menu/lib/interface';
@@ -150,13 +150,13 @@ const Ontology: FC = () => {
                     items: [
                       {
                         key: 'edit',
-                        icon: <div className="rb:size-6 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit.svg')]" />,
+                        icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit_bold.svg')]" />,
                         label: t('common.edit'),
                         onClick: (e: MenuInfo) => handleEdit(item, e),
                       },
                       {
                         key: 'delete',
-                        icon: <div className="rb:size-6 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete.svg')]" />,
+                        icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red_big.svg')]" />,
                         label: t('common.delete'),
                         onClick: (e: MenuInfo) => handleDelete(item, e),
                       },
@@ -164,7 +164,7 @@ const Ontology: FC = () => {
                   }}
                   placement="bottomRight"
                 >
-                  <div onClick={(e) => e.stopPropagation()} className="rb:cursor-pointer rb:size-6 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
+                  <div onClick={(e) => e.stopPropagation()} className="rb:cursor-pointer rb:size-5.5 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
                 </Dropdown>
               </Flex>
             }
