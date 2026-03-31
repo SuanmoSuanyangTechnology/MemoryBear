@@ -448,15 +448,16 @@ class AgentRunService:
             features_config: Dict[str, Any],
             is_new_conversation: bool,
             variables: Optional[Dict[str, Any]] = None
-    ) -> Optional[str]:
+    ) -> tuple[Any, Any]:
         """首轮对话时返回开场白文本（支持变量替换），否则返回 None"""
         if not is_new_conversation:
-            return None
+            return None, None
         opening = features_config.get("opening_statement", {})
         if not (isinstance(opening, dict) and opening.get("enabled") and opening.get("statement")):
-            return None
+            return None, None
         
         statement = opening["statement"]
+        suggested_questions = opening["suggested_questions"]
         
         # 如果有变量，进行替换（仅支持 {{var_name}} 格式）
         if variables:
@@ -464,7 +465,7 @@ class AgentRunService:
                 placeholder = f"{{{{{var_name}}}}}"
                 statement = statement.replace(placeholder, str(var_value))
         
-        return statement
+        return statement, suggested_questions
 
     @staticmethod
     def _filter_citations(
@@ -598,13 +599,16 @@ class AgentRunService:
 
             # 5. 处理会话ID（创建或验证），新会话时写入开场白
             is_new_conversation = not conversation_id
-            opening = self._get_opening_statement(features_config, is_new_conversation, variables)
+            opening, suggested_questions = None, None
+            if not sub_agent:
+                opening, suggested_questions = self._get_opening_statement(features_config, is_new_conversation, variables)
             conversation_id = await self._ensure_conversation(
                 conversation_id=conversation_id,
                 app_id=agent_config.app_id,
                 workspace_id=workspace_id,
                 user_id=user_id,
-                opening_statement=opening
+                opening_statement=opening,
+                suggested_questions=suggested_questions
             )
 
             model_info = ModelInfo(
@@ -839,14 +843,17 @@ class AgentRunService:
 
             # 5. 处理会话ID（创建或验证），新会话时写入开场白
             is_new_conversation = not conversation_id
-            opening = self._get_opening_statement(features_config, is_new_conversation, variables)
+            opening, suggested_questions = None, None
+            if not sub_agent:
+                opening, suggested_questions = self._get_opening_statement(features_config, is_new_conversation, variables)
             conversation_id = await self._ensure_conversation(
                 conversation_id=conversation_id,
                 app_id=agent_config.app_id,
                 workspace_id=workspace_id,
                 user_id=user_id,
                 sub_agent=sub_agent,
-                opening_statement=opening
+                opening_statement=opening,
+                suggested_questions=suggested_questions
             )
 
             model_info = ModelInfo(
@@ -1050,7 +1057,8 @@ class AgentRunService:
             workspace_id: uuid.UUID,
             user_id: Optional[str],
             sub_agent: bool = False,
-            opening_statement: Optional[str] = None
+            opening_statement: Optional[str] = None,
+            suggested_questions: Optional[List[str]] = None
     ) -> str:
         """确保会话存在（创建或验证）
 
@@ -1061,6 +1069,7 @@ class AgentRunService:
             user_id: 用户ID
             sub_agent: 是否为子代理
             opening_statement: 开场白（新会话时作为第一条消息写入）
+            suggested_questions: 预设问题列表
 
         Returns:
             str: 会话ID
@@ -1104,7 +1113,7 @@ class AgentRunService:
                     conversation_id=uuid.UUID(new_conv_id),
                     role="assistant",
                     content=opening_statement,
-                    meta_data={}
+                    meta_data={"suggested_questions": suggested_questions}
                 )
                 logger.debug(f"已保存开场白到会话 {new_conv_id}")
 

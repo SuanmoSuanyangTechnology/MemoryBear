@@ -12,6 +12,9 @@ import base64
 import csv
 import io
 import json
+import re
+import olefile
+import struct
 import zipfile
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
@@ -602,31 +605,75 @@ class MultimodalService:
             try:
                 word_file = io.BytesIO(file_content)
                 doc = Document(word_file)
-                return '\n'.join(p.text for p in doc.paragraphs)
+                text_lines = []
+                for p in doc.paragraphs:
+                    text = p.text.strip()
+                    if text:
+                        text_lines.append(text)
+
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            text = cell.text.strip()
+                            if text:
+                                text_lines.append(text)
+
+                full_text = "\n".join(text_lines)
+                return full_text.strip() or "[docx 文件无文本内容]"
             except Exception as e:
-                logger.error(f"提取 docx 文本失败: {e}")
+                logger.error(f"提取 docx 文本失败: {str(e)}", exc_info=True)
                 return f"[docx 提取失败: {str(e)}]"
 
-        # 旧版 .doc（OLE2 格式）
+        # 旧版 .doc（OLE2/CFB 格式），按 Word Binary Format 规范解析 piece table
         try:
-            import olefile
             ole = olefile.OleFileIO(io.BytesIO(file_content))
-            if not ole.exists('WordDocument'):
-                return "[doc 提取失败: 未找到 WordDocument 流]"
-            # 读取 WordDocument 流，提取可见 ASCII/Unicode 文本
-            stream = ole.openstream('WordDocument').read()
-            # Word Binary Format: 文本在流中以 UTF-16-LE 编码存储
-            # 简单提取：过滤出可打印字符段
-            try:
-                text = stream.decode('utf-16-le', errors='ignore')
-            except Exception:
-                text = stream.decode('latin-1', errors='ignore')
-            # 过滤控制字符，保留可打印内容
-            import re
-            text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
-            text = re.sub(r' +', ' ', text).strip()
+            word_stream = ole.openstream('WordDocument').read()
+
+            # FIB offset 0xA bit9 决定使用 0Table 还是 1Table
+            fib_flags = struct.unpack_from('<H', word_stream, 0xA)[0]
+            table_name = '1Table' if (fib_flags & 0x0200) else '0Table'
+            table_stream = ole.openstream(table_name).read()
+
+            # 从 FIB 读取 fcClx/lcbClx 定位 piece table
+            fc_clx, lcb_clx = struct.unpack_from("<II", word_stream, 0x1A2)
+            clx = table_stream[fc_clx: fc_clx + lcb_clx]
+
+            # 解析 CLX，找到 PlcPcd（piece table）
+            i, plc_pcd = 0, None
+            while i < len(clx):
+                clxt = clx[i]
+                if clxt == 0x01:
+                    i += 3 + struct.unpack_from('<H', clx, i + 1)[0]
+                elif clxt == 0x02:
+                    cb = struct.unpack_from('<I', clx, i + 1)[0]
+                    plc_pcd = clx[i + 5: i + 5 + cb]
+                    break
+                else:
+                    break
+
+            if plc_pcd is None:
+                raise ValueError("PlcPcd not found")
+
+            # PlcPcd: (n+1) 个 CP（4字节）+ n 个 PCD（8字节）
+            n_pieces = (len(plc_pcd) - 4) // 12
+            cp_array = [struct.unpack_from('<I', plc_pcd, k * 4)[0] for k in range(n_pieces + 1)]
+
+            parts = []
+            for k in range(n_pieces):
+                fc_value = struct.unpack_from('<I', plc_pcd, (n_pieces + 1) * 4 + k * 8 + 2)[0]
+                is_ansi = bool(fc_value & 0x40000000)
+                fc = fc_value & 0x3FFFFFFF
+                char_count = cp_array[k + 1] - cp_array[k]
+
+                if is_ansi:
+                    parts.append(word_stream[fc: fc + char_count].decode('cp1252', errors='replace'))
+                else:
+                    parts.append(word_stream[fc: fc + char_count * 2].decode('utf-16-le', errors='replace'))
+
             ole.close()
-            return text
+            result = re.sub(r'[\x00-\x1f\x7f]', '', ''.join(parts))
+            return result.strip()
+
         except Exception as e:
             logger.error(f"提取 doc 文本失败: {e}")
             return f"[doc 提取失败: {str(e)}]"

@@ -31,6 +31,7 @@ from app.schemas.memory_storage_schema import (
     ForgettingCurveRequest,
     ForgettingCurveResponse,
     ForgettingCurvePoint,
+    PendingNodesResponse,
 )
 from app.schemas.response_schema import ApiResponse
 from app.services.memory_forget_service import MemoryForgetService
@@ -306,6 +307,100 @@ async def get_forgetting_stats(
     except Exception as e:
         api_logger.error(f"获取遗忘引擎统计失败: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "获取遗忘引擎统计失败", str(e))
+
+
+@router.get("/pending-nodes", response_model=ApiResponse)
+async def get_pending_nodes(
+    end_user_id: str,
+    page: int = 1,
+    pagesize: int = 10,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    获取待遗忘节点列表（独立分页接口）
+
+    查询满足遗忘条件的节点（激活值低于阈值且最后访问时间超过最小天数）。
+    此接口独立分页，与 /stats 接口分离。
+
+    Args:
+        end_user_id: 组ID（即 end_user_id，必填）
+        page: 页码（从1开始，默认1）
+        pagesize: 每页数量（默认10）
+        current_user: 当前用户
+        db: 数据库会话
+
+    Returns:
+        ApiResponse: 包含待遗忘节点列表和分页信息的响应
+
+    Examples:
+        - 第1页，每页10条：GET /memory/forget-memory/pending-nodes?end_user_id=xxx&page=1&pagesize=10
+        - 第2页，每页20条：GET /memory/forget-memory/pending-nodes?end_user_id=xxx&page=2&pagesize=20
+
+    Notes:
+        - page 从1开始，pagesize 必须大于0
+        - 返回格式：{"items": [...], "page": {"page": 1, "pagesize": 10, "total": 100, "hasnext": true}}
+    """
+    workspace_id = current_user.current_workspace_id
+    # 检查用户是否已选择工作空间
+    if workspace_id is None:
+        api_logger.warning(f"用户 {current_user.username} 尝试获取待遗忘节点但未选择工作空间")
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+
+    # 验证 end_user_id 必填
+    if not end_user_id:
+        api_logger.warning(f"用户 {current_user.username} 尝试获取待遗忘节点但未提供 end_user_id")
+        return fail(BizCode.INVALID_PARAMETER, "end_user_id 不能为空", "end_user_id is required")
+
+    # 通过 end_user_id 获取关联的 config_id
+    try:
+        from app.services.memory_agent_service import get_end_user_connected_config
+
+        connected_config = get_end_user_connected_config(end_user_id, db)
+        config_id = connected_config.get("memory_config_id")
+        config_id = resolve_config_id(config_id, db)
+
+        if config_id is None:
+            api_logger.warning(f"终端用户 {end_user_id} 未关联记忆配置")
+            return fail(BizCode.INVALID_PARAMETER, f"终端用户 {end_user_id} 未关联记忆配置", "memory_config_id is None")
+
+        api_logger.debug(f"通过 end_user_id={end_user_id} 获取到 config_id={config_id}")
+    except ValueError as e:
+        api_logger.warning(f"获取终端用户配置失败: {str(e)}")
+        return fail(BizCode.INVALID_PARAMETER, str(e), "ValueError")
+    except Exception as e:
+        api_logger.error(f"获取终端用户配置时发生错误: {str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "获取终端用户配置失败", str(e))
+
+    # 验证分页参数
+    if page < 1:
+        return fail(BizCode.INVALID_PARAMETER, "page 必须大于等于1", "page < 1")
+    if pagesize < 1:
+        return fail(BizCode.INVALID_PARAMETER, "pagesize 必须大于等于1", "pagesize < 1")
+
+    api_logger.info(
+        f"用户 {current_user.username} 在工作空间 {workspace_id} 请求获取待遗忘节点: "
+        f"end_user_id={end_user_id}, page={page}, pagesize={pagesize}"
+    )
+
+    try:
+        # 调用服务层获取待遗忘节点列表
+        result = await forget_service.get_pending_nodes(
+            db=db,
+            end_user_id=end_user_id,
+            config_id=config_id,
+            page=page,
+            pagesize=pagesize
+        )
+
+        # 构建响应
+        response_data = PendingNodesResponse(**result)
+
+        return success(data=response_data.model_dump(), msg="查询成功")
+
+    except Exception as e:
+        api_logger.error(f"获取待遗忘节点列表失败: {str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "获取待遗忘节点列表失败", str(e))
 
 
 @router.post("/forgetting_curve", response_model=ApiResponse)

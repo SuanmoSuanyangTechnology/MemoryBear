@@ -91,7 +91,7 @@ async def chat(
 
     app = app_service.get_app(api_key_auth.resource_id, api_key_auth.workspace_id)
     other_id = payload.user_id
-    workspace_id = app.workspace_id
+    workspace_id = api_key_auth.workspace_id
     end_user_repo = EndUserRepository(db)
     new_end_user = end_user_repo.get_or_create_end_user(
         app_id=app.id,

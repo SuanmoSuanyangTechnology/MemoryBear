@@ -214,7 +214,7 @@ class ConversationService:
 
             conversation.message_count += 1
 
-            if conversation.message_count == 1 and role == "user":
+            if conversation.message_count <= 2 and role == "user":
                 conversation.title = (
                         content[:50] + ("..." if len(content) > 50 else "")
                 )
