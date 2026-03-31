@@ -1506,7 +1506,7 @@ export const zh = {
       EPISODIC_MEMORY: '情景记忆',
       FORGET_MEMORY: '遗忘记忆',
       
-      endUserProfile: '核心档案',
+      endUserProfile: '永久记忆',
       editEndUserProfile: '编辑',
       other_name: '名称',
       position: '职位',
