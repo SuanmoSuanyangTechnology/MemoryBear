@@ -195,7 +195,7 @@ export const en = {
       createNewApplicationDesc: 'Build an app in 3 minutes, no code.',
       createNewKnowledge: 'Create New Knowledge',
       createNewKnowledgeDesc: 'Create a searchable knowledge base instantly.',
-      memoryConversation: 'Memory Conversation',
+      memoryConversation: 'Memory Validation',
       memoryConversationDesc: 'The more you use it, the better AI knows you.',
       helpCenter: 'Help Center',
       helpCenterDesc: 'One place to get help and start fast.',

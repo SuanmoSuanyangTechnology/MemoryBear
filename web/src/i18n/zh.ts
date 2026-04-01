@@ -906,7 +906,7 @@ export const zh = {
       createNewApplicationDesc: '零代码，3 分钟搭建应用',
       createNewKnowledge: '创建知识库',
       createNewKnowledgeDesc: '秒级生成可搜索知识库',
-      memoryConversation: '记忆对话',
+      memoryConversation: '记忆验证',
       memoryConversationDesc: '越用越懂你的 AI',
       helpCenter: '帮助中心',
       helpCenterDesc: '一站式上手与支持',
