@@ -42,8 +42,7 @@ async def create_end_user(
     payload = CreateEndUserRequest(**body)
     workspace_id = api_key_auth.workspace_id
 
-    # sourcery skip: sql-injection
-    logger.info(f"Create end user request - other_id: {payload.other_id}, workspace_id: {workspace_id}")
+    logger.info("Create end user request - other_id: %s, workspace_id: %s", payload.other_id, workspace_id)
 
     # Resolve memory_config_id: explicit > workspace default
     memory_config_id = None
