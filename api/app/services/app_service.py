@@ -13,7 +13,7 @@ import uuid
 from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 from fastapi import Depends
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, update as sa_update
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -759,14 +759,11 @@ class AppService:
         app.is_active = False
         
         # 更新 app_shares 表中该应用的所有共享记录为失效状态
-        from app.models import AppShare
-        from sqlalchemy import update as sa_update
-        self.db.execute(
-            sa_update(AppShare).where(
-                AppShare.source_app_id == app_id,
-                AppShare.is_active.is_(True)
-            ).values(is_active=False)
-        )
+        stmt = sa_update(AppShare).where(
+            AppShare.source_app_id == app_id,
+            AppShare.is_active.is_(True)
+        ).values(is_active=False)
+        self.db.execute(stmt)
         
         self.db.commit()
 
