@@ -40,21 +40,14 @@ def get_system_version():
     try:
         db = SessionLocal()
         try:
-            print(f"[DEBUG] 开始从数据库获取最新版本...")
             current_version, version_info = HomePageRepository.get_latest_version_introduction(db)
-            if current_version:
-                print(f"[DEBUG] 数据库获取成功：version={current_version}")
-            else:
-                print(f"[DEBUG] 数据库获取失败：current_version=None")
         finally:
             db.close()
     except Exception as e:
-        print(f"[DEBUG] 数据库查询异常：{e}")
         pass
     
     # 2️⃣ 降级：使用环境变量中的版本号
     if not current_version:
-        print(f"[DEBUG] 使用环境变量版本：{settings.SYSTEM_VERSION}")
         current_version = settings.SYSTEM_VERSION
         version_info = HomePageService.load_version_introduction(current_version)
     
