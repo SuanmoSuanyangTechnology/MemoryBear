@@ -1,6 +1,6 @@
 from datetime import datetime, time
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, Table, MetaData
 from uuid import UUID
 from typing import Dict, Optional, Any
 
@@ -206,8 +206,6 @@ class HomePageRepository:
             如果数据库中没有已发布的版本，返回 (None, None)
         """
         try:
-            from sqlalchemy import Table, MetaData
-            
             metadata = MetaData()
             
             version_notes = Table('version_notes', metadata, autoload_with=db.bind)
@@ -262,9 +260,6 @@ class HomePageRepository:
             如果数据库中没有该版本，返回 None
         """
         try:
-            from sqlalchemy import Table, MetaData
-            from datetime import datetime, time
-            
             metadata = MetaData()
             version_notes = Table('version_notes', metadata, autoload_with=db.engine)
             
