@@ -1,3 +1,6 @@
+.rb-modal {
+  top: 40px;
+}
 .rb-modal .ant-modal-footer .ant-btn {
   height: 32px !important;
   padding: 0 15px !important;

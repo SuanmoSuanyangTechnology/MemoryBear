@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:18:19 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 15:52:37
+ * @Last Modified time: 2026-03-31 15:31:18
  */
 /**
  * PageScrollList Component
@@ -48,7 +48,7 @@ interface PageScrollListProps<T, Q = Record<string, unknown>> {
   /** API endpoint URL */
   url: string;
   /** Function to render each list item */
-  renderItem: (item: T) => React.ReactNode;
+  renderItem: (item: T, index: number) => React.ReactNode;
   /** Query parameters for API request */
   query?: Q;
   /** Number of columns in grid layout */
@@ -57,6 +57,8 @@ interface PageScrollListProps<T, Q = Record<string, unknown>> {
   className?: string;
   needLoading?: boolean;
   heightClass?: string;
+  gutter?: [number, number] | number;
+  onTotalChange?: (total: number) => void;
 }
 
 const defaultHeightClass = 'rb:h-[calc(100vh-116px)]!';
@@ -70,6 +72,8 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
   className = '',
   needLoading = true,
   heightClass,
+  gutter = [12, 12],
+  onTotalChange,
 }: PageScrollListProps<T, Q>, ref: React.Ref<PageScrollListRef>) => {
   /** Expose refresh method to parent component */
   useImperativeHandle(ref, () => ({
@@ -88,6 +92,7 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
   const pageRef = useRef(1);
   const loadingRef = useRef(false);
   const hasMoreRef = useRef(true);
+  const [total, setTotal] = useState(0);
 
   /** Load more data from API with pagination */
   const loadMoreData = (reset?: boolean) => {
@@ -107,6 +112,9 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
         setData(prev => reset ? results : [...prev, ...results]);
         hasMoreRef.current = response.page?.hasnext;
         setHasMore(response.page?.hasnext);
+        const newTotal = response.page?.total || 0;
+        setTotal(newTotal);
+        onTotalChange?.(newTotal);
       })
       .catch(() => {
         hasMoreRef.current = false;
@@ -156,11 +164,11 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
           {/* Render grid list or empty state */}
           {data.length > 0 ? (
             <Row
-              gutter={[12, 12]}
+              gutter={gutter}
             >
               {data.map((item, index) => (
                 <Col key={(item as any).id || index} span={24/column}>
-                  {renderItem(item)}
+                  {renderItem(item, index)}
                 </Col>
               ))}
             </Row>

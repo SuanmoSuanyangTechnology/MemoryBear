@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 15:44:33
+ * @Last Modified time: 2026-03-31 15:45:17
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
@@ -36,6 +36,7 @@ export interface ModelConfig {
   n: number;
   /** Stop sequences */
   stop?: string;
+  deep_thinking?: boolean;
 }
 
 /**

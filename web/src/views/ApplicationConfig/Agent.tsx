@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 18:13:51
+ * @Last Modified time: 2026-03-31 16:50:10
  */
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { useTranslation } from 'react-i18next'
@@ -194,7 +194,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
    * Open model configuration modal
    */
   const handleModelConfig = () => {
-    modelConfigModalRef.current?.handleOpen('model')
+    modelConfigModalRef.current?.handleOpen('model', { ...defaultModel, model_parameters : values?.model_parameters })
   }
   /**
    * Clear all debugging chat sessions
@@ -287,7 +287,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
       setChatList([{
         label: filterValue?.name || '',
         model_config_id: filterValue?.id || '',
-        model_parameters: {...(filterValue?.config || {})} as unknown as ModelConfig,
+        model_parameters: {...(values?.model_parameters || {})} as unknown as ModelConfig,
         list: []
       }])
       form.setFieldValue('capability', filterValue?.capability)
@@ -361,7 +361,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
 
   useEffect(() => {
     const opening_statement = form.getFieldValue(['features', 'opening_statement'])
-    console.log('opening_statement', opening_statement, defaultModel, chatList)
 
     if (opening_statement?.enabled && opening_statement?.statement && opening_statement?.statement.trim() !== '') {
       const assistantMsg: ChatItem = {

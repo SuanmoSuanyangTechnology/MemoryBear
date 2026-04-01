@@ -795,6 +795,7 @@ export const zh = {
       citation: '引用和归属',
       citation_desc: '显示源文档和生成内容的归属部分',
       invalidVariablesTitle: "对话开场白中引用了以下未定义的变量，是否保存开场白配置？",
+      deep_thinking: '开启深度思考',
 
       apps: '我的应用',
       sharing: '共享',
@@ -1274,6 +1275,8 @@ export const zh = {
       vision: '视觉',
       audio: '音频',
       video: '视频',
+      thinking: '深度思考',
+      is_thinking: '支持深度思考',
     },
     timezones: {
       'Asia/Shanghai': '中国标准时间 (UTC+8)',
@@ -1592,6 +1595,8 @@ export const zh = {
       core_entities: '核心实体',
       communityDetailEmptyDesc: '点击左侧图表中的社区查看详情',
       communityLoadingTip: '社区图谱生成中',
+      assistant: 'AI 助手',
+      totalRagMemory: '记忆总数',
     },
     space: {
       createSpace: '创建空间',
@@ -1778,6 +1783,11 @@ export const zh = {
       vision_id: '视觉模型',
       audio_id: '音频模型',
       video_id: '视频模型',
+      onlyDelete: '仅删填充',
+      semanticFiltering: '语义过滤',
+      sceneFocus: '场景聚焦',
+      loose: '宽松',
+      strict: '严格',
     },
     memoryConversation: {
       chatEmpty:'有什么我可以帮您的吗？',
@@ -1825,6 +1835,7 @@ export const zh = {
       stopAudioRecorder: '停止录音',
       startAudioRecorder: '开始录音',
       citations: '引用',
+      reasoning_content: '深度思考内容',
     },
     login: {
       title: '红熊记忆科学',
