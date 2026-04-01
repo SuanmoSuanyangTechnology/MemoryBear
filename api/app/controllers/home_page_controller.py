@@ -3,9 +3,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.response_utils import success
-from app.db import get_db
+from app.db import get_db, SessionLocal
 from app.dependencies import get_current_user
 from app.models.user_model import User
+from app.repositories.home_page_repository import HomePageRepository
 from app.schemas.response_schema import ApiResponse
 from app.services.home_page_service import HomePageService
 
@@ -31,9 +32,39 @@ def get_workspace_list(
 
 @router.get("/version", response_model=ApiResponse)
 def get_system_version():
-    """获取系统版本号+说明"""
-    current_version = settings.SYSTEM_VERSION
-    version_info = HomePageService.load_version_introduction(current_version)
+    """获取系统版本号 + 说明"""
+    current_version = None
+    version_info = None
+    
+    # 1️⃣ 优先从数据库获取最新已发布的版本
+    try:
+        db = SessionLocal()
+        try:
+            print(f"[DEBUG] 开始从数据库获取最新版本...")
+            current_version, version_info = HomePageRepository.get_latest_version_introduction(db)
+            if current_version:
+                print(f"[DEBUG] 数据库获取成功：version={current_version}")
+            else:
+                print(f"[DEBUG] 数据库获取失败：current_version=None")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[DEBUG] 数据库查询异常：{e}")
+        pass
+    
+    # 2️⃣ 降级：使用环境变量中的版本号
+    if not current_version:
+        print(f"[DEBUG] 使用环境变量版本：{settings.SYSTEM_VERSION}")
+        current_version = settings.SYSTEM_VERSION
+        version_info = HomePageService.load_version_introduction(current_version)
+    
+    # 3️⃣ 如果数据库和 JSON 都没有，返回基本信息
+    if not version_info:
+        version_info = {
+            "introduction": {"codeName": "", "releaseDate": "", "upgradePosition": "", "coreUpgrades": []},
+            "introduction_en": {"codeName": "", "releaseDate": "", "upgradePosition": "", "coreUpgrades": []}
+        }
+    
     return success(
         data={
             "version": current_version,
