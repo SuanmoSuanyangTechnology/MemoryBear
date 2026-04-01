@@ -85,15 +85,16 @@ class ModelConfigService:
 
     @staticmethod
     async def validate_model_config(
-            db: Session,
-            *,
-            model_name: str,
-            provider: str,
-            api_key: str,
-            api_base: Optional[str] = None,
-            model_type: str = "llm",
-            test_message: str = "Hello",
-            is_omni: bool = False
+        db: Session,
+        *,
+        model_name: str,
+        provider: str,
+        api_key: str,
+        api_base: Optional[str] = None,
+        model_type: str = "llm",
+        test_message: str = "Hello",
+        is_omni: bool = False,
+        capability: Optional[list] = None
     ) -> Dict[str, Any]:
         """验证模型配置是否有效
 
@@ -124,6 +125,7 @@ class ModelConfigService:
                 api_key=api_key,
                 base_url=api_base,
                 is_omni=is_omni,
+                support_thinking="thinking" in (capability or []),
                 temperature=0.7,
                 max_tokens=100
             )
@@ -320,7 +322,8 @@ class ModelConfigService:
                     api_base=api_key_data.api_base,
                     model_type=model_data.type,
                     test_message="Hello",
-                    is_omni=model_data.is_omni
+                    is_omni=model_data.is_omni,
+                    capability=model_data.capability
                 )
                 if not validation_result["valid"]:
                     raise BusinessException(
@@ -590,7 +593,8 @@ class ModelApiKeyService:
                 api_base=data.api_base,
                 model_type=model_config.type,
                 test_message="Hello",
-                is_omni=data.is_omni
+                is_omni=data.is_omni,
+                capability=model_config.capability
             )
             if not validation_result["valid"]:
                 # 记录验证失败的模型，但不抛出异常
@@ -675,7 +679,8 @@ class ModelApiKeyService:
                     api_base=api_key_data.api_base,
                     model_type=model_config.type,
                     test_message="Hello",
-                    is_omni=api_key_data.is_omni
+                    is_omni=api_key_data.is_omni,
+                    capability=model_config.capability
                 )
                 if not validation_result["valid"]:
                     raise BusinessException(
@@ -707,7 +712,8 @@ class ModelApiKeyService:
                 api_base=api_key_data.api_base or existing_api_key.api_base,
                 model_type=model_config.type,
                 test_message="Hello",
-                is_omni=model_config.is_omni
+                is_omni=model_config.is_omni,
+                capability=model_config.capability
             )
             if not validation_result["valid"]:
                 raise BusinessException(

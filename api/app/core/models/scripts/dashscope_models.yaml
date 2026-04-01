@@ -6,36 +6,42 @@ models:
   description: DeepSeek-R1-Distill-Qwen-14B大语言模型，支持智能体思考，32000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
   - agent-thought
   logo: dashscope
+
 - name: deepseek-r1-distill-qwen-32b
   type: llm
   provider: dashscope
   description: DeepSeek-R1-Distill-Qwen-32B大语言模型，支持智能体思考，32000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
   - agent-thought
   logo: dashscope
+
 - name: deepseek-r1
   type: llm
   provider: dashscope
   description: DeepSeek-R1大语言模型，支持智能体思考，131072超大上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
   - agent-thought
   logo: dashscope
+
 - name: deepseek-v3.1
   type: llm
   provider: dashscope
@@ -48,6 +54,7 @@ models:
   - 大语言模型
   - agent-thought
   logo: dashscope
+
 - name: deepseek-v3.2-exp
   type: llm
   provider: dashscope
@@ -60,6 +67,7 @@ models:
   - 大语言模型
   - agent-thought
   logo: dashscope
+
 - name: deepseek-v3.2
   type: llm
   provider: dashscope
@@ -72,6 +80,7 @@ models:
   - 大语言模型
   - agent-thought
   logo: dashscope
+
 - name: deepseek-v3
   type: llm
   provider: dashscope
@@ -84,6 +93,7 @@ models:
   - 大语言模型
   - agent-thought
   logo: dashscope
+
 - name: farui-plus
   type: llm
   provider: dashscope
@@ -98,6 +108,7 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: glm-4.7
   type: llm
   provider: dashscope
@@ -112,6 +123,7 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qvq-max-latest
   type: llm
   provider: dashscope
@@ -119,7 +131,8 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
+  - vision
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -127,6 +140,7 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qvq-max
   type: llm
   provider: dashscope
@@ -134,7 +148,8 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
+  - vision
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -142,6 +157,7 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen-coder-turbo-0919
   type: llm
   provider: dashscope
@@ -155,13 +171,15 @@ models:
   - 代码模型
   - agent-thought
   logo: dashscope
+
 - name: qwen-max-latest
   type: llm
   provider: dashscope
   description: qwen-max-latest大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式，支持联网搜索
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -169,6 +187,7 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen-max-longcontext
   type: llm
   provider: dashscope
@@ -183,13 +202,15 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen-max
   type: llm
   provider: dashscope
   description: qwen-max大语言模型，支持多工具调用、智能体思考、流式工具调用，32768上下文窗口，对话模式，支持联网搜索
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -197,6 +218,7 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen-mt-plus
   type: llm
   provider: dashscope
@@ -210,6 +232,7 @@ models:
   - 翻译模型
   - agent-thought
   logo: dashscope
+
 - name: qwen-mt-turbo
   type: llm
   provider: dashscope
@@ -223,6 +246,7 @@ models:
   - 翻译模型
   - agent-thought
   logo: dashscope
+
 - name: qwen-plus-0112
   type: llm
   provider: dashscope
@@ -237,6 +261,7 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen-plus-0125
   type: llm
   provider: dashscope
@@ -251,6 +276,7 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen-plus-0723
   type: llm
   provider: dashscope
@@ -265,6 +291,7 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen-plus-0806
   type: llm
   provider: dashscope
@@ -279,6 +306,7 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen-plus-0919
   type: llm
   provider: dashscope
@@ -293,6 +321,7 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen-plus-1125
   type: llm
   provider: dashscope
@@ -307,6 +336,7 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen-plus-1127
   type: llm
   provider: dashscope
@@ -321,6 +351,7 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen-plus-1220
   type: llm
   provider: dashscope
@@ -335,6 +366,7 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen-vl-max
   type: chat
   provider: dashscope
@@ -342,8 +374,8 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - video
+  - vision
+  - video
   is_omni: false
   tags:
   - 大语言模型
@@ -352,6 +384,7 @@ models:
   - agent-thought
   - video
   logo: dashscope
+
 - name: qwen-vl-plus-0809
   type: chat
   provider: dashscope
@@ -359,8 +392,8 @@ models:
   is_deprecated: true
   is_official: true
   capability:
-    - vision
-    - video
+  - vision
+  - video
   is_omni: false
   tags:
   - 大语言模型
@@ -369,6 +402,7 @@ models:
   - agent-thought
   - video
   logo: dashscope
+
 - name: qwen-vl-plus-2025-01-02
   type: chat
   provider: dashscope
@@ -376,8 +410,8 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - video
+  - vision
+  - video
   is_omni: false
   tags:
   - 大语言模型
@@ -386,6 +420,7 @@ models:
   - agent-thought
   - video
   logo: dashscope
+
 - name: qwen-vl-plus-2025-01-25
   type: chat
   provider: dashscope
@@ -393,8 +428,8 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - video
+  - vision
+  - video
   is_omni: false
   tags:
   - 大语言模型
@@ -403,6 +438,7 @@ models:
   - agent-thought
   - video
   logo: dashscope
+
 - name: qwen-vl-plus-latest
   type: chat
   provider: dashscope
@@ -410,8 +446,8 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - video
+  - vision
+  - video
   is_omni: false
   tags:
   - 大语言模型
@@ -420,6 +456,7 @@ models:
   - agent-thought
   - video
   logo: dashscope
+
 - name: qwen-vl-plus
   type: chat
   provider: dashscope
@@ -427,8 +464,8 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - video
+  - vision
+  - video
   is_omni: false
   tags:
   - 大语言模型
@@ -437,6 +474,7 @@ models:
   - agent-thought
   - video
   logo: dashscope
+
 - name: qwen2.5-0.5b-instruct
   type: llm
   provider: dashscope
@@ -451,13 +489,15 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen3-14b
   type: llm
   provider: dashscope
   description: qwen3-14b大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -465,13 +505,15 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen3-235b-a22b-instruct-2507
   type: llm
   provider: dashscope
   description: qwen3-235b-a22b-instruct-2507大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -479,13 +521,15 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen3-235b-a22b-thinking-2507
   type: llm
   provider: dashscope
   description: qwen3-235b-a22b-thinking-2507大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -493,13 +537,15 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen3-235b-a22b
   type: llm
   provider: dashscope
   description: qwen3-235b-a22b大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -507,13 +553,15 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen3-30b-a3b-instruct-2507
   type: llm
   provider: dashscope
   description: qwen3-30b-a3b-instruct-2507大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -521,13 +569,15 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen3-30b-a3b
   type: llm
   provider: dashscope
   description: qwen3-30b-a3b大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -535,13 +585,15 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen3-32b
   type: llm
   provider: dashscope
   description: qwen3-32b大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -549,13 +601,15 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen3-4b
   type: llm
   provider: dashscope
   description: qwen3-4b大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -563,13 +617,15 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen3-8b
   type: llm
   provider: dashscope
   description: qwen3-8b大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -577,65 +633,75 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen3-coder-30b-a3b-instruct
   type: llm
   provider: dashscope
   description: qwen3-coder-30b-a3b-instruct大语言模型，支持智能体思考，262144上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
   - 代码模型
   - agent-thought
   logo: dashscope
+
 - name: qwen3-coder-480b-a35b-instruct
   type: llm
   provider: dashscope
   description: qwen3-coder-480b-a35b-instruct大语言模型，支持智能体思考，262144上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
   - 代码模型
   - agent-thought
   logo: dashscope
+
 - name: qwen3-coder-plus-2025-09-23
   type: llm
   provider: dashscope
   description: qwen3-coder-plus-2025-09-23大语言模型，支持智能体思考，1000000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
   - 代码模型
   - agent-thought
   logo: dashscope
+
 - name: qwen3-coder-plus
   type: llm
   provider: dashscope
   description: qwen3-coder-plus大语言模型，支持智能体思考，1000000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
   - 代码模型
   - agent-thought
   logo: dashscope
+
 - name: qwen3-max-2025-09-23
   type: llm
   provider: dashscope
   description: qwen3-max-2025-09-23大语言模型，支持多工具调用、智能体思考、流式工具调用，262144上下文窗口，对话模式，支持联网搜索
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -644,13 +710,15 @@ models:
   - stream-tool-call
   - 联网搜索
   logo: dashscope
+
 - name: qwen3-max-2026-01-23
   type: llm
   provider: dashscope
   description: qwen3-max-2026-01-23大语言模型，支持多工具调用、智能体思考、流式工具调用，262144上下文窗口，对话模式，支持联网搜索
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -659,13 +727,15 @@ models:
   - stream-tool-call
   - 联网搜索
   logo: dashscope
+
 - name: qwen3-max-preview
   type: llm
   provider: dashscope
   description: qwen3-max-preview大语言模型，支持多工具调用、智能体思考、流式工具调用，262144上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -673,13 +743,15 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen3-max
   type: llm
   provider: dashscope
   description: qwen3-max大语言模型，支持多工具调用、智能体思考、流式工具调用，262144上下文窗口，对话模式，支持联网搜索
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -688,13 +760,15 @@ models:
   - stream-tool-call
   - 联网搜索
   logo: dashscope
+
 - name: qwen3-next-80b-a3b-instruct
   type: llm
   provider: dashscope
   description: qwen3-next-80b-a3b-instruct大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -702,13 +776,15 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen3-next-80b-a3b-thinking
   type: llm
   provider: dashscope
   description: qwen3-next-80b-a3b-thinking大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -716,6 +792,7 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwen3-omni-flash-2025-12-01
   type: llm
   provider: dashscope
@@ -723,9 +800,10 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - video
-    - audio
+  - vision
+  - video
+  - audio
+  - thinking
   is_omni: true
   tags:
   - 大语言模型
@@ -735,6 +813,7 @@ models:
   - video
   - audio
   logo: dashscope
+
 - name: qwen3-vl-235b-a22b-instruct
   type: chat
   provider: dashscope
@@ -742,8 +821,9 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - video
+  - vision
+  - video
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -754,6 +834,7 @@ models:
   - vision
   - video
   logo: dashscope
+
 - name: qwen3-vl-235b-a22b-thinking
   type: chat
   provider: dashscope
@@ -761,8 +842,9 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - video
+  - vision
+  - video
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -773,6 +855,7 @@ models:
   - vision
   - video
   logo: dashscope
+
 - name: qwen3-vl-30b-a3b-instruct
   type: chat
   provider: dashscope
@@ -780,8 +863,9 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - video
+  - vision
+  - video
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -792,6 +876,7 @@ models:
   - vision
   - video
   logo: dashscope
+
 - name: qwen3-vl-30b-a3b-thinking
   type: chat
   provider: dashscope
@@ -799,8 +884,9 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - video
+  - vision
+  - video
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -811,6 +897,7 @@ models:
   - vision
   - video
   logo: dashscope
+
 - name: qwen3-vl-flash
   type: chat
   provider: dashscope
@@ -818,8 +905,9 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - video
+  - vision
+  - video
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -830,6 +918,7 @@ models:
   - vision
   - video
   logo: dashscope
+
 - name: qwen3-vl-plus-2025-09-23
   type: chat
   provider: dashscope
@@ -837,8 +926,9 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - video
+  - vision
+  - video
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -847,6 +937,7 @@ models:
   - agent-thought
   - video
   logo: dashscope
+
 - name: qwen3-vl-plus
   type: chat
   provider: dashscope
@@ -854,8 +945,9 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - video
+  - vision
+  - video
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -864,45 +956,52 @@ models:
   - agent-thought
   - video
   logo: dashscope
+
 - name: qwq-32b
   type: llm
   provider: dashscope
   description: qwq-32b大语言模型，支持智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwq-plus-0305
   type: llm
   provider: dashscope
   description: qwq-plus-0305大语言模型，支持智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: qwq-plus
   type: llm
   provider: dashscope
   description: qwq-plus大语言模型，支持智能体思考、流式工具调用，131072上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - thinking
   is_omni: false
   tags:
   - 大语言模型
   - agent-thought
   - stream-tool-call
   logo: dashscope
+
 - name: gte-rerank-v2
   type: rerank
   provider: dashscope
@@ -914,6 +1013,7 @@ models:
   tags:
   - 重排序模型
   logo: dashscope
+
 - name: gte-rerank
   type: rerank
   provider: dashscope
@@ -925,6 +1025,7 @@ models:
   tags:
   - 重排序模型
   logo: dashscope
+
 - name: multimodal-embedding-v1
   type: embedding
   provider: dashscope
@@ -932,13 +1033,14 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
+  - vision
   is_omni: false
   tags:
   - 嵌入模型
   - 多模态模型
   - vision
   logo: dashscope
+
 - name: text-embedding-v1
   type: embedding
   provider: dashscope
@@ -951,6 +1053,7 @@ models:
   - 嵌入模型
   - 文本嵌入
   logo: dashscope
+
 - name: text-embedding-v2
   type: embedding
   provider: dashscope
@@ -963,6 +1066,7 @@ models:
   - 嵌入模型
   - 文本嵌入
   logo: dashscope
+
 - name: text-embedding-v3
   type: embedding
   provider: dashscope
@@ -975,6 +1079,7 @@ models:
   - 嵌入模型
   - 文本嵌入
   logo: dashscope
+
 - name: text-embedding-v4
   type: embedding
   provider: dashscope

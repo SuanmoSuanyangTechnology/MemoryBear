@@ -241,6 +241,8 @@ class ModelParameters(BaseModel):
     presence_penalty: float = Field(default=0.0, ge=-2.0, le=2.0, description="存在惩罚")
     n: int = Field(default=1, ge=1, le=10, description="生成的回复数量")
     stop: Optional[List[str]] = Field(default=None, description="停止序列")
+    deep_thinking: bool = Field(default=False, description="是否启用深度思考模式（需模型支持，如 DeepSeek-R1、QwQ 等）")
+    thinking_budget_tokens: Optional[int] = Field(default=None, ge=1024, le=131072, description="深度思考 token 预算（仅部分模型支持）")
 
 
 class VariableDefinition(BaseModel):
@@ -612,6 +614,7 @@ class AppChatRequest(BaseModel):
     user_id: Optional[str] = Field(default=None, description="用户ID（用于会话管理）")
     variables: Optional[Dict[str, Any]] = Field(default=None, description="自定义变量参数值")
     stream: bool = Field(default=False, description="是否流式返回")
+    thinking: bool = Field(default=False, description="是否启用深度思考（需Agent配置支持）")
     files: List[FileInput] = Field(default_factory=list, description="附件列表（支持多文件）")
 
 
