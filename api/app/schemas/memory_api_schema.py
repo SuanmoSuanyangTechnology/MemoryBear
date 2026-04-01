@@ -141,10 +141,12 @@ class CreateEndUserRequest(BaseModel):
         other_id: External user identifier (required)
         other_name: Display name for the end user
         memory_config_id: Optional memory config ID. If not provided, uses workspace default.
+        app_id: Optional app ID to bind the end user to.
     """
     other_id: str = Field(..., description="External user identifier (required)")
     other_name: Optional[str] = Field("", description="Display name")
     memory_config_id: Optional[str] = Field(None, description="Memory config ID. Falls back to workspace default if not provided.")
+    app_id: Optional[str] = Field(None, description="App ID to bind the end user to")
 
     @field_validator("other_id")
     @classmethod

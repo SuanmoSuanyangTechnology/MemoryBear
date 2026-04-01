@@ -8,6 +8,8 @@ This service validates inputs and delegates to MemoryAgentService for core memor
 import uuid
 from typing import Any, Dict, Optional
 
+from sqlalchemy.orm import Session
+
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.logging_config import get_logger
@@ -15,7 +17,6 @@ from app.models.app_model import App
 from app.models.end_user_model import EndUser
 from app.schemas.memory_config_schema import ConfigurationError
 from app.services.memory_agent_service import MemoryAgentService
-from sqlalchemy.orm import Session
 
 logger = get_logger(__name__)
 
