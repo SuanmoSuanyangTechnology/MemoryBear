@@ -128,27 +128,20 @@ def get_workspace_end_users_paginated(
 
         if keyword:
             keyword_pattern = f"%{keyword}%"
-            # 优先匹配 other_name，如果 other_name 为空则匹配 id
-            # 使用 OR 条件：匹配 other_name 不为空的数据，或者 other_name 为空但 id 匹配的数据
+            # other_name 匹配始终生效；id 匹配仅对 other_name 为空的记录生效
             base_query = base_query.filter(
                 or_(
-                    # 情况1：other_name 不为空且匹配 keyword
-                    and_(
-                        EndUserModel.other_name != "",
-                        EndUserModel.other_name.isnot(None),
-                        EndUserModel.other_name.ilike(keyword_pattern)
-                    ),
-                    # 情况2：other_name 为空或 None，但 id 匹配 keyword
+                    EndUserModel.other_name.ilike(keyword_pattern),
                     and_(
                         or_(
+                            EndUserModel.other_name.is_(None),
                             EndUserModel.other_name == "",
-                            EndUserModel.other_name.is_(None)
                         ),
-                        cast(EndUserModel.id, String).ilike(keyword_pattern)
-                    )
+                        cast(EndUserModel.id, String).ilike(keyword_pattern),
+                    ),
                 )
             )
-            business_logger.info(f"应用模糊搜索: keyword={keyword}（优先匹配 other_name，无 other_name 时匹配 id）")
+            business_logger.info(f"应用模糊搜索: keyword={keyword}（匹配 other_name；other_name 为空时匹配 id）")
 
         # 获取总记录数
         total = base_query.count()

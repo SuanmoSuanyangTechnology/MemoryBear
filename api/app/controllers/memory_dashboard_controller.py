@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -48,7 +49,7 @@ def get_workspace_total_end_users(
 
 @router.get("/end_users", response_model=ApiResponse)
 async def get_workspace_end_users(
-    workspace_id: Optional[str] = Query(None, description="工作空间ID（可选，默认当前用户工作空间）"),
+    workspace_id: Optional[uuid.UUID] = Query(None, description="工作空间ID（可选，默认当前用户工作空间）"),
     keyword: Optional[str] = Query(None, description="搜索关键词（同时模糊匹配 other_name 和 id）"),
     page: int = Query(1, ge=1, description="页码，从1开始"),
     pagesize: int = Query(10, ge=1, description="每页数量"),
