@@ -151,7 +151,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
                   e.currentTarget.style.background = 'white';
                 }}
               >
-                <img src={nodeType.icon} className="rb:w-4 rb:h-4" />
+                <div className={`rb:size-4 rb:bg-cover ${nodeType.icon}`} />
                 <span style={{ fontSize: '14px' }}>{t(`workflow.${nodeType.type}`)}</span>
               </div>
             ))}

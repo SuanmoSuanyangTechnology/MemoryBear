@@ -68,7 +68,7 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
       
       {/* 右侧画布区域 */}
       <div 
-        className={clsx(`rb:fixed rb:top-18.5 rb:bottom-2.5 rb:left-0 rb:right-0 rb:transition-all`)}
+        className={clsx(`rb:fixed rb:top-16 rb:bottom-0 rb:left-0 rb:right-0 rb:transition-all`)}
         onDrop={onDrop}
         onDragOver={onDragOver}
       >

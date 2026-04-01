@@ -52,7 +52,7 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
     })}>
       <NodeTools node={node} />
       <Flex align="center" gap={8} className="rb:flex-1">
-        <img src={data.icon} className="rb:size-6" />
+        <div className={`rb:size-6 rb:bg-cover ${data.icon}`} />
         <div className="rb:wrap-break-word rb:line-clamp-1">{data.name ?? t(`workflow.${data.type}`)}</div>
       </Flex>
 

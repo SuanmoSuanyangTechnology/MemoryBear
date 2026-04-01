@@ -45,11 +45,7 @@ const VariableComponent: React.FC<{ nodeKey: NodeKey; data: Suggestion }> = ({
       {data.isContext ? (
         <span style={{ fontSize: '12px', marginRight: '4px' }}>📄</span>
       ) : data.group !== 'CONVERSATION' ? (
-        <img 
-          src={data.nodeData?.icon} 
-          style={{ width: '12px', height: '12px', marginRight: '4px' }} 
-          alt=""
-        />
+        <div className={`rb:size-4 rb:mr-1 rb:bg-cover ${data.nodeData?.icon}`} />
       ) : null}
       {!data.isContext && data.group !== 'CONVERSATION' && (
         <>

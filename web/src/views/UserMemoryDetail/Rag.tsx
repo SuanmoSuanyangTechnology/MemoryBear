@@ -16,8 +16,6 @@ import { Row, Col, Skeleton, Spin, Flex, Tooltip } from 'antd'
 import { LoadingOutlined } from '@ant-design/icons';
 import { useParams } from 'react-router-dom'
 
-import aboutUs from '@/assets/images/userMemory/aboutUs.svg'
-import memoryInsight from '@/assets/images/userMemory/memoryInsight.svg'
 import RbCard from '@/components/RbCard/Card'
 import type { Data } from './types'
 import {
@@ -34,12 +32,12 @@ import ConversationMemory from './components/ConversationMemory'
  */
 interface TitleProps {
   title: string
-  icon: string
+  iconClassName: string
 }
 /** Collapsible section title */
-const Title: FC<TitleProps> = ({ title, icon }) => (
+const Title: FC<TitleProps> = ({ title, iconClassName }) => (
   <Flex align="center" gap={4} className="rb:font-medium rb:leading-5 rb:mb-2.25!">
-    <img src={icon} className="rb:size-4.5 rb:ml-0.5" />
+    <div className={`rb:size-4.5 rb:ml-0.5 rb:bg-cover ${iconClassName}`} />
     {title}
   </Flex>
 )
@@ -143,7 +141,7 @@ const Rag: FC = () => {
           <>
             <Title
               title={t('userMemory.aboutMe')}
-              icon={aboutUs}
+              iconClassName="rb:bg-[url('@/assets/images/userMemory/aboutUs.svg')]"
             />
             <div className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5 rb:px-3 rb:mb-4">
               {loading.summary
@@ -160,7 +158,7 @@ const Rag: FC = () => {
           <>
             <Title
               title={t('userMemory.memoryInsight')}
-              icon={memoryInsight}
+              iconClassName="rb:bg-[url('@/assets/images/userMemory/memoryInsight.svg')]"
             />
             <div className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5 rb:px-3">
               {loading.insight

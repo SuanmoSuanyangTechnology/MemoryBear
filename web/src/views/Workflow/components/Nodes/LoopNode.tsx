@@ -126,7 +126,7 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
     })}>
       <NodeTools node={node} />
       <Flex align="center" gap={8} className="rb:flex-1">
-        <img src={data.icon} className="rb:size-6" />
+        <div className={`rb:size-6 rb:bg-cover ${data.icon}`} />
         <div className="rb:wrap-break-word rb:line-clamp-1">{data.name ?? t(`workflow.${data.type}`)}</div>
       </Flex>
       <div className="rb:mt-3 rb:min-h-[calc(100%-36px)] rb:w-full rb:bg-[radial-gradient(circle,#939AB1_1px,#F0F3F8_1px)] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)] rb:rounded-[10px] rb:bg-size-[12px_12px]"></div>

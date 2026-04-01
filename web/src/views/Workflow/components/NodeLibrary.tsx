@@ -49,7 +49,7 @@ const NodeLibrary: FC<{ collapsed: boolean; handleToggle: () => void }> = ({ col
                             e.dataTransfer.setData('application/json', JSON.stringify(node));
                           }}
                         >
-                          <img src={node.icon} className="rb:size-6 rb:cursor-pointer" />
+                          <div className={`rb:size-6 rb:cursor-pointer rb:bg-cover ${node.icon}`} />
                         </div>
                       </Tooltip>
                     ))
@@ -77,7 +77,7 @@ const NodeLibrary: FC<{ collapsed: boolean; handleToggle: () => void }> = ({ col
                           e.dataTransfer.setData('application/json', JSON.stringify(node));
                         }}
                       >
-                        <img src={node.icon} className="rb:size-6" />
+                        <div className={`rb:size-6 rb:bg-cover ${node.icon}`} />
                         <span className="rb:font-medium rb:text-[12px] rb:leading-4">{t(`workflow.${node.type}`)}</span>
                       </Flex>
                     ))}

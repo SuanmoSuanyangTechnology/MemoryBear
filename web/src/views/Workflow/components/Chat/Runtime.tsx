@@ -137,7 +137,7 @@ const Runtime: FC<{ item: ChatItem; index: number;}> = ({
                 key: vo.node_id,
                 label: <div className={clsx("rb:flex rb:justify-between rb:items-center", getStatus(vo.status))}>
                   <div className="rb:flex rb:items-center rb:gap-1 rb:flex-1">
-                    {vo.icon && <img src={vo.icon} className="rb:size-4" />}
+                    {vo.icon && <div className={`rb:size-4 rb:bg-cover ${vo.icon}`} />}
                     <div className="rb:wrap-break-word rb:line-clamp-1">{vo.node_name}</div>
                   </div>
                   <span>

@@ -73,11 +73,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
         >
           {filterOption.nodeData?.icon && filterOption.nodeData?.name && (
             <>
-              <img
-                src={filterOption.nodeData.icon}
-                style={{ width: '12px', height: '12px', marginRight: '4px' }}
-                alt=""
-              />
+              <div className={`rb:size-3 rb:mr-1 rb:bg-cover ${filterOption.nodeData.icon}`} />
               {filterOption.nodeData.name}
               <span className="rb:text-[#DFE4ED] rb:mx-0.5">/</span>
             </>
@@ -111,11 +107,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
    */
   const groupedOptions = Object.entries(groupedSuggestions).map(([_nodeId, suggestions]) => ({
     label: <Flex align="center" gap={4}>
-      {suggestions[0].nodeData.icon && <img
-        src={suggestions[0].nodeData.icon}
-        className="rb:size-3"
-        alt=""
-      />}
+      {suggestions[0].nodeData.icon && <div className={`rb:size-3 ${suggestions[0].nodeData.icon}`} />}
       {suggestions[0].nodeData.name}
     </Flex>,
     options: suggestions.map(s => ({ 

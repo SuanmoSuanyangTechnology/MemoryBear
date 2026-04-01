@@ -13,28 +13,6 @@ import NoteNode from './components/Nodes/NoteNode';
 import type { PortMetadata, GroupMetadata } from '@antv/x6/lib/model/port';
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 
-// Import workflow icons
-import startIcon from '@/assets/images/workflow/start.svg';
-import endIcon from '@/assets/images/workflow/end.svg';
-import llmIcon from '@/assets/images/workflow/llm.svg';
-import ragIcon from '@/assets/images/workflow/rag.svg';
-import parameterExtractionIcon from '@/assets/images/workflow/parameter_extraction.svg';
-import conditionIcon from '@/assets/images/workflow/condition.svg';
-import iterationIcon from '@/assets/images/workflow/iteration.svg';
-import loopIcon from '@/assets/images/workflow/loop.svg';
-import aggregatorIcon from '@/assets/images/workflow/aggregator.svg';
-import httpRequestIcon from '@/assets/images/workflow/http_request.svg';
-import toolsIcon from '@/assets/images/workflow/tools.svg';
-import codeExecutionIcon from '@/assets/images/workflow/code_execution.svg';
-import templateRenderingIcon from '@/assets/images/workflow/template_rendering.svg';
-import questionClassifierIcon from '@/assets/images/workflow/question-classifier.svg'
-import breakIcon from '@/assets/images/workflow/break.svg'
-import assignerIcon from '@/assets/images/workflow/assigner.svg'
-import memoryReadIcon from '@/assets/images/workflow/memory-read.svg'
-import memoryWriteIcon from '@/assets/images/workflow/memory-write.svg'
-import unknownIcon from '@/assets/images/workflow/unknown.svg'
-import documentExtractorIcon from '@/assets/images/workflow/document-extractor.svg'
-
 import { memoryConfigListUrl } from '@/api/memory'
 import type { NodeLibrary } from './types'
 
@@ -46,7 +24,7 @@ export const nodeLibrary: NodeLibrary[] = [
   {
     category: "coreNode",
     nodes: [
-      { type: "start", icon: startIcon,
+      { type: "start", icon: 'rb:bg-[url("@/assets/images/workflow/start.svg")]',
         config: {
           variables: {
             type: 'define',
@@ -87,7 +65,7 @@ export const nodeLibrary: NodeLibrary[] = [
         }
       },
       {
-        type: "end", icon: endIcon,
+        type: "end", icon: 'rb:bg-[url("@/assets/images/workflow/end.svg")]',
         config: {
           output: {
             type: 'editor'
@@ -100,7 +78,7 @@ export const nodeLibrary: NodeLibrary[] = [
   {
     category: "aiAndCognitiveProcessing",
     nodes: [
-      { type: "llm", icon: llmIcon,
+      { type: "llm", icon: 'rb:bg-[url("@/assets/images/workflow/llm.svg")]',
         config: {
           model_id: {
             type: 'define',
@@ -154,7 +132,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "knowledge-retrieval", icon: ragIcon,
+      { type: "knowledge-retrieval", icon: 'rb:bg-[url("@/assets/images/workflow/rag.svg")]',
         config: {
           query: {
             type: 'variableList',
@@ -164,7 +142,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "parameter-extractor", icon: parameterExtractionIcon,
+      { type: "parameter-extractor", icon: 'rb:bg-[url("@/assets/images/workflow/parameter_extraction.svg")]',
         config: {
           model_id: {
             type: 'modelSelect',
@@ -191,7 +169,7 @@ export const nodeLibrary: NodeLibrary[] = [
   {
     category: "cognitiveUpgrading",
     nodes: [
-      { type: "memory-read", icon: memoryReadIcon,
+      { type: "memory-read", icon: 'rb:bg-[url("@/assets/images/workflow/memory-read.svg")]',
         config: {
           message: {
             type: 'editor',
@@ -214,7 +192,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "memory-write", icon: memoryWriteIcon,
+      { type: "memory-write", icon: 'rb:bg-[url("@/assets/images/workflow/memory-write.svg")]',
         config: {
           message: {
             type: 'editor',
@@ -240,7 +218,7 @@ export const nodeLibrary: NodeLibrary[] = [
   {
     category: "flowControl",
     nodes: [
-      { type: "if-else", icon: conditionIcon,
+      { type: "if-else", icon: 'rb:bg-[url("@/assets/images/workflow/condition.svg")]',
         config: {
           cases: {
             type: 'caseList',
@@ -253,7 +231,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "question-classifier", icon: questionClassifierIcon,
+      { type: "question-classifier", icon: 'rb:bg-[url("@/assets/images/workflow/question-classifier.svg")]',
         config: {
           model_id: {
             type: 'modelSelect',
@@ -277,7 +255,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "iteration", icon: iterationIcon,
+      { type: "iteration", icon: 'rb:bg-[url("@/assets/images/workflow/iteration.svg")]',
         config: {
           input: {
             type: 'variableList',
@@ -310,7 +288,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         },
       },
-      { type: "loop", icon: loopIcon,
+      { type: "loop", icon: 'rb:bg-[url("@/assets/images/workflow/loop.svg")]',
         config: {
           cycle_vars: {
             type: 'cycleVarsList',
@@ -333,9 +311,10 @@ export const nodeLibrary: NodeLibrary[] = [
           },
         }
       },
-      { type: "cycle-start", icon: startIcon },
-      { type: "break", icon: breakIcon },
-      { type: "var-aggregator", icon: aggregatorIcon,
+      { type: "cycle-start", icon: 'rb:bg-[url("@/assets/images/workflow/start.svg")]'},
+      { type: "break", icon: 'rb:bg-[url("@/assets/images/workflow/break.svg")]'},
+      {
+        type: "var-aggregator", icon: 'rb:bg-[url("@/assets/images/workflow/aggregator.svg")]',
         config: {
           group: {
             type: 'switch',
@@ -350,7 +329,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "assigner", icon: assignerIcon,
+      { type: "assigner", icon: 'rb:bg-[url("@/assets/images/workflow/assigner.svg")]',
         config: {
           assignments: {
             type: 'assignmentList',
@@ -363,7 +342,7 @@ export const nodeLibrary: NodeLibrary[] = [
   {
     category: "externalInteraction",
     nodes: [
-      { type: "http-request", icon: httpRequestIcon,
+      { type: "http-request", icon: 'rb:bg-[url("@/assets/images/workflow/http_request.svg")]',
         config: {
           method: {
             type: 'select',
@@ -423,7 +402,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "tool", icon: toolsIcon, 
+      { type: "tool", icon: 'rb:bg-[url("@/assets/images/workflow/tools.svg")]',
         config: {
           tool_id: {
             type: 'cascader'
@@ -433,7 +412,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "code", icon: codeExecutionIcon,
+      { type: "code", icon: 'rb:bg-[url("@/assets/images/workflow/code_execution.svg")]',
         config: {
           input_variables: {
             type: 'inputList',
@@ -459,7 +438,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
         }
       },
-      { type: "jinja-render", icon: templateRenderingIcon,
+      { type: "jinja-render", icon: 'rb:bg-[url("@/assets/images/workflow/template_rendering.svg")]',
         config: {
           mapping: {
             type: 'mappingList',
@@ -474,7 +453,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
         }
       },
-      { type: "document-extractor", icon: documentExtractorIcon,
+      { type: "document-extractor", icon: 'rb:bg-[url("@/assets/images/workflow/document-extractor.svg")]',
         config: {
           file_selector: {
             type: 'variableList',
@@ -527,7 +506,8 @@ export const THEME_MAP: Record<string, { outer: string; title: string; bg: strin
 }
 
 export const notesConfig = {
-  type: "notes", icon: templateRenderingIcon,
+  type: "notes",
+  icon: 'rb:bg-[url("@/assets/images/workflow/unknown.svg")]',
   config: {
     text: {
       type: 'define',
@@ -555,11 +535,11 @@ export const notesConfig = {
 }
 export const unknownNode = {
   type: 'unknown',
-  icon: unknownIcon
+  icon: 'rb:bg-[url("@/assets/images/workflow/unknown.svg")]'
 }
 export const noteNode = {
   type: 'notes',
-  icon: unknownIcon
+  icon: 'rb:bg-[url("@/assets/images/workflow/unknown.svg")]'
 }
 
 export const nodeWidth = 240;
@@ -702,7 +682,7 @@ const defaultPortGroup = {
     body: {
       width: 1,
       height: 8,
-      x: -1,
+      x: 0.75,
       magnet: true,
       stroke: port_color,
       strokeWidth: edge_width,
@@ -738,7 +718,7 @@ const leftPortGroup = {
     body: {
       width: 1,
       height: 8,
-      x: -1,
+      x: -1.75,
       y: -4,
       magnet: true,
       stroke: port_color,

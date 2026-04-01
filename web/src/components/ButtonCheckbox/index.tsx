@@ -74,9 +74,9 @@ const ButtonCheckbox: FC<ButtonCheckboxProps> = ({
       onClick={handleChange}
     >
       {/* Display unchecked icon when not checked */}
-      {icon && !checked && <img src={icon} className="rb:size-4" />}
+      {icon && !checked && <img src={icon} alt={icon} className="rb:size-4" />}
       {/* Display checked icon when checked */}
-      {checkedIcon && checked && <img src={checkedIcon} className="rb:w-4 rb:h-4 rb:mr-1" />}
+      {checkedIcon && checked && <img src={checkedIcon} alt={checkedIcon} className="rb:w-4 rb:h-4 rb:mr-1" />}
       {children}
     </Flex>
   );

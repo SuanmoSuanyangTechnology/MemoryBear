@@ -91,7 +91,7 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
   initialData,
   emptySize = 160,
   emptyText,
-  isScroll = false,
+  isScroll = true,
   scrollX,
   scrollY,
   currentPageKey = 'page',
