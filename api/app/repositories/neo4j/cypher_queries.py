@@ -1449,3 +1449,44 @@ ON CREATE SET r.end_user_id = edge.end_user_id,
     r.created_at = edge.created_at
 RETURN elementId(r) AS uuid
 """
+
+SEARCH_PERCEPTUAL_BY_KEYWORD = """
+CALL db.index.fulltext.queryNodes("perceptualFulltext", $q) YIELD node AS p, score
+WHERE p.end_user_id = $end_user_id
+RETURN p.id AS id,
+       p.end_user_id AS end_user_id,
+       p.perceptual_type AS perceptual_type,
+       p.file_path AS file_path,
+       p.file_name AS file_name,
+       p.file_ext AS file_ext,
+       p.summary AS summary,
+       p.keywords AS keywords,
+       p.topic AS topic,
+       p.domain AS domain,
+       p.created_at AS created_at,
+       p.file_type AS file_type,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+PERCEPTUAL_EMBEDDING_SEARCH = """
+CALL db.index.vector.queryNodes('perceptual_summary_embedding_index', $limit * 100, $embedding)
+YIELD node AS p, score
+WHERE p.summary_embedding IS NOT NULL AND p.end_user_id = $end_user_id
+RETURN p.id AS id,
+       p.end_user_id AS end_user_id,
+       p.perceptual_type AS perceptual_type,
+       p.file_path AS file_path,
+       p.file_name AS file_name,
+       p.file_ext AS file_ext,
+       p.summary AS summary,
+       p.keywords AS keywords,
+       p.topic AS topic,
+       p.domain AS domain,
+       p.created_at AS created_at,
+       p.file_type AS file_type,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
