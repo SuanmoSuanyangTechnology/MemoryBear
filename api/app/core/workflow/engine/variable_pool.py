@@ -13,9 +13,54 @@ from pydantic import BaseModel
 
 from app.core.workflow.engine.runtime_schema import ExecutionContext
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
-from app.core.workflow.variable.variable_objects import T, create_variable_instance
+from app.core.workflow.variable.variable_objects import T, create_variable_instance, ArrayVariable, FileVariable
 
 logger = logging.getLogger(__name__)
+
+VARIABLE_PATTERN = re.compile(r"\{\{\s*(.*?)\s*}}")
+
+
+class LazyVariableDict:
+    def __init__(self, source, literal):
+        self._source: dict[str, VariableStruct[Any]] = source
+        self._literal: bool = literal
+        self._cache = {}
+
+    def keys(self):
+        return self._source.keys()
+
+    def _resolve(self, key):
+        if key in self._cache:
+            return self._cache[key]
+        var_struct = self._source.get(key)
+        if var_struct is None:
+            raise KeyError(key)
+        value = var_struct.instance.to_literal() if self._literal else var_struct.instance.get_value()
+        self._cache[key] = value
+        return value
+
+    def get(self, key, default=None):
+        try:
+            return self._resolve(key)
+        except KeyError:
+            return default
+
+    def __getitem__(self, key):
+        return self._resolve(key)
+
+    def __getattr__(self, key):
+        if key.startswith('_'):
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{key}'")
+        return self._resolve(key)
+
+    def __contains__(self, key):
+        return key in self._source
+
+    def __iter__(self):
+        return iter(self._source)
+
+    def __len__(self):
+        return len(self._source)
 
 
 class VariableSelector:
@@ -117,8 +162,7 @@ class VariablePool:
 
     @staticmethod
     def transform_selector(selector):
-        pattern = r"\{\{\s*(.*?)\s*\}\}"
-        variable_literal = re.sub(pattern, r"\1", selector).strip()
+        variable_literal = VARIABLE_PATTERN.sub(r"\1", selector).strip()
         selector = VariableSelector.from_string(variable_literal).path
         if len(selector) != 2:
             raise ValueError(f"Selector not valid - {selector}")
@@ -303,6 +347,16 @@ class VariablePool:
         """
         return self._get_variable_struct(selector) is not None
 
+    def lazy_namespace(self, namespace: str, literal: bool = False) -> LazyVariableDict:
+        return LazyVariableDict(self.variables.get(namespace, {}), literal)
+
+    def lazy_all_node_outputs(self, literal: bool = False) -> dict[str, LazyVariableDict]:
+        return {
+            ns: LazyVariableDict(vars_dict, literal)
+            for ns, vars_dict in self.variables.items()
+            if ns not in ("sys", "conv")
+        }
+
     def get_all_system_vars(self, literal=False) -> dict[str, Any]:
         """获取所有系统变量
         
@@ -372,6 +426,16 @@ class VariablePool:
 
     def copy(self, pool: 'VariablePool'):
         self.variables = deepcopy(pool.variables)
+
+    def is_file_variable(self, selector):
+        variable_struct = self.get_instance(selector, default=None, strict=False)
+        if variable_struct is None:
+            return False
+        if isinstance(variable_struct, FileVariable):
+            return True
+        elif isinstance(variable_struct, ArrayVariable) and variable_struct.child_type == FileVariable:
+            return True
+        return False
 
     def to_dict(self) -> dict[str, Any]:
         """导出为字典
@@ -469,5 +533,3 @@ class VariablePoolInitializer:
                 var_type=var_type,
                 mut=False
             )
-
-

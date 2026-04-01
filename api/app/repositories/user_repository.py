@@ -19,18 +19,22 @@ class UserRepository:
         self.db = db
 
     def get_user_by_id(self, user_id: uuid.UUID) -> Optional[User]:
-        """根据ID获取用户"""
-        db_logger.debug(f"根据ID查询用户: user_id={user_id}")
+        """根据 ID 获取用户（租户禁用时返回 None）"""
+        db_logger.debug(f"根据 ID 查询用户：user_id={user_id}")
         
         try:
             user = self.db.query(User).options(joinedload(User.tenant)).filter(User.id == user_id).first()
             if user:
-                db_logger.debug(f"用户查询成功: {user.username} (ID: {user_id})")
+                # 检查租户状态，租户禁用时返回 None
+                if user.tenant and not user.tenant.is_active:
+                    db_logger.warning(f"用户 {user.username} (ID: {user_id}) 所属租户 {user.tenant_id} 已被禁用")
+                    return None
+                db_logger.debug(f"用户查询成功：{user.username} (ID: {user_id})")
             else:
-                db_logger.debug(f"用户不存在: user_id={user_id}")
+                db_logger.debug(f"用户不存在：user_id={user_id}")
             return user
         except Exception as e:
-            db_logger.error(f"根据ID查询用户失败: user_id={user_id} - {str(e)}")
+            db_logger.error(f"根据 ID 查询用户失败：user_id={user_id} - {str(e)}")
             raise
 
     def get_user_by_email(self, email: str) -> Optional[User]:
@@ -154,22 +158,26 @@ class UserRepository:
             raise
 
     def get_users_by_tenant(
-        self, 
-        tenant_id: uuid.UUID, 
-        skip: int = 0, 
+        self,
+        tenant_id: uuid.UUID,
+        skip: int = 0,
         limit: int = 100,
         is_active: Optional[bool] = None,
+        is_superuser: Optional[bool] = None,
         search: Optional[str] = None
     ) -> List[User]:
         """获取租户下的用户列表"""
         db_logger.debug(f"查询租户用户: tenant_id={tenant_id}")
-        
+
         try:
             query = self.db.query(User).options(joinedload(User.tenant)).filter(User.tenant_id == tenant_id)
-            
+
             if is_active is not None:
                 query = query.filter(User.is_active == is_active)
-            
+
+            if is_superuser is not None:
+                query = query.filter(User.is_superuser == is_superuser)
+
             if search:
                 query = query.filter(
                     or_(
@@ -177,7 +185,7 @@ class UserRepository:
                         User.email.ilike(f"%{search}%")
                     )
                 )
-            
+
             users = query.offset(skip).limit(limit).all()
             db_logger.debug(f"租户用户查询成功: tenant_id={tenant_id}, count={len(users)}")
             return users
@@ -186,18 +194,22 @@ class UserRepository:
             raise
 
     def count_users_by_tenant(
-        self, 
+        self,
         tenant_id: uuid.UUID,
         is_active: Optional[bool] = None,
+        is_superuser: Optional[bool] = None,
         search: Optional[str] = None
     ) -> int:
         """统计租户下的用户数量"""
         try:
             query = self.db.query(func.count(User.id)).filter(User.tenant_id == tenant_id)
-            
+
             if is_active is not None:
                 query = query.filter(User.is_active == is_active)
-            
+
+            if is_superuser is not None:
+                query = query.filter(User.is_superuser == is_superuser)
+
             if search:
                 query = query.filter(
                     or_(
@@ -205,7 +217,7 @@ class UserRepository:
                         User.email.ilike(f"%{search}%")
                     )
                 )
-            
+
             return query.scalar()
         except Exception as e:
             db_logger.error(f"统计租户用户失败: tenant_id={tenant_id} - {str(e)}")

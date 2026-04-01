@@ -12,6 +12,7 @@ import { Row, Col, Progress, App, Table } from 'antd'
 import RbCard from '@/components/RbCard/Card'
 import {
   getForgetStats,
+  getForgetPendingNodesUrl,
 } from '@/api/memory'
 import type { ForgetData } from '../types'
 import ActivationMetricsPieCard from '../components/ActivationMetricsPieCard'
@@ -19,6 +20,7 @@ import RecentTrendsLineCard from '../components/RecentTrendsLineCard'
 import { formatDateTime } from '@/utils/format'
 import StatusTag from '@/components/StatusTag'
 import ForgetRefreshModal from '../components/ForgetRefreshModal';
+import RbTable from '@/components/Table'
 
 /** Maps node type keys to StatusTag colour presets for the pending-nodes table. */
 const statusTagColors: Record<string, 'success' | 'purple' | 'default' | 'warning' | 'error' | 'lightBlue'> = {
@@ -191,7 +193,9 @@ const ForgetDetail = forwardRef((_props, ref) => {
           bodyClassName="rb:p-3! rb:py-0! rb:h-[calc(100%-54px)]"
           className="rb:h-full!"
         >
-          <Table
+          <RbTable
+            apiUrl={getForgetPendingNodesUrl}
+            apiParams={{ end_user_id: id }}
             rowKey='node_id'
             dataSource={data.pending_nodes ?? []}
             columns={[
@@ -225,11 +229,6 @@ const ForgetDetail = forwardRef((_props, ref) => {
                 render: (activation_value) => <span className="rb:text-[#5B6167]">{activation_value}</span>
               },
             ]}
-            pagination={{
-              pageSize: 5,
-              showQuickJumper: true,
-              className: 'rb:mt-5! rb:mb-5.75!'
-            }}
             className="table-header-has-bg"
           />
         </RbCard>

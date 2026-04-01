@@ -12,32 +12,12 @@ from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.repositories.memory_short_repository import LongTermMemoryRepository
 from app.schemas.memory_agent_schema import AgentMemory_Long_Term
-from app.services.memory_konwledges_server import write_rag
 from app.services.task_service import get_task_memory_write_result
 from app.tasks import write_message_task
 from app.utils.config_utils import resolve_config_id
 
 logger = get_agent_logger(__name__)
 template_root = os.path.join(PROJECT_ROOT_, 'memory', 'agent', 'utils', 'prompt')
-
-
-async def write_rag_agent(end_user_id, user_message, ai_message, user_rag_memory_id):
-    """
-    Write messages to RAG storage system
-
-    Combines user and AI messages into a single string format and stores them
-    in the RAG (Retrieval-Augmented Generation) knowledge base for future retrieval.
-
-    Args:
-        end_user_id: User identifier for the conversation
-        user_message: User's input message content
-        ai_message: AI's response message content
-        user_rag_memory_id: RAG memory identifier for storage location
-    """
-    # RAG mode: combine messages into string format (maintain original logic)
-    combined_message = f"user: {user_message}\nassistant: {ai_message}"
-    await write_rag(end_user_id, combined_message, user_rag_memory_id)
-    logger.info(f'RAG_Agent:{end_user_id};{user_rag_memory_id}')
 
 
 async def write(
@@ -118,7 +98,7 @@ async def write(
         logger.info(f'[WRITE] Task result - user={actual_end_user_id}, status={write_status}')
 
 
-async def term_memory_save(long_term_messages, actual_config_id, end_user_id, type, scope):
+async def term_memory_save(end_user_id, strategy_type, scope):
     """
     Save long-term memory data to database
 
@@ -127,10 +107,8 @@ async def term_memory_save(long_term_messages, actual_config_id, end_user_id, ty
     to long-term memory storage.
 
     Args:
-        long_term_messages: Long-term message data to be saved
-        actual_config_id: Configuration identifier for memory settings
         end_user_id: User identifier for memory association
-        type: Memory storage strategy type (STRATEGY_CHUNK or STRATEGY_AGGREGATE)
+        strategy_type: Memory storage strategy type (STRATEGY_CHUNK or STRATEGY_AGGREGATE)
         scope: Scope/window size for memory processing
     """
     with get_db_context() as db_session:
@@ -138,7 +116,10 @@ async def term_memory_save(long_term_messages, actual_config_id, end_user_id, ty
 
         from app.core.memory.agent.utils.redis_tool import write_store
         result = write_store.get_session_by_userid(end_user_id)
-        if type == AgentMemory_Long_Term.STRATEGY_CHUNK or AgentMemory_Long_Term.STRATEGY_AGGREGATE:
+        if not result:
+            logger.warning(f"No write data found for user {end_user_id}")
+            return
+        if strategy_type in [AgentMemory_Long_Term.STRATEGY_CHUNK, AgentMemory_Long_Term.STRATEGY_AGGREGATE]:
             data = await format_parsing(result, "dict")
             chunk_data = data[:scope]
             if len(chunk_data) == scope:
@@ -149,9 +130,6 @@ async def term_memory_save(long_term_messages, actual_config_id, end_user_id, ty
             long_messages = await messages_parse(long_time_data)
             repo.upsert(end_user_id, long_messages)
             logger.info(f'写入短长期：')
-
-
-"""Window-based dialogue processing"""
 
 
 async def window_dialogue(end_user_id, langchain_messages, memory_config, scope):
@@ -167,40 +145,33 @@ async def window_dialogue(end_user_id, langchain_messages, memory_config, scope)
         langchain_messages: Original message data list
         scope: Window size determining when to trigger long-term storage
     """
-    scope = scope
-    is_end_user_id = count_store.get_sessions_count(end_user_id)
-    if is_end_user_id is not False:
-        is_end_user_id = count_store.get_sessions_count(end_user_id)[0]
-        redis_messages = count_store.get_sessions_count(end_user_id)[1]
-    if is_end_user_id and int(is_end_user_id) != int(scope):
-        is_end_user_id += 1
-        langchain_messages += redis_messages
-        count_store.update_sessions_count(end_user_id, is_end_user_id, langchain_messages)
-    elif int(is_end_user_id) == int(scope):
+    is_end_user_has_history = count_store.get_sessions_count(end_user_id)
+    if is_end_user_has_history:
+        end_user_visit_count, redis_messages = is_end_user_has_history
+    else:
+        count_store.save_sessions_count(end_user_id, 1, langchain_messages)
+        return
+    end_user_visit_count += 1
+    if end_user_visit_count < scope:
+        redis_messages.extend(langchain_messages)
+        count_store.update_sessions_count(end_user_id, end_user_visit_count, redis_messages)
+    else:
         logger.info('写入长期记忆NEO4J')
-        formatted_messages = (redis_messages)
+        redis_messages.extend(langchain_messages)
         # Get config_id (if memory_config is an object, extract config_id; otherwise use directly)
         if hasattr(memory_config, 'config_id'):
             config_id = memory_config.config_id
         else:
             config_id = memory_config
 
-        await write(
-            AgentMemory_Long_Term.STORAGE_NEO4J,
-            end_user_id,
-            "",
-            "",
-            None,
-            end_user_id,
-            config_id,
-            formatted_messages
+        write_message_task.delay(
+            end_user_id,  # end_user_id: User ID
+            redis_messages,  # message: JSON string format message list
+            config_id,  # config_id: Configuration ID string
+            AgentMemory_Long_Term.STORAGE_NEO4J,  # storage_type: "neo4j"
+            ""  # user_rag_memory_id: RAG memory ID (not used in Neo4j mode)
         )
-        count_store.update_sessions_count(end_user_id, 1, langchain_messages)
-    else:
-        count_store.save_sessions_count(end_user_id, 1, langchain_messages)
-
-
-"""Time-based memory processing"""
+        count_store.update_sessions_count(end_user_id, 0, [])
 
 
 async def memory_long_term_storage(end_user_id, memory_config, time):
@@ -291,9 +262,7 @@ async def aggregate_judgment(end_user_id: str, ori_messages: list, memory_config
         return result_dict
 
     except Exception as e:
-        print(f"[aggregate_judgment] 发生错误: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"[aggregate_judgment] 发生错误: {e}", exc_info=True)
 
         return {
             "is_same_event": False,

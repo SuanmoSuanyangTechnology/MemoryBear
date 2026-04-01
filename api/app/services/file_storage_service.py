@@ -325,27 +325,30 @@ class FileStorageService:
             )
             raise
 
-    async def get_file_url(self, file_key: str, expires: int = 3600) -> str:
+    async def get_file_url(
+        self,
+        file_key: str,
+        expires: int = 3600,
+        file_name: Optional[str] = None,
+    ) -> str:
         """
         Get an access URL for a file.
 
         Args:
             file_key: The file key.
             expires: URL validity period in seconds (default: 1 hour).
+            file_name: If set, adds Content-Disposition: attachment to force download.
 
         Returns:
             URL for accessing the file.
         """
         logger.debug(f"Getting file URL: file_key={file_key}, expires={expires}s")
-
         try:
-            url = await self.storage.get_url(file_key, expires)
+            url = await self.storage.get_url(file_key, expires, file_name=file_name)
             logger.debug(f"File URL generated: file_key={file_key}")
             return url
         except Exception as e:
-            logger.error(
-                f"Error getting file URL: file_key={file_key}, error={str(e)}"
-            )
+            logger.error(f"Error getting file URL: file_key={file_key}, error={str(e)}")
             raise
 
 

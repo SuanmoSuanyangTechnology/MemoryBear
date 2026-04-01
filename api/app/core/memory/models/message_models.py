@@ -30,6 +30,7 @@ class ConversationMessage(BaseModel):
     """
     role: str = Field(..., description="The role of the speaker (e.g., 'user', 'assistant').")
     msg: str = Field(..., description="The text content of the message.")
+    files: list[tuple] = Field(default_factory=list, description="The file content of the message", exclude=True)
 
 
 class TemporalValidityRange(BaseModel):
@@ -130,7 +131,8 @@ class Chunk(BaseModel):
     content: str = Field(..., description="The content of the chunk as a string.")
     speaker: Optional[str] = Field(None, description="The speaker/role for this chunk (user/assistant).")
     statements: List[Statement] = Field(default_factory=list, description="A list of statements in the chunk.")
-    chunk_embedding: Optional[List[float]] = Field(None, description="The embedding vector of the chunk.")
+    files: list[tuple] = Field(default_factory=list, description="List of files in the chunk.")
+    chunk_embedding: Optional[List[float]] = Field(default=None, description="The embedding vector of the chunk.")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata for the chunk.")
 
     @classmethod

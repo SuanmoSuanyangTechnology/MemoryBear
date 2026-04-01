@@ -1,0 +1,334 @@
+provider: volcano
+models:
+# Doubao-Seed 2.0 系列
+- name: doubao-seed-2-0-pro-260215
+  type: chat
+  provider: volcano
+  description: 旗舰级全能通用模型，面向 Agent 时代的复杂推理与长链路任务执行场景。强调多模态理解、长上下文推理、结构化生成与工具增强执行。复杂指令与多约束执行能力突出，可稳定应对多步复杂规划、复杂图文推理、视频内容理解与高难度分析等场景。侧重长链路推理能力与复杂任务稳定性，适配真实业务中的复杂场景。
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
+  tags:
+  - 大语言模型
+  logo: volcano
+
+- name: doubao-seed-2-0-lite-260215
+  type: chat
+  provider: volcano
+  description: 面向高频企业场景兼顾性能与成本的均衡型模型，综合能力超越上一代Doubao-Seed-1.8。胜任非结构化信息处理、内容创作、搜索推荐、数据分析等生产型工作，支持长上下文、多源信息融合、多步指令执行与高保真结构化输出。在保障稳定效果的同时显著优化成本。兼顾生成质量与响应速度，适合作为通用生产级模型。
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
+  tags:
+  - 大语言模型
+  logo: volcano
+
+- name: doubao-seed-2-0-mini-260215
+  type: chat
+  provider: volcano
+  description: 面向低时延、高并发与成本敏感场景，提供极致的模型推理速度。模型效果与Doubao-Seed-1.6相当。支持256k上下文、4档思考长度和多模态理解，适合成本和速度优先的轻量级任务。
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
+  tags:
+  - 大语言模型
+  logo: volcano
+
+- name: doubao-seed-2-0-code-preview-260215
+  type: chat
+  provider: volcano
+  description: 面向真实编程环境优化的 Coding 模型，能稳定调用 Claude Code 等常见 IDE 中的工具。模型特别优化了前端能力，在使用常见的前端框架时能有良好表现。模型支持使用 Skills，可以配合多种自定义技能使用。Seed 2.0 的编程加强版，更适合 Agentic Coding。
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
+  tags:
+  - 大语言模型
+  - 代码模型
+  logo: volcano
+
+# Doubao-Seed 1.x 系列
+- name: doubao-seed-1-8-251228
+  type: chat
+  provider: volcano
+  description: Doubao-Seed-1.8 面向多模态 Agent 场景定向优化。Agent 能力上，Tool Use、复杂指令遵循等能力均大幅增强。多模态理解方面，视觉基础能力显著提升，可低帧率理解超长视频，视频运动理解、复杂空间理解及文档结构化解析能力也有所优化，还原生支持智能上下文管理，用户可配置上下文策略。
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
+  tags:
+  - 大语言模型
+  logo: volcano
+
+- name: doubao-seed-1-6-251015
+  type: chat
+  provider: volcano
+  description: Doubao-Seed-1.6全新多模态深度思考模型，同时支持minimal/low/medium/high 四种reasoning effort。 更强模型效果，服务复杂任务和有挑战场景。支持 256k 上下文窗口，输出长度支持最大 32k tokens。
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
+  tags:
+  - 大语言模型
+  logo: volcano
+
+- name: doubao-seed-1-6-lite-251015
+  type: chat
+  provider: volcano
+  description: 更高性价比，常见任务的最佳选择，支持minimal、low、medium、high 四种reasoning_effort思考深度
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
+  tags:
+  - 大语言模型
+  logo: volcano
+
+- name: doubao-seed-1-6-flash-250828
+  type: chat
+  provider: volcano
+  description: Doubao-Seed-1.6-flash推理速度极致的多模态深度思考模型，TPOT低至10ms； 同时支持文本和视觉理解，文本理解能力超过上一代lite，视觉理解比肩友商pro系列模型。支持 256k 上下文窗口，输出长度支持最大 16k tokens。
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
+  tags:
+  - 大语言模型
+  logo: volcano
+
+- name: doubao-seed-code-preview-251028
+  type: chat
+  provider: volcano
+  description: 面向Agentic编程任务进行了深度优化。
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
+  tags:
+  - 大语言模型
+  - 代码模型
+  logo: volcano
+
+- name: doubao-seed-1-6-vision-250815
+  type: chat
+  provider: volcano
+  description: 全新Doubao-Seed-1.6系列视觉深度思考模型，视觉理解能力显著增强，并支持image_process视觉工具
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+    - video
+  is_omni: false
+  tags:
+  - 大语言模型
+  - 多模态模型
+  logo: volcano
+
+# Doubao 1.5 系列
+- name: doubao-1-5-vision-pro-32k-250115
+  type: chat
+  provider: volcano
+  description: 全新升级的多模态大模型，支持任意分辨率和极端长宽比图像识别，增强视觉推理、文档识别、细节信息理解和指令遵循能力。支持 32k 上下文窗口，输出长度支持最大 12k tokens。
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+  is_omni: false
+  tags:
+  - 大语言模型
+  - 多模态模型
+  logo: volcano
+
+- name: doubao-1-5-pro-32k-250115
+  type: chat
+  provider: volcano
+  description: 全新一代主力模型，性能全面升级，在知识、代码、推理等方面表现卓越。最大支持 128k 上下文窗口，输出长度支持最大 12k tokens。
+  is_deprecated: false
+  is_official: true
+  capability: []
+  is_omni: false
+  tags:
+  - 大语言模型
+  logo: volcano
+
+- name: doubao-1-5-lite-32k-250115
+  type: chat
+  provider: volcano
+  description: 全新一代轻量版模型，极致响应速度，效果与时延均达到全球一流水平。支持 32k 上下文窗口，输出长度支持最大 12k tokens。
+  is_deprecated: false
+  is_official: true
+  capability: []
+  is_omni: false
+  tags:
+  - 大语言模型
+  logo: volcano
+
+# Doubao-Seedance 视频生成系列
+- name: doubao-seedance-1-5-pro-251215
+  type: video
+  provider: volcano
+  description: 豆包视频生成模型Seedance 1.5 pro 作为全球领先的视频生成模型，可生成音画高精同步的视频内容。支持多人多语言对白，全面覆盖环境音、动作音、合成音、乐器音、背景音及人声，支持首尾帧，实现影视级叙事效果，满足影视、漫剧、电商及广告领域的高阶创作需求。
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+  is_omni: false
+  tags:
+  - 视频生成
+  logo:  volcano
+
+- name: doubao-seedance-1-0-pro-250528
+  type: video
+  provider: volcano
+  description: 一款支持多镜头叙事的视频生成基础模型，在各维度表现出色。它在语义理解与指令遵循能力上取得突破，能生成运动流畅、细节丰富、风格多样且具备影视级美感的 1080P 高清视频
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+  is_omni: false
+  tags:
+  - 视频生成
+  logo: volcano
+
+- name: doubao-seedance-1-0-pro-fast-251015
+  type: video
+  provider: volcano
+  description: 一款价格触底、效能封顶的全面模型，在视频生成质量、速度、价格之间取得了卓越平衡。它继承了Seedance 1.0 pro 核心优势，同时生成速度提升、价格更具竞争力，为创作者带来效率与成本双重优化的体验。
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+  is_omni: false
+  tags:
+  - 视频生成
+  logo: volcano
+
+- name: doubao-seedance-1-0-lite-i2v-250428
+  type: video
+  provider: volcano
+  description: 基于首帧图片、尾帧图片（可选）、参考图片（可选）和文本提示词（可选）相结合的方式生成视频
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+  is_omni: false
+  tags:
+  - 视频生成
+  - 图生视频
+  logo: volcano
+
+- name: doubao-seedance-1-0-lite-t2v-250428
+  type: video
+  provider: volcano
+  description: 基于文本提示词生成视频
+  is_deprecated: false
+  is_official: true
+  capability: []
+  is_omni: false
+  tags:
+  - 视频生成
+  - 文生视频
+  logo: volcano
+
+# Doubao-Seedream 图像生成系列
+- name: doubao-seedream-5-0-260128
+  type: image
+  provider: volcano
+  description: 字节跳动发布的最新图像创作模型。该模型首次搭载联网检索功能，能融合实时网络信息，提升生图时效性。同时，模型的聪明度进一步升级，能够精准解析复杂指令和视觉内容。此外，模型在世界知识广度、参考一致性及专业场景生成质量上均有增强，可更好地满足企业级视觉创作需求。
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+  is_omni: false
+  tags:
+  - 图像生成
+  logo: volcano
+
+- name: doubao-seedream-4-5-251128
+  type: image
+  provider: volcano
+  description: 字节跳动最新推出的图像多模态模型，整合了文生图、图生图、组图输出等能力，融合常识和推理能力。相比前代4.0模型生成效果大幅提升，具备更好的编辑一致性和多图融合效果，能更精准的控制画面细节，小字、小人脸生成更自然，图片排版、色彩更和谐，美感提升。
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+  is_omni: false
+  tags:
+  - 图像生成
+  logo: volcano
+
+- name: doubao-seedream-4-0-250828
+  type: image
+  provider: volcano
+  description: 基于领先架构的SOTA级多模态图像创作模型，其生成美感、指令遵循、结构完整度、主体保持一致性处于世界头部水平。模型采用同一套架构实现文生图与编辑能力的统一，原生支持文本 、单图和多图输入，并能通过对提示词的深度推理，自动适配最优的图像比例尺寸与生成数量，可一次性连续输出最多 15 张内容关联的图像，支持 4K 超高清输出。
+  is_deprecated: false
+  is_official: true
+  capability:
+    - vision
+  is_omni: false
+  tags:
+  - 图像生成
+  logo: volcano
+
+- name: doubao-seedream-3-0-t2i-250415
+  type: image
+  provider: volcano
+  description: 一款支持原生高分辨率的中英双语图像生成基础模型，综合能力媲美GPT-4o，处于世界第一梯队。支持原生 2K 分辨率输出；响应速度更快；小字生成更准确，文本排版效果增强；指令遵循能力强，美感&结构提升，保真度和细节表现较好。
+  is_deprecated: false
+  is_official: true
+  capability: []
+  is_omni: false
+  tags:
+  - 图像生成
+  - 文生图
+  logo: volcano
+
+# Doubao 翻译系列
+- name: doubao-seed-translation-250915
+  type: chat
+  provider: volcano
+  description: 通用多语言翻译模型，支持30余种语言互译，支持 4K 上下文窗口，输出长度支持最大 3K tokens
+  is_deprecated: false
+  is_official: true
+  capability: []
+  is_omni: false
+  tags:
+  - 翻译模型
+  logo: volcano
+
+# Doubao Embedding 系列
+- name: doubao-embedding-vision-251215
+  type: embedding
+  provider: volcano
+  description: 主要面向图文多模向量检索的使用场景，支持图片输入及中、英双语文本输入，最长 128K 上下文长度。
+  is_deprecated: false
+  is_official: true
+  capability:
+  - vision
+  - video
+  is_omni: false
+  tags:
+  - 向量模型
+  - 多模态模型
+  logo: volcano

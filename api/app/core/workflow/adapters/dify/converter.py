@@ -9,9 +9,9 @@ from urllib.parse import quote
 
 from app.core.workflow.adapters.base_converter import BaseConverter
 from app.core.workflow.adapters.errors import (
-    UnsupportVariableType,
-    UnknowModelWarning,
-    ExceptionDefineition,
+    UnsupportedVariableType,
+    UnknownModelWarning,
+    ExceptionDefinition,
     ExceptionType
 )
 from app.core.workflow.nodes.assigner.config import AssignmentItem
@@ -54,7 +54,7 @@ from app.core.workflow.nodes.http_request.config import (
     HttpFormData,
     HttpTimeOutConfig,
     HttpRetryConfig,
-    HttpErrorDefaultTamplete,
+    HttpErrorDefaultTemplate,
     HttpErrorHandleConfig
 )
 from app.core.workflow.nodes.if_else.config import ConditionDetail, ConditionBranchConfig
@@ -108,7 +108,7 @@ class DifyConverter(BaseConverter):
         try:
             return config.model_validate(value)
         except Exception as e:
-            self.errors.append(ExceptionDefineition(
+            self.errors.append(ExceptionDefinition(
                 type=ExceptionType.CONFIG,
                 node_id=node_id,
                 node_name=node_name,
@@ -138,7 +138,7 @@ class DifyConverter(BaseConverter):
         var_selector = mapping.get(var_selector, var_selector)
         return var_selector
 
-    def _process_list_variable_litearl(self, variable_selector: list) -> str | None:
+    def _process_list_variable_literal(self, variable_selector: list) -> str | None:
         if not self.process_var_selector(".".join(variable_selector)):
             return None
         return "{{" + self.process_var_selector(".".join(variable_selector)) + "}}"
@@ -269,7 +269,7 @@ class DifyConverter(BaseConverter):
             var_type = self.variable_type_map(var["type"])
             if not var_type:
                 self.errors.append(
-                    UnsupportVariableType(
+                    UnsupportedVariableType(
                         scope=node["id"],
                         name=var["variable"],
                         var_type=var["type"],
@@ -281,7 +281,7 @@ class DifyConverter(BaseConverter):
 
             if var_type in ["file", "array[file]"]:
                 self.errors.append(
-                    ExceptionDefineition(
+                    ExceptionDefinition(
                         type=ExceptionType.VARIABLE,
                         node_id=node["id"],
                         node_name=node_data["title"],
@@ -311,7 +311,7 @@ class DifyConverter(BaseConverter):
     def convert_question_classifier_node_config(self, node: dict) -> dict:
         node_data = node["data"]
         self.warnings.append(
-            UnknowModelWarning(
+            UnknownModelWarning(
                 node_id=node["id"],
                 node_name=node_data["title"],
                 model_name=node_data["model"].get("name")
@@ -327,7 +327,7 @@ class DifyConverter(BaseConverter):
             )
 
         result = QuestionClassifierNodeConfig.model_construct(
-            input_variable=self._process_list_variable_litearl(node_data.get("query_variable_selector")),
+            input_variable=self._process_list_variable_literal(node_data.get("query_variable_selector")),
             user_supplement_prompt=self.trans_variable_format(node_data.get("instructions", "")),
             categories=categories,
         ).model_dump()
@@ -337,13 +337,13 @@ class DifyConverter(BaseConverter):
     def convert_llm_node_config(self, node: dict) -> dict:
         node_data = node["data"]
         self.warnings.append(
-            UnknowModelWarning(
+            UnknownModelWarning(
                 node_id=node["id"],
                 node_name=node_data["title"],
                 model_name=node_data["model"].get("name")
             )
         )
-        context = self._process_list_variable_litearl(node_data["context"]["variable_selector"])
+        context = self._process_list_variable_literal(node_data["context"]["variable_selector"])
         memory = MemoryWindowSetting(
             enable=bool(node_data.get("memory")),
             enable_window=bool(node_data.get("memory", {}).get("window", {}).get("enabled", False)),
@@ -367,7 +367,7 @@ class DifyConverter(BaseConverter):
                 )
             )
         vision = node_data["vision"]["enabled"]
-        vision_input = self._process_list_variable_litearl(
+        vision_input = self._process_list_variable_literal(
             node_data["vision"]["configs"]["variable_selector"]
         ) if vision else None
         result = LLMNodeConfig.model_construct(
@@ -433,7 +433,7 @@ class DifyConverter(BaseConverter):
             conditions.append(
                 LoopConditionDetail.model_construct(
                     operator=self.convert_compare_operator(condition["comparison_operator"]),
-                    left=self._process_list_variable_litearl(condition["variable_selector"]),
+                    left=self._process_list_variable_literal(condition["variable_selector"]),
                     right=self.trans_variable_format(
                         right_value
                     ) if isinstance(right_value, str) and self.is_variable(right_value) else self.convert_variable_type(
@@ -453,7 +453,7 @@ class DifyConverter(BaseConverter):
             right_input_type = variable["value_type"]
             right_value_type = self.variable_type_map(variable["var_type"])
             if right_input_type == ValueInputType.VARIABLE:
-                right_value = self._process_list_variable_litearl(variable.get("value", ""))
+                right_value = self._process_list_variable_literal(variable.get("value", ""))
             else:
                 right_value = self.convert_variable_type(right_value_type, variable.get("value", ""))
             loop_variables.append(
@@ -475,10 +475,10 @@ class DifyConverter(BaseConverter):
     def convert_iteration_node_config(self, node: dict) -> dict:
         node_data = node["data"]
         result = IterationNodeConfig.model_construct(
-            input=self._process_list_variable_litearl(node_data["iterator_selector"]),
+            input=self._process_list_variable_literal(node_data["iterator_selector"]),
             parallel=node_data["is_parallel"],
             parallel_count=node_data["parallel_nums"],
-            output=self._process_list_variable_litearl(node_data["output_selector"]),
+            output=self._process_list_variable_literal(node_data["output_selector"]),
             output_type=self.variable_type_map(node_data.get("output_type")),
             flatten=node_data["flatten_output"],
         ).model_dump()
@@ -494,8 +494,8 @@ class DifyConverter(BaseConverter):
                 continue
             assignments.append(
                 AssignmentItem(
-                    variable_selector=self._process_list_variable_litearl(assignment["variable_selector"]),
-                    value=self._process_list_variable_litearl(
+                    variable_selector=self._process_list_variable_literal(assignment["variable_selector"]),
+                    value=self._process_list_variable_literal(
                         assignment["value"]
                     ) if assignment["input_type"] == ValueInputType.VARIABLE else assignment["value"],
                     operation=self.convert_assignment_operator(assignment["operation"])
@@ -514,7 +514,7 @@ class DifyConverter(BaseConverter):
             input_variables.append(
                 InputVariable.model_construct(
                     name=input_variable["variable"],
-                    variable=self._process_list_variable_litearl(input_variable["value_selector"]),
+                    variable=self._process_list_variable_literal(input_variable["value_selector"]),
                 )
             )
 
@@ -570,7 +570,7 @@ class DifyConverter(BaseConverter):
         else:
             if node_data["body"]["data"]:
                 body_content = (node_data["body"]["data"][0].get("value") or
-                                self._process_list_variable_litearl(node_data["body"]["data"][0].get("file")))
+                                self._process_list_variable_literal(node_data["body"]["data"][0].get("file")))
             else:
                 body_content = ""
 
@@ -585,7 +585,7 @@ class DifyConverter(BaseConverter):
                     self.trans_variable_format(key_value[0])
                 ] = self.trans_variable_format(key_value[1])
             else:
-                self.warnings.append(ExceptionDefineition(
+                self.warnings.append(ExceptionDefinition(
                     type=ExceptionType.CONFIG,
                     node_id=node["id"],
                     node_name=node_data["title"],
@@ -603,7 +603,7 @@ class DifyConverter(BaseConverter):
                     self.trans_variable_format(key_value[0])
                 ] = self.trans_variable_format(key_value[1])
             else:
-                self.warnings.append(ExceptionDefineition(
+                self.warnings.append(ExceptionDefinition(
                     type=ExceptionType.CONFIG,
                     node_id=node["id"],
                     node_name=node_data["title"],
@@ -625,7 +625,7 @@ class DifyConverter(BaseConverter):
                     default_header = var["value"]
                 elif var["key"] == "status_code":
                     default_status_code = var["value"]
-            default_value = HttpErrorDefaultTamplete(
+            default_value = HttpErrorDefaultTemplate(
                 body=default_body,
                 headers=default_header,
                 status_code=default_status_code,
@@ -668,7 +668,7 @@ class DifyConverter(BaseConverter):
         for variable in node_data["variables"]:
             mapping.append(VariablesMappingConfig.model_construct(
                 name=variable["variable"],
-                value=self._process_list_variable_litearl(variable["value_selector"])
+                value=self._process_list_variable_literal(variable["value_selector"])
             ))
         result = JinjaRenderNodeConfig.model_construct(
             template=node_data["template"],
@@ -679,14 +679,14 @@ class DifyConverter(BaseConverter):
 
     def convert_knowledge_node_config(self, node: dict) -> dict:
         node_data = node["data"]
-        self.warnings.append(ExceptionDefineition(
+        self.warnings.append(ExceptionDefinition(
             node_id=node["id"],
             node_name=node_data["title"],
             type=ExceptionType.CONFIG,
             detail=f"Please reconfigure the Knowledge Retrieval node.",
         ))
         result = KnowledgeRetrievalNodeConfig.model_construct(
-            query=self._process_list_variable_litearl(node_data["query_variable_selector"]),
+            query=self._process_list_variable_literal(node_data["query_variable_selector"]),
         ).model_dump()
 
         self.config_validate(node["id"], node["data"]["title"], KnowledgeRetrievalNodeConfig, result)
@@ -695,7 +695,7 @@ class DifyConverter(BaseConverter):
     def convert_parameter_extractor_node_config(self, node: dict) -> dict:
         node_data = node["data"]
         self.warnings.append(
-            UnknowModelWarning(
+            UnknownModelWarning(
                 node_id=node["id"],
                 node_name=node_data["title"],
                 model_name=node_data["model"].get("name")
@@ -712,7 +712,7 @@ class DifyConverter(BaseConverter):
                 )
             )
         result = ParameterExtractorNodeConfig.model_construct(
-            text=self._process_list_variable_litearl(node_data["query"]),
+            text=self._process_list_variable_literal(node_data["query"]),
             params=params,
             prompt=node_data.get("instruction")
         ).model_dump()
@@ -727,14 +727,14 @@ class DifyConverter(BaseConverter):
         group_type = {}
         if not advanced_settings or not advanced_settings["group_enabled"]:
             group_variables = [
-                self._process_list_variable_litearl(variable)
+                self._process_list_variable_literal(variable)
                 for variable in node_data["variables"]
             ]
             group_type["output"] = node_data["output_type"]
         else:
             for group in advanced_settings["groups"]:
                 group_variables[group["group_name"]] = [
-                    self._process_list_variable_litearl(variable)
+                    self._process_list_variable_literal(variable)
                     for variable in group["variables"]
                 ]
                 group_type[group["group_name"]] = group["output_type"]
@@ -751,7 +751,7 @@ class DifyConverter(BaseConverter):
 
     def convert_tool_node_config(self, node: dict) -> dict:
         node_data = node["data"]
-        self.warnings.append(ExceptionDefineition(
+        self.warnings.append(ExceptionDefinition(
             node_id=node["id"],
             node_name=node_data["title"],
             type=ExceptionType.CONFIG,

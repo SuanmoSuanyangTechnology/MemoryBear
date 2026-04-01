@@ -19,37 +19,37 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from uuid import UUID
 
 import redis
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.cache import InterestMemoryCache
 from app.core.config import settings
 from app.core.logging_config import get_config_logger, get_logger
 from app.core.memory.agent.langgraph_graph.read_graph import make_read_graph
-from app.core.memory.agent.langgraph_graph.write_graph import make_write_graph
 from app.core.memory.agent.logger_file.log_streamer import LogStreamer
 from app.core.memory.agent.utils.messages_tools import (
     merge_multiple_search_results,
     reorder_output_results,
 )
 from app.core.memory.agent.utils.type_classifier import status_typle
+from app.core.memory.agent.utils.write_tools import write as write_neo4j
 from app.core.memory.analytics.hot_memory_tags import get_interest_distribution
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.core.memory.utils.log.audit_logger import audit_logger
 from app.db import get_db_context
 from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.schemas import FileInput
 from app.schemas.memory_agent_schema import Write_UserInput
 from app.schemas.memory_config_schema import ConfigurationError
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_konwledges_server import (
     write_rag,
 )
+from app.services.memory_perceptual_service import MemoryPerceptualService
 
-try:
-    from app.core.memory.utils.log.audit_logger import audit_logger
-except ImportError:
-    audit_logger = None
 logger = get_logger(__name__)
 config_logger = get_config_logger()
 
@@ -65,24 +65,22 @@ class MemoryAgentService:
         if str(messages) == 'success':
             logger.info(f"Write operation successful for group {end_user_id} with config_id {config_id}")
             # 记录成功的操作
-            if audit_logger:
-                audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id,
-                                           success=True,
-                                           duration=duration, details={"message_length": len(message)})
+            audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id,
+                                       success=True,
+                                       duration=duration, details={"message_length": len(message)})
             return context
         else:
             logger.warning(f"Write operation failed for group {end_user_id}")
 
             # 记录失败的操作
-            if audit_logger:
-                audit_logger.log_operation(
-                    operation="WRITE",
-                    config_id=config_id,
-                    end_user_id=end_user_id,
-                    success=False,
-                    duration=duration,
-                    error=f"写入失败: {messages[:100]}"
-                )
+            audit_logger.log_operation(
+                operation="WRITE",
+                config_id=config_id,
+                end_user_id=end_user_id,
+                success=False,
+                duration=duration,
+                error=f"写入失败: {messages[:100]}"
+            )
 
             raise ValueError(f"写入失败: {messages}")
 
@@ -267,8 +265,16 @@ class MemoryAgentService:
             logger.info("Log streaming completed, cleaning up resources")
             # LogStreamer uses context manager for file handling, so cleanup is automatic
 
-    async def write_memory(self, end_user_id: str, messages: list[dict], config_id: Optional[uuid.UUID] | int,
-                           db: Session, storage_type: str, user_rag_memory_id: str, language: str = "zh") -> str:
+    async def write_memory(
+            self,
+            end_user_id: str,
+            messages: list[dict],
+            config_id: Optional[uuid.UUID] | int,
+            db: Session,
+            storage_type: str,
+            user_rag_memory_id: str,
+            language: str = "zh"
+    ) -> str:
         """
         Process write operation with config_id
 
@@ -297,8 +303,8 @@ class MemoryAgentService:
                 config_id = connected_config.get("memory_config_id")
             logger.info(f"Resolved config from end_user: config_id={config_id}, workspace_id={workspace_id}")
             if config_id is None and workspace_id is None:
-                raise ValueError(
-                    f"No memory configuration found for end_user {end_user_id}. Please ensure the user has a connected memory configuration.")
+                raise ValueError(f"No memory configuration found for end_user {end_user_id}. "
+                                 f"Please ensure the user has a connected memory configuration.")
         except Exception as e:
             if "No memory configuration found" in str(e):
                 raise  # Re-raise our specific error
@@ -327,60 +333,72 @@ class MemoryAgentService:
             logger.error(error_msg)
 
             # Log failed operation
-            if audit_logger:
-                duration = time.time() - start_time
-                audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id,
-                                           success=False, duration=duration, error=error_msg)
+            duration = time.time() - start_time
+            audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id,
+                                       success=False, duration=duration, error=error_msg)
 
             raise ValueError(error_msg)
 
+        perceptual_serivce = MemoryPerceptualService(db)
+        for message in messages:
+            message["file_content"] = []
+            for file in (message.get("files") or []):
+                file_object = await perceptual_serivce.generate_perceptual_memory(
+                    end_user_id=end_user_id,
+                    memory_config=memory_config,
+                    file=FileInput(**file)
+                )
+                if file_object is None:
+                    continue
+                message["file_content"].append((file_object, file["type"]))
+        logger.info(messages)
+
+        message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
         try:
             if storage_type == "rag":
                 # For RAG storage, convert messages to single string
-                message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
-                result = await write_rag(end_user_id, message_text, user_rag_memory_id)
-                return result
+                await write_rag(end_user_id, message_text, user_rag_memory_id)
+                return "success"
             else:
-                async with make_write_graph() as graph:
-                    config = {"configurable": {"thread_id": end_user_id}}
-                    # Convert structured messages to LangChain messages
-                    langchain_messages = []
-                    for msg in messages:
-                        if msg['role'] == 'user':
-                            langchain_messages.append(HumanMessage(content=msg['content']))
-                        elif msg['role'] == 'assistant':
-                            langchain_messages.append(AIMessage(content=msg['content']))
-                    # 初始状态 - 包含所有必要字段
-                    initial_state = {
-                        "messages": langchain_messages,
-                        "end_user_id": end_user_id,
-                        "memory_config": memory_config,
-                        "language": language
+                await write_neo4j(
+                    end_user_id=end_user_id,
+                    messages=messages,
+                    memory_config=memory_config,
+                    ref_id='',
+                    language=language
+                )
+                for lang in ["zh", "en"]:
+                    deleted = await InterestMemoryCache.delete_interest_distribution(
+                        end_user_id, lang
+                    )
+                    if deleted:
+                        logger.info(
+                            f"Invalidated interest distribution cache: end_user_id={end_user_id}, language={lang}")
+                for message in messages:
+                    message["file_content"] = [
+                        perceptual[0].file_path for perceptual in message["file_content"]
+                    ]
+                return self.writer_messages_deal(
+                    "success",
+                    start_time,
+                    end_user_id,
+                    config_id,
+                    message_text,
+                    {
+                        "status": "success",
+                        "data": messages,
+                        "config_id": memory_config.config_id,
+                        "config_name": memory_config.config_name
                     }
-
-                    # 获取节点更新信息
-                    async for update_event in graph.astream(
-                            initial_state,
-                            stream_mode="updates",
-                            config=config
-                    ):
-                        for node_name, node_data in update_event.items():
-                            if 'save_neo4j' == node_name:
-                                massages = node_data
-                    massagesstatus = massages.get('write_result')['status']
-                    contents = massages.get('write_result')
-                    # Convert messages back to string for logging
-                    message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
-                    return self.writer_messages_deal(massagesstatus, start_time, end_user_id, config_id, message_text,
-                                                     contents)
+                )
         except Exception as e:
             # Ensure proper error handling and logging
             error_msg = f"Write operation failed: {str(e)}"
             logger.error(error_msg)
-            if audit_logger:
-                duration = time.time() - start_time
-                audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id,
-                                           success=False, duration=duration, error=error_msg)
+
+            duration = time.time() - start_time
+            audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id,
+                                       success=False, duration=duration, error=error_msg)
             raise ValueError(error_msg)
 
     async def read_memory(
@@ -445,10 +463,9 @@ class MemoryAgentService:
         logger.info(f"Read operation for group {end_user_id} with config_id {config_id}")
 
         # 导入审计日志记录器
-        try:
-            from app.core.memory.utils.log.audit_logger import audit_logger
-        except ImportError:
-            audit_logger = None
+
+
+
 
         config_load_start = time.time()
         try:
@@ -468,16 +485,15 @@ class MemoryAgentService:
             logger.error(error_msg)
 
             # Log failed operation
-            if audit_logger:
-                duration = time.time() - start_time
-                audit_logger.log_operation(
-                    operation="READ",
-                    config_id=config_id,
-                    end_user_id=end_user_id,
-                    success=False,
-                    duration=duration,
-                    error=error_msg
-                )
+            duration = time.time() - start_time
+            audit_logger.log_operation(
+                operation="READ",
+                config_id=config_id,
+                end_user_id=end_user_id,
+                success=False,
+                duration=duration,
+                error=error_msg
+            )
 
             raise ValueError(error_msg)
 
@@ -583,7 +599,7 @@ class MemoryAgentService:
                                     retrieved_content.append({query: statements})
 
                     # 如果 retrieved_content 为空，设置为空字符串
-                    if retrieved_content == []:
+                    if not retrieved_content:
                         retrieved_content = ''
 
                     # 只有当回答不是"信息不足"且不是快速检索时才保存
@@ -609,15 +625,15 @@ class MemoryAgentService:
                 total_time = time.time() - start_time
                 logger.info(
                     f"[PERF] read_memory completed successfully in {total_time:.4f}s (config: {config_load_time:.4f}s, graph: {graph_exec_time:.4f}s)")
-                if audit_logger:
-                    duration = time.time() - start_time
-                    audit_logger.log_operation(
-                        operation="READ",
-                        config_id=config_id,
-                        end_user_id=end_user_id,
-                        success=True,
-                        duration=duration
-                    )
+
+                duration = time.time() - start_time
+                audit_logger.log_operation(
+                    operation="READ",
+                    config_id=config_id,
+                    end_user_id=end_user_id,
+                    success=True,
+                    duration=duration
+                )
 
                 return {
                     "answer": summary,
@@ -627,16 +643,16 @@ class MemoryAgentService:
             # Ensure proper error handling and logging
             error_msg = f"Read operation failed: {str(e)}"
             logger.error(error_msg)
-            if audit_logger:
-                duration = time.time() - start_time
-                audit_logger.log_operation(
-                    operation="READ",
-                    config_id=config_id,
-                    end_user_id=end_user_id,
-                    success=False,
-                    duration=duration,
-                    error=error_msg
-                )
+
+            duration = time.time() - start_time
+            audit_logger.log_operation(
+                operation="READ",
+                config_id=config_id,
+                end_user_id=end_user_id,
+                success=False,
+                duration=duration,
+                error=error_msg
+            )
             raise ValueError(error_msg)
 
     def get_messages_list(self, user_input: Write_UserInput) -> list[dict]:

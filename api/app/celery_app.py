@@ -1,5 +1,6 @@
 import os
 import platform
+import re
 from datetime import timedelta
 from urllib.parse import quote
 
@@ -11,21 +12,24 @@ from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+
+def _mask_url(url: str) -> str:
+    """隐藏 URL 中的密码部分，适用于 redis:// 和 amqp:// 等协议"""
+    return re.sub(r'(://[^:]*:)[^@]+(@)', r'\1***\2', url)
+
 # macOS fork() safety - must be set before any Celery initialization
 if platform.system() == 'Darwin':
     os.environ.setdefault('OBJC_DISABLE_INITIALIZE_FORK_SAFETY', 'YES')
 
 # 创建 Celery 应用实例
-# broker: 任务队列（使用 Redis DB，由 CELERY_BROKER_DB 指定）
-# backend: 结果存储（使用 Redis DB，由 CELERY_BACKEND_DB 指定）
+# broker: 优先使用环境变量 CELERY_BROKER_URL（支持 amqp:// 等任意协议），
+#         未配置则回退到 Redis 方案
+# backend: 结果存储（使用 Redis）
 # NOTE: 不要在 .env 中设置 BROKER_URL / RESULT_BACKEND / CELERY_BROKER / CELERY_BACKEND，
 #       这些名称会被 Celery CLI 的 Click 框架劫持，详见 docs/celery-env-bug-report.md
 
-# Build canonical broker/backend URLs and force them into os.environ so that
-# Celery's Settings.broker_url property (which checks CELERY_BROKER_URL first)
-# cannot be overridden by stray env vars.
-# See: https://github.com/celery/celery/issues/4284
-_broker_url = f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB_CELERY_BROKER}"
+_broker_url = os.getenv("CELERY_BROKER_URL") or \
+    f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB_CELERY_BROKER}"
 _backend_url = f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB_CELERY_BACKEND}"
 os.environ["CELERY_BROKER_URL"] = _broker_url
 os.environ["CELERY_RESULT_BACKEND"] = _backend_url
@@ -45,8 +49,8 @@ celery_app = Celery(
 logger.info(
     "Celery app initialized",
     extra={
-        "broker": _broker_url.replace(quote(settings.REDIS_PASSWORD), "***"),
-        "backend": _backend_url.replace(quote(settings.REDIS_PASSWORD), "***"),
+        "broker": _mask_url(_broker_url),
+        "backend": _mask_url(_backend_url),
     },
 )
 # Default queue for unrouted tasks
@@ -103,6 +107,9 @@ celery_app.conf.update(
         'app.core.memory.agent.long_term_storage.window': {'queue': 'memory_tasks'},
         'app.core.memory.agent.long_term_storage.time': {'queue': 'memory_tasks'},
         'app.core.memory.agent.long_term_storage.aggregate': {'queue': 'memory_tasks'},
+
+        # Clustering tasks → memory_tasks queue (使用相同的 worker，避免 macOS fork 问题)
+        'app.tasks.run_incremental_clustering': {'queue': 'memory_tasks'},
 
         # Document tasks → document_tasks queue (prefork worker)
         'app.core.rag.tasks.parse_document': {'queue': 'document_tasks'},

@@ -66,6 +66,13 @@ const Conversation: FC = () => {
   const [thinking, setThinking] = useState(false)
 
   useEffect(() => {
+    return () => {
+      audioPollingRef.current.forEach((timer) => clearInterval(timer))
+      audioPollingRef.current.clear()
+    }
+  }, [])
+
+  useEffect(() => {
     const shareToken = localStorage.getItem(`shareToken_${token}`)
     setShareToken(shareToken)
     if (shareToken && shareToken !== '') return
@@ -146,13 +153,29 @@ const Conversation: FC = () => {
   }
 
   useEffect(() => {
-    audioPollingRef.current.forEach((timer) => clearInterval(timer))
-    audioPollingRef.current.clear()
     if (conversation_id) {
       getConversationDetail(token as string, conversation_id)
         .then(res => {
           const response = res as { messages: ChatItem[] }
-          setChatList(response?.messages || [])
+          const messages = response?.messages || []
+          const historyAudioUrls = new Set(messages.map(m => m.meta_data?.audio_url).filter(Boolean))
+          audioPollingRef.current.forEach((timer, key) => {
+            if (!historyAudioUrls.has(key)) {
+              clearInterval(timer)
+              audioPollingRef.current.delete(key)
+            }
+          })
+          messages.forEach(msg => {
+            if (msg.role === 'assistant' && msg.meta_data?.audio_url && msg.meta_data?.audio_status === 'pending') {
+              startAudioPolling(msg.meta_data.audio_url, msg.meta_data.audio_url)
+            }
+          })
+          setChatList(messages.map(msg => {
+            if (msg.role === 'assistant' && msg.meta_data?.audio_url && audioPollingRef.current.has(msg.meta_data.audio_url)) {
+              return { ...msg, meta_data: { ...msg.meta_data, audio_status: 'pending' } }
+            }
+            return msg
+          }))
         })
     } else {
       if (features?.opening_statement?.statement) {
@@ -253,6 +276,28 @@ const Conversation: FC = () => {
     }))
   }, [audioStatusMap, chatList.length])
 
+  const startAudioPolling = (audioUrl: string, idToPoll: string) => {
+    if (audioPollingRef.current.has(idToPoll)) return
+    const fileId = audioUrl.split('/').pop()
+    if (!fileId) return
+    const timer = setInterval(() => {
+      getFileStatusById(fileId)
+        .then(res => {
+          const { status } = res as { status: string }
+          if (status && status !== 'pending') {
+            setAudioStatusMap(prev => ({ ...prev, [idToPoll]: status }))
+            clearInterval(audioPollingRef.current.get(idToPoll))
+            audioPollingRef.current.delete(idToPoll)
+          }
+        })
+        .catch(() => {
+          clearInterval(audioPollingRef.current.get(idToPoll))
+          audioPollingRef.current.delete(idToPoll)
+        })
+    }, 2000)
+    audioPollingRef.current.set(idToPoll, timer)
+  }
+
   /** Send message and handle streaming response */
   const handleSend = (msg?: string) => {
     if (!token || !shareToken) return
@@ -316,35 +361,8 @@ const Conversation: FC = () => {
               const { file_id } = item.data as { file_id?: string }
               const idToPoll = file_id || audio_url || ''
               const fileId = audio_url.split('/').pop()
-              if (fileId && idToPoll && !audioPollingRef.current.has(idToPoll)) {
-
-                const timer = setInterval(() => {
-                  getFileStatusById(fileId)
-                    .then(res => {
-                      const { status } = res as { status: string }
-                      if (status && status !== 'pending') {
-                        setAudioStatusMap(prev => ({
-                          ...prev,
-                          [idToPoll]: status
-                        }))
-                        clearInterval(audioPollingRef.current.get(idToPoll))
-                        audioPollingRef.current.delete(idToPoll)
-                        getHistory(true)
-                        if (currentConversationId && currentConversationId !== conversation_id) {
-                          setConversationId(currentConversationId)
-                        }
-                      }
-                    })
-                    .catch(() => {
-                      clearInterval(audioPollingRef.current.get(idToPoll))
-                      audioPollingRef.current.delete(idToPoll)
-                      getHistory(true)
-                      if (currentConversationId && currentConversationId !== conversation_id) {
-                        setConversationId(currentConversationId)
-                      }
-                    })
-                }, 2000)
-                audioPollingRef.current.set(idToPoll, timer)
+              if (fileId && idToPoll) {
+                startAudioPolling(audio_url, idToPoll)
               }
             } else {
               getHistory(true)
@@ -356,6 +374,10 @@ const Conversation: FC = () => {
               updateAssistantMessage(content, audio_url, undefined, citations)
             }
             setLoading(false)
+            getHistory(true)
+            if (currentConversationId && currentConversationId !== conversation_id) {
+              setConversationId(currentConversationId)
+            }
             break
         }
       })

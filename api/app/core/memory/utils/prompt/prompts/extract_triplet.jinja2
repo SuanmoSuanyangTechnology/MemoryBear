@@ -5,6 +5,15 @@
 ===Task===
 Extract entities and knowledge triplets from the given statement.
 
+**⚠️ CRITICAL REQUIREMENTS:**
+1. **ALIASES ORDER IS CRITICAL**: The FIRST alias in the array will be used as the user's primary display name (other_name). You MUST put the most important/frequently used name FIRST.
+2. **ALWAYS include aliases field**: Even if empty, you MUST include "aliases": [] in EVERY entity.
+
+<!-- TODO: v0.2.10 - denied_aliases 功能暂时禁用，将通过 Cypher 查询实现
+2. **DENIED_ALIASES**: When user explicitly denies a name (e.g., "我不叫X", "I'm not called X"), you MUST put X in denied_aliases field, NOT in aliases.
+3. **ALWAYS include both fields**: Even if empty, you MUST include "aliases": [] and "denied_aliases": [] in EVERY entity.
+-->
+
 {% if language == "zh" %}
 **重要：请使用中文生成实体名称（name）、描述（description）和示例（example）。**
 {% else %}
@@ -18,34 +27,29 @@ Extract entities and knowledge triplets from the given statement.
 {% if ontology_types %}
 ===Ontology Type Guidance===
 
-**CRITICAL RULE: You MUST ONLY use the predefined ontology type names listed below for the entity "type" field. Do NOT use any other type names, even if they seem reasonable.**
+**CRITICAL: Use ONLY predefined type names below. If no exact match, use CLOSEST type. NEVER invent new types.**
 
-**If no predefined type fits an entity, use the CLOSEST matching predefined type. NEVER invent new type names.**
+**Type Priority:**
+1. [场景类型] Scene Types (domain-specific, prefer first)
+2. [通用类型] General Types (standard ontologies)
+3. [通用父类] Parent Types (hierarchy context)
 
-**Type Priority (from highest to lowest):**
-1. **[场景类型] Scene Types** - Domain-specific types, ALWAYS prefer these first
-2. **[通用类型] General Types** - Common types from standard ontologies (DBpedia)
-3. **[通用父类] Parent Types** - Provide type hierarchy context
+**Rules:**
+- Type MUST exactly match predefined names
+- Do NOT modify, translate, or abbreviate type names
+- Prefer scene types over general types
 
-**Type Matching Rules:**
-- Entity type MUST exactly match one of the predefined type names below
-- Do NOT use types like "Equipment", "Component", "Concept", "Action", "Condition", "Data", "Duration" unless they appear in the predefined list
-- Do NOT modify, translate, abbreviate, or create variations of type names
-- Prefer scene types (marked [场景类型]) over general types when both could apply
-- If uncertain, check the type description to find the best match
-
-**Predefined Ontology Types:**
+**Predefined Types:**
 {{ ontology_types }}
 
 {% if type_hierarchy_hints %}
-**Type Hierarchy Reference:**
-The following shows type inheritance relationships (Child → Parent → Grandparent):
+**Hierarchy:**
 {% for hint in type_hierarchy_hints %}
 - {{ hint }}
 {% endfor %}
 {% endif %}
 
-**ALLOWED Type Names (use EXACTLY one of these, no exceptions):**
+**ALLOWED Names:**
 {{ ontology_type_names | join(', ') }}
 
 {% endif %}
@@ -62,66 +66,94 @@ The following shows type inheritance relationships (Child → Parent → Grandpa
 - **Entity descriptions must be in English**
 - **Examples must be in English**
 {% endif %}
-- **Semantic Memory Classification (is_explicit_memory):**
-  * Set to `true` if the entity represents **explicit/semantic memory**:
-    - **Concepts:** "Machine Learning", "Photosynthesis", "Democracy"
-    - **Knowledge:** "Python Programming Language", "Theory of Relativity"
-    - **Definitions:** "API (Application Programming Interface)", "REST API"
-    - **Principles:** "SOLID Principles", "First Law of Thermodynamics"
-    - **Theories:** "Evolution Theory", "Quantum Mechanics"
-    - **Methods/Techniques:** "Agile Development", "Machine Learning Algorithm"
-    - **Technical Terms:** "Neural Network", "Database"
-  * Set to `false` for:
-    - **People:** "John Smith", "Dr. Wang"
-    - **Organizations:** "Microsoft", "Harvard University"
-    - **Locations:** "Beijing", "Central Park"
-    - **Events:** "2024 Conference", "Project Meeting"
-    - **Specific objects:** "iPhone 15", "Building A"
-- **Example Generation (IMPORTANT for semantic memory entities):**
-  * For entities where `is_explicit_memory=true`, generate a **concise example (around 20 characters)** to help understand the concept
-  * The example should be:
-    - **Specific and concrete**: Use real-world scenarios or applications
-    - **Brief**: Around 20 characters (can be slightly longer if needed for clarity)
+- **Semantic Memory (is_explicit_memory):**
+  * `true` for: Concepts, Knowledge, Definitions, Theories, Methods (e.g., "Machine Learning", "REST API")
+  * `false` for: People, Organizations, Locations, Events, Specific objects
+  * For `is_explicit_memory=true`, provide concise example (~20 chars{% if language == "zh" %}，使用中文{% endif %})
+
+**🚨🚨🚨 ALIASES & DENIED_ALIASES - MANDATORY FIELDS 🚨🚨🚨**
+
+**CRITICAL RULES (违反将导致提取失败):**
+
+1. **EVERY entity MUST have aliases field:**
+   - `"aliases": [...]` - REQUIRED, even if empty `[]`
+
+2. **ALIASES - 别名提取规则:**
 {% if language == "zh" %}
-    - **使用中文**
+   - 包含：昵称、全名、简称、别称、网名等
+   - 顺序：**第一个别名将作为用户的主显示名称（other_name），必须把最重要/最常用的名字放在第一位**
+   - 提取顺序：严格按照对话中首次出现的顺序
+   - 示例：
+     * "我叫张三，大家叫我小张" → aliases=["张三", "小张"]（张三是第一个，将成为 other_name）
+     * "大家叫我小李，我全名叫李明" → aliases=["小李", "李明"]（小李先出现，将成为 other_name）
+   - 空值：如果没有别名，使用 `[]`
+   - 重要：只提取本次对话中明确提到的别名，不要推测或添加未提及的名字
 {% else %}
-    - **In English**
+   - Include: nicknames, full names, abbreviations, alternative names
+   - Order: **The FIRST alias will be used as the user's primary display name (other_name). Put the most important/frequently used name FIRST**
+   - Extraction order: Strictly follow the order of first appearance in conversation
+   - Examples:
+     * "I'm John, people call me Johnny" → aliases=["John", "Johnny"] (John is first, will become other_name)
+     * "People call me Mike, my full name is Michael" → aliases=["Mike", "Michael"] (Mike appears first, will become other_name)
+   - Empty: If no aliases, use `[]`
+   - Important: Only extract aliases explicitly mentioned in current conversation, do not infer or add unmentioned names
 {% endif %}
-  * For non-semantic entities (`is_explicit_memory=false`), the example field can be empty
-- **Aliases Extraction:**
+
+
+
+3. **USER ENTITY SPECIAL HANDLING:**
 {% if language == "zh" %}
-  * 别名使用中文
+   - 用户实体的 name 字段：使用 "用户" 或 "我"
+   - 用户的真实姓名：放入 aliases
+   - **🚨 禁止将 "用户"、"我" 放入 aliases 中，aliases 只能包含用户的真实姓名、昵称等**
+   - 示例：
+     * "我叫李明" → name="用户", aliases=["李明"]
+     * ❌ 错误：aliases=["用户", "李明"]（"用户"不是真实姓名，禁止放入 aliases）
+     * ❌ 错误：aliases=["我", "李明"]（"我"不是真实姓名，禁止放入 aliases）
 {% else %}
-  * Aliases should be in English
+   - User entity name field: use "User" or "I"
+   - User's real name: put in aliases
+   - **🚨 NEVER put "User" or "I" in aliases. Aliases must only contain real names, nicknames, etc.**
+   - Examples:
+     * "I'm John" → name="User", aliases=["John"]
+     * ❌ Wrong: aliases=["User", "John"] ("User" is not a real name, FORBIDDEN in aliases)
+     * ❌ Wrong: aliases=["I", "John"] ("I" is not a real name, FORBIDDEN in aliases)
 {% endif %}
-  * Include common alternative names, abbreviations and full names
-  * If no aliases exist, use empty array: []
-- Exclude lengthy quotes, calendar dates, temporal ranges, and temporal expressions
-- For numeric values: extract as separate entities (instance_of: 'Numeric', name: units, numeric_value: value)
-  Example: £30 → name: 'GBP', numeric_value: 30, instance_of: 'Numeric'
+
+
+
+4. **ALIASES ORDER:**
+{% if language == "zh" %}
+   - 顺序优先级：按出现顺序，先出现的在前
+{% else %}
+   - Order priority: by appearance order, first mentioned comes first
+{% endif %}
+
+**EXAMPLES OF CORRECT EXTRACTION:**
+{% if language == "zh" %}
+- "我叫张三" → aliases=["张三"] （张三将成为 other_name）
+- "大家叫我小明，我全名叫李明" → aliases=["小明", "李明"] （小明先出现，将成为 other_name）
+- "我是李华，网名叫华仔" → aliases=["李华", "华仔"] （李华先出现，将成为 other_name）
+{% else %}
+- "I'm John" → aliases=["John"] (John will become other_name)
+- "People call me Mike, my full name is Michael" → aliases=["Mike", "Michael"] (Mike appears first, will become other_name)
+- "I'm John Smith, username JSmith" → aliases=["John Smith", "JSmith"] (John Smith appears first, will become other_name)
+{% endif %}
+  
+- Exclude lengthy quotes, dates, temporal expressions
+- Numeric values: extract as entities (instance_of: 'Numeric', name: units, numeric_value: value)
 
 **Triplet Extraction:**
-- Extract (subject, predicate, object) triplets where:
-  - Subject: main entity performing the action or being described
-  - Predicate: relationship between entities (e.g., 'is', 'works at', 'believes')
-  - Object: entity, value, or concept affected by the predicate
+- Extract (subject, predicate, object) where subject/object are entities, predicate is relationship
 {% if language == "zh" %}
-- subject_name 和 object_name 必须使用中文
+- subject_name 和 object_name 使用中文
 {% else %}
-- subject_name and object_name must be in English (translate if original is in another language)
+- subject_name and object_name in English
 {% endif %}
-- Exclude all temporal expressions from every field
-- Use ONLY the predicates listed in "Predicate Instructions" (uppercase English tokens)
-- Do NOT translate predicate tokens
-- Do NOT include `statement_id` field (assigned automatically)
-
-**When NOT to extract triplets:**
-- Non-propositional utterances (emotions, fillers, onomatopoeia)
-- No clear predicate from the given definitions applies
-- Standalone noun phrases or checklist items → extract as entities only
-- Do NOT invent generic predicates (e.g., "IS_DOING", "FEELS", "MENTIONS")
-
-**If no valid triplet exists:** Return triplets: [], extract entities if present, otherwise both arrays empty.
+- Use ONLY predicates from "Predicate Instructions" (uppercase tokens)
+- Exclude temporal expressions, do NOT include `statement_id`
+- **When NOT to extract:** emotions, fillers, no clear predicate, standalone nouns
+- **If no valid triplet:** Return triplets: []
 {%- if predicate_instructions -%}
 
 **Predicate Instructions:**
@@ -207,26 +239,44 @@ Output:
     {"entity_idx": 0, "name": "三脚架", "type": "Equipment", "description": "摄影器材配件", "example": "", "aliases": ["相机三脚架"], "is_explicit_memory": false}
   ]
 }
+
+**Example 4 (别名 - Chinese):** "我的名字是乐力齐，我的小名是齐齐，同事们都叫我小乐"
+Output:
+{
+  "triplets": [],
+  "entities": [
+    {"entity_idx": 0, "name": "用户", "type": "Person", "description": "用户本人", "example": "", "aliases": ["乐力齐", "齐齐", "小乐"], "is_explicit_memory": false}
+  ]
+}
+
+**Example 5 (别名顺序 - Chinese):** "我叫陈思远。对了，我的网名叫「远山」"
+Output:
+{
+  "triplets": [],
+  "entities": [
+    {"entity_idx": 0, "name": "用户", "type": "Person", "description": "用户本人", "example": "", "aliases": ["陈思远", "远山"], "is_explicit_memory": false}
+  ]
+}
+
+
 {% endif %}
 ===End of Examples===
 
 {% if ontology_types %}
-**⚠️ REMINDER: The examples above use generic type names for illustration only. You MUST use ONLY the predefined ontology type names from the "ALLOWED Type Names" list above. For example, use "PredictiveMaintenance" instead of "Concept", use "ProductionLine" instead of "Equipment", etc. Map each entity to the closest matching predefined type.**
+**⚠️ REMINDER: Examples use generic types for illustration. You MUST use predefined types from "ALLOWED Names" above.**
 {% endif %}
 
 ===Output Format===
 
 **JSON Requirements:**
-- Use only ASCII double quotes (") for JSON structure
-- Never use Chinese quotation marks ("") or Unicode quotes
-- Escape quotation marks in text with backslashes (\")
-- Ensure proper string closure and comma separation
-- No line breaks within JSON string values
+- Use ASCII double quotes ("), escape with \"
+- No Chinese quotes (""), no line breaks in strings
 {% if language == "zh" %}
-- **语言要求：实体名称（name）、描述（description）、示例（example）、subject_name、object_name 必须使用中文**
+- **语言：name、description、example、subject_name、object_name 使用中文**
 {% else %}
-- **Language Requirement: Entity names, descriptions, examples, subject_name, object_name must be in English**
-- **If the original text is in Chinese, translate all names to English**
+- **Language: names, descriptions, examples in English (translate if needed)**
 {% endif %}
+- **⚠️ ALIASES ORDER: preserve temporal order of appearance**
+- **🚨 MANDATORY FIELD: EVERY entity MUST include "aliases" field, even if empty array []**
 
 {{ json_schema }}

@@ -28,7 +28,7 @@ class MemoryAPIService:
     2. Maps end_user_id to end_user_id for memory operations
     3. Delegates to MemoryAgentService for actual memory read/write operations
     """
-    
+
     def __init__(self, db: Session):
         """Initialize MemoryAPIService.
         
@@ -36,11 +36,11 @@ class MemoryAPIService:
             db: SQLAlchemy database session
         """
         self.db = db
-    
+
     def validate_end_user(
-        self, 
-        end_user_id: str, 
-        workspace_id: uuid.UUID
+            self,
+            end_user_id: str,
+            workspace_id: uuid.UUID
     ) -> EndUser:
         """Validate that end_user exists and belongs to the workspace.
         
@@ -56,7 +56,7 @@ class MemoryAPIService:
             BusinessException: If end_user not in authorized workspace
         """
         logger.info(f"Validating end_user: {end_user_id} for workspace: {workspace_id}")
-        
+
         # Query end_user by ID
         try:
             end_user_uuid = uuid.UUID(end_user_id)
@@ -66,7 +66,7 @@ class MemoryAPIService:
                 message=f"Invalid end_user_id format: {end_user_id}",
                 code=BizCode.INVALID_PARAMETER
             )
-        
+
         end_user = self.db.query(EndUser).filter(EndUser.id == end_user_uuid).first()
 
         if not end_user:
@@ -75,13 +75,13 @@ class MemoryAPIService:
                 resource_type="EndUser",
                 resource_id=end_user_id
             )
-        
+
         # Verify end_user belongs to the workspace via App relationship
         app = self.db.query(App).filter(
             App.id == end_user.app_id,
             App.is_active.is_(True)
         ).first()
-        
+
         if not app:
             logger.warning(f"App not found for end_user: {end_user_id}")
             # raise ResourceNotFoundException(
@@ -99,7 +99,7 @@ class MemoryAPIService:
         #         message=f"End user does not belong to authorized workspace. end_user.workspace_id={end_user.workspace_id}, api_key.workspace_id={workspace_id}",
         #         code=BizCode.FORBIDDEN
         #     )
-        
+
         logger.info(f"End user {end_user_id} validated successfully")
         return end_user
 
@@ -125,13 +125,13 @@ class MemoryAPIService:
             logger.warning(f"Failed to update memory_config_id for end_user {end_user_id}: {e}")
 
     async def write_memory(
-        self,
-        workspace_id: uuid.UUID,
-        end_user_id: str,
-        message: str,
-        config_id: str,
-        storage_type: str = "neo4j",
-        user_rag_memory_id: Optional[str] = None,
+            self,
+            workspace_id: uuid.UUID,
+            end_user_id: str,
+            message: str,
+            config_id: str,
+            storage_type: str = "neo4j",
+            user_rag_memory_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Write memory with validation.
         
@@ -154,13 +154,13 @@ class MemoryAPIService:
             BusinessException: If end_user not in authorized workspace or write fails
         """
         logger.info(f"Writing memory for end_user: {end_user_id}, workspace: {workspace_id}")
-        
+
         # Validate end_user exists and belongs to workspace
         self.validate_end_user(end_user_id, workspace_id)
-        
+
         # Update end user's memory_config_id
         self._update_end_user_config(end_user_id, config_id)
-        
+
         try:
             # Delegate to MemoryAgentService
             # Convert string message to list[dict] format expected by MemoryAgentService
@@ -171,11 +171,11 @@ class MemoryAPIService:
                 config_id=config_id,
                 db=self.db,
                 storage_type=storage_type,
-                user_rag_memory_id=user_rag_memory_id or ""
+                user_rag_memory_id=user_rag_memory_id or "",
             )
-            
+
             logger.info(f"Memory write successful for end_user: {end_user_id}")
-            
+
             # result may be a string "success" or a dict with a "status" key
             # Preserve the full dict so callers don't silently lose extra fields
             # (e.g. error codes, metadata) returned by MemoryAgentService.
@@ -189,7 +189,7 @@ class MemoryAPIService:
                 "status": result if isinstance(result, str) else "success",
                 "end_user_id": end_user_id,
             }
-            
+
         except ConfigurationError as e:
             logger.error(f"Memory configuration error for end_user {end_user_id}: {e}")
             raise BusinessException(
@@ -204,16 +204,16 @@ class MemoryAPIService:
                 message=f"Memory write failed: {str(e)}",
                 code=BizCode.MEMORY_WRITE_FAILED
             )
-    
+
     async def read_memory(
-        self,
-        workspace_id: uuid.UUID,
-        end_user_id: str,
-        message: str,
-        search_switch: str = "0",
-        config_id: str = "",
-        storage_type: str = "neo4j",
-        user_rag_memory_id: Optional[str] = None,
+            self,
+            workspace_id: uuid.UUID,
+            end_user_id: str,
+            message: str,
+            search_switch: str = "0",
+            config_id: str = "",
+            storage_type: str = "neo4j",
+            user_rag_memory_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Read memory with validation.
         
@@ -237,14 +237,13 @@ class MemoryAPIService:
             BusinessException: If end_user not in authorized workspace or read fails
         """
         logger.info(f"Reading memory for end_user: {end_user_id}, workspace: {workspace_id}")
-        
+
         # Validate end_user exists and belongs to workspace
         self.validate_end_user(end_user_id, workspace_id)
-        
+
         # Update end user's memory_config_id
         self._update_end_user_config(end_user_id, config_id)
 
-        
         try:
             # Delegate to MemoryAgentService
             result = await MemoryAgentService().read_memory(
@@ -257,15 +256,15 @@ class MemoryAPIService:
                 storage_type=storage_type,
                 user_rag_memory_id=user_rag_memory_id or ""
             )
-            
+
             logger.info(f"Memory read successful for end_user: {end_user_id}")
-            
+
             return {
                 "answer": result.get("answer", ""),
                 "intermediate_outputs": result.get("intermediate_outputs", []),
                 "end_user_id": end_user_id
             }
-            
+
         except ConfigurationError as e:
             logger.error(f"Memory configuration error for end_user {end_user_id}: {e}")
             raise BusinessException(
@@ -281,9 +280,56 @@ class MemoryAPIService:
                 code=BizCode.MEMORY_READ_FAILED
             )
 
+    def create_end_user(
+            self,
+            workspace_id: uuid.UUID,
+            other_id: str,
+    ) -> Dict[str, Any]:
+        """Create or retrieve an end user for the workspace.
+        
+        Uses get_or_create semantics: if an end user with the same other_id
+        already exists in the workspace, returns the existing one.
+        
+        Args:
+            workspace_id: Workspace ID from API key authorization
+            other_id: External user identifier
+            
+        Returns:
+            Dict with id, other_id, other_name, and workspace_id
+            
+        Raises:
+            BusinessException: If creation fails
+        """
+        logger.info(f"Creating end user - other_id: {other_id}, workspace_id: {workspace_id}")
+
+        try:
+            from app.repositories.end_user_repository import EndUserRepository
+
+            end_user_repo = EndUserRepository(self.db)
+            end_user = end_user_repo.get_or_create_end_user(
+                app_id=None,
+                workspace_id=workspace_id,
+                other_id=other_id,
+            )
+
+            logger.info(f"End user ready: {end_user.id}")
+            return {
+                "id": str(end_user.id),
+                "other_id": end_user.other_id or "",
+                "other_name": end_user.other_name or "",
+                "workspace_id": str(end_user.workspace_id),
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to create end user for workspace {workspace_id}: {e}")
+            raise BusinessException(
+                message=f"Failed to create end user: {str(e)}",
+                code=BizCode.INTERNAL_ERROR
+            )
+
     def list_memory_configs(
-        self,
-        workspace_id: uuid.UUID,
+            self,
+            workspace_id: uuid.UUID,
     ) -> Dict[str, Any]:
         """List all memory configs for a workspace.
         

@@ -2,6 +2,7 @@
 # Author: Eternity
 # @Email: 1533512157@qq.com
 # @Time : 2026/2/10 13:33
+from app.core.workflow.engine.runtime_schema import ExecutionContext
 from app.core.workflow.engine.variable_pool import VariablePool
 
 
@@ -9,6 +10,7 @@ class WorkflowResultBuilder:
     def build_final_output(
             self,
             result: dict,
+            execution_context: ExecutionContext,
             variable_pool: VariablePool,
             elapsed_time: float,
             final_output: str,
@@ -26,6 +28,8 @@ class WorkflowResultBuilder:
                     - "node_outputs" (dict): Outputs of executed nodes.
                     - "messages" (list): Conversation messages exchanged during execution.
                     - "error" (str, optional): Error message if any node failed.
+            execution_context (ExecutionContext): The execution context containing metadata like
+                execution ID, workspace ID, and user ID.)
             variable_pool (VariablePool): Variable Pool
             elapsed_time (float): Total execution time in seconds.
             final_output (Any): The aggregated or final output content of the workflow
@@ -48,18 +52,23 @@ class WorkflowResultBuilder:
         """
         node_outputs = result.get("node_outputs", {})
         token_usage = self.aggregate_token_usage(node_outputs)
-        conversation_id = variable_pool.get_value("sys.conversation_id")
+        conversation_vars = {}
+        sys_vars = {}
+
+        if variable_pool:
+            conversation_vars = variable_pool.get_all_conversation_vars()
+            sys_vars = variable_pool.get_all_system_vars()
 
         return {
             "status": "completed" if success else "failed",
             "output": final_output,
             "variables": {
-                "conv": variable_pool.get_all_conversation_vars(),
-                "sys": variable_pool.get_all_system_vars()
+                "conv": conversation_vars,
+                "sys": sys_vars
             },
             "node_outputs": node_outputs,
             "messages": result.get("messages", []),
-            "conversation_id": conversation_id,
+            "conversation_id": execution_context.conversation_id,
             "elapsed_time": elapsed_time,
             "token_usage": token_usage,
             "error": result.get("error"),

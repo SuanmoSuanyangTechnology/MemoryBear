@@ -9,10 +9,10 @@ from app.core.workflow.nodes.enums import NodeType
 
 
 def merge_activate_state(x, y):
-    return {
-        k: x.get(k, False) or y.get(k, False)
-        for k in set(x) | set(y)
-    }
+    merged = dict(x)
+    for k, v in y.items():
+        merged[k] = merged.get(k, False) or v
+    return merged
 
 
 def merge_looping_state(x, y):
@@ -33,6 +33,8 @@ class WorkflowState(dict):
         "workspace_id",
         "user_id",
         "activate",
+        "memory_storage_type",
+        "user_rag_memory_id"
     })
     __optional_keys__ = frozenset({
         "error",
@@ -62,6 +64,9 @@ class WorkflowState(dict):
     # node activate status
     activate: Annotated[dict[str, bool], merge_activate_state]
 
+    memory_storage_type: str
+    user_rag_memory_id: str
+
 
 class WorkflowStateManager:
     def create_initial_state(
@@ -85,7 +90,9 @@ class WorkflowStateManager:
             looping=0,
             activate={
                 start_node_id: True
-            }
+            },
+            memory_storage_type=execution_context.memory_storage_type,
+            user_rag_memory_id=execution_context.user_rag_memory_id
         )
 
     @staticmethod

@@ -196,6 +196,13 @@ class CitationConfig(BaseModel):
     enabled: bool = Field(default=False)
 
 
+class Citation(BaseModel):
+    document_id: str
+    file_name: str
+    knowledge_id: str
+    score: float
+
+
 class WebSearchConfig(BaseModel):
     """联网搜索配置"""
     enabled: bool = Field(default=False)
@@ -269,7 +276,7 @@ class AgentConfigCreate(BaseModel):
 
     # 记忆配置
     memory: MemoryConfig = Field(
-        default_factory=lambda: MemoryConfig(enabled=True),
+        default_factory=lambda: MemoryConfig(enabled=False),
         description="对话历史记忆配置"
     )
 

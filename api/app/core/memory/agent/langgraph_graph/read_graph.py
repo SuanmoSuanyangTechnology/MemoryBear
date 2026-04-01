@@ -15,7 +15,7 @@ from app.core.memory.agent.langgraph_graph.nodes.problem_nodes import (
     Problem_Extension,
 )
 from app.core.memory.agent.langgraph_graph.nodes.retrieve_nodes import (
-    retrieve,
+    retrieve_nodes,
 )
 from app.core.memory.agent.langgraph_graph.nodes.summary_nodes import (
     Input_Summary,
@@ -53,8 +53,8 @@ async def make_read_graph():
         workflow.add_node("Split_The_Problem", Split_The_Problem)
         workflow.add_node("Problem_Extension", Problem_Extension)
         workflow.add_node("Input_Summary", Input_Summary)
-        # workflow.add_node("Retrieve", retrieve_nodes)
-        workflow.add_node("Retrieve", retrieve)
+        workflow.add_node("Retrieve", retrieve_nodes)
+        # workflow.add_node("Retrieve", retrieve)
         workflow.add_node("Verify", Verify)
         workflow.add_node("Retrieve_Summary", Retrieve_Summary)
         workflow.add_node("Summary", Summary)

@@ -1,5 +1,6 @@
 import os
 import subprocess
+from app.repositories.neo4j.create_indexes import create_all_indexes
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, APIRouter
@@ -60,8 +61,10 @@ async def lifespan(app: FastAPI):
             logger.warning(f"加载预定义模型时出错: {str(e)}")
     else:
         logger.info("预定义模型加载已禁用 (LOAD_MODEL=false)")
-
+    await create_all_indexes()
     logger.info("应用程序启动完成")
+
+
     yield
     # 应用关闭事件
     logger.info("应用程序正在关闭")

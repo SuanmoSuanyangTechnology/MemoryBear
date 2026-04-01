@@ -116,13 +116,13 @@ const History: React.FC = () => {
               <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5">{formatDateTime(item.created_at, 'YYYY/MM/DD HH:mm')}</div>
 
               <Space size={8}>
-                <div className="rb:size-4.5 rb:bg-cover rb:bg-[url('src/assets/images/prompt/eye.svg')] rb:hover:bg-[url('src/assets/images/prompt/eye_bg.svg')]"
+                <div className="rb:size-4.5 rb:bg-cover rb:bg-[url('@/assets/images/prompt/eye.svg')] rb:hover:bg-[url('@/assets/images/prompt/eye_bg.svg')]"
                   onClick={() => handleClick('detail', item)}
                 ></div>
-                <div className="rb:size-4.5 rb:bg-cover rb:bg-[url('src/assets/images/prompt/edit.svg')] rb:hover:bg-[url('src/assets/images/prompt/edit_bg.svg')]"
+                <div className="rb:size-4.5 rb:bg-cover rb:bg-[url('@/assets/images/prompt/edit.svg')] rb:hover:bg-[url('@/assets/images/prompt/edit_bg.svg')]"
                   onClick={() => handleClick('edit', item)}
                 ></div>
-                <div className="rb:size-4.5 rb:bg-cover rb:bg-[url('src/assets/images/prompt/delete.svg')] rb:hover:bg-[url('src/assets/images/prompt/delete_hover.svg')]"
+                <div className="rb:size-4.5 rb:bg-cover rb:bg-[url('@/assets/images/prompt/delete.svg')] rb:hover:bg-[url('@/assets/images/prompt/delete_hover.svg')]"
                   onClick={() => handleClick('delete', item)}
                 ></div>
               </Space>

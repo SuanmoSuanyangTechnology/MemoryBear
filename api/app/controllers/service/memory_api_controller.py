@@ -6,6 +6,8 @@ from app.core.response_utils import success
 from app.db import get_db
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_api_schema import (
+    CreateEndUserRequest,
+    CreateEndUserResponse,
     ListConfigsResponse,
     MemoryReadRequest,
     MemoryReadResponse,
@@ -113,3 +115,31 @@ async def list_memory_configs(
 
     logger.info(f"Listed {result['total']} configs for workspace: {api_key_auth.workspace_id}")
     return success(data=ListConfigsResponse(**result).model_dump(), msg="Configs listed successfully")
+
+
+@router.post("/end_users")
+@require_api_key(scopes=["memory"])
+async def create_end_user(
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Create an end user.
+    
+    Creates a new end user for the authorized workspace.
+    If an end user with the same other_id already exists, returns the existing one.
+    """
+    body = await request.json()
+    payload = CreateEndUserRequest(**body)
+    logger.info(f"Create end user request - other_id: {payload.other_id}, workspace_id: {api_key_auth.workspace_id}")
+
+    memory_api_service = MemoryAPIService(db)
+
+    result = memory_api_service.create_end_user(
+        workspace_id=api_key_auth.workspace_id,
+        other_id=payload.other_id,
+    )
+
+    logger.info(f"End user ready: {result['id']}")
+    return success(data=CreateEndUserResponse(**result).model_dump(), msg="End user created successfully")

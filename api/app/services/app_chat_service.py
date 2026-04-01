@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.agent.langchain_agent import LangChainAgent
 from app.core.logging_config import get_business_logger
+from app.core.memory.agent.langgraph_graph.write_graph import write_long_term
 from app.db import get_db
 from app.models import MultiAgentConfig, AgentConfig, ModelType
 from app.models import WorkflowConfig
@@ -20,11 +21,11 @@ from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 from app.services.conversation_service import ConversationService
 from app.services.draft_run_service import AgentRunService
+from app.services.memory_agent_service import get_end_user_connected_config
 from app.services.model_service import ModelApiKeyService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
 from app.services.multimodal_service import MultimodalService
 from app.services.workflow_service import WorkflowService
-from app.schemas import FileType
 
 logger = get_business_logger()
 
@@ -43,18 +44,17 @@ class AppChatService:
             message: str,
             conversation_id: uuid.UUID,
             config: AgentConfig,
-            user_id: Optional[str] = None,
+            files: list[FileInput],
+            user_id: str,
             variables: Optional[Dict[str, Any]] = None,
             web_search: bool = False,
             memory: bool = True,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
-            workspace_id: Optional[str] = None,
-            files: Optional[List[FileInput]] = None
+            workspace_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """聊天（非流式）"""
         start_time = time.time()
-        config_id = None
 
         # 应用 features 配置
         features_config: dict = config.features or {}
@@ -93,7 +93,9 @@ class AppChatService:
         tools.extend(skill_tools)
         if skill_prompts:
             system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-        tools.extend(self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval, user_id))
+        kb_tools, citations_collector = self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval,
+                                                                                           user_id)
+        tools.extend(kb_tools)
         memory_flag = False
         if memory:
             memory_tools, memory_flag = self.agent_service.load_memory_config(
@@ -128,7 +130,7 @@ class AppChatService:
             model_type=ModelType.LLM
         )
 
-        # 加载历史消息
+        # 加载历史消息（包含开场白）
         history = await self.conversation_service.get_conversation_history(
             conversation_id=conversation_id,
             max_history=10,
@@ -136,11 +138,30 @@ class AppChatService:
             current_is_omni=api_key_obj.is_omni
         )
 
+        # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
+        is_new_conversation = len(history) == 0
+        if is_new_conversation:
+            opening, suggested_questions = self.agent_service._get_opening_statement(features_config, True, variables)
+            if opening:
+                self.conversation_service.add_message(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=opening,
+                    meta_data={"suggested_questions": suggested_questions}
+                )
+                # 重新加载历史（包含刚写入的开场白）
+                history = await self.conversation_service.get_conversation_history(
+                    conversation_id=conversation_id,
+                    max_history=10,
+                    current_provider=api_key_obj.provider,
+                    current_is_omni=api_key_obj.is_omni
+                )
+
         # 处理多模态文件
         processed_files = None
         if files:
             multimodal_service = MultimodalService(self.db, model_info)
-            processed_files = await multimodal_service.process_files(user_id, files)
+            processed_files = await multimodal_service.process_files(files)
             logger.info(f"处理了 {len(processed_files)} 个文件")
 
         # 调用 Agent（支持多模态）
@@ -148,11 +169,6 @@ class AppChatService:
             message=message,
             history=history,
             context=None,
-            end_user_id=user_id,
-            storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
-            config_id=config_id,
-            memory_flag=memory_flag,
             files=processed_files  # 传递处理后的文件
         )
 
@@ -177,6 +193,9 @@ class AppChatService:
             tenant_id=tenant_id, workspace_id=workspace_id
         )
 
+        # 过滤 citations（只调用一次）
+        filtered_citations = self.agent_service._filter_citations(features_config, citations_collector)
+
         # 构建用户消息内容（含多模态文件）
         human_meta = {
             "files": [],
@@ -185,7 +204,8 @@ class AppChatService:
         assistant_meta = {
             "model": api_key_obj.model_name,
             "usage": result.get("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}),
-            "audio_url": None
+            "audio_url": None,
+            "citations": filtered_citations
         }
         if files:
             for f in files:
@@ -205,6 +225,21 @@ class AppChatService:
         # 保存消息
         if audio_url:
             assistant_meta["audio_url"] = audio_url
+        if memory_flag:
+            connected_config = get_end_user_connected_config(user_id, self.db)
+            memory_config_id: str = connected_config.get("memory_config_id")
+            messages = [
+                {"role": "user", "content": message, "files": [file.model_dump() for file in files]},
+                {"role": "assistant", "content": result["content"]}
+            ]
+            if memory_config_id:
+                await write_long_term(
+                    storage_type,
+                    user_id,
+                    messages,
+                    user_rag_memory_id,
+                    memory_config_id
+                )
         self.conversation_service.add_message(
             conversation_id=conversation_id,
             role="user",
@@ -230,7 +265,7 @@ class AppChatService:
             }),
             "elapsed_time": elapsed_time,
             "suggested_questions": suggested_questions,
-            "citations": self.agent_service._filter_citations(features_config, result.get("citations", [])),
+            "citations": filtered_citations,
             "audio_url": audio_url,
             "audio_status": "pending"
         }
@@ -240,20 +275,19 @@ class AppChatService:
             message: str,
             conversation_id: uuid.UUID,
             config: AgentConfig,
+            files: list[FileInput],
             user_id: Optional[str] = None,
             variables: Optional[Dict[str, Any]] = None,
             web_search: bool = False,
             memory: bool = True,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
-            workspace_id: Optional[str] = None,
-            files: Optional[List[FileInput]] = None
+            workspace_id: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """聊天（流式）"""
 
         try:
             start_time = time.time()
-            config_id = None
             message_id = uuid.uuid4()
 
             # 应用 features 配置
@@ -295,7 +329,9 @@ class AppChatService:
             tools.extend(skill_tools)
             if skill_prompts:
                 system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-            tools.extend(self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval, user_id))
+            kb_tools, citations_collector = self.agent_service.load_knowledge_retrieval_config(
+                config.knowledge_retrieval, user_id)
+            tools.extend(kb_tools)
             # 添加长期记忆工具
             memory_flag = False
             if memory:
@@ -331,7 +367,7 @@ class AppChatService:
                 model_type=ModelType.LLM
             )
 
-            # 加载历史消息
+            # 加载历史消息（包含开场白）
             history = await self.conversation_service.get_conversation_history(
                 conversation_id=conversation_id,
                 max_history=10,
@@ -339,11 +375,30 @@ class AppChatService:
                 current_is_omni=api_key_obj.is_omni
             )
 
+            # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
+            is_new_conversation = len(history) == 0
+            if is_new_conversation:
+                opening, suggested_questions = self.agent_service._get_opening_statement(features_config, True, variables)
+                if opening:
+                    self.conversation_service.add_message(
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=opening,
+                        meta_data={"suggested_questions": suggested_questions}
+                    )
+                    # 重新加载历史（包含刚写入的开场白）
+                    history = await self.conversation_service.get_conversation_history(
+                        conversation_id=conversation_id,
+                        max_history=10,
+                        current_provider=api_key_obj.provider,
+                        current_is_omni=api_key_obj.is_omni
+                    )
+
             # 处理多模态文件
             processed_files = None
             if files:
                 multimodal_service = MultimodalService(self.db, model_info)
-                processed_files = await multimodal_service.process_files(user_id, files)
+                processed_files = await multimodal_service.process_files(files)
                 logger.info(f"处理了 {len(processed_files)} 个文件")
 
             # 流式调用 Agent（支持多模态），同时并行启动 TTS
@@ -367,11 +422,6 @@ class AppChatService:
                     message=message,
                     history=history,
                     context=None,
-                    end_user_id=user_id,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id,
-                    config_id=config_id,
-                    memory_flag=memory_flag,
                     files=processed_files
             ):
                 if isinstance(chunk, int):
@@ -409,17 +459,20 @@ class AppChatService:
                     logger.warning(f"TTS任务异常: {e}")
                     audio_status = "failed"
             end_data["audio_status"] = audio_status if stream_audio_url else None
-            end_data["citations"] = self.agent_service._filter_citations(features_config, [])
+            # 过滤 citations（只调用一次）
+            filtered_citations = self.agent_service._filter_citations(features_config, citations_collector)
+            end_data["citations"] = filtered_citations
 
             # 保存消息
             human_meta = {
-                "files":[],
+                "files": [],
                 "history_files": {}
             }
             assistant_meta = {
                 "model": api_key_obj.model_name,
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
-                "audio_url": None
+                "audio_url": None,
+                "citations": filtered_citations
             }
 
             if files:
@@ -437,6 +490,22 @@ class AppChatService:
 
             if stream_audio_url:
                 assistant_meta["audio_url"] = stream_audio_url
+
+            if memory_flag:
+                connected_config = get_end_user_connected_config(user_id, self.db)
+                memory_config_id: str = connected_config.get("memory_config_id")
+                messages = [
+                    {"role": "user", "content": message, "files": [file.model_dump() for file in files]},
+                    {"role": "assistant", "content": full_content}
+                ]
+                if memory_config_id:
+                    await write_long_term(
+                        storage_type,
+                        user_id,
+                        messages,
+                        user_rag_memory_id,
+                        memory_config_id
+                    )
             self.conversation_service.add_message(
                 conversation_id=conversation_id,
                 role="user",
@@ -570,7 +639,6 @@ class AppChatService:
 
             # 2. 创建编排器
             orchestrator = MultiAgentOrchestrator(self.db, config)
-
 
             # 3. 流式执行任务
             async for event in orchestrator.execute_stream(

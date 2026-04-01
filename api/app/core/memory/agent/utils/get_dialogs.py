@@ -11,7 +11,7 @@ async def get_chunked_dialogs(
         chunker_strategy: str = "RecursiveChunker",
         end_user_id: str = "group_1",
         messages: list = None,
-        ref_id: str = "wyl_20251027",
+        ref_id: str = "",
         config_id: str = None
 ) -> List[DialogData]:
     """Generate chunks from structured messages using the specified chunker strategy.
@@ -40,12 +40,13 @@ async def get_chunked_dialogs(
 
         role = msg['role']
         content = msg['content']
+        files = msg.get("file_content", [])
 
         if role not in ['user', 'assistant']:
             raise ValueError(f"Message {idx} role must be 'user' or 'assistant', got: {role}")
 
         if content.strip():
-            conversation_messages.append(ConversationMessage(role=role, msg=content.strip()))
+            conversation_messages.append(ConversationMessage(role=role, msg=content.strip(), files=files))
 
     if not conversation_messages:
         raise ValueError("Message list cannot be empty after filtering")

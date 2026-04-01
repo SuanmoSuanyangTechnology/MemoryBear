@@ -1,11 +1,12 @@
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from sqlalchemy import desc, nullslast, or_, and_, cast, String
+from typing import List, Optional, Dict, Any
 import uuid
 from fastapi import HTTPException
 
 from app.models.user_model import User
 from app.models.app_model import App
-from app.models.end_user_model import EndUser
+from app.models.end_user_model import EndUser, EndUser as EndUserModel
 from app.models.memory_increment_model import MemoryIncrement
 
 from app.repositories import (
@@ -49,48 +50,123 @@ def get_current_workspace_type(
 
 
 def get_workspace_end_users(
-    db: Session, 
-    workspace_id: uuid.UUID, 
+    db: Session,
+    workspace_id: uuid.UUID,
     current_user: User
 ) -> List[EndUser]:
     """获取工作空间的所有宿主（优化版本：减少数据库查询次数）
-    
     返回结果按 created_at 从新到旧排序（NULL 值排在最后）
     """
     business_logger.info(f"获取工作空间宿主列表: workspace_id={workspace_id}, 操作者: {current_user.username}")
-    
-    try:        
+
+    try:
         # 查询应用（ORM）
         apps_orm = app_repository.get_apps_by_workspace_id(db, workspace_id)
-        
+
         if not apps_orm:
             business_logger.info("工作空间下没有应用")
             return []
-        
+
         # 提取所有 app_id
         # app_ids = [app.id for app in apps_orm]
-        
         # 批量查询所有 end_users（一次查询而非循环查询）
         # 按 created_at 降序排序，NULL 值排在最后；id 作为次级排序键保证确定性
-        from app.models.end_user_model import EndUser as EndUserModel
-        from sqlalchemy import desc, nullslast
         end_users_orm = db.query(EndUserModel).filter(
             EndUserModel.workspace_id == workspace_id
         ).order_by(
             nullslast(desc(EndUserModel.created_at)),
             desc(EndUserModel.id)
         ).all()
-        
+
         # 转换为 Pydantic 模型（只在需要时转换）
         end_users = [EndUserSchema.model_validate(eu) for eu in end_users_orm]
-        
+
         business_logger.info(f"成功获取 {len(end_users)} 个宿主记录")
         return end_users
-        
+
     except HTTPException:
         raise
     except Exception as e:
         business_logger.error(f"获取工作空间宿主列表失败: workspace_id={workspace_id} - {str(e)}")
+        raise
+
+
+def get_workspace_end_users_paginated(
+    db: Session,
+    workspace_id: uuid.UUID,
+    current_user: User,
+    page: int,
+    pagesize: int,
+    keyword: Optional[str] = None
+) -> Dict[str, Any]:
+    """获取工作空间的宿主列表（分页版本，支持模糊搜索）
+
+    返回结果按 created_at 从新到旧排序（NULL 值排在最后）
+    支持通过 keyword 参数同时模糊搜索 other_name 和 id 字段
+
+    Args:
+        db: 数据库会话
+        workspace_id: 工作空间ID
+        current_user: 当前用户
+        page: 页码（从1开始）
+        pagesize: 每页数量
+        keyword: 搜索关键词（可选，同时模糊匹配 other_name 和 id）
+
+    Returns:
+        dict: 包含 items（宿主列表）和 total（总记录数）的字典
+    """
+    business_logger.info(f"获取工作空间宿主列表（分页）: workspace_id={workspace_id}, keyword={keyword}, page={page}, pagesize={pagesize}, 操作者: {current_user.username}")
+
+    try:
+        # 构建基础查询
+        base_query = db.query(EndUserModel).filter(
+            EndUserModel.workspace_id == workspace_id
+        )
+
+        # 构建搜索条件（过滤空字符串和None）
+        keyword = keyword.strip() if keyword else None
+
+        if keyword:
+            keyword_pattern = f"%{keyword}%"
+            # other_name 匹配始终生效；id 匹配仅对 other_name 为空的记录生效
+            base_query = base_query.filter(
+                or_(
+                    EndUserModel.other_name.ilike(keyword_pattern),
+                    and_(
+                        or_(
+                            EndUserModel.other_name.is_(None),
+                            EndUserModel.other_name == "",
+                        ),
+                        cast(EndUserModel.id, String).ilike(keyword_pattern),
+                    ),
+                )
+            )
+            business_logger.info(f"应用模糊搜索: keyword={keyword}（匹配 other_name；other_name 为空时匹配 id）")
+
+        # 获取总记录数
+        total = base_query.count()
+
+        if total == 0:
+            business_logger.info("工作空间下没有宿主")
+            return {"items": [], "total": 0}
+
+        # 分页查询
+        # 按 created_at 降序排序，NULL 值排在最后；id 作为次级排序键保证确定性
+        end_users_orm = base_query.order_by(
+            nullslast(desc(EndUserModel.created_at)),
+            desc(EndUserModel.id)
+        ).offset((page - 1) * pagesize).limit(pagesize).all()
+
+        # 转换为 Pydantic 模型
+        end_users = [EndUserSchema.model_validate(eu) for eu in end_users_orm]
+
+        business_logger.info(f"成功获取 {len(end_users)} 个宿主记录，总计 {total} 条")
+        return {"items": end_users, "total": total}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        business_logger.error(f"获取工作空间宿主列表（分页）失败: workspace_id={workspace_id} - {str(e)}")
         raise
 
 
@@ -638,7 +714,24 @@ def get_rag_content(
                 business_logger.error(f"获取文档 {document.id} 的chunks失败: {str(e)}")
                 continue
         
-        # 4. 返回结果
+        # 4. 将所有 page_content 拼接后按角色分割为对话列表
+        merged_text = "\n".join(page_contents)
+        conversations = []
+        if merged_text.strip():
+            import re
+            # 在任意位置匹配 "user:" 或 "assistant:"，不限于行首
+            parts = re.split(r'(user|assistant):', merged_text)
+            # parts 结构: ['', 'user', ' content...', 'assistant', ' content...', ...]
+            i = 1
+            while i < len(parts) - 1:
+                role = parts[i].strip()
+                content = parts[i + 1].strip()
+                # 将 content 中的 \n 还原为真实换行
+                content = content.replace("\\n", "\n")
+                if role in ("user", "assistant") and content:
+                    conversations.append({"role": role, "content": content})
+                i += 2
+
         result = {
             "page": {
                 "page": page,
@@ -646,10 +739,10 @@ def get_rag_content(
                 "total": global_total,
                 "hasnext": offset_end < global_total,
             },
-            "items": page_contents
+            "items": conversations
         }
         
-        business_logger.info(f"成功获取RAG内容: total={global_total}, page={page}, 返回={len(page_contents)} 条")
+        business_logger.info(f"成功获取RAG内容: total={global_total}, page={page}, 返回={len(conversations)} 条对话")
         return result
         
     except Exception as e:

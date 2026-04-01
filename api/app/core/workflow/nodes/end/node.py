@@ -36,8 +36,6 @@ class EndNode(BaseNode):
         Returns:
             最终输出字符串
         """
-        logger.info(f"节点 {self.node_id} (End) 开始执行")
-
         # 获取配置的输出模板
         output_template = self.config.get("output")
 
@@ -46,11 +44,4 @@ class EndNode(BaseNode):
             output = self._render_template(output_template, variable_pool, strict=False)
         else:
             output = ""
-
-        # 统计信息（用于日志）
-        node_outputs = state.get("node_outputs", {})
-        total_nodes = len(node_outputs)
-
-        logger.info(f"节点 {self.node_id} (End) 执行完成，共执行 {total_nodes} 个节点")
-
         return output

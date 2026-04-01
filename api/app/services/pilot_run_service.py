@@ -297,9 +297,12 @@ async def run_pilot_extraction(
             chunk_nodes,
             statement_nodes,
             entity_nodes,
+            _,
             statement_chunk_edges,
             statement_entity_edges,
             entity_edges,
+            _,
+            _
         ) = extraction_result
 
         log_time("Extraction Pipeline", time.time() - step_start, log_file)
