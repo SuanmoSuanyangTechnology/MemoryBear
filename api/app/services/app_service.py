@@ -757,6 +757,17 @@ class AppService:
 
         # 逻辑删除应用
         app.is_active = False
+        
+        # 更新 app_shares 表中该应用的所有共享记录为失效状态
+        from app.models import AppShare
+        from sqlalchemy import update as sa_update
+        self.db.execute(
+            sa_update(AppShare).where(
+                AppShare.source_app_id == app_id,
+                AppShare.is_active.is_(True)
+            ).values(is_active=False)
+        )
+        
         self.db.commit()
 
         logger.info(
