@@ -7,7 +7,8 @@
 import { type FC, useEffect, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Skeleton, Row, Col, Flex } from 'antd'
+import { Skeleton, Row, Col, Flex, DatePicker, Pagination } from 'antd'
+import type { Dayjs } from 'dayjs'
 import * as echarts from 'echarts'
 import 'echarts-wordcloud'
 
@@ -41,6 +42,7 @@ export interface SemanticMemory {
 
 /** Combined API response containing both memory categories. */
 interface Data {
+  total: number;
   episodic_memories: EpisodicMemory[];
   semantic_memories: SemanticMemory[]
 }
@@ -71,7 +73,19 @@ const ExplicitDetail: FC = () => {
   /** Keeps a stable reference to the ECharts instance for cleanup. */
   const chartInstance = useRef<echarts.ECharts | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
-  const [data, setData] = useState<Data>({ episodic_memories: [], semantic_memories: [] })
+  const [data, setData] = useState<Data>({ episodic_memories: [], semantic_memories: [], total: 0 })
+  const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null)
+  const [page, setPage] = useState(1)
+  const PAGE_SIZE = 10
+
+  const filteredEpisodic = dateRange?.[0] && dateRange?.[1]
+    ? data.episodic_memories.filter(item => {
+        const ts = item.created_at
+        return ts >= dateRange[0]!.startOf('day').valueOf() && ts <= dateRange[1]!.endOf('day').valueOf()
+      })
+    : data.episodic_memories
+
+  const pagedEpisodic = filteredEpisodic.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   /* Fetch data whenever the route user ID changes. */
   useEffect(() => {
@@ -131,35 +145,77 @@ const ExplicitDetail: FC = () => {
     })
     return () => { chartInstance.current?.dispose(); chartInstance.current = null }
   }, [data.semantic_memories])
+
+  /* Redraw the word cloud when the container dimensions change. */
+  useEffect(() => {
+    const target = wordCloudRef.current?.parentElement
+    if (!target) return
+    const observer = new ResizeObserver(() => {
+      if (!chartInstance.current) return
+      chartInstance.current.resize()
+      chartInstance.current.setOption({ series: [{ type: 'wordCloud' }] })
+    })
+    observer.observe(target)
+    return () => {
+      observer.disconnect()
+      chartInstance.current?.dispose();
+      chartInstance.current = null
+    }
+  }, [])
+
   return (
     <Row gutter={12} className="rb:h-full!">
       <Col span={12} className="rb:h-full!">
         <RbCard
-          title={t('explicitDetail.episodic_memories')}
+          title={() => <span className="rb:font-[MiSans-Bold] rb:font-bold">{t('explicitDetail.episodic_memories')}</span>}
+          extra={<span className="rb:text-[#5B6167]">{t('table.totalRecords', { total: data.total })}</span>}
           headerType="borderless"
-          headerClassName="rb:min-h-[50px]! rb:font-[MiSans-Bold] rb:font-bold"
-          bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-50px)] rb:overflow-y-auto!"
+          headerClassName="rb:min-h-[50px]!"
+          bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-50px)]"
           className="rb:h-full!"
         >
           {loading ?
             <Skeleton active />
-            : data.episodic_memories?.length > 0 ? (
-              <Flex gap={12} vertical>
-                {data.episodic_memories.map(item => (
-                  <div
-                    key={item.id}
-                    className="rb:cursor-pointer rb:bg-[#F6F6F6] rb:rounded-xl rb:pt-2.5 rb:px-3 rb:pb-3"
-                    onClick={() => handleView(item)}
-                  >
-                    <Flex align="center" justify="space-between">
-                      <span className="rb:font-medium rb:pl-1">{item.title}</span>
-                      <div className="rb:textt-[#5B6167] rb:leading-4.25 rb:text-[12px]">{formatDateTime(item.created_at)}</div>
-                    </Flex>
-                    <div className="rb:bg-white rb:rounded-lg rb:py-2.5 rb:px-3 rb:mt-2.5 rb:leading-5">{item.content}</div>
-                  </div>
-                ))}
+            : (
+              <Flex gap={12} vertical className="rb:h-full!">
+                <Row gutter={12}>
+                  <Col span={12}>
+                    <DatePicker.RangePicker
+                      value={dateRange}
+                      onChange={(val) => { setDateRange(val); setPage(1) }}
+                      allowClear
+                    />
+                  </Col>
+                </Row>
+                <div className="rb:max-h-[calc(100%-92px)] rb:overflow-y-auto">
+                  {pagedEpisodic.length > 0 ? pagedEpisodic.map(item => (
+                    <div
+                      key={item.id}
+                      className="rb:cursor-pointer rb:bg-[#F6F6F6] rb:rounded-xl rb:pt-2.5 rb:px-3 rb:pb-3"
+                      onClick={() => handleView(item)}
+                    >
+                      <Flex align="center" justify="space-between">
+                        <span className="rb:font-medium rb:pl-1">{item.title}</span>
+                        <div className="rb:text-[#5B6167] rb:leading-4.25 rb:text-[12px]">{formatDateTime(item.created_at)}</div>
+                      </Flex>
+                      <div className="rb:bg-white rb:rounded-lg rb:py-2.5 rb:px-3 rb:mt-2.5 rb:leading-5">{item.content}</div>
+                    </div>
+                  )) : <Empty />}
+                </div>
+                {filteredEpisodic.length > PAGE_SIZE && (
+                  <Pagination
+                    current={page}
+                    pageSize={PAGE_SIZE}
+                    total={filteredEpisodic.length}
+                    onChange={setPage}
+                    size="small"
+                    showSizeChanger={true}
+                    showQuickJumper={true}
+                    className="rb:mt-1!"
+                  />
+                )}
               </Flex>
-            ) : <Empty />
+            )
           }
         </RbCard>
       </Col>
