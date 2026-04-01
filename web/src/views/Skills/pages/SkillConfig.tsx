@@ -7,17 +7,16 @@
 import { type FC, useEffect, useRef, useState } from "react";
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Form, Input, Button, Space, Select, App } from 'antd'
+import { Form, Input, Button, Space, Select, App, Flex } from 'antd'
 
 import Card from '@/views/ApplicationConfig/components/Card'
-import aiPrompt from '@/assets/images/application/aiPrompt.png'
 import AiPromptModal from '@/views/ApplicationConfig/components/AiPromptModal'
 import ToolList from '../components/ToolList/ToolList'
 import type { AiPromptModalRef } from '@/views/ApplicationConfig/types'
-import exitIcon from '@/assets/images/knowledgeBase/exit.png';
 import type { SkillFormData } from '../types'
 import { getSkillDetail, createSkill, updateSkill } from '@/api/skill'
 import { stringRegExp } from '@/utils/validator';
+import PageHeader from '@/components/Layout/PageHeader'
 
 /**
  * Skill Configuration Page Component
@@ -43,6 +42,7 @@ const SkillConfig: FC = () => {
   const { message } = App.useApp()
   const [loading, setLoading] = useState(false)
   const [form] = Form.useForm<SkillFormData>();
+  const [data, setData] = useState<SkillFormData | null>(null)
 
   /**
    * Effect: Load skill data if editing existing skill
@@ -70,6 +70,7 @@ const SkillConfig: FC = () => {
     getSkillDetail(id)
       .then(res => {
         form.setFieldsValue(res as SkillFormData)
+        setData(res as SkillFormData)
       })
       .finally(() => {
         setLoading(false)
@@ -131,93 +132,103 @@ const SkillConfig: FC = () => {
   }
 
   return (
-    <div className="rb:w-250 rb:mt-5 rb:pb-5 rb:mx-auto">
-      {/* Back button */}
-      <div className='rb:flex rb:items-center rb:gap-2 rb:mb-4 rb:cursor-pointer' onClick={handleBack}>
-        <img src={exitIcon} alt='exit' className='rb:w-4 rb:h-4' />
-        <span className='rb:text-gray-500 rb:text-sm'>{t('common.exit')}</span>
-      </div>
-      
-      <Form form={form} layout="vertical">
-        <Space size={16} direction="vertical" className="rb:w-full">
-          {/* Manifest Section: Basic skill information */}
-          <Card title={t('skills.mainfest')}>
-            <Form.Item
-              name="name"
-              label={t('skills.name')}
-              rules={[
-                { required: true, message: t('common.inputPlaceholder', { title: t('skills.name') }) },
-                { max: 50 },
-                { pattern: stringRegExp, message: t('common.nameInvalid') },
-              ]}
+    <Flex vertical className="rb:h-screen!">
+      <PageHeader
+        title={data?.name}
+        extra={
+          <Flex gap={12} align="center">
+            {/* Save button */}
+            <Button type="primary" className="rb:px-2! rb:gap-0.5!" disabled={loading} onClick={handleSave}>{t('skills.save')}</Button>
+            <Button
+              className="rb:px-2! rb:gap-0.5!"
+              icon={<div className="rb:bg-[url('@/assets/images/workflow/return.svg')] rb:size-4 rb:bg-cover"></div>}
+              onClick={handleBack}
             >
-              <Input placeholder={t('common.pleaseEnter')} />
-            </Form.Item>
-            <Form.Item
-              name="description"
-              label={t('skills.description')}
-              rules={[{ max: 500 }]}
-            >
-              <Input.TextArea placeholder={t('skills.descriptionPlaceholder')} />
-            </Form.Item>
-            <Form.Item
-              name={['config', 'keywords']}
-              label={t('skills.keywords')}
-              rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('skills.keywords') }) }]}
-            >
-              <Select
-                mode="tags"
-                placeholder={t('common.pleaseEnter')}
-              />
-            </Form.Item>
-          </Card>
+              {t('common.return')}
+            </Button>
+          </Flex>
+        }
+      />
+      <div className="rb:w-250 rb:my-3 rb:mx-auto rb:flex-1 rb:overflow-y-auto">
+        <Form form={form} layout="vertical">
+          <Space size={16} direction="vertical" className="rb:w-full">
+            {/* Manifest Section: Basic skill information */}
+            <Card title={t('skills.mainfest')}>
+              <Form.Item
+                name="name"
+                label={t('skills.name')}
+                rules={[
+                  { required: true, message: t('common.inputPlaceholder', { title: t('skills.name') }) },
+                  { max: 50 },
+                  { pattern: stringRegExp, message: t('common.nameInvalid') },
+                ]}
+              >
+                <Input placeholder={t('common.pleaseEnter')} />
+              </Form.Item>
+              <Form.Item
+                name="description"
+                label={t('skills.description')}
+                rules={[{ max: 500 }]}
+              >
+                <Input.TextArea placeholder={t('skills.descriptionPlaceholder')} />
+              </Form.Item>
+              <Form.Item
+                name={['config', 'keywords']}
+                label={t('skills.keywords')}
+                rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('skills.keywords') }) }]}
+              >
+                <Select
+                  mode="tags"
+                  placeholder={t('common.pleaseEnter')}
+                />
+              </Form.Item>
+            </Card>
 
-          {/* Prompt Configuration Section: AI instructions */}
-          <Card title={t('skills.promptConfiguration')}
-            extra={
-              <Button style={{ padding: '0 8px', height: '24px' }} onClick={handlePrompt}>
-                <img src={aiPrompt} className="rb:size-5" />
-                {t('skills.aiPrompt')}
-              </Button>
-            }
-          >
+            {/* Prompt Configuration Section: AI instructions */}
+            <Card title={t('skills.promptConfiguration')}
+              extra={
+                <Button style={{ padding: '0 8px', height: '24px' }} onClick={handlePrompt}>
+                  <div className="rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/application/aiPrompt.png')] rb:mr-1!" />
+                  {t('skills.aiPrompt')}
+                </Button>
+              }
+            >
+              <Form.Item
+                name="prompt"
+                className="rb:mb-0!"
+              >
+                <Input.TextArea
+                  placeholder={t('skills.promptPlaceholder')}
+                  styles={{
+                    textarea: {
+                      minHeight: '200px',
+                      borderRadius: '8px'
+                    },
+                  }}
+                />
+              </Form.Item>
+            </Card>
+
+            {/* Tool Configuration Section */}
             <Form.Item
-              name="prompt"
+              name="tools"
+              rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('skills.tools') }) }]}
               className="rb:mb-0!"
             >
-              <Input.TextArea
-                placeholder={t('skills.promptPlaceholder')}
-                styles={{
-                  textarea: {
-                    minHeight: '200px',
-                    borderRadius: '8px'
-                  },
-                }}
-              />
+              <ToolList />
             </Form.Item>
-          </Card>
 
-          {/* Tool Configuration Section */}
-          <Form.Item
-            name="tools"
-            rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('skills.tools') }) }]}
-            className="rb:mb-0!"
-          >
-            <ToolList />
-          </Form.Item>
-
-          {/* Save button */}
-          <Button type="primary" block disabled={loading} onClick={handleSave}>{t('skills.save')}</Button>
-        </Space>
-      </Form>
-      
-      {/* AI Prompt Generation Modal */}
-      <AiPromptModal
-        ref={aiPromptModalRef}
-        refresh={updatePrompt}
-        source="skills"
-      />
-    </div>
+          </Space>
+        </Form>
+        
+        {/* AI Prompt Generation Modal */}
+        <AiPromptModal
+          ref={aiPromptModalRef}
+          refresh={updatePrompt}
+          source="skills"
+        />
+      </div>
+    </Flex>
   )
 }
 

@@ -54,7 +54,7 @@ const ModelSelect: FC<ModelSelectProps> = ({
     const logo = getListLogoUrl(item.provider, item.logo as string);
     return (
       <Flex align="center" gap={8}>
-        {logo && <img src={logo} className="rb:size-5 rb:rounded-md" alt="" />}
+        {logo && <img src={logo} className="rb:size-5 rb:rounded-md" alt={logo} />}
         <div className={`rb:flex-1 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap ${fontClassName}`}>{item.name}</div>
       </Flex>
     );
@@ -75,7 +75,7 @@ const ModelSelect: FC<ModelSelectProps> = ({
         return (
           <Flex align="center" gap={8}>
             <Flex align="center" gap={8}>
-              {logo && <img src={logo} className="rb:size-5 rb:rounded-md" alt="" />}
+              {logo && <img src={logo} className="rb:size-5 rb:rounded-md" alt={logo} />}
               <span className="rb:wrap-break-word rb:line-clamp-1">{data.name as string}</span>
             </Flex>
             {data.capability?.length > 0 && (

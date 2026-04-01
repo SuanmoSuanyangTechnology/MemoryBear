@@ -405,7 +405,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
               <Flex align="center" justify="space-between" className="rb:p-3! rb:bg-white rb:rounded-xl">
                 <Button type="primary" ghost onClick={handleModelConfig} className="rb:group">
                   {modelLogo
-                    ? <img src={modelLogo} className="rb:size-4 rb:rounded-md" alt="" />
+                    ? <img src={modelLogo} className="rb:size-4 rb:rounded-md" alt={modelLogo} />
                     : defaultModel?.name
                     ? <div className="rb:size-4 rb:bg-[url('@/assets/images/application/model.svg')]"></div> : null}
                   {defaultModel?.name || t('application.chooseModel')}

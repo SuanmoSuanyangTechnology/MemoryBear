@@ -12,10 +12,6 @@ import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 
 import styles from '../index.module.css'
-import editIcon from '@/assets/images/edit_hover.svg'
-import copyIcon from '@/assets/images/copy_hover.svg'
-import exportIcon from '@/assets/images/export_hover.svg'
-import deleteIcon from '@/assets/images/delete_hover.svg'
 import type { Application, ApplicationModalRef } from '@/views/ApplicationManagement/types';
 import ApplicationModal from '@/views/ApplicationManagement/components/ApplicationModal'
 import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef, FeaturesConfigForm } from '../types'
@@ -38,10 +34,10 @@ const sharingTabKeys = [
  * Menu icon mapping
  */
 const menuIcons: Record<string, string> = {
-  edit: editIcon,
-  copy: copyIcon,
-  export: exportIcon,
-  delete: deleteIcon
+  edit: "rb:bg-[url('@/assets/images/common/edit_bold.svg')]",
+  copy: "rb:bg-[url('@/assets/images/copy_hover.svg')]",
+  export: "rb:bg-[url('@/assets/images/export_hover.svg')]",
+  delete: "rb:bg-[url('@/assets/images/common/delete_red_big.svg')]"
 }
 
 /**
@@ -70,7 +66,7 @@ interface ConfigHeaderProps {
  * Configuration header component
  * Displays application name, tabs, and action buttons
  */
-const ConfigHeader: FC<ConfigHeaderProps> = ({ 
+const ConfigHeader: FC<ConfigHeaderProps> = ({
   application, activeTab, handleChangeTab, refresh,
   workflowRef,
   appRef,
@@ -172,7 +168,8 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
   const formatMenuItems = useMemo(() => {
     const items = (application?.type !== 'multi_agent' ? ['edit', 'copy', 'export', 'delete'] : ['edit', 'copy', 'delete']).map(key => ({
       key,
-      icon: <img src={menuIcons[key]} className="rb:w-4 rb:h-4 rb:mr-2" />,
+      icon: <div className={`rb:size-4 rb:mr-2 ${menuIcons[key]}`} />,
+      danger: key === 'delete',
       label: t(`common.${key}`),
     }))
     return items
@@ -182,7 +179,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
     appRef?.current?.handleSaveFeaturesConfig?.(value)
     onFeaturesChange?.(value)
   }, [appRef, onFeaturesChange])
-  
+
   return (
     <>
       <PageHeader
@@ -250,9 +247,9 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
             </Popover>
           </Flex>
           : <Flex justify="flex-end">
-            <Flex align="center" className="rb:leading-5 rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goToApplication}>
+            <Flex align="center" gap={8} className="rb:leading-5 rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goToApplication}>
               <div
-                className="rb:mr-2 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/logout.svg')]"
+                className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/logout.svg')]"
               ></div>
               {t('common.return')}
             </Flex>

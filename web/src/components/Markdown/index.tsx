@@ -62,7 +62,7 @@ const components = {
   ul: ({ children, ...props }: any) => <ul className="rb:list-disc rb:ml-6 rb:mb-2" {...props}>{children}</ul>,
   ol: ({ children, ...props }: any) => <ol className="rb:list-decimal rb:ml-6 rb:mb-2" {...props}>{children}</ol>,  
   li: ({ children, ...props }: any) => <li className="rb:mb-1" {...props}>{children}</li>,  
-  blockquote: ({ children, ...props }: any) => <blockquote className="rb:border-l-4 rb:border-[#D9D9D9] rb:pl-4 rb:mb-2" {...props}>{children}</blockquote>,
+  blockquote: ({ children, ...props }: any) => <blockquote className="rb:bg-[#F6F6F6] rb:rounded-lg rb:pt-2.5 rb:pb-0.5 rb:px-3 rb:mb-3 rb:mt-1" {...props}>{children}</blockquote>,
   p: ({ children, ...props }: any) => <p className="rb:mb-2" {...props}>{children}</p>,
   strong: ({ children, ...props }: any) => <strong className="rb:font-bold" {...props}>{children}</strong>,
   em: ({ children, ...props }: any) => <em className="rb:italic" {...props}>{children}</em>,
@@ -81,10 +81,10 @@ const components = {
   audio: ({ src, ...props }: any) => <AudioBlock node={{ children: [{ properties: { src: src || '' } }] }} {...props} />,
   a: ({ href, children, ...props }: any) => <Link href={href || '#'} {...props}>{children}</Link>,
   button: ({ children }: any) => <RbButton node={{ children }}>{[children]}</RbButton>,
-  table: ({ children, ...props }: any) => <div className="rb:overflow-x-auto rb:max-w-full"><table className="rb:border rb:border-[#D9D9D9] rb:mb-2" {...props}>{children}</table></div>,
-  tr: ({ children, ...props }: any) => <tr className="rb:border rb:border-[#D9D9D9]" {...props}>{children}</tr>,
-  th: ({ children, ...props }: any) => <th className="rb:border rb:border-[#D9D9D9] rb:px-2 rb:py-1 rb:text-left rb:font-bold" {...props}>{children}</th>,
-  td: ({ children, ...props }: any) => <td className="rb:border rb:border-[#D9D9D9] rb:px-2 rb:py-1 rb:text-left" {...props}>{children}</td>,
+  table: ({ children, ...props }: any) => <div className="rb:overflow-x-auto rb:max-w-full"><table className="rb:border rb:border-[#EBEBEB] rb:mb-2" {...props}>{children}</table></div>,
+  tr: ({ children, ...props }: any) => <tr className="rb:border rb:border-[#EBEBEB]" {...props}>{children}</tr>,
+  th: ({ children, ...props }: any) => <th className="rb:border rb:border-[#EBEBEB] rb:px-2 rb:py-1 rb:text-left rb:font-bold" {...props}>{children}</th>,
+  td: ({ children, ...props }: any) => <td className="rb:border rb:border-[#EBEBEB] rb:px-2 rb:py-1 rb:text-left" {...props}>{children}</td>,
   input: ({ children, ...props }: any) => {
     switch (props.type) {
       case 'color':
@@ -122,6 +122,7 @@ const components = {
   select: ({ children, ...props }: any) => <Select style={{width: '100%'}} {...props}>{children}</Select>,
   textarea: ({ children, ...props }: any) => <Input.TextArea {...props}>{children}</Input.TextArea>,
   form: ({ children, ...props }: any) => <Form {...props}>{children}</Form>,
+  hr: (props: any) => <hr className="rb:border-t rb:border-[#EBEBEB] rb:my-3" {...props} />
 }
 
 const RbMarkdown: FC<RbMarkdownProps> = ({

@@ -288,11 +288,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
           return (
             <div key={nodeId}>
               <Flex align="center" gap={4} className="rb:px-3! rb:text-[12px] rb:py-1.25! rb:font-medium rb:text-[#5B6167]">
-                {nodeIcon && <img
-                  src={nodeIcon}
-                  className="rb:size-3"
-                  alt=""
-                />}
+                {nodeIcon && <div className={`rb:size-3 rb:bg-cover ${nodeIcon}`} />}
                 {nodeName}
               </Flex>
               {nodeOptions.map((option) => {
