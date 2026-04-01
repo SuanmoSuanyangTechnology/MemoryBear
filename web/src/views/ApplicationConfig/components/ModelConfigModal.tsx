@@ -171,12 +171,13 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
             key={item.key}
             name={item.key}
             label={t(`application.${item.key}`)}
-            extra={t(`application.${item.key}_desc`)}
+            extra={<>{t(`application.${item.key}_desc`)} | {t('application.range')}: [{item.min}, {item.max}]</>}
           >
             <RbSlider 
               max={item.max}
               step={item.step}
               min={item.min}
+              isInput={true}
             />
           </FormItem>
         ))}

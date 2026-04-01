@@ -1457,6 +1457,7 @@ export const en = {
       appCount: '{{count}} apps shared to this space',
       resetFeaturesTip: 'Please reconfigure the [Conversation Features - File Upload] settings',
       logTitle: 'Description',
+      range: 'Range',
     },
     userMemory: {
       userMemory: 'User Memory',
