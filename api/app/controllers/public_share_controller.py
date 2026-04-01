@@ -27,6 +27,7 @@ from app.services.conversation_service import ConversationService
 from app.services.release_share_service import ReleaseShareService
 from app.services.shared_chat_service import SharedChatService
 from app.services.workflow_service import WorkflowService
+from app.models.file_metadata_model import FileMetadata
 from app.utils.app_config_utils import workflow_config_4_app_release, \
     agent_config_4_app_release, multi_agent_config_4_app_release
 
@@ -259,8 +260,41 @@ def get_conversation(
     conv_service = ConversationService(db)
     messages = conv_service.get_messages(conversation_id)
 
-    # 构建响应
-    conv_dict = conversation_schema.Conversation.model_validate(conversation).model_dump()
+    file_ids = []
+    message_file_id_map = {}
+
+    # 第一次遍历：解析 audio_url，收集所有有效的 file_id
+    for idx, m in enumerate(messages):
+        if m.role == "assistant" and m.meta_data:
+            audio_url = m.meta_data.get("audio_url")
+            if not audio_url:
+                continue
+            try:
+                file_id = uuid.UUID(audio_url.rstrip("/").split("/")[-1])
+            except (ValueError, IndexError):
+                # audio_url 无法解析为 UUID，标记为 unknown
+                m.meta_data["audio_status"] = "unknown"
+                continue
+
+            file_ids.append(file_id)
+            message_file_id_map[idx] = file_id
+
+    # 批量查询所有相关的 FileMetadata
+    file_status_map = {}
+    if file_ids:
+        file_metas = (
+            db.query(FileMetadata)
+            .filter(FileMetadata.id.in_(set(file_ids)))
+            .all()
+        )
+        file_status_map = {fm.id: fm.status for fm in file_metas}
+
+    # 第二次遍历：将查询结果映射回消息
+    for idx, file_id in message_file_id_map.items():
+        m = messages[idx]
+        m.meta_data["audio_status"] = file_status_map.get(file_id, "unknown")
+
+    conv_dict = conversation_schema.Conversation.model_validate(conversation).model_dump(mode="json")
     conv_dict["messages"] = [
         conversation_schema.Message.model_validate(m) for m in messages
     ]
@@ -320,6 +354,16 @@ async def chat(
             other_id=other_id,
             original_user_id=user_id
         )
+
+        # Only extract and set memory_config_id when the end user doesn't have one yet
+        if not new_end_user.memory_config_id:
+            from app.services.memory_config_service import MemoryConfigService
+            memory_config_service = MemoryConfigService(db)
+            memory_config_id, _ = memory_config_service.extract_memory_config_id(release.type, release.config or {})
+            if memory_config_id:
+                new_end_user.memory_config_id = memory_config_id
+                db.commit()
+                db.refresh(new_end_user)
         end_user_id = str(new_end_user.id)
 
         # appid = share.app_id
@@ -410,30 +454,6 @@ async def chat(
         agent_config = agent_config_4_app_release(release)
 
         if payload.stream:
-            # async def event_generator():
-            #     async for event in service.chat_stream(
-            #         share_token=share_token,
-            #         message=payload.message,
-            #         conversation_id=conversation.id,  # 使用已创建的会话 ID
-            #         user_id=str(new_end_user.id),  # 转换为字符串
-            #         variables=payload.variables,
-            #         password=password,
-            #         web_search=payload.web_search,
-            #         memory=payload.memory,
-            #         storage_type=storage_type,
-            #         user_rag_memory_id=user_rag_memory_id
-            #     ):
-            #         yield event
-
-            # return StreamingResponse(
-            #     event_generator(),
-            #     media_type="text/event-stream",
-            #     headers={
-            #         "Cache-Control": "no-cache",
-            #         "Connection": "keep-alive",
-            #         "X-Accel-Buffering": "no"
-            #     }
-            # )
             async def event_generator():
                 async for event in app_chat_service.agnet_chat_stream(
                         message=payload.message,
@@ -459,20 +479,6 @@ async def chat(
                     "X-Accel-Buffering": "no"
                 }
             )
-        # 非流式返回
-        # result = await service.chat(
-        #     share_token=share_token,
-        #     message=payload.message,
-        #     conversation_id=conversation.id,  # 使用已创建的会话 ID
-        #     user_id=str(new_end_user.id),  # 转换为字符串
-        #     variables=payload.variables,
-        #     password=password,
-        #     web_search=payload.web_search,
-        #     memory=payload.memory,
-        #     storage_type=storage_type,
-        #     user_rag_memory_id=user_rag_memory_id
-        # )
-        # return success(data=conversation_schema.ChatResponse(**result))
         result = await app_chat_service.agnet_chat(
             message=payload.message,
             conversation_id=conversation.id,  # 使用已创建的会话 ID
@@ -531,48 +537,6 @@ async def chat(
         )
 
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
-        # 多 Agent 流式返回
-        # if payload.stream:
-        #     async def event_generator():
-        #         async for event in service.multi_agent_chat_stream(
-        #             share_token=share_token,
-        #             message=payload.message,
-        #             conversation_id=conversation.id,  # 使用已创建的会话 ID
-        #             user_id=str(new_end_user.id),  # 转换为字符串
-        #             variables=payload.variables,
-        #             password=password,
-        #             web_search=payload.web_search,
-        #             memory=payload.memory,
-        #                 storage_type=storage_type,
-        #                 user_rag_memory_id=user_rag_memory_id
-        #         ):
-        #             yield event
-
-        #     return StreamingResponse(
-        #         event_generator(),
-        #         media_type="text/event-stream",
-        #         headers={
-        #             "Cache-Control": "no-cache",
-        #             "Connection": "keep-alive",
-        #             "X-Accel-Buffering": "no"
-        #         }
-        #     )
-
-        # # 多 Agent 非流式返回
-        # result = await service.multi_agent_chat(
-        #     share_token=share_token,
-        #     message=payload.message,
-        #     conversation_id=conversation.id,  # 使用已创建的会话 ID
-        #     user_id=str(new_end_user.id),  # 转换为字符串
-        #     variables=payload.variables,
-        #     password=password,
-        #     web_search=payload.web_search,
-        #     memory=payload.memory,
-        #     storage_type=storage_type,
-        #     user_rag_memory_id=user_rag_memory_id
-        # )
-
-        # return success(data=conversation_schema.ChatResponse(**result))
     elif app_type == AppType.WORKFLOW:
         config = workflow_config_4_app_release(release)
         if not config.id:

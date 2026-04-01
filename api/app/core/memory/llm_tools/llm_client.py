@@ -56,7 +56,7 @@ class LLMClient(ABC):
         self.max_retries = self.config.max_retries
         self.timeout = self.config.timeout
 
-        logger.info(
+        logger.debug(
             f"初始化 LLM 客户端: provider={self.provider}, "
             f"model={self.model_name}, max_retries={self.max_retries}"
         )

@@ -132,6 +132,82 @@ class EndUserRepository:
             db_logger.error(f"获取或创建终端用户时出错: {str(e)}")
             raise
 
+    def get_or_create_end_user_with_config(
+        self,
+        app_id: Optional[uuid.UUID],
+        workspace_id: uuid.UUID,
+        other_id: str,
+        memory_config_id: Optional[uuid.UUID] = None,
+        other_name: Optional[str] = None
+    ) -> EndUser:
+        """获取或创建终端用户，并在单次事务中关联记忆配置。
+        
+        与 get_or_create_end_user 类似，但额外支持在创建/获取时
+        一并设置 memory_config_id，避免多次提交。
+        
+        Args:
+            app_id: 应用ID（可为 None）
+            workspace_id: 工作空间ID
+            other_id: 第三方ID
+            memory_config_id: 记忆配置ID（可选，仅在用户尚无配置时设置）
+            other_name: 用户名称（用于创建 EndUserInfo）
+            
+        Returns:
+            EndUser: 终端用户对象（已关联记忆配置）
+        """
+        try:
+            end_user = (
+                self.db.query(EndUser)
+                .filter(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.other_id == other_id
+                )
+                .order_by(EndUser.created_at.asc())
+                .first()
+            )
+
+            if end_user:
+                db_logger.debug(f"找到现有终端用户: workspace_id={workspace_id}, other_id={other_id}")
+                if app_id is not None:
+                    end_user.app_id = app_id
+                if memory_config_id and not end_user.memory_config_id:
+                    end_user.memory_config_id = memory_config_id
+                self.db.commit()
+                self.db.refresh(end_user)
+                return end_user
+
+            # 创建新用户
+            end_user = EndUser(
+                app_id=app_id,
+                workspace_id=workspace_id,
+                other_id=other_id,
+                memory_config_id=memory_config_id,
+            )
+            self.db.add(end_user)
+            self.db.flush()
+
+            end_user_info = EndUserInfo(
+                end_user_id=end_user.id,
+                other_name=other_name or "",
+                aliases=[],
+                meta_data={}
+            )
+            self.db.add(end_user_info)
+
+            self.db.commit()
+            self.db.refresh(end_user)
+
+            db_logger.info(
+                f"创建新终端用户及其信息: (other_id: {other_id}) for workspace {workspace_id}, "
+                f"memory_config_id={memory_config_id}"
+            )
+            return end_user
+
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"获取或创建终端用户(含配置)时出错: {str(e)}")
+            raise
+
     def get_by_id(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
         """根据ID获取终端用户（用于缓存操作）
         
@@ -511,6 +587,51 @@ class EndUserRepository:
             self.db.rollback()
             db_logger.error(
                 f"批量更新终端用户记忆配置时出错: workspace_id={workspace_id}, "
+                f"memory_config_id={memory_config_id}, error={str(e)}"
+            )
+            raise
+
+    def batch_update_memory_config_id_by_app(
+            self,
+            app_id: uuid.UUID,
+            memory_config_id: uuid.UUID
+    ) -> int:
+        """批量更新应用下所有终端用户的 memory_config_id
+        
+        Args:
+            app_id: 应用ID
+            memory_config_id: 新的记忆配置ID
+            
+        Returns:
+            int: 更新的终端用户数量
+            
+        Raises:
+            Exception: 数据库操作失败时抛出
+        """
+        try:
+            from sqlalchemy import update
+            
+            stmt = (
+                update(EndUser)
+                .where(EndUser.app_id == app_id)
+                .values(memory_config_id=memory_config_id)
+            )
+
+            result = self.db.execute(stmt)
+            self.db.commit()
+
+            updated_count = result.rowcount
+
+            db_logger.info(
+                f"批量更新终端用户记忆配置: app_id={app_id}, "
+                f"memory_config_id={memory_config_id}, updated_count={updated_count}"
+            )
+
+            return updated_count
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(
+                f"批量更新终端用户记忆配置时出错: app_id={app_id}, "
                 f"memory_config_id={memory_config_id}, error={str(e)}"
             )
             raise

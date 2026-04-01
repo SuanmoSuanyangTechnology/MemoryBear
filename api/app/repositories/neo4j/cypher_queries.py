@@ -340,17 +340,22 @@ SEARCH_ENTITIES_BY_NAME_OR_ALIAS = """
 CALL db.index.fulltext.queryNodes("entitiesFulltext", $q) YIELD node AS e, score
 WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
 WITH e, score
-UNION
-MATCH (e:ExtractedEntity)
-WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
-  AND e.aliases IS NOT NULL
-  AND ANY(alias IN e.aliases WHERE toLower(alias) CONTAINS toLower($q))
-WITH e,
+WITH collect({entity: e, score: score}) AS fulltextResults
+
+OPTIONAL MATCH (ae:ExtractedEntity)
+WHERE ($end_user_id IS NULL OR ae.end_user_id = $end_user_id)
+  AND ae.aliases IS NOT NULL
+  AND ANY(alias IN ae.aliases WHERE toLower(alias) CONTAINS toLower($q))
+WITH fulltextResults, collect(ae) AS aliasEntities
+
+UNWIND (fulltextResults + [x IN aliasEntities | {entity: x, score:
      CASE 
-       WHEN ANY(alias IN e.aliases WHERE toLower(alias) = toLower($q)) THEN 1.0
-       WHEN ANY(alias IN e.aliases WHERE toLower(alias) STARTS WITH toLower($q)) THEN 0.9
+       WHEN ANY(alias IN x.aliases WHERE toLower(alias) = toLower($q)) THEN 1.0
+       WHEN ANY(alias IN x.aliases WHERE toLower(alias) STARTS WITH toLower($q)) THEN 0.9
        ELSE 0.8
-     END AS score
+     END
+}]) AS row
+WITH row.entity AS e, row.score AS score
 WITH DISTINCT e, MAX(score) AS score
 OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
 OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)

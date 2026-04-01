@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 14:07:35
+ * @Last Modified time: 2026-03-26 15:45:42
  */
 /**
  * Memory Extraction Engine Configuration Page
@@ -13,7 +13,7 @@
 import { type FC, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Row, Col, Space, Select, InputNumber, App, Form, Input, Flex, Tooltip } from 'antd'
+import { Row, Col, Space, Select, InputNumber, App, Form, Input, Flex, Tooltip, Divider } from 'antd'
 import clsx from 'clsx'
 
 import Card from './components/Card'
@@ -123,10 +123,10 @@ const MemoryExtractionEngine: FC = () => {
         </Tooltip>
       </Flex>
 
-      <Row gutter={12}>
-        <Col span={12}>
-          <Form form={form}>
-            <Flex vertical gap={12} className="rb:h-[calc(100vh-114px)]! rb:overflow-y-auto">
+      <Row gutter={12} className="rb:h-[calc(100%-38px)]!">
+        <Col span={12} className="rb:h-full!">
+          <Form form={form} className="rb:h-full!">
+            <Flex vertical gap={12} className="rb:h-full! rb:overflow-y-auto">
               <div className="rb:bg-white rb:rounded-xl rb:py-2.5 rb:px-4">
                 <Flex
                   align="center"
@@ -212,7 +212,43 @@ const MemoryExtractionEngine: FC = () => {
                                   {config.meaning
                                     ? <Space size={4} className="rb:text-[#212332] rb:font-medium rb:leading-5">
                                       {t(`memoryExtractionEngine.${config.label}`)}
-                                      <Tooltip title={<>{t('memoryExtractionEngine.Meaning')}: {t(`memoryExtractionEngine.${config.meaning}`)}</>}>
+                                      <Tooltip
+                                        classNames={{
+                                          body: 'rb:min-w-[500px]!'
+                                        }}
+                                        title={<>
+                                          {t('memoryExtractionEngine.Meaning')}: {t(`memoryExtractionEngine.${config.meaning}`)}
+
+                                          {config.label === 'intelligentSemanticPruningThreshold' && <>
+                                            <Flex justify="space-between" align="center" className="rb:text-[12px] rb:mb-1! rb:flex-nowrap!">
+                                              <span className="rb:whitespace-nowrap">{t('memoryExtractionEngine.loose')} ←</span>
+                                              <Divider className="rb:flex-1! rb:min-w-0!" />
+                                              <span className="rb:whitespace-nowrap">→ {t('memoryExtractionEngine.strict')}</span>
+                                            </Flex>
+
+                                            <Row>
+                                              <Col span={6} className="rb:text-center">
+                                                0.0 <br/>
+                                                | <br/>
+                                                {t('memoryExtractionEngine.onlyDelete')}
+                                              </Col>
+                                              <Col span={6} className="rb:text-center">
+                                                0.3 <br />
+                                                | <br />
+                                                {t('memoryExtractionEngine.semanticFiltering')}
+                                              </Col>
+                                              <Col span={6} className="rb:text-center">
+                                                0.6 <br />
+                                                | <br />
+                                                {t('memoryExtractionEngine.sceneFocus')}
+                                              </Col>
+                                              <Col span={6} className="rb:text-center">
+                                                0.9 <br />
+                                              </Col>
+                                            </Row>
+                                          </>}
+                                        </>}
+                                      >
                                         <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
                                       </Tooltip>
                                     </Space>
@@ -231,14 +267,16 @@ const MemoryExtractionEngine: FC = () => {
                                         options={config.options ? config.options.map(item => ({ ...item, label: t(`memoryExtractionEngine.${item.label}`) })) : []}
                                       />
                                       : config.control === 'slider'
-                                      ? <RbSlider
-                                        min={config.min || 0}
-                                        max={config.max || 1}
-                                        step={config.step || 0.01}
-                                        isInput={true}
-                                        prefix={<span className="rb:text-[#5B6167]">{t('emotionEngine.currentValue')}:</span>}
-                                        inputClassName="rb:w-[155px]!"
-                                      />
+                                      ? <>
+                                        <RbSlider
+                                          min={config.min || 0}
+                                          max={config.max || 1}
+                                          step={config.step || 0.01}
+                                          isInput={true}
+                                          prefix={<span className="rb:text-[#5B6167]">{t('emotionEngine.currentValue')}:</span>}
+                                          inputClassName="rb:w-[155px]!"
+                                        />
+                                      </>
                                       : config.control === 'inputNumber'
                                       ? <InputNumber min={config.min || 0} style={{ width: '100%' }} placeholder={t('common.pleaseEnter')} />
                                       : config.control === 'text'
@@ -259,7 +297,7 @@ const MemoryExtractionEngine: FC = () => {
             </Flex>
           </Form>
         </Col>
-        <Col span={12}>
+        <Col span={12} className="rb:h-full!">
           <Result
             loading={loading}
             handleSave={handleSave}

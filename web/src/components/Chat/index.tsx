@@ -27,12 +27,14 @@ const Chat: FC<ChatProps> = ({
   fileList,
   fileChange,
   className,
-  renderRuntime
+  renderRuntime,
+  conversationId
 }) => {
   return (
     <div className={`rb:h-full rb:relative rb:pt-2 ${className}`}>
       {/* Chat content display area */}
       <ChatContent
+        key={conversationId ?? 'new'}
         classNames={contentClassName}
         data={data}
         streamLoading={streamLoading}

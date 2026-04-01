@@ -32,7 +32,7 @@ export const lightTheme: ThemeConfig = {
       bodyBg: '#EEEFF4',
       siderBg: '#FAFCFF',
       headerPadding: '0 24px 0 20px',
-      headerHeight: 64,
+      headerHeight: 56,
       headerColor: '#212332',
     },
     Menu: {

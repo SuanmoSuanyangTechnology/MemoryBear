@@ -111,6 +111,18 @@ def get_current_user_info(
                 break
     
     api_logger.info(f"当前用户信息获取成功: {result.username}, 角色: {result_schema.role}, 工作空间: {result_schema.current_workspace_name}")
+
+    # 设置权限：如果用户来自 SSO Source，则使用该 Source 的 permissions；否则返回 "all" 表示拥有所有权限
+    if current_user.external_source:
+        from premium.sso.models import SSOSource
+        source = db.query(SSOSource).filter(SSOSource.source_code == current_user.external_source).first()
+        if source and source.permissions:
+            result_schema.permissions = source.permissions
+        else:
+            result_schema.permissions = []
+    else:
+        result_schema.permissions = ["all"]
+
     return success(data=result_schema, msg=t("users.info.get_success"))
 
 
@@ -133,7 +145,6 @@ def get_tenant_superusers(
     
     superusers_schema = [user_schema.User.model_validate(u) for u in superusers]
     return success(data=superusers_schema, msg=t("users.list.superusers_success"))
-
 
 
 @router.get("/{user_id}", response_model=ApiResponse)

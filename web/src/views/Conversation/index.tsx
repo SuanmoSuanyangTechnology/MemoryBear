@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 13:35:42
+ * @Last Modified time: 2026-03-31 16:24:47
  */
 /**
  * Conversation Page
@@ -27,11 +27,12 @@ import ChatEmpty from '@/assets/images/empty/chatEmpty.png'
 import Chat from '@/components/Chat'
 import type { ChatItem } from '@/components/Chat/types'
 import { type SSEMessage } from '@/utils/stream'
-import { shareFileUploadUrlWithoutApiPrefix } from '@/api/fileStorage'
+import { shareFileUploadUrlWithoutApiPrefix, getFileStatusById } from '@/api/fileStorage'
 import ChatToolbar, { type ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import type { Variable } from '@/views/Workflow/components/Properties/VariableList/types'
+import type { Variable as AppVariable } from '@/views/ApplicationConfig/components/VariableList/types'
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
-import { getFileStatusById } from '@/api/fileStorage';
+import { replaceVariables } from '@/views/ApplicationConfig/Agent'
 
 const Conversation: FC = () => {
   const { t } = useTranslation()
@@ -41,7 +42,6 @@ const Conversation: FC = () => {
   const searchParams = new URLSearchParams(location.search)
   const userId = searchParams.get('user_id')
   const [loading, setLoading] = useState(false)
-  const [streamLoading, setStreamLoading] = useState(false)
   const [message, setMessage] = useState<string>('')
   const [conversation_id, setConversationId] = useState<string | null>(null)
   const [historyList, setHistoryList] = useState<HistoryItem[]>([])
@@ -61,6 +61,16 @@ const Conversation: FC = () => {
   const [features, setFeatures] = useState<FeaturesConfigForm>({} as FeaturesConfigForm)
   const [config, setConfig] = useState<Record<string, any>>({})
   const [audioStatusMap, setAudioStatusMap] = useState<Record<string, string>>({})
+  const streamLoadingRef = useRef(false)
+  const [isDeepThinking, setIsDeepThinking] = useState<Record<string, any>>({})
+  const [thinking, setThinking] = useState(false)
+
+  useEffect(() => {
+    return () => {
+      audioPollingRef.current.forEach((timer) => clearInterval(timer))
+      audioPollingRef.current.clear()
+    }
+  }, [])
 
   useEffect(() => {
     const shareToken = localStorage.getItem(`shareToken_${token}`)
@@ -84,11 +94,12 @@ const Conversation: FC = () => {
     if (shareToken && token) {
       getExperienceConfig(token)
         .then(res => {
-          const response = res as { variables: Variable[]; features: FeaturesConfigForm; app_type: string; memory?: boolean; }
+          const response = res as { variables: Variable[]; features: FeaturesConfigForm; model_parameters?: Record<string, any>; app_type: string; memory: boolean; }
           toolbarRef.current?.setVariables(response.variables || [])
           setConfig(response)
           setFeatures(response.features)
-          setIsHasMemory((response.app_type === 'workflow' && response.memory) || (response.app_type !== 'workflow'))
+          setIsHasMemory((response.app_type === 'workflow' && response.memory) || response.memory)
+          setIsDeepThinking(response.model_parameters?.deep_thinking || false)
         })
     } else {
       setChatList([])
@@ -142,13 +153,29 @@ const Conversation: FC = () => {
   }
 
   useEffect(() => {
-    audioPollingRef.current.forEach((timer) => clearInterval(timer))
-    audioPollingRef.current.clear()
     if (conversation_id) {
       getConversationDetail(token as string, conversation_id)
         .then(res => {
           const response = res as { messages: ChatItem[] }
-          setChatList(response?.messages || [])
+          const messages = response?.messages || []
+          const historyAudioUrls = new Set(messages.map(m => m.meta_data?.audio_url).filter(Boolean))
+          audioPollingRef.current.forEach((timer, key) => {
+            if (!historyAudioUrls.has(key)) {
+              clearInterval(timer)
+              audioPollingRef.current.delete(key)
+            }
+          })
+          messages.forEach(msg => {
+            if (msg.role === 'assistant' && msg.meta_data?.audio_url && msg.meta_data?.audio_status === 'pending') {
+              startAudioPolling(msg.meta_data.audio_url, msg.meta_data.audio_url)
+            }
+          })
+          setChatList(messages.map(msg => {
+            if (msg.role === 'assistant' && msg.meta_data?.audio_url && audioPollingRef.current.has(msg.meta_data.audio_url)) {
+              return { ...msg, meta_data: { ...msg.meta_data, audio_status: 'pending' } }
+            }
+            return msg
+          }))
         })
     } else {
       if (features?.opening_statement?.statement) {
@@ -188,7 +215,7 @@ const Conversation: FC = () => {
 
   const updateAssistantMessage = (content: string = '', audio_url?: string, audio_status?: string, citations?: any[]) => {
     if (!content && !audio_url && (!citations || citations?.length < 1)) return
-    if (streamLoading) setStreamLoading(false)
+    if (streamLoadingRef.current) streamLoadingRef.current = false
     setChatList(prev => {
       const lastList = [...prev]
       const lastIndex = lastList.length - 1
@@ -200,9 +227,32 @@ const Conversation: FC = () => {
             ...lastMsg,
             content: lastMsg.content + content,
             meta_data: {
+              ...(lastMsg.meta_data || {}),
               audio_url: audio_url || lastMsg.meta_data?.audio_url,
               audio_status: audio_status || lastMsg.meta_data?.audio_status,
               citations: citations || lastMsg.meta_data?.citations
+            }
+          }
+        ]
+      }
+      return prev
+    })
+  }
+  const updateAssistantReasoningMessage = (content: string = '') => {
+    if (!content) return
+    if (streamLoadingRef.current) streamLoadingRef.current = false
+    setChatList(prev => {
+      const lastList = [...prev]
+      const lastIndex = lastList.length - 1
+      const lastMsg = lastList[lastIndex]
+      if (lastMsg?.role === 'assistant') {
+        return [
+          ...lastList.slice(0, lastIndex),
+          {
+            ...lastMsg,
+            meta_data: {
+              ...(lastMsg.meta_data || {}),
+              reasoning_content: (lastMsg.meta_data?.reasoning_content || '') + content
             }
           }
         ]
@@ -225,6 +275,28 @@ const Conversation: FC = () => {
       return msg
     }))
   }, [audioStatusMap, chatList.length])
+
+  const startAudioPolling = (audioUrl: string, idToPoll: string) => {
+    if (audioPollingRef.current.has(idToPoll)) return
+    const fileId = audioUrl.split('/').pop()
+    if (!fileId) return
+    const timer = setInterval(() => {
+      getFileStatusById(fileId)
+        .then(res => {
+          const { status } = res as { status: string }
+          if (status && status !== 'pending') {
+            setAudioStatusMap(prev => ({ ...prev, [idToPoll]: status }))
+            clearInterval(audioPollingRef.current.get(idToPoll))
+            audioPollingRef.current.delete(idToPoll)
+          }
+        })
+        .catch(() => {
+          clearInterval(audioPollingRef.current.get(idToPoll))
+          audioPollingRef.current.delete(idToPoll)
+        })
+    }, 2000)
+    audioPollingRef.current.set(idToPoll, timer)
+  }
 
   /** Send message and handle streaming response */
   const handleSend = (msg?: string) => {
@@ -250,7 +322,7 @@ const Conversation: FC = () => {
     if (!isCanSend) return
 
     setLoading(true)
-    setStreamLoading(true)
+    streamLoadingRef.current = true
     addUserMessage(msg || message, files)
     addAssistantMessage()
     toolbarRef.current?.setFiles([])
@@ -274,6 +346,10 @@ const Conversation: FC = () => {
             const { conversation_id: newId } = item.data as { conversation_id: string }
             currentConversationId = newId
             break
+          case 'reasoning':
+            updateAssistantReasoningMessage(content)
+            if (curId) currentConversationId = curId;
+            break
           case 'message':
             updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined)
             if (curId) currentConversationId = curId;
@@ -285,35 +361,8 @@ const Conversation: FC = () => {
               const { file_id } = item.data as { file_id?: string }
               const idToPoll = file_id || audio_url || ''
               const fileId = audio_url.split('/').pop()
-              if (fileId && idToPoll && !audioPollingRef.current.has(idToPoll)) {
-
-                const timer = setInterval(() => {
-                  getFileStatusById(fileId)
-                    .then(res => {
-                      const { status } = res as { status: string }
-                      if (status && status !== 'pending') {
-                        setAudioStatusMap(prev => ({
-                          ...prev,
-                          [idToPoll]: status
-                        }))
-                        clearInterval(audioPollingRef.current.get(idToPoll))
-                        audioPollingRef.current.delete(idToPoll)
-                        getHistory(true)
-                        if (currentConversationId && currentConversationId !== conversation_id) {
-                          setConversationId(currentConversationId)
-                        }
-                      }
-                    })
-                    .catch(() => {
-                      clearInterval(audioPollingRef.current.get(idToPoll))
-                      audioPollingRef.current.delete(idToPoll)
-                      getHistory(true)
-                      if (currentConversationId && currentConversationId !== conversation_id) {
-                        setConversationId(currentConversationId)
-                      }
-                    })
-                }, 2000)
-                audioPollingRef.current.set(idToPoll, timer)
+              if (fileId && idToPoll) {
+                startAudioPolling(audio_url, idToPoll)
               }
             } else {
               getHistory(true)
@@ -325,6 +374,10 @@ const Conversation: FC = () => {
               updateAssistantMessage(content, audio_url, undefined, citations)
             }
             setLoading(false)
+            getHistory(true)
+            if (currentConversationId && currentConversationId !== conversation_id) {
+              setConversationId(currentConversationId)
+            }
             break
         }
       })
@@ -347,15 +400,16 @@ const Conversation: FC = () => {
           }
         }
       }),
-      variables: params
+      variables: params,
+      thinking,
     }, handleStreamMessage, shareToken)
       .catch(() => {
         setLoading(false)
-        setStreamLoading(false)
+        streamLoadingRef.current = false
       })
       .finally(() => {
         setLoading(false)
-        setStreamLoading(false)
+        streamLoadingRef.current = false
       })
   }
 
@@ -374,8 +428,22 @@ const Conversation: FC = () => {
       }
     })
   }
+  const handleChangeDeepThinking = () => {
+    setThinking(prev => !prev)
+  }
 
-  console.log('chatList', chatList)
+  const handleChangeVariables = (variables: Variable[]) => {
+    setChatList(prev => {
+      const firstMsg = prev[0]
+      console.log('firstMsg', firstMsg)
+      if (firstMsg && firstMsg.role === 'assistant' && firstMsg.content && features?.opening_statement.enabled && features?.opening_statement.statement && variables.length > 0) {
+        firstMsg.content = replaceVariables(features?.opening_statement.statement, variables as unknown as AppVariable[])
+      }
+      return [firstMsg, ...prev.slice(1)]
+    })
+  }
+
+  console.log('chatList', chatList, streamLoadingRef.current)
 
   return (
     <Flex className="rb:w-full rb:p-[-16px]!">
@@ -437,11 +505,12 @@ const Conversation: FC = () => {
             empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
             contentClassName={!fileList.length ? "rb:h-[calc(100%-144px)] rb:w-full" : "rb:h-[calc(100%-208px)] rb:w-full"}
             data={chatList}
-            streamLoading={streamLoading}
+            streamLoading={streamLoadingRef.current}
             loading={loading}
             onChange={setMessage}
             onSend={handleSend}
             labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
+            conversationId={conversation_id}
             fileList={fileList}
             fileChange={(list) => {
               setFileList(list || [])
@@ -460,7 +529,24 @@ const Conversation: FC = () => {
               }
             }}
             rightExtra={
-              <Flex align="center" justify="end" gap={8}>
+              (features?.web_search?.enabled || isHasMemory || isDeepThinking)
+              ? <Flex align="center" justify="end" gap={8}>
+                {isDeepThinking &&
+                  <Tooltip title={t('memoryConversation.deepThinking')}>
+                    <Flex justify="center" align="center"
+                      className={clsx("rb:size-7 rb:cursor-pointer rb:border rb:hover:bg-[#F6F6F6] rb:rounded-full rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]", {
+                        'rb:bg-[rgba(21,94,239,0.06)] rb:border-[rgba(21,94,239,0.25)]': thinking,
+                        'rb:border-[#EBEBEB]': !thinking,
+                      })}
+                      onClick={handleChangeDeepThinking}
+                    >
+                      <div className={clsx("rb:size-4 rb:bg-cover", {
+                        "rb:bg-[url('@/assets/images/conversation/deepThinking.svg')]": !thinking,
+                        "rb:bg-[url('@/assets/images/conversation/deepThinkingChecked.svg')]": thinking
+                      })} />
+                    </Flex>
+                  </Tooltip>
+                }
                 {features?.web_search?.enabled &&
                   <Tooltip title={t('memoryConversation.web_search')}>
                     <Flex justify="center" align="center"
@@ -496,7 +582,9 @@ const Conversation: FC = () => {
                   </Tooltip>
                 }
               </Flex>
+              : undefined
             }
+            onVariablesChange={handleChangeVariables}
           />
           </Chat>
         </div>

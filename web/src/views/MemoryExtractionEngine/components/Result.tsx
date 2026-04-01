@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:11 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 11:40:38
+ * @Last Modified time: 2026-03-26 15:46:30
  */
 /**
  * Result Component
@@ -267,7 +267,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
       title={t('memoryExtractionEngine.exampleMemoryExtractionResults')}
       subTitle={t('memoryExtractionEngine.exampleMemoryExtractionResultsSubTitle')}
       headerClassName="rb:pb-0! rb:pt-4!"
-      bodyClassName="rb:h-[calc(100vh-163px)]! rb:overflow-y-auto rb:p-[16px_20px]!"
+      bodyClassName="rb:h-[calc(100%-50px)]! rb:overflow-y-auto rb:p-[16px_20px]!"
       extra={<Space size={8}>
         <Button
           icon={<div className="rb:size-3.5 rb:bg-cover rb:bg-[url('@/assets/images/common/save.svg')]"></div>}
@@ -281,6 +281,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
           onClick={handleRun}
         >{t('memoryExtractionEngine.debug')}</Button>
       </Space>}
+      className="rb:h-full!"
     >
       {/* <RbAlert color="orange" icon={<ExclamationCircleFilled />} className="rb:mb-3!">
         {t('memoryExtractionEngine.warning')}

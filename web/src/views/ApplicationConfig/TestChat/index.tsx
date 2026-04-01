@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 13:43:02
+ * @Last Modified time: 2026-03-31 16:04:15
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -171,9 +171,28 @@ const TestChat: FC<TestChatProps> = ({
           ...lastMsg,
           content: lastMsg.content + content,
           meta_data: {
+            ...(lastMsg.meta_data || {}),
             audio_url: audio_url || lastMsg.meta_data?.audio_url,
             audio_status: audio_status || lastMsg.meta_data?.audio_status,
             citations: citations || lastMsg.meta_data?.citations
+          }
+        }
+      }
+      return newList
+    })
+  }
+  const updateAssistantReasoningMessage = (content: string) => {
+    if (!content) return
+    if (streamLoading) setStreamLoading(false)
+    setChatList(prev => {
+      const newList = [...prev]
+      const lastMsg = newList[newList.length - 1]
+      if (lastMsg?.role === 'assistant') {
+        newList[newList.length - 1] = {
+          ...lastMsg,
+          meta_data: {
+            ...(lastMsg.meta_data || {}),
+            reasoning_content: (lastMsg.meta_data?.reasoning_content || '') + content
           }
         }
       }
@@ -271,6 +290,10 @@ const TestChat: FC<TestChatProps> = ({
       };
       switch (item.event) {
         case 'start':
+          if (conversation_id && conversationId !== conversation_id) setConversationId(conversation_id)
+          break
+        case 'reasoning':
+          updateAssistantReasoningMessage(content)
           if (conversation_id && conversationId !== conversation_id) setConversationId(conversation_id)
           break
         case 'message':
@@ -531,11 +554,11 @@ const TestChat: FC<TestChatProps> = ({
   }
 
   return (
-    <div className="rb:w-250 rb:p-3 rb:mx-auto">
+    <div className="rb:w-250 rb:mx-auto rb:h-full">
       <RbCard
         title={t('application.test')}
         headerClassName="rb:min-h-[56px]!"
-        className="rb:h-[calc(100vh-88px)]!"
+        className="rb:h-full!"
         bodyClassName="rb:h-[calc(100%-56px)]! rb:overflow-y-auto rb:px-3! rb:py-0!"
       >
         <Chat

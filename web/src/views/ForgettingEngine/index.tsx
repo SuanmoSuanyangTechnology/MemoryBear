@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:00:12 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-25 18:29:00 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-26 15:47:37
  */
 /**
  * Forgetting Engine Configuration Page
@@ -155,8 +155,8 @@ const ForgettingEngine: React.FC = () => {
   }
 
   return (
-    <Row gutter={12}>
-      <Col span={12}>
+    <Row gutter={12} className="rb:h-full!">
+      <Col span={12} className="rb:h-full!">
         <RbCard
           title={t('forgettingEngine.forgettingEngineConfigParams')}
           extra={<Space>
@@ -165,7 +165,7 @@ const ForgettingEngine: React.FC = () => {
           </Space>}
           headerType="borderless"
           headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
-          className="rb:h-[calc(100vh-76px)]!"
+          className="rb:h-full!"
           bodyClassName="rb:h-[calc(100%-54px)] rb:overflow-y-auto! rb:p-3! rb:pt-0!"
         >
           <Form 
@@ -226,7 +226,7 @@ const ForgettingEngine: React.FC = () => {
           </Form>
         </RbCard>
       </Col>
-      <Col span={12}>
+      <Col span={12} className="rb:h-full!">
         <RbCard
           title={t('forgettingEngine.forgettingCurve')}
           headerType="borderless"

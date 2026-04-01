@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 11:11:46
+ * @Last Modified time: 2026-03-31 10:08:26
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -33,6 +33,7 @@ import assignerIcon from '@/assets/images/workflow/assigner.svg'
 import memoryReadIcon from '@/assets/images/workflow/memory-read.svg'
 import memoryWriteIcon from '@/assets/images/workflow/memory-write.svg'
 import unknownIcon from '@/assets/images/workflow/unknown.svg'
+import documentExtractorIcon from '@/assets/images/workflow/document-extractor.svg'
 
 import { memoryConfigListUrl } from '@/api/memory'
 import type { NodeLibrary } from './types'
@@ -473,8 +474,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
         }
       },
-      {
-        type: "document-extractor", icon: codeExecutionIcon,
+      { type: "document-extractor", icon: documentExtractorIcon,
         config: {
           file_selector: {
             type: 'variableList',
@@ -693,8 +693,59 @@ export const portArgs = { x: nodeWidth, y: portItemArgsY }
 
 const defaultPortGroup = {
   position: { name: 'absolute' },
-  markup: portMarkup,
-  attrs: portAttrs
+  markup: [
+    { tagName: 'rect', selector: 'body' },
+    { tagName: 'circle', selector: 'hoverBody' },
+    { tagName: 'text', selector: 'label' },
+  ],
+  attrs: {
+    body: {
+      width: 1,
+      height: 8,
+      x: -1,
+      magnet: true,
+      stroke: port_color,
+      strokeWidth: edge_width,
+      fill: port_color,
+    },
+    hoverBody: {
+      r: 6,
+      cy: 2,
+      magnet: true,
+      stroke: port_color,
+      strokeWidth: edge_width,
+      fill: port_color,
+      opacity: 0,
+    },
+    label: {
+      text: '+',
+      fontSize: 12,
+      fontWeight: 'bold',
+      fill: '#FFFFFF',
+      textAnchor: 'middle',
+      textVerticalAnchor: 'middle',
+      pointerEvents: 'none',
+      y: '0.15em',
+      opacity: 0,
+    },
+  },
+}
+
+const leftPortGroup = {
+  position: { name: 'absolute' },
+  markup: [{ tagName: 'rect', selector: 'body' }],
+  attrs: {
+    body: {
+      width: 1,
+      height: 8,
+      x: -1,
+      y: -4,
+      magnet: true,
+      stroke: port_color,
+      strokeWidth: edge_width,
+      fill: port_color,
+    },
+  },
 }
 
 /**
@@ -703,7 +754,7 @@ const defaultPortGroup = {
  */
 export const defaultAbsolutePortGroups = {
   right: defaultPortGroup,
-  left: defaultPortGroup,
+  left: leftPortGroup,
 }
 /**
  * Default port items for standard nodes
@@ -797,7 +848,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 28,
     shape: 'add-node',
     ports: {
-      groups: { left: defaultPortGroup },
+      groups: { left: leftPortGroup },
       items: [{ group: 'left', args: { x: 0, y: 18 }}],
     },
   },
@@ -824,7 +875,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 28,
     shape: 'add-node',
     ports: {
-      groups: { left: defaultPortGroup },
+      groups: { left: leftPortGroup },
       items: [{ group: 'left', args: { x: 0, y: 14 } }],
     },
   },
@@ -833,7 +884,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 76,
     shape: 'normal-node',
     ports: {
-      groups: { left: defaultPortGroup },
+      groups: { left: leftPortGroup },
       items: [defaultPortItems[0]],
     },
   },
@@ -877,11 +928,74 @@ export const edgeAttrs = {
     line: {
       stroke: edge_color,
       strokeWidth: edge_width,
-      targetMarker: {
-        name: 'block',
-        width: 4,
-        height: 4,
+      targetMarker: null,
+      sourceMarker: null,
+    },
+  },
+}
+
+/**
+ * Edge hover tool: circular "+" button shown at midpoint on hover
+ */
+export const edgeHoverTool = {
+  name: 'button',
+  args: {
+    markup: [
+      {
+        tagName: 'circle',
+        selector: 'button',
+        attrs: {
+          r: 6,
+          stroke: port_color,
+          strokeWidth: edge_width,
+          fill: port_color,
+          cursor: 'pointer',
+        },
       },
+      {
+        tagName: 'text',
+        textContent: '+',
+        selector: 'icon',
+        attrs: {
+          fontSize: 12,
+          fontWeight: 'bold',
+          fill: '#FFFFFF',
+          textAnchor: 'middle',
+          textVerticalAnchor: 'middle',
+          pointerEvents: 'none',
+          y: '0.3em',
+        },
+      },
+    ],
+    distance: 0.5,
+    offset: { x: 0, y: 0 },
+    onClick({ e, cell: edge }: any) {
+      e.stopPropagation();
+      const graph = edge.model?.graph;
+      if (!graph) return;
+      const sourceCell = graph.getCellById(edge.getSourceCellId());
+      const targetCell = graph.getCellById(edge.getTargetCellId());
+      const sourcePort = edge.getSourcePortId();
+      const targetPort = edge.getTargetPortId();
+      if (!sourceCell || !targetCell) return;
+      const rect = (e.target as HTMLElement).getBoundingClientRect();
+      const tempDiv = document.createElement('div');
+      tempDiv.style.position = 'fixed';
+      tempDiv.style.left = rect.left + 'px';
+      tempDiv.style.top = rect.top + 'px';
+      tempDiv.style.width = '1px';
+      tempDiv.style.height = '1px';
+      tempDiv.style.zIndex = '9999';
+      document.body.appendChild(tempDiv);
+      window.dispatchEvent(new CustomEvent('port:click', {
+        detail: {
+          node: sourceCell,
+          port: sourcePort,
+          element: tempDiv,
+          rect,
+          edgeInsertion: { edge, sourceCell, targetCell, sourcePort, targetPort }
+        }
+      }));
     },
   },
 }

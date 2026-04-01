@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import os
 import re
 import shutil
@@ -38,12 +37,10 @@ from app.db import get_db, get_db_context
 from app.models import Document, File, Knowledge
 from app.models.end_user_model import EndUser
 from app.schemas import document_schema, file_schema
-from app.schemas.model_schema import ModelInfo
 from app.services.memory_agent_service import MemoryAgentService, get_end_user_connected_config
 from app.services.memory_forget_service import MemoryForgetService
-from app.services.memory_perceptual_service import MemoryPerceptualService
 from app.utils.config_utils import resolve_config_id
-from app.utils.redis_lock import RedisLock
+from app.utils.redis_lock import RedisFairLock
 
 logger = get_logger(__name__)
 
@@ -104,7 +101,12 @@ def get_sync_redis_client() -> Optional[redis.StrictRedis]:
 
 
 def set_asyncio_event_loop():
-    """Set the asyncio event loop for the current thread."""
+    """Ensure an open asyncio event loop exists for the current thread.
+
+    Reuses the existing event loop if one is available and still open.
+    Creates and installs a new event loop only when the current one is
+    closed or missing (e.g. after ``_shutdown_loop_gracefully``).
+    """
     try:
         loop = asyncio.get_event_loop()
         if loop.is_closed():
@@ -114,6 +116,30 @@ def set_asyncio_event_loop():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
     return loop
+
+
+def _shutdown_loop_gracefully(loop: asyncio.AbstractEventLoop):
+    """Gracefully shutdown pending async generators and tasks on the event loop.
+
+    This prevents 'RuntimeError: Event loop is closed' from httpx.AsyncClient.__del__
+    by giving pending aclose() coroutines a chance to run before the loop is discarded.
+
+    Note: This only tears down the given loop. Callers that need a fresh event
+    loop afterwards should use ``set_asyncio_event_loop()`` explicitly.
+    """
+    try:
+        # Cancel and collect all remaining tasks
+        all_tasks = asyncio.all_tasks(loop)
+        if all_tasks:
+            for task in all_tasks:
+                task.cancel()
+            loop.run_until_complete(asyncio.gather(*all_tasks, return_exceptions=True))
+        # Shutdown async generators (triggers __aclose__ on httpx clients etc.)
+        loop.run_until_complete(loop.shutdown_asyncgens())
+    except Exception:
+        pass
+    finally:
+        loop.close()
 
 
 @celery_app.task(name="tasks.process_item")
@@ -1148,8 +1174,28 @@ def write_message_task(
             logger.info(f"[CELERY WRITE] Write completed successfully: {result}")
             return result
 
+    redis_client = get_sync_redis_client()
+    lock = None
+    if redis_client is not None:
+        lock = RedisFairLock(
+            key=f"memory_write:{end_user_id}",
+            redis_client=redis_client,
+            expire=600,
+            timeout=3600,
+            auto_renewal=True,
+        )
+        if not lock.acquire():
+            logger.warning(f"[CELERY WRITE] 获取锁超时，跳过本次写入: end_user_id={end_user_id}")
+            return {
+                "status": "SKIPPED",
+                "error": "acquire lock timeout",
+                "end_user_id": end_user_id,
+                "config_id": str(config_id),
+                "elapsed_time": time.time() - start_time,
+                "task_id": self.request.id,
+            }
+
     try:
-        # 尝试获取现有事件循环，如果不存在则创建新的
         loop = set_asyncio_event_loop()
 
         result = loop.run_until_complete(_run())
@@ -1158,7 +1204,6 @@ def write_message_task(
         logger.info(f"[CELERY WRITE] Task completed successfully "
                     f"- elapsed_time={elapsed_time:.2f}s, task_id={self.request.id}")
 
-        # 记录该用户最后一次 write_message 成功的时间，供时间轴筛选使用
         try:
             _r = get_sync_redis_client()
             if _r is not None:
@@ -1199,6 +1244,15 @@ def write_message_task(
             "elapsed_time": elapsed_time,
             "task_id": self.request.id
         }
+    finally:
+        if lock is not None:
+            try:
+                lock.release()
+            except Exception as e:
+                logger.warning(f"[CELERY WRITE] 释放锁失败: {e}")
+        # Gracefully shutdown the event loop to prevent
+        # 'RuntimeError: Event loop is closed' from httpx.AsyncClient.__del__
+        _shutdown_loop_gracefully(loop)
 
 
 # unused task
@@ -2879,3 +2933,6 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
             "elapsed_time": time.time() - start_time,
             "task_id": self.request.id,
         }
+
+
+# unused task

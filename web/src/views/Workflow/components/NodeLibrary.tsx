@@ -10,7 +10,7 @@ const NodeLibrary: FC<{ collapsed: boolean; handleToggle: () => void }> = ({ col
   const { t } = useTranslation()
 
   return (
-    <div className={clsx("rb:overflow-hidden rb:fixed rb:left-2.5 rb:top-18.5 rb:z-1000", {
+    <div className={clsx("rb:h-[calc(100vh-88px)] rb:overflow-hidden rb:fixed rb:left-2.5 rb:top-18.5 rb:z-1000", {
       'rb:w-65': !collapsed,
       'rb:w-14': collapsed
     })}>
@@ -27,9 +27,9 @@ const NodeLibrary: FC<{ collapsed: boolean; handleToggle: () => void }> = ({ col
           'rb:min-h-[52px]!': collapsed
         })}
         className="rb:h-full! rb:hover:shadow-none!"
-        bodyClassName={clsx('rb:overflow-y-auto! rb:h-[calc(100vh-126px)]! rb:pt-0! rb:pb-3!', {
-          'rb:px-0!': collapsed,
-          'rb:px-3!': !collapsed
+        bodyClassName={clsx('rb:overflow-y-auto! rb:pt-0! rb:pb-3!', {
+          'rb:px-0! rb:h-[calc(100%-52px)]!': collapsed,
+          'rb:px-3! rb:h-[calc(100%-42px)]!': !collapsed
         })}
       >
         <Flex vertical align={collapsed ? 'center' : undefined} gap={collapsed ? 8 : 16}>
@@ -70,7 +70,7 @@ const NodeLibrary: FC<{ collapsed: boolean; handleToggle: () => void }> = ({ col
                         key={nodeIndex}
                         align="center"
                         gap={8}
-                        className="rb:rounded-xl rb:p-2! rb-border rb:cursor-pointer rb:hover:border rb:hover:border-[#171719]!"
+                        className="rb:rounded-xl rb:p-2! rb:border rb:border-[#EBEBEB] rb:cursor-pointer rb:hover:border rb:hover:border-[#171719]!"
                         draggable
                         onDragStart={(e) => {
                           e.dataTransfer.setData('application/reactflow', node.type);
@@ -87,8 +87,6 @@ const NodeLibrary: FC<{ collapsed: boolean; handleToggle: () => void }> = ({ col
           }
         </Flex>
       </RbCard>
-      <Flex gap={12} vertical>
-      </Flex>
     </div>
   );
 };

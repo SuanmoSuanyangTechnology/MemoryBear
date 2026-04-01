@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2025-12-19 16:54:52 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-16 15:06:29 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-27 11:35:37
  */
 import { forwardRef, useImperativeHandle, useRef } from 'react'
 import { Row, Col } from 'antd';
@@ -46,8 +46,8 @@ const StatementDetail = forwardRef<{ handleRefresh: () => void },{ refresh: () =
     handleRefresh
   }));
   return (
-    <Row gutter={[12, 12]}>
-      <Col span={12}>
+    <Row gutter={[12, 12]} className="rb:h-full!">
+      <Col span={12} className="rb:h-full!">
         <Row gutter={[12, 12]}>
           <Col span={24}>
             <WordCloud />
@@ -60,7 +60,7 @@ const StatementDetail = forwardRef<{ handleRefresh: () => void },{ refresh: () =
           </Col>
         </Row>
       </Col>
-      <Col span={12}>
+      <Col span={12} className="rb:h-full!">
         <Suggestions ref={suggestionsRef} refresh={refresh} />
       </Col>
     </Row>

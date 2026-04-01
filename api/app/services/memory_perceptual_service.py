@@ -243,28 +243,9 @@ class MemoryPerceptualService:
             memory_config: MemoryConfig,
             file: FileInput
     ):
-        memories = self.repository.get_by_url(file.url)
-        if memories:
-            business_logger.info(f"Perceptual memory already exists: {file.url}")
-            if end_user_id not in [memory.end_user_id for memory in memories]:
-                business_logger.info(f"Copy perceptual memory end_user_id: {end_user_id}")
-                memory_cache = memories[0]
-                memory = self.repository.create_perceptual_memory(
-                    end_user_id=uuid.UUID(end_user_id),
-                    perceptual_type=PerceptualType(memory_cache.perceptual_type),
-                    file_path=memory_cache.file_path,
-                    file_name=memory_cache.file_name,
-                    file_ext=memory_cache.file_ext,
-                    summary=memory_cache.summary,
-                    meta_data=memory_cache.meta_data
-                )
-                self.db.commit()
-                return memory
-            else:
-                for memory in memories:
-                    if memory.end_user_id == uuid.UUID(end_user_id):
-                        return memory
         llm, model_config = self._get_mutlimodal_client(file.type, memory_config)
+        if model_config is None or llm is None:
+            return None
         multimodel_service = MultimodalService(self.db, ModelInfo(
             model_name=model_config.model_name,
             provider=model_config.provider,
@@ -286,15 +267,20 @@ class MemoryPerceptualService:
             with open(os.path.join(prompt_path, 'perceptual_summary_system.jinja2'), 'r', encoding='utf-8') as f:
                 opt_system_prompt = f.read()
             rendered_system_message = Template(opt_system_prompt).render(file_type=file.type, language='zh')
-        except FileNotFoundError:
-            raise BusinessException(message="System prompt template not found", code=BizCode.NOT_FOUND)
+        except FileNotFoundError as e:
+            business_logger.error(f"Failed to generate perceptual memory: {str(e)}")
+            return None
         messages = [
             {"role": RoleType.SYSTEM.value, "content": [{"type": "text", "text": rendered_system_message}]},
             {"role": RoleType.USER.value, "content": [
                 {"type": "text", "text": "Summarize the following file"}, file_message
             ]}
         ]
-        result = await llm.ainvoke(messages)
+        try:
+            result = await llm.ainvoke(messages)
+        except Exception as e:
+            business_logger.error(f"Failed to generate perceptual memory: {str(e)}")
+            return None
         content = result.content
         final_output = ""
         if isinstance(content, list):

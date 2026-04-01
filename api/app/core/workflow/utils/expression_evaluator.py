@@ -4,32 +4,33 @@ from typing import Any
 
 from simpleeval import simple_eval, NameNotDefined, InvalidExpression
 
+from app.core.workflow.engine.variable_pool import LazyVariableDict, VARIABLE_PATTERN
+
 logger = logging.getLogger(__name__)
+
+_NORMALIZE_PATTERN = re.compile(r"\{\{\s*(\d+)\.(\w+)\s*}}")
 
 
 class ExpressionEvaluator:
     """Safe expression evaluator for workflow variables and node outputs."""
-    
+
     # Reserved namespaces
     RESERVED_NAMESPACES = {"var", "node", "sys", "nodes"}
 
     @classmethod
     def normalize_template(cls, template: str) -> str:
-        pattern = re.compile(
-            r"\{\{\s*(\d+)\.(\w+)\s*}}"
-        )
-        return pattern.sub(
+        return _NORMALIZE_PATTERN.sub(
             r'{{ node["\1"].\2 }}',
             template
         )
 
     @classmethod
     def evaluate(
-        cls,
-        expression: str,
-        conv_vars: dict[str, Any],
-        node_outputs: dict[str, Any],
-        system_vars: dict[str, Any] | None = None
+            cls,
+            expression: str,
+            conv_vars: dict[str, Any],
+            node_outputs: dict[str, Any],
+            system_vars: dict[str, Any] | None = None
     ) -> Any:
         """
         Safely evaluate an expression using workflow variables.
@@ -49,48 +50,47 @@ class ExpressionEvaluator:
         # Remove Jinja2-style brackets if present
         expression = expression.strip()
         expression = cls.normalize_template(expression)
-        pattern = r"\{\{\s*(.*?)\s*\}\}"
-        expression = re.sub(pattern, r"\1", expression).strip()
+        expression = VARIABLE_PATTERN.sub(r"\1", expression).strip()
 
         # Build context for evaluation
         context = {
-            "conv": conv_vars,                   # conversation variables
-            "node": node_outputs,                # node outputs
-            "sys": system_vars or {},            # system variables
+            "conv": conv_vars,  # conversation variables
+            "node": node_outputs,  # node outputs
+            "sys": system_vars or {},  # system variables
         }
 
-        context.update(conv_vars)
-        context["nodes"] = node_outputs
+        # context.update(conv_vars)
+        # context["nodes"] = node_outputs
         context.update(node_outputs)
-        
+
         try:
             # simpleeval supports safe operations:
             # arithmetic, comparisons, logical ops, attribute/dict/list access
             result = simple_eval(expression, names=context)
             return result
-            
+
         except NameNotDefined as e:
             logger.error(f"Undefined variable in expression: {expression}, error: {e}")
             raise ValueError(f"Undefined variable: {e}")
-            
+
         except InvalidExpression as e:
             logger.error(f"Invalid expression syntax: {expression}, error: {e}")
             raise ValueError(f"Invalid expression syntax: {e}")
-            
+
         except SyntaxError as e:
             logger.error(f"Syntax error in expression: {expression}, error: {e}")
             raise ValueError(f"Syntax error: {e}")
-            
+
         except Exception as e:
             logger.error(f"Expression evaluation failed: {expression}, error: {e}")
             raise ValueError(f"Expression evaluation failed: {e}")
-    
+
     @staticmethod
     def evaluate_bool(
-        expression: str,
-        conv_var: dict[str, Any],
-        node_outputs: dict[str, Any],
-        system_vars: dict[str, Any] | None = None
+            expression: str,
+            conv_var: dict[str, Any],
+            node_outputs: dict[str, Any],
+            system_vars: dict[str, Any] | None = None
     ) -> bool:
         """
         Evaluate a boolean expression (for conditions).
@@ -108,7 +108,7 @@ class ExpressionEvaluator:
             expression, conv_var, node_outputs, system_vars
         )
         return bool(result)
-    
+
     @staticmethod
     def validate_variable_names(variables: list[dict]) -> list[str]:
         """
@@ -121,7 +121,7 @@ class ExpressionEvaluator:
             list[str]: List of error messages. Empty if all names are valid.
         """
         errors = []
-        
+
         for var in variables:
             var_name = var.get("name", "")
 
@@ -134,16 +134,16 @@ class ExpressionEvaluator:
                 errors.append(
                     f"Variable name '{var_name}' is not a valid Python identifier"
                 )
-        
+
         return errors
 
 
 # 便捷函数
 def evaluate_expression(
-    expression: str,
-    conv_var: dict[str, Any],
-    node_outputs: dict[str, Any],
-    system_vars: dict[str, Any]
+        expression: str,
+        conv_var: dict[str, Any] | LazyVariableDict,
+        node_outputs: dict[str, dict[str, Any] | LazyVariableDict],
+        system_vars: dict[str, Any] | LazyVariableDict
 ) -> Any:
     """Evaluate an expression (convenience function)."""
     return ExpressionEvaluator.evaluate(
@@ -152,11 +152,11 @@ def evaluate_expression(
 
 
 def evaluate_condition(
-    expression: str,
-    conv_var: dict[str, Any],
-    node_outputs: dict[str, Any],
-    system_vars: dict[str, Any] | None = None
-) -> bool:
+        expression: str,
+        conv_var: dict[str, Any] | LazyVariableDict,
+        node_outputs: dict[str, dict[str, Any] | LazyVariableDict],
+        system_vars: dict[str, Any] | LazyVariableDict
+) -> Any:
     """Evaluate a boolean condition expression (convenience function)."""
     return ExpressionEvaluator.evaluate_bool(
         expression, conv_var, node_outputs, system_vars

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 14:03:01
+ * @Last Modified time: 2026-03-27 17:32:10
  */
 /**
  * Copy Application Modal
@@ -74,16 +74,16 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
   }
 
   const formatFileTypeOptions = (fu: FeaturesConfigForm['file_upload']) => {
-    let options = [{ type: 'document', enabled: fu.document_enabled, maxSize: fu.document_max_size_mb }]
-    if (!capability) return options
+    let options = fu.document_enabled ? [{ type: 'document', enabled: fu.document_enabled, maxSize: fu.document_max_size_mb }] : []
+    if (!capability && source !== 'workflow') return options
     
-    if (capability.includes('vision')) {
+    if ((capability?.includes('vision') || source === 'workflow') && fu.image_enabled) {
       options.push({ type: 'image', enabled: fu.image_enabled, maxSize: fu.image_max_size_mb })
     }
-    if (capability.includes('audio')) {
+    if ((capability?.includes('audio') || source === 'workflow') && fu.audio_enabled) {
       options.push({ type: 'audio', enabled: fu.audio_enabled, maxSize: fu.audio_max_size_mb })
     }
-    if (capability.includes('video')) {
+    if ((capability?.includes('video') || source === 'workflow') && fu.video_enabled) {
       options.push({ type: 'video', enabled: fu.video_enabled, maxSize: fu.video_max_size_mb })
     }
     return options.filter(item => item.enabled)
@@ -201,6 +201,7 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
         ref={fileUploadSettingModalRef}
         onSave={handleSaveSettings}
         capability={capability}
+        source={source}
       />
       <OpenStatementSettingModal
         ref={openStatementSettingModalRef}

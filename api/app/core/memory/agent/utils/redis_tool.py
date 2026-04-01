@@ -3,8 +3,9 @@ import uuid
 from app.core.config import settings
 from typing import List, Dict, Any, Optional, Union
 
+from app.core.logging_config import get_logger
 from app.core.memory.agent.utils.redis_base import (
-    serialize_messages, 
+    serialize_messages,
     deserialize_messages,
     fix_encoding,
     format_session_data,
@@ -14,12 +15,12 @@ from app.core.memory.agent.utils.redis_base import (
     get_current_timestamp
 )
 
-
+logger = get_logger(__name__)
 
 
 class RedisWriteStore:
     """Redis Write 类型存储类，用于管理 save_session_write 相关的数据"""
-    
+
     def __init__(self, host='localhost', port=6379, db=0, password=None, session_id=''):
         """
         初始化 Redis 连接
@@ -66,10 +67,10 @@ class RedisWriteStore:
             })
             result = pipe.execute()
 
-            print(f"[save_session_write] 保存结果: {result[0]}, session_id: {session_id}")
+            logger.debug(f"[save_session_write] 保存结果: {result[0]}, session_id: {session_id}")
             return session_id
         except Exception as e:
-            print(f"[save_session_write] 保存会话失败: {e}")
+            logger.error(f"[save_session_write] 保存会话失败: {e}")
             raise e
 
     def get_session_by_userid(self, userid: str) -> Union[List[Dict[str, str]], bool]:
@@ -99,7 +100,7 @@ class RedisWriteStore:
             for key, data in zip(keys, all_data):
                 if not data:
                     continue
-                
+
                 # 从 write 类型读取，匹配 sessionid 字段
                 if data.get('sessionid') == userid:
                     # 从 key 中提取 session_id: session:write:{session_id}
@@ -108,16 +109,16 @@ class RedisWriteStore:
                         "sessionid": session_id,
                         "messages": fix_encoding(data.get('messages', ''))
                     })
-            
+
             if not results:
                 return False
-            
-            print(f"[get_session_by_userid] userid={userid}, 找到 {len(results)} 条数据")
+
+            logger.debug(f"[get_session_by_userid] userid={userid}, 找到 {len(results)} 条数据")
             return results
         except Exception as e:
-            print(f"[get_session_by_userid] 查询失败: {e}")
+            logger.error(f"[get_session_by_userid] 查询失败: {e}")
             return False
-    
+
     def get_all_sessions_by_end_user_id(self, end_user_id: str) -> Union[List[Dict[str, Any]], bool]:
         """
         通过 end_user_id 获取所有 write 类型的会话数据
@@ -144,7 +145,7 @@ class RedisWriteStore:
             # 只查询 write 类型的 key
             keys = self.r.keys('session:write:*')
             if not keys:
-                print(f"[get_all_sessions_by_end_user_id] 没有找到任何 write 类型的会话")
+                logger.debug(f"[get_all_sessions_by_end_user_id] 没有找到任何 write 类型的会话")
                 return False
 
             # 批量获取数据
@@ -158,12 +159,12 @@ class RedisWriteStore:
             for key, data in zip(keys, all_data):
                 if not data:
                     continue
-                
+
                 # 从 write 类型读取，匹配 sessionid 字段
                 if data.get('sessionid') == end_user_id:
                     # 从 key 中提取 session_id: session:write:{session_id}
                     session_id = key.split(':')[-1]
-                    
+
                     # 构建完整的会话信息
                     session_info = {
                         "session_id": session_id,
@@ -173,23 +174,21 @@ class RedisWriteStore:
                         "starttime": data.get('starttime', '')
                     }
                     results.append(session_info)
-            
+
             if not results:
-                print(f"[get_all_sessions_by_end_user_id] end_user_id={end_user_id}, 没有找到数据")
+                logger.debug(f"[get_all_sessions_by_end_user_id] end_user_id={end_user_id}, 没有找到数据")
                 return False
-            
+
             # 按时间排序（最新的在前）
             results.sort(key=lambda x: x.get('starttime', ''), reverse=True)
-            
-            print(f"[get_all_sessions_by_end_user_id] end_user_id={end_user_id}, 找到 {len(results)} 条数据")
+
+            logger.debug(f"[get_all_sessions_by_end_user_id] end_user_id={end_user_id}, 找到 {len(results)} 条数据")
             return results
         except Exception as e:
-            print(f"[get_all_sessions_by_end_user_id] 查询失败: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"[get_all_sessions_by_end_user_id] 查询失败: {e}", exc_info=True)
             return False
 
-    def find_user_recent_sessions(self, userid: str, 
+    def find_user_recent_sessions(self, userid: str,
                                   minutes: int = 5) -> List[Dict[str, str]]:
         """
         根据 userid 从 save_session_write 写入的数据中查询最近 N 分钟内的会话数据
@@ -203,11 +202,11 @@ class RedisWriteStore:
         """
         import time
         start_time = time.time()
-        
+
         # 只查询 write 类型的 key
         keys = self.r.keys('session:write:*')
         if not keys:
-            print(f"[find_user_recent_sessions] 查询耗时: {time.time() - start_time:.3f}秒, 结果数: 0")
+            logger.debug(f"[find_user_recent_sessions] 查询耗时: {time.time() - start_time:.3f}秒, 结果数: 0")
             return []
 
         # 批量获取数据
@@ -221,7 +220,7 @@ class RedisWriteStore:
         for data in all_data:
             if not data:
                 continue
-            
+
             # 从 write 类型读取，匹配 sessionid 字段
             if data.get('sessionid') == userid and data.get('starttime'):
                 # write 类型没有 aimessages，所以 Answer 为空
@@ -230,15 +229,14 @@ class RedisWriteStore:
                     "Answer": "",
                     "starttime": data.get('starttime', '')
                 })
-        
+
         # 根据时间范围过滤
         filtered_items = filter_by_time_range(matched_items, minutes)
         # 排序并移除时间字段
-        result_items = sort_and_limit_results(filtered_items, limit=None)
-        print(result_items)
+        result_items = sort_and_limit_results(filtered_items)
 
         elapsed_time = time.time() - start_time
-        print(f"[find_user_recent_sessions] userid={userid}, minutes={minutes}, "
+        logger.debug(f"[find_user_recent_sessions] userid={userid}, minutes={minutes}, "
               f"查询耗时: {elapsed_time:.3f}秒, 结果数: {len(result_items)}")
 
         return result_items
@@ -258,7 +256,7 @@ class RedisWriteStore:
 
 class RedisCountStore:
     """Redis Count 类型存储类，用于管理访问次数统计相关的数据"""
-    
+
     def __init__(self, host='localhost', port=6379, db=0, password=None, session_id=''):
         """
         初始化 Redis 连接
@@ -278,7 +276,7 @@ class RedisCountStore:
             decode_responses=True,
             encoding='utf-8'
         )
-        self.uudi = session_id
+        self.uuid = session_id
 
     def save_sessions_count(self, end_user_id: str, count: int, messages: Any) -> str:
         """
@@ -295,26 +293,26 @@ class RedisCountStore:
         session_id = str(uuid.uuid4())
         key = generate_session_key(session_id, key_type="count")
         index_key = f'session:count:index:{end_user_id}'  # 索引键
-        
+
         pipe = self.r.pipeline()
         pipe.hset(key, mapping={
-            "id": self.uudi,
+            "id": self.uuid,
             "end_user_id": end_user_id,
             "count": int(count),
             "messages": serialize_messages(messages),
             "starttime": get_current_timestamp()
         })
         pipe.expire(key, 30 * 24 * 60 * 60)  # 30天过期
-        
+
         # 创建索引：end_user_id -> session_id 映射
         pipe.set(index_key, session_id, ex=30 * 24 * 60 * 60)
-        
+
         result = pipe.execute()
-        
-        print(f"[save_sessions_count] 保存结果: {result}, session_id: {session_id}")
+
+        logger.debug(f"[save_sessions_count] 保存结果: {result}, session_id: {session_id}")
         return session_id
 
-    def get_sessions_count(self, end_user_id: str) -> Union[List[Any], bool]:
+    def get_sessions_count(self, end_user_id: str) -> tuple[int, list[dict]] | bool:
         """
         通过 end_user_id 查询访问次数统计
         
@@ -327,7 +325,7 @@ class RedisCountStore:
         try:
             # 使用索引键快速查找
             index_key = f'session:count:index:{end_user_id}'
-            
+
             # 检查索引键类型，避免 WRONGTYPE 错误
             try:
                 key_type = self.r.type(index_key)
@@ -335,35 +333,40 @@ class RedisCountStore:
                     self.r.delete(index_key)
                     return False
             except Exception as type_error:
-                print(f"[get_sessions_count] 检查键类型失败: {type_error}")
-            
+                logger.error(f"[get_sessions_count] 检查键类型失败: {type_error}")
+
             session_id = self.r.get(index_key)
-            
+
             if not session_id:
                 return False
-            
+
             # 直接获取数据
             key = generate_session_key(session_id, key_type="count")
             data = self.r.hgetall(key)
-            
+
             if not data:
                 # 索引存在但数据不存在，清理索引
                 self.r.delete(index_key)
                 return False
-            
+
             count = data.get('count')
             messages_str = data.get('messages')
-            
+
             if count is not None:
-                messages = deserialize_messages(messages_str)
-                return [int(count), messages]
-            
+                messages: list[dict] = deserialize_messages(messages_str)
+                return int(count), messages
+
             return False
         except Exception as e:
-            print(f"[get_sessions_count] 查询失败: {e}")
+            logger.error(f"[get_sessions_count] 查询失败: {e}")
             return False
-    def update_sessions_count(self, end_user_id: str, new_count: int, 
-                             messages: Any) -> bool:
+
+    def update_sessions_count(
+            self,
+            end_user_id: str,
+            new_count: int,
+            messages: Any
+    ) -> bool:
         """
         通过 end_user_id 修改访问次数统计（优化版：使用索引）
         
@@ -378,39 +381,39 @@ class RedisCountStore:
         try:
             # 使用索引键快速查找
             index_key = f'session:count:index:{end_user_id}'
-            
+
             # 检查索引键类型，避免 WRONGTYPE 错误
             try:
                 key_type = self.r.type(index_key)
                 if key_type != 'string' and key_type != 'none':
                     # 索引键类型错误，删除并返回 False
-                    print(f"[update_sessions_count] 索引键类型错误: {key_type}，删除索引")
+                    logger.warning(f"[update_sessions_count] 索引键类型错误: {key_type}，删除索引")
                     self.r.delete(index_key)
-                    print(f"[update_sessions_count] 未找到记录: end_user_id={end_user_id}")
+                    logger.debug(f"[update_sessions_count] 未找到记录: end_user_id={end_user_id}")
                     return False
             except Exception as type_error:
-                print(f"[update_sessions_count] 检查键类型失败: {type_error}")
-            
+                logger.error(f"[update_sessions_count] 检查键类型失败: {type_error}")
+
             session_id = self.r.get(index_key)
-            
+
             if not session_id:
-                print(f"[update_sessions_count] 未找到记录: end_user_id={end_user_id}")
+                logger.debug(f"[update_sessions_count] 未找到记录: end_user_id={end_user_id}")
                 return False
-            
+
             # 直接更新数据
             key = generate_session_key(session_id, key_type="count")
             messages_str = serialize_messages(messages)
-            
+
             pipe = self.r.pipeline()
-            pipe.hset(key, 'count', int(new_count))
+            pipe.hset(key, 'count', str(new_count))
             pipe.hset(key, 'messages', messages_str)
             result = pipe.execute()
-            
-            print(f"[update_sessions_count] 更新成功: end_user_id={end_user_id}, new_count={new_count}, key={key}")
+
+            logger.debug(f"[update_sessions_count] 更新成功: end_user_id={end_user_id}, new_count={new_count}, key={key}")
             return True
-            
+
         except Exception as e:
-            print(f"[update_sessions_count] 更新失败: {e}")
+            logger.debug(f"[update_sessions_count] 更新失败: {e}")
             return False
 
     def delete_all_count_sessions(self) -> int:
@@ -428,7 +431,7 @@ class RedisCountStore:
 
 class RedisSessionStore:
     """Redis 会话存储类，用于管理会话数据"""
-    
+
     def __init__(self, host='localhost', port=6379, db=0, password=None, session_id=''):
         """
         初始化 Redis 连接
@@ -451,9 +454,9 @@ class RedisSessionStore:
         self.uudi = session_id
 
     # ==================== 写入操作 ====================
-    
-    def save_session(self, userid: str, messages: str, aimessages: str, 
-                    apply_id: str, end_user_id: str) -> str:
+
+    def save_session(self, userid: str, messages: str, aimessages: str,
+                     apply_id: str, end_user_id: str) -> str:
         """
         写入一条会话数据，返回 session_id
         
@@ -483,14 +486,14 @@ class RedisSessionStore:
             })
             result = pipe.execute()
 
-            print(f"[save_session] 保存结果: {result[0]}, session_id: {session_id}")
+            logger.debug(f"[save_session] 保存结果: {result[0]}, session_id: {session_id}")
             return session_id
         except Exception as e:
-            print(f"[save_session] 保存会话失败: {e}")
+            logger.error(f"[save_session] 保存会话失败: {e}")
             raise e
 
     # ==================== 读取操作 ====================
-    
+
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """
         读取一条会话数据
@@ -520,8 +523,8 @@ class RedisSessionStore:
                 sessions[sid] = self.get_session(sid)
         return sessions
 
-    def find_user_apply_group(self, sessionid: str, apply_id: str, 
-                             end_user_id: str) -> List[Dict[str, str]]:
+    def find_user_apply_group(self, sessionid: str, apply_id: str,
+                              end_user_id: str) -> List[Dict[str, str]]:
         """
         根据 sessionid、apply_id 和 end_user_id 查询会话数据，返回最新的6条
         
@@ -535,10 +538,10 @@ class RedisSessionStore:
         """
         import time
         start_time = time.time()
-        
+
         keys = self.r.keys('session:*')
         if not keys:
-            print(f"[find_user_apply_group] 查询耗时: {time.time() - start_time:.3f}秒, 结果数: 0")
+            logger.debug(f"[find_user_apply_group] 查询耗时: {time.time() - start_time:.3f}秒, 结果数: 0")
             return []
 
         # 批量获取数据
@@ -556,21 +559,21 @@ class RedisSessionStore:
                 continue
 
             if (data.get('apply_id') == apply_id and
-                data.get('end_user_id') == end_user_id):
+                    data.get('end_user_id') == end_user_id):
                 # 支持模糊匹配或完全匹配 sessionid
                 if sessionid in data.get('sessionid', '') or data.get('sessionid') == sessionid:
                     matched_items.append(format_session_data(data, include_time=True))
-        
+
         # 排序、限制数量并移除时间字段
         result_items = sort_and_limit_results(matched_items, limit=6)
 
         elapsed_time = time.time() - start_time
-        print(f"[find_user_apply_group] 查询耗时: {elapsed_time:.3f}秒, 结果数: {len(result_items)}")
+        logger.debug(f"[find_user_apply_group] 查询耗时: {elapsed_time:.3f}秒, 结果数: {len(result_items)}")
 
         return result_items
 
     # ==================== 更新操作 ====================
-    
+
     def update_session(self, session_id: str, field: str, value: Any) -> bool:
         """
         更新单个字段
@@ -591,7 +594,7 @@ class RedisSessionStore:
         return bool(results[0])
 
     # ==================== 删除操作 ====================
-    
+
     def delete_session(self, session_id: str) -> int:
         """
         删除单条会话
@@ -632,7 +635,7 @@ class RedisSessionStore:
 
         keys = self.r.keys('session:*')
         if not keys:
-            print("[delete_duplicate_sessions] 没有会话数据")
+            logger.debug("[delete_duplicate_sessions] 没有会话数据")
             return 0
 
         # 批量获取所有数据
@@ -678,7 +681,7 @@ class RedisSessionStore:
                 deleted_count += len(batch)
 
         elapsed_time = time.time() - start_time
-        print(f"[delete_duplicate_sessions] 删除重复会话数量: {deleted_count}, 耗时: {elapsed_time:.3f}秒")
+        logger.debug(f"[delete_duplicate_sessions] 删除重复会话数量: {deleted_count}, 耗时: {elapsed_time:.3f}秒")
         return deleted_count
 
 

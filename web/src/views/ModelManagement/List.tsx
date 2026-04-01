@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:10 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 14:21:01
+ * @Last Modified time: 2026-03-27 19:18:55
  */
 /**
  * Model List View
@@ -11,7 +11,7 @@
  */
 
 import { useRef, useState, useEffect, forwardRef, useImperativeHandle } from 'react';
-import { Button, Flex, Row, Col, Tooltip } from 'antd'
+import { Button, Flex, Row, Col, Tooltip, Popover } from 'antd'
 import { useTranslation } from 'react-i18next';
 
 import type { ProviderModelItem, KeyConfigModalRef, ModelListDetailRef, ModelListItem, BaseRef } from './types'
@@ -75,7 +75,14 @@ const ModelList = forwardRef<BaseRef, { query: any; handleEdit: (vo?: ModelListI
                   <Tooltip title={String(item.provider).charAt(0).toUpperCase() + String(item.provider).slice(1)}>
                     <div className="rb:wrap-break-word rb:line-clamp-1">{String(item.provider).charAt(0).toUpperCase() + String(item.provider).slice(1)}</div>
                   </Tooltip>
-                  <Flex gap={8} className="rb:overflow-hidden rb:flex-nowrap rb:w-auto!">{item.tags.map(tag => <Tag key={tag} className="rb:shrink-0">{t(`modelNew.${tag}`)}</Tag>)}</Flex>
+
+                  <Popover content={
+                    <Flex gap={8} className="rb:overflow-hidden rb:flex-nowrap rb:w-auto!">{item.tags.map(tag => <Tag key={tag} className="rb:shrink-0">{t(`modelNew.${tag}`)}</Tag>)}</Flex>
+                  }>
+                    <Flex gap={8} className="rb:overflow-hidden rb:flex-nowrap rb:w-auto!">
+                      {item.tags.map(tag => <Tag key={tag} className="rb:shrink-0">{t(`modelNew.${tag}`)}</Tag>)}
+                    </Flex>
+                  </Popover>
                 </Flex>}
                 isNeedTooltip={false}
                 footer={<Row gutter={9} className="rb:pt-2!">

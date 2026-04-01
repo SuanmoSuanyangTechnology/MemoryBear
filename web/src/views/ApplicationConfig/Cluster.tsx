@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:33 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 15:16:25
+ * @Last Modified time: 2026-03-27 18:14:25
  */
 import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -79,7 +79,7 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
         saveMultiAgentConfig(id as string, params)
           .then((res) => {
             if (flag) {
-              message.success(t('common.saveSuccess'))
+              message.success({ content: t('common.saveSuccess'), duration: 1 })
             }
             resolve(res)
           })
@@ -197,33 +197,34 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
   return (
     <>
       {loading && <Spin fullscreen></Spin>}
-      <Row className="rb:h-[calc(100vh-89px)]" gutter={12}>
-        <Col span={12} className="rb:h-full rb:overflow-x-auto rb:border-r rb:border-[#DFE4ED]">
+      <Row className="rb:h-full!" gutter={12}>
+        <Col span={12}>
           <Form form={form} layout="vertical">
-            <Flex gap={16} vertical>
+            <Flex gap={12} vertical>
               <Flex align="center" justify="end" className="rb:p-3! rb:bg-white rb:rounded-xl">
                 {/* <FeaturesConfig value={values?.features as FeaturesConfigForm} refresh={handleSaveFeaturesConfig} /> */}
                 <Button type="primary" onClick={() => handleSave()}>
                   {t('common.save')}
                 </Button>
               </Flex>
-              <Form.Item name="features" hidden noStyle></Form.Item>
-              <Card title={t('application.collaboration')}>
-                <Form.Item
-                  name="orchestration_mode"
-                  noStyle
-                >
-                  <RadioGroupCard
-                    options={['supervisor', 'collaboration'].map((type) => ({
-                      value: type,
-                      label: t(`application.${type}`),
-                      labelDesc: t(`application.${type}Desc`),
-                    }))}
-                    allowClear={false}
-                    block={true}
-                  />
-                </Form.Item>
-              </Card>
+              <Flex gap={12} vertical className="rb:h-[calc(100vh-158px)]! rb:overflow-y-auto!">
+                <Form.Item name="features" hidden noStyle></Form.Item>
+                <Card title={t('application.collaboration')}>
+                  <Form.Item
+                    name="orchestration_mode"
+                    noStyle
+                  >
+                    <RadioGroupCard
+                      options={['supervisor', 'collaboration'].map((type) => ({
+                        value: type,
+                        label: t(`application.${type}`),
+                        labelDesc: t(`application.${type}Desc`),
+                      }))}
+                      allowClear={false}
+                      block={true}
+                    />
+                  </Form.Item>
+                </Card>
 
                 <Card
                   title={<>
@@ -289,45 +290,46 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
                         >{t('application.modelConfig')}</Button>
                       </Form.Item>
                     </Flex>
-                </Form.Item>
-                <Form.Item
-                  name={['execution_config', "sub_agent_execution_mode"]}
-                  label={<span className="rb:text-[#5B6167]">{t('application.orchestrationMode')}</span>}
-                  className="rb:mb-4!"
-                >
-                  <Select
-                    options={['sequential', 'parallel'].map((type) => ({
-                      value: type,
-                      label: t(`application.${type}`),
-                    }))}
-                    placeholder={t('common.pleaseSelect')}
-                  />
-                </Form.Item>
-                <Form.Item
-                  name="aggregation_strategy"
-                  label={<span className="rb:text-[#5B6167]">{t('application.aggregationStrategy')}</span>}
-                  className="rb:mb-0!"
-                >
-                  <Select
-                    options={['merge', 'vote', 'priority'].map((type) => ({
-                      value: type,
-                      label: t(`application.${type}`),
-                    }))}
-                    placeholder={t('common.pleaseSelect')}
-                  />
-                </Form.Item>
-              </Card>}
+                  </Form.Item>
+                  <Form.Item
+                    name={['execution_config', "sub_agent_execution_mode"]}
+                    label={<span className="rb:text-[#5B6167]">{t('application.orchestrationMode')}</span>}
+                    className="rb:mb-4!"
+                  >
+                    <Select
+                      options={['sequential', 'parallel'].map((type) => ({
+                        value: type,
+                        label: t(`application.${type}`),
+                      }))}
+                      placeholder={t('common.pleaseSelect')}
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    name="aggregation_strategy"
+                    label={<span className="rb:text-[#5B6167]">{t('application.aggregationStrategy')}</span>}
+                    className="rb:mb-0!"
+                  >
+                    <Select
+                      options={['merge', 'vote', 'priority'].map((type) => ({
+                        value: type,
+                        label: t(`application.${type}`),
+                      }))}
+                      placeholder={t('common.pleaseSelect')}
+                    />
+                  </Form.Item>
+                </Card>}
+              </Flex>
             </Flex>
           </Form>
         </Col>
-        <Col span={12} className="rb:h-full rb:overflow-y-hidden">
+        <Col span={12} className="rb:h-full! rb:overflow-y-hidden">
           <RbCard
             title={t('application.debuggingAndPreview')}
             headerType="borderless"
             headerClassName="rb:h-[56px]! rb:leading-[22px]!"
             titleClassName="rb:font-[MiSans-Bold] rb:font-bold"
-            bodyClassName="rb:p-4! rb:pt-0!"
-            className="rb:h-full"
+            bodyClassName="rb:p-4! rb:pt-0! rb:h-[calc(100%-56px)]!"
+            className="rb:h-full!"
           >
             <Chat
               data={data as Config}

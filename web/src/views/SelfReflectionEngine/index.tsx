@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:46:47 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 11:44:16
+ * @Last Modified time: 2026-03-26 18:57:08
  */
 /**
  * Self Reflection Engine Configuration Page
@@ -169,8 +169,8 @@ const SelfReflectionEngine: React.FC = () => {
   }
 
   return (
-    <Row gutter={[16, 16]}>
-      <Col span={12}>
+    <Row gutter={[16, 16]} className="rb:h-full!">
+      <Col span={12} className="rb:h-full!">
         <RbCard
           title={t('reflectionEngine.reflectionEngineConfig')}
           extra={<Space>
@@ -179,7 +179,7 @@ const SelfReflectionEngine: React.FC = () => {
           </Space>}
           headerType="borderless"
           headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
-          className="rb:h-[calc(100vh-76px)]!"
+          className="rb:h-full!"
           bodyClassName="rb:h-[calc(100%-54px)] rb:overflow-y-auto! rb:p-4! rb:pt-0!"
         >
           <Form 
@@ -252,8 +252,8 @@ const SelfReflectionEngine: React.FC = () => {
           </Form>
         </RbCard>
       </Col>
-      <Col span={12}>
-        <Space size={16} direction="vertical" className="rb:w-full">
+      <Col span={12} className="rb:h-full!">
+        <Flex gap={16} vertical className="rb:h-full!">
           <RbCard
             title={t('memoryExtractionEngine.example')}
           >
@@ -346,7 +346,7 @@ const SelfReflectionEngine: React.FC = () => {
               </RbCard>
             )}
           </>}
-        </Space>
+        </Flex>
       </Col>
     </Row>
   );

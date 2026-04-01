@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:41 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 16:43:10
+ * @Last Modified time: 2026-03-26 15:24:41
  */
 import { type FC, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -30,7 +30,7 @@ const tagColors: Record<Release['tagKey'], TagProps['color']> = {
   history: 'default',
 }
 
-const heightClass = 'rb:h-[calc(100vh-88px)]'
+const heightClass = 'rb:max-h-[calc(100vh-140px)]'
 /**
  * Release page component
  * Manages application version releases, rollbacks, and version history
@@ -77,51 +77,55 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
   }
   return (
     <Flex gap={12}>
-      <div className={`rb:overflow-y-auto rb:w-101 rb:flex-[0_0_auto] ${heightClass}`}>
+      <div className="rb:w-101 rb:h-full">
         <Flex gap={12} vertical>
           <div className="rb:px-1">
             <div className="rb:text-[16px] rb:leading-5.5 rb:font-medium">{t('application.versionList')}</div>
             <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5">{t('application.versionListDesc')}</div>
           </div>
-          {releaseList.length === 0
-            ? <Empty />
-            : selectedVersion && releaseList.map((version, index) => {
-              const tagKey = version.id === data.current_release_id && index === 0
-                ? 'current'
-                : version.id === data.current_release_id
-                ? 'rolledBack' :  'history'
-              return (
-                <RbCard 
-                  key={version.version} 
-                  title={<>
-                    {version.version_name && version.version_name[0].toLocaleLowerCase() === 'v' ? version.version_name : version.version_name ? `v${version.version_name}` : `v${version.version}`}
-                    {tagKey && <Tag color={tagColors[tagKey]} className="rb:ml-2">
-                      {tagKey}
-                    </Tag>}
-                  </>}
-                  className={clsx("rb:hover:shadow-[0px_2px_8px_0px_rgba(0,0,0,0.2)]! rb:cursor-pointer rb:bg-white", {
-                    'rb:border-[#171719]!': version.id === selectedVersion.id,
-                    'rb:border-[#DFE4ED] ': version.id !== selectedVersion.id
-                  })}
-                  headerType="borderless"
-                  onClick={() => setSelectedVersion(version)}
-                >
-                  <div className="rb:leading-5 rb:line-clamp-2 rb:overflow-hidden rb:text-ellipsis rb:whitespace-nowrap">
-                    <Markdown content={version.release_notes} />
-                  </div>
-                  <div className="rb:mt-4 rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5">
-                    {t('application.publishedOn')} {formatDateTime(version.published_at, 'YYYY-MM-DD HH:mm:ss')}
-                  </div>
-                  <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5">
-                    {t('application.publisher')}: {version.publisher_name}
-                  </div>
-                </RbCard>
-              )
-            })
-          }
+          <div className={`${heightClass} rb:overflow-y-auto`}>
+            {releaseList.length === 0
+              ? <Empty />
+              : <Flex gap={12} vertical>
+                {selectedVersion && releaseList.map((version, index) => {
+                  const tagKey = version.id === data.current_release_id && index === 0
+                    ? 'current'
+                    : version.id === data.current_release_id
+                      ? 'rolledBack' : 'history'
+                  return (
+                    <RbCard
+                      key={version.version}
+                      title={<>
+                        {version.version_name && version.version_name[0].toLocaleLowerCase() === 'v' ? version.version_name : version.version_name ? `v${version.version_name}` : `v${version.version}`}
+                        {tagKey && <Tag color={tagColors[tagKey]} className="rb:ml-2">
+                          {tagKey}
+                        </Tag>}
+                      </>}
+                      className={clsx("rb:hover:shadow-[0px_2px_8px_0px_rgba(0,0,0,0.2)]! rb:cursor-pointer rb:bg-white", {
+                        'rb:border-[#171719]!': version.id === selectedVersion.id,
+                        'rb:border-[#DFE4ED] ': version.id !== selectedVersion.id
+                      })}
+                      headerType="borderless"
+                      onClick={() => setSelectedVersion(version)}
+                    >
+                      <div className="rb:leading-5 rb:line-clamp-2 rb:overflow-hidden rb:text-ellipsis rb:whitespace-nowrap">
+                        <Markdown content={version.release_notes} />
+                      </div>
+                      <div className="rb:mt-4 rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5">
+                        {t('application.publishedOn')} {formatDateTime(version.published_at, 'YYYY-MM-DD HH:mm:ss')}
+                      </div>
+                      <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5">
+                        {t('application.publisher')}: {version.publisher_name}
+                      </div>
+                    </RbCard>
+                  )
+                })}
+              </Flex>
+            }
+          </div>
         </Flex>
       </div>
-      <div className={`rb:overflow-y-auto rb:flex-[1_1_auto] ${heightClass}`}>
+      <div className="rb:overflow-y-auto rb:flex-1">
         <Form layout="vertical">
           <Flex align="center" className={clsx("rb:leading-6.5! rb:text-[18px] rb:font-medium rb:mb-4.75!", {
             'rb:justify-between': selectedVersion,
@@ -140,7 +144,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
             </Space>
           </Flex>
           {selectedVersion && 
-            <Flex gap={16} vertical>
+            <Flex gap={16} vertical className={`${heightClass} rb:overflow-y-auto`}>
               <RbCard
                 title={t('application.VersionInformation')}
                 headerType="borderless"

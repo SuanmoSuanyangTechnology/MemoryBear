@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 13:57:40
+ * @Last Modified time: 2026-03-27 17:30:47
  */
 /**
  * Workflow Chat Component
@@ -41,7 +41,9 @@ import type { ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import Runtime from './Runtime';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
 
-const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: WorkflowConfig | null }>(({ appId, graphRef, data }, ref) => {
+const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: WorkflowConfig | null; features?: FeaturesConfigForm }>(({
+  appId, graphRef, features
+}, ref) => {
   const { t } = useTranslation()
   const { message: messageApi } = App.useApp()
   const toolbarRef = useRef<ChatToolbarRef>(null)
@@ -58,7 +60,6 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [fileList, setFileList] = useState<any[]>([])
   const [message, setMessage] = useState<string | undefined>(undefined)
-  const [features, setFeatures] = useState<FeaturesConfigForm>({} as FeaturesConfigForm)
 
   /**
    * Opens the chat drawer and loads workflow variables from the start node
@@ -66,10 +67,6 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   const handleOpen = () => {
     setOpen(true)
   }
-
-  useEffect(() => {
-    if (data?.features && open) setFeatures(data.features)
-  }, [open, data?.features])
 
   useEffect(() => {
     if (open && toolbarReady) {
@@ -434,7 +431,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
         >
           <ChatToolbar
             ref={toolbarCallbackRef}
-            features={features}
+            features={features as FeaturesConfigForm}
             onFilesChange={setFileList}
             onVariablesChange={setVariables}
           />

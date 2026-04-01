@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-09 14:28:34
+ * @Last Modified time: 2026-03-26 18:59:53
  */
 /**
  * Neo4j User Memory Detail View
@@ -75,7 +75,7 @@ const Neo4j: FC = () => {
 
   return (
     <div className="rb:h-screen rb:w-screen rb:p-3 rb:relative" onClick={() => setSelectedKey(null)}>
-      <Flex className="rb:h-[calc(100vh-24px)]" gap={12}>
+      <Flex className="rb:h-full!" gap={12}>
         <Flex gap={15} vertical justify="space-between" align="center" className="rb:h-full! rb:px-4! rb:pt-6! rb:pb-5! rb:bg-white rb:w-20 rb:rounded-xl">
           <Flex gap={15} vertical>
             <Popover 

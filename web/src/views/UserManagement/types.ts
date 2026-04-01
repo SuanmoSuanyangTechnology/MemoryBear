@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:50:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-25 11:44:02
+ * @Last Modified time: 2026-03-27 16:03:32
  */
 /**
  * User data type
@@ -18,6 +18,7 @@ export interface User {
   current_workspace_id?: string;
   current_workspace_name?: string;
   role: 'member' | 'manager' | null;
+  permissions: string[];
   [key: string]: unknown;
 }
 

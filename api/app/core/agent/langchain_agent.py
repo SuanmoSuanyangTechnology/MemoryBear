@@ -11,17 +11,13 @@ LangChain Agent 封装
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
 
-from app.core.memory.agent.langgraph_graph.write_graph import write_long_term
-from app.db import get_db
-from app.core.logging_config import get_business_logger
-from app.core.models import RedBearLLM, RedBearModelConfig
-from app.models.models_model import ModelType, ModelProvider
-from app.services.memory_agent_service import (
-    get_end_user_connected_config,
-)
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
+
+from app.core.logging_config import get_business_logger
+from app.core.models import RedBearLLM, RedBearModelConfig
+from app.models.models_model import ModelType
 
 logger = get_business_logger()
 
@@ -226,10 +222,9 @@ class LangChainAgent:
         Returns:
             List[BaseMessage]: 消息列表
         """
-        messages = []
+        messages:list = [SystemMessage(content=self.system_prompt)]
 
         # 添加系统提示词
-        messages.append(SystemMessage(content=self.system_prompt))
 
         # 添加历史消息
         if history:
@@ -320,12 +315,7 @@ class LangChainAgent:
             message: str,
             history: Optional[List[Dict[str, str]]] = None,
             context: Optional[str] = None,
-            end_user_id: Optional[str] = None,
-            config_id: Optional[str] = None,  # 添加这个参数
-            storage_type: Optional[str] = None,
-            user_rag_memory_id: Optional[str] = None,
-            memory_flag: Optional[bool] = True,
-            files: Optional[List[Dict[str, Any]]] = None  # 新增：多模态文件
+            files: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """执行对话
 
@@ -333,32 +323,12 @@ class LangChainAgent:
             message: 用户消息
             history: 历史消息列表 [{"role": "user/assistant", "content": "..."}]
             context: 上下文信息（如知识库检索结果）
+            files: 多模态文件
 
         Returns:
             Dict: 包含 content 和元数据的字典
         """
-        message_chat = message
         start_time = time.time()
-        actual_config_id = config_id
-        # If config_id is None, try to get from end_user's connected config
-        if actual_config_id is None and end_user_id:
-            try:
-                from app.services.memory_agent_service import (
-                    get_end_user_connected_config,
-                )
-                db = next(get_db())
-                try:
-                    connected_config = get_end_user_connected_config(end_user_id, db)
-                    actual_config_id = connected_config.get("memory_config_id")
-                except Exception as e:
-                    logger.warning(f"Failed to get connected config for end_user {end_user_id}: {e}")
-                finally:
-                    db.close()
-            except Exception as e:
-                logger.warning(f"Failed to get db session: {e}")
-        actual_end_user_id = end_user_id if end_user_id is not None else "unknown"
-        logger.info(f'写入类型{storage_type, str(end_user_id), message, str(user_rag_memory_id)}')
-        print(f'写入类型{storage_type, str(end_user_id), message, str(user_rag_memory_id)}')
         try:
             # 准备消息列表（支持多模态）
             messages = self._prepare_messages(message, history, context, files)
@@ -445,9 +415,6 @@ class LangChainAgent:
             logger.info(f"最终提取的内容长度: {len(content)}")
 
             elapsed_time = time.time() - start_time
-            if memory_flag:
-                await write_long_term(storage_type, end_user_id, message_chat, content, user_rag_memory_id,
-                                      actual_config_id)
             response = {
                 "content": content,
                 "model": self.model_name,
@@ -478,12 +445,7 @@ class LangChainAgent:
             message: str,
             history: Optional[List[Dict[str, str]]] = None,
             context: Optional[str] = None,
-            end_user_id: Optional[str] = None,
-            config_id: Optional[str] = None,
-            storage_type: Optional[str] = None,
-            user_rag_memory_id: Optional[str] = None,
-            memory_flag: Optional[bool] = True,
-            files: Optional[List[Dict[str, Any]]] = None  # 新增：多模态文件
+            files: Optional[List[Dict[str, Any]]] = None
     ) -> AsyncGenerator[str | int, None]:
         """执行流式对话
 
@@ -491,6 +453,7 @@ class LangChainAgent:
             message: 用户消息
             history: 历史消息列表
             context: 上下文信息
+            files: 多模态文件
 
         Yields:
             str: 消息内容块
@@ -501,23 +464,6 @@ class LangChainAgent:
         logger.info(f"  Has tools: {bool(self.tools)}")
         logger.info(f"  Tool count: {len(self.tools) if self.tools else 0}")
         logger.info("=" * 80)
-        message_chat = message
-        actual_config_id = config_id
-        # If config_id is None, try to get from end_user's connected config
-        if actual_config_id is None and end_user_id:
-            try:
-                db = next(get_db())
-                try:
-                    connected_config = get_end_user_connected_config(end_user_id, db)
-                    actual_config_id = connected_config.get("memory_config_id")
-                except Exception as e:
-                    logger.warning(f"Failed to get connected config for end_user {end_user_id}: {e}")
-                finally:
-                    db.close()
-            except Exception as e:
-                logger.warning(f"Failed to get db session: {e}")
-
-            # 注意：不在这里写入用户消息，等 AI 回复后一起写入
         try:
             # 准备消息列表（支持多模态）
             messages = self._prepare_messages(message, history, context, files)
@@ -527,17 +473,18 @@ class LangChainAgent:
             )
 
             chunk_count = 0
-            yielded_content = False
 
             # 统一使用 agent 的 astream_events 实现流式输出
             logger.debug("使用 Agent astream_events 实现流式输出")
             full_content = ''
             try:
+                last_event = {}
                 async for event in self.agent.astream_events(
                         {"messages": messages},
                         version="v2",
                         config={"recursion_limit": self.max_iterations}
                 ):
+                    last_event = event
                     chunk_count += 1
                     kind = event.get("event")
 
@@ -551,7 +498,6 @@ class LangChainAgent:
                             if isinstance(chunk_content, str) and chunk_content:
                                 full_content += chunk_content
                                 yield chunk_content
-                                yielded_content = True
                             elif isinstance(chunk_content, list):
                                 # 多模态响应：提取文本部分
                                 for item in chunk_content:
@@ -562,18 +508,15 @@ class LangChainAgent:
                                             if text:
                                                 full_content += text
                                                 yield text
-                                                yielded_content = True
                                         # OpenAI 格式: {"type": "text", "text": "..."}
                                         elif item.get("type") == "text":
                                             text = item.get("text", "")
                                             if text:
                                                 full_content += text
                                                 yield text
-                                                yielded_content = True
                                     elif isinstance(item, str):
                                         full_content += item
                                         yield item
-                                        yielded_content = True
 
                     elif kind == "on_llm_stream":
                         # 另一种 LLM 流式事件
@@ -584,7 +527,6 @@ class LangChainAgent:
                                 if isinstance(chunk_content, str) and chunk_content:
                                     full_content += chunk_content
                                     yield chunk_content
-                                    yielded_content = True
                                 elif isinstance(chunk_content, list):
                                     # 多模态响应：提取文本部分
                                     for item in chunk_content:
@@ -595,22 +537,18 @@ class LangChainAgent:
                                                 if text:
                                                     full_content += text
                                                     yield text
-                                                    yielded_content = True
                                             # OpenAI 格式: {"type": "text", "text": "..."}
                                             elif item.get("type") == "text":
                                                 text = item.get("text", "")
                                                 if text:
                                                     full_content += text
                                                     yield text
-                                                    yielded_content = True
                                         elif isinstance(item, str):
                                             full_content += item
                                             yield item
-                                            yielded_content = True
                             elif isinstance(chunk, str):
                                 full_content += chunk
                                 yield chunk
-                                yielded_content = True
 
                     # 记录工具调用（可选）
                     elif kind == "on_tool_start":
@@ -620,17 +558,14 @@ class LangChainAgent:
 
                 logger.debug(f"Agent 流式完成，共 {chunk_count} 个事件")
                 # 统计token消耗
-                # 统计 token 消耗：优先使用流式过程中捕获的值，回退到最后 event 的 messages
-                output_messages = event.get("data", {}).get("output", {}).get("messages", [])
+                output_messages = last_event.get("data", {}).get("output", {}).get("messages", [])
                 for msg in reversed(output_messages):
                     if isinstance(msg, AIMessage):
                         stream_total_tokens = self._extract_tokens_from_message(msg)
                         logger.info(f"流式 token 统计: total_tokens={stream_total_tokens}")
                         yield stream_total_tokens
                         break
-                if memory_flag:
-                    await write_long_term(storage_type, end_user_id, message_chat, full_content, user_rag_memory_id,
-                                          actual_config_id)
+
             except Exception as e:
                 logger.error(f"Agent astream_events 失败: {str(e)}", exc_info=True)
                 raise

@@ -34,16 +34,16 @@ const Statistics: FC = () => {
       className: 'rb:text-[#212332]'
     },
     {
-      title: t('user.createTime'),
+      title: t('application.created_at'),
       dataIndex: 'created_at',
       key: 'created_at',
       render: (createdAt: string) => formatDateTime(createdAt, 'YYYY-MM-DD HH:mm:ss'),
     },
     {
-      title: t('user.lastLoginTime'),
-      dataIndex: 'last_login_at',
-      key: 'last_login_at',
-      render: (lastLoginAt: string) => lastLoginAt ? formatDateTime(lastLoginAt, 'YYYY-MM-DD HH:mm:ss') : '-',
+      title: t('common.updated_at'),
+      dataIndex: 'updated_at',
+      key: 'updated_at',
+      render: (updatedAt: string) => updatedAt ? formatDateTime(updatedAt, 'YYYY-MM-DD HH:mm:ss') : '-',
     },
     {
       title: t('common.operation'),

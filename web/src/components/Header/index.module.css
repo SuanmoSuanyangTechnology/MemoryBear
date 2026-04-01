@@ -3,7 +3,6 @@
   align-items: center;
   justify-content: space-between;
   padding: 16px 24px 16px 20px;
-  height: 64px;
   color: #212332;
   z-index: 0;
   font-size: 14px;
@@ -25,4 +24,26 @@
 .header :global(.ant-breadcrumb .ant-breadcrumb-item:last-child a) {
   color: #212332;
   font-weight: 600;
+}
+.userDropdown:global(.ant-dropdown .ant-dropdown-menu),
+.userDropdown:global(.ant-dropdown-menu-submenu .ant-dropdown-menu) {
+  padding: 12px 8px;
+}
+.userDropdown:global(.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item),
+.userDropdown:global(.ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-item),
+.userDropdown:global(.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-submenu-title),
+.userDropdown:global(.ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-submenu-title) {
+  padding-left: 8px;
+  padding-right: 4px;
+}
+.userDropdown:global(.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item.ant-dropdown-menu-item-danger:not(.ant-dropdown-menu-item-disabled):hover),
+.userDropdown:global(.ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-item.ant-dropdown-menu-item-danger:not(.ant-dropdown-menu-item-disabled):hover) {
+  background-color: #F6F6F6;
+  color: #FF5D34;
+}
+.userDropdown:global(.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item-divider),
+.userDropdown:global(.ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-item-divider),
+.userDropdown:global(.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-submenu-title-divider),
+.userDropdown:global(.ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-submenu-title-divider) {
+  margin: 10px 8px;
 }

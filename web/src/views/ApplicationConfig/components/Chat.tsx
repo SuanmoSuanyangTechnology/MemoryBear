@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 13:41:44
+ * @Last Modified time: 2026-03-31 15:02:07
  */
 /**
  * Chat debugging component for application testing
@@ -141,6 +141,36 @@ const Chat: FC<ChatProps> = ({
     }
   }
   /** Update assistant message with streaming content */
+  const updateAssistantReasoningMessage = (content?: string, model_config_id?: string, conversation_id?: string) => {
+    if (!content || !model_config_id) return
+    updateChatList(prev => {
+      const targetIndex = prev.findIndex(item => item.model_config_id === model_config_id);
+      if (targetIndex !== -1) {
+        const modelChatList = [...prev]
+        const curModelChat = modelChatList[targetIndex]
+        const curChatMsgList = curModelChat.list || []
+        const lastMsg = curChatMsgList[curChatMsgList.length - 1]
+        if (lastMsg && lastMsg.role === 'assistant') {
+          modelChatList[targetIndex] = {
+            ...modelChatList[targetIndex],
+            conversation_id,
+            list: [
+              ...curChatMsgList.slice(0, curChatMsgList.length - 1),
+              {
+                ...lastMsg,
+                meta_data: {
+                  reasoning_content: (lastMsg.meta_data?.reasoning_content || '') + (content || ''),
+                }
+              }
+            ]
+          }
+        }
+        return [...modelChatList]
+      }
+      return prev;
+    })
+  }
+  /** Update assistant message with streaming content */
   const updateAssistantMessage = (content?: string, model_config_id?: string, conversation_id?: string, audio_url?: string, citations?: any[]) => {
     if ((!content && !audio_url && (!citations || citations?.length < 1)) || !model_config_id) return
     updateChatList(prev => {
@@ -160,6 +190,7 @@ const Chat: FC<ChatProps> = ({
                 ...lastMsg,
                 content: lastMsg.content + (content || ''),
                 meta_data: {
+                  ...(lastMsg.meta_data || {}),
                   ...(audio_url !== undefined ? { audio_url, audio_status: 'pending' } : {}),
                   citations: citations || lastMsg.meta_data?.citations
                 }
@@ -224,11 +255,11 @@ const Chat: FC<ChatProps> = ({
     if (loading || !id) return
     setLoading(true)
     setCompareLoading(true)
+    const files = (fileList || []).filter(item => !['uploading', 'error'].includes(item.status))
     handleSave(false)
       .then(() => {
         const message = msg
         if (!message?.trim()) return
-        const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
         // Validate required variables before sending
         let isCanSend = true
         const params: Record<string, any> = {}
@@ -274,6 +305,9 @@ const Chat: FC<ChatProps> = ({
             };
             
             switch (item.event) {
+              case 'model_reasoning':
+                updateAssistantReasoningMessage(content, model_config_id, conversation_id)
+                break;
               case 'model_message':
                 updateAssistantMessage(content, model_config_id, conversation_id, audio_url)
                 break;
@@ -427,11 +461,11 @@ const Chat: FC<ChatProps> = ({
     if (loading || !id) return
     setLoading(true)
     setCompareLoading(true)
+    const files = (fileList || []).filter(item => !['uploading', 'error'].includes(item.status))
     handleSave(false)
       .then(() => {
         const message = msg
         if (!message || message.trim() === '') return
-        const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
         addUserMessage(message, files)
         setMessage(undefined)
         toolbarRef.current?.setFiles([])

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:44:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 13:52:09
+ * @Last Modified time: 2026-03-27 15:14:58
  */
 /**
  * Prompt Editor Component
@@ -188,12 +188,12 @@ const Prompt: FC = () => {
 
             <RbCard
               title={t('prompt.chatTitle')}
-              headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:gont-bold"
+              headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:font-bold"
               headerType="borderless"
               bodyClassName="rb:px-4! rb:pt-0! rb:pb-3!"
             >
               <ChatContent
-                classNames="rb:h-[calc(100vh-265px)] rb:mb-[12px]!"
+                classNames="rb:h-[calc(100vh-257px)] rb:mb-[12px]!"
                 contentClassNames="rb:max-w-75!"
                 empty={<Empty url={ConversationEmptyIcon} title={t(`prompt.promptChatEmpty`)} isNeedSubTitle={false} size={[140, 100]} className="rb:h-full" />}
                 data={chatList || []}
@@ -243,13 +243,14 @@ const Prompt: FC = () => {
                 <ModelSelect
                   params={{ type: 'llm,chat' }}
                   className={`rb:w-75! ${styles.select}`}
+                  variant="filled"
                 />
               </Form.Item>
               <Button className="rb:border-none!" onClick={handleJump}>{t('prompt.history')}</Button>
             </Flex>
             <RbCard
               title={t('prompt.conversationOptimizationPrompt')}
-              headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:gont-bold"
+              headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:font-bold"
               headerType="borderless"
               bodyClassName="rb:px-4! rb:pt-0! rb:pb-3!"
               extra={
@@ -275,10 +276,10 @@ const Prompt: FC = () => {
                 {values?.current_prompt
                   ? <Editor
                     ref={editorRef}
-                    className="rb:h-[calc(100vh-201px)] rb:bg-white! rb:border-none! rb:p-0! rb:text-[#212332] rb:leading-5"
+                    className="rb:h-[calc(100vh-193px)] rb:bg-white! rb:border-none! rb:p-0! rb:text-[#212332] rb:leading-5"
                     onChange={(value) => form.setFieldValue('current_prompt', value)}
                   />
-                  : <Empty url={analysisEmptyIcon} title={t(`prompt.promptPlaceholder`)} isNeedSubTitle={false} size={[270, 170]} className="rb:h-[calc(100vh-201px)] rb:w-70 rb:mx-auto! rb:text-center! rb:text-[12px]! rb:leading-4!" />
+                  : <Empty url={analysisEmptyIcon} title={t(`prompt.promptPlaceholder`)} isNeedSubTitle={false} size={[270, 170]} className="rb:h-[calc(100vh-193px)] rb:mx-auto! rb:text-center! rb:text-[12px]! rb:leading-4!" />
                 }
               </Form.Item>
             </RbCard>

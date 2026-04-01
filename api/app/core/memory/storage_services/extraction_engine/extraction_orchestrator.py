@@ -182,7 +182,7 @@ class ExtractionOrchestrator:
         list[StatementEntityEdge],
         list[EntityEntityEdge],
         list[PerceptualEdge],
-        dict
+        list[DialogData]
     ]:
         """
         运行完整的知识提取流水线（优化版：并行执行）
@@ -295,6 +295,7 @@ class ExtractionOrchestrator:
                 statement_entity_edges,
                 entity_entity_edges,
                 dialog_data_list,
+                dedup_details,
             ) = await self._run_dedup_and_write_summary(
                 dialogue_nodes,
                 chunk_nodes,
@@ -305,6 +306,11 @@ class ExtractionOrchestrator:
                 entity_entity_edges,
                 dialog_data_list,
             )
+
+            # 步骤 7: 同步用户别名到数据库表（仅正式模式）
+            if not is_pilot_run:
+                logger.info("步骤 7: 同步用户别名到 end_user 和 end_user_info 表")
+                await self._update_end_user_other_name(entity_nodes, dialog_data_list)
 
             logger.info(f"知识提取流水线运行完成（{mode_str}）")
             return (
@@ -1399,7 +1405,8 @@ class ExtractionOrchestrator:
                         logger.info(f"同步 Neo4j aliases 到 end_user_info: {neo4j_aliases}")
                 else:
                     first_alias = current_aliases[0].strip() if current_aliases else ""
-                    if first_alias:
+                    # 确保 first_alias 不是占位名称
+                    if first_alias and first_alias not in self.USER_PLACEHOLDER_NAMES:
                         db.add(EndUserInfo(
                             end_user_id=end_user_uuid,
                             other_name=first_alias,
@@ -1415,29 +1422,33 @@ class ExtractionOrchestrator:
 
 
     
+    # 用户实体占位名称，不允许作为 other_name 或出现在 aliases 中
+    USER_PLACEHOLDER_NAMES = {'用户', '我', 'User', 'I'}
+
     def _extract_current_aliases(self, entity_nodes: List[ExtractedEntityNode]) -> List[str]:
         """从实体节点提取用户别名（保持 LLM 提取的原始顺序，不进行任何排序）
         
-        这个方法直接返回 LLM 提取的别名列表，不做任何修改。
+        这个方法直接返回 LLM 提取的别名列表，并过滤掉占位名称（"用户"、"我"、"User"、"I"）。
         第一个别名将被用作 other_name。
         
         Args:
             entity_nodes: 实体节点列表
             
         Returns:
-            别名列表（保持 LLM 提取的原始顺序）
+            别名列表（保持 LLM 提取的原始顺序，已过滤占位名称）
         """
-        USER_NAMES = {'用户', '我', 'User', 'I'}
         for entity in entity_nodes:
-            if getattr(entity, 'name', '').strip() in USER_NAMES:
+            if getattr(entity, 'name', '').strip() in self.USER_PLACEHOLDER_NAMES:
                 aliases = getattr(entity, 'aliases', []) or []
-                logger.debug(f"提取到用户别名（原始顺序）: {aliases}")
-                return aliases
+                # 过滤掉占位名称，防止 "用户"/"我"/"User"/"I" 被存入 aliases 和 other_name
+                filtered = [a for a in aliases if a.strip() not in self.USER_PLACEHOLDER_NAMES]
+                logger.debug(f"提取到用户别名（原始顺序，已过滤占位名称）: {filtered}")
+                return filtered
         return []
 
 
     async def _fetch_neo4j_user_aliases(self, end_user_id: str) -> List[str]:
-        """从 Neo4j 查询用户实体的完整 aliases 列表"""
+        """从 Neo4j 查询用户实体的完整 aliases 列表（已过滤占位名称）"""
         cypher = """
         MATCH (e:ExtractedEntity)
         WHERE e.end_user_id = $end_user_id AND e.name IN ['用户', '我', 'User', 'I']
@@ -1451,7 +1462,10 @@ class ExtractionOrchestrator:
         aliases = result[0].get('aliases') or []
         if not aliases:
             logger.debug(f"Neo4j 用户实体 aliases 为空: end_user_id={end_user_id}")
-        return aliases
+            return []
+        # 过滤掉占位名称，防止历史脏数据传播
+        filtered = [a for a in aliases if a.strip() not in self.USER_PLACEHOLDER_NAMES]
+        return filtered
 
     def _resolve_other_name(
             self,
@@ -1463,14 +1477,25 @@ class ExtractionOrchestrator:
         决定 other_name 是否需要更新，返回新值；无需更新返回 None。
         
         决策规则：
-        - 为空 → 用本次对话第一个别名
+        - 为空或为占位名称 → 用本次对话第一个别名
         - 不在 Neo4j aliases 中 → 用 Neo4j 第一个别名（说明已被删除）
         - 否则 → 保持不变（返回 None）
+        
+        注意：返回值不允许是占位名称（"用户"、"我"、"User"、"I"）
         """
-        if not current or not current.strip():
-            return current_aliases[0].strip() if current_aliases else None
+        # 当前值为空或为占位名称时，需要更新
+        if not current or not current.strip() or current.strip() in self.USER_PLACEHOLDER_NAMES:
+            candidate = current_aliases[0].strip() if current_aliases else None
+            # 确保候选值不是占位名称
+            if candidate and candidate in self.USER_PLACEHOLDER_NAMES:
+                return None
+            return candidate
         if current not in neo4j_aliases:
-            return neo4j_aliases[0].strip() if neo4j_aliases else None
+            candidate = neo4j_aliases[0].strip() if neo4j_aliases else None
+            # 确保候选值不是占位名称
+            if candidate and candidate in self.USER_PLACEHOLDER_NAMES:
+                return None
+            return candidate
         
         return None
 
@@ -1492,6 +1517,7 @@ class ExtractionOrchestrator:
         list[StatementChunkEdge],
         list[StatementEntityEdge],
         list[EntityEntityEdge],
+        list[DialogData],
         dict
     ]:
         """
@@ -1555,6 +1581,8 @@ class ExtractionOrchestrator:
                     statement_chunk_edges,
                     dedup_statement_entity_edges,
                     dedup_entity_entity_edges,
+                    dialog_data_list,
+                    dedup_details,
                 )
 
                 final_entity_nodes = dedup_entity_nodes
@@ -1562,7 +1590,16 @@ class ExtractionOrchestrator:
                 final_entity_entity_edges = dedup_entity_entity_edges
             else:
                 # 正式模式：执行完整的两阶段去重
-                result_tuple = await dedup_layers_and_merge_and_return(
+                (
+                    dialogue_nodes,
+                    chunk_nodes,
+                    statement_nodes,
+                    final_entity_nodes,
+                    statement_chunk_edges,
+                    final_statement_entity_edges,
+                    final_entity_entity_edges,
+                    dedup_details,
+                ) = await dedup_layers_and_merge_and_return(
                     dialogue_nodes,
                     chunk_nodes,
                     statement_nodes,
@@ -1576,20 +1613,20 @@ class ExtractionOrchestrator:
                     llm_client=self.llm_client,
                 )
 
-                # 解包返回值
-                (
-                    _,
-                    _,
-                    _,
-                    final_entity_nodes,
-                    _,
-                    final_statement_entity_edges,
-                    final_entity_entity_edges,
-                    dedup_details,
-                ) = result_tuple
-
                 # 保存去重消歧的详细记录到实例变量
                 self._save_dedup_details(dedup_details, entity_nodes, final_entity_nodes)
+
+                result_tuple = (
+                    dialogue_nodes,
+                    chunk_nodes,
+                    statement_nodes,
+                    final_entity_nodes,
+                    statement_chunk_edges,
+                    final_statement_entity_edges,
+                    final_entity_entity_edges,
+                    dialog_data_list,
+                    dedup_details,
+                )
 
             logger.info(
                 f"去重后: {len(final_entity_nodes)} 个实体节点, "

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:45:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 12:30:51
+ * @Last Modified time: 2026-03-31 15:01:46
  */
 import { type ReactNode } from 'react'
 
@@ -33,7 +33,8 @@ export interface ChatItem {
       file_name: string;
       knowledge_id: string;
       score: string;
-    }[]
+    }[];
+    reasoning_content?: string;
   },
 }
 
@@ -66,6 +67,7 @@ export interface ChatProps {
   fileChange?: (fileList: any[]) => void;
   className?: string;
   renderRuntime?: (item: ChatItem, index: number) => ReactNode;
+  conversationId?: string | null;
 }
 
 /**

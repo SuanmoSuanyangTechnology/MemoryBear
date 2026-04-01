@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:34:16 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 11:36:02
+ * @Last Modified time: 2026-03-27 11:22:10
  */
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -32,7 +32,7 @@ const ActivationMetricsPieCard: FC<ActivationMetricsPieCardProps> = ({ chartData
       className="rb:h-full!"
     >
       {loading
-        ? <Loading size={249} />
+        ? <Loading size={150} />
         : <PieChart
           chartData={chartData as { name: string; value: number }[]}
           height={214}

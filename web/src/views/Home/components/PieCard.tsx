@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:16:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-10 11:57:35
+ * @Last Modified time: 2026-03-26 14:30:27
  */
 /**
  * Pie Chart Card Component
@@ -33,7 +33,7 @@ const PieCard: FC<PieCardProps> = ({ chartData, loading }) => {
     >
       {loading
         ? <Loading size={249} />
-        : <PieChart chartData={chartData} />
+        : <PieChart chartData={chartData} itemGap={24} />
       }
     </Card>
   )

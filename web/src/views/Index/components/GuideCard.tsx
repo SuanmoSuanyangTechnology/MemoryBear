@@ -75,7 +75,7 @@ const GuideCard: React.FC = () => {
         <div className="rb:mt-2 rb:pl-3 rb:pr-4">
           <Button ref={startButtonRef} block className='rb:gap-1 rb:flex rb:items-center' onClick={handleStartGuide}>
             <span className='rb:text-xs'>{t('index.viewGuide')}</span>
-            <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/common/arrow_right_dark.svg')]"></div>
+            <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_right_dark.svg')]"></div>
           </Button>
         </div>
     </div>

@@ -37,6 +37,7 @@ from app.core.memory.agent.utils.type_classifier import status_typle
 from app.core.memory.agent.utils.write_tools import write as write_neo4j
 from app.core.memory.analytics.hot_memory_tags import get_interest_distribution
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+from app.core.memory.utils.log.audit_logger import audit_logger
 from app.db import get_db_context
 from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -49,10 +50,6 @@ from app.services.memory_konwledges_server import (
 )
 from app.services.memory_perceptual_service import MemoryPerceptualService
 
-try:
-    from app.core.memory.utils.log.audit_logger import audit_logger
-except ImportError:
-    audit_logger = None
 logger = get_logger(__name__)
 config_logger = get_config_logger()
 
@@ -68,24 +65,22 @@ class MemoryAgentService:
         if str(messages) == 'success':
             logger.info(f"Write operation successful for group {end_user_id} with config_id {config_id}")
             # 记录成功的操作
-            if audit_logger:
-                audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id,
-                                           success=True,
-                                           duration=duration, details={"message_length": len(message)})
+            audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id,
+                                       success=True,
+                                       duration=duration, details={"message_length": len(message)})
             return context
         else:
             logger.warning(f"Write operation failed for group {end_user_id}")
 
             # 记录失败的操作
-            if audit_logger:
-                audit_logger.log_operation(
-                    operation="WRITE",
-                    config_id=config_id,
-                    end_user_id=end_user_id,
-                    success=False,
-                    duration=duration,
-                    error=f"写入失败: {messages[:100]}"
-                )
+            audit_logger.log_operation(
+                operation="WRITE",
+                config_id=config_id,
+                end_user_id=end_user_id,
+                success=False,
+                duration=duration,
+                error=f"写入失败: {messages[:100]}"
+            )
 
             raise ValueError(f"写入失败: {messages}")
 
@@ -338,10 +333,9 @@ class MemoryAgentService:
             logger.error(error_msg)
 
             # Log failed operation
-            if audit_logger:
-                duration = time.time() - start_time
-                audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id,
-                                           success=False, duration=duration, error=error_msg)
+            duration = time.time() - start_time
+            audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id,
+                                       success=False, duration=duration, error=error_msg)
 
             raise ValueError(error_msg)
 
@@ -401,10 +395,10 @@ class MemoryAgentService:
             # Ensure proper error handling and logging
             error_msg = f"Write operation failed: {str(e)}"
             logger.error(error_msg)
-            if audit_logger:
-                duration = time.time() - start_time
-                audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id,
-                                           success=False, duration=duration, error=error_msg)
+
+            duration = time.time() - start_time
+            audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id,
+                                       success=False, duration=duration, error=error_msg)
             raise ValueError(error_msg)
 
     async def read_memory(
@@ -469,10 +463,9 @@ class MemoryAgentService:
         logger.info(f"Read operation for group {end_user_id} with config_id {config_id}")
 
         # 导入审计日志记录器
-        try:
-            from app.core.memory.utils.log.audit_logger import audit_logger
-        except ImportError:
-            audit_logger = None
+
+
+
 
         config_load_start = time.time()
         try:
@@ -492,16 +485,15 @@ class MemoryAgentService:
             logger.error(error_msg)
 
             # Log failed operation
-            if audit_logger:
-                duration = time.time() - start_time
-                audit_logger.log_operation(
-                    operation="READ",
-                    config_id=config_id,
-                    end_user_id=end_user_id,
-                    success=False,
-                    duration=duration,
-                    error=error_msg
-                )
+            duration = time.time() - start_time
+            audit_logger.log_operation(
+                operation="READ",
+                config_id=config_id,
+                end_user_id=end_user_id,
+                success=False,
+                duration=duration,
+                error=error_msg
+            )
 
             raise ValueError(error_msg)
 
@@ -633,15 +625,15 @@ class MemoryAgentService:
                 total_time = time.time() - start_time
                 logger.info(
                     f"[PERF] read_memory completed successfully in {total_time:.4f}s (config: {config_load_time:.4f}s, graph: {graph_exec_time:.4f}s)")
-                if audit_logger:
-                    duration = time.time() - start_time
-                    audit_logger.log_operation(
-                        operation="READ",
-                        config_id=config_id,
-                        end_user_id=end_user_id,
-                        success=True,
-                        duration=duration
-                    )
+
+                duration = time.time() - start_time
+                audit_logger.log_operation(
+                    operation="READ",
+                    config_id=config_id,
+                    end_user_id=end_user_id,
+                    success=True,
+                    duration=duration
+                )
 
                 return {
                     "answer": summary,
@@ -651,16 +643,16 @@ class MemoryAgentService:
             # Ensure proper error handling and logging
             error_msg = f"Read operation failed: {str(e)}"
             logger.error(error_msg)
-            if audit_logger:
-                duration = time.time() - start_time
-                audit_logger.log_operation(
-                    operation="READ",
-                    config_id=config_id,
-                    end_user_id=end_user_id,
-                    success=False,
-                    duration=duration,
-                    error=error_msg
-                )
+
+            duration = time.time() - start_time
+            audit_logger.log_operation(
+                operation="READ",
+                config_id=config_id,
+                end_user_id=end_user_id,
+                success=False,
+                duration=duration,
+                error=error_msg
+            )
             raise ValueError(error_msg)
 
     def get_messages_list(self, user_input: Write_UserInput) -> list[dict]:

@@ -105,13 +105,19 @@ Extract entities and knowledge triplets from the given statement.
 {% if language == "zh" %}
    - 用户实体的 name 字段：使用 "用户" 或 "我"
    - 用户的真实姓名：放入 aliases
+   - **🚨 禁止将 "用户"、"我" 放入 aliases 中，aliases 只能包含用户的真实姓名、昵称等**
    - 示例：
      * "我叫李明" → name="用户", aliases=["李明"]
+     * ❌ 错误：aliases=["用户", "李明"]（"用户"不是真实姓名，禁止放入 aliases）
+     * ❌ 错误：aliases=["我", "李明"]（"我"不是真实姓名，禁止放入 aliases）
 {% else %}
    - User entity name field: use "User" or "I"
    - User's real name: put in aliases
+   - **🚨 NEVER put "User" or "I" in aliases. Aliases must only contain real names, nicknames, etc.**
    - Examples:
      * "I'm John" → name="User", aliases=["John"]
+     * ❌ Wrong: aliases=["User", "John"] ("User" is not a real name, FORBIDDEN in aliases)
+     * ❌ Wrong: aliases=["I", "John"] ("I" is not a real name, FORBIDDEN in aliases)
 {% endif %}
 
 

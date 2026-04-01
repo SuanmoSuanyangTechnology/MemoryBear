@@ -216,7 +216,7 @@ const ApplicationManagement: React.FC = () => {
                     'rb:text-[#155EEF]': key === 'type',
                   })}>
                     {key === 'source' && item.is_shared
-                      ? t('application.shared')
+                      ? item.source_workspace_name
                       : key === 'source' && !item.is_shared
                         ? t('application.configuration')
                         : key === 'created_at'

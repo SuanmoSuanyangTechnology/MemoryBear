@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-01-08 19:46:02 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-16 15:09:49 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-03-27 11:17:22
  */
 import { type FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -87,8 +87,8 @@ const ShortTermDetail: FC = () => {
   }
 
   return (
-    <Row gutter={12}>
-      <Col span={12}>
+    <Row gutter={12} className="rb:h-full!">
+      <Col span={12} className="rb:h-full!">
         <div className="rb:grid rb:grid-cols-3 rb:gap-3 rb:mb-3">
           {(['retrieval_number', 'entity', 'long_term_number'] as const).map(key => (
             <Flex key={key} align="center" justify="space-between" className="rb:bg-white rb:rounded-xl rb:py-3! rb:pl-5! rb:pr-4!">
@@ -115,10 +115,10 @@ const ShortTermDetail: FC = () => {
           </Space>)}
           headerType="borderless"
           headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
-          bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-54px)] rb:overflow-y-auto!"
-          className="rb:h-[calc(100vh-183px)]!"
+          bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-54px)]"
+          className="rb:h-[calc(100%-94px)]!"
         >
-          <Flex gap={12} vertical>
+          <Flex gap={12} vertical className="rb:h-full!  rb:overflow-y-auto!">
             {loading
               ? <Skeleton active />
               : !data.short_term || data.short_term.length === 0
@@ -189,7 +189,7 @@ const ShortTermDetail: FC = () => {
           </Flex>
         </RbCard>
       </Col>
-      <Col span={12}>
+      <Col span={12} className="rb:h-full!">
         <RbCard
           title={() => (<Space size={4}>
             {t('shortTermDetail.longTermTitle')}
@@ -200,7 +200,7 @@ const ShortTermDetail: FC = () => {
           headerType="borderless"
           headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
           bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-54px)] rb:overflow-y-auto!"
-          className="rb:h-[calc(100vh-88px)]!"
+          className="rb:h-full!"
         >
           <Flex vertical gap={12}>
             {loading

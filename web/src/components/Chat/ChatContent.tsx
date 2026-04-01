@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 13:32:29
+ * @Last Modified time: 2026-03-31 15:01:53
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -37,11 +37,27 @@ const ChatContent: FC<ChatContentProps> = ({
   const prevDataLengthRef = useRef(data.length);
   const isScrolledToBottomRef = useRef(true);
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const [playingIndex, setPlayingIndex] = useState<number | null>(null)
+  const [expandedReasoning, setExpandedReasoning] = useState<Set<number>>(new Set())
+  const [manualToggledReasoning, setManualToggledReasoning] = useState<Set<number>>(new Set())
 
-  const handlePlay = (index: number, audio_url: string, audio_status?: string) => {
-    if (audio_status !== 'completed' && !audio_status) return
-    if (playingIndex === index) {
+  const toggleReasoning = (index: number) => {
+    setManualToggledReasoning(prev => new Set(prev).add(index))
+    setExpandedReasoning(prev => {
+      const next = new Set(prev)
+      next.has(index) ? next.delete(index) : next.add(index)
+      return next
+    })
+  }
+
+  const isReasoningExpanded = (index: number) => {
+    if (manualToggledReasoning.has(index)) return expandedReasoning.has(index)
+    return !data[index]?.content
+  }
+  const [playingIndex, setPlayingIndex] = useState<string | null>(null)
+
+  const handlePlay = (audio_url: string, audio_status?: string) => {
+    if (audio_status !== 'completed' && typeof audio_status === 'string') return
+    if (playingIndex === audio_url) {
       audioRef.current?.pause()
       setPlayingIndex(null)
       return
@@ -52,7 +68,7 @@ const ChatContent: FC<ChatContentProps> = ({
     const audio = new Audio(audio_url)
     audioRef.current = audio
     audio.play()
-    setPlayingIndex(index)
+    setPlayingIndex(audio_url)
     audio.onended = () => setPlayingIndex(null)
   }
   
@@ -79,12 +95,16 @@ const ChatContent: FC<ChatContentProps> = ({
       }
     };
   }, []);
-  
+
   // Auto-scroll to bottom when data changes to show latest messages
   // When data array length remains unchanged, if data is updated and user manually scrolled up, don't auto-scroll to bottom
   // When data array length changes, auto-scroll to bottom
   // If already scrolled to bottom, will auto-scroll to bottom
   useEffect(() => {
+    if (playingIndex && !data.some(item => item.meta_data?.audio_url === playingIndex)) {
+      audioRef.current?.pause()
+      setPlayingIndex(null)
+    }
     setTimeout(() => {
       if (scrollContainerRef.current) {
         // Auto-scroll if data length changed OR user is currently at bottom
@@ -120,7 +140,7 @@ const ChatContent: FC<ChatContentProps> = ({
                     {labelFormat(item)}
                   </div>
                 }
-                {item.meta_data?.files && item.meta_data?.files.length > 0 && <Flex gap={8} vertical align="end">
+                {item.meta_data?.files && item.meta_data?.files.length > 0 && <Flex gap={8} vertical align="end" className="rb:mb-2!">
                   {item.meta_data?.files?.map((file) => {
                     if (file.type.includes('image')) {
                       return (
@@ -174,6 +194,22 @@ const ChatContent: FC<ChatContentProps> = ({
                   'rb:mt-1.5': labelPosition === 'top',
                   'rb:mb-1.5': labelPosition === 'bottom',
                 })}>
+                  {item.meta_data?.reasoning_content && <div className="rb:mb-2 rb:border rb:rounded-md rb:px-3 rb:pt-2 rb:bg-white rb:text-[12px]">
+                    <Flex
+                      align="center"
+                      justify="space-between"
+                      className="rb:text-[#5B6167] rb:font-medium rb:cursor-pointer rb:pb-2!"
+                      onClick={() => toggleReasoning(index)}
+                    >
+                      <span>{t('memoryConversation.reasoning_content')}</span>
+                      <div
+                        className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')]", {
+                          'rb:rotate-180': !isReasoningExpanded(index),
+                        })}
+                      ></div>
+                    </Flex>
+                    {isReasoningExpanded(index) && <Markdown content={item.meta_data.reasoning_content} />}
+                  </div>}
                   {item.status && <div className="rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/conversation/exclamation_circle.svg')] rb:absolute rb:-left-7"></div>}
                   {item.subContent && renderRuntime && renderRuntime(item, index)}
                   {/* Render message content using Markdown component */}
@@ -194,23 +230,26 @@ const ChatContent: FC<ChatContentProps> = ({
                         key={idx}
                         size="small"
                         className="rb:text-[12px]!"
-                        onClick={() => window.open(`/knowledge/${citation.knowledge_id}/document/${citation.document_id}`, '_blank')}
+                        onClick={() => {
+                          const params = new URLSearchParams({ documentId: citation.document_id, parentId: citation.knowledge_id });
+                          window.open(`/#/knowledge-base/${citation.knowledge_id}/DocumentDetails?${params}`, '_blank');
+                        }}
                       >{citation.file_name}</Button>
                     ))}
                   </div>}
                   {item.meta_data?.audio_url && <>
                     <Divider className="rb:my-3!" />
                     <Space size={12} className="rb:pb-2 rb:pl-1">
-                      {playingIndex !== index && item.meta_data?.audio_status === 'pending'
+                      {playingIndex !== item.meta_data?.audio_url && item.meta_data?.audio_status === 'pending'
                         ? <Spin />
-                        : playingIndex !== index
+                        : playingIndex !== item.meta_data?.audio_url
                         ? <SoundOutlined className={clsx("rb:cursor-pointer rb:size-5.5", {
                           'rb:text-[#FF5D34]': item.meta_data?.audio_status === 'error',
                           'rb:hover:text-[#155EEF]!': !item.meta_data?.audio_status || !['pending', 'error'].includes(item.meta_data?.audio_status)
-                        })} onClick={() => handlePlay(index, item.meta_data?.audio_url!, item.meta_data?.audio_status)} />
+                        })} onClick={() => handlePlay(item.meta_data?.audio_url!, item.meta_data?.audio_status)} />
                         : <div
                             className="rb:size-5.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/audio_ing.gif')]"
-                            onClick={() => handlePlay(index, item.meta_data?.audio_url!, item.meta_data?.audio_status)}
+                            onClick={() => handlePlay(item.meta_data?.audio_url!, item.meta_data?.audio_status)}
                           />
                       }
                     </Space>
