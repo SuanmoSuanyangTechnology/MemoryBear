@@ -614,34 +614,30 @@ async def search_entity(end_user_id: Optional[str] = None) -> Dict[str, Any]:
 
 
 async def search_all(end_user_id: Optional[str] = None) -> Dict[str, Any]:
+    """查询用户的记忆总量（简化版本，只返回total）
+
+    Args:
+        end_user_id: 用户ID
+
+    Returns:
+        Dict[str, Any]: {"total": int}
+    """
+    if not end_user_id:
+        return {"total": 0}
+
     result = await _neo4j_connector.execute_query(
-        MemoryConfigRepository.SEARCH_FOR_ALL,
-        end_user_id=end_user_id,
+        MemoryConfigRepository.SEARCH_FOR_ALL_BATCH,
+        end_user_ids=[end_user_id],
     )
 
-    # 检查结果是否为空或长度不足
-    if not result or len(result) < 4:
-        data = {
-            "total": 0,
-            "counts": {
-                "dialogue": 0,
-                "chunk": 0,
-                "statement": 0,
-                "entity": 0,
-            },
-        }
-        return data
+    # 从批量查询结果中提取该用户的total
+    total = 0
+    for row in result:
+        if row["user_id"] == end_user_id:
+            total = row["total"]
+            break
 
-    data = {
-        "total": result[-1]["Count"],
-        "counts": {
-            "dialogue": result[0]["Count"],
-            "chunk": result[1]["Count"],
-            "statement": result[2]["Count"],
-            "entity": result[3]["Count"],
-        },
-    }
-    return data
+    return {"total": total}
 
 
 async def kb_type_distribution(end_user_id: Optional[str] = None) -> Dict[str, Any]:

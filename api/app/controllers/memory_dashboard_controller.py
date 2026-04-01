@@ -611,38 +611,66 @@ async def dashboard_data(
             except Exception as e:
                 api_logger.warning(f"获取记忆总量失败: {str(e)}")
             
-            # 2. 获取知识库类型统计（total_knowledge）
+            # 2. 获取知识库数量（total_knowledge），排除用户知识库(permission_id='Memory')
             try:
-                from app.services.memory_agent_service import MemoryAgentService 
-                memory_agent_service = MemoryAgentService()
-                knowledge_stats = await memory_agent_service.get_knowledge_type_stats(
-                    end_user_id=end_user_id,
-                    only_active=True,
-                    current_workspace_id=workspace_id,
-                    db=db
-                )
-                neo4j_data["total_knowledge"] = knowledge_stats.get("total", 0)
-                api_logger.info(f"成功获取知识库类型统计total: {neo4j_data['total_knowledge']}")
+                from sqlalchemy import func as _func
+                from app.models.knowledge_model import Knowledge as _Knowledge
+                total_knowledge = db.query(_func.count(_Knowledge.id)).filter(
+                    _Knowledge.workspace_id == workspace_id,
+                    _Knowledge.status == 1,
+                    _Knowledge.permission_id != "Memory"
+                ).scalar() or 0
+                neo4j_data["total_knowledge"] = total_knowledge
+                api_logger.info(f"成功获取知识库数量: {neo4j_data['total_knowledge']}")
             except Exception as e:
-                api_logger.warning(f"获取知识库类型统计失败: {str(e)}")
+                api_logger.warning(f"获取知识库数量失败: {str(e)}")
             
-            # 3. 获取API调用统计（total_api_call）
+            # 3. 获取API调用统计（total_api_call）—— 仅统计当天api_key_log调用次数
             try:
-                # 使用 AppStatisticsService 获取真实的API调用统计
-                app_stats_service = AppStatisticsService(db)
-                api_stats = app_stats_service.get_workspace_api_statistics(
-                    workspace_id=workspace_id,
-                    start_date=start_date,
-                    end_date=end_date
-                )
-                # 计算总调用次数
-                total_api_calls = sum(item.get("total_calls", 0) for item in api_stats)
+                from datetime import datetime
+                from sqlalchemy import func as _api_func
+                from app.models.api_key_model import ApiKey as _ApiKey, ApiKeyLog as _ApiKeyLog
+
+                _now = datetime.now()
+                _today_start = _now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+                _api_key_ids = [
+                    row[0] for row in db.query(_ApiKey.id).filter(
+                        _ApiKey.workspace_id == workspace_id
+                    ).all()
+                ]
+                if _api_key_ids:
+                    total_api_calls = db.query(_api_func.count(_ApiKeyLog.id)).filter(
+                        _ApiKeyLog.api_key_id.in_(_api_key_ids),
+                        _ApiKeyLog.created_at >= _today_start,
+                        _ApiKeyLog.created_at < _now
+                    ).scalar() or 0
+                else:
+                    total_api_calls = 0
                 neo4j_data["total_api_call"] = total_api_calls
-                api_logger.info(f"成功获取API调用统计: {neo4j_data['total_api_call']}")
+                api_logger.info(f"成功获取API调用统计(当天): {neo4j_data['total_api_call']}")
             except Exception as e:
                 api_logger.error(f"获取API调用统计失败: {str(e)}")
                 neo4j_data["total_api_call"] = 0
             
+            # 计算昨日对比
+            try:
+                changes = memory_dashboard_service.get_dashboard_yesterday_changes(
+                    db=db,
+                    workspace_id=workspace_id,
+                    storage_type=storage_type,
+                    today_data=neo4j_data
+                )
+                neo4j_data.update(changes)
+            except Exception as e:
+                api_logger.warning(f"计算neo4j昨日对比失败: {str(e)}")
+                neo4j_data.update({
+                    "total_memory_change": None,
+                    "total_app_change": None,
+                    "total_knowledge_change": None,
+                    "total_api_call_change": None,
+                })
+
             result["neo4j_data"] = neo4j_data
             api_logger.info("成功获取neo4j_data")
         
@@ -669,22 +697,40 @@ async def dashboard_data(
                 )
                 rag_data["total_app"] = total_app
                 
-                # total_knowledge: 使用 total_kb（总知识库数）
-                total_kb = memory_dashboard_service.get_rag_total_kb(db, current_user)
+                # total_knowledge: 直接查knowledges表status=1的总数，排除用户知识库(permission_id='Memory')
+                from sqlalchemy import func as _func
+                from app.models.knowledge_model import Knowledge as _Knowledge
+                total_kb = db.query(_func.count(_Knowledge.id)).filter(
+                    _Knowledge.workspace_id == workspace_id,
+                    _Knowledge.status == 1,
+                    _Knowledge.permission_id != "Memory"
+                ).scalar() or 0
                 rag_data["total_knowledge"] = total_kb
                 
-                # total_api_call: 使用 AppStatisticsService 获取真实的API调用统计
+                # total_api_call: 仅统计当天api_key_log调用次数
                 try:
-                    app_stats_service = AppStatisticsService(db)
-                    api_stats = app_stats_service.get_workspace_api_statistics(
-                        workspace_id=workspace_id,
-                        start_date=start_date,
-                        end_date=end_date
-                    )
-                    # 计算总调用次数
-                    total_api_calls = sum(item.get("total_calls", 0) for item in api_stats)
+                    from datetime import datetime
+                    from sqlalchemy import func as _api_func
+                    from app.models.api_key_model import ApiKey as _ApiKey, ApiKeyLog as _ApiKeyLog
+
+                    _now = datetime.now()
+                    _today_start = _now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+                    _api_key_ids = [
+                        row[0] for row in db.query(_ApiKey.id).filter(
+                            _ApiKey.workspace_id == workspace_id
+                        ).all()
+                    ]
+                    if _api_key_ids:
+                        total_api_calls = db.query(_api_func.count(_ApiKeyLog.id)).filter(
+                            _ApiKeyLog.api_key_id.in_(_api_key_ids),
+                            _ApiKeyLog.created_at >= _today_start,
+                            _ApiKeyLog.created_at < _now
+                        ).scalar() or 0
+                    else:
+                        total_api_calls = 0
                     rag_data["total_api_call"] = total_api_calls
-                    api_logger.info(f"成功获取RAG模式API调用统计: {rag_data['total_api_call']}")
+                    api_logger.info(f"成功获取RAG模式API调用统计(当天): {rag_data['total_api_call']}")
                 except Exception as e:
                     api_logger.warning(f"获取RAG模式API调用统计失败，使用默认值: {str(e)}")
                     rag_data["total_api_call"] = 0
@@ -693,6 +739,24 @@ async def dashboard_data(
             except Exception as e:
                 api_logger.warning(f"获取RAG相关数据失败: {str(e)}")
             
+            # 计算昨日对比
+            try:
+                changes = memory_dashboard_service.get_dashboard_yesterday_changes(
+                    db=db,
+                    workspace_id=workspace_id,
+                    storage_type=storage_type,
+                    today_data=rag_data
+                )
+                rag_data.update(changes)
+            except Exception as e:
+                api_logger.warning(f"计算RAG昨日对比失败: {str(e)}")
+                rag_data.update({
+                    "total_memory_change": None,
+                    "total_app_change": None,
+                    "total_knowledge_change": None,
+                    "total_api_call_change": None,
+                })
+
             result["rag_data"] = rag_data
             api_logger.info("成功获取rag_data")
         

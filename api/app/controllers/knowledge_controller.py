@@ -352,6 +352,7 @@ async def delete_knowledge(
         # 2. Soft-delete knowledge base
         api_logger.debug(f"Perform a soft delete: {db_knowledge.name} (ID: {knowledge_id})")
         db_knowledge.status = 2
+        db_knowledge.updated_at = datetime.datetime.now()
         db.commit()
         api_logger.info(f"The knowledge base has been successfully deleted: {db_knowledge.name} (ID: {knowledge_id})")
         return success(msg="The knowledge base has been successfully deleted")
