@@ -1100,7 +1100,7 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
         }
 
 
-@celery_app.task(name="app.core.memory.agent.write_message", bind=True)
+@celery_app.task(name="app.core.memory.agent.write_message", bind=True, acks_late=False)
 def write_message_task(
         self,
         end_user_id: str,
