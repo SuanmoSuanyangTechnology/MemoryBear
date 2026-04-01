@@ -45,11 +45,19 @@ class ModelParameterMerger:
             "frequency_penalty": 0.0,
             "presence_penalty": 0.0,
             "n": 1,
-            "stop": None
+            "stop": None,
+            "deep_thinking": False,
+            "thinking_budget_tokens": None
         }
         
         # 合并参数：默认值 -> 模型配置 -> Agent 配置
         merged = default_params.copy()
+        
+        # Pydantic 对象转为 dict
+        if model_config_params and hasattr(model_config_params, 'model_dump'):
+            model_config_params = model_config_params.model_dump()
+        if agent_config_params and hasattr(agent_config_params, 'model_dump'):
+            agent_config_params = agent_config_params.model_dump()
         
         # 应用模型配置参数
         if model_config_params:

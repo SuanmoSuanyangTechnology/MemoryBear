@@ -232,7 +232,8 @@ class MemoryPerceptualService:
                     provider=model_config.provider,
                     api_key=model_config.api_key,
                     base_url=model_config.api_base,
-                    is_omni=model_config.is_omni
+                    is_omni=model_config.is_omni,
+                    support_thinking="thinking" in (model_config.capability or []),
                 )
             )
         return llm, model_config

@@ -117,7 +117,9 @@ class AppChatService:
             max_tokens=model_parameters.get("max_tokens", 2000),
             system_prompt=system_prompt,
             tools=tools,
-
+            deep_thinking=model_parameters.get("deep_thinking", False),
+            thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
+            capability=api_key_obj.capability or [],
         )
 
         model_info = ModelInfo(
@@ -205,7 +207,8 @@ class AppChatService:
             "model": api_key_obj.model_name,
             "usage": result.get("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}),
             "audio_url": None,
-            "citations": filtered_citations
+            "citations": filtered_citations,
+            "reasoning_content": result.get("reasoning_content")
         }
         if files:
             for f in files:
@@ -258,6 +261,7 @@ class AppChatService:
             "conversation_id": conversation_id,
             "message_id": str(message_id),
             "message": result["content"],
+            "reasoning_content": result.get("reasoning_content"),
             "usage": result.get("usage", {
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
@@ -354,7 +358,10 @@ class AppChatService:
                 max_tokens=model_parameters.get("max_tokens", 2000),
                 system_prompt=system_prompt,
                 tools=tools,
-                streaming=True
+                streaming=True,
+                deep_thinking=model_parameters.get("deep_thinking", False),
+                thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
+                capability=api_key_obj.capability or [],
             )
 
             model_info = ModelInfo(
@@ -403,6 +410,7 @@ class AppChatService:
 
             # 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
+            full_reasoning = ""
             total_tokens = 0
 
             text_queue: asyncio.Queue = asyncio.Queue()
@@ -426,6 +434,9 @@ class AppChatService:
             ):
                 if isinstance(chunk, int):
                     total_tokens = chunk
+                elif isinstance(chunk, dict) and chunk.get("type") == "reasoning":
+                    full_reasoning += chunk['content']
+                    yield f"event: reasoning\ndata: {json.dumps({'content': chunk['content']}, ensure_ascii=False)}\n\n"
                 else:
                     full_content += chunk
                     yield f"event: message\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
@@ -472,7 +483,8 @@ class AppChatService:
                 "model": api_key_obj.model_name,
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                 "audio_url": None,
-                "citations": filtered_citations
+                "citations": filtered_citations,
+                "reasoning_content": full_reasoning or None
             }
 
             if files:
@@ -652,13 +664,13 @@ class AppChatService:
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id
             ):
-                if "sub_usage" in event:
+                # 拦截 sub_usage 事件，累加 token
+                if "event: sub_usage" in event:
                     if "data:" in event:
                         try:
                             data_line = event.split("data: ", 1)[1].strip()
                             data = json.loads(data_line)
-                            if "total_tokens" in data:
-                                total_tokens += data["total_tokens"]
+                            total_tokens += data.get("total_tokens", 0)
                         except:
                             pass
                 else:

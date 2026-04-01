@@ -248,7 +248,9 @@ class SharedChatService:
             max_tokens=model_parameters.get("max_tokens", 2000),
             system_prompt=system_prompt,
             tools=tools,
-
+            deep_thinking=model_parameters.get("deep_thinking", False),
+            thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
+            capability=api_key_obj.capability or [],
         )
 
         # 加载历史消息
@@ -450,7 +452,10 @@ class SharedChatService:
                 max_tokens=model_parameters.get("max_tokens", 2000),
                 system_prompt=system_prompt,
                 tools=tools,
-                streaming=True
+                streaming=True,
+                deep_thinking=model_parameters.get("deep_thinking", False),
+                thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
+                capability=api_key_obj.capability or [],
             )
 
             # 加载历史消息
@@ -479,6 +484,8 @@ class SharedChatService:
             ):
                 if isinstance(chunk, int):
                     total_tokens = chunk
+                elif isinstance(chunk, dict) and chunk.get("type") == "reasoning":
+                    yield f"event: reasoning\ndata: {json.dumps({'content': chunk['content']}, ensure_ascii=False)}\n\n"
                 else:
                     full_content += chunk
                     # 发送消息块事件

@@ -62,6 +62,7 @@ class QuestionClassifierNode(BaseNode):
             api_key = api_config.api_key
             base_url = api_config.api_base
             is_omni = api_config.is_omni
+            capability = api_config.capability
             model_type = config.type
 
         return RedBearLLM(
@@ -70,7 +71,8 @@ class QuestionClassifierNode(BaseNode):
                 provider=provider,
                 api_key=api_key,
                 base_url=base_url,
-                is_omni=is_omni
+                is_omni=is_omni,
+                support_thinking="thinking" in (capability or []),
             ),
             type=ModelType(model_type)
         )

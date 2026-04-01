@@ -393,6 +393,7 @@ class MasterAgentRouter:
                 api_key=api_key_config.api_key,
                 base_url=api_key_config.api_base,
                 is_omni=api_key_config.is_omni,
+                support_thinking="thinking" in (api_key_config.capability or []),
                 extra_params = extra_params
             )
 
@@ -402,6 +403,17 @@ class MasterAgentRouter:
             # 调用模型
             response = await llm.ainvoke(prompt)
             ModelApiKeyService.record_api_key_usage(self.db, api_key_config.id)
+
+            # 提取 token 消耗
+            self._last_routing_tokens = 0
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                um = response.usage_metadata
+                self._last_routing_tokens = um.get("total_tokens", 0) if isinstance(um, dict) else getattr(um, "total_tokens", 0)
+            elif hasattr(response, 'response_metadata') and response.response_metadata:
+                token_usage = response.response_metadata.get("token_usage") or response.response_metadata.get("usage", {})
+                if isinstance(token_usage, dict):
+                    self._last_routing_tokens = token_usage.get("total_tokens", 0)
+            logger.info(f"Master Agent 路由 token 消耗: {self._last_routing_tokens}")
 
             # 提取响应内容
             if hasattr(response, 'content'):

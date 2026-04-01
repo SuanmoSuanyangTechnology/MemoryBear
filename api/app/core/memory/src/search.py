@@ -758,8 +758,7 @@ async def run_hybrid_search(
                     model_name=embedder_config_dict["model_name"],
                     provider=embedder_config_dict["provider"],
                     api_key=embedder_config_dict["api_key"],
-                    base_url=embedder_config_dict["base_url"],
-                    type="llm"
+                    base_url=embedder_config_dict["base_url"]
                 )
                 config_load_time = time.time() - config_load_start
                 logger.info(f"[PERF] Config loading took {config_load_time:.4f}s")
