@@ -353,15 +353,13 @@ async def get_workspace_total_memory_count(
                 "details": []
             }
         
-        # 2. 对每个 host_id 调用 search_all 获取 total
+        # 2. 使用 search_all_batch 批量查询所有宿主的记忆数量
         from app.services import memory_storage_service
-        
-        total_count = 0
-        details = []
         
         # 如果提供了 end_user_id，只查询该用户
         if end_user_id:
-            search_result = await memory_storage_service.search_all(end_user_id=end_user_id)
+            batch_result = await memory_storage_service.search_all_batch([end_user_id])
+            count = batch_result.get(end_user_id, 0)
             # 查询用户名称
             from app.repositories.end_user_repository import EndUserRepository
             repo = EndUserRepository(db)
@@ -369,42 +367,31 @@ async def get_workspace_total_memory_count(
             user_name = end_user.other_name if end_user else None
             
             return {
-                "total_memory_count": search_result.get("total", 0),
+                "total_memory_count": count,
                 "host_count": 1,
                 "details": [{
                     "end_user_id": end_user_id, 
-                    "count": search_result.get("total", 0),
+                    "count": count,
                     "name": user_name
                 }]
             }
         
-        for host in hosts:
-            try:
-                end_user_id_str = str(host.id)
-                
-                search_result = await memory_storage_service.search_all(
-                    end_user_id=end_user_id_str
-                )
-                
-                host_total = search_result.get("total", 0)
-                total_count += host_total
-                
-                details.append({
-                    "end_user_id": end_user_id_str,
-                    "count": host_total,
-                    "name": host.other_name  # 使用 other_name 字段
-                })
-                
-                business_logger.debug(f"EndUser {end_user_id_str} ({host.other_name}) 记忆数: {host_total}")
-                
-            except Exception as e:
-                business_logger.warning(f"获取 end_user {host.id} 记忆数失败: {str(e)}")
-                # 失败的 host 记为 0
-                details.append({
-                    "end_user_id": str(host.id),
-                    "count": 0,
-                    "name": host.other_name  # 使用 other_name 字段
-                })
+        # 批量查询所有宿主记忆数量（一次 Neo4j 查询）
+        end_user_ids = [str(host.id) for host in hosts]
+        batch_result = await memory_storage_service.search_all_batch(end_user_ids)
+        
+        # 构建 host name 映射
+        host_name_map = {str(host.id): host.other_name for host in hosts}
+        
+        total_count = sum(batch_result.values())
+        details = [
+            {
+                "end_user_id": uid,
+                "count": batch_result.get(uid, 0),
+                "name": host_name_map.get(uid)
+            }
+            for uid in end_user_ids
+        ]
         
         result = {
             "total_memory_count": total_count,
