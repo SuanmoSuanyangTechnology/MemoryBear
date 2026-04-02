@@ -15,12 +15,39 @@ from app.schemas.memory_api_schema import (
     MemoryWriteRequest,
     MemoryWriteResponse,
     MemoryWriteSyncResponse,
-    TaskStatusResponse,
 )
 from app.services.memory_api_service import MemoryAPIService
 
 router = APIRouter(prefix="/memory", tags=["V1 - Memory API"])
 logger = get_business_logger()
+
+
+def _sanitize_task_result(result: dict) -> dict:
+    """Make Celery task result JSON-serializable.
+
+    Converts UUID and other non-serializable values to strings.
+
+    Args:
+        result: Raw task result dict from task_service
+
+    Returns:
+        JSON-safe dict
+    """
+    import uuid as _uuid
+    from datetime import datetime
+
+    def _convert(obj):
+        if isinstance(obj, dict):
+            return {k: _convert(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_convert(i) for i in obj]
+        if isinstance(obj, _uuid.UUID):
+            return str(obj)
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return obj
+
+    return _convert(result)
 
 
 @router.get("")
@@ -80,7 +107,7 @@ async def get_write_task_status(
     from app.services.task_service import get_task_memory_write_result
     result = get_task_memory_write_result(task_id)
 
-    return success(data=TaskStatusResponse(**result).model_dump(), msg="Task status retrieved")
+    return success(data=_sanitize_task_result(result), msg="Task status retrieved")
 
 
 @router.post("/read")
@@ -135,7 +162,7 @@ async def get_read_task_status(
     from app.services.task_service import get_task_memory_read_result
     result = get_task_memory_read_result(task_id)
 
-    return success(data=TaskStatusResponse(**result).model_dump(), msg="Task status retrieved")
+    return success(data=_sanitize_task_result(result), msg="Task status retrieved")
 
 
 @router.post("/write/sync")
