@@ -162,7 +162,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     // If model data hasn't been fetched yet, fetch it once
     if (!models) {
       try {
-        models = await getModelList({ page: 1, pagesize: 100 });
+        models = await getModelList({ page: 1, pagesize: 100 }, ['llm', 'embedding', 'rerank', 'chat']);
       } catch (error) {
         console.error('Failed to fetch models:', error);
         models = { items: [] };
