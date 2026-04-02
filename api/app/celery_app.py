@@ -6,6 +6,7 @@ from urllib.parse import quote
 
 from celery import Celery
 from celery.schedules import crontab
+from kombu import Exchange, Queue
 
 from app.core.config import settings
 from app.core.logging_config import get_logger
@@ -56,6 +57,28 @@ logger.info(
 # Default queue for unrouted tasks
 celery_app.conf.task_default_queue = 'memory_tasks'
 
+# ── Consistent Hash Exchange for write_message sharding ──
+# Routes write tasks by end_user_id so same-user messages land on the same
+# queue, giving sequential processing per user without blocking locks.
+# Requires: rabbitmq-plugins enable rabbitmq_consistent_hash_exchange
+MEMORY_WRITE_SHARDS = int(os.getenv('MEMORY_WRITE_SHARDS', '5'))
+
+memory_write_exchange = Exchange(
+    'memory_write_hash',
+    type='x-consistent-hash',
+    durable=True,
+)
+
+memory_write_queues = [
+    Queue(
+        f'memory_write_{i}',
+        exchange=memory_write_exchange,
+        routing_key='1',  # equal weight per shard
+        durable=True,
+    )
+    for i in range(MEMORY_WRITE_SHARDS)
+]
+
 # macOS 兼容性配置
 if platform.system() == 'Darwin':
     os.environ.setdefault('OBJC_DISABLE_INITIALIZE_FORK_SAFETY', 'YES')
@@ -95,12 +118,15 @@ celery_app.conf.update(
     worker_send_task_events=True,
     task_send_sent_event=True,
 
+    # Declare shard queues so workers can consume them
+    task_queues=memory_write_queues,
+
     # task routing
     task_routes={
         # Memory tasks → memory_tasks queue (threads worker)
         'app.core.memory.agent.read_message_priority': {'queue': 'memory_tasks'},
         'app.core.memory.agent.read_message': {'queue': 'memory_tasks'},
-        'app.core.memory.agent.write_message': {'queue': 'memory_tasks'},
+        # write_message is routed via consistent hash exchange at call site
         'app.tasks.write_perceptual_memory': {'queue': 'memory_tasks'},
 
         # Long-term storage tasks → memory_tasks queue (batched write strategies)

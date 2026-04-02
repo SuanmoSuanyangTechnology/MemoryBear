@@ -22,6 +22,7 @@ services:
       - worker-periodic
 
   # Memory worker - Memory read/write tasks (threads pool for asyncio)
+  # Consumes memory_tasks (reads) + memory_write_0..N shard queues (writes via consistent hash exchange)
   worker-memory:
     image: redbear-mem-open:latest
     container_name: worker-memory
@@ -30,7 +31,7 @@ services:
     volumes:
       - ./files:/files
       - /etc/localtime:/etc/localtime:ro
-    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=100 --queues=memory_tasks -n memory_worker@%h
+    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=100 --queues=memory_tasks,memory_write_0,memory_write_1,memory_write_2,memory_write_3,memory_write_4 -n memory_worker@%h
     restart: unless-stopped
     networks:
       - celery

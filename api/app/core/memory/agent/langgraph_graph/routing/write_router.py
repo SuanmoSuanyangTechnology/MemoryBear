@@ -106,18 +106,22 @@ async def write(
 
         logger.info(
             f"[WRITE] Submitting Celery task - user={actual_end_user_id}, messages={len(structured_messages)}, config={actual_config_id}")
-        write_id = write_message_task.delay(
-            actual_end_user_id,  # end_user_id: User ID
-            structured_messages,  # message: JSON string format message list
-            str(actual_config_id),  # config_id: Configuration ID string
-            storage_type,  # storage_type: "neo4j"
-            user_rag_memory_id or ""  # user_rag_memory_id: RAG memory ID (not used in Neo4j mode)
+        write_id = write_message_task.apply_async(
+            args=[
+                actual_end_user_id,  # end_user_id: User ID
+                structured_messages,  # message: JSON string format message list
+                str(actual_config_id),  # config_id: Configuration ID string
+                storage_type,  # storage_type: "neo4j"
+                user_rag_memory_id or ""  # user_rag_memory_id: RAG memory ID (not used in Neo4j mode)
+            ],
+            exchange='memory_write_hash',
+            routing_key=actual_end_user_id,  # consistent hash routes by user
         )
         logger.info(f"[WRITE] Celery task submitted - task_id={write_id}")
         write_status = get_task_memory_write_result(str(write_id))
         logger.info(f'[WRITE] Task result - user={actual_end_user_id}, status={write_status}')
 
-
+ 
 async def term_memory_save(long_term_messages, actual_config_id, end_user_id, type, scope):
     """
     Save long-term memory data to database

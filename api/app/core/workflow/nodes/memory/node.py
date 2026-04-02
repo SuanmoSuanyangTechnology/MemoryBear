@@ -109,12 +109,11 @@ class MemoryWriteNode(BaseNode):
                 "files": file_info
             })
 
-        write_message_task.delay(
-            end_user_id=end_user_id,
-            message=messages,
-            config_id=str(self.typed_config.config_id),
-            storage_type=state["memory_storage_type"],
-            user_rag_memory_id=state["user_rag_memory_id"]
+        write_message_task.apply_async(
+            args=[end_user_id, messages, str(self.typed_config.config_id),
+                  state["memory_storage_type"], state["user_rag_memory_id"]],
+            exchange='memory_write_hash',
+            routing_key=end_user_id,  # consistent hash routes by user
         )
 
         return "success"

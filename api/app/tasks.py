@@ -1181,7 +1181,8 @@ def write_message_task(
             key=f"memory_write:{end_user_id}",
             redis_client=redis_client,
             expire=600,
-            timeout=3600,
+            timeout=5,  # Short timeout — consistent hash exchange handles per-user routing,
+                        # lock is just a safety net for rare hash collisions
             auto_renewal=True,
         )
         if not lock.acquire():
