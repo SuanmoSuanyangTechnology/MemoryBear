@@ -1,15 +1,15 @@
 /*
  * @Author: ZhaoYing 
- * @Date: 2026-01-20 10:42:13 
+ * @Date: 2026-04-02 17:11:04 
  * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-04-02 17:13:08 
+ * @Last Modified time: 2026-04-02 17:11:04 
  */
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { useEffect } from 'react';
+import { $setSelection } from 'lexical';
 import { CLOSE_AUTOCOMPLETE_COMMAND } from '../commands';
 
-// Plugin to handle blur events and close autocomplete when clicking outside
-export default function BlurPlugin() {
+export default function Jinja2BlurPlugin() {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
@@ -21,8 +21,16 @@ export default function BlurPlugin() {
 
     return editor.registerRootListener((rootElement) => {
       if (rootElement) {
+        const handleBlur = (e: FocusEvent) => {
+          if ((e.target as HTMLElement)?.closest('[data-autocomplete-popup="true"]')) return;
+          const relatedTarget = e.relatedTarget as HTMLElement;
+          if (!relatedTarget || relatedTarget === document.body) return;
+          editor.update(() => { $setSelection(null); });
+        };
+        rootElement.addEventListener('blur', handleBlur);
         return () => {
           document.removeEventListener('mousedown', handleClickOutside);
+          rootElement.removeEventListener('blur', handleBlur);
         };
       }
       return () => { document.removeEventListener('mousedown', handleClickOutside); };

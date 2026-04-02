@@ -11,13 +11,13 @@ import { ContentEditable } from '@lexical/react/LexicalContentEditable';
 import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin';
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
 
-import AutocompletePlugin, { type Suggestion } from './plugin/AutocompletePlugin';
+import { type Suggestion } from './plugin/AutocompletePlugin';
 import CharacterCountPlugin from './plugin/CharacterCountPlugin';
-import InitialValuePlugin from './plugin/InitialValuePlugin';
-import CommandPlugin from './plugin/CommandPlugin';
+import Jinja2InitialValuePlugin from './plugin/Jinja2InitialValuePlugin';
+import Jinja2AutocompletePlugin from './plugin/Jinja2AutocompletePlugin';
 import Jinja2HighlightPlugin from './plugin/Jinja2HighlightPlugin';
+import Jinja2BlurPlugin from './plugin/Jinja2BlurPlugin';
 import LineNumberPlugin from './plugin/LineNumberPlugin';
-import BlurPlugin from './plugin/BlurPlugin';
 
 const jinja2Theme = {
   paragraph: 'editor-paragraph',
@@ -171,13 +171,12 @@ const Jinja2Editor: FC<Jinja2EditorProps> = ({
           ErrorBoundary={LexicalErrorBoundary}
         />
         <HistoryPlugin />
-        <CommandPlugin />
         <Jinja2HighlightPlugin />
         <LineNumberPlugin />
-        <AutocompletePlugin options={options} enableJinja2 />
-        <CharacterCountPlugin setCount={() => {}} onChange={onChange} />
-        <InitialValuePlugin value={value} options={options} enableLineNumbers />
-        <BlurPlugin enableJinja2 />
+        <Jinja2AutocompletePlugin options={options} />
+        <CharacterCountPlugin setCount={() => {}} onChange={onChange} waitForInit />
+        <Jinja2InitialValuePlugin value={value} />
+        <Jinja2BlurPlugin />
       </div>
     </LexicalComposer>
   );

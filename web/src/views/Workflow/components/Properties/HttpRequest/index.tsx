@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:35:43 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 11:32:44
+ * @Last Modified time: 2026-04-02 17:17:06
  */
 import { type FC, useRef, useState } from "react";
 import { useTranslation } from 'react-i18next'
@@ -114,6 +114,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         <Col span={16}>
           <Form.Item name="url">
             <Editor 
+              key="url"
               options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')} 
               variant="outlined"
               type="input"
@@ -212,13 +213,15 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         }
         {values?.body?.content_type === 'binary' &&
           <Form.Item name={['body', 'data']}
-            className="rb:bg-[#F6F6F6] rb:border-[#F6F6F6]! rb:hover:bg-white rb:hover:border-[#171719]! rb:border rb:rounded-lg rb:px-2! rb:py-1.5! rb:mb-0!"
+            className="rb:bg-[#F6F6F6] rb:border-[#F6F6F6]! rb:hover:bg-white rb:hover:border-[#171719]! rb:border rb:rounded-lg rb:mb-0!"
           >
             <Editor
+              key={['body', 'data'].join('_')}
               placeholder={t('common.pleaseSelect')}
               options={options.filter(vo => vo.dataType.includes('file'))}
               type="input"
               size="small"
+              height={28}
             />
           </Form.Item>
         }
