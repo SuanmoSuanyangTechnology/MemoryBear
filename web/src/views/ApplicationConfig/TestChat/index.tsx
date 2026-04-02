@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 16:04:15
+ * @Last Modified time: 2026-04-02 17:58:07
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -63,6 +63,12 @@ interface NodeData {
   state: Record<string, any>;
   status?: 'completed' | 'failed';
   audio_url?: string;
+  citations?: {
+    document_id: string;
+    file_name: string;
+    knowledge_id: string;
+    score: string;
+  }[]
 }
 
 const TestChat: FC<TestChatProps> = ({
@@ -111,8 +117,7 @@ const TestChat: FC<TestChatProps> = ({
         }
       }])
     }
-    
-
+  
     let initVariables: Variable[] = []
 
     switch (application.type) {
@@ -162,7 +167,7 @@ const TestChat: FC<TestChatProps> = ({
     }])
   }
 
-  const updateAssistantMessage = (content: string, audio_url?: string, audio_status?: string, citations?: any[]) => {
+  const updateAssistantMessage = (content: string, audio_url?: string, audio_status?: string, citations?: NodeData['citations']) => {
     setChatList(prev => {
       const newList = [...prev]
       const lastMsg = newList[newList.length - 1]
@@ -281,12 +286,7 @@ const TestChat: FC<TestChatProps> = ({
     data.map(item => {
       const { conversation_id, content, message_length, audio_url, citations } = item.data as {
         conversation_id: string, content: string, message_length: number; audio_url?: string;
-        citations?: {
-          document_id: string;
-          file_name: string;
-          knowledge_id: string;
-          score: string;
-        }[]
+        citations?: NodeData['citations']
       };
       switch (item.event) {
         case 'start':
@@ -344,15 +344,15 @@ const TestChat: FC<TestChatProps> = ({
     })
   }
 
-  const handleWorkflowSend = () => {
-    if (loading || !application || !message || !message?.trim()) return
+  const handleWorkflowSend = (msg?: string) => {
+    if (loading || !application || !((message && message?.trim() !== '') || (msg && msg?.trim() !== ''))) return
     const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
     const variables = toolbarRef.current?.getVariables() || []
     const { isCanSend, params } = buildVariableParams(variables)
     if (!isCanSend) return
 
     setLoading(true)
-    addUserMessage(message, files)
+    addUserMessage((msg || message) as string, files)
     addAssistantMessage()
     toolbarRef.current?.setFiles([])
     setFileList([])
@@ -361,7 +361,7 @@ const TestChat: FC<TestChatProps> = ({
 
     draftRun(
       application.id,
-      formatParams(message, conversationId, files, params),
+      formatParams((msg || message) as string, conversationId, files, params),
       handleWorkflowStreamMessage
     )
       .catch((error) => {
@@ -383,7 +383,7 @@ const TestChat: FC<TestChatProps> = ({
 
   const handleWorkflowStreamMessage = (data: SSEMessage[]) => {
     data.forEach(item => {
-      const { content, conversation_id } = item.data as NodeData;
+      const { content, conversation_id, citations } = item.data as NodeData;
       switch (item.event) {
       // Append streaming text chunks to assistant message
         case 'message':
@@ -412,6 +412,9 @@ const TestChat: FC<TestChatProps> = ({
         // Mark workflow as complete
         case 'workflow_end':
           updateWorkflowEndMessage(item.data as NodeData)
+          if (citations && citations.length > 0) {
+            updateWorkflowEndMessage(item.data as NodeData, citations)
+          }
           setStreamLoading(false)
           setLoading(false)
           break
@@ -536,7 +539,7 @@ const TestChat: FC<TestChatProps> = ({
     })
   }
 
-  const updateWorkflowEndMessage = (data: NodeData) => {
+  const updateWorkflowEndMessage = (data: NodeData, citations?: NodeData['citations']) => {
     const { error, status } = data;
     setChatList(prev => {
       const newList = [...prev]
@@ -547,6 +550,10 @@ const TestChat: FC<TestChatProps> = ({
           status,
           error,
           content: newList[lastIndex].content === '' ? null : newList[lastIndex].content,
+          meta_data: {
+            ...newList[lastIndex].meta_data || {},
+            citations
+          }
         }
       }
       return newList

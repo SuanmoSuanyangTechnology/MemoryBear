@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 17:30:47
+ * @Last Modified time: 2026-04-02 18:01:09
  */
 /**
  * Workflow Chat Component
@@ -66,6 +66,17 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
    */
   const handleOpen = () => {
     setOpen(true)
+
+    if (features?.opening_statement?.statement && features?.opening_statement?.statement.trim() !== '') {
+      setChatList(prev => [...prev, {
+        role: 'assistant',
+        created_at: Date.now(),
+        content: features?.opening_statement?.statement,
+        meta_data: {
+          suggested_questions: features?.opening_statement?.suggested_questions || []
+        }
+      }])
+    }
   }
 
   useEffect(() => {
@@ -164,7 +175,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
      */
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach(item => {
-        const { content, conversation_id, node_id, cycle_id, cycle_idx, input, output, error, elapsed_time, status } = item.data as {
+        const { content, conversation_id, node_id, cycle_id, cycle_idx, input, output, error, elapsed_time, status, citations } = item.data as {
           content: string;
           conversation_id: string | null;
           cycle_id: string;
@@ -177,7 +188,13 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
           elapsed_time?: string;
           error?: any;
           state: Record<string, any>;
-          status?: 'completed' | 'failed'
+          status?: 'completed' | 'failed',
+          citations?: {
+            document_id: string;
+            file_name: string;
+            knowledge_id: string;
+            score: string;
+          }[]
         };
 
         const node = graphRef.current?.getNodes().find(n => n.id === node_id);
@@ -312,6 +329,10 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
                   status,
                   error,
                   content: newList[lastIndex].content === '' ? null : newList[lastIndex].content,
+                  meta_data: {
+                    ...newList[lastIndex].meta_data || {},
+                    citations
+                  }
                 }
               }
               return newList
@@ -421,6 +442,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
         renderRuntime={(item, index) => {
           return <Runtime item={item} index={index} />
         }}
+        onSend={handleSend}
       />
       <Flex align="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">
         <ChatInput
