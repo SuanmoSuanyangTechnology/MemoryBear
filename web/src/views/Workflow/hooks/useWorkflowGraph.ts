@@ -491,32 +491,36 @@ export const useWorkflowGraph = ({
    * @param node - Clicked node
    */
   const nodeClick = ({ node }: { node: Node }) => {
-    // Ignore add-node type node clicks
-    const nodeData = node.getData()
-    if (nodeData?.type === 'add-node' || nodeData.type === 'break' || nodeData.type === 'cycle-start') {
-      setSelectedNode(null)
-      return;
-    }
+    blankClick()
 
-    const nodes = graphRef.current?.getNodes();
-
-    nodes?.forEach(vo => {
-      const data = vo.getData();
-      if (data.isSelected) {
-        vo.setData({
-          ...data,
-          isSelected: false,
-        });
+    setTimeout(() => {
+      // Ignore add-node type node clicks
+      const nodeData = node.getData()
+      if (nodeData?.type === 'add-node' || nodeData.type === 'break' || nodeData.type === 'cycle-start') {
+        setSelectedNode(null)
+        return;
       }
-    });
-    node.setData({
-      ...nodeData,
-      isSelected: true,
-    });
-    clearEdgeSelect()
-    if (nodeData.type !== 'notes') {
-      setSelectedNode(node);
-    }
+
+      const nodes = graphRef.current?.getNodes();
+
+      nodes?.forEach(vo => {
+        const data = vo.getData();
+        if (data.isSelected) {
+          vo.setData({
+            ...data,
+            isSelected: false,
+          });
+        }
+      });
+      node.setData({
+        ...nodeData,
+        isSelected: true,
+      });
+      clearEdgeSelect()
+      if (nodeData.type !== 'notes') {
+        setSelectedNode(node);
+      }
+    }, 0)
   };
   /**
    * Handle edge click event

@@ -68,7 +68,7 @@ export const getModelTypeList = async () => {
     return response as any[];
 };
 // 获取模型列表
-export const getModelList = async (types: string[], pageInfo: PageRequest) => {
+export const getModelList = async (pageInfo: PageRequest, types?: string[]) => {
   const response = await request.get(`${apiPrefix}/models`, { ...pageInfo, type: types?.join(','), is_active: true });
     return response as any;
 };
