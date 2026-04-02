@@ -99,8 +99,8 @@ const Index = () => {
 
 
   return (
-    <Row gutter={12}>
-      <Col flex="1">
+    <Flex gap={12} wrap="nowrap" className="rb:w-full! rb:h-full! rb:overflow-y-auto">
+      <div className="rb:flex-1 rb:min-w-0">
         <Flex vertical>
           <div className='rb:w-full rb:h-26 rb:p-4 rb:bg-cover rb:bg-[url("@/assets/images/index/index_bg@2x.png")] rb:rounded-xl rb:overflow-hidden'>
             <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-white rb:text-[18px] rb:leading-7">
@@ -123,14 +123,14 @@ const Index = () => {
             />
           </div>
         </Flex>
-      </Col>
-      <Col flex="328px">
+      </div>
+      <div className="rb:w-82!">
         {/* 引导 */}
         <GuideCard />
         <VersionCard />
         <QuickActions onNavigate={navigate} />
-      </Col>
-    </Row>
+      </div>
+    </Flex>
   );
 }
 
