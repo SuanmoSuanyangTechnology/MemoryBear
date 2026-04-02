@@ -207,7 +207,7 @@ const KnowledgeBaseManagement: FC = () => {
   };
   const fetchModelList = async () => { 
     try {
-      const response = await getModelList(['llm', 'embedding', 'rerank', 'chat'], { page: 1, pagesize: 100 });
+      const response = await getModelList({ page: 1, pagesize: 100 }, ['llm', 'embedding', 'rerank', 'chat']);
       // 缓存模型列表，建立 id -> name 的映射
       if (response?.items && Array.isArray(response.items)) {
         const cache: Record<string, string> = {};
