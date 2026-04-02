@@ -22,7 +22,7 @@ jobs:
 
       - name: Sync to Gitee
         run: |
-          GITEE_URL="https://${{ secrets.GITEE_USERNAME }}:${{ secrets.GITEE_TOKEN }}@gitee.com/${{ secrets.GITEE_USERNAME }}/MemoryBear.git"
+          GITEE_URL="https://${{ secrets.GITEE_USERNAME }}:${{ secrets.GITEE_TOKEN }}@gitee.com/hangzhou-hongxiong-intelligent_1/MemoryBear.git"
           git remote add gitee "$GITEE_URL"
 
           # 遍历并推送所有分支
