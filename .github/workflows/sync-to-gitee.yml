@@ -1,0 +1,36 @@
+name: Sync to Gitee
+
+on:
+  push:
+    branches:
+      - main     # Production
+      - develop  # Integration
+      - 'release/*' # Release preparation
+      - 'hotfix/*'  # Urgent fixes
+    tags:
+      - '*'      # All version tags (v1.0.0, etc.)
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync to Gitee
+        run: |
+          GITEE_URL="https://${{ secrets.GITEE_USERNAME }}:${{ secrets.GITEE_TOKEN }}@gitee.com/${{ secrets.GITEE_USERNAME }}/MemoryBear.git"
+          git remote add gitee "$GITEE_URL"
+
+          # 遍历并推送所有分支
+          for branch in $(git branch -r | grep -v HEAD | sed 's/origin\///'); do
+            echo "Syncing branch: $branch"
+            git push -f gitee "origin/$branch:refs/heads/$branch"
+          done
+
+          # 推送所有标签
+          echo "Syncing tags..."
+          git push gitee --tags --force
