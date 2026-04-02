@@ -1082,3 +1082,65 @@ async def generate_rag_profile(
         "personas_count": len(personas),
         "insight_generated": bool(insight_sections.get("memory_insight")),
     }
+
+
+def get_dashboard_common_stats(db: Session, workspace_id) -> dict:
+    """
+    获取 dashboard 中 neo4j/rag 分支共享的统计数据：
+    total_app、total_knowledge、total_api_call
+
+    Returns:
+        dict: {"total_app": int, "total_knowledge": int, "total_api_call": int}
+    """
+    result = {"total_app": 0, "total_knowledge": 0, "total_api_call": 0}
+
+    # total_app: 统计当前空间下的所有app数量（包含自有 + 被分享给本工作空间的app）
+    try:
+        from app.services import app_service as _app_svc
+        _, total_app = _app_svc.AppService(db).list_apps(
+            workspace_id=workspace_id, include_shared=True, pagesize=1
+        )
+        result["total_app"] = total_app
+    except Exception as e:
+        business_logger.warning(f"获取应用数量失败: {e}")
+
+    # total_knowledge: 统计顶层知识库（parent_id = workspace_id）
+    try:
+        from sqlalchemy import func as _func
+        from app.models.knowledge_model import Knowledge as _Knowledge
+        total_knowledge = db.query(_func.count(_Knowledge.id)).filter(
+            _Knowledge.workspace_id == workspace_id,
+            _Knowledge.status == 1,
+            _Knowledge.parent_id == _Knowledge.workspace_id
+        ).scalar() or 0
+        result["total_knowledge"] = total_knowledge
+    except Exception as e:
+        business_logger.warning(f"获取知识库数量失败: {e}")
+
+    # total_api_call: 仅统计当天 api_key_log 调用次数
+    try:
+        from datetime import datetime
+        from sqlalchemy import func as _api_func
+        from app.models.api_key_model import ApiKey as _ApiKey, ApiKeyLog as _ApiKeyLog
+
+        _now = datetime.now()
+        _today_start = _now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        _api_key_ids = [
+            row[0] for row in db.query(_ApiKey.id).filter(
+                _ApiKey.workspace_id == workspace_id
+            ).all()
+        ]
+        if _api_key_ids:
+            total_api_calls = db.query(_api_func.count(_ApiKeyLog.id)).filter(
+                _ApiKeyLog.api_key_id.in_(_api_key_ids),
+                _ApiKeyLog.created_at >= _today_start,
+                _ApiKeyLog.created_at < _now
+            ).scalar() or 0
+        else:
+            total_api_calls = 0
+        result["total_api_call"] = total_api_calls
+    except Exception as e:
+        business_logger.warning(f"获取API调用统计失败: {e}")
+
+    return result

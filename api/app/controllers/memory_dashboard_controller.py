@@ -591,7 +591,7 @@ async def dashboard_data(
                 "total_api_call": None
             }
             
-            # 1. 获取记忆总量（total_memory）
+            # 1. 获取记忆总量（total_memory）—— neo4j 独有逻辑：查询 neo4j 存储节点
             try:
                 total_memory_data = await memory_dashboard_service.get_workspace_total_memory_count(
                     db=db,
@@ -600,60 +600,14 @@ async def dashboard_data(
                     end_user_id=end_user_id
                 )
                 neo4j_data["total_memory"] = total_memory_data.get("total_memory_count", 0)
-                # total_app: 统计当前空间下的所有app数量
-                # 包含自有app + 被分享给本工作空间的app
-                from app.services import app_service as _app_svc
-                _, total_app = _app_svc.AppService(db).list_apps(
-                    workspace_id=workspace_id, include_shared=True, pagesize=1
-                )
-                neo4j_data["total_app"] = total_app
-                api_logger.info(f"成功获取记忆总量: {neo4j_data['total_memory']}, 应用数量: {neo4j_data['total_app']}")
+                api_logger.info(f"成功获取记忆总量: {neo4j_data['total_memory']}")
             except Exception as e:
                 api_logger.warning(f"获取记忆总量失败: {str(e)}")
             
-            # 2. 获取知识库数量（total_knowledge）
-            # 逻辑：统计 knowledges 表中 workspace_id = 当前工作空间 且 parent_id = workspace_id 的记录数
-            # 即只统计顶层知识库（parent_id 指向所属工作空间）
-            try:
-                from sqlalchemy import func as _func
-                from app.models.knowledge_model import Knowledge as _Knowledge
-                total_knowledge = db.query(_func.count(_Knowledge.id)).filter(
-                    _Knowledge.workspace_id == workspace_id,
-                    _Knowledge.status == 1,
-                    _Knowledge.parent_id == _Knowledge.workspace_id
-                ).scalar() or 0
-                neo4j_data["total_knowledge"] = total_knowledge
-                api_logger.info(f"成功获取知识库数量: {neo4j_data['total_knowledge']}")
-            except Exception as e:
-                api_logger.warning(f"获取知识库数量失败: {str(e)}")
-            
-            # 3. 获取API调用统计（total_api_call）—— 仅统计当天api_key_log调用次数
-            try:
-                from datetime import datetime
-                from sqlalchemy import func as _api_func
-                from app.models.api_key_model import ApiKey as _ApiKey, ApiKeyLog as _ApiKeyLog
-
-                _now = datetime.now()
-                _today_start = _now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-                _api_key_ids = [
-                    row[0] for row in db.query(_ApiKey.id).filter(
-                        _ApiKey.workspace_id == workspace_id
-                    ).all()
-                ]
-                if _api_key_ids:
-                    total_api_calls = db.query(_api_func.count(_ApiKeyLog.id)).filter(
-                        _ApiKeyLog.api_key_id.in_(_api_key_ids),
-                        _ApiKeyLog.created_at >= _today_start,
-                        _ApiKeyLog.created_at < _now
-                    ).scalar() or 0
-                else:
-                    total_api_calls = 0
-                neo4j_data["total_api_call"] = total_api_calls
-                api_logger.info(f"成功获取API调用统计(当天): {neo4j_data['total_api_call']}")
-            except Exception as e:
-                api_logger.error(f"获取API调用统计失败: {str(e)}")
-                neo4j_data["total_api_call"] = 0
+            # 2. 获取共享统计数据（total_app、total_knowledge、total_api_call）
+            common_stats = memory_dashboard_service.get_dashboard_common_stats(db, workspace_id)
+            neo4j_data.update(common_stats)
+            api_logger.info(f"成功获取共享统计: app={common_stats['total_app']}, knowledge={common_stats['total_knowledge']}, api_call={common_stats['total_api_call']}")
             
             # 计算昨日对比
             try:
@@ -685,61 +639,18 @@ async def dashboard_data(
                 "total_api_call": None
             }
             
-            # 获取RAG相关数据
+            # 1. 获取记忆总量（total_memory）—— rag 独有逻辑：查询 document 表的 chunk_num
             try:
-                # total_memory: 只统计用户知识库（permission_id='Memory'）的chunk数
                 total_chunk = memory_dashboard_service.get_rag_user_kb_total_chunk(db, current_user)
                 rag_data["total_memory"] = total_chunk
-                
-                # total_app: 统计当前空间下的所有app数量
-                # 包含自有app + 被分享给本工作空间的app
-                from app.services import app_service as _app_svc
-                _, total_app = _app_svc.AppService(db).list_apps(
-                    workspace_id=workspace_id, include_shared=True, pagesize=1
-                )
-                rag_data["total_app"] = total_app
-                
-                # total_knowledge: 直接查knowledges表status=1的总数，排除用户知识库(permission_id='Memory')
-                from sqlalchemy import func as _func
-                from app.models.knowledge_model import Knowledge as _Knowledge
-                total_kb = db.query(_func.count(_Knowledge.id)).filter(
-                    _Knowledge.workspace_id == workspace_id,
-                    _Knowledge.status == 1,
-                    _Knowledge.permission_id != "Memory"
-                ).scalar() or 0
-                rag_data["total_knowledge"] = total_kb
-                
-                # total_api_call: 仅统计当天api_key_log调用次数
-                try:
-                    from datetime import datetime
-                    from sqlalchemy import func as _api_func
-                    from app.models.api_key_model import ApiKey as _ApiKey, ApiKeyLog as _ApiKeyLog
-
-                    _now = datetime.now()
-                    _today_start = _now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-                    _api_key_ids = [
-                        row[0] for row in db.query(_ApiKey.id).filter(
-                            _ApiKey.workspace_id == workspace_id
-                        ).all()
-                    ]
-                    if _api_key_ids:
-                        total_api_calls = db.query(_api_func.count(_ApiKeyLog.id)).filter(
-                            _ApiKeyLog.api_key_id.in_(_api_key_ids),
-                            _ApiKeyLog.created_at >= _today_start,
-                            _ApiKeyLog.created_at < _now
-                        ).scalar() or 0
-                    else:
-                        total_api_calls = 0
-                    rag_data["total_api_call"] = total_api_calls
-                    api_logger.info(f"成功获取RAG模式API调用统计(当天): {rag_data['total_api_call']}")
-                except Exception as e:
-                    api_logger.warning(f"获取RAG模式API调用统计失败，使用默认值: {str(e)}")
-                    rag_data["total_api_call"] = 0
-                
-                api_logger.info(f"成功获取RAG相关数据: memory={total_chunk}, app={total_app}, knowledge={total_kb}, api_calls={rag_data['total_api_call']}")
+                api_logger.info(f"成功获取RAG记忆总量: {total_chunk}")
             except Exception as e:
-                api_logger.warning(f"获取RAG相关数据失败: {str(e)}")
+                api_logger.warning(f"获取RAG记忆总量失败: {str(e)}")
+            
+            # 2. 获取共享统计数据（total_app、total_knowledge、total_api_call）
+            common_stats = memory_dashboard_service.get_dashboard_common_stats(db, workspace_id)
+            rag_data.update(common_stats)
+            api_logger.info(f"成功获取共享统计: app={common_stats['total_app']}, knowledge={common_stats['total_knowledge']}, api_call={common_stats['total_api_call']}")
             
             # 计算昨日对比
             try:
