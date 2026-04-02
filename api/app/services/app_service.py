@@ -758,11 +758,14 @@ class AppService:
         # 逻辑删除应用
         app.is_active = False
         
-        # 更新 app_shares 表中该应用的所有共享记录为失效状态
+        # 更新 app_shares 表中该应用的所有共享记录为失效状态，并更新 updated_at 时间
         stmt = sa_update(AppShare).where(
             AppShare.source_app_id == app_id,
             AppShare.is_active.is_(True)
-        ).values(is_active=False)
+        ).values(
+            is_active=False,
+            updated_at=datetime.datetime.now()
+        )
         self.db.execute(stmt)
         
         self.db.commit()
