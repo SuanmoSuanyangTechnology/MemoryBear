@@ -458,7 +458,7 @@ class AgentRunService:
         
         statement = opening["statement"]
         suggested_questions = opening["suggested_questions"]
-        
+
         # 如果有变量，进行替换（仅支持 {{var_name}} 格式）
         if variables:
             for var_name, var_value in variables.items():
@@ -595,6 +595,9 @@ class AgentRunService:
                 max_tokens=effective_params.get("max_tokens", 2000),
                 system_prompt=system_prompt,
                 tools=tools,
+                deep_thinking=effective_params.get("deep_thinking", False),
+                thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
+                capability=api_key_config.get("capability", []),
             )
 
             # 5. 处理会话ID（创建或验证），新会话时写入开场白
@@ -689,7 +692,8 @@ class AgentRunService:
                             "prompt_tokens": 0,
                             "completion_tokens": 0,
                             "total_tokens": 0
-                        })
+                        }),
+                        "reasoning_content": result.get("reasoning_content")
                     },
                     files=files,
                     processed_files=processed_files,
@@ -701,6 +705,7 @@ class AgentRunService:
 
             response = {
                 "message": result["content"],
+                "reasoning_content": result.get("reasoning_content"),
                 "conversation_id": conversation_id,
                 "usage": result.get("usage", {
                     "prompt_tokens": 0,
@@ -838,7 +843,10 @@ class AgentRunService:
                 max_tokens=effective_params.get("max_tokens", 2000),
                 system_prompt=system_prompt,
                 tools=tools,
-                streaming=True
+                streaming=True,
+                deep_thinking=effective_params.get("deep_thinking", False),
+                thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
+                capability=api_key_config.get("capability", []),
             )
 
             # 5. 处理会话ID（创建或验证），新会话时写入开场白
@@ -898,6 +906,7 @@ class AgentRunService:
 
             # 9. 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
+            full_reasoning = ""
             total_tokens = 0
 
             # 启动流式 TTS（文本边输出边合成）
@@ -916,6 +925,9 @@ class AgentRunService:
             ):
                 if isinstance(chunk, int):
                     total_tokens = chunk
+                elif isinstance(chunk, dict) and chunk.get("type") == "reasoning":
+                    full_reasoning += chunk["content"]
+                    yield self._format_sse_event("reasoning", {"content": chunk["content"]})
                 else:
                     full_content += chunk
                     yield self._format_sse_event("message", {"content": chunk})
@@ -944,7 +956,8 @@ class AgentRunService:
                     app_id=agent_config.app_id,
                     user_id=user_id,
                     meta_data={
-                        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens}
+                        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                        "reasoning_content": full_reasoning or None
                     },
                     files=files,
                     processed_files=processed_files,
@@ -1665,7 +1678,7 @@ class AgentRunService:
             """从 text_queue 取文本按句子切分后喂给 synthesizer"""
             import re
             buf = ""
-            sentence_end = re.compile(r'[\u3002\uff01\uff1f\.!?\n]')
+            sentence_end = re.compile(r'[\u3002\uff01\uff1f.!?\n]')
             while True:
                 chunk = await text_queue.get()
                 if chunk is None:
@@ -1894,6 +1907,7 @@ class AgentRunService:
                     "conversation_id": result['conversation_id'],
                     "parameters_used": model_info["parameters"],
                     "message": result.get("message"),
+                    "reasoning_content": result.get("reasoning_content"),
                     "usage": usage,
                     "elapsed_time": elapsed,
                     "tokens_per_second": (
@@ -2012,7 +2026,7 @@ class AgentRunService:
         # 需要从 ModelApiKey 获取实际的模型名称，或者在 ModelConfig 中添加 model 字段
         return None
 
-    def _with_parameters(self, agent_config: AgentConfig, parameters: Dict[str, Any]) -> AgentConfig:
+    def _with_parameters(self, agent_config: AgentConfig, parameters: Dict[str, Any]) -> tuple[AgentConfig, Any]:
         """创建一个带有覆盖参数的 agent_config（浅拷贝，只修改 model_parameters）
 
         Args:
@@ -2110,6 +2124,7 @@ class AgentRunService:
 
                 start_time = time.time()
                 full_content = ""
+                full_reasoning = ""
                 returned_conversation_id = model_conversation_id
                 audio_url = None
                 audio_status = None
@@ -2168,6 +2183,18 @@ class AgentRunService:
                                     "content": chunk
                                 }))
 
+                            # 转发深度思考事件（带模型标识）
+                            if event_type == "reasoning" and event_data:
+                                reasoning_chunk = event_data.get("content", "")
+                                full_reasoning += reasoning_chunk
+                                await event_queue.put(self._format_sse_event("model_reasoning", {
+                                    "model_index": idx,
+                                    "model_config_id": model_config_id,
+                                    "label": model_label,
+                                    "conversation_id": returned_conversation_id,
+                                    "content": event_data.get("content", "")
+                                }))
+
                             # 从 end 事件中提取 features 输出字段
                             if event_type == "end" and event_data:
                                 audio_url = event_data.get("audio_url")
@@ -2199,6 +2226,7 @@ class AgentRunService:
                     "conversation_id": returned_conversation_id,
                     "parameters_used": model_info["parameters"],
                     "message": full_content,
+                    "reasoning_content": full_reasoning or None,
                     "elapsed_time": elapsed,
                     "audio_url": audio_url,
                     "audio_status": audio_status,
@@ -2351,6 +2379,7 @@ class AgentRunService:
                 "label": r["label"],
                 "conversation_id": r.get("conversation_id"),
                 "message": r.get("message"),
+                "reasoning_content": r.get("reasoning_content"),
                 "elapsed_time": r.get("elapsed_time", 0),
                 "audio_url": r.get("audio_url"),
                 "audio_status": r.get("audio_status"),

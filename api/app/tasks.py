@@ -61,9 +61,9 @@ def _get_or_create_redis_pool() -> redis.ConnectionPool | None:
                 db=settings.REDIS_DB_CELERY_BACKEND,
                 password=settings.REDIS_PASSWORD,
                 decode_responses=True,
-                max_connections=10,
+                max_connections=100,
                 socket_connect_timeout=5,
-                socket_timeout=5,
+                socket_timeout=10,
                 retry_on_timeout=True,
                 health_check_interval=30,
             )
@@ -1100,7 +1100,7 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
         }
 
 
-@celery_app.task(name="app.core.memory.agent.write_message", bind=True)
+@celery_app.task(name="app.core.memory.agent.write_message", bind=True, acks_late=False)
 def write_message_task(
         self,
         end_user_id: str,
@@ -1176,6 +1176,7 @@ def write_message_task(
 
     redis_client = get_sync_redis_client()
     lock = None
+    loop = None
     if redis_client is not None:
         lock = RedisFairLock(
             key=f"memory_write:{end_user_id}",
@@ -1196,6 +1197,7 @@ def write_message_task(
             }
 
     try:
+        task_start_time = int(time.time())
         loop = set_asyncio_event_loop()
 
         result = loop.run_until_complete(_run())
@@ -1205,7 +1207,7 @@ def write_message_task(
                     f"- elapsed_time={elapsed_time:.2f}s, task_id={self.request.id}")
 
         try:
-            _r = get_sync_redis_client()
+            _r = redis_client
             if _r is not None:
                 from datetime import timezone as _tz
                 _now_utc = datetime.now(_tz.utc).isoformat()
@@ -1219,6 +1221,7 @@ def write_message_task(
         return {
             "status": "SUCCESS",
             "result": result,
+            "start_at": task_start_time,
             "end_user_id": end_user_id,
             "config_id": config_id,
             "elapsed_time": elapsed_time,
@@ -1252,7 +1255,8 @@ def write_message_task(
                 logger.warning(f"[CELERY WRITE] 释放锁失败: {e}")
         # Gracefully shutdown the event loop to prevent
         # 'RuntimeError: Event loop is closed' from httpx.AsyncClient.__del__
-        _shutdown_loop_gracefully(loop)
+        if loop:
+            _shutdown_loop_gracefully(loop)
 
 
 # unused task
@@ -1320,7 +1324,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
         from app.models.app_model import App
         from app.models.end_user_model import EndUser
         from app.repositories.memory_increment_repository import write_memory_increment
-        from app.services.memory_storage_service import search_all
+        from app.services.memory_storage_service import search_all_batch
 
         with get_db_context() as db:
             try:
@@ -1354,27 +1358,15 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                     EndUser.workspace_id == workspace_id
                 ).distinct().all()
 
-                # 3. 遍历所有end_user，查询每个宿主的记忆总量并累加
-                total_num = 0
-                end_user_details = []
+                # 3. 批量查询所有宿主的记忆总量
+                end_user_id_list = [str(eid) for (eid,) in end_users]
+                batch_result = await search_all_batch(end_user_id_list)
 
-                for (end_user_id,) in end_users:
-                    try:
-                        # 调用 search_all 接口查询该宿主的总量
-                        result = await search_all(str(end_user_id))
-                        user_total = result.get("total", 0)
-                        total_num += user_total
-                        end_user_details.append({
-                            "end_user_id": str(end_user_id),
-                            "total": user_total
-                        })
-                    except Exception as e:
-                        # 记录单个用户查询失败，但继续处理其他用户
-                        end_user_details.append({
-                            "end_user_id": str(end_user_id),
-                            "total": 0,
-                            "error": str(e)
-                        })
+                total_num = sum(batch_result.values())
+                end_user_details = [
+                    {"end_user_id": uid, "total": batch_result.get(uid, 0)}
+                    for uid in end_user_id_list
+                ]
 
                 # 4. 写入数据库
                 memory_increment = write_memory_increment(
@@ -1437,7 +1429,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
         from app.models.end_user_model import EndUser
         from app.models.workspace_model import Workspace
         from app.repositories.memory_increment_repository import write_memory_increment
-        from app.services.memory_storage_service import search_all
+        from app.services.memory_storage_service import search_all_batch
 
         with get_db_context() as db:
             try:
@@ -1495,28 +1487,15 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
                             EndUser.workspace_id == workspace_id
                         ).distinct().all()
 
-                        # 3. 遍历所有end_user，查询每个宿主的记忆总量并累加
-                        total_num = 0
-                        end_user_details = []
+                        # 3. 批量查询所有宿主的记忆总量
+                        end_user_id_list = [str(eid) for (eid,) in end_users]
+                        batch_result = await search_all_batch(end_user_id_list)
 
-                        for (end_user_id,) in end_users:
-                            try:
-                                # 调用 search_all 接口查询该宿主的总量
-                                result = await search_all(str(end_user_id))
-                                user_total = result.get("total", 0)
-                                total_num += user_total
-                                end_user_details.append({
-                                    "end_user_id": str(end_user_id),
-                                    "total": user_total
-                                })
-                            except Exception as e:
-                                # 记录单个用户查询失败，但继续处理其他用户
-                                logger.warning(f"查询用户 {end_user_id} 记忆失败: {str(e)}")
-                                end_user_details.append({
-                                    "end_user_id": str(end_user_id),
-                                    "total": 0,
-                                    "error": str(e)
-                                })
+                        total_num = sum(batch_result.values())
+                        end_user_details = [
+                            {"end_user_id": uid, "total": batch_result.get(uid, 0)}
+                            for uid in end_user_id_list
+                        ]
 
                         # 4. 写入数据库
                         memory_increment = write_memory_increment(

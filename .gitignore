@@ -18,6 +18,7 @@ examples/
 .kiro
 .vscode
 .idea
+.claude
 
 # Temporary outputs
 .DS_Store

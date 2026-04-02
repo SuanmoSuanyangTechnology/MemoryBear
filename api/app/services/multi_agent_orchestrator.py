@@ -287,6 +287,11 @@ class MultiAgentOrchestrator:
             sub_conversation_id = None
             total_tokens = 0
             
+            # 累加 Master Agent 路由决策消耗的 token
+            total_tokens += task_analysis.get("routing_tokens", 0)
+            # 累加 Master Agent 整合消耗的 token
+            total_tokens += getattr(self, '_last_merge_tokens', 0)
+
             if isinstance(results, dict):
                 sub_conversation_id = results.get("conversation_id") or results.get("result", {}).get("conversation_id")
                 # 提取 token 信息
@@ -358,12 +363,16 @@ class MultiAgentOrchestrator:
             variables=variables
         )
 
+        # 获取路由决策消耗的 token
+        routing_tokens = getattr(self.router, '_last_routing_tokens', 0)
+
         logger.info(
             "Master Agent 分析完成",
             extra={
                 "selected_agent": routing_decision.get("selected_agent_id"),
                 "confidence": routing_decision.get("confidence"),
-                "strategy": routing_decision.get("strategy")
+                "strategy": routing_decision.get("strategy"),
+                "routing_tokens": routing_tokens
             }
         )
 
@@ -372,7 +381,8 @@ class MultiAgentOrchestrator:
             "variables": variables or {},
             "sub_agents": self.config.sub_agents,
             "initial_context": variables or {},
-            "routing_decision": routing_decision
+            "routing_decision": routing_decision,
+            "routing_tokens": routing_tokens
         }
 
     async def _execute_sequential(
@@ -1032,6 +1042,11 @@ class MultiAgentOrchestrator:
 
         # 5. 流式执行子 Agent
         sub_conversation_id = None
+        # Master Agent 路由决策消耗的 token，通过 sub_usage 事件发送给上层
+        routing_tokens = task_analysis.get("routing_tokens", 0)
+        if routing_tokens > 0:
+            yield self._format_sse_event("sub_usage", {"total_tokens": routing_tokens})
+
         async for event in self._execute_sub_agent_stream(
             agent_data["config"],
             message,
@@ -1054,6 +1069,7 @@ class MultiAgentOrchestrator:
                 except:
                     pass
 
+            # 直接透传所有事件（包括 sub_usage），累加统一由上层处理
             yield event
 
         # 6. 如果有会话 ID，发送一个包含它的事件
@@ -2600,6 +2616,7 @@ class MultiAgentOrchestrator:
                 api_key=api_key_config.api_key,
                 base_url=api_key_config.api_base,
                 is_omni=api_key_config.is_omni,
+                support_thinking="thinking" in (api_key_config.capability or []),
                 temperature=0.7,  # 整合任务使用中等温度
                 max_tokens=2000
             )
@@ -2612,6 +2629,17 @@ class MultiAgentOrchestrator:
 
             ModelApiKeyService.record_api_key_usage(self.db, api_key_config.id)
 
+            # 提取整合消耗的 token
+            merge_tokens = 0
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                um = response.usage_metadata
+                merge_tokens = um.get("total_tokens", 0) if isinstance(um, dict) else getattr(um, "total_tokens", 0)
+            elif hasattr(response, 'response_metadata') and response.response_metadata:
+                token_usage = response.response_metadata.get("token_usage") or response.response_metadata.get("usage", {})
+                if isinstance(token_usage, dict):
+                    merge_tokens = token_usage.get("total_tokens", 0)
+            self._last_merge_tokens = merge_tokens
+
             # 提取响应内容
             if hasattr(response, 'content'):
                 merged_response = response.content
@@ -2621,7 +2649,8 @@ class MultiAgentOrchestrator:
             logger.info(
                 "Master Agent 整合完成",
                 extra={
-                    "merged_length": len(merged_response)
+                    "merged_length": len(merged_response),
+                    "merge_tokens": merge_tokens
                 }
             )
 
@@ -2766,6 +2795,7 @@ class MultiAgentOrchestrator:
                 api_key=api_key_config.api_key,
                 base_url=api_key_config.api_base,
                 is_omni=api_key_config.is_omni,
+                support_thinking="thinking" in (api_key_config.capability or []),
                 temperature=0.7,
                 max_tokens=2000,
                 extra_params={"streaming": True}  # 启用流式输出

@@ -591,7 +591,7 @@ async def dashboard_data(
                 "total_api_call": None
             }
             
-            # 1. 获取记忆总量（total_memory）
+            # 1. 获取记忆总量（total_memory）—— neo4j 独有逻辑：查询 neo4j 存储节点
             try:
                 total_memory_data = await memory_dashboard_service.get_workspace_total_memory_count(
                     db=db,
@@ -600,49 +600,33 @@ async def dashboard_data(
                     end_user_id=end_user_id
                 )
                 neo4j_data["total_memory"] = total_memory_data.get("total_memory_count", 0)
-                # total_app: 统计当前空间下的所有app数量
-                # 包含自有app + 被分享给本工作空间的app
-                from app.services import app_service as _app_svc
-                _, total_app = _app_svc.AppService(db).list_apps(
-                    workspace_id=workspace_id, include_shared=True, pagesize=1
-                )
-                neo4j_data["total_app"] = total_app
-                api_logger.info(f"成功获取记忆总量: {neo4j_data['total_memory']}, 应用数量: {neo4j_data['total_app']}")
+                api_logger.info(f"成功获取记忆总量: {neo4j_data['total_memory']}")
             except Exception as e:
                 api_logger.warning(f"获取记忆总量失败: {str(e)}")
             
-            # 2. 获取知识库类型统计（total_knowledge）
-            try:
-                from app.services.memory_agent_service import MemoryAgentService 
-                memory_agent_service = MemoryAgentService()
-                knowledge_stats = await memory_agent_service.get_knowledge_type_stats(
-                    end_user_id=end_user_id,
-                    only_active=True,
-                    current_workspace_id=workspace_id,
-                    db=db
-                )
-                neo4j_data["total_knowledge"] = knowledge_stats.get("total", 0)
-                api_logger.info(f"成功获取知识库类型统计total: {neo4j_data['total_knowledge']}")
-            except Exception as e:
-                api_logger.warning(f"获取知识库类型统计失败: {str(e)}")
+            # 2. 获取共享统计数据（total_app、total_knowledge、total_api_call）
+            common_stats = memory_dashboard_service.get_dashboard_common_stats(db, workspace_id)
+            neo4j_data.update(common_stats)
+            api_logger.info(f"成功获取共享统计: app={common_stats['total_app']}, knowledge={common_stats['total_knowledge']}, api_call={common_stats['total_api_call']}")
             
-            # 3. 获取API调用统计（total_api_call）
+            # 计算昨日对比
             try:
-                # 使用 AppStatisticsService 获取真实的API调用统计
-                app_stats_service = AppStatisticsService(db)
-                api_stats = app_stats_service.get_workspace_api_statistics(
+                changes = memory_dashboard_service.get_dashboard_yesterday_changes(
+                    db=db,
                     workspace_id=workspace_id,
-                    start_date=start_date,
-                    end_date=end_date
+                    storage_type=storage_type,
+                    today_data=neo4j_data
                 )
-                # 计算总调用次数
-                total_api_calls = sum(item.get("total_calls", 0) for item in api_stats)
-                neo4j_data["total_api_call"] = total_api_calls
-                api_logger.info(f"成功获取API调用统计: {neo4j_data['total_api_call']}")
+                neo4j_data.update(changes)
             except Exception as e:
-                api_logger.error(f"获取API调用统计失败: {str(e)}")
-                neo4j_data["total_api_call"] = 0
-            
+                api_logger.warning(f"计算neo4j昨日对比失败: {str(e)}")
+                neo4j_data.update({
+                    "total_memory_change": None,
+                    "total_app_change": None,
+                    "total_knowledge_change": None,
+                    "total_api_call_change": None,
+                })
+
             result["neo4j_data"] = neo4j_data
             api_logger.info("成功获取neo4j_data")
         
@@ -655,44 +639,37 @@ async def dashboard_data(
                 "total_api_call": None
             }
             
-            # 获取RAG相关数据
+            # 1. 获取记忆总量（total_memory）—— rag 独有逻辑：查询 document 表的 chunk_num
             try:
-                # total_memory: 只统计用户知识库（permission_id='Memory'）的chunk数
                 total_chunk = memory_dashboard_service.get_rag_user_kb_total_chunk(db, current_user)
                 rag_data["total_memory"] = total_chunk
-                
-                # total_app: 统计当前空间下的所有app数量
-                # 包含自有app + 被分享给本工作空间的app
-                from app.services import app_service as _app_svc
-                _, total_app = _app_svc.AppService(db).list_apps(
-                    workspace_id=workspace_id, include_shared=True, pagesize=1
-                )
-                rag_data["total_app"] = total_app
-                
-                # total_knowledge: 使用 total_kb（总知识库数）
-                total_kb = memory_dashboard_service.get_rag_total_kb(db, current_user)
-                rag_data["total_knowledge"] = total_kb
-                
-                # total_api_call: 使用 AppStatisticsService 获取真实的API调用统计
-                try:
-                    app_stats_service = AppStatisticsService(db)
-                    api_stats = app_stats_service.get_workspace_api_statistics(
-                        workspace_id=workspace_id,
-                        start_date=start_date,
-                        end_date=end_date
-                    )
-                    # 计算总调用次数
-                    total_api_calls = sum(item.get("total_calls", 0) for item in api_stats)
-                    rag_data["total_api_call"] = total_api_calls
-                    api_logger.info(f"成功获取RAG模式API调用统计: {rag_data['total_api_call']}")
-                except Exception as e:
-                    api_logger.warning(f"获取RAG模式API调用统计失败，使用默认值: {str(e)}")
-                    rag_data["total_api_call"] = 0
-                
-                api_logger.info(f"成功获取RAG相关数据: memory={total_chunk}, app={total_app}, knowledge={total_kb}, api_calls={rag_data['total_api_call']}")
+                api_logger.info(f"成功获取RAG记忆总量: {total_chunk}")
             except Exception as e:
-                api_logger.warning(f"获取RAG相关数据失败: {str(e)}")
+                api_logger.warning(f"获取RAG记忆总量失败: {str(e)}")
             
+            # 2. 获取共享统计数据（total_app、total_knowledge、total_api_call）
+            common_stats = memory_dashboard_service.get_dashboard_common_stats(db, workspace_id)
+            rag_data.update(common_stats)
+            api_logger.info(f"成功获取共享统计: app={common_stats['total_app']}, knowledge={common_stats['total_knowledge']}, api_call={common_stats['total_api_call']}")
+            
+            # 计算昨日对比
+            try:
+                changes = memory_dashboard_service.get_dashboard_yesterday_changes(
+                    db=db,
+                    workspace_id=workspace_id,
+                    storage_type=storage_type,
+                    today_data=rag_data
+                )
+                rag_data.update(changes)
+            except Exception as e:
+                api_logger.warning(f"计算RAG昨日对比失败: {str(e)}")
+                rag_data.update({
+                    "total_memory_change": None,
+                    "total_app_change": None,
+                    "total_knowledge_change": None,
+                    "total_api_call_change": None,
+                })
+
             result["rag_data"] = rag_data
             api_logger.info("成功获取rag_data")
         

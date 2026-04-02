@@ -37,7 +37,10 @@ class LangChainAgent:
             tools: Optional[Sequence[BaseTool]] = None,
             streaming: bool = False,
             max_iterations: Optional[int] = None,  # 最大迭代次数（None 表示自动计算）
-            max_tool_consecutive_calls: int = 3  # 单个工具最大连续调用次数
+            max_tool_consecutive_calls: int = 3,  # 单个工具最大连续调用次数
+            deep_thinking: bool = False,  # 是否启用深度思考模式
+            thinking_budget_tokens: Optional[int] = None,  # 深度思考 token 预算
+            capability: Optional[List[str]] = None  # 模型能力列表，用于校验是否支持深度思考
     ):
         """初始化 LangChain Agent
 
@@ -60,6 +63,7 @@ class LangChainAgent:
         self.streaming = streaming
         self.is_omni = is_omni
         self.max_tool_consecutive_calls = max_tool_consecutive_calls
+        self.deep_thinking = deep_thinking and ("thinking" in (capability or []))
 
         # 工具调用计数器：记录每个工具的连续调用次数
         self.tool_call_counter: Dict[str, int] = {}
@@ -82,6 +86,13 @@ class LangChainAgent:
             f"auto_calculated={max_iterations is None}"
         )
 
+        # 根据 capability 校验是否真正支持深度思考
+        actual_deep_thinking = self.deep_thinking
+        if deep_thinking and not actual_deep_thinking:
+            logger.warning(
+                f"模型 {model_name} 不支持深度思考（capability 中无 'thinking'），已自动关闭 deep_thinking"
+            )
+
         # 创建 RedBearLLM（支持多提供商）
         model_config = RedBearModelConfig(
             model_name=model_name,
@@ -89,10 +100,13 @@ class LangChainAgent:
             api_key=api_key,
             base_url=api_base,
             is_omni=is_omni,
+            deep_thinking=actual_deep_thinking,
+            thinking_budget_tokens=thinking_budget_tokens if actual_deep_thinking else None,
+            support_thinking="thinking" in (capability or []),
             extra_params={
                 "temperature": temperature,
                 "max_tokens": max_tokens,
-                "streaming": streaming  # 使用参数控制流式
+                "streaming": streaming
             }
         )
 
@@ -249,6 +263,33 @@ class LangChainAgent:
 
         return messages
 
+    @staticmethod
+    def _extract_tokens_from_message(msg) -> int:
+        """从 AIMessage 或类似对象中提取 total_tokens，兼容多种 provider 格式
+
+        支持的格式：
+        - response_metadata.token_usage.total_tokens (OpenAI/ChatOpenAI)
+        - response_metadata.usage.total_tokens (部分 provider)
+        - usage_metadata.total_tokens (LangChain 新版)
+        """
+        total = 0
+        # 1. response_metadata
+        response_meta = getattr(msg, "response_metadata", None)
+        if response_meta and isinstance(response_meta, dict):
+            # 尝试 token_usage 路径
+            token_usage = response_meta.get("token_usage") or response_meta.get("usage", {})
+            if isinstance(token_usage, dict):
+                total = token_usage.get("total_tokens", 0)
+        # 2. usage_metadata（LangChain 新版 AIMessage 属性）
+        if not total:
+            usage_meta = getattr(msg, "usage_metadata", None)
+            if usage_meta:
+                if isinstance(usage_meta, dict):
+                    total = usage_meta.get("total_tokens", 0)
+                else:
+                    total = getattr(usage_meta, "total_tokens", 0)
+        return total or 0
+
     def _build_multimodal_content(self, text: str, files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         构建多模态消息内容
@@ -282,6 +323,17 @@ class LangChainAgent:
         )
 
         return content_parts
+
+    @staticmethod
+    def _extract_reasoning_content(msg) -> str:
+        """从 AIMessage 中提取深度思考内容（reasoning_content）
+
+        所有 provider 统一通过 additional_kwargs.reasoning_content 传递：
+        - DeepSeek-R1 / QwQ: 原生字段
+        - Volcano (Doubao-thinking): 由 VolcanoChatOpenAI 从 delta.reasoning_content 注入
+        """
+        additional = getattr(msg, "additional_kwargs", None) or {}
+        return additional.get("reasoning_content") or additional.get("reasoning", "")
 
     async def chat(
             self,
@@ -348,6 +400,7 @@ class LangChainAgent:
 
             logger.debug(f"输出消息数量: {len(output_messages)}")
             total_tokens = 0
+            reasoning_content = ""
             for msg in reversed(output_messages):
                 if isinstance(msg, AIMessage):
                     logger.debug(f"找到 AI 消息，content 类型: {type(msg.content)}")
@@ -382,8 +435,8 @@ class LangChainAgent:
                     else:
                         content = str(msg.content)
                         logger.debug(f"转换为字符串: {content[:100]}...")
-                    response_meta = msg.response_metadata if hasattr(msg, 'response_metadata') else None
-                    total_tokens = response_meta.get("token_usage", {}).get("total_tokens", 0) if response_meta else 0
+                    total_tokens = self._extract_tokens_from_message(msg)
+                    reasoning_content = self._extract_reasoning_content(msg) if self.deep_thinking else ""
                     break
 
             logger.info(f"最终提取的内容长度: {len(content)}")
@@ -399,6 +452,8 @@ class LangChainAgent:
                     "total_tokens": total_tokens
                 }
             }
+            if reasoning_content:
+                response["reasoning_content"] = reasoning_content
 
             logger.debug(
                 "Agent 调用完成",
@@ -420,7 +475,7 @@ class LangChainAgent:
             history: Optional[List[Dict[str, str]]] = None,
             context: Optional[str] = None,
             files: Optional[List[Dict[str, Any]]] = None
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[str | int, None]:
         """执行流式对话
 
         Args:
@@ -431,6 +486,8 @@ class LangChainAgent:
 
         Yields:
             str: 消息内容块
+            int: token 统计
+            Dict: 深度思考内容 {"type": "reasoning", "content": "..."}
         """
         logger.info("=" * 80)
         logger.info(" chat_stream 方法开始执行")
@@ -451,6 +508,7 @@ class LangChainAgent:
             # 统一使用 agent 的 astream_events 实现流式输出
             logger.debug("使用 Agent astream_events 实现流式输出")
             full_content = ''
+            full_reasoning = ''
             try:
                 last_event = {}
                 async for event in self.agent.astream_events(
@@ -467,6 +525,13 @@ class LangChainAgent:
                         # LLM 流式输出
                         chunk = event.get("data", {}).get("chunk")
                         if chunk and hasattr(chunk, "content"):
+                            # 提取深度思考内容（仅在启用深度思考时）
+                            if self.deep_thinking:
+                                reasoning_chunk = self._extract_reasoning_content(chunk)
+                                if reasoning_chunk:
+                                    full_reasoning += reasoning_chunk
+                                    yield {"type": "reasoning", "content": reasoning_chunk}
+
                             # 处理多模态响应：content 可能是字符串或列表
                             chunk_content = chunk.content
                             if isinstance(chunk_content, str) and chunk_content:
@@ -497,6 +562,13 @@ class LangChainAgent:
                         chunk = event.get("data", {}).get("chunk")
                         if chunk:
                             if hasattr(chunk, "content"):
+                                # 提取深度思考内容（仅在启用深度思考时）
+                                if self.deep_thinking:
+                                    reasoning_chunk = self._extract_reasoning_content(chunk)
+                                    if reasoning_chunk:
+                                        full_reasoning += reasoning_chunk
+                                        yield {"type": "reasoning", "content": reasoning_chunk}
+
                                 chunk_content = chunk.content
                                 if isinstance(chunk_content, str) and chunk_content:
                                     full_content += chunk_content
@@ -535,12 +607,9 @@ class LangChainAgent:
                 output_messages = last_event.get("data", {}).get("output", {}).get("messages", [])
                 for msg in reversed(output_messages):
                     if isinstance(msg, AIMessage):
-                        response_meta = msg.response_metadata if hasattr(msg, 'response_metadata') else None
-                        total_tokens = response_meta.get("token_usage", {}).get(
-                            "total_tokens",
-                            0
-                        ) if response_meta else 0
-                        yield total_tokens
+                        stream_total_tokens = self._extract_tokens_from_message(msg)
+                        logger.info(f"流式 token 统计: total_tokens={stream_total_tokens}")
+                        yield stream_total_tokens
                         break
 
             except Exception as e:

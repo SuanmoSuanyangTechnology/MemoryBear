@@ -11,6 +11,7 @@ models:
   tags:
   - 大语言模型
   logo: bedrock
+
 - name: amazon nova
   type: llm
   provider: bedrock
@@ -27,6 +28,7 @@ models:
   - stream-tool-call
   - vision
   logo: bedrock
+
 - name: anthropic claude
   type: llm
   provider: bedrock
@@ -35,6 +37,7 @@ models:
   is_official: true
   capability:
     - vision
+    - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -44,6 +47,7 @@ models:
   - stream-tool-call
   - document
   logo: bedrock
+
 - name: cohere
   type: llm
   provider: bedrock
@@ -58,6 +62,7 @@ models:
   - tool-call
   - stream-tool-call
   logo: bedrock
+
 - name: deepseek
   type: llm
   provider: bedrock
@@ -66,6 +71,7 @@ models:
   is_official: true
   capability:
     - vision
+    - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -74,6 +80,7 @@ models:
   - tool-call
   - stream-tool-call
   logo: bedrock
+
 - name: meta
   type: llm
   provider: bedrock
@@ -87,6 +94,7 @@ models:
   - agent-thought
   - tool-call
   logo: bedrock
+
 - name: mistral
   type: llm
   provider: bedrock
@@ -100,6 +108,7 @@ models:
   - agent-thought
   - tool-call
   logo: bedrock
+
 - name: openai
   type: llm
   provider: bedrock
@@ -114,6 +123,7 @@ models:
   - tool-call
   - stream-tool-call
   logo: bedrock
+
 - name: qwen
   type: llm
   provider: bedrock
@@ -128,6 +138,7 @@ models:
   - tool-call
   - stream-tool-call
   logo: bedrock
+
 - name: amazon.rerank-v1:0
   type: rerank
   provider: bedrock
@@ -139,6 +150,7 @@ models:
   tags:
   - 重排序模型
   logo: bedrock
+
 - name: cohere.rerank-v3-5:0
   type: rerank
   provider: bedrock
@@ -150,6 +162,7 @@ models:
   tags:
   - 重排序模型
   logo: bedrock
+
 - name: amazon.nova-2-multimodal-embeddings-v1:0
   type: embedding
   provider: bedrock
@@ -163,6 +176,7 @@ models:
   - 文本嵌入模型
   - vision
   logo: bedrock
+
 - name: amazon.titan-embed-text-v1
   type: embedding
   provider: bedrock
@@ -174,6 +188,7 @@ models:
   tags:
   - 文本嵌入模型
   logo: bedrock
+
 - name: amazon.titan-embed-text-v2:0
   type: embedding
   provider: bedrock
@@ -185,6 +200,7 @@ models:
   tags:
   - 文本嵌入模型
   logo: bedrock
+
 - name: cohere.embed-english-v3
   type: embedding
   provider: bedrock
@@ -196,6 +212,7 @@ models:
   tags:
   - 文本嵌入模型
   logo: bedrock
+
 - name: cohere.embed-multilingual-v3
   type: embedding
   provider: bedrock

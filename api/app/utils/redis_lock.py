@@ -1,14 +1,21 @@
-import redis
-import uuid
-import time
+import logging
 import threading
+import time
+import uuid
+
+import redis
+from redis.exceptions import (
+    ConnectionError,
+    TimeoutError,
+    RedisError,
+)
 
 UNLOCK_SCRIPT = """
 if redis.call("get", KEYS[1]) == ARGV[1] then
     return redis.call("del", KEYS[1])
-else
-    return 0
 end
+
+return 0
 """
 
 RENEW_SCRIPT = """
@@ -19,38 +26,44 @@ else
 end
 """
 
-CLEANUP_DEAD_HEAD_SCRIPT = """
+ACQUIRE_SCRIPT = """
 local queue_key = KEYS[1]
 local lock_key = KEYS[2]
 
-local first = redis.call("lindex", queue_key, 0)
-if not first then
-    return 0
+local client_id = ARGV[1]
+local expire = tonumber(ARGV[2])
+local time_out = tonumber(ARGV[3])
+
+local now = tonumber(redis.call("time")[1])
+
+if redis.call("zscore", queue_key, client_id) == false then
+    redis.call("zadd", queue_key, now, client_id)
 end
 
-if redis.call("exists", lock_key) == 1 then
-    return 0
+local expired = redis.call("zrangebyscore", queue_key, 0, now - time_out)
+
+for _, v in ipairs(expired) do
+    redis.call("zrem", queue_key, v)
 end
 
-redis.call("lpop", queue_key)
-return 1
-"""
+local first = redis.call("zrange", queue_key, 0, 0)[1]
+if first == client_id then
 
-SAFE_RELEASE_QUEUE_SCRIPT = """
-local queue_key = KEYS[1]
-local value = ARGV[1]
+    if redis.call("set", lock_key, client_id, "NX", "EX", expire) then
+        redis.call("zrem", queue_key, client_id)
+        return 1
+    end
 
-local first = redis.call("lindex", queue_key, 0)
-if first == value then
-    redis.call("lpop", queue_key)
-    return 1
+    if redis.call("get", lock_key) == client_id then
+        redis.call("expire", lock_key, expire)
+        return 1
+    end
 end
 return 0
 """
 
 
 def _ensure_str(val):
-    """统一将 Redis 返回值转为 str，兼容 decode_responses=True/False"""
     if val is None:
         return None
     if isinstance(val, bytes):
@@ -59,18 +72,27 @@ def _ensure_str(val):
 
 
 class RedisFairLock:
+    # ZOMBIE CLEAN BUFFER
+    CLEANUP_BUFFER = 30
+    # Redis 操作失败时的最大重试次数
+    MAX_RETRIES = 3
+    # 重试间隔基数（秒），实际间隔 = base * 2^attempt（指数退避）
+    RETRY_BACKOFF_BASE = 0.1
+
+    _logger = logging.getLogger(__name__)
+
     def __init__(
             self,
             key: str,
             redis_client: redis.StrictRedis,
             expire: int = 30,
-            retry_interval: float = 0.05,
+            retry_interval: float = 1,
             timeout: float = 600,
             auto_renewal: bool = True
     ):
         self.key = key
-        self.queue_key = f"{key}:queue"
-        self.value = str(uuid.uuid4())
+        self.queue_key = f"{key}:zset"
+        self.value = f"{uuid.uuid4().hex}:{int(time.time())}"
         self.expire = expire
         self.retry_interval = retry_interval
         self.timeout = timeout
@@ -80,28 +102,56 @@ class RedisFairLock:
         self._renew_thread = None
         self._stop_renew = threading.Event()
 
+    def _exec_with_retry(self, func, *args, raise_on_fail=True, **kwargs):
+        """
+        带指数退避重试的 Redis 操作执行器。
+
+        对 ConnectionError / TimeoutError 自动重试，其他异常直接抛出。
+        """
+        last_err = None
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                return func(*args, **kwargs)
+            except (ConnectionError, TimeoutError) as e:
+                last_err = e
+                wait = self.RETRY_BACKOFF_BASE * (2 ** attempt)
+                self._logger.warning(
+                    f"[RedisFairLock] Redis error on attempt {attempt + 1}/{self.MAX_RETRIES} "
+                    f"for key={self.key}: {e}, retrying in {wait:.2f}s"
+                )
+                time.sleep(wait)
+            except RedisError:
+                raise
+        if raise_on_fail:
+            raise last_err
+        return None
+
     def acquire(self):
         start = time.time()
 
-        self.redis.rpush(self.queue_key, self.value)
-
         while True:
-            first = _ensure_str(self.redis.lindex(self.queue_key, 0))
+            ok = self._exec_with_retry(
+                self.redis.eval,
+                ACQUIRE_SCRIPT,
+                2,
+                self.queue_key,
+                self.key,
+                self.value,
+                str(self.expire),
+                str(self.timeout + self.CLEANUP_BUFFER),
+            )
 
-            if first == self.value:
-                ok = self.redis.set(self.key, self.value, nx=True, ex=self.expire)
-                if ok:
-                    self._locked = True
-
-                    if self.auto_renewal:
-                        self._start_renewal()
-                    return True
-
-            if first:
-                self.redis.eval(CLEANUP_DEAD_HEAD_SCRIPT, 2, self.queue_key, self.key)
+            if ok == 1:
+                self._locked = True
+                if self.auto_renewal:
+                    self._start_renewal()
+                return True
 
             if time.time() - start > self.timeout:
-                self.redis.lrem(self.queue_key, 0, self.value)
+                self._exec_with_retry(
+                    self.redis.zrem, self.queue_key, self.value,
+                    raise_on_fail=False,
+                )
                 return False
 
             time.sleep(self.retry_interval)
@@ -112,13 +162,17 @@ class RedisFairLock:
             if self._stop_renew.is_set():
                 break
 
-            self.redis.eval(
+            success = self._exec_with_retry(
+                self.redis.eval,
                 RENEW_SCRIPT,
                 1,
                 self.key,
                 self.value,
-                str(self.expire)
+                str(self.expire),
+                raise_on_fail=False,
             )
+            if not success:
+                break
 
     def _start_renewal(self):
         self._stop_renew = threading.Event()
@@ -137,9 +191,10 @@ class RedisFairLock:
         if self.auto_renewal:
             self._stop_renewal()
 
-        self.redis.eval(UNLOCK_SCRIPT, 1, self.key, self.value)
-
-        self.redis.eval(SAFE_RELEASE_QUEUE_SCRIPT, 1, self.queue_key, self.value)
+        self._exec_with_retry(
+            self.redis.eval, UNLOCK_SCRIPT, 1, self.key, self.value,
+            raise_on_fail=False,
+        )
 
         self._locked = False
 
@@ -151,4 +206,3 @@ class RedisFairLock:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.release()
-

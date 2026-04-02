@@ -4,26 +4,20 @@
  * @Last Modified by: ZhaoYing
  * @Last Modified time: 2026-03-25 10:58:47
  */
-import { type FC, useState, useEffect, useMemo } from 'react';
+import { type FC, useState, useMemo } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
 import { ContentEditable } from '@lexical/react/LexicalContentEditable';
 import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin';
-// import { AutoFocusPlugin } from '@lexical/react/LexicalAutoFocusPlugin';
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
-// import { HeadingNode, QuoteNode } from '@lexical/rich-text';
-// import { ListItemNode, ListNode } from '@lexical/list';
-// import { LinkNode } from '@lexical/link';
-// import { CodeNode } from '@lexical/code';
 
 import AutocompletePlugin, { type Suggestion } from './plugin/AutocompletePlugin'
 import CharacterCountPlugin from './plugin/CharacterCountPlugin'
 import InitialValuePlugin from './plugin/InitialValuePlugin';
 import CommandPlugin from './plugin/CommandPlugin';
-import Jinja2HighlightPlugin from './plugin/Jinja2HighlightPlugin';
-import LineNumberPlugin from './plugin/LineNumberPlugin';
 import BlurPlugin from './plugin/BlurPlugin';
 import { VariableNode } from './nodes/VariableNode'
+import Jinja2Editor from './Jinja2Editor';
 
 // Props interface for Lexical Editor component
 export interface LexicalEditorProps {
@@ -50,16 +44,6 @@ const theme = {
   },
 };
 
-// Theme with Jinja2 syntax highlighting
-const jinja2Theme = {
-  ...theme,
-  code: 'jinja2-expression',
-  text: {
-    ...theme.text,
-    code: 'jinja2-inline',
-  },
-};
-
 // Main Lexical Editor component
 const Editor: FC<LexicalEditorProps> =({
   placeholder = "请输入内容...",
@@ -74,97 +58,27 @@ const Editor: FC<LexicalEditorProps> =({
   className
 }) => {
   const [_count, setCount] = useState(0);
-  const [enableJinja2, setEnableJinja2] = useState(false)
-  const [enableLineNumbers, setEnableLineNumbers] = useState(false)
 
-  // Setup Jinja2 mode and inject styles when language changes
-  useEffect(() => {
-    const needsLineNumbers = language === 'jinja2';
-    setEnableJinja2(language === 'jinja2');
-    setEnableLineNumbers(needsLineNumbers);
-
-    if (needsLineNumbers) {
-      const styleId = 'code-editor-styles';
-      let existingStyle = document.getElementById(styleId);
-
-      if (!existingStyle) {
-        const style = document.createElement('style');
-        style.id = styleId;
-        style.textContent = `
-          .jinja2-expression {
-            background-color: #f6f8fa !important;
-            border: 1px solid #d1d9e0 !important;
-            border-radius: 3px !important;
-            padding: 2px 4px !important;
-            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace !important;
-            font-size: 13px !important;
-            color: #0969da !important;
-          }
-          .jinja2-inline {
-            background-color: #f6f8fa !important;
-            padding: 1px 3px !important;
-            border-radius: 2px !important;
-            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace !important;
-            font-size: 13px !important;
-            color: #0969da !important;
-          }
-          .editor-paragraph {
-            margin: 0;
-          }
-          .editor-paragraph:has-text('{') .editor-text,
-          .editor-paragraph:has-text('[') .editor-text {
-            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace !important;
-          }
-          .editor-with-line-numbers {
-            display: flex;
-          }
-          .line-numbers {
-            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-            font-size: 12px;
-            line-height: 16px;
-            padding: 4px 8px;
-            text-align: right;
-            user-select: none;
-            display: flex;
-            flex-direction: column;
-          }
-          .line-numbers > div {
-            min-height: 20px;
-            display: flex;
-            align-items: flex-start;
-          }
-          .editor-content-wrapper {
-            flex: 1;
-          }
-          .editor-content-with-numbers {
-            white-space: pre-wrap;
-            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-          }
-          .editor-content-with-numbers p {
-            margin: 0;
-            min-height: 20px;
-          }
-        `;
-        document.head.appendChild(style);
-      }
-    }
-  }, [language])
+  if (language === 'jinja2') {
+    return (
+      <Jinja2Editor
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        options={options}
+        variant={variant}
+        size={size}
+        height={height}
+        className={className}
+      />
+    );
+  }
 
   // Lexical editor configuration
   const initialConfig = {
     namespace: 'AutocompleteEditor',
-    theme: enableJinja2 ? jinja2Theme : theme,
-    nodes: enableJinja2 ? [
-      // When Jinja2 is enabled, use plain text instead of VariableNode
-    ] : [
-      // HeadingNode,
-      // QuoteNode,
-      // ListItemNode,
-      // ListNode,
-      // LinkNode,
-      // CodeNode,
-      VariableNode,
-    ],
+    theme,
+    nodes: [VariableNode],
     onError: (error: Error) => {
       console.error(error);
     },
@@ -198,54 +112,26 @@ const Editor: FC<LexicalEditorProps> =({
       <div style={{ position: 'relative' }} className={className}>
         <RichTextPlugin
           contentEditable={
-            enableLineNumbers ? (
-            // Editor with line numbers for Jinja2 mode
-              <div className="editor-with-line-numbers" style={{
-                border: variant === 'borderless' ? 'none' : '1px solid #DFE4ED',
-                borderRadius: '6px',
+            <ContentEditable
+              style={{
                 minHeight: minheight,
-              }}>
-                <div className="line-numbers">
-                  <div>1</div>
-                </div>
-                <div className="editor-content-wrapper">
-                  <ContentEditable
-                    className="editor-content-with-numbers"
-                    style={{
-                      minHeight: minheight,
-                      padding: variant === 'borderless' ? '0' : '4px 0',
-                      outline: 'none',
-                      resize: 'none',
-                      fontSize: fontSize,
-                      lineHeight: lineHeight,
-                      border: 'none',
-                    }}
-                  />
-                </div>
-              </div>
-            ) : (
-              // Standard editor without line numbers
-              <ContentEditable
-                style={{
-                  minHeight: minheight,
-                  padding: height ? '4px 6px' : variant === 'borderless' ? '0' : '6px 8px',
-                  border: variant === 'borderless' ? 'none' : '1px solid #EBEBEB',
-                  borderRadius: '8px',
-                  outline: 'none',
-                  resize: 'none',
-                  fontSize: fontSize,
-                  lineHeight: lineHeight,
-                }}
-              />
-            )
+                padding: height ? '4px 6px' : variant === 'borderless' ? '0' : '6px 8px',
+                border: variant === 'borderless' ? 'none' : '1px solid #EBEBEB',
+                borderRadius: '8px',
+                outline: 'none',
+                resize: 'none',
+                fontSize: fontSize,
+                lineHeight: lineHeight,
+              }}
+            />
           }
           placeholder={
             <div
               style={{
                 minHeight: placeHolderMinheight,
                 position: 'absolute',
-                top: enableLineNumbers ? '4px' : variant === 'borderless' ? '0' : '6px',
-                left: enableLineNumbers ? '16px' : (variant === 'borderless' ? '0' : '11px'),
+                top: variant === 'borderless' ? '0' : '6px',
+                left: variant === 'borderless' ? '0' : '11px',
                 color: '#A8A9AA',
                 fontSize: fontSize,
                 lineHeight: placeHolderMinheight,
@@ -257,15 +143,12 @@ const Editor: FC<LexicalEditorProps> =({
           }
           ErrorBoundary={LexicalErrorBoundary}
         />
-        {/* Editor plugins */}
         <HistoryPlugin />
         <CommandPlugin />
-        {language === 'jinja2' && <Jinja2HighlightPlugin />}
-        {enableLineNumbers && <LineNumberPlugin />}
-        <AutocompletePlugin options={options} enableJinja2={enableJinja2} />
+        <AutocompletePlugin options={options} enableJinja2={false} />
         <CharacterCountPlugin setCount={(count) => { setCount(count) }} onChange={onChange} />
-        <InitialValuePlugin value={value} options={options} enableLineNumbers={enableLineNumbers} />
-        <BlurPlugin enableJinja2={enableJinja2} />
+        <InitialValuePlugin value={value} options={options} enableLineNumbers={false} />
+        <BlurPlugin enableJinja2={false} />
       </div>
     </LexicalComposer>
   );

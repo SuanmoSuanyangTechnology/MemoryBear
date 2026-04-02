@@ -163,6 +163,7 @@ def _get_ontology_service(
             api_key=api_key_config.api_key,
             base_url=api_key_config.api_base,
             is_omni=api_key_config.is_omni,
+            support_thinking="thinking" in (api_key_config.capability or []),
             max_retries=3,
             timeout=60.0
         )

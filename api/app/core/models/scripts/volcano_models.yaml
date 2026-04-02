@@ -10,6 +10,7 @@ models:
   capability:
     - vision
     - video
+    - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -24,6 +25,7 @@ models:
   capability:
     - vision
     - video
+    - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -38,6 +40,7 @@ models:
   capability:
     - vision
     - video
+    - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -52,6 +55,7 @@ models:
   capability:
     - vision
     - video
+    - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -82,6 +86,7 @@ models:
   capability:
     - vision
     - video
+    - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -96,6 +101,7 @@ models:
   capability:
     - vision
     - video
+    - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -110,6 +116,7 @@ models:
   capability:
     - vision
     - video
+    - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -124,6 +131,7 @@ models:
   capability:
     - vision
     - video
+    - thinking
   is_omni: false
   tags:
   - 大语言模型
@@ -139,6 +147,7 @@ models:
   capability:
     - vision
     - video
+    - thinking
   is_omni: false
   tags:
   - 大语言模型

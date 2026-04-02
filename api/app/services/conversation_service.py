@@ -534,6 +534,7 @@ class ConversationService:
         api_key = api_config.api_key
         api_base = api_config.api_base
         is_omni = api_config.is_omni
+        capability = api_config.capability
         model_type = config.type
 
         llm = RedBearLLM(
@@ -542,7 +543,8 @@ class ConversationService:
                 provider=provider,
                 api_key=api_key,
                 base_url=api_base,
-                is_omni=is_omni
+                is_omni=is_omni,
+                support_thinking="thinking" in (capability or []),
             ),
             type=ModelType(model_type)
         )

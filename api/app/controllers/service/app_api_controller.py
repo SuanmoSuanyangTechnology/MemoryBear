@@ -144,6 +144,11 @@ async def chat(
         # print(app.current_release.default_model_config_id)
         agent_config = agent_config_4_app_release(app.current_release)
         # print(agent_config.default_model_config_id)
+
+        # thinking 开关：仅当 agent 配置了 deep_thinking 且请求 thinking=True 时才启用
+        if not (agent_config.model_parameters.get("deep_thinking", False) and payload.thinking):
+            agent_config.model_parameters["deep_thinking"] = False
+
         # 流式返回
         if payload.stream:
             async def event_generator():

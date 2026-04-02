@@ -1,6 +1,6 @@
-from datetime import datetime, timedelta
+from datetime import datetime, time
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, Table, MetaData
 from uuid import UUID
 from typing import Dict, Optional, Any
 
@@ -193,9 +193,62 @@ class HomePageRepository:
         return workspaces, app_count_dict, user_count_dict
     
     @staticmethod
+    def get_latest_version_introduction(db: Session) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+        """
+        从数据库获取最新已发布的版本说明
+        使用反射方式读取表结构，不依赖 premium 模型类
+        
+        Args:
+            db: 数据库会话
+            
+        Returns:
+            (版本号，版本说明字典) 的元组
+            如果数据库中没有已发布的版本，返回 (None, None)
+        """
+        try:
+            metadata = MetaData()
+            
+            version_notes = Table('version_notes', metadata, autoload_with=db.bind)
+            
+            # 获取最新已发布的版本（按发布时间倒序，日期相同时按版本号倒序）
+            query = db.query(version_notes).filter(
+                version_notes.c.is_published == True
+            ).order_by(
+                version_notes.c.release_date.desc(),
+                version_notes.c.version.desc()
+            )
+            
+            note = query.first()
+            
+            if not note:
+                return None, None
+            
+            version_info = {
+                "introduction": {
+                    "codeName": note.code_name or "",
+                    "releaseDate": int(datetime.combine(note.release_date, time()).timestamp() * 1000) if note.release_date else 0,
+                    "upgradePosition": note.upgrade_position or "",
+                    "coreUpgrades": note.core_upgrades or []
+                },
+                "introduction_en": {
+                    "codeName": note.code_name_en or note.code_name or "",
+                    "releaseDate": int(datetime.combine(note.release_date, time()).timestamp() * 1000) if note.release_date else 0,
+                    "upgradePosition": note.upgrade_position_en or note.upgrade_position or "",
+                    "coreUpgrades": note.core_upgrades_en or []
+                }
+            }
+            
+            return note.version, version_info
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return None, None
+    
+    @staticmethod
     def get_version_introduction(db: Session, version: str) -> Optional[Dict[str, Any]]:
         """
-        从数据库获取版本说明（优先读取已发布的版本）
+        从数据库获取指定版本说明（优先读取已发布的版本）
         使用反射方式读取表结构，不依赖 premium 模型类
         
         Args:
@@ -207,11 +260,8 @@ class HomePageRepository:
             如果数据库中没有该版本，返回 None
         """
         try:
-            from sqlalchemy import Table, MetaData
-            
             metadata = MetaData()
             version_notes = Table('version_notes', metadata, autoload_with=db.engine)
-            version_note_items = Table('version_note_items', metadata, autoload_with=db.engine)
             
             note = db.query(version_notes).filter(
                 version_notes.c.version == version,
@@ -221,31 +271,18 @@ class HomePageRepository:
             if not note:
                 return None
             
-            items = db.query(version_note_items).filter(
-                version_note_items.c.note_id == note.id
-            ).order_by(version_note_items.c.sort_order).all()
-            
-            core_upgrades = []
-            for item in items:
-                title = item.title
-                content = item.content
-                if content:
-                    core_upgrades.append(f"{title}<br>{content}")
-                else:
-                    core_upgrades.append(title)
-            
             return {
                 "introduction": {
-                    "codeName": "",
-                    "releaseDate": note.release_date.isoformat() if note.release_date else "",
-                    "upgradePosition": "",
-                    "coreUpgrades": core_upgrades
+                    "codeName": note.code_name or "",
+                    "releaseDate": int(datetime.combine(note.release_date, time()).timestamp() * 1000) if note.release_date else 0,
+                    "upgradePosition": note.upgrade_position or "",
+                    "coreUpgrades": note.core_upgrades or []
                 },
                 "introduction_en": {
-                    "codeName": "",
-                    "releaseDate": note.release_date.isoformat() if note.release_date else "",
-                    "upgradePosition": "",
-                    "coreUpgrades": core_upgrades
+                    "codeName": note.code_name_en or note.code_name or "",
+                    "releaseDate": int(datetime.combine(note.release_date, time()).timestamp() * 1000) if note.release_date else 0,
+                    "upgradePosition": note.upgrade_position_en or note.upgrade_position or "",
+                    "coreUpgrades": note.core_upgrades_en or []
                 }
             }
         except Exception:

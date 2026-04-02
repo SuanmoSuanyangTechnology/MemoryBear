@@ -415,6 +415,7 @@ class LLMRouter:
                 api_key=api_key_config.api_key,
                 base_url=api_key_config.api_base,
                 is_omni=api_key_config.is_omni,
+                support_thinking="thinking" in (api_key_config.capability or []),
                 temperature=0.3,
                 max_tokens=500
             )

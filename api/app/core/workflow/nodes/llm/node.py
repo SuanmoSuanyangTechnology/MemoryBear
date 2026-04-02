@@ -135,7 +135,8 @@ class LLMNode(BaseNode):
                 api_key=model_info.api_key,
                 base_url=model_info.api_base,
                 extra_params=extra_params,
-                is_omni=model_info.is_omni
+                is_omni=model_info.is_omni,
+                support_thinking="thinking" in (model_info.capability or []),
             ),
             type=model_info.model_type
         )
