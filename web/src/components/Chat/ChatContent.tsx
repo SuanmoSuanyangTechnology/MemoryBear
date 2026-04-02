@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 15:01:53
+ * @Last Modified time: 2026-04-02 16:05:01
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -123,6 +123,9 @@ const ChatContent: FC<ChatContentProps> = ({
 
   const handleDownload = (file: any) => {
     window.open(getFileUrl(file), '_blank')
+  }
+  const onFormSubmit = (values: Record<string, any>) => {
+    onSend?.(JSON.stringify(values))
   }
   return (
     <div ref={scrollContainerRef} className={clsx("rb:relative rb:overflow-y-auto", classNames)}>
@@ -253,7 +256,7 @@ const ChatContent: FC<ChatContentProps> = ({
                   {item.status && <div className="rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/conversation/exclamation_circle.svg')] rb:absolute rb:-left-7"></div>}
                   {item.subContent && renderRuntime && renderRuntime(item, index)}
                   {/* Render message content using Markdown component */}
-                  <Markdown content={renderRuntime ? item.content ?? '' : item.content ?? errorDesc ?? ''} />
+                  <Markdown content={renderRuntime ? item.content ?? '' : item.content ?? errorDesc ?? ''} onFormSubmit={onFormSubmit} />
 
                   {item.meta_data?.suggested_questions && item.meta_data?.suggested_questions?.length > 0 && <Flex wrap className="rb:my-1!">
                     {item.meta_data?.suggested_questions?.map((question, idx) => (
