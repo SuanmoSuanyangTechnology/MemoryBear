@@ -33,6 +33,7 @@ export interface LexicalEditorProps {
   type?: 'input' | 'textarea';
   language?: 'string' | 'jinja2';
   className?: string;
+  waitForInit?: boolean;
 }
 
 // Default theme for editor
@@ -55,8 +56,10 @@ const Editor: FC<LexicalEditorProps> =({
   type = 'textarea',
   language = 'string',
   height,
-  className
+  className,
+  waitForInit = false,
 }) => {
+  console.log('Editor value', value)
   const [_count, setCount] = useState(0);
 
   if (language === 'jinja2') {
@@ -145,10 +148,10 @@ const Editor: FC<LexicalEditorProps> =({
         />
         <HistoryPlugin />
         <CommandPlugin />
-        <AutocompletePlugin options={options} enableJinja2={false} />
-        <CharacterCountPlugin setCount={(count) => { setCount(count) }} onChange={onChange} />
-        <InitialValuePlugin value={value} options={options} enableLineNumbers={false} />
-        <BlurPlugin enableJinja2={false} />
+        <AutocompletePlugin options={options} />
+        <CharacterCountPlugin setCount={(count) => { setCount(count) }} onChange={onChange} waitForInit={waitForInit || !!value} />
+        <InitialValuePlugin value={value} options={options} />
+        <BlurPlugin />
       </div>
     </LexicalComposer>
   );
