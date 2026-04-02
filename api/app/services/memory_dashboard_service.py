@@ -353,15 +353,13 @@ async def get_workspace_total_memory_count(
                 "details": []
             }
         
-        # 2. 对每个 host_id 调用 search_all 获取 total
+        # 2. 使用 search_all_batch 批量查询所有宿主的记忆数量
         from app.services import memory_storage_service
-        
-        total_count = 0
-        details = []
         
         # 如果提供了 end_user_id，只查询该用户
         if end_user_id:
-            search_result = await memory_storage_service.search_all(end_user_id=end_user_id)
+            batch_result = await memory_storage_service.search_all_batch([end_user_id])
+            count = batch_result.get(end_user_id, 0)
             # 查询用户名称
             from app.repositories.end_user_repository import EndUserRepository
             repo = EndUserRepository(db)
@@ -369,42 +367,31 @@ async def get_workspace_total_memory_count(
             user_name = end_user.other_name if end_user else None
             
             return {
-                "total_memory_count": search_result.get("total", 0),
+                "total_memory_count": count,
                 "host_count": 1,
                 "details": [{
                     "end_user_id": end_user_id, 
-                    "count": search_result.get("total", 0),
+                    "count": count,
                     "name": user_name
                 }]
             }
         
-        for host in hosts:
-            try:
-                end_user_id_str = str(host.id)
-                
-                search_result = await memory_storage_service.search_all(
-                    end_user_id=end_user_id_str
-                )
-                
-                host_total = search_result.get("total", 0)
-                total_count += host_total
-                
-                details.append({
-                    "end_user_id": end_user_id_str,
-                    "count": host_total,
-                    "name": host.other_name  # 使用 other_name 字段
-                })
-                
-                business_logger.debug(f"EndUser {end_user_id_str} ({host.other_name}) 记忆数: {host_total}")
-                
-            except Exception as e:
-                business_logger.warning(f"获取 end_user {host.id} 记忆数失败: {str(e)}")
-                # 失败的 host 记为 0
-                details.append({
-                    "end_user_id": str(host.id),
-                    "count": 0,
-                    "name": host.other_name  # 使用 other_name 字段
-                })
+        # 批量查询所有宿主记忆数量（一次 Neo4j 查询）
+        end_user_ids = [str(host.id) for host in hosts]
+        batch_result = await memory_storage_service.search_all_batch(end_user_ids)
+        
+        # 构建 host name 映射
+        host_name_map = {str(host.id): host.other_name for host in hosts}
+        
+        total_count = sum(batch_result.values())
+        details = [
+            {
+                "end_user_id": uid,
+                "count": batch_result.get(uid, 0),
+                "name": host_name_map.get(uid)
+            }
+            for uid in end_user_ids
+        ]
         
         result = {
             "total_memory_count": total_count,
@@ -518,6 +505,206 @@ def get_rag_user_kb_total_chunk(
     except Exception as e:
         business_logger.error(f"获取用户知识库总chunk数失败: workspace_id={workspace_id} - {str(e)}")
         raise
+
+def get_dashboard_yesterday_changes(
+    db: Session,
+    workspace_id: uuid.UUID,
+    storage_type: str,
+    today_data: dict
+) -> dict:
+    """
+    计算各指标相比昨天的变化量。
+    
+    Args:
+        db: 数据库会话
+        workspace_id: 工作空间ID
+        storage_type: 存储类型 'neo4j' | 'rag'
+        today_data: 当前数据，包含 total_memory, total_app, total_knowledge, total_api_call
+    
+    Returns:
+        {
+            "total_memory_change": int | None,
+            "total_app_change": int | None,
+            "total_knowledge_change": int | None,
+            "total_api_call_change": int | None
+        }
+    """
+    from datetime import datetime, timedelta
+    from sqlalchemy import func
+    from app.models.api_key_model import ApiKey, ApiKeyLog
+    from app.models.knowledge_model import Knowledge
+    from app.models.app_model import App
+    from app.models.appshare_model import AppShare
+
+    business_logger.info(f"计算昨日对比: workspace_id={workspace_id}, storage_type={storage_type}")
+
+    now_local = datetime.now()
+    today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_start = today_start - timedelta(days=1)
+
+    changes = {
+        "total_memory_change": None,
+        "total_app_change": None,
+        "total_knowledge_change": None,
+        "total_api_call_change": None,
+    }
+
+    # --- total_api_call_change ---
+    try:
+        # 获取该workspace下所有api_key的id
+        api_key_ids = [
+            row[0] for row in db.query(ApiKey.id).filter(
+                ApiKey.workspace_id == workspace_id
+            ).all()
+        ]
+        if api_key_ids:
+            # 今日累计
+            today_api_count = db.query(func.count(ApiKeyLog.id)).filter(
+                ApiKeyLog.api_key_id.in_(api_key_ids),
+                ApiKeyLog.created_at >= today_start,
+                ApiKeyLog.created_at < now_local
+            ).scalar() or 0
+            # 昨日全天
+            yesterday_api_count = db.query(func.count(ApiKeyLog.id)).filter(
+                ApiKeyLog.api_key_id.in_(api_key_ids),
+                ApiKeyLog.created_at >= yesterday_start,
+                ApiKeyLog.created_at < today_start
+            ).scalar() or 0
+            changes["total_api_call_change"] = today_api_count - yesterday_api_count
+        else:
+            # 没有api_key，如果今日也是0则无对比意义
+            changes["total_api_call_change"] = None
+    except Exception as e:
+        business_logger.warning(f"计算API调用昨日对比失败: {str(e)}")
+
+    # --- total_knowledge_change ---
+    try:
+        # 今天有效总量：当前status=1的知识库总数，排除用户知识库(permission_id='Memory')
+        today_knowledge = db.query(func.count(Knowledge.id)).filter(
+            Knowledge.workspace_id == workspace_id,
+            Knowledge.status == 1,
+            Knowledge.permission_id != "Memory"
+        ).scalar() or 0
+        # 昨日有效总量：昨天之前创建的、当前仍有效的知识库，排除用户知识库
+        yesterday_knowledge = db.query(func.count(Knowledge.id)).filter(
+            Knowledge.workspace_id == workspace_id,
+            Knowledge.status == 1,
+            Knowledge.permission_id != "Memory",
+            Knowledge.created_at < today_start
+        ).scalar() or 0
+        # 今日软删：今天被软删的知识库(status=2 且 updated_at >= today_start)，排除用户知识库
+        today_deleted_knowledge = db.query(func.count(Knowledge.id)).filter(
+            Knowledge.workspace_id == workspace_id,
+            Knowledge.status == 2,
+            Knowledge.permission_id != "Memory",
+            Knowledge.updated_at >= today_start
+        ).scalar() or 0
+
+        if yesterday_knowledge == 0 and today_knowledge == 0 and today_deleted_knowledge == 0:
+            changes["total_knowledge_change"] = None
+        else:
+            # change = 今天有效总量 - 今日软删 - 昨日有效总量
+            changes["total_knowledge_change"] = today_knowledge - today_deleted_knowledge - yesterday_knowledge
+    except Exception as e:
+        business_logger.warning(f"计算知识库昨日对比失败: {str(e)}")
+
+    # --- total_app_change ---
+    try:
+        # === 自有app ===
+        # 今天有效总量
+        today_own_apps = db.query(func.count(App.id)).filter(
+            App.workspace_id == workspace_id,
+            App.is_active == True
+        ).scalar() or 0
+        # 昨日有效总量
+        yesterday_own_apps = db.query(func.count(App.id)).filter(
+            App.workspace_id == workspace_id,
+            App.is_active == True,
+            App.created_at < today_start
+        ).scalar() or 0
+        # 今日软删
+        today_deleted_own_apps = db.query(func.count(App.id)).filter(
+            App.workspace_id == workspace_id,
+            App.is_active == False,
+            App.updated_at >= today_start
+        ).scalar() or 0
+
+        # === 被分享app ===
+        # 今天有效总量
+        today_shared_apps = db.query(func.count(AppShare.id)).filter(
+            AppShare.target_workspace_id == workspace_id,
+            AppShare.is_active == True
+        ).scalar() or 0
+        # 昨日有效总量
+        yesterday_shared_apps = db.query(func.count(AppShare.id)).filter(
+            AppShare.target_workspace_id == workspace_id,
+            AppShare.is_active == True,
+            AppShare.created_at < today_start
+        ).scalar() or 0
+        # 今日软删
+        today_deleted_shared_apps = db.query(func.count(AppShare.id)).filter(
+            AppShare.target_workspace_id == workspace_id,
+            AppShare.is_active == False,
+            AppShare.updated_at >= today_start
+        ).scalar() or 0
+
+        today_total_app = today_own_apps + today_shared_apps
+        yesterday_total_app = yesterday_own_apps + yesterday_shared_apps
+        total_deleted = today_deleted_own_apps + today_deleted_shared_apps
+
+        if yesterday_total_app == 0 and today_total_app == 0 and total_deleted == 0:
+            changes["total_app_change"] = None
+        else:
+            # change = 今天有效总量 - 今日软删 - 昨日有效总量
+            changes["total_app_change"] = today_total_app - total_deleted - yesterday_total_app
+    except Exception as e:
+        business_logger.warning(f"计算应用数量昨日对比失败: {str(e)}")
+
+    # --- total_memory_change ---
+    try:
+        today_memory = today_data.get("total_memory")
+        if today_memory is None:
+            changes["total_memory_change"] = None
+        elif storage_type == "neo4j":
+            # 从 memory_increments 取最近一条 created_at < today_start 的记录
+            last_record = db.query(MemoryIncrement).filter(
+                MemoryIncrement.workspace_id == workspace_id,
+                MemoryIncrement.created_at < today_start
+            ).order_by(desc(MemoryIncrement.created_at)).first()
+            if last_record is None:
+                changes["total_memory_change"] = None
+            else:
+                changes["total_memory_change"] = today_memory - last_record.total_num
+        elif storage_type == "rag":
+            # RAG: 查 documents 表中 created_at < today_start 的 chunk_num 之和
+            from app.models.document_model import Document
+            from app.models.end_user_model import EndUser as _EndUser
+            from app.models.app_model import App as _App
+
+            end_user_ids = [
+                str(eid) for (eid,) in db.query(_EndUser.id)
+                .join(_App, _EndUser.app_id == _App.id)
+                .filter(_App.workspace_id == workspace_id)
+                .all()
+            ]
+            if not end_user_ids:
+                changes["total_memory_change"] = None
+            else:
+                file_names = [f"{uid}.txt" for uid in end_user_ids]
+                yesterday_chunk = db.query(func.sum(Document.chunk_num)).filter(
+                    Document.file_name.in_(file_names),
+                    Document.created_at < today_start
+                ).scalar()
+                if yesterday_chunk is None:
+                    changes["total_memory_change"] = None
+                else:
+                    changes["total_memory_change"] = today_memory - int(yesterday_chunk)
+    except Exception as e:
+        business_logger.warning(f"计算记忆总量昨日对比失败: {str(e)}")
+
+    business_logger.info(f"昨日对比计算完成: {changes}")
+    return changes
+
 
 def get_current_user_total_chunk(
     end_user_id: str,
@@ -882,3 +1069,65 @@ async def generate_rag_profile(
         "personas_count": len(personas),
         "insight_generated": bool(insight_sections.get("memory_insight")),
     }
+
+
+def get_dashboard_common_stats(db: Session, workspace_id) -> dict:
+    """
+    获取 dashboard 中 neo4j/rag 分支共享的统计数据：
+    total_app、total_knowledge、total_api_call
+
+    Returns:
+        dict: {"total_app": int, "total_knowledge": int, "total_api_call": int}
+    """
+    result = {"total_app": 0, "total_knowledge": 0, "total_api_call": 0}
+
+    # total_app: 统计当前空间下的所有app数量（包含自有 + 被分享给本工作空间的app）
+    try:
+        from app.services import app_service as _app_svc
+        _, total_app = _app_svc.AppService(db).list_apps(
+            workspace_id=workspace_id, include_shared=True, pagesize=1
+        )
+        result["total_app"] = total_app
+    except Exception as e:
+        business_logger.warning(f"获取应用数量失败: {e}")
+
+    # total_knowledge: 统计顶层知识库（parent_id = workspace_id）
+    try:
+        from sqlalchemy import func as _func
+        from app.models.knowledge_model import Knowledge as _Knowledge
+        total_knowledge = db.query(_func.count(_Knowledge.id)).filter(
+            _Knowledge.workspace_id == workspace_id,
+            _Knowledge.status == 1,
+            _Knowledge.parent_id == _Knowledge.workspace_id
+        ).scalar() or 0
+        result["total_knowledge"] = total_knowledge
+    except Exception as e:
+        business_logger.warning(f"获取知识库数量失败: {e}")
+
+    # total_api_call: 仅统计当天 api_key_log 调用次数
+    try:
+        from datetime import datetime
+        from sqlalchemy import func as _api_func
+        from app.models.api_key_model import ApiKey as _ApiKey, ApiKeyLog as _ApiKeyLog
+
+        _now = datetime.now()
+        _today_start = _now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        _api_key_ids = [
+            row[0] for row in db.query(_ApiKey.id).filter(
+                _ApiKey.workspace_id == workspace_id
+            ).all()
+        ]
+        if _api_key_ids:
+            total_api_calls = db.query(_api_func.count(_ApiKeyLog.id)).filter(
+                _ApiKeyLog.api_key_id.in_(_api_key_ids),
+                _ApiKeyLog.created_at >= _today_start,
+                _ApiKeyLog.created_at < _now
+            ).scalar() or 0
+        else:
+            total_api_calls = 0
+        result["total_api_call"] = total_api_calls
+    except Exception as e:
+        business_logger.warning(f"获取API调用统计失败: {e}")
+
+    return result

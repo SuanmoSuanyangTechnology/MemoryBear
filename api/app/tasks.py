@@ -1324,7 +1324,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
         from app.models.app_model import App
         from app.models.end_user_model import EndUser
         from app.repositories.memory_increment_repository import write_memory_increment
-        from app.services.memory_storage_service import search_all
+        from app.services.memory_storage_service import search_all_batch
 
         with get_db_context() as db:
             try:
@@ -1358,27 +1358,15 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                     EndUser.workspace_id == workspace_id
                 ).distinct().all()
 
-                # 3. 遍历所有end_user，查询每个宿主的记忆总量并累加
-                total_num = 0
-                end_user_details = []
+                # 3. 批量查询所有宿主的记忆总量
+                end_user_id_list = [str(eid) for (eid,) in end_users]
+                batch_result = await search_all_batch(end_user_id_list)
 
-                for (end_user_id,) in end_users:
-                    try:
-                        # 调用 search_all 接口查询该宿主的总量
-                        result = await search_all(str(end_user_id))
-                        user_total = result.get("total", 0)
-                        total_num += user_total
-                        end_user_details.append({
-                            "end_user_id": str(end_user_id),
-                            "total": user_total
-                        })
-                    except Exception as e:
-                        # 记录单个用户查询失败，但继续处理其他用户
-                        end_user_details.append({
-                            "end_user_id": str(end_user_id),
-                            "total": 0,
-                            "error": str(e)
-                        })
+                total_num = sum(batch_result.values())
+                end_user_details = [
+                    {"end_user_id": uid, "total": batch_result.get(uid, 0)}
+                    for uid in end_user_id_list
+                ]
 
                 # 4. 写入数据库
                 memory_increment = write_memory_increment(
@@ -1441,7 +1429,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
         from app.models.end_user_model import EndUser
         from app.models.workspace_model import Workspace
         from app.repositories.memory_increment_repository import write_memory_increment
-        from app.services.memory_storage_service import search_all
+        from app.services.memory_storage_service import search_all_batch
 
         with get_db_context() as db:
             try:
@@ -1499,28 +1487,15 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
                             EndUser.workspace_id == workspace_id
                         ).distinct().all()
 
-                        # 3. 遍历所有end_user，查询每个宿主的记忆总量并累加
-                        total_num = 0
-                        end_user_details = []
+                        # 3. 批量查询所有宿主的记忆总量
+                        end_user_id_list = [str(eid) for (eid,) in end_users]
+                        batch_result = await search_all_batch(end_user_id_list)
 
-                        for (end_user_id,) in end_users:
-                            try:
-                                # 调用 search_all 接口查询该宿主的总量
-                                result = await search_all(str(end_user_id))
-                                user_total = result.get("total", 0)
-                                total_num += user_total
-                                end_user_details.append({
-                                    "end_user_id": str(end_user_id),
-                                    "total": user_total
-                                })
-                            except Exception as e:
-                                # 记录单个用户查询失败，但继续处理其他用户
-                                logger.warning(f"查询用户 {end_user_id} 记忆失败: {str(e)}")
-                                end_user_details.append({
-                                    "end_user_id": str(end_user_id),
-                                    "total": 0,
-                                    "error": str(e)
-                                })
+                        total_num = sum(batch_result.values())
+                        end_user_details = [
+                            {"end_user_id": uid, "total": batch_result.get(uid, 0)}
+                            for uid in end_user_id_list
+                        ]
 
                         # 4. 写入数据库
                         memory_increment = write_memory_increment(
