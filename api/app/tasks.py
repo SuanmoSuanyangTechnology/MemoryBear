@@ -61,9 +61,9 @@ def _get_or_create_redis_pool() -> redis.ConnectionPool | None:
                 db=settings.REDIS_DB_CELERY_BACKEND,
                 password=settings.REDIS_PASSWORD,
                 decode_responses=True,
-                max_connections=10,
+                max_connections=100,
                 socket_connect_timeout=5,
-                socket_timeout=5,
+                socket_timeout=10,
                 retry_on_timeout=True,
                 health_check_interval=30,
             )
@@ -1207,7 +1207,7 @@ def write_message_task(
                     f"- elapsed_time={elapsed_time:.2f}s, task_id={self.request.id}")
 
         try:
-            _r = get_sync_redis_client()
+            _r = redis_client
             if _r is not None:
                 from datetime import timezone as _tz
                 _now_utc = datetime.now(_tz.utc).isoformat()
