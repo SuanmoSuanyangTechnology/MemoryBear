@@ -111,6 +111,30 @@ class MemoryWriteResponse(BaseModel):
     """Response schema for memory write operation.
     
     Attributes:
+        task_id: Celery task ID for status polling
+        status: Initial task status (PENDING)
+        end_user_id: End user ID the write was submitted for
+    """
+    task_id: str = Field(..., description="Celery task ID for polling")
+    status: str = Field(..., description="Task status: PENDING")
+    end_user_id: str = Field(..., description="End user ID")
+
+
+class TaskStatusResponse(BaseModel):
+    """Response schema for task status check.
+    
+    Attributes:
+        status: Task status (PENDING, STARTED, SUCCESS, FAILURE, SKIPPED)
+        result: Task result data (available when status is SUCCESS or FAILURE)
+    """
+    status: str = Field(..., description="Task status")
+    result: Optional[Dict[str, Any]] = Field(None, description="Task result when completed")
+
+
+class MemoryWriteSyncResponse(BaseModel):
+    """Response schema for synchronous memory write.
+    
+    Attributes:
         status: Operation status (success or failed)
         end_user_id: End user ID that was written to
     """
@@ -118,8 +142,8 @@ class MemoryWriteResponse(BaseModel):
     end_user_id: str = Field(..., description="End user ID")
 
 
-class MemoryReadResponse(BaseModel):
-    """Response schema for memory read operation.
+class MemoryReadSyncResponse(BaseModel):
+    """Response schema for synchronous memory read.
     
     Attributes:
         answer: Generated answer from memory retrieval
@@ -128,9 +152,22 @@ class MemoryReadResponse(BaseModel):
     """
     answer: str = Field(..., description="Generated answer")
     intermediate_outputs: List[Dict[str, Any]] = Field(
-        default_factory=list, 
+        default_factory=list,
         description="Intermediate retrieval outputs"
     )
+    end_user_id: str = Field(..., description="End user ID")
+
+
+class MemoryReadResponse(BaseModel):
+    """Response schema for memory read operation.
+    
+    Attributes:
+        task_id: Celery task ID for status polling
+        status: Initial task status (PENDING)
+        end_user_id: End user ID the read was submitted for
+    """
+    task_id: str = Field(..., description="Celery task ID for polling")
+    status: str = Field(..., description="Task status: PENDING")
     end_user_id: str = Field(..., description="End user ID")
 
 
