@@ -611,14 +611,16 @@ async def dashboard_data(
             except Exception as e:
                 api_logger.warning(f"获取记忆总量失败: {str(e)}")
             
-            # 2. 获取知识库数量（total_knowledge），排除用户知识库(permission_id='Memory')
+            # 2. 获取知识库数量（total_knowledge）
+            # 逻辑：统计 knowledges 表中 workspace_id = 当前工作空间 且 parent_id = workspace_id 的记录数
+            # 即只统计顶层知识库（parent_id 指向所属工作空间）
             try:
                 from sqlalchemy import func as _func
                 from app.models.knowledge_model import Knowledge as _Knowledge
                 total_knowledge = db.query(_func.count(_Knowledge.id)).filter(
                     _Knowledge.workspace_id == workspace_id,
                     _Knowledge.status == 1,
-                    _Knowledge.permission_id != "Memory"
+                    _Knowledge.parent_id == _Knowledge.workspace_id
                 ).scalar() or 0
                 neo4j_data["total_knowledge"] = total_knowledge
                 api_logger.info(f"成功获取知识库数量: {neo4j_data['total_knowledge']}")
