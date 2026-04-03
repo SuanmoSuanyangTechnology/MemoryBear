@@ -11,8 +11,26 @@ Classes:
 from typing import Any, List, Dict
 
 from neo4j import AsyncGraphDatabase, basic_auth
+from neo4j.time import DateTime as Neo4jDateTime, Date as Neo4jDate, Time as Neo4jTime, Duration as Neo4jDuration
 
 from app.core.config import settings
+
+
+def _convert_neo4j_types(value: Any) -> Any:
+    """递归将 neo4j 原生时间类型转为 Python 原生类型 / ISO 字符串，确保可被 json.dumps 序列化。"""
+    if isinstance(value, Neo4jDateTime):
+        return value.to_native().isoformat() if value.tzinfo else value.iso_format()
+    if isinstance(value, Neo4jDate):
+        return value.iso_format()
+    if isinstance(value, Neo4jTime):
+        return value.iso_format()
+    if isinstance(value, Neo4jDuration):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _convert_neo4j_types(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_convert_neo4j_types(item) for item in value]
+    return value
 
 
 class Neo4jConnector:
@@ -59,11 +77,12 @@ class Neo4jConnector:
         """
         await self.driver.close()
 
-    async def execute_query(self, query: str, **kwargs: Any) -> List[Dict[str, Any]]:
+    async def execute_query(self, query: str, json_format=False, **kwargs: Any) -> List[Dict[str, Any]]:
         """执行Cypher查询
         
         Args:
             query: Cypher查询语句
+            json_format: json格式化
             **kwargs: 查询参数，将作为参数传递给Cypher查询
             
         Returns:
@@ -78,7 +97,10 @@ class Neo4jConnector:
             **kwargs
         )
         records, summary, keys = result
-        return [record.data() for record in records]
+        if json_format:
+            return [_convert_neo4j_types(record.data()) for record in records]
+        else:
+            return [record.data() for record in records]
     
     async def execute_write_transaction(self, transaction_func, **kwargs: Any) -> Any:
         """在写事务中执行操作

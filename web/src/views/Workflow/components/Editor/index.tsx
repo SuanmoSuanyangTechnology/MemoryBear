@@ -33,6 +33,7 @@ export interface LexicalEditorProps {
   type?: 'input' | 'textarea';
   language?: 'string' | 'jinja2';
   className?: string;
+  waitForInit?: boolean;
 }
 
 // Default theme for editor
@@ -55,8 +56,10 @@ const Editor: FC<LexicalEditorProps> =({
   type = 'textarea',
   language = 'string',
   height,
-  className
+  className,
+  waitForInit = false,
 }) => {
+  console.log('Editor value', value)
   const [_count, setCount] = useState(0);
 
   if (language === 'jinja2') {

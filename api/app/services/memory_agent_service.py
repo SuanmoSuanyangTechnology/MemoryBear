@@ -462,11 +462,6 @@ class MemoryAgentService:
 
         logger.info(f"Read operation for group {end_user_id} with config_id {config_id}")
 
-        # 导入审计日志记录器
-
-
-
-
         config_load_start = time.time()
         try:
             # Use a separate database session to avoid transaction failures
@@ -507,10 +502,13 @@ class MemoryAgentService:
             async with make_read_graph() as graph:
                 config = {"configurable": {"thread_id": end_user_id}}
                 # 初始状态 - 包含所有必要字段
-                initial_state = {"messages": [HumanMessage(content=message)], "search_switch": search_switch,
-                                 "end_user_id": end_user_id
-                    , "storage_type": storage_type, "user_rag_memory_id": user_rag_memory_id,
-                                 "memory_config": memory_config}
+                initial_state = {
+                    "messages": [HumanMessage(content=message)],
+                    "search_switch": search_switch,
+                    "end_user_id": end_user_id
+                    , "storage_type": storage_type,
+                    "user_rag_memory_id": user_rag_memory_id,
+                    "memory_config": memory_config}
                 # 获取节点更新信息
                 _intermediate_outputs = []
                 summary = ''
@@ -522,7 +520,7 @@ class MemoryAgentService:
                     for node_name, node_data in update_event.items():
                         # if 'save_neo4j' == node_name:
                         #     massages = node_data
-                        print(f"处理节点: {node_name}")
+                        logger.info(f"处理节点: {node_name}")
 
                         # 处理不同Summary节点的返回结构
                         if 'Summary' in node_name:
@@ -548,6 +546,11 @@ class MemoryAgentService:
                         retrieve_node = node_data.get('retrieve', {}).get('_intermediate_outputs', None)
                         if retrieve_node and retrieve_node != [] and retrieve_node != {}:
                             _intermediate_outputs.extend(retrieve_node)
+
+                        # Perceptual_Retrieve 节点
+                        perceptual_node = node_data.get('perceptual_data', {}).get('_intermediate', None)
+                        if perceptual_node and perceptual_node != [] and perceptual_node != {}:
+                            _intermediate_outputs.append(perceptual_node)
 
                         # Verify 节点
                         verify_n = node_data.get('verify', {}).get('_intermediate', None)

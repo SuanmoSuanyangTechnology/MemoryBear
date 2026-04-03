@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2025-12-23 16:22:51 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-04-02 17:14:15
+ */
 import { useEffect, useRef } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { $getRoot, $createParagraphNode, $createTextNode } from 'lexical';
@@ -8,19 +14,17 @@ import { type Suggestion } from '../plugin/AutocompletePlugin'
 interface InitialValuePluginProps {
   value: string;
   options?: Suggestion[];
-  enableLineNumbers?: boolean;
 }
 
-const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options = [], enableLineNumbers = false }) => {
+const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options = [] }) => {
   const [editor] = useLexicalComposerContext();
   const prevValueRef = useRef<string>('');
-  const prevEnableLineNumbersRef = useRef<boolean>(enableLineNumbers);
   const isUserInputRef = useRef(false);
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
   useEffect(() => {
-    const removeListener = editor.registerUpdateListener(({ editorState, tags }) => {
+    return editor.registerUpdateListener(({ editorState, tags }) => {
       if (tags.has('programmatic')) return;
       editorState.read(() => {
         const root = $getRoot();
@@ -31,21 +35,16 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
         }
       });
     });
-
-    return removeListener;
   }, [editor]);
 
   useEffect(() => {
-    if (value !== prevValueRef.current || enableLineNumbers !== prevEnableLineNumbersRef.current) {
-      // Skip reset if the change was triggered by user input (avoid cursor jump)
-      if (isUserInputRef.current && enableLineNumbers === prevEnableLineNumbersRef.current) {
+    if (value !== prevValueRef.current) {
+      if (isUserInputRef.current) {
         prevValueRef.current = value;
         isUserInputRef.current = false;
         return;
       }
-      // Update refs BEFORE editor.update to prevent re-entry
       prevValueRef.current = value;
-      prevEnableLineNumbersRef.current = enableLineNumbers;
       isUserInputRef.current = false;
 
       queueMicrotask(() => {
@@ -54,16 +53,7 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
           root.clear();
 
           const parts = value.split(/(\{\{[^}]+\}\}|\n)/);
-
-          if (enableLineNumbers) {
-            const lines = value.split('\n');
-            lines.forEach((line) => {
-              const paragraph = $createParagraphNode();
-              paragraph.append($createTextNode(line));
-              root.append(paragraph);
-            });
-          } else {
-            let paragraph = $createParagraphNode();
+          let paragraph = $createParagraphNode();
 
             parts.forEach(part => {
               if (part === '\n') {
@@ -129,15 +119,10 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
               }
             });
             root.append(paragraph);
-          }
         }, { tag: 'programmatic' });
       });
-    } else {
-      prevValueRef.current = value;
-      prevEnableLineNumbersRef.current = enableLineNumbers;
-      isUserInputRef.current = false;
     }
-  }, [value, editor, enableLineNumbers]);
+  }, [value, editor]);
 
   return null;
 };

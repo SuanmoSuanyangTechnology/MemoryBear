@@ -263,7 +263,6 @@ async def Problem_Extension(state: ReadState) -> ReadState:
     logger.info(f"Problem extension result: {aggregated_dict}")
 
     # Emit intermediate output for frontend
-    print(time.time() - start)
     result = {
         "context": aggregated_dict,
         "original": data,

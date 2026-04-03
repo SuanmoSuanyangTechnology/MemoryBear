@@ -395,7 +395,8 @@ class BaseNode(ABC):
             "output": output,
             "elapsed_time": elapsed_time,
             "token_usage": token_usage,
-            "error": None
+            "error": None,
+            **self._extract_extra_fields(business_result),
         }
         final_output = {
             "node_outputs": {self.node_id: node_output},
@@ -497,6 +498,13 @@ class BaseNode(ABC):
         """
         # Default implementation returns the business result directly
         return business_result
+
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        """Extracts extra fields to merge into node_output (e.g. citations).
+
+        Subclasses may override to inject additional metadata.
+        """
+        return {}
 
     def _extract_token_usage(self, business_result: Any) -> dict[str, int] | None:
         """Extracts token usage information from the business result.

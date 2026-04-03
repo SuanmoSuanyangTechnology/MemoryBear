@@ -1,4 +1,3 @@
-import os
 from collections import defaultdict
 from pathlib import Path
 from typing import Annotated, TypedDict
@@ -52,6 +51,7 @@ class ReadState(TypedDict):
     embedding_id: str
     memory_config: object  # 新增字段用于传递内存配置对象
     retrieve: dict
+    perceptual_data: dict
     RetrieveSummary: dict
     InputSummary: dict
     verify: dict

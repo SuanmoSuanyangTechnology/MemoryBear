@@ -318,7 +318,7 @@ class VariablePool:
             namespace: str,
             key: str,
             value: Any,
-            var_type: VariableType,
+            var_type: VariableType | None,
             mut: bool
     ):
         if self.has(f"{namespace}.{key}"):
@@ -493,6 +493,23 @@ class VariablePoolInitializer:
                     var_value = var_default
                 else:
                     var_value = DEFAULT_VALUE(var_type)
+                # Convert FileInput-format dicts to full FileObject dicts
+                if var_type == VariableType.FILE:
+                    if not var_value:
+                        continue
+                    var_value = await self._resolve_file_default(var_value)
+                    if not var_value:
+                        continue
+                elif var_type == VariableType.ARRAY_FILE:
+                    if not var_value:
+                        var_value = []
+                    else:
+                        resolved = []
+                        for item in var_value:
+                            f = await self._resolve_file_default(item)
+                            if f:
+                                resolved.append(f)
+                        var_value = resolved
                 await variable_pool.new(
                     namespace="conv",
                     key=var_name,
@@ -500,6 +517,17 @@ class VariablePoolInitializer:
                     var_type=var_type,
                     mut=True
                 )
+
+    @staticmethod
+    async def _resolve_file_default(file_def: dict) -> dict | None:
+        """Accept only already-resolved FileObject dicts (is_file=True).
+        FileInput-format dicts are converted at save time by WorkflowService._resolve_variables_file_defaults.
+        """
+        if not isinstance(file_def, dict):
+            return None
+        if file_def.get("is_file"):
+            return file_def
+        return None
 
     @staticmethod
     async def _init_system_vars(

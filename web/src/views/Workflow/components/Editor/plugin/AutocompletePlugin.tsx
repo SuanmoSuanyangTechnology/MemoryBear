@@ -2,11 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 16:13:37
+ * @Last Modified time: 2026-04-02 17:12:41
  */
 import { useEffect, useLayoutEffect, useState, useRef, type FC } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { $getSelection, $isRangeSelection, $isTextNode, COMMAND_PRIORITY_HIGH, KEY_ENTER_COMMAND, KEY_ARROW_DOWN_COMMAND, KEY_ARROW_UP_COMMAND, KEY_ESCAPE_COMMAND } from 'lexical';
+import { $getSelection, $isRangeSelection, COMMAND_PRIORITY_HIGH, KEY_ENTER_COMMAND, KEY_ARROW_DOWN_COMMAND, KEY_ARROW_UP_COMMAND, KEY_ESCAPE_COMMAND } from 'lexical';
 import { Space, Flex } from 'antd';
 
 import { INSERT_VARIABLE_COMMAND, CLOSE_AUTOCOMPLETE_COMMAND } from '../commands';
@@ -28,7 +28,7 @@ export interface Suggestion {
 }
 
 // Autocomplete plugin for variable suggestions triggered by '/' character
-const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> = ({ options, enableJinja2 = false }) => {
+const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
   const [editor] = useLexicalComposerContext();
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -159,34 +159,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[], enableJinja2?: boolean }> 
 
   // Insert selected suggestion into editor
   const insertMention = (suggestion: Suggestion) => {
-    if (enableJinja2) {
-      // In Jinja2 mode, insert {{variable}} format text
-      editor.update(() => {
-        const selection = $getSelection();
-        if ($isRangeSelection(selection)) {
-          const anchorNode = selection.anchor.getNode();
-          const anchorOffset = selection.anchor.offset;
-          const nodeText = anchorNode.getTextContent();
-          
-          // Remove trigger character '/'
-          const textBefore = nodeText.substring(0, anchorOffset - 1);
-          const textAfter = nodeText.substring(anchorOffset);
-          const newText = textBefore + `{{${suggestion.value}}}` + textAfter;
-          
-          if ($isTextNode(anchorNode)) {
-            anchorNode.setTextContent(newText);
-          }
-          
-          // Set cursor position after inserted text
-          const newOffset = textBefore.length + `{{${suggestion.value}}}`.length;
-          selection.anchor.offset = newOffset;
-          selection.focus.offset = newOffset;
-        }
-      });
-    } else {
-      // In normal mode, use VariableNode
-      editor.dispatchCommand(INSERT_VARIABLE_COMMAND, { data: suggestion });
-    }
+    editor.dispatchCommand(INSERT_VARIABLE_COMMAND, { data: suggestion });
     setShowSuggestions(false);
     setExpandedParent(null);
     setChildPanelTop(0);

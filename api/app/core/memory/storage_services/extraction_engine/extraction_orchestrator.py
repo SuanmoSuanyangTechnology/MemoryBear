@@ -44,6 +44,10 @@ from app.core.memory.models.variate_config import (
 from app.core.memory.storage_services.extraction_engine.deduplication.two_stage_dedup import (
     dedup_layers_and_merge_and_return,
 )
+from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
+    _USER_PLACEHOLDER_NAMES,
+    fetch_neo4j_assistant_aliases,
+)
 from app.core.memory.storage_services.extraction_engine.knowledge_extraction.embedding_generation import (
     embedding_generation,
     generate_entity_embeddings_from_triplets,
@@ -1341,14 +1345,20 @@ class ExtractionOrchestrator:
             dialog_data_list: List[DialogData]
     ) -> None:
         """
-        从 Neo4j 读取用户实体的最终 aliases，同步到 end_user 和 end_user_info 表
+        将本轮提取的用户别名同步到 end_user 和 end_user_info 表。
 
-        注意：
-        1. other_name 使用本次对话提取的第一个别名（保持时间顺序）
-        2. aliases 从 Neo4j 读取（保持完整性）
+        注意：此方法在 Neo4j 写入之前调用，因此不能依赖 Neo4j 作为别名的权威数据源。
+        改为直接使用内存中去重后的 entity_nodes 的 aliases，与 PgSQL 已有的 aliases 合并。
+
+        策略：
+        1. 从内存中的 entity_nodes 提取本轮用户别名（current_aliases）
+        2. 从去重后的 entity_nodes 中提取完整别名（含 Neo4j 二层去重合并的历史别名）
+        3. 从 PgSQL end_user_info 读取已有的 aliases（db_aliases）
+        4. 合并 db_aliases + deduped_aliases + current_aliases，去重保序
+        5. 写回 PgSQL
 
         Args:
-            entity_nodes: 实体节点列表
+            entity_nodes: 去重后的实体节点列表（内存中，含二层去重合并结果）
             dialog_data_list: 对话数据列表
         """
         try:
@@ -1361,23 +1371,40 @@ class ExtractionOrchestrator:
                 logger.warning("end_user_id 为空，跳过用户别名同步")
                 return
 
-            # 1. 提取本次对话的用户别名（保持 LLM 提取的原始顺序，不排序）
-            current_aliases = self._extract_current_aliases(entity_nodes)
+            # 1. 提取本轮对话的用户别名（保持 LLM 提取的原始顺序，不排序）
+            current_aliases = self._extract_current_aliases(entity_nodes, dialog_data_list)
 
-            # 2. 从 Neo4j 获取完整 aliases（权威数据源）
-            neo4j_aliases = await self._fetch_neo4j_user_aliases(end_user_id)
+            # 1.5 从去重后的 entity_nodes 中提取完整别名
+            # 二层去重会将 Neo4j 中已有的历史别名合并到 entity_nodes 中，
+            # 这里提取出来确保 PgSQL 与 Neo4j 的别名保持同步
+            deduped_aliases = self._extract_deduped_entity_aliases(entity_nodes)
 
-            if not neo4j_aliases:
-                # Neo4j 中没有别名，使用本次对话提取的别名
-                neo4j_aliases = current_aliases
-                if not neo4j_aliases:
-                    logger.debug(f"aliases 为空，跳过同步: end_user_id={end_user_id}")
-                    return
+            # 1.6 从 Neo4j 查询已有的 AI 助手别名，作为额外的排除源
+            # （防止 LLM 未提取出 AI 助手实体时，AI 别名泄漏到用户别名中）
+            neo4j_assistant_aliases = await self._fetch_neo4j_assistant_aliases(end_user_id)
+            if neo4j_assistant_aliases:
+                before_count = len(current_aliases)
+                current_aliases = [
+                    a for a in current_aliases
+                    if a.strip().lower() not in neo4j_assistant_aliases
+                ]
+                if len(current_aliases) < before_count:
+                    logger.info(f"通过 Neo4j AI 助手别名排除了 {before_count - len(current_aliases)} 个误归属别名")
+                # 同样过滤 deduped_aliases
+                deduped_aliases = [
+                    a for a in deduped_aliases
+                    if a.strip().lower() not in neo4j_assistant_aliases
+                ]
 
-            logger.info(f"本次对话提取的 aliases: {current_aliases}")
-            logger.info(f"Neo4j 中的完整 aliases: {neo4j_aliases}")
+            if not current_aliases and not deduped_aliases:
+                logger.debug(f"本轮未提取到用户别名，跳过同步: end_user_id={end_user_id}")
+                return
 
-            # 3. 同步到数据库
+            logger.info(f"本轮对话提取的 aliases: {current_aliases}")
+            if deduped_aliases:
+                logger.info(f"去重后实体的完整 aliases（含历史）: {deduped_aliases}")
+
+            # 2. 同步到数据库
             end_user_uuid = uuid.UUID(end_user_id)
             with get_db_context() as db:
                 # 更新 end_user 表
@@ -1386,7 +1413,38 @@ class ExtractionOrchestrator:
                     logger.warning(f"未找到 end_user_id={end_user_id} 的用户记录")
                     return
 
-                new_name = self._resolve_other_name(end_user.other_name, current_aliases, neo4j_aliases)
+                # 3. 从 PgSQL 读取已有 aliases 并与本轮合并
+                info = EndUserInfoRepository(db).get_by_end_user_id(end_user_uuid)
+                db_aliases = (info.aliases if info and info.aliases else [])
+                # 过滤掉占位名称
+                db_aliases = [a for a in db_aliases if a.strip().lower() not in self.USER_PLACEHOLDER_NAMES]
+
+                # 合并：已有 + 去重后完整别名 + 本轮新增，去重保序
+                merged_aliases = list(db_aliases)
+                seen_lower = {a.strip().lower() for a in merged_aliases}
+                # 先合并去重后实体的完整别名（含 Neo4j 历史别名）
+                for alias in deduped_aliases:
+                    if alias.strip().lower() not in seen_lower:
+                        merged_aliases.append(alias)
+                        seen_lower.add(alias.strip().lower())
+                # 再合并本轮新提取的别名
+                for alias in current_aliases:
+                    if alias.strip().lower() not in seen_lower:
+                        merged_aliases.append(alias)
+                        seen_lower.add(alias.strip().lower())
+
+                # 最终过滤：从合并结果中排除 AI 助手别名（清理历史脏数据）
+                if neo4j_assistant_aliases:
+                    merged_aliases = [
+                        a for a in merged_aliases
+                        if a.strip().lower() not in neo4j_assistant_aliases
+                    ]
+
+                logger.info(f"PgSQL 已有 aliases: {db_aliases}")
+                logger.info(f"合并后 aliases: {merged_aliases}")
+
+                # 更新 end_user 表 other_name
+                new_name = self._resolve_other_name(end_user.other_name, current_aliases, merged_aliases)
                 if new_name is not None:
                     end_user.other_name = new_name
                     logger.info(f"更新 end_user 表 other_name → {new_name}")
@@ -1394,26 +1452,27 @@ class ExtractionOrchestrator:
                     logger.debug(f"end_user 表 other_name 保持不变: {end_user.other_name}")
 
                 # 更新或创建 end_user_info 记录
-                info = EndUserInfoRepository(db).get_by_end_user_id(end_user_uuid)
                 if info:
-                    new_name_info = self._resolve_other_name(info.other_name, current_aliases, neo4j_aliases)
+                    new_name_info = self._resolve_other_name(info.other_name, current_aliases, merged_aliases)
                     if new_name_info is not None:
                         info.other_name = new_name_info
                         logger.info(f"更新 end_user_info 表 other_name → {new_name_info}")
-                    if info.aliases != neo4j_aliases:
-                        info.aliases = neo4j_aliases
-                        logger.info(f"同步 Neo4j aliases 到 end_user_info: {neo4j_aliases}")
+                    if info.aliases != merged_aliases:
+                        info.aliases = merged_aliases
+                        logger.info(f"同步合并后 aliases 到 end_user_info: {merged_aliases}")
                 else:
-                    first_alias = current_aliases[0].strip() if current_aliases else ""
+                    first_alias = current_aliases[0].strip() if current_aliases else (
+                        deduped_aliases[0].strip() if deduped_aliases else ""
+                    )
                     # 确保 first_alias 不是占位名称
-                    if first_alias and first_alias not in self.USER_PLACEHOLDER_NAMES:
+                    if first_alias and first_alias.lower() not in self.USER_PLACEHOLDER_NAMES:
                         db.add(EndUserInfo(
                             end_user_id=end_user_uuid,
                             other_name=first_alias,
-                            aliases=neo4j_aliases,
+                            aliases=merged_aliases,
                             meta_data={}
                         ))
-                        logger.info(f"创建 end_user_info 记录，other_name={first_alias}, aliases={neo4j_aliases}")
+                        logger.info(f"创建 end_user_info 记录，other_name={first_alias}, aliases={merged_aliases}")
 
                 db.commit()
 
@@ -1423,49 +1482,81 @@ class ExtractionOrchestrator:
 
     
     # 用户实体占位名称，不允许作为 other_name 或出现在 aliases 中
-    USER_PLACEHOLDER_NAMES = {'用户', '我', 'User', 'I'}
+    # 复用 deduped_and_disamb 模块级常量，避免重复维护
+    USER_PLACEHOLDER_NAMES = _USER_PLACEHOLDER_NAMES
 
-    def _extract_current_aliases(self, entity_nodes: List[ExtractedEntityNode]) -> List[str]:
-        """从实体节点提取用户别名（保持 LLM 提取的原始顺序，不进行任何排序）
+    def _extract_current_aliases(self, entity_nodes: List[ExtractedEntityNode], dialog_data_list=None) -> List[str]:
+        """从用户发言的原始实体中提取本轮新增别名（绕过去重污染）
         
-        这个方法直接返回 LLM 提取的别名列表，并过滤掉占位名称（"用户"、"我"、"User"、"I"）。
-        第一个别名将被用作 other_name。
+        策略：
+        仅从 dialog_data_list 中找到 speaker="user" 的 statement，
+        从这些 statement 的 triplet_extraction_info 中提取用户实体的 aliases。
+        这样拿到的是 LLM 对用户原话的提取结果，不受去重合并的影响。
+        
+        注意：不再使用去重后 entity_nodes 作为兜底，因为二层去重会将 Neo4j 历史别名
+        合并进来，导致历史别名被误认为"本轮提取"。历史别名的同步由
+        _extract_deduped_entity_aliases 负责。
         
         Args:
-            entity_nodes: 实体节点列表
+            entity_nodes: 去重后的实体节点列表（未使用，保留参数兼容性）
+            dialog_data_list: 对话数据列表
             
         Returns:
-            别名列表（保持 LLM 提取的原始顺序，已过滤占位名称）
+            别名列表（保持原始顺序，已过滤）
+        """
+        if not dialog_data_list:
+            return []
+
+        all_user_aliases = []
+        seen_lower = set()
+        for dialog in dialog_data_list:
+            for chunk in dialog.chunks:
+                speaker = getattr(chunk, 'speaker', None)
+                for statement in chunk.statements:
+                    stmt_speaker = getattr(statement, 'speaker', None) or speaker
+                    if stmt_speaker != "user":
+                        continue
+                    triplet_info = getattr(statement, 'triplet_extraction_info', None)
+                    if not triplet_info:
+                        continue
+                    for entity in (triplet_info.entities or []):
+                        ent_name = getattr(entity, 'name', '').strip()
+                        if ent_name.lower() in self.USER_PLACEHOLDER_NAMES:
+                            for alias in (getattr(entity, 'aliases', []) or []):
+                                a = alias.strip()
+                                if a and a.lower() not in self.USER_PLACEHOLDER_NAMES and a.lower() not in seen_lower:
+                                    all_user_aliases.append(a)
+                                    seen_lower.add(a.lower())
+        if all_user_aliases:
+            logger.debug(f"从用户原始发言提取到别名: {all_user_aliases}")
+        return all_user_aliases
+
+    def _extract_deduped_entity_aliases(self, entity_nodes: List[ExtractedEntityNode]) -> List[str]:
+        """从去重后的用户实体中提取完整别名列表。
+
+        二层去重会将 Neo4j 中已有的历史别名合并到 entity_nodes 的用户实体中，
+        因此这里提取到的别名包含了历史积累的所有别名，可用于同步到 PgSQL。
+
+        Args:
+            entity_nodes: 去重后的实体节点列表（含二层去重合并结果）
+
+        Returns:
+            别名列表（已过滤占位名称，去重保序）
         """
         for entity in entity_nodes:
-            if getattr(entity, 'name', '').strip() in self.USER_PLACEHOLDER_NAMES:
+            if getattr(entity, 'name', '').strip().lower() in self.USER_PLACEHOLDER_NAMES:
                 aliases = getattr(entity, 'aliases', []) or []
-                # 过滤掉占位名称，防止 "用户"/"我"/"User"/"I" 被存入 aliases 和 other_name
-                filtered = [a for a in aliases if a.strip() not in self.USER_PLACEHOLDER_NAMES]
-                logger.debug(f"提取到用户别名（原始顺序，已过滤占位名称）: {filtered}")
-                return filtered
+                filtered = [
+                    a for a in aliases
+                    if a.strip().lower() not in self.USER_PLACEHOLDER_NAMES
+                ]
+                if filtered:
+                    return filtered
         return []
 
-
-    async def _fetch_neo4j_user_aliases(self, end_user_id: str) -> List[str]:
-        """从 Neo4j 查询用户实体的完整 aliases 列表（已过滤占位名称）"""
-        cypher = """
-        MATCH (e:ExtractedEntity)
-        WHERE e.end_user_id = $end_user_id AND e.name IN ['用户', '我', 'User', 'I']
-        RETURN e.aliases AS aliases
-        LIMIT 1
-        """
-        result = await Neo4jConnector().execute_query(cypher, end_user_id=end_user_id)
-        if not result:
-            logger.debug(f"Neo4j 中未找到用户实体: end_user_id={end_user_id}")
-            return []
-        aliases = result[0].get('aliases') or []
-        if not aliases:
-            logger.debug(f"Neo4j 用户实体 aliases 为空: end_user_id={end_user_id}")
-            return []
-        # 过滤掉占位名称，防止历史脏数据传播
-        filtered = [a for a in aliases if a.strip() not in self.USER_PLACEHOLDER_NAMES]
-        return filtered
+    async def _fetch_neo4j_assistant_aliases(self, end_user_id: str) -> set:
+        """从 Neo4j 查询 AI 助手实体的所有别名（用于从用户别名中排除）"""
+        return await fetch_neo4j_assistant_aliases(self.connector, end_user_id)
 
     def _resolve_other_name(
             self,
@@ -1484,16 +1575,16 @@ class ExtractionOrchestrator:
         注意：返回值不允许是占位名称（"用户"、"我"、"User"、"I"）
         """
         # 当前值为空或为占位名称时，需要更新
-        if not current or not current.strip() or current.strip() in self.USER_PLACEHOLDER_NAMES:
+        if not current or not current.strip() or current.strip().lower() in self.USER_PLACEHOLDER_NAMES:
             candidate = current_aliases[0].strip() if current_aliases else None
             # 确保候选值不是占位名称
-            if candidate and candidate in self.USER_PLACEHOLDER_NAMES:
+            if candidate and candidate.lower() in self.USER_PLACEHOLDER_NAMES:
                 return None
             return candidate
         if current not in neo4j_aliases:
             candidate = neo4j_aliases[0].strip() if neo4j_aliases else None
             # 确保候选值不是占位名称
-            if candidate and candidate in self.USER_PLACEHOLDER_NAMES:
+            if candidate and candidate.lower() in self.USER_PLACEHOLDER_NAMES:
                 return None
             return candidate
         

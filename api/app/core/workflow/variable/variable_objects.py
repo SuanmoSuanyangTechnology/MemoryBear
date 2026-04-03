@@ -66,20 +66,10 @@ class FileVariable(BaseVariable):
     type = 'file'
 
     def valid_value(self, value) -> FileObject:
-
         if isinstance(value, dict):
             if not value.get("is_file"):
                 raise TypeError(f"Value must be a FileObject  - {type(value)}:{value}")
-            return FileObject(
-                **{
-                    "type": str(value.get('type')),
-                    "transfer_method": value.get("transfer_method"),
-                    "url": value.get('url'),
-                    "file_id": value.get("file_id"),
-                    "origin_file_type": value.get("origin_file_type"),
-                    "is_file": True
-                }
-            )
+            return FileObject(**value)
         if isinstance(value, FileObject):
             return value
         raise TypeError(f"Value must be a FileObject - {type(value)}:{value}")
@@ -88,7 +78,7 @@ class FileVariable(BaseVariable):
         return f'{"!"if self.value.type == FileType.IMAGE else ""}[file]({self.value.url})'
 
     def get_value(self) -> Any:
-        return self.value.model_dump()
+        return self.value.model_dump(exclude={"content_cache"})
 
     async def get_content(self):
         total_bytes = 0
@@ -186,6 +176,8 @@ def create_variable_instance(var_type: VariableType, value: Any) -> T:
             return BooleanVariable(value)
         case VariableType.OBJECT:
             return DictVariable(value)
+        case VariableType.FILE:
+            return FileVariable(value)
         case VariableType.ARRAY_STRING:
             return make_array(StringVariable, value)
         case VariableType.ARRAY_NUMBER:

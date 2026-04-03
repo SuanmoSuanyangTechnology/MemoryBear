@@ -4,10 +4,6 @@ from typing import Optional, Any, List, Dict, Union
 from enum import Enum, StrEnum
 
 from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator
-
-from app.schemas.workflow_schema import WorkflowConfigCreate
-
-
 # ---------- Multimodal File Support ----------
 
 class FileType(StrEnum):
@@ -317,7 +313,7 @@ class AppCreate(BaseModel):
     # only for type=multi_agent
     multi_agent_config: Optional[Dict[str, Any]] = None
 
-    workflow_config: Optional[WorkflowConfigCreate] = None
+    workflow_config: Optional[Dict[str, Any]] = None
 
 
 class AppUpdate(BaseModel):
@@ -644,12 +640,19 @@ class CitationSource(BaseModel):
 class DraftRunResponse(BaseModel):
     """试运行响应（非流式）"""
     message: str = Field(..., description="AI 回复消息")
+    reasoning_content: Optional[str] = Field(default=None, description="深度思考内容")
     conversation_id: Optional[str] = Field(default=None, description="会话ID（用于多轮对话）")
     usage: Optional[Dict[str, Any]] = Field(default=None, description="Token 使用情况")
     elapsed_time: Optional[float] = Field(default=None, description="耗时（秒）")
     suggested_questions: List[str] = Field(default_factory=list, description="下一步建议问题")
     citations: List[CitationSource] = Field(default_factory=list, description="引用来源")
     audio_url: Optional[str] = Field(default=None, description="TTS 语音URL")
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+        if not data.get("reasoning_content"):
+            data.pop("reasoning_content", None)
+        return data
 
 
 class OpeningResponse(BaseModel):

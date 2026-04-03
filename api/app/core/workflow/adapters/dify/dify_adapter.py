@@ -45,6 +45,8 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         "question-classifier": NodeType.QUESTION_CLASSIFIER,
         "variable-aggregator": NodeType.VAR_AGGREGATOR,
         "tool": NodeType.TOOL,
+        "list-operator": NodeType.LIST_OPERATOR,
+        "document-extractor": NodeType.DOCUMENT_EXTRACTOR,
         "": NodeType.NOTES
     }
 
