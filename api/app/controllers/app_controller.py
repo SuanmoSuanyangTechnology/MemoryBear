@@ -292,10 +292,19 @@ def get_opening(
 ):
     """返回开场白文本和预设问题，供前端对话界面初始化时展示"""
     workspace_id = current_user.current_workspace_id
-    cfg = app_service.get_agent_config(db, app_id=app_id, workspace_id=workspace_id)
-    features = cfg.features or {}
-    if hasattr(features, "model_dump"):
-        features = features.model_dump()
+
+    # 根据应用类型获取 features
+    from app.models.app_model import App as AppModel
+    app = db.get(AppModel, app_id)
+    if app and app.type == "workflow":
+        cfg = app_service.get_workflow_config(db=db, app_id=app_id, workspace_id=workspace_id)
+        features = cfg.features or {}
+    else:
+        cfg = app_service.get_agent_config(db, app_id=app_id, workspace_id=workspace_id)
+        features = cfg.features or {}
+        if hasattr(features, "model_dump"):
+            features = features.model_dump()
+
     opening = features.get("opening_statement", {})
     return success(data=app_schema.OpeningResponse(
         enabled=opening.get("enabled", False),
