@@ -198,6 +198,124 @@ def _merge_attribute(canonical: ExtractedEntityNode, ent: ExtractedEntityNode):
     except Exception:
         pass
 
+# 用户和AI助手的占位名称集合（用于名称标准化）
+_USER_PLACEHOLDER_NAMES = {"用户", "我", "user", "i"}
+_ASSISTANT_PLACEHOLDER_NAMES = {"ai助手", "助手", "人工智能助手", "智能助手", "智能体", "ai assistant", "assistant"}
+
+# 标准化后的规范名称和类型
+_CANONICAL_USER_NAME = "用户"
+_CANONICAL_USER_TYPE = "用户"
+_CANONICAL_ASSISTANT_NAME = "AI助手"
+_CANONICAL_ASSISTANT_TYPE = "Agent"
+
+# 用户和AI助手的所有可能名称（用于判断实体是否为特殊角色实体）
+_ALL_USER_NAMES = _USER_PLACEHOLDER_NAMES
+_ALL_ASSISTANT_NAMES = _ASSISTANT_PLACEHOLDER_NAMES
+
+
+def _is_user_entity(ent: ExtractedEntityNode) -> bool:
+    """判断实体是否为用户实体（name 或 entity_type 匹配）"""
+    name = (getattr(ent, "name", "") or "").strip().lower()
+    etype = (getattr(ent, "entity_type", "") or "").strip()
+    return name in _ALL_USER_NAMES or etype == _CANONICAL_USER_TYPE
+
+
+def _is_assistant_entity(ent: ExtractedEntityNode) -> bool:
+    """判断实体是否为AI助手实体（name 或 entity_type 匹配）"""
+    name = (getattr(ent, "name", "") or "").strip().lower()
+    etype = (getattr(ent, "entity_type", "") or "").strip()
+    return name in _ALL_ASSISTANT_NAMES or etype == _CANONICAL_ASSISTANT_TYPE
+
+
+def _would_merge_cross_role(a: ExtractedEntityNode, b: ExtractedEntityNode) -> bool:
+    """判断两个实体的合并是否会跨越用户/AI助手角色边界。
+    
+    用户实体和AI助手实体永远不应该被合并在一起。
+    如果一方是用户实体、另一方是AI助手实体，返回 True（阻止合并）。
+    """
+    a_is_user = _is_user_entity(a)
+    a_is_assistant = _is_assistant_entity(a)
+    b_is_user = _is_user_entity(b)
+    b_is_assistant = _is_assistant_entity(b)
+    
+    # 用户 + AI助手 → 阻止
+    if (a_is_user and b_is_assistant) or (a_is_assistant and b_is_user):
+        return True
+    return False
+
+
+def _normalize_special_entity_names(
+    entity_nodes: List[ExtractedEntityNode],
+) -> None:
+    """标准化用户和AI助手实体的名称和类型。
+
+    多轮对话中，LLM 对同一角色可能使用不同的名称变体（如"用户"/"我"/"User"，
+    "AI助手"/"助手"/"Assistant"），导致精确匹配无法合并。
+    此函数在去重前将这些变体统一为规范名称，并强制绑定 entity_type，确保：
+    - name="用户" 的实体 entity_type 一定为 "用户"
+    - name="AI助手" 的实体 entity_type 一定为 "Agent"
+
+    Args:
+        entity_nodes: 实体节点列表（原地修改）
+    """
+    for ent in entity_nodes:
+        name = (getattr(ent, "name", "") or "").strip()
+        name_lower = name.lower()
+
+        if name_lower in _USER_PLACEHOLDER_NAMES:
+            ent.name = _CANONICAL_USER_NAME
+            ent.entity_type = _CANONICAL_USER_TYPE
+        elif name_lower in _ASSISTANT_PLACEHOLDER_NAMES:
+            ent.name = _CANONICAL_ASSISTANT_NAME
+            ent.entity_type = _CANONICAL_ASSISTANT_TYPE
+
+
+def clean_cross_role_aliases(
+    entity_nodes: List[ExtractedEntityNode],
+    external_assistant_aliases: set = None,
+) -> None:
+    """清洗用户实体和AI助手实体之间的别名交叉污染。
+
+    在 Neo4j 写入前调用，确保：
+    - 用户实体的 aliases 不包含 AI 助手的别名
+    - AI 助手实体的 aliases 不包含用户的别名
+
+    Args:
+        entity_nodes: 实体节点列表（原地修改）
+        external_assistant_aliases: 外部传入的 AI 助手别名集合（如从 Neo4j 查询），
+                                    与本轮实体中的 AI 助手别名合并使用
+    """
+    # 收集本轮 AI 助手实体的所有别名
+    assistant_aliases = set(external_assistant_aliases or set())
+    user_aliases = set()
+
+    for ent in entity_nodes:
+        if _is_assistant_entity(ent):
+            for alias in (getattr(ent, "aliases", []) or []):
+                assistant_aliases.add(alias.strip().lower())
+        elif _is_user_entity(ent):
+            for alias in (getattr(ent, "aliases", []) or []):
+                user_aliases.add(alias.strip().lower())
+
+    # 从用户实体的 aliases 中移除 AI 助手别名
+    if assistant_aliases:
+        for ent in entity_nodes:
+            if _is_user_entity(ent):
+                original = getattr(ent, "aliases", []) or []
+                cleaned = [a for a in original if a.strip().lower() not in assistant_aliases]
+                if len(cleaned) < len(original):
+                    ent.aliases = cleaned
+
+    # 从 AI 助手实体的 aliases 中移除用户别名
+    if user_aliases:
+        for ent in entity_nodes:
+            if _is_assistant_entity(ent):
+                original = getattr(ent, "aliases", []) or []
+                cleaned = [a for a in original if a.strip().lower() not in user_aliases]
+                if len(cleaned) < len(original):
+                    ent.aliases = cleaned
+
+
 def accurate_match(
     entity_nodes: List[ExtractedEntityNode]
 ) -> Tuple[List[ExtractedEntityNode], Dict[str, str], Dict[str, Dict]]:
@@ -261,6 +379,10 @@ def accurate_match(
         canonical = alias_index.get((ent_uid, ent_name))
         # 确保不是自身
         if canonical is not None and canonical.id != ent.id:
+            # 保护：禁止跨角色合并（用户实体和AI助手实体不能互相合并）
+            if _would_merge_cross_role(canonical, ent):
+                i += 1
+                continue
             _merge_attribute(canonical, ent)
             id_redirect[ent.id] = canonical.id
             for k, v in list(id_redirect.items()):
@@ -704,6 +826,11 @@ def fuzzy_match(
             # 条件A（快速通道）：alias_match_merge = True
             # 条件B（标准通道）：s_name ≥ tn AND s_type ≥ type_threshold AND overall ≥ tover
             if alias_match_merge or (s_name >= tn and s_type >= type_threshold and overall >= tover):
+                #  保护：禁止跨角色合并（用户实体和AI助手实体不能互相合并）
+                if _would_merge_cross_role(a, b):
+                    j += 1
+                    continue
+
                 # ========== 第六步：执行实体合并 ==========
                 
                 # 6.1 合并别名
@@ -812,6 +939,12 @@ async def LLM_decision(  # 决策中包含去重和消歧的功能
             a = entity_by_id.get(canonical_id)
             b = entity_by_id.get(losing_id)
             if not a or not b: # 若不存在 a 或 b，可能已在精确或模糊阶段合并，在之前阶段合并之后，不会再处理但是处于审计的目的会记录
+                continue
+            # 保护：禁止跨角色合并（用户实体和AI助手实体不能互相合并）
+            if _would_merge_cross_role(a, b):
+                llm_records.append(
+                    f"[LLM阻断] 跨角色合并被阻止: {a.id} ({a.name}) 与 {b.id} ({b.name})"
+                )
                 continue
             _merge_attribute(a, b)
             # ID 重定向
@@ -934,6 +1067,9 @@ async def deduplicate_entities_and_edges(
     返回：去重后的实体、语句→实体边、实体↔实体边。
     """
     local_llm_records: List[str] = [] # 作为“审计日志”的本地收集器 初始化，保留为了之后对于LLM决策追溯
+    # 0) 标准化用户和AI助手实体名称（确保多轮对话中的变体名称统一）
+    _normalize_special_entity_names(entity_nodes)
+
     # 1) 精确匹配
     deduped_entities, id_redirect, exact_merge_map = accurate_match(entity_nodes)
 

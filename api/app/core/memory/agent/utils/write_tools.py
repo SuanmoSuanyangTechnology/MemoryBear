@@ -152,6 +152,31 @@ async def write(
     # Step 3: Save all data to Neo4j database
     step_start = time.time()
 
+    # Neo4j 写入前：清洗用户/AI助手实体之间的别名交叉污染
+    # 从 Neo4j 查询已有的 AI 助手别名，与本轮实体中的 AI 助手别名合并，
+    # 确保用户实体的 aliases 不包含 AI 助手的名字
+    try:
+        from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
+            clean_cross_role_aliases,
+        )
+        neo4j_assistant_aliases = set()
+        if all_entity_nodes:
+            _eu_id = all_entity_nodes[0].end_user_id
+            if _eu_id:
+                _cypher = """
+                MATCH (e:ExtractedEntity)
+                WHERE e.end_user_id = $end_user_id AND e.name IN ['AI助手', '助手', 'AI Assistant', 'Assistant']
+                RETURN e.aliases AS aliases
+                """
+                _result = await neo4j_connector.execute_query(_cypher, end_user_id=_eu_id)
+                for _record in (_result or []):
+                    for _alias in (_record.get('aliases') or []):
+                        neo4j_assistant_aliases.add(_alias.strip().lower())
+        clean_cross_role_aliases(all_entity_nodes, external_assistant_aliases=neo4j_assistant_aliases)
+        logger.info(f"Neo4j 写入前别名清洗完成，AI助手别名排除集大小: {len(neo4j_assistant_aliases)}")
+    except Exception as e:
+        logger.warning(f"Neo4j 写入前别名清洗失败（不影响主流程）: {e}")
+
     # 添加死锁重试机制
     max_retries = 3
     retry_delay = 1  # 秒
