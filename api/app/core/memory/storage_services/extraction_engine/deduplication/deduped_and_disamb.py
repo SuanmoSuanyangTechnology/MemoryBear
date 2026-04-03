@@ -286,6 +286,51 @@ def _normalize_special_entity_names(
                     ent.aliases = cleaned
 
 
+async def fetch_neo4j_assistant_aliases(neo4j_connector, end_user_id: str) -> set:
+    """从 Neo4j 查询 AI 助手实体的所有别名（小写归一化）。
+
+    这是助手别名查询的唯一入口，供 write_tools 和 extraction_orchestrator 共用，
+    避免多处维护相同的 Cypher 和名称列表。
+
+    Args:
+        neo4j_connector: Neo4j 连接器实例（需提供 execute_query 方法）
+        end_user_id: 终端用户 ID
+
+    Returns:
+        小写归一化后的助手别名集合
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # 使用模块级 _ASSISTANT_PLACEHOLDER_NAMES 的标题化形式构建查询名称列表，
+    # 保持与 _normalize_special_entity_names 标准化后的名称一致
+    query_names = [_CANONICAL_ASSISTANT_NAME]  # "AI助手"
+    # 补充英文常见变体
+    query_names.extend(["助手", "AI Assistant", "Assistant"])
+    # 去重
+    query_names = list(dict.fromkeys(query_names))
+
+    cypher = """
+    MATCH (e:ExtractedEntity)
+    WHERE e.end_user_id = $end_user_id AND e.name IN $names
+    RETURN e.aliases AS aliases
+    """
+    try:
+        result = await neo4j_connector.execute_query(
+            cypher, end_user_id=end_user_id, names=query_names
+        )
+        assistant_aliases: set = set()
+        for record in (result or []):
+            for alias in (record.get("aliases") or []):
+                assistant_aliases.add(alias.strip().lower())
+        if assistant_aliases:
+            logger.debug(f"Neo4j 中 AI 助手别名: {assistant_aliases}")
+        return assistant_aliases
+    except Exception as e:
+        logger.warning(f"查询 Neo4j AI 助手别名失败: {e}")
+        return set()
+
+
 def clean_cross_role_aliases(
     entity_nodes: List[ExtractedEntityNode],
     external_assistant_aliases: set = None,

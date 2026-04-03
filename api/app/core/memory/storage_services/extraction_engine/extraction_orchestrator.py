@@ -1400,7 +1400,7 @@ class ExtractionOrchestrator:
                 info = EndUserInfoRepository(db).get_by_end_user_id(end_user_uuid)
                 db_aliases = (info.aliases if info and info.aliases else [])
                 # 过滤掉占位名称
-                db_aliases = [a for a in db_aliases if a.strip() not in self.USER_PLACEHOLDER_NAMES]
+                db_aliases = [a for a in db_aliases if a.strip().lower() not in self.USER_PLACEHOLDER_NAMES]
 
                 # 合并：已有 + 本轮新增，去重保序
                 merged_aliases = list(db_aliases)
@@ -1440,7 +1440,7 @@ class ExtractionOrchestrator:
                 else:
                     first_alias = current_aliases[0].strip() if current_aliases else ""
                     # 确保 first_alias 不是占位名称
-                    if first_alias and first_alias not in self.USER_PLACEHOLDER_NAMES:
+                    if first_alias and first_alias.lower() not in self.USER_PLACEHOLDER_NAMES:
                         db.add(EndUserInfo(
                             end_user_id=end_user_uuid,
                             other_name=first_alias,
@@ -1457,7 +1457,7 @@ class ExtractionOrchestrator:
 
     
     # 用户实体占位名称，不允许作为 other_name 或出现在 aliases 中
-    USER_PLACEHOLDER_NAMES = {'用户', '我', 'User', 'I'}
+    USER_PLACEHOLDER_NAMES = {'用户', '我', 'user', 'i'}
 
     def _extract_current_aliases(self, entity_nodes: List[ExtractedEntityNode], dialog_data_list=None) -> List[str]:
         """从用户发言的原始实体中提取别名（绕过去重污染）
@@ -1490,10 +1490,10 @@ class ExtractionOrchestrator:
                             continue
                         for entity in (triplet_info.entities or []):
                             ent_name = getattr(entity, 'name', '').strip()
-                            if ent_name in self.USER_PLACEHOLDER_NAMES:
+                            if ent_name.lower() in self.USER_PLACEHOLDER_NAMES:
                                 for alias in (getattr(entity, 'aliases', []) or []):
                                     a = alias.strip()
-                                    if a and a not in self.USER_PLACEHOLDER_NAMES and a.lower() not in seen_lower:
+                                    if a and a.lower() not in self.USER_PLACEHOLDER_NAMES and a.lower() not in seen_lower:
                                         all_user_aliases.append(a)
                                         seen_lower.add(a.lower())
             if all_user_aliases:
@@ -1502,11 +1502,11 @@ class ExtractionOrchestrator:
 
         # 兜底：从去重后的 entity_nodes 提取（旧逻辑）
         for entity in entity_nodes:
-            if getattr(entity, 'name', '').strip() in self.USER_PLACEHOLDER_NAMES:
+            if getattr(entity, 'name', '').strip().lower() in self.USER_PLACEHOLDER_NAMES:
                 aliases = getattr(entity, 'aliases', []) or []
                 filtered = [
                     a for a in aliases
-                    if a.strip() not in self.USER_PLACEHOLDER_NAMES
+                    if a.strip().lower() not in self.USER_PLACEHOLDER_NAMES
                 ]
                 if filtered:
                     logger.debug(f"从去重后实体提取到别名（兜底）: {filtered}")
@@ -1531,28 +1531,15 @@ class ExtractionOrchestrator:
             logger.debug(f"Neo4j 用户实体 aliases 为空: end_user_id={end_user_id}")
             return []
         # 过滤掉占位名称，防止历史脏数据传播
-        filtered = [a for a in aliases if a.strip() not in self.USER_PLACEHOLDER_NAMES]
+        filtered = [a for a in aliases if a.strip().lower() not in self.USER_PLACEHOLDER_NAMES]
         return filtered
 
     async def _fetch_neo4j_assistant_aliases(self, end_user_id: str) -> set:
         """从 Neo4j 查询 AI 助手实体的所有别名（用于从用户别名中排除）"""
-        cypher = """
-        MATCH (e:ExtractedEntity)
-        WHERE e.end_user_id = $end_user_id AND e.name IN ['AI助手', '助手', 'AI Assistant', 'Assistant']
-        RETURN e.aliases AS aliases
-        """
-        try:
-            result = await Neo4jConnector().execute_query(cypher, end_user_id=end_user_id)
-            assistant_aliases = set()
-            for record in (result or []):
-                for alias in (record.get('aliases') or []):
-                    assistant_aliases.add(alias.strip().lower())
-            if assistant_aliases:
-                logger.debug(f"Neo4j 中 AI 助手别名: {assistant_aliases}")
-            return assistant_aliases
-        except Exception as e:
-            logger.warning(f"查询 Neo4j AI 助手别名失败: {e}")
-            return set()
+        from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
+            fetch_neo4j_assistant_aliases,
+        )
+        return await fetch_neo4j_assistant_aliases(Neo4jConnector(), end_user_id)
 
     def _resolve_other_name(
             self,
@@ -1571,16 +1558,16 @@ class ExtractionOrchestrator:
         注意：返回值不允许是占位名称（"用户"、"我"、"User"、"I"）
         """
         # 当前值为空或为占位名称时，需要更新
-        if not current or not current.strip() or current.strip() in self.USER_PLACEHOLDER_NAMES:
+        if not current or not current.strip() or current.strip().lower() in self.USER_PLACEHOLDER_NAMES:
             candidate = current_aliases[0].strip() if current_aliases else None
             # 确保候选值不是占位名称
-            if candidate and candidate in self.USER_PLACEHOLDER_NAMES:
+            if candidate and candidate.lower() in self.USER_PLACEHOLDER_NAMES:
                 return None
             return candidate
         if current not in neo4j_aliases:
             candidate = neo4j_aliases[0].strip() if neo4j_aliases else None
             # 确保候选值不是占位名称
-            if candidate and candidate in self.USER_PLACEHOLDER_NAMES:
+            if candidate and candidate.lower() in self.USER_PLACEHOLDER_NAMES:
                 return None
             return candidate
         

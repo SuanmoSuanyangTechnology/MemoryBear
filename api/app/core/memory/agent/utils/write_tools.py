@@ -158,20 +158,13 @@ async def write(
     try:
         from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
             clean_cross_role_aliases,
+            fetch_neo4j_assistant_aliases,
         )
         neo4j_assistant_aliases = set()
         if all_entity_nodes:
             _eu_id = all_entity_nodes[0].end_user_id
             if _eu_id:
-                _cypher = """
-                MATCH (e:ExtractedEntity)
-                WHERE e.end_user_id = $end_user_id AND e.name IN ['AI助手', '助手', 'AI Assistant', 'Assistant']
-                RETURN e.aliases AS aliases
-                """
-                _result = await neo4j_connector.execute_query(_cypher, end_user_id=_eu_id)
-                for _record in (_result or []):
-                    for _alias in (_record.get('aliases') or []):
-                        neo4j_assistant_aliases.add(_alias.strip().lower())
+                neo4j_assistant_aliases = await fetch_neo4j_assistant_aliases(neo4j_connector, _eu_id)
         clean_cross_role_aliases(all_entity_nodes, external_assistant_aliases=neo4j_assistant_aliases)
         logger.info(f"Neo4j 写入前别名清洗完成，AI助手别名排除集大小: {len(neo4j_assistant_aliases)}")
     except Exception as e:
