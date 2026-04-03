@@ -241,7 +241,7 @@ const Menu: FC<{
     const findMatchingKey = (menuList: MenuItem[], parentPaths: string[] = []): { key: string | null; } => {
       for (const menu of menuList) {
         if (menu.path) {
-          const menuPath = menu.path[0] !== '/' ? '/' + menu.path : menu.path;
+          const menuPath = menu.path?.[0] !== '/' ? '/' + menu.path : menu.path;
 
           /** Exact match or path prefix match (ensure complete path segment match) */
           const isExactMatch = menuPath === currentPath;

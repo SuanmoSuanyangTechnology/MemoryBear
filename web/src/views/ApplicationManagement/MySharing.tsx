@@ -92,7 +92,7 @@ const MySharing: React.FC = () => {
               label: (
                 <Flex align="center" gap={12}>
                   {workspace.target_workspace_icon
-                    ? <img src={workspace.target_workspace_icon} className="rb:w-8 rb:h-8 rb:rounded-lg rb:object-cover" />
+                    ? <img src={workspace.target_workspace_icon} alt={workspace.target_workspace_icon} className="rb:w-8 rb:h-8 rb:rounded-lg rb:object-cover" />
                     : <div className="rb:w-8 rb:h-8 rb:rounded-lg rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[14px] rb:text-white">
                         {workspace.target_workspace_name[0]}
                       </div>

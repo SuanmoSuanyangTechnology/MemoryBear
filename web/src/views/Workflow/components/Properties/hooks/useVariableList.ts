@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-19 17:00:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-28 16:24:31
+ * @Last Modified time: 2026-04-02 16:58:40
  */
 /**
  * useVariableList Hook
@@ -18,6 +18,16 @@ import { useMemo, useEffect, useState } from 'react';
 import { Graph, Node } from '@antv/x6';
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin';
 import type { ChatVariable } from '../../../types';
+
+export const fileSubVariable = [
+  { label: 'type', dataType: 'string', filed: 'type' },
+  { label: 'size', dataType: 'number', filed: 'size' },
+  { label: 'name', dataType: 'string', filed: 'name' },
+  { label: 'url', dataType: 'string', filed: 'url' },
+  { label: 'extension', dataType: 'string', filed: 'extension' },
+  { label: 'mime_type', dataType: 'string', filed: 'mime_type' },
+  { label: 'related_id', dataType: 'string', filed: 'related_id' },
+];
 
 /**
  * Node variable definitions
@@ -45,7 +55,12 @@ const NODE_VARIABLES = {
   ],
   'document-extractor': [
     { label: 'text', dataType: 'string', field: 'text' },
-  ]
+  ],
+  'list-operator': [
+    { label: 'result', dataType: 'array[string]', field: 'result' },
+    { label: 'first_record', dataType: 'string', field: 'first_record' },
+    { label: 'last_record', dataType: 'string', field: 'last_record' },
+  ] // dataType will be overridden dynamically
 } as const;
 
 /**
@@ -60,6 +75,17 @@ const NODE_VARIABLES = {
  * @param {any} nodeData - Node data associated with the variable
  * @param {Partial<Suggestion>} [extra] - Additional suggestion properties
  */
+const buildFileChildren = (key: string, value: string, nodeData: any, parentLabel: string): Suggestion[] =>
+  fileSubVariable.map(sub => ({
+    key: `${key}_${sub.filed}`,
+    label: sub.label,
+    type: 'variable',
+    dataType: sub.dataType,
+    value: `${value}.${sub.filed}`,
+    nodeData,
+    parentLabel,
+  }));
+
 const addVariable = (
   list: Suggestion[],
   keys: Set<string>,
@@ -72,7 +98,10 @@ const addVariable = (
 ) => {
   if (!keys.has(key)) {
     keys.add(key);
-    list.push({ key, label, type: 'variable', dataType, value, nodeData, ...extra });
+    const children = dataType === 'file'
+      ? buildFileChildren(key, value, nodeData, label)
+      : undefined;
+    list.push({ key, label, type: 'variable', dataType, value, nodeData, children, ...extra });
   }
 };
 
@@ -94,9 +123,26 @@ const processNodeVariables = (
 
   // Add node-specific variables
   if (type in NODE_VARIABLES) {
-    NODE_VARIABLES[type as keyof typeof NODE_VARIABLES].forEach(({ label, dataType, field }) => {
-      addVariable(variableList, addedKeys, `${dataNodeId}_${label}`, label, dataType, `${dataNodeId}.${field}`, nodeData);
-    });
+    if (type === 'list-operator') {
+      // Determine output type from the first variable in config
+      const variableValue = config?.variable;
+      let itemType = 'string';
+      if (variableValue) {
+        const refVar = variableList.find(v => `{{${v.value}}}` === variableValue);
+        if (refVar?.dataType.startsWith('array[')) {
+          itemType = refVar.dataType.replace(/^array\[(.+)\]$/, '$1');
+        } else if (refVar) {
+          itemType = refVar.dataType;
+        }
+      }
+      addVariable(variableList, addedKeys, `${dataNodeId}_result`, 'result', `array[${itemType}]`, `${dataNodeId}.result`, nodeData);
+      addVariable(variableList, addedKeys, `${dataNodeId}_first_record`, 'first_record', itemType, `${dataNodeId}.first_record`, nodeData);
+      addVariable(variableList, addedKeys, `${dataNodeId}_last_record`, 'last_record', itemType, `${dataNodeId}.last_record`, nodeData);
+    } else {
+      NODE_VARIABLES[type as keyof typeof NODE_VARIABLES].forEach(({ label, dataType, field }) => {
+        addVariable(variableList, addedKeys, `${dataNodeId}_${label}`, label, dataType, `${dataNodeId}.${field}`, nodeData);
+      });
+    }
   }
 
   // Process special node types
@@ -181,7 +227,8 @@ const hasOutputNodeTypes = [
   'http-request',
   'tool',
   'jinja-render',
-  'document-extractor'
+  'document-extractor',
+  'list-operator'
 ];
 
 /**
@@ -191,10 +238,10 @@ const hasOutputNodeTypes = [
  * @param {any} values - Additional values to merge with node config
  * @returns {Suggestion[]} List of node variables
  */
-export const getCurrentNodeVariables = (nodeData: any, values: any): Suggestion[] => {
+export const getCurrentNodeVariables = (nodeData: any, values: any, upstreamVariables: Suggestion[] = []): Suggestion[] => {
   if (!nodeData || !hasOutputNodeTypes.includes(nodeData.type)) return [];
-  const list: Suggestion[] = [];
-  const keys = new Set<string>();
+  const list: Suggestion[] = [...upstreamVariables];
+  const keys = new Set<string>(upstreamVariables.map(v => v.key));
   const dataNodeId = nodeData.id;
 
   processNodeVariables({
@@ -206,7 +253,8 @@ export const getCurrentNodeVariables = (nodeData: any, values: any): Suggestion[
   }, dataNodeId, list, keys);
   
   // Special case: var-aggregator without group enabled returns no variables
-  return nodeData.type === 'var-aggregator' && !nodeData.config.group.defaultValue ? [] : list;
+  const result = list.filter(v => v.nodeData?.id === dataNodeId);
+  return nodeData.type === 'var-aggregator' && !nodeData.config.group.defaultValue ? [] : result;
 };
 
 /**
@@ -263,52 +311,21 @@ export const getChildNodeVariables = (
     // Add node-specific variables
     if (type in NODE_VARIABLES) {
       NODE_VARIABLES[type as keyof typeof NODE_VARIABLES].forEach(({ label, dataType, field }) => {
-        const varKey = `${nodeId}_${label}`;
-        if (!keys.has(varKey)) {
-          keys.add(varKey);
-          list.push({
-            key: varKey,
-            label,
-            type: 'variable',
-            dataType,
-            value: `${nodeId}.${field}`,
-            nodeData,
-          });
-        }
+        addVariable(list, keys, `${nodeId}_${label}`, label, dataType, `${nodeId}.${field}`, nodeData);
       });
     }
 
     // Add parameter-extractor variables
     if (type === 'parameter-extractor') {
       (nodeData.config?.params?.defaultValue || []).forEach((p: any) => {
-        if (p?.name && !keys.has(`${nodeId}_${p.name}`)) {
-          keys.add(`${nodeId}_${p.name}`);
-          list.push({
-            key: `${nodeId}_${p.name}`,
-            label: p.name,
-            type: 'variable',
-            dataType: p.type || 'string',
-            value: `${nodeId}.${p.name}`,
-            nodeData,
-          });
-        }
+        if (p?.name) addVariable(list, keys, `${nodeId}_${p.name}`, p.name, p.type || 'string', `${nodeId}.${p.name}`, nodeData);
       });
     }
     
     // Add code node variables
     if (type === 'code') {
       (nodeData.config?.output_variables?.defaultValue || []).forEach((p: any) => {
-        if (p?.name && !keys.has(`${nodeId}_${p.name}`)) {
-          keys.add(`${nodeId}_${p.name}`);
-          list.push({
-            key: `${nodeId}_${p.name}`,
-            label: p.name,
-            type: 'variable',
-            dataType: p.type || 'string',
-            value: `${nodeId}.${p.name}`,
-            nodeData,
-          });
-        }
+        if (p?.name) addVariable(list, keys, `${nodeId}_${p.name}`, p.name, p.type || 'string', `${nodeId}.${p.name}`, nodeData);
       });
     }
   });

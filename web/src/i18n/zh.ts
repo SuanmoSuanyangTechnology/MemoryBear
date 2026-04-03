@@ -2175,6 +2175,7 @@ export const zh = {
       unknown: '未知节点',
       notes: '便签',
       'document-extractor': '文档提取器',
+      'list-operator': '列表操作',
 
       clickToConfigure: '点击配置节点参数',
       nodeProperties: '节点属性',
@@ -2248,6 +2249,8 @@ export const zh = {
           'string': 'String',
           'number': 'Number',
           'boolean': 'Boolean',
+          'file': 'File',
+          'array[file]': 'Array[File]',
           'array[string]': 'Array[String]',
           'array[number]': 'Array[Number]',
           'array[boolean]': 'Array[Boolean]',
@@ -2378,6 +2381,20 @@ export const zh = {
         },
         'document-extractor': {
           file_selector: '输入变量',
+        },
+        'list-operator': {
+          variable: '输入变量',
+          filter_by: '过滤条件',
+          addCondition: '添加过滤条件',
+          order_by: '排序',
+          asc: 'asc',
+          desc: 'desc',
+          extract_by: '取第 N 项',
+          limit: '取前 N 项',
+          type: {
+            eq: '在',
+            ne: '不在',
+          }
         },
         name: '键',
         type: '类型',

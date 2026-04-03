@@ -2179,6 +2179,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       unknown: 'Unknown Node',
       notes: 'Sticky Note',
       'document-extractor': 'Document Extractor',
+      'list-operator': 'List Operator',
 
       clickToConfigure: 'Click to configure node parameters',
       nodeProperties: 'Node Properties',
@@ -2252,6 +2253,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           'string': 'String',
           'number': 'Number',
           'boolean': 'Boolean',
+          'file': 'File',
+          'array[file]': 'Array[File]',
           'array[string]': 'Array[String]',
           'array[number]': 'Array[Number]',
           'array[boolean]': 'Array[Boolean]',
@@ -2379,6 +2382,20 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         },
         'document-extractor': {
           file_selector: 'Input Variable',
+        },
+        'list-operator': {
+          variable: 'Input Variable',
+          filter_by: 'Filter Conditions',
+          addCondition: 'Add Filter Condition',
+          order_by: 'Sort',
+          asc: 'asc',
+          desc: 'desc',
+          extract_by: 'Extract Nth Item',
+          limit: 'Take First N Items',
+          type: {
+            eq: 'In',
+            ne: 'Not In',
+          }
         },
         name: 'Key',
         type: 'Type',

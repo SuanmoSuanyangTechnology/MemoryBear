@@ -75,7 +75,6 @@ const AssignmentList: FC<AssignmentListProps> = ({
                         <VariableSelect
                           placeholder={t('common.pleaseSelect')}
                           options={options.filter(vo => vo.nodeData.type === 'loop' || vo.value.includes('conv.') || (vo.nodeData.type === 'iteration' && (vo.label === 'item' || vo.label === 'index')))}
-                          popupMatchSelectWidth={false}
                           onChange={() => {
                             form.setFieldValue([parentName, name, 'operation'], undefined);
                             form.setFieldValue([parentName, name, 'value'], undefined);
@@ -121,7 +120,6 @@ const AssignmentList: FC<AssignmentListProps> = ({
                               ? <VariableSelect
                                 placeholder={t('common.pleaseSelect')}
                                 options={dataType ? options.filter(vo => vo.dataType === dataType) : options}
-                                popupMatchSelectWidth={false}
                                 size={size}
                                 variant="borderless"
                                 className="select"
@@ -153,7 +151,6 @@ const AssignmentList: FC<AssignmentListProps> = ({
                                   : <VariableSelect
                                     placeholder={t('common.pleaseSelect')}
                                     options={dataType ? options.filter(vo => vo.dataType === dataType) : options}
-                                    popupMatchSelectWidth={false}
                                     size={size}
                                     variant="borderless"
                                     className="select"

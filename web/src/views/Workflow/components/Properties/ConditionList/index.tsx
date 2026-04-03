@@ -153,7 +153,6 @@ const ConditionList: FC<CaseListProps> = ({
                                   )}
                                   size="small"
                                   allowClear={false}
-                                  popupMatchSelectWidth={false}
                                   placeholder={t('common.pleaseSelect')}
                                   onChange={(val) => handleLeftFieldChange(index, val)}
                                   variant="borderless"
@@ -201,7 +200,6 @@ const ConditionList: FC<CaseListProps> = ({
                                             placeholder={t('common.pleaseSelect')}
                                             options={options.filter(vo => vo.dataType === 'number')}
                                             allowClear={false}
-                                            popupMatchSelectWidth={false}
                                             variant="borderless"
                                             size="small"
                                           />

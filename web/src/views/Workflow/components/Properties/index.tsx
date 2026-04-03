@@ -37,6 +37,7 @@ import { nodeLibrary } from '../../constant';
 import RbCard from '@/components/RbCard/Card';
 import ModelConfig from './ModelConfig'
 import ModelSelect from '@/components/ModelSelect'
+import ListOperator from './ListOperator'
 
 /**
  * Props for Properties component
@@ -362,7 +363,7 @@ const Properties: FC<PropertiesProps> = ({
    */
   const currentNodeVariables = useMemo(() => {
     if (!selectedNode) return []
-    return getCurrentNodeVariables(selectedNode?.getData(), values)
+    return getCurrentNodeVariables(selectedNode?.getData(), values, variableList)
   }, [selectedNode?.getData(), values])
 
   const [outputCollapsed, setOutputCollapsed] = useState(true)
@@ -466,7 +467,12 @@ const Properties: FC<PropertiesProps> = ({
           <Form.Item name="id" label="ID">
             <Input disabled />
           </Form.Item>
-          {selectedNode?.data?.type === 'unknown'
+          {selectedNode?.data?.type === 'list-operator'
+            ? <ListOperator
+              options={variableList}
+              selectedNode={selectedNode} 
+            />
+            : selectedNode?.data?.type === 'unknown'
             ? <>
               <Form.Item name="replaceNode" label={t('workflow.config.unknown.replaceNodeType')}>
                 <Select

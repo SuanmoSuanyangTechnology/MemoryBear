@@ -77,9 +77,20 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
 
               if (conversationMatch) {
                 const [_, variableName] = conversationMatch;
-                const conversationSuggestion = optionsRef.current.find(s =>
+                const fullValue = `conv.${variableName}`;
+                // First try direct match on top-level label
+                let conversationSuggestion = optionsRef.current.find(s =>
                   s.group === 'CONVERSATION' && s.label === variableName
                 );
+                // Then search children by value (e.g. conv.api_key.url)
+                if (!conversationSuggestion) {
+                  for (const s of optionsRef.current) {
+                    if (s.group === 'CONVERSATION' && s.children) {
+                      const child = s.children.find(c => c.value === fullValue);
+                      if (child) { conversationSuggestion = child; break; }
+                    }
+                  }
+                }
                 if (conversationSuggestion) {
                   paragraph.append($createVariableNode(conversationSuggestion));
                 } else {
