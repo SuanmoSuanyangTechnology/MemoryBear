@@ -401,7 +401,7 @@ class AppService:
     def _create_workflow_config(
             self,
             app_id: uuid.UUID,
-            data: app_schema.WorkflowConfigCreate,
+            data,
             now: datetime.datetime
     ):
         workflow_cfg = WorkflowConfig(
@@ -678,7 +678,9 @@ class AppService:
                 self._create_multi_agent_config(app.id, data.multi_agent_config, now)
 
             if app.type == "workflow" and data.workflow_config:
-                self._create_workflow_config(app.id, data.workflow_config, now)
+                from app.schemas.workflow_schema import WorkflowConfigCreate
+                wf_data = WorkflowConfigCreate(**data.workflow_config) if isinstance(data.workflow_config, dict) else data.workflow_config
+                self._create_workflow_config(app.id, wf_data, now)
 
             self.db.commit()
             self.db.refresh(app)

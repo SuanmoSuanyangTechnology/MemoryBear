@@ -545,6 +545,12 @@ class WorkflowService:
     def _get_memory_store_info(self, workspace_id: uuid.UUID) -> tuple[str, str]:
         storage_type = get_workspace_storage_type_without_auth(self.db, workspace_id)
         user_rag_memory_id = ""
+        # 如果 storage_type 为 None，使用默认值 'neo4j'
+        if not storage_type:
+            storage_type = 'neo4j'
+            logger.warning(
+                f"Storage type not set for workspace {workspace_id}, using default: neo4j"
+            )
         if storage_type == "rag":
             knowledge = knowledge_repository.get_knowledge_by_name(
                 db=self.db,
@@ -659,6 +665,26 @@ class WorkflowService:
                 input_data["conv_messages"] = conv_messages
             init_message_length = len(input_data.get("conv_messages", []))
 
+            # 新会话时写入开场白
+            is_new_conversation = init_message_length == 0
+            if is_new_conversation:
+                opening_cfg = feature_configs.get("opening_statement", {})
+                if isinstance(opening_cfg, dict) and opening_cfg.get("enabled") and opening_cfg.get("statement"):
+                    statement = opening_cfg["statement"]
+                    suggested_questions = opening_cfg.get("suggested_questions", [])
+                    if payload.variables:
+                        for var_name, var_value in payload.variables.items():
+                            statement = statement.replace(f"{{{{{var_name}}}}}", str(var_value))
+                    self.conversation_service.add_message(
+                        conversation_id=conversation_id_uuid,
+                        role="assistant",
+                        content=statement,
+                        meta_data={"suggested_questions": suggested_questions}
+                    )
+                    # 注入到 conv_messages，让 LLM 感知开场白
+                    input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
+                    init_message_length = 1
+
             result = await execute_workflow(
                 workflow_config=workflow_config_dict,
                 input_data=input_data,
@@ -721,6 +747,13 @@ class WorkflowService:
                 logger.error(f"Workflow Run Failed, execution_id: {execution.execution_id},"
                              f" error: {result.get('error')}")
 
+            # 过滤 citations
+            citations = result.get("citations", [])
+            citation_cfg = feature_configs.get("citation", {})
+            filtered_citations = (
+                citations if isinstance(citation_cfg, dict) and citation_cfg.get("enabled") else []
+            )
+
             # 返回增强的响应结构
             return {
                 "execution_id": execution.execution_id,
@@ -734,7 +767,8 @@ class WorkflowService:
                 "conversation_id": result.get("conversation_id"),  # 所有节点输出（详细数据）payload.,  # 会话 ID
                 "error_message": result.get("error"),
                 "elapsed_time": result.get("elapsed_time"),
-                "token_usage": result.get("token_usage")
+                "token_usage": result.get("token_usage"),
+                "citations": filtered_citations,
             }
 
         except Exception as e:
@@ -825,6 +859,27 @@ class WorkflowService:
                 input_data["conv_messages"] = conv_messages
             init_message_length = len(input_data.get("conv_messages", []))
             message_id = uuid.uuid4()
+
+            # 新会话时写入开场白
+            is_new_conversation = init_message_length == 0
+            if is_new_conversation:
+                opening_cfg = feature_configs.get("opening_statement", {})
+                if isinstance(opening_cfg, dict) and opening_cfg.get("enabled") and opening_cfg.get("statement"):
+                    statement = opening_cfg["statement"]
+                    suggested_questions = opening_cfg.get("suggested_questions", [])
+                    if payload.variables:
+                        for var_name, var_value in payload.variables.items():
+                            statement = statement.replace(f"{{{{{var_name}}}}}", str(var_value))
+                    self.conversation_service.add_message(
+                        conversation_id=conversation_id_uuid,
+                        role="assistant",
+                        content=statement,
+                        meta_data={"suggested_questions": suggested_questions}
+                    )
+                    # 注入到 conv_messages，让 LLM 感知开场白
+                    input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
+                    init_message_length = 1
+
             async for event in execute_workflow_stream(
                     workflow_config=workflow_config_dict,
                     input_data=input_data,
@@ -875,6 +930,13 @@ class WorkflowService:
                             output_data=event.get("data"),
                             token_usage=token_usage.get("total_tokens", None)
                         )
+                        # 注入 citations 到 workflow_end 事件
+                        citations = event.get("data", {}).get("citations", [])
+                        citation_cfg = feature_configs.get("citation", {})
+                        filtered_citations = (
+                            citations if isinstance(citation_cfg, dict) and citation_cfg.get("enabled") else []
+                        )
+                        event.setdefault("data", {})["citations"] = filtered_citations
                         logger.info(f"Workflow Run Success, "
                                     f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
                     elif status == "failed":

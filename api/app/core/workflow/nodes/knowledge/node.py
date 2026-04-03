@@ -34,6 +34,20 @@ class KnowledgeRetrievalNode(BaseNode):
             "output": VariableType.ARRAY_STRING
         }
 
+    def _extract_output(self, business_result: Any) -> Any:
+        """下游节点只拿 chunks 列表"""
+        if isinstance(business_result, dict) and "chunks" in business_result:
+            return business_result["chunks"]
+        return business_result
+
+    def _extract_citations(self, business_result: Any) -> list:
+        if isinstance(business_result, dict):
+            return business_result.get("citations", [])
+        return []
+
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        return {"citations": self._extract_citations(business_result)}
+
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         return {
             "query": self._render_template(self.typed_config.query, variable_pool),
@@ -314,4 +328,20 @@ class KnowledgeRetrievalNode(BaseNode):
             logger.info(
                 f"Node {self.node_id}: knowledge base retrieval completed, results count: {len(final_rs)}"
             )
-            return [chunk.page_content for chunk in final_rs]
+            citations = []
+            seen_doc_ids = set()
+            for chunk in final_rs:
+                meta = chunk.metadata or {}
+                doc_id = meta.get("document_id") or meta.get("doc_id")
+                if doc_id and doc_id not in seen_doc_ids:
+                    seen_doc_ids.add(doc_id)
+                    citations.append({
+                        "document_id": str(doc_id),
+                        "file_name": meta.get("file_name", ""),
+                        "knowledge_id": str(meta.get("knowledge_id", kb_config.kb_id)),
+                        "score": meta.get("score", 0.0),
+                    })
+            return {
+                "chunks": [chunk.page_content for chunk in final_rs],
+                "citations": citations,
+            }
