@@ -1367,7 +1367,7 @@ class ExtractionOrchestrator:
                 return
 
             # 1. 提取本轮对话的用户别名（保持 LLM 提取的原始顺序，不排序）
-            current_aliases = self._extract_current_aliases(entity_nodes)
+            current_aliases = self._extract_current_aliases(entity_nodes, dialog_data_list)
 
             # 1.5 从 Neo4j 查询已有的 AI 助手别名，作为额外的排除源
             # （防止 LLM 未提取出 AI 助手实体时，AI 别名泄漏到用户别名中）
@@ -1459,45 +1459,58 @@ class ExtractionOrchestrator:
     # 用户实体占位名称，不允许作为 other_name 或出现在 aliases 中
     USER_PLACEHOLDER_NAMES = {'用户', '我', 'User', 'I'}
 
-    def _extract_current_aliases(self, entity_nodes: List[ExtractedEntityNode]) -> List[str]:
-        """从实体节点提取用户别名（保持 LLM 提取的原始顺序，不进行任何排序）
+    def _extract_current_aliases(self, entity_nodes: List[ExtractedEntityNode], dialog_data_list=None) -> List[str]:
+        """从用户发言的原始实体中提取别名（绕过去重污染）
         
-        这个方法直接返回 LLM 提取的别名列表，并过滤掉：
-        1. 占位名称（"用户"、"我"、"User"、"I"）
-        2. AI 助手实体的别名（防止 AI 的名字被错误归入用户别名）
-        
-        第一个别名将被用作 other_name。
+        策略：
+        1. 从 dialog_data_list 中找到 speaker="user" 的 statement
+        2. 从这些 statement 的 triplet_extraction_info 中提取用户实体的 aliases
+        3. 这样拿到的是 LLM 对用户原话的提取结果，不受去重合并的影响
         
         Args:
-            entity_nodes: 实体节点列表
+            entity_nodes: 去重后的实体节点列表（备用）
+            dialog_data_list: 对话数据列表（优先使用）
             
         Returns:
-            别名列表（保持 LLM 提取的原始顺序，已过滤占位名称和 AI 别名）
+            别名列表（保持原始顺序，已过滤）
         """
-        # 先收集 AI 助手实体的所有别名（用于排除）
-        assistant_names = set()
-        ASSISTANT_PLACEHOLDER_NAMES = {"AI助手", "助手", "AI Assistant", "Assistant"}
-        for entity in entity_nodes:
-            ent_name = getattr(entity, 'name', '').strip()
-            if ent_name in ASSISTANT_PLACEHOLDER_NAMES:
-                for alias in (getattr(entity, 'aliases', []) or []):
-                    assistant_names.add(alias.strip().lower())
-                # AI 助手的 name 本身也加入排除集
-                assistant_names.add(ent_name.lower())
-        
-        # 提取用户实体的别名，排除占位名称和 AI 助手别名
+        # 优先从原始 dialog_data_list 中提取（绕过去重污染）
+        if dialog_data_list:
+            all_user_aliases = []
+            seen_lower = set()
+            for dialog in dialog_data_list:
+                for chunk in dialog.chunks:
+                    speaker = getattr(chunk, 'speaker', None)
+                    for statement in chunk.statements:
+                        stmt_speaker = getattr(statement, 'speaker', None) or speaker
+                        if stmt_speaker != "user":
+                            continue
+                        triplet_info = getattr(statement, 'triplet_extraction_info', None)
+                        if not triplet_info:
+                            continue
+                        for entity in (triplet_info.entities or []):
+                            ent_name = getattr(entity, 'name', '').strip()
+                            if ent_name in self.USER_PLACEHOLDER_NAMES:
+                                for alias in (getattr(entity, 'aliases', []) or []):
+                                    a = alias.strip()
+                                    if a and a not in self.USER_PLACEHOLDER_NAMES and a.lower() not in seen_lower:
+                                        all_user_aliases.append(a)
+                                        seen_lower.add(a.lower())
+            if all_user_aliases:
+                logger.debug(f"从用户原始发言提取到别名: {all_user_aliases}")
+                return all_user_aliases
+
+        # 兜底：从去重后的 entity_nodes 提取（旧逻辑）
         for entity in entity_nodes:
             if getattr(entity, 'name', '').strip() in self.USER_PLACEHOLDER_NAMES:
                 aliases = getattr(entity, 'aliases', []) or []
                 filtered = [
                     a for a in aliases
                     if a.strip() not in self.USER_PLACEHOLDER_NAMES
-                    and a.strip().lower() not in assistant_names
                 ]
-                logger.debug(f"提取到用户别名（已过滤占位名称和AI别名）: {filtered}")
-                if assistant_names:
-                    logger.debug(f"已排除的AI助手别名: {assistant_names}")
-                return filtered
+                if filtered:
+                    logger.debug(f"从去重后实体提取到别名（兜底）: {filtered}")
+                    return filtered
         return []
 
 

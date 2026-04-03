@@ -269,6 +269,22 @@ def _normalize_special_entity_names(
             ent.name = _CANONICAL_ASSISTANT_NAME
             ent.entity_type = _CANONICAL_ASSISTANT_TYPE
 
+    # 第二步：收集 AI 助手实体的所有别名，从用户实体的 aliases 中排除
+    # 防止 LLM 把 AI 的名字错误放入用户实体的 aliases
+    assistant_alias_set = set()
+    for ent in entity_nodes:
+        if _is_assistant_entity(ent):
+            for alias in (getattr(ent, "aliases", []) or []):
+                assistant_alias_set.add(alias.strip().lower())
+
+    if assistant_alias_set:
+        for ent in entity_nodes:
+            if _is_user_entity(ent):
+                original_aliases = getattr(ent, "aliases", []) or []
+                cleaned = [a for a in original_aliases if a.strip().lower() not in assistant_alias_set]
+                if len(cleaned) < len(original_aliases):
+                    ent.aliases = cleaned
+
 
 def clean_cross_role_aliases(
     entity_nodes: List[ExtractedEntityNode],

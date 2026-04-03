@@ -225,7 +225,7 @@ async def render_triplet_extraction_prompt(
     template = prompt_env.get_template("extract_triplet.jinja2")
     
     # 准备本体类型数据
-    ontology_types: OntologyTypeList | None = None,
+    ontology_type_section = None
     ontology_type_names = []
     type_hierarchy_hints = []
     if ontology_types and ontology_types.types:
