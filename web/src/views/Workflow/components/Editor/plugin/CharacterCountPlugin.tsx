@@ -6,15 +6,12 @@ import { $isVariableNode } from '../nodes/VariableNode';
 
 const CharacterCountPlugin = ({ setCount, onChange }: { setCount: (count: number) => void; onChange?: (value: string) => void }) => {
   const [editor] = useLexicalComposerContext();
-  const isReadyRef = useRef(false);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   useEffect(() => {
     return editor.registerUpdateListener(({ editorState, tags }) => {
-      if (tags.has('programmatic')) {
-        isReadyRef.current = true;
-        return;
-      }
-      if (!isReadyRef.current) return;
+      if (tags.has('programmatic')) return;
       editorState.read(() => {
         const root = $getRoot();
         let serializedContent = '';
@@ -38,10 +35,10 @@ const CharacterCountPlugin = ({ setCount, onChange }: { setCount: (count: number
         serializedContent = paragraphs.join('\n');
         
         setCount(serializedContent.length);
-        onChange?.(serializedContent);
+        onChangeRef.current?.(serializedContent);
       });
     });
-  }, [editor, setCount, onChange]);
+  }, [editor, setCount]);
 
   return null;
 }

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 10:08:26
+ * @Last Modified time: 2026-04-03 20:28:08
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -463,7 +463,7 @@ export const nodeLibrary: NodeLibrary[] = [
       },
       { type: "list-operator", icon: 'rb:bg-[url("@/assets/images/workflow/list-operator.svg")]',
         config: {
-          variable: {
+          input_list: {
             type: 'variableList',
           },
           filter_by: {

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 10:58:47
+ * @Last Modified time: 2026-04-03 20:44:16
  */
 import { type FC, useState, useMemo } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
@@ -147,7 +147,7 @@ const Editor: FC<LexicalEditorProps> =({
         <HistoryPlugin />
         <CommandPlugin />
         <AutocompletePlugin options={options} enableJinja2={false} />
-        <CharacterCountPlugin setCount={(count) => { setCount(count) }} onChange={onChange} />
+        <CharacterCountPlugin setCount={setCount} onChange={onChange} />
         <InitialValuePlugin value={value} options={options} enableLineNumbers={false} />
         <BlurPlugin enableJinja2={false} />
       </div>

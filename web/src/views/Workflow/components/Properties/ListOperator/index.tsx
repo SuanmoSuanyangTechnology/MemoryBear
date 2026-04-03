@@ -20,12 +20,12 @@ const ListOperator: FC<ListOperatorProps> = ({ options }) => {
   const { t } = useTranslation()
   const form = Form.useFormInstance()
   const values = Form.useWatch([], form) || {}
-  const variableOption = options.find(option => `{{${option.value}}}` === values?.variable)
+  const variableOption = options.find(option => `{{${option.value}}}` === values?.input_list)
   const variableType = variableOption?.dataType
 
   return (
     <>
-      <Form.Item name="variable" label={t('workflow.config.list-operator.variable')} required>
+      <Form.Item name="input_list" label={t('workflow.config.list-operator.variable')} required>
         <VariableSelect
           placeholder={t('common.pleaseSelect')}
           options={options.filter(vo => vo.dataType.includes('array') && vo.dataType !== 'array[object]')}

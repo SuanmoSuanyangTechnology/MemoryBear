@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:40:13 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-03 18:51:17
+ * @Last Modified time: 2026-04-03 20:19:34
  */
 import { useState, useRef, useEffect, useLayoutEffect, type FC } from 'react'
 import { createPortal } from 'react-dom'
@@ -49,36 +49,26 @@ const VariableSelect: FC<VariableSelectProps> = ({
 
   const CHILD_PANEL_HEIGHT = 280; // max-h-60 (240) + header (~40)
 
-  // Calculate dropdown position when opening
-  useEffect(() => {
-    if (!open || !containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    setDropdownPos({ top: rect.bottom + 8, left: rect.left, width: rect.width });
-  }, [open]);
-
-  // Adjust dropdown vertical position after render
+  // Calculate dropdown position (runs synchronously after DOM paint to avoid flicker)
   useLayoutEffect(() => {
-    if (!open || !dropdownRef.current || !containerRef.current) return;
+    if (!open || !containerRef.current) return;
     const triggerRect = containerRef.current.getBoundingClientRect();
+    const MARGIN = 8;
+    const width = triggerRect.width;
+    // Set initial width/left immediately; top will be refined once dropdownRef is available
+    if (!dropdownRef.current) {
+      setDropdownPos({ top: triggerRect.bottom + MARGIN, left: triggerRect.left, width });
+      return;
+    }
     const dropdownHeight = dropdownRef.current.offsetHeight;
     const dropdownWidth = dropdownRef.current.offsetWidth;
-    const viewportHeight = window.innerHeight;
-    const MARGIN = 8;
-
-    // Horizontal: left-align to trigger, clamp to viewport
     const left = Math.min(triggerRect.left, window.innerWidth - dropdownWidth - 10);
-
-    const spaceBelow = viewportHeight - triggerRect.bottom - MARGIN;
+    const spaceBelow = window.innerHeight - triggerRect.bottom - MARGIN;
     const spaceAbove = triggerRect.top - MARGIN;
-
-    let finalTop: number;
-    if (spaceBelow >= dropdownHeight || spaceBelow >= spaceAbove) {
-      finalTop = triggerRect.bottom + MARGIN;
-    } else {
-      finalTop = triggerRect.top - dropdownHeight - MARGIN;
-      if (finalTop < MARGIN) finalTop = MARGIN;
-    }
-    setDropdownPos(prev => ({ ...prev, top: finalTop, left }));
+    const top = (spaceBelow >= dropdownHeight || spaceBelow >= spaceAbove)
+      ? triggerRect.bottom + MARGIN
+      : Math.max(MARGIN, triggerRect.top - dropdownHeight - MARGIN);
+    setDropdownPos({ top, left, width });
   }, [open, search, Array.isArray(value) ? value.length : 0]);
 
   const filteredOptions = filterBooleanType
@@ -182,9 +172,10 @@ const VariableSelect: FC<VariableSelectProps> = ({
     const el = itemRefs.current.get(key);
     if (el) {
       const rect = el.getBoundingClientRect();
-      const absoluteBottom = rect.top + CHILD_PANEL_HEIGHT;
-      const overflow = absoluteBottom - (window.innerHeight - 10);
-      const top = overflow > 0 ? rect.top - overflow : rect.top;
+      const spaceBelow = window.innerHeight - rect.top - 10;
+      const top = spaceBelow >= CHILD_PANEL_HEIGHT
+        ? rect.top
+        : Math.max(10, window.innerHeight - CHILD_PANEL_HEIGHT - 10);
       setChildPanelPos({ top, right: window.innerWidth - rect.left + 8 });
     }
   };
@@ -203,7 +194,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
           variant === 'outlined' && 'rb:border rb:border-[#d9d9d9] hover:rb:border-[#4096ff]',
           variant === 'outlined' && open && 'rb:border-[#4096ff] rb:shadow-[0_0_0_2px_rgba(5,145,255,0.1)]',
           variant === 'borderless' && 'rb:border-none rb:shadow-none rb:bg-transparent',
-          multiple ? 'rb:min-h-8 rb:py-1' : size === 'small' ? 'rb:h-6 rb:text-[10px]' : size === 'large' ? 'rb:h-10' : 'rb:h-8 rb:text-[12px]',
+          multiple && size === 'small' ? 'rb:min-h-6 rb:py-0.75' : multiple ? 'rb:min-h-8 rb:py-1' : size === 'small' ? 'rb:h-6 rb:text-[10px]' : size === 'large' ? 'rb:h-10' : 'rb:h-8 rb:text-[12px]',
           !multiple && (size === 'small' ? 'rb:text-[10px]' : 'rb:text-[12px]'),
           className
         )}
