@@ -728,12 +728,15 @@ class WorkflowService:
                 filtered_citations = (
                     citations if isinstance(citation_cfg, dict) and citation_cfg.get("enabled") else []
                 )
+                assistant_meta = {"usage": token_usage, "audio_url": None}
+                if filtered_citations:
+                    assistant_meta["citations"] = filtered_citations
                 self.conversation_service.add_message(
                     message_id=message_id,
                     conversation_id=conversation_id_uuid,
                     role="assistant",
                     content=assistant_message,
-                    meta_data={"usage": token_usage, "audio_url": None, "citations": filtered_citations}
+                    meta_data=assistant_meta
                 )
                 self.update_execution_status(
                     execution.execution_id,
@@ -923,12 +926,15 @@ class WorkflowService:
                         filtered_citations = (
                             citations if isinstance(citation_cfg, dict) and citation_cfg.get("enabled") else []
                         )
+                        assistant_meta = {"usage": token_usage, "audio_url": None}
+                        if filtered_citations:
+                            assistant_meta["citations"] = filtered_citations
                         self.conversation_service.add_message(
                             message_id=message_id,
                             conversation_id=conversation_id_uuid,
                             role="assistant",
                             content=assistant_message,
-                            meta_data={"usage": token_usage, "audio_url": None, "citations": filtered_citations}
+                            meta_data=assistant_meta
                         )
                         self.update_execution_status(
                             execution.execution_id,
