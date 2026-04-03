@@ -159,9 +159,9 @@ class AccessHistoryManager:
                 
             except Exception as e:
                 if attempt < self.max_retries - 1:
-                    # 随机退避：避免并发请求同时重试再次冲突
+                    # 带抖动的指数退避：base * 2^attempt * random(0.5, 1.0)
                     import random
-                    backoff = random.uniform(0.05, 0.2) * (attempt + 1)
+                    backoff = 0.05 * (2 ** attempt) * random.uniform(0.5, 1.0)
                     logger.warning(
                         f"访问记录失败（尝试 {attempt + 1}/{self.max_retries}），"
                         f"{backoff:.3f}s 后重试: {str(e)}"
