@@ -475,7 +475,7 @@ class LangChainAgent:
             history: Optional[List[Dict[str, str]]] = None,
             context: Optional[str] = None,
             files: Optional[List[Dict[str, Any]]] = None
-    ) -> AsyncGenerator[str | int, None]:
+    ) -> AsyncGenerator[str | int | dict[str, str], None]:
         """执行流式对话
 
         Args:

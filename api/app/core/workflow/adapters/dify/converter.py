@@ -32,13 +32,16 @@ from app.core.workflow.nodes.configs import (
     NoteNodeConfig,
     ParameterExtractorNodeConfig,
     QuestionClassifierNodeConfig,
-    VariableAggregatorNodeConfig
+    VariableAggregatorNodeConfig,
+    ListOperatorNodeConfig,
+    DocExtractorNodeConfig,
 )
 from app.core.workflow.nodes.cycle_graph.config import (
     ConditionDetail as LoopConditionDetail,
     ConditionsConfig,
     CycleVariable
 )
+from app.core.workflow.nodes.list_operator.config import FilterCondition
 from app.core.workflow.nodes.enums import (
     ValueInputType,
     ComparisonOperator,
@@ -90,6 +93,8 @@ class DifyConverter(BaseConverter):
             NodeType.VAR_AGGREGATOR: self.convert_variable_aggregator_node_config,
             NodeType.TOOL: self.convert_tool_node_config,
             NodeType.NOTES: self.convert_notes_config,
+            NodeType.LIST_OPERATOR: self.convert_list_operator_node_config,
+            NodeType.DOCUMENT_EXTRACTOR: self.convert_document_extractor_node_config,
             NodeType.CYCLE_START: lambda x: {},
             NodeType.BREAK: lambda x: {},
         }
@@ -213,7 +218,9 @@ class DifyConverter(BaseConverter):
             "end with": ComparisonOperator.END_WITH,
             "not contains": ComparisonOperator.NOT_CONTAINS,
             "exists": ComparisonOperator.NOT_EMPTY,
-            "not exists": ComparisonOperator.EMPTY
+            "not exists": ComparisonOperator.EMPTY,
+            "in": ComparisonOperator.IN,
+            "not in": ComparisonOperator.NOT_IN,
         }
         return operator_map.get(operator, operator)
 
@@ -770,4 +777,47 @@ class DifyConverter(BaseConverter):
             theme=node_data.get("theme", "blue"),
             show_author=node_data.get("showAuthor", True)
         ).model_dump()
+        return result
+
+    def convert_list_operator_node_config(self, node: dict) -> dict:
+        """Dify list-operator — convert variable path array to {{ }} selector format."""
+        node_data = node["data"]
+        variable_path = node_data.get("variable", [])
+        input_list = self._process_list_variable_literal(variable_path) or ""
+        filter_by = node_data.get("filter_by", {"enabled": False, "conditions": []})
+        # Convert each condition's comparison_operator from Dify format to native
+        if filter_by.get("conditions"):
+            converted_conditions = []
+            for cond in filter_by["conditions"]:
+                converted_conditions.append({
+                    **cond,
+                    "comparison_operator": self.convert_compare_operator(
+                        cond.get("comparison_operator", "")
+                    )
+                })
+            filter_by = {**filter_by, "conditions": converted_conditions}
+        result = {
+            "input_list": input_list,
+            "filter_by": filter_by,
+            "order_by": node_data.get("order_by", {"enabled": False, "key": "", "value": "asc"}),
+            "limit": node_data.get("limit", {"enabled": False, "size": -1}),
+            "extract_by": node_data.get("extract_by", {"enabled": False, "serial": "1"}),
+        }
+        self.config_validate(node["id"], node["data"]["title"], ListOperatorNodeConfig, result)
+        return result
+
+    def convert_document_extractor_node_config(self, node: dict) -> dict:
+        """Convert Dify document-extractor node to MemoryBear DocExtractorNodeConfig.
+
+        Dify document-extractor data fields:
+          variable_selector: list[str]  - file variable path
+        """
+        node_data = node["data"]
+        file_selector = self._process_list_variable_literal(
+            node_data.get("variable_selector", [])
+        ) or ""
+        result = DocExtractorNodeConfig.model_construct(
+            file_selector=file_selector,
+        ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], DocExtractorNodeConfig, result)
         return result

@@ -71,8 +71,7 @@ class QuestionClassifierNode(BaseNode):
                 provider=provider,
                 api_key=api_key,
                 base_url=base_url,
-                is_omni=is_omni,
-                support_thinking="thinking" in (capability or []),
+                is_omni=is_omni
             ),
             type=ModelType(model_type)
         )

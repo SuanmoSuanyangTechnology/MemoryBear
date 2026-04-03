@@ -53,22 +53,24 @@ async def login_for_access_token(
             user = auth_service.authenticate_user_or_raise(db, form_data.email, form_data.password)
             auth_logger.info(f"用户认证成功: {user.email} (ID: {user.id})")
             if form_data.invite:
-                auth_service.bind_workspace_with_invite(db=db,
-                user=user,        
-                invite_token=form_data.invite,
-                workspace_id=invite_info.workspace_id)
+                auth_service.bind_workspace_with_invite(
+                    db=db,
+                    user=user,
+                    invite_token=form_data.invite,
+                    workspace_id=invite_info.workspace_id
+                )
         except BusinessException as e:
         # 用户不存在且有邀请码，尝试注册
             if e.code == BizCode.USER_NOT_FOUND:
                 auth_logger.info(f"用户不存在，使用邀请码注册: {form_data.email}")
                 user = auth_service.register_user_with_invite(
-                db=db,
-                email=form_data.email,
-                username=form_data.username,
-                password=form_data.password,
-                invite_token=form_data.invite,
-                workspace_id=invite_info.workspace_id
-            )
+                    db=db,
+                    email=form_data.email,
+                    username=form_data.username,
+                    password=form_data.password,
+                    invite_token=form_data.invite,
+                    workspace_id=invite_info.workspace_id
+                )
             elif e.code == BizCode.PASSWORD_ERROR:
                 # 用户存在但密码错误
                 auth_logger.warning(f"接受邀请失败，密码验证错误: {form_data.email}")
