@@ -74,15 +74,16 @@ const Editor: FC<LexicalEditorProps> =({
     );
   }
 
-  // Lexical editor configuration
-  const initialConfig = {
+  // Lexical editor configuration — must be stable (never recreated)
+  const initialConfig = useMemo(() => ({
     namespace: 'AutocompleteEditor',
     theme,
     nodes: [VariableNode],
     onError: (error: Error) => {
       console.error(error);
     },
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
 
   // Calculate minimum height based on type and size
   const minheight = useMemo(() => {
@@ -130,7 +131,7 @@ const Editor: FC<LexicalEditorProps> =({
               style={{
                 minHeight: placeHolderMinheight,
                 position: 'absolute',
-                top: variant === 'borderless' ? '0' : '6px',
+                top: variant === 'borderless' ? '2px' : '6px',
                 left: variant === 'borderless' ? '0' : '11px',
                 color: '#A8A9AA',
                 fontSize: fontSize,

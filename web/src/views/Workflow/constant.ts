@@ -313,8 +313,7 @@ export const nodeLibrary: NodeLibrary[] = [
       },
       { type: "cycle-start", icon: 'rb:bg-[url("@/assets/images/workflow/start.svg")]'},
       { type: "break", icon: 'rb:bg-[url("@/assets/images/workflow/break.svg")]'},
-      {
-        type: "var-aggregator", icon: 'rb:bg-[url("@/assets/images/workflow/aggregator.svg")]',
+      { type: "var-aggregator", icon: 'rb:bg-[url("@/assets/images/workflow/aggregator.svg")]',
         config: {
           group: {
             type: 'switch',
@@ -460,6 +459,42 @@ export const nodeLibrary: NodeLibrary[] = [
             placeholder: 'common.pleaseSelect',
             onFilterVariableNames: ['sys.files']
           }
+        }
+      },
+      { type: "list-operator", icon: 'rb:bg-[url("@/assets/images/workflow/list-operator.svg")]',
+        config: {
+          variable: {
+            type: 'variableList',
+          },
+          filter_by: {
+            type: 'define',
+            defaultValue: {
+              enabled: false,
+              conditions: [{}]
+            }
+          },
+          order_by: {
+            type: 'define',
+            defaultValue: {
+              "enabled": false,
+              "key": "",
+              "value": "asc"
+            }
+          },
+          limit: {
+            type: 'define',
+            defaultValue: {
+              "enabled": false,
+              "size": 1
+            }
+          },
+          extract_by: {
+            type: 'define',
+            defaultValue: {
+              "enabled": false,
+              "serial": ""
+            }
+          },
         }
       },
     ]

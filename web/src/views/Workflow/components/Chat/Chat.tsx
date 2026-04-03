@@ -149,23 +149,8 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
       return
     }
 
-    setLoading(true)
     const message = msg
     const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
-    setChatList(prev => [...prev, {
-      role: 'user',
-      content: message,
-      created_at: Date.now(),
-      meta_data: {
-        files
-      },
-    }])
-    setChatList(prev => [...prev, {
-      role: 'assistant',
-      content: '',
-      created_at: Date.now(),
-      subContent: [],
-    }])
 
     /**
      * Handles SSE stream messages from workflow execution
@@ -362,6 +347,24 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
         }
       })
     }
+    setChatList(prev => [
+      ...prev,
+      {
+        role: 'user',
+        content: message,
+        created_at: Date.now(),
+        meta_data: {
+          files
+        },
+      },
+      {
+        role: 'assistant',
+        content: '',
+        created_at: Date.now(),
+        subContent: [],
+      }
+    ])
+    setLoading(true)
     setStreamLoading(true)
     draftRun(appId, data, handleStreamMessage)
       .catch((error) => {

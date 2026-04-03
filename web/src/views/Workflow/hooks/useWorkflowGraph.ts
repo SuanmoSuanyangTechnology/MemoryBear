@@ -144,7 +144,7 @@ export const useWorkflowGraph = ({
         const { id, type, name, position, config = {} } = node
         let nodeLibraryConfig: NodeProperties | undefined = [...nodeLibrary, { nodes: [unknownNode, notesConfig] }]
           .flatMap(category => category.nodes)
-          .find(n => n.type === type) as NodeProperties
+          .find(n => n.type === type) as NodeProperties || unknownNode
         nodeLibraryConfig = JSON.parse(JSON.stringify({ ...nodeLibraryConfig, config: nodeLibraryConfig.config || {} }))
 
         if (nodeLibraryConfig?.config) {

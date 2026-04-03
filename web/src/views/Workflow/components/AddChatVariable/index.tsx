@@ -57,6 +57,7 @@ const AddChatVariable = forwardRef<AddChatVariableRef, AddChatVariableProps>(({
       title={t('workflow.addvariable')}
       open={open}
       onClose={() => setOpen(false)}
+      width={480}
     >
       <div>
         <Button
