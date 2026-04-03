@@ -10,7 +10,6 @@ from app.core.logging_config import get_agent_logger
 from app.core.memory.src.search import run_hybrid_search
 from app.core.memory.utils.data.text_utils import escape_lucene_query
 
-
 logger = get_agent_logger(__name__)
 
 # 需要从展开结果中过滤的字段（含 Neo4j DateTime，不可 JSON 序列化）
@@ -31,10 +30,10 @@ def _clean_expand_fields(obj):
 
 
 async def expand_communities_to_statements(
-    community_results: List[dict],
-    end_user_id: str,
-    existing_content: str = "",
-    limit: int = 10,
+        community_results: List[dict],
+        end_user_id: str,
+        existing_content: str = "",
+        limit: int = 10,
 ) -> Tuple[List[dict], List[str]]:
     """
     社区展开 helper：给定命中的 community 列表，拉取关联 Statement。
@@ -76,17 +75,18 @@ async def expand_communities_to_statements(
         if s.get("statement") and s["statement"] not in existing_lines
     ]
     cleaned = _clean_expand_fields(expanded_stmts)
-    logger.info(f"[expand_communities] 展开 {len(expanded_stmts)} 条 statements，新增 {len(new_texts)} 条，community_ids={community_ids}")
+    logger.info(
+        f"[expand_communities] 展开 {len(expanded_stmts)} 条 statements，新增 {len(new_texts)} 条，community_ids={community_ids}")
     return cleaned, new_texts
 
 
 class SearchService:
     """Service for executing hybrid search and processing results."""
-    
+
     def __init__(self):
         """Initialize the search service."""
         logger.info("SearchService initialized")
-    
+
     def extract_content_from_result(self, result: dict, node_type: str = "") -> str:
         """
         Extract only meaningful content from search results, dropping all metadata.
@@ -107,19 +107,19 @@ class SearchService:
         """
         if not isinstance(result, dict):
             return str(result)
-        
+
         content_parts = []
-        
+
         # Statements: extract statement field
         if 'statement' in result and result['statement']:
             content_parts.append(result['statement'])
-        
+
         # Community 节点：有 member_count 或 core_entities 字段，或 node_type 明确指定
         # 用 "[主题：{name}]" 前缀区分，让 LLM 知道这是主题级摘要
         is_community = (
-            node_type == "community"
-            or 'member_count' in result
-            or 'core_entities' in result
+                node_type == "community"
+                or 'member_count' in result
+                or 'core_entities' in result
         )
         if is_community:
             name = result.get('name', '')
@@ -130,16 +130,16 @@ class SearchService:
         elif 'content' in result and result['content']:
             # Summaries / Chunks
             content_parts.append(result['content'])
-        
+
         # Entities: extract name and fact_summary (commented out in original)
         # if 'name' in result and result['name']:
         #     content_parts.append(result['name'])
         #     if result.get('fact_summary'):
         #         content_parts.append(result['fact_summary'])
-        
+
         # Return concatenated content or empty string
         return '\n'.join(content_parts) if content_parts else ""
-    
+
     def clean_query(self, query: str) -> str:
         """
         Clean and escape query text for Lucene.
@@ -155,33 +155,33 @@ class SearchService:
             Cleaned and escaped query string
         """
         q = str(query).strip()
-        
+
         # Remove wrapping quotes
         if (q.startswith("'") and q.endswith("'")) or (
-            q.startswith('"') and q.endswith('"')
+                q.startswith('"') and q.endswith('"')
         ):
             q = q[1:-1]
-        
+
         # Remove newlines and carriage returns
         q = q.replace('\r', ' ').replace('\n', ' ').strip()
-        
+
         # Apply Lucene escaping
         q = escape_lucene_query(q)
-        
+
         return q
-    
+
     async def execute_hybrid_search(
-        self,
-        end_user_id: str,
-        question: str,
-        limit: int = 5,
-        search_type: str = "hybrid",
-        include: Optional[List[str]] = None,
-        rerank_alpha: float = 0.4,
-        output_path: str = "search_results.json",
-        return_raw_results: bool = False,
-        memory_config = None,
-        expand_communities: bool = True,
+            self,
+            end_user_id: str,
+            question: str,
+            limit: int = 5,
+            search_type: str = "hybrid",
+            include: Optional[List[str]] = None,
+            rerank_alpha: float = 0.4,
+            output_path: str = "search_results.json",
+            return_raw_results: bool = False,
+            memory_config=None,
+            expand_communities: bool = True,
     ) -> Tuple[str, str, Optional[dict]]:
         """
         Execute hybrid search and return clean content.
@@ -205,10 +205,10 @@ class SearchService:
         """
         if include is None:
             include = ["statements", "chunks", "entities", "summaries", "communities"]
-        
+
         # Clean query
         cleaned_query = self.clean_query(question)
-        
+
         try:
             # Execute search
             answer = await run_hybrid_search(
@@ -221,18 +221,18 @@ class SearchService:
                 memory_config=memory_config,
                 rerank_alpha=rerank_alpha
             )
-            
+
             # Extract results based on search type and include parameter
             # Prioritize summaries as they contain synthesized contextual information
             answer_list = []
-            
+
             # For hybrid search, use reranked_results
             if search_type == "hybrid":
                 reranked_results = answer.get('reranked_results', {})
-                
+
                 # Priority order: summaries first (most contextual), then communities, statements, chunks, entities
                 priority_order = ['summaries', 'communities', 'statements', 'chunks', 'entities']
-                
+
                 for category in priority_order:
                     if category in include and category in reranked_results:
                         category_results = reranked_results[category]
@@ -242,7 +242,7 @@ class SearchService:
                 # For keyword or embedding search, results are directly in answer dict
                 # Apply same priority order
                 priority_order = ['summaries', 'communities', 'statements', 'chunks', 'entities']
-                
+
                 for category in priority_order:
                     if category in include and category in answer:
                         category_results = answer[category]
@@ -261,7 +261,7 @@ class SearchService:
                     end_user_id=end_user_id,
                 )
                 answer_list.extend(cleaned_stmts)
-            
+
             # Extract clean content from all results，按类型传入 node_type 区分 community
             content_list = []
             for ans in answer_list:
@@ -269,19 +269,18 @@ class SearchService:
                 ntype = "community" if ('member_count' in ans or 'core_entities' in ans) else ""
                 content_list.append(self.extract_content_from_result(ans, node_type=ntype))
 
-            
             # Filter out empty strings and join with newlines
             clean_content = '\n'.join([c for c in content_list if c])
-            
+
             # Log first 200 chars
             logger.info(f"检索接口搜索结果==>>:{clean_content[:200]}...")
-            
+
             # Return raw results if requested
             if return_raw_results:
                 return clean_content, cleaned_query, answer
             else:
                 return clean_content, cleaned_query, None
-            
+
         except Exception as e:
             logger.error(
                 f"Search failed for query '{question}' in group '{end_user_id}': {e}",
