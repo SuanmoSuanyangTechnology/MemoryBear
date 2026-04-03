@@ -118,8 +118,7 @@ class ParameterExtractorNode(BaseNode):
                 provider=provider,
                 api_key=api_key,
                 base_url=api_base,
-                is_omni=is_omni,
-                support_thinking="thinking" in (capability or []),
+                is_omni=is_omni
             ),
             type=ModelType(model_type)
         )

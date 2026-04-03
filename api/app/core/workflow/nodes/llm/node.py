@@ -135,8 +135,7 @@ class LLMNode(BaseNode):
                 api_key=model_info.api_key,
                 base_url=model_info.api_base,
                 extra_params=extra_params,
-                is_omni=model_info.is_omni,
-                support_thinking="thinking" in (model_info.capability or []),
+                is_omni=model_info.is_omni
             ),
             type=model_info.model_type
         )
@@ -214,9 +213,10 @@ class LLMNode(BaseNode):
                 messages = messages[:-1] + history_message + messages[-1:]
             self.messages = messages
         else:
-            # 使用简单的 prompt 格式（向后兼容）
+            # 使用简单的 prompt 格式（向后兼容）——包装为标准消息列表以兼容所有 provider
             prompt_template = self.config.get("prompt", "")
-            self.messages = self._render_template(prompt_template, variable_pool)
+            rendered = self._render_template(prompt_template, variable_pool)
+            self.messages = [{"role": "user", "content": rendered}]
 
         return llm
 

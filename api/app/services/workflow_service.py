@@ -16,7 +16,6 @@ from app.core.workflow.adapters.registry import PlatformAdapterRegistry
 from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.validator import validate_workflow_config
-from app.core.workflow.variable.base_variable import FileObject
 from app.db import get_db
 from app.models import App
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution
@@ -453,22 +452,70 @@ class WorkflowService:
             "success_rate": completed / total if total > 0 else 0
         }
 
+    async def _resolve_variables_file_defaults(
+            self,
+            variables: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Convert FileInput-format defaults in workflow variables to full FileObject dicts."""
+        from app.core.workflow.utils.file_processor import (
+            resolve_local_file_object_dict,
+            fetch_remote_file_meta,
+        )
+
+        async def _resolve_one(item: dict) -> dict | None:
+            if not isinstance(item, dict) or item.get("is_file"):
+                return item
+            transfer_method = item.get("transfer_method", "remote_url")
+            file_type = item.get("type", "document")
+            origin_file_type = item.get("file_type") or file_type
+            if transfer_method == "remote_url":
+                url = item.get("url", "")
+                return await fetch_remote_file_meta(url, file_type, origin_file_type) if url else None
+            else:
+                return resolve_local_file_object_dict(self.db, item.get("upload_file_id"), file_type, origin_file_type)
+
+        result = []
+        for var_def in variables:
+            var_type = var_def.get("type", "")
+            default = var_def.get("default")
+            if var_type == "file" and isinstance(default, dict) and not default.get("is_file"):
+                var_def = {**var_def, "default": await _resolve_one(default)}
+            elif var_type == "array[file]" and isinstance(default, list):
+                resolved = []
+                for item in default:
+                    r = await _resolve_one(item)
+                    if r is not None:
+                        resolved.append(r)
+                var_def = {**var_def, "default": resolved}
+            result.append(var_def)
+        return result
+
     async def _handle_file_input(self, files: list[FileInput]):
         if not files:
             return []
 
+        from app.core.workflow.utils.file_processor import (
+            resolve_local_file_object_dict,
+            build_file_object_dict_from_meta,
+            fetch_remote_file_meta,
+        )
+
         files_struct = []
         for file in files:
-            files_struct.append(
-                FileObject(
-                    type=file.type,
-                    url=await self.multimodal_service.get_file_url(file),
-                    transfer_method=file.transfer_method,
-                    file_id=str(file.upload_file_id) if file.upload_file_id else None,
-                    origin_file_type=file.file_type,
-                    is_file=True
-                ).model_dump()
-            )
+            url = await self.multimodal_service.get_file_url(file)
+            file_type = str(file.type)
+            origin_file_type = file.file_type or file_type
+
+            if file.transfer_method.value == "local_file" and file.upload_file_id:
+                fo = resolve_local_file_object_dict(self.db, file.upload_file_id, file_type, origin_file_type)
+                files_struct.append(fo or build_file_object_dict_from_meta(
+                    file_type=file_type, transfer_method="local_file",
+                    origin_file_type=origin_file_type,
+                    file_id=str(file.upload_file_id), url=url,
+                    file_name=None, file_size=None, file_ext=None, content_type=None,
+                ))
+            else:
+                files_struct.append(await fetch_remote_file_meta(url, file_type, origin_file_type))
         return files_struct
 
     @staticmethod
