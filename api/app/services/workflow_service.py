@@ -722,12 +722,18 @@ class WorkflowService:
                     content=human_message,
                     meta_data=human_meta
                 )
+                # 过滤 citations
+                citations = result.get("citations", [])
+                citation_cfg = feature_configs.get("citation", {})
+                filtered_citations = (
+                    citations if isinstance(citation_cfg, dict) and citation_cfg.get("enabled") else []
+                )
                 self.conversation_service.add_message(
                     message_id=message_id,
                     conversation_id=conversation_id_uuid,
                     role="assistant",
                     content=assistant_message,
-                    meta_data={"usage": token_usage, "audio_url": None}
+                    meta_data={"usage": token_usage, "audio_url": None, "citations": filtered_citations}
                 )
                 self.update_execution_status(
                     execution.execution_id,
@@ -746,13 +752,7 @@ class WorkflowService:
                 )
                 logger.error(f"Workflow Run Failed, execution_id: {execution.execution_id},"
                              f" error: {result.get('error')}")
-
-            # 过滤 citations
-            citations = result.get("citations", [])
-            citation_cfg = feature_configs.get("citation", {})
-            filtered_citations = (
-                citations if isinstance(citation_cfg, dict) and citation_cfg.get("enabled") else []
-            )
+                filtered_citations = []
 
             # 返回增强的响应结构
             return {
@@ -917,24 +917,24 @@ class WorkflowService:
                             content=human_message,
                             meta_data=human_meta
                         )
+                        # 过滤 citations
+                        citations = event.get("data", {}).get("citations", [])
+                        citation_cfg = feature_configs.get("citation", {})
+                        filtered_citations = (
+                            citations if isinstance(citation_cfg, dict) and citation_cfg.get("enabled") else []
+                        )
                         self.conversation_service.add_message(
                             message_id=message_id,
                             conversation_id=conversation_id_uuid,
                             role="assistant",
                             content=assistant_message,
-                            meta_data={"usage": token_usage, "audio_url": None}
+                            meta_data={"usage": token_usage, "audio_url": None, "citations": filtered_citations}
                         )
                         self.update_execution_status(
                             execution.execution_id,
                             "completed",
                             output_data=event.get("data"),
                             token_usage=token_usage.get("total_tokens", None)
-                        )
-                        # 注入 citations 到 workflow_end 事件
-                        citations = event.get("data", {}).get("citations", [])
-                        citation_cfg = feature_configs.get("citation", {})
-                        filtered_citations = (
-                            citations if isinstance(citation_cfg, dict) and citation_cfg.get("enabled") else []
                         )
                         event.setdefault("data", {})["citations"] = filtered_citations
                         logger.info(f"Workflow Run Success, "
