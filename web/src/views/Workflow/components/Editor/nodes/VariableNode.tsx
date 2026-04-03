@@ -32,8 +32,7 @@ const VariableComponent: React.FC<{ nodeKey: NodeKey; data: Suggestion }> = ({
     e.stopPropagation();
     setSelected(!isSelected);
   };
-
-  console.log('data', data)
+  
   return (
     <span
       onClick={handleClick}

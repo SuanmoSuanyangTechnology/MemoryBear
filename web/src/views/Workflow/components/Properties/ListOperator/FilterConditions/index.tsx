@@ -67,11 +67,10 @@ const FilterConditions: FC<FilterConditionsProps> = ({
   const form = Form.useFormInstance();
 
   const handleKeyFieldChange = (index: number, newValue: string) => {
-    form.setFieldValue(['filter_by', index], {
+    form.setFieldValue([parentName, 'conditions', index], {
       key: newValue,
       comparison_operator: undefined,
       value: undefined,
-      value_type: undefined,
     });
   };
 
@@ -85,8 +84,8 @@ const FilterConditions: FC<FilterConditionsProps> = ({
                 className="rb:relative"
               >
                 {fields.map((field, index) => {
-                  const filter_by = form.getFieldValue(['filter_by']) || [];
-                  const currentCondition = filter_by[index] || {};
+                  const conditions = form.getFieldValue([parentName, 'conditions']) || [];
+                  const currentCondition = conditions[index] || {};
                   const currentOperator = currentCondition.comparison_operator;
                   const hideValueField = currentOperator === 'empty' || currentOperator === 'not_empty';
                   const keyFieldValue = currentCondition.key;
@@ -103,9 +102,7 @@ const FilterConditions: FC<FilterConditionsProps> = ({
                     >
                       <div className="rb:flex-1 rb:bg-[#F6F6F6] rb:rounded-lg">
                         {variableType === 'array[file]' &&
-                          <Row className={clsx("rb:p-1!", {
-                            'rb-border-b': !hideValueField
-                          })}>
+                          <Row className="rb:p-1! rb-border-b">
                             <Col span={24}>
                               <Form.Item name={[field.name, 'key']} noStyle>
                                 <Select
@@ -121,7 +118,7 @@ const FilterConditions: FC<FilterConditionsProps> = ({
                           </Row>
                         }
                         <Row>
-                          <Col flex="96px">
+                          <Col flex={hideValueField ? '1' : "96px"}>
                             <Form.Item name={[field.name, 'comparison_operator']} noStyle>
                               <Select
                                 options={operatorList.map(vo => ({

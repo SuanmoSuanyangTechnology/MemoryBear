@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-03 18:39:07
+ * @Last Modified time: 2026-04-03 20:13:16
  */
 import { useEffect, type FC } from 'react'
 import { useTranslation } from 'react-i18next';
@@ -91,12 +91,12 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
       const firstVariable = allSuggestions.find(opt => `{{${opt.value}}}` === firstVariableValue);
       if (firstVariable) {
         filteredOptions = options.flatMap(opt => {
-          if (opt.dataType === 'file' && opt.children?.length) {
-            return [{ ...opt, children: opt.children.map(c => ({ ...c, disabled: c.dataType !== firstVariable.dataType })) }];
+          if (opt.children?.length) {
+            const filteredChildren = opt.children.filter(c => c.dataType === firstVariable.dataType);
+            if (filteredChildren.length) return [{ ...opt, disabled: opt.dataType !== firstVariable.dataType, children: filteredChildren }];
+            return [{ ...opt, children: [] }];
           }
-          if (opt.dataType === firstVariable.dataType && !opt.children?.length) return [opt];
-          const filteredChildren = opt.children?.filter(c => c.dataType === firstVariable.dataType);
-          if (filteredChildren?.length) return [{ ...opt, children: filteredChildren }];
+          if (opt.dataType === firstVariable.dataType) return [opt];
           return [];
         });
       }
@@ -182,12 +182,12 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
 
                           if (firstVariable) {
                             return options.flatMap(vo => {
-                              if (vo.dataType === 'file' && vo.children?.length) {
-                                return [{ ...vo, children: vo.children.map(c => ({ ...c, disabled: c.dataType !== firstVariable.dataType })) }];
+                              if (vo.children?.length) {
+                                const filteredChildren = vo.children.filter(c => c.dataType === firstVariable.dataType);
+                                if (filteredChildren.length) return [{ ...vo, disabled: vo.dataType !== firstVariable.dataType, children: filteredChildren }];
+                                return [{ ...vo, children: [] }];
                               }
-                              if (vo.dataType === firstVariable.dataType && (!vo.children || vo.children.length < 1)) return [vo];
-                              const filteredChildren = vo.children?.filter(sub => sub.dataType === firstVariable.dataType);
-                              if (filteredChildren?.length) return [{ ...vo, children: filteredChildren }];
+                              if (vo.dataType === firstVariable.dataType) return [vo];
                               return [];
                             });
                           }
