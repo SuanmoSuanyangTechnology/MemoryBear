@@ -61,6 +61,7 @@ class TripletExtractor:
             predicate_instructions=PREDICATE_DEFINITIONS,
             language=self._get_language(),
             ontology_types=self.ontology_types,
+            speaker=getattr(statement, 'speaker', None),
         )
 
         # Create messages for LLM
