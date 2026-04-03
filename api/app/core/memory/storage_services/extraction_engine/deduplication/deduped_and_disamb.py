@@ -4,6 +4,7 @@
 import asyncio
 import difflib  # 提供字符串相似度计算工具
 import importlib
+import logging
 import os
 import re
 from datetime import datetime
@@ -15,6 +16,8 @@ from app.core.memory.models.graph_models import (
     StatementEntityEdge,
 )
 from app.core.memory.models.variate_config import DedupConfig
+
+logger = logging.getLogger(__name__)
 
 
 # 模块级类型统一工具函数
@@ -233,15 +236,10 @@ def _would_merge_cross_role(a: ExtractedEntityNode, b: ExtractedEntityNode) -> b
     用户实体和AI助手实体永远不应该被合并在一起。
     如果一方是用户实体、另一方是AI助手实体，返回 True（阻止合并）。
     """
-    a_is_user = _is_user_entity(a)
-    a_is_assistant = _is_assistant_entity(a)
-    b_is_user = _is_user_entity(b)
-    b_is_assistant = _is_assistant_entity(b)
-    
-    # 用户 + AI助手 → 阻止
-    if (a_is_user and b_is_assistant) or (a_is_assistant and b_is_user):
-        return True
-    return False
+    return (
+        (_is_user_entity(a) and _is_assistant_entity(b))
+        or (_is_assistant_entity(a) and _is_user_entity(b))
+    )
 
 
 def _normalize_special_entity_names(
@@ -269,21 +267,8 @@ def _normalize_special_entity_names(
             ent.name = _CANONICAL_ASSISTANT_NAME
             ent.entity_type = _CANONICAL_ASSISTANT_TYPE
 
-    # 第二步：收集 AI 助手实体的所有别名，从用户实体的 aliases 中排除
-    # 防止 LLM 把 AI 的名字错误放入用户实体的 aliases
-    assistant_alias_set = set()
-    for ent in entity_nodes:
-        if _is_assistant_entity(ent):
-            for alias in (getattr(ent, "aliases", []) or []):
-                assistant_alias_set.add(alias.strip().lower())
-
-    if assistant_alias_set:
-        for ent in entity_nodes:
-            if _is_user_entity(ent):
-                original_aliases = getattr(ent, "aliases", []) or []
-                cleaned = [a for a in original_aliases if a.strip().lower() not in assistant_alias_set]
-                if len(cleaned) < len(original_aliases):
-                    ent.aliases = cleaned
+    # 第二步：清洗用户/AI助手之间的别名交叉污染（复用 clean_cross_role_aliases）
+    clean_cross_role_aliases(entity_nodes)
 
 
 async def fetch_neo4j_assistant_aliases(neo4j_connector, end_user_id: str) -> set:
@@ -299,15 +284,9 @@ async def fetch_neo4j_assistant_aliases(neo4j_connector, end_user_id: str) -> se
     Returns:
         小写归一化后的助手别名集合
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
-    # 使用模块级 _ASSISTANT_PLACEHOLDER_NAMES 的标题化形式构建查询名称列表，
-    # 保持与 _normalize_special_entity_names 标准化后的名称一致
-    query_names = [_CANONICAL_ASSISTANT_NAME]  # "AI助手"
-    # 补充英文常见变体
-    query_names.extend(["助手", "AI Assistant", "Assistant"])
-    # 去重
+    # 查询名称列表：规范名称 + 常见变体（与 _normalize_special_entity_names 标准化后一致）
+    query_names = [_CANONICAL_ASSISTANT_NAME, *_ASSISTANT_PLACEHOLDER_NAMES]
+    # 去重保序
     query_names = list(dict.fromkeys(query_names))
 
     cypher = """

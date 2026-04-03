@@ -27,9 +27,9 @@ Extract entities and knowledge triplets from the given statement.
 **Speaker:** {{ speaker }}
 {% if speaker == "assistant" %}
 {% if language == "zh" %}
-⚠️ 当前陈述句来自 **AI助手的回复**。AI助手在回复中提到的名字（如称呼用户为"远哥""VV"等）是**用户的别名**，不是 AI 助手的别名。请注意区分说话人的视角。
+⚠️ 当前陈述句来自 **AI助手的回复**。AI助手在回复中用来称呼用户的名字是**用户的别名**，不是 AI 助手的别名。但只能提取原文中逐字出现的名字，严禁推测或创造原文中不存在的别名变体。
 {% else %}
-⚠️ This statement is from the **AI assistant's reply**. Names the AI uses to address the user (e.g., calling the user "buddy", "VV") are **user's aliases**, NOT the AI assistant's aliases. Pay attention to the speaker's perspective.
+⚠️ This statement is from the **AI assistant's reply**. Names the AI uses to address the user are **user's aliases**, NOT the AI assistant's aliases. But only extract names that appear VERBATIM in the text — never infer or fabricate alias variants.
 {% endif %}
 {% endif %}
 {% endif %}
@@ -97,16 +97,17 @@ Extract entities and knowledge triplets from the given statement.
      * "我叫张三，大家叫我小张" → aliases=["张三", "小张"]（张三是第一个，将成为 other_name）
      * "大家叫我小李，我全名叫李明" → aliases=["小李", "李明"]（小李先出现，将成为 other_name）
    - 空值：如果没有别名，使用 `[]`
-   - 重要：只提取本次对话中明确提到的别名，不要推测或添加未提及的名字
+   - **🚨🚨🚨 严禁幻觉：只提取对话原文中逐字出现的别名，绝对不能推测、衍生或创造任何未在原文中出现的名字。例如，看到"陈思远"不能自行添加"思远大人""远哥""小远"等变体。如果原文没有这些字，就不能出现在 aliases 中。**
    - **🚨 归属区分：必须严格区分名称的归属对象。默认情况下，用户提到的名字归属用户实体。只有出现明确的第二人称命名表达（如"叫你""给你取名"）时，才将名字归属 AI/助手实体。**
-   - **🚨 说话人视角：当 speaker 为 assistant 时，AI 助手用来称呼用户的名字（如"远哥""VV""思远大人"）是用户的别名，必须归入用户实体的 aliases，绝对不能归入 AI 助手实体。**
+   - **🚨 说话人视角：当 speaker 为 assistant 时，AI 助手用来称呼用户的名字是用户的别名，必须归入用户实体的 aliases，绝对不能归入 AI 助手实体。但同样只能提取原文中逐字出现的称呼，不能推测。**
      * "我叫陈思远，我给AI取名为远仔" → 用户 aliases=["陈思远"]，AI助手 aliases=["远仔"]
      * "我叫vv" → 用户 aliases=["vv"]（没有给AI取名的表达，名字归用户）
-     * [speaker=assistant] "好的，远哥/VV/思远大人" → 用户 aliases=["远哥", "VV", "思远大人"]（AI 在称呼用户，这些是用户的别名）
+     * [speaker=assistant] "好的，VV" → 用户 aliases=["VV"]（AI 在称呼用户，原文中出现了"VV"）
      * [speaker=assistant] "我叫陈仔" → AI助手 aliases=["陈仔"]（AI 在自我介绍，这是 AI 的别名）
      * ❌ 错误：将"远仔"放入用户的 aliases（"远仔"是给AI取的名字，不是用户的名字）
      * ❌ 错误：用户说"我叫vv"，却把"vv"放入 AI 助手的 aliases
-     * ❌ 错误：AI 称呼用户为"远哥"，却把"远哥"放入 AI 助手的 aliases
+     * ❌ 错误：AI 称呼用户为"VV"，却把"VV"放入 AI 助手的 aliases
+     * ❌ 错误：原文只有"陈思远"，却在 aliases 中添加"思远大人""远哥""小远"等从未出现的变体（这是幻觉）
 {% else %}
    - Include: nicknames, full names, abbreviations, alternative names
    - Order: **The FIRST alias will be used as the user's primary display name (other_name). Put the most important/frequently used name FIRST**
@@ -115,16 +116,17 @@ Extract entities and knowledge triplets from the given statement.
      * "I'm John, people call me Johnny" → aliases=["John", "Johnny"] (John is first, will become other_name)
      * "People call me Mike, my full name is Michael" → aliases=["Mike", "Michael"] (Mike appears first, will become other_name)
    - Empty: If no aliases, use `[]`
-   - Important: Only extract aliases explicitly mentioned in current conversation, do not infer or add unmentioned names
+   - **🚨🚨🚨 NO HALLUCINATION: Only extract aliases that appear VERBATIM in the original text. NEVER infer, derive, or fabricate names not present in the text. For example, seeing "John Smith" does NOT allow adding "Johnny", "Smithy", "Mr. Smith" unless those exact strings appear in the conversation.**
    - **🚨 Ownership distinction: By default, all names mentioned by the user belong to the user entity. Only assign a name to the AI/assistant entity when an explicit second-person naming expression (e.g., "I'll call you", "your name is") is present.**
-   - **🚨 Speaker perspective: When speaker is "assistant", names the AI uses to address the user (e.g., "buddy", "VV", "boss") are the USER's aliases and MUST go into the user entity's aliases, NEVER into the AI assistant entity's aliases.**
+   - **🚨 Speaker perspective: When speaker is "assistant", names the AI uses to address the user are the USER's aliases and MUST go into the user entity's aliases, NEVER into the AI assistant entity's aliases. But only extract names that appear verbatim in the text, never infer.**
      * "I'm Alex, I'll call you Buddy" → User aliases=["Alex"], AI assistant aliases=["Buddy"]
      * "I'm vv" → User aliases=["vv"] (no AI-naming expression, name belongs to user)
-     * [speaker=assistant] "Sure thing, buddy/VV" → User aliases=["buddy", "VV"] (AI addressing the user, these are user's aliases)
+     * [speaker=assistant] "Sure thing, VV" → User aliases=["VV"] (AI addressing the user, "VV" appears in text)
      * [speaker=assistant] "I'm Jarvis" → AI assistant aliases=["Jarvis"] (AI self-introduction, this is AI's alias)
      * ❌ Wrong: putting "Buddy" in user's aliases ("Buddy" is a name for the AI, not the user)
      * ❌ Wrong: User says "I'm vv" but "vv" is put in AI assistant's aliases
-     * ❌ Wrong: AI calls user "buddy" but "buddy" is put in AI assistant's aliases
+     * ❌ Wrong: AI calls user "VV" but "VV" is put in AI assistant's aliases
+     * ❌ Wrong: Text only has "John Smith" but aliases include "Johnny", "Smithy" (hallucinated variants)
 {% endif %}
 
 
@@ -161,7 +163,7 @@ Extract entities and knowledge triplets from the given statement.
    - **🚨 "你不叫X了"/"你不叫X，你叫Y" 句式：X 和 Y 都是 AI 的名字（旧名和新名），绝对不是用户的名字。因为句子主语是"你"（AI）。**
    - **以下情况名字归属用户，不是给 AI 取名：**「我叫」「我的名字是」「叫我」「我是」「大家叫我」「我的英文名是」「我的昵称是」等**第一人称（我）的自我介绍句式**
    - **🚨 speaker=assistant 时的特殊规则：**
-     * AI 用来称呼用户的名字（如"远哥""VV""思远大人"）→ 归入**用户**实体的 aliases
+     * AI 用来称呼用户的名字 → 归入**用户**实体的 aliases（但必须是原文中逐字出现的称呼，不能推测）
      * AI 自称的名字（如"我叫陈仔""我是你的助手"）→ 归入**AI助手**实体的 aliases
      * 判断依据：AI 说"你叫X"或用 X 称呼用户 → X 是用户别名；AI 说"我叫X"或"我是X" → X 是 AI 别名
    - 示例：
@@ -170,11 +172,12 @@ Extract entities and knowledge triplets from the given statement.
      * "我叫陈思远，我给AI取名为远仔" → 用户实体: name="用户", aliases=["陈思远"]；AI实体: name="AI助手", aliases=["远仔"]
      * "叫你小助，我自己叫老王" → 用户实体: name="用户", aliases=["老王"]；AI实体: name="AI助手", aliases=["小助"]
      * "你不叫远仔了，你现在叫陈仔" → AI实体: name="AI助手", aliases=["陈仔"]（"远仔"是AI旧名，"陈仔"是AI新名，都归AI。不要把"远仔"或"陈仔"放入用户的aliases）
-     * [speaker=assistant] "好的远哥/VV/思远大人，今天想干点啥？" → 用户实体: name="用户", aliases=["远哥", "VV", "思远大人"]（AI 在称呼用户）
-     * [speaker=assistant] "你叫陈思远（或VV），我叫陈仔" → 用户实体: name="用户", aliases=["陈思远", "VV"]；AI实体: name="AI助手", aliases=["陈仔"]
+     * [speaker=assistant] "好的VV，今天想干点啥？" → 用户实体: name="用户", aliases=["VV"]（AI 在称呼用户，原文中出现了"VV"）
+     * [speaker=assistant] "你叫陈思远，我叫陈仔" → 用户实体: name="用户", aliases=["陈思远"]；AI实体: name="AI助手", aliases=["陈仔"]
      * ❌ 错误：用户说"我叫vv"，却把"vv"放入 AI 助手的 aliases（没有任何给 AI 取名的表达）
-     * ❌ 错误：AI 称呼用户为"远哥"，却把"远哥"放入 AI 助手的 aliases
+     * ❌ 错误：AI 称呼用户为"VV"，却把"VV"放入 AI 助手的 aliases
      * ❌ 错误：aliases=["陈思远", "远仔"]（"远仔"是给AI取的名字，不是用户的名字）
+     * ❌ 错误：原文只有"陈思远"，却在 aliases 中添加"思远大人""远哥""小远"等从未出现的变体（这是幻觉）
 {% else %}
    - **🚨 Default rule: If there is NO explicit AI/assistant naming expression in the conversation, ALL names belong to the user entity. Do NOT guess or infer that a name is for the AI.**
    - Only create an AI/assistant entity when the user **explicitly** names the AI/assistant
@@ -185,7 +188,7 @@ Extract entities and knowledge triplets from the given statement.
    - **🚨 "You're not called X anymore" / "You're not X, you're Y" pattern: BOTH X and Y are AI's names (old and new). They are NOT user's names. The subject is "you" (the AI).**
    - **These patterns mean the name belongs to the USER, NOT the AI:** "I'm", "my name is", "call me", "I am", "people call me", "my English name is", "my nickname is", etc. — **first-person ("I"/"me") self-introduction patterns**
    - **🚨 Special rules when speaker=assistant:**
-     * Names the AI uses to address the user (e.g., "buddy", "VV", "boss") → belong to the **user** entity's aliases
+     * Names the AI uses to address the user → belong to the **user** entity's aliases (but only extract names that appear verbatim in the text, never infer)
      * Names the AI uses for itself (e.g., "I'm Jarvis", "I am your assistant") → belong to the **AI assistant** entity's aliases
      * Rule: AI says "you are X" or calls user X → X is user's alias; AI says "I'm X" or "I am X" → X is AI's alias
    - Examples:
@@ -194,11 +197,12 @@ Extract entities and knowledge triplets from the given statement.
      * "I'm Alex, I'll call you Buddy" → User entity: name="User", aliases=["Alex"]; AI entity: name="AI Assistant", aliases=["Buddy"]
      * "Call yourself Jarvis, my name is Tony" → User entity: name="User", aliases=["Tony"]; AI entity: name="AI Assistant", aliases=["Jarvis"]
      * "You're not called Jarvis anymore, your new name is Friday" → AI entity: name="AI Assistant", aliases=["Friday"] (both "Jarvis" and "Friday" are AI names, NOT user names)
-     * [speaker=assistant] "Sure thing, buddy/VV!" → User entity: name="User", aliases=["buddy", "VV"] (AI addressing the user)
+     * [speaker=assistant] "Sure thing, VV" → User entity: name="User", aliases=["VV"] (AI addressing the user, "VV" appears in text)
      * [speaker=assistant] "You're Alex, and I'm Jarvis" → User entity: name="User", aliases=["Alex"]; AI entity: name="AI Assistant", aliases=["Jarvis"]
      * ❌ Wrong: User says "I'm vv" but "vv" is put in AI assistant's aliases (no AI-naming expression exists)
-     * ❌ Wrong: AI calls user "buddy" but "buddy" is put in AI assistant's aliases
+     * ❌ Wrong: AI calls user "VV" but "VV" is put in AI assistant's aliases
      * ❌ Wrong: aliases=["Alex", "Buddy"] ("Buddy" is a name for the AI, not the user)
+     * ❌ Wrong: Text only has "John Smith" but aliases include "Johnny", "Smithy" (hallucinated variants)
 {% endif %}
 
 5. **ALIASES ORDER:**
