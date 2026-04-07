@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:07:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-03 20:21:02
+ * @Last Modified time: 2026-04-07 12:18:58
  */
 /**
  * AppHeader Component
@@ -77,7 +77,7 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
     {
       key: '1',
       icon: <Flex align="center" justify="center" className="rb:size-10 rb:rounded-xl rb:bg-[#155EEF] rb:text-white">
-        {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(0, 2) : user.username[0]}
+        {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(0, 2) : user.username?.[0]}
       </Flex>,
       label: (<>
         <div className="rb:text-[#212332] rb:leading-5">{user.username}</div>
