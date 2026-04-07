@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 16:47:09
+ * @Last Modified time: 2026-04-07 20:56:46
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -725,6 +725,41 @@ export const useWorkflowGraph = ({
     // Delete all collected nodes and edges
     if (cells.length > 0) {
       graphRef.current?.removeCells(cells);
+
+      // If parent is iteration/loop and only cycle-start remains, add add-node connected to it
+      parentNodesToUpdate.forEach(parentNode => {
+        const parentShape = parentNode.shape;
+        if (parentShape !== 'loop-node' && parentShape !== 'iteration-node') return;
+        const parentData = parentNode.getData();
+        const remainingChildren = graphRef.current!.getNodes().filter(
+          n => n.getData()?.cycle === parentData.id
+        );
+        const cycleStartNodes = remainingChildren.filter(n => n.getData()?.type === 'cycle-start');
+        if (cycleStartNodes.length === 1 && remainingChildren.length === 1) {
+          const cycleStartNode = cycleStartNodes[0];
+          const bbox = cycleStartNode.getBBox();
+          const addNode = graphRef.current!.addNode({
+            ...graphNodeLibrary.addStart,
+            x: bbox.x + 84,
+            y: bbox.y + 4,
+            data: {
+              type: 'add-node',
+              parentId: parentNode.id,
+              cycle: parentData.id,
+              label: t('workflow.addNode'),
+              icon: '+',
+            },
+          });
+          parentNode.addChild(addNode);
+          const sourcePort = cycleStartNode.getPorts().find(p => p.group === 'right')?.id || 'right';
+          const targetPort = addNode.getPorts().find(p => p.group === 'left')?.id || 'left';
+          graphRef.current!.addEdge({
+            source: { cell: cycleStartNode.id, port: sourcePort },
+            target: { cell: addNode.id, port: targetPort },
+            ...edgeAttrs,
+          });
+        }
+      });
     }
     return false;
   };
