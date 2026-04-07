@@ -1,5 +1,5 @@
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Union
 from langchain_core.embeddings import Embeddings
 
 from app.core.models.base import RedBearModelConfig, get_provider_embedding_class, RedBearModelFactory
@@ -22,7 +22,8 @@ class RedBearEmbeddings(Embeddings):
             self._model = self._create_model(config)
             self._client = None
 
-    def _create_model(self, config: RedBearModelConfig) -> Embeddings:
+    @staticmethod
+    def _create_model(config: RedBearModelConfig) -> Embeddings:
         """根据配置创建 LangChain 模型"""
         embedding_class = get_provider_embedding_class(config.provider)
         provider = config.provider.lower()
@@ -36,6 +37,8 @@ class RedBearEmbeddings(Embeddings):
                 "api_key": config.api_key,
                 "timeout": httpx.Timeout(timeout=config.timeout, connect=60.0),
                 "max_retries": config.max_retries,
+                "check_embedding_ctx_length": False,
+                "encoding_format": "float"
             }
         elif provider == ModelProvider.DASHSCOPE:
             params = {
