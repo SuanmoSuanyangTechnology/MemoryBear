@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 14:38:28
+ * @Last Modified time: 2026-04-07 14:22:40
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Button, Form, Input, Flex, App } from 'antd';
@@ -45,7 +45,7 @@ const OpenStatementSettingModal = forwardRef<OpenStatementSettingModalRef, OpenS
   const handleSave = async () => {
     form.validateFields().then(values => {
       const { suggested_questions, ...rest } = values
-      const filterSuggestedQuestions = suggested_questions.filter(vo => vo && vo.trim() !== '' && vo !== null)
+      const filterSuggestedQuestions = suggested_questions?.filter(vo => vo && vo.trim() !== '' && vo !== null)
       if (values?.enabled && values?.statement && values?.statement?.trim() !== '') {
         const usedVars = [...new Set([...values.statement?.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]))]
 
