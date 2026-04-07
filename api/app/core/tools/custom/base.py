@@ -220,7 +220,9 @@ class CustomTool(BaseTool):
             image_url = None
             if self._uploaded_files:
                 for f in self._uploaded_files:
-                    if f.get("type") == "image":
+                    f_type = f.get("type", "")
+                    if f_type == "image":
+                        # Bedrock/Anthropic 格式：{"type": "image", "source": {"type": "base64", ...}}
                         source = f.get("source", {})
                         if source.get("type") == "base64":
                             media_type = source.get("media_type", "image/jpeg")
@@ -232,7 +234,11 @@ class CustomTool(BaseTool):
                         elif f.get("url"):
                             # 其他格式：{"type": "image", "url": "https://..."}
                             image_url = f.get("url")
-                        break  # 只取第一张图片
+                        break
+                    elif f_type == "image_url":
+                        # OpenAI/Volcano 格式：{"type": "image_url", "image_url": {"url": "..."}}
+                        image_url = f.get("image_url", {}).get("url", "")
+                        break
    
             # 如果 image_url 是服务器中转 URL，直接下载图片转 base64
             # 避免 OSS 签名 URL 在重定向解析过程中被破坏
