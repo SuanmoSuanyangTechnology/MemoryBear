@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 21:29:59
+ * @Last Modified time: 2026-04-07 22:13:47
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -284,7 +284,7 @@ const ChatContent: FC<ChatContentProps> = ({
                   }
                 </div>
                 {/* Bottom label (such as timestamp, username, etc.) */}
-                {labelPosition === 'bottom' && <Flex gap={16} align="center" justify={item.role === 'user' ? 'end' : 'start'}>
+                {(labelPosition === 'bottom' || item.meta_data?.audio_url) && <Flex gap={16} align="center" justify={item.role === 'user' ? 'end' : 'start'}>
                   {item.meta_data?.audio_url && <>
                     {playingIndex !== item.meta_data?.audio_url && item.meta_data?.audio_status === 'pending'
                       ? <Spin />
@@ -299,9 +299,9 @@ const ChatContent: FC<ChatContentProps> = ({
                         />
                     }
                   </>}
-                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
+                  {labelPosition === 'bottom' && <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
                     {labelFormat(item)}
-                  </div>
+                  </div>}
                 </Flex>
                 }
               </>

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:17:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 15:14:02
+ * @Last Modified time: 2026-04-07 21:56:00
  */
 /**
  * RbMarkdown Component
@@ -22,7 +22,7 @@
  * @component
  */
 
-import { useState, useRef, useEffect, type FC, createContext, useContext, useCallback } from 'react'
+import { useState, useRef, useEffect, type FC, createContext, useContext, useCallback, useMemo } from 'react'
 import { Image, Input, Select, Form, Checkbox, Radio, ColorPicker, DatePicker, TimePicker, InputNumber, Slider } from 'antd'
 import ReactMarkdown from 'react-markdown'
 import RemarkGfm from 'remark-gfm'
@@ -44,6 +44,11 @@ const FormContext = createContext<{
   onSubmit?: (values: Record<string, any>) => void;
 } | null>(null)
 
+/** Stable form wrapper component — state lives in RbMarkdown, survives components object rebuilds */
+const RbForm: FC<any> = ({ children, ...props }) => (
+  <Form {...props}>{children}</Form>
+)
+
 /** Props interface for RbMarkdown component */
 interface RbMarkdownProps {
   /** Markdown content to render */
@@ -60,8 +65,8 @@ interface RbMarkdownProps {
   onFormSubmit?: (values: Record<string, any>) => void;
 }
 
-/** Build components with onFormSubmit callback */
-const buildComponents = (onFormSubmit?: (values: Record<string, any>) => void) => ({
+/** Build stable components map — form submission handled via FormContext */
+const buildComponents = () => ({
   h1: ({ children, ...props }: any) => <h1 className="rb:text-2xl rb:font-bold rb:mb-2" {...props}>{children}</h1>,
   h2: ({ children, ...props }: any) => <h2 className="rb:text-xl rb:font-bold rb:mb-2" {...props}>{children}</h2>,
   h3: ({ children, ...props }: any) => <h3 className="rb:text-lg rb:font-bold rb:mb-2" {...props}>{children}</h3>,
@@ -95,49 +100,50 @@ const buildComponents = (onFormSubmit?: (values: Record<string, any>) => void) =
   td: ({ children, ...props }: any) => <td className="rb:border rb:border-[#EBEBEB] rb:px-2 rb:py-1 rb:text-left" {...props}>{children}</td>,
   button: ({ children, ...props }: any) => {
     const ctx = useContext(FormContext)
-    return <RbButton {...props} onClick={() => ctx?.onSubmit?.(ctx.values)}>{[children]}</RbButton>
+    return <RbButton {...props} onClick={() => ctx?.onSubmit?.(ctx?.values ?? {})}>{[children]}</RbButton>
   },
-  input: ({ children, ...props }: any) => {
+  input: ({ children, value, ...props }: any) => {
     const ctx = useContext(FormContext)
     const handleChange = useCallback((val: any) => {
       if (props.name) ctx?.setValue(props.name, val)
     }, [ctx, props.name])
+    console.log('props', props)
     switch (props.type) {
       case 'color':
-        return <ColorPicker className="rb:mb-4!" {...props} onChange={handleChange} />
+        return <ColorPicker className="rb:mb-4!" defaultValue={value} {...props} onChange={handleChange} />
       case 'time':
-        return <TimePicker className="rb:mb-4!" {...props} onChange={handleChange} />
+        return <TimePicker className="rb:mb-4!" defaultValue={value} {...props} onChange={handleChange} />
       case 'date':
-        return <DatePicker className="rb:mb-4!" {...props} onChange={handleChange} />
+        return <DatePicker className="rb:mb-4!" defaultValue={value} {...props} onChange={handleChange} />
       case 'datetime':
       case 'datetime-local':
-        return <DatePicker className="rb:mb-4!" showTime={true} {...props} onChange={handleChange} />
+        return <DatePicker className="rb:mb-4!" defaultValue={value} showTime={true} {...props} onChange={handleChange} />
       case 'week':
-        return <DatePicker className="rb:mb-4!" picker="week" {...props} onChange={handleChange} />
+        return <DatePicker className="rb:mb-4!" defaultValue={value} picker="week" {...props} onChange={handleChange} />
       case 'month':
-        return <DatePicker className="rb:mb-4!" picker="month" {...props} onChange={handleChange} />
+        return <DatePicker className="rb:mb-4!" defaultValue={value} picker="month" {...props} onChange={handleChange} />
       case 'number':
-        return <InputNumber className="rb:mb-4!" {...props} onChange={handleChange} />
+        return <InputNumber className="rb:mb-4!" defaultValue={value} {...props} onChange={handleChange} />
       case 'search':
-        return <Input.Search className="rb:mb-4!" {...props} onChange={(e) => handleChange(e.target.value)} />
+        return <Input.Search className="rb:mb-4!" defaultValue={value} {...props} onChange={(e) => handleChange(e.target.value)} />
       case 'range':
-        return <Slider className="rb:mb-4!" {...props} onChange={handleChange} />
+        return <Slider className="rb:mb-4!" defaultValue={value} {...props} onChange={handleChange} />
       case 'submit':
       case 'button':
-        return <RbButton className="rb:mb-4!" {...props} onClick={() => ctx?.onSubmit?.(ctx.values)}>{[props.value || children]}</RbButton>
+        return <RbButton className="rb:mb-4!" defaultValue={value} {...props} onClick={() => ctx?.onSubmit?.(ctx?.values ?? {})}>{[props.value || children]}</RbButton>
       case 'checkbox':
-        return <Checkbox className="rb:mb-4!" {...props} onChange={(e) => handleChange(e.target.checked)}>{children}</Checkbox>
+        return <Checkbox className="rb:mb-4!" defaultValue={value} {...props} onChange={(e) => handleChange(e.target.checked)}>{children}</Checkbox>
       case 'password':
-        return <Input.Password className="rb:mb-4!" {...props} onChange={(e) => handleChange(e.target.value)} />
+        return <Input.Password className="rb:mb-4!" defaultValue={value} {...props} onChange={(e) => handleChange(e.target.value)} />
       case 'radio':
-        return <Radio className="rb:mb-4!" {...props} onChange={(e) => handleChange(e.target.value)}>{children}</Radio>
+        return <Radio className="rb:mb-4!" defaultValue={value} {...props} onChange={(e) => handleChange(e.target.value)}>{children}</Radio>
       case 'select': {
         const raw = props['data-options']
         const options = (typeof raw === 'string' ? JSON.parse(raw) : raw || []).map((v: string) => ({ label: v, value: v }))
-        return <Select className="rb:mb-4! rb:w-full!" options={options} onChange={(val) => { if (props.name) ctx?.setValue(props.name, val) }} />
+        return <Select className="rb:mb-4! rb:w-full!" defaultValue={value} options={options} onChange={(val) => { if (props.name) ctx?.setValue(props.name, val) }} />
       }
       default:
-        return <Input className="rb:mb-4!" value={children} {...props} onChange={(e) => handleChange(e.target.value)} />
+        return <Input className="rb:mb-4!" defaultValue={value} {...props} onChange={(e) => handleChange(e.target.value)} />
     }
   },
   select: ({ children, ...props }: any) => {
@@ -148,15 +154,7 @@ const buildComponents = (onFormSubmit?: (values: Record<string, any>) => void) =
     const ctx = useContext(FormContext)
     return <Input.TextArea className="rb:mb-4!" {...props} onChange={(e) => { if (props.name) ctx?.setValue(props.name, e.target.value) }}>{children}</Input.TextArea>
   },
-  form: ({ children, ...props }: any) => {
-    const [values, setValues] = useState<Record<string, any>>({})
-    const setValue = useCallback((name: string, value: any) => setValues(prev => ({ ...prev, [name]: value })), [])
-    return (
-      <FormContext.Provider value={{ values, setValue, onSubmit: onFormSubmit }}>
-        <Form {...props}>{children}</Form>
-      </FormContext.Provider>
-    )
-  },
+  form: RbForm,
   label: ({ children, ...props }: any) => {
     return <label className="rb:block rb:font-medium rb:text-[#212332] rb:mb-2" {...props}>{children}</label>
   },
@@ -171,7 +169,10 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
   className,
   onFormSubmit,
 }) => {
-  const components = buildComponents(onFormSubmit)
+  const [formValues, setFormValues] = useState<Record<string, any>>({})
+  const setValue = useCallback((name: string, value: any) => setFormValues(prev => ({ ...prev, [name]: value })), [])
+  const formCtx = useMemo(() => ({ values: formValues, setValue, onSubmit: onFormSubmit }), [formValues, setValue, onFormSubmit])
+  const components = useMemo(() => buildComponents(), [])
   const [editContent, setEditContent] = useState(content)
   const textareaRef = useRef<any>(null)
 
@@ -238,6 +239,7 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
 
   /** Render markdown preview mode */
   return (
+    <FormContext.Provider value={formCtx}>
     <div className={`rb:relative ${className || ''}`} onKeyDown={handleKeyDown} tabIndex={0}>
       <style>{`
         .html-comment {
@@ -274,6 +276,7 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
         {processedContent}
       </ReactMarkdown>
     </div>
+    </FormContext.Provider>
   )
 }
 export default RbMarkdown
