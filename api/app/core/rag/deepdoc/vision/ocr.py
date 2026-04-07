@@ -81,13 +81,15 @@ def load_model(model_dir, nm, device_id: int | None = None):
     options = ort.SessionOptions()
     options.enable_cpu_mem_arena = False
     options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-    options.intra_op_num_threads = 2
-    options.inter_op_num_threads = 2
 
     # https://github.com/microsoft/onnxruntime/issues/9509#issuecomment-951546580
     # Shrink GPU memory after execution
     run_options = ort.RunOptions()
     if cuda_is_available():
+        # GPU mode: minimal CPU threads since computation happens on GPU
+        options.intra_op_num_threads = int(os.environ.get("ORT_GPU_INTRA_THREADS", "1"))
+        options.inter_op_num_threads = int(os.environ.get("ORT_GPU_INTER_THREADS", "1"))
+
         gpu_mem_limit_mb = int(os.environ.get("OCR_GPU_MEM_LIMIT_MB", "2048"))
         arena_strategy = os.environ.get("OCR_ARENA_EXTEND_STRATEGY", "kNextPowerOfTwo")
         provider_device_id = 0 if device_id is None else device_id
@@ -105,12 +107,16 @@ def load_model(model_dir, nm, device_id: int | None = None):
         run_options.add_run_config_entry("memory.enable_memory_arena_shrinkage", "gpu:" + str(provider_device_id))
         logging.info(f"load_model {model_file_path} uses GPU (device {provider_device_id}, gpu_mem_limit={cuda_provider_options['gpu_mem_limit']}, arena_strategy={arena_strategy})")
     else:
+        # CPU mode: more threads to speed up inference
+        options.intra_op_num_threads = int(os.environ.get("ORT_CPU_INTRA_THREADS", "4"))
+        options.inter_op_num_threads = int(os.environ.get("ORT_CPU_INTER_THREADS", "2"))
+
         sess = ort.InferenceSession(
             model_file_path,
             options=options,
             providers=['CPUExecutionProvider'])
         run_options.add_run_config_entry("memory.enable_memory_arena_shrinkage", "cpu")
-        logging.info(f"load_model {model_file_path} uses CPU")
+        logging.info(f"load_model {model_file_path} uses CPU (intra_threads={options.intra_op_num_threads}, inter_threads={options.inter_op_num_threads})")
     loaded_model = (sess, run_options)
     loaded_models[model_cached_tag] = loaded_model
     return loaded_model

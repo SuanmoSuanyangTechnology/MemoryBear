@@ -1,0 +1,41 @@
+# GPU override for document worker
+# Usage: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# This replaces worker-document with a GPU-accelerated version.
+# Requires: NVIDIA GPU + nvidia-container-toolkit installed on host.
+# Build GPU image first: docker build -f Dockerfile.gpu -t redbear-mem-open:gpu .
+
+services:
+  worker-document:
+    image: redbear-mem-open:gpu
+    container_name: worker-document-gpu
+    env_file:
+      - .env
+    environment:
+      - PARALLEL_DEVICES=1
+      - OCR_GPU_MEM_LIMIT_MB=2048
+      - OCR_ARENA_EXTEND_STRATEGY=kNextPowerOfTwo
+      - ORT_GPU_INTRA_THREADS=1
+      - ORT_GPU_INTER_THREADS=1
+    volumes:
+      - ./files:/files
+      - /etc/localtime:/etc/localtime:ro
+    command: >
+      celery -A app.celery_worker.celery_app worker -E
+      --loglevel=info --pool=prefork --concurrency=2
+      --queues=document_tasks
+      --max-tasks-per-child=30
+      --max-memory-per-child=4000000
+      -n document_worker@%h
+    restart: unless-stopped
+    networks:
+      - celery
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+        limits:
+          memory: 16G

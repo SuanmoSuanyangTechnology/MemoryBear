@@ -1,8 +1,10 @@
+import os
+
 from app.core.rag.utils import es_conn
 from app.core.rag.nlp import search
 from app.core.rag.graphrag import search as kg_search
 
-PARALLEL_DEVICES: int = 0
+PARALLEL_DEVICES: int = int(os.environ.get("PARALLEL_DEVICES", "0"))
 
 docStoreConn = None
 
