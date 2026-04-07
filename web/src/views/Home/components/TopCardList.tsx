@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:28:07 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-11 14:57:55
+ * @Last Modified time: 2026-04-07 23:23:04
  */
 /**
  * Top Card List Component
@@ -62,8 +62,8 @@ const TopCardList: FC<{data?: DashboardData}> = ({ data }) => {
               'rb:text-[#FF5D34]': data?.[`${item.key}_change` as keyof DashboardData] && data?.[`${item.key}_change` as keyof DashboardData] < 0,
               'rb:text-[#369F21]': !data?.[`${item.key}_change` as keyof DashboardData] || data?.[`${item.key}_change` as keyof DashboardData] >= 0,
             })}>
-              {data?.[`${item.key}_change` as keyof DashboardData] && data?.[item.key as keyof DashboardData] > 0
-                ? (100 * data?.[`${item.key}_change` as keyof DashboardData] / data?.[item.key as keyof DashboardData]).toFixed(2)
+              {data?.[`${item.key}_change` as keyof DashboardData] && typeof data?.[item.key as keyof DashboardData] === 'number'
+                ? (100 * data?.[`${item.key}_change` as keyof DashboardData]).toFixed(2)
                 : 0
               }%
               <div className={clsx("rb:size-3.5 rb:cursor-pointer rb:bg-cover", {
