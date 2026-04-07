@@ -38,6 +38,7 @@ import RbCard from '@/components/RbCard/Card';
 import ModelConfig from './ModelConfig'
 import ModelSelect from '@/components/ModelSelect'
 import ListOperator from './ListOperator'
+import type { Variable } from "./VariableList/types";
 
 /**
  * Props for Properties component
@@ -229,7 +230,6 @@ const Properties: FC<PropertiesProps> = ({
       }
       return filteredList;
     };
-
     if (nodeType === 'llm') {
       // For LLM nodes that are children of iteration or loop nodes, include parent variables
       const parentLoopNode = selectedNode ? (() => {
@@ -790,8 +790,25 @@ const Properties: FC<PropertiesProps> = ({
                                                   return nodeTypeMatch || variableNameMatch;
                                                 });
                                               }
-                                              if (config.onFilterVariableNames) {
-                                                return baseVariableList.filter(variable => Array.isArray(config.onFilterVariableNames) && config.onFilterVariableNames.includes(variable.label));
+                                              if (config.onFilterVariableType) {
+                                                const types = config.onFilterVariableType as string[];
+                                                let list: Suggestion[] = []
+                                                baseVariableList.forEach((variable) => {
+                                                  if (variable.children?.length) {
+                                                    const filteredChildren = variable.children.filter((c: Suggestion) => types.includes(c.dataType));
+                                                    console.log('filteredChildren', filteredChildren)
+                                                    if (filteredChildren.length > 0) {
+                                                      list.push({ ...variable, children: filteredChildren });
+                                                    } else if (types.includes(variable.dataType)) {
+                                                      list.push({ ...variable, children: [] });
+                                                    }
+                                                  } else if (types.includes(variable.dataType)) {
+                                                    list.push(variable);
+                                                  }
+                                                });
+
+                                                console.log('list', list)
+                                                return list
                                               }
                                               // Filter child nodes for iteration output
                                               if (config.filterChildNodes && selectedNode) {
@@ -812,7 +829,7 @@ const Properties: FC<PropertiesProps> = ({
                                               }
                                               return baseVariableList;
                                             })()}
-                                            onChange={(value, option) => handleChangeVariableList(value, option, key)}
+                                            onChange={(value, option) => handleChangeVariableList(value as string, option, key)}
                                             size="small"
                                           />
                                           : config.type === 'switch'

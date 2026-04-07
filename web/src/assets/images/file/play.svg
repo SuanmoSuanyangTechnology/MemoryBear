@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="40px" height="40px" viewBox="0 0 40 40" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>播放</title>
+    <defs>
+        <filter x="-3.4%" y="-9.4%" width="106.8%" height="121.1%" filterUnits="objectBoundingBox" id="filter-1">
+            <feOffset dx="0" dy="2" in="SourceAlpha" result="shadowOffsetOuter1"></feOffset>
+            <feGaussianBlur stdDeviation="6" in="shadowOffsetOuter1" result="shadowBlurOuter1"></feGaussianBlur>
+            <feColorMatrix values="0 0 0 0 0.0901960784   0 0 0 0 0.0901960784   0 0 0 0 0.0980392157  0 0 0 0.1 0" type="matrix" in="shadowBlurOuter1" result="shadowMatrixOuter1"></feColorMatrix>
+            <feMerge>
+                <feMergeNode in="shadowMatrixOuter1"></feMergeNode>
+                <feMergeNode in="SourceGraphic"></feMergeNode>
+            </feMerge>
+        </filter>
+    </defs>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="记忆验证-交互" transform="translate(-1148, -304)" fill-rule="nonzero">
+            <g id="输入框1" filter="url(#filter-1)" transform="translate(774, 285)">
+                <g id="文件" transform="translate(206, 12)">
+                    <g id="播放" transform="translate(180, 17)">
+                        <rect id="矩形" fill="#000000" opacity="0" x="0" y="0" width="16" height="16"></rect>
+                        <path d="M8,0 C3.6,0 0,3.6 0,8 C0,12.4 3.6,16 8,16 C12.4,16 16,12.4 16,8 C16,3.6 12.4,0 8,0 Z" id="路径" fill="#171719"></path>
+                        <path d="M10.5,6.9 L7.83332813,5.13332812 C6.93332813,4.53332812 6.16667188,4.93332812 6.16667188,6.03332812 L6.16667188,10.0333281 C6.16667188,11.1333281 6.9,11.5333281 7.83332813,10.9333281 L10.5,9.16667187 C11.4,8.5 11.4,7.5 10.5,6.9 Z" id="路径" fill="#FFFFFF"></path>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

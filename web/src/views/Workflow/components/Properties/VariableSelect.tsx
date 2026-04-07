@@ -20,7 +20,7 @@ interface VariableSelectProps {
   multiple?: boolean;
   size?: 'small' | 'middle' | 'large';
   placeholder?: string;
-  variant?: 'outlined' | 'borderless';
+  variant?: 'outlined' | 'borderless' | 'filled';
   className?: string;
   onChange?: (value: string | string[], option: Suggestion | Suggestion[] | undefined) => void;
 }
@@ -190,12 +190,12 @@ const VariableSelect: FC<VariableSelectProps> = ({
       {/* Trigger */}
       <div
         className={clsx(
-          'rb:w-full rb:flex rb:items-center rb:justify-between rb:cursor-pointer rb:rounded-md rb:bg-white rb:px-2 rb:transition-colors',
-          variant === 'outlined' && 'rb:border rb:border-[#d9d9d9] hover:rb:border-[#4096ff]',
+          'rb:w-full rb:flex rb:items-center rb:justify-between rb:cursor-pointer rb:rounded-md rb:px-2 rb:transition-colors',
+          variant === 'outlined' && 'rb:border rb:border-[#d9d9d9] hover:rb:border-[#4096ff] rb:bg-white',
           variant === 'outlined' && open && 'rb:border-[#4096ff] rb:shadow-[0_0_0_2px_rgba(5,145,255,0.1)]',
           variant === 'borderless' && 'rb:border-none rb:shadow-none rb:bg-transparent',
           multiple && size === 'small' ? 'rb:min-h-6 rb:py-0.75' : multiple ? 'rb:min-h-8 rb:py-1' : size === 'small' ? 'rb:h-6 rb:text-[10px]' : size === 'large' ? 'rb:h-10' : 'rb:h-8 rb:text-[12px]',
-          !multiple && (size === 'small' ? 'rb:text-[10px]' : 'rb:text-[12px]'),
+          !multiple && (size === 'small' ? 'rb:text-[12px]' : 'rb:text-[12px]'),
           className
         )}
         onClick={() => setOpen(o => !o)}

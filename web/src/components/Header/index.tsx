@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:07:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-05 13:43:59
+ * @Last Modified time: 2026-04-03 20:21:02
  */
 /**
  * AppHeader Component
@@ -180,7 +180,7 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
         >
           <Flex align="center" className="rb:cursor-pointer rb:font-medium">
             <Flex align="center" justify="center" className="rb:size-8 rb:rounded-xl rb:bg-[#155EEF] rb:text-white rb:mr-2!">
-              {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(0, 2) : user.username[0]}
+              {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(user.username.length, -2) : user.username[0]}
             </Flex>
             <span className="rb:text-[#212332] rb:text-[12px] rb:leading-4 rb:mr-1">{user.username}</span>
             <div className={clsx("rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')]", {

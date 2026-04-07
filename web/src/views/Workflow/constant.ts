@@ -128,7 +128,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           vision_input: {
             type: 'variableList',
-            onFilterVariableNames: ['sys.files']
+            onFilterVariableType: ['array[file]']
           }
         }
       },
@@ -457,7 +457,7 @@ export const nodeLibrary: NodeLibrary[] = [
           file_selector: {
             type: 'variableList',
             placeholder: 'common.pleaseSelect',
-            onFilterVariableNames: ['sys.files']
+            onFilterVariableType: ['array[file]', 'file']
           }
         }
       },
