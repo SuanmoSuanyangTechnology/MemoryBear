@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:17:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 15:14:02
+ * @Last Modified time: 2026-04-07 21:56:00
  */
 /**
  * RbMarkdown Component
@@ -97,47 +97,48 @@ const buildComponents = (onFormSubmit?: (values: Record<string, any>) => void) =
     const ctx = useContext(FormContext)
     return <RbButton {...props} onClick={() => ctx?.onSubmit?.(ctx.values)}>{[children]}</RbButton>
   },
-  input: ({ children, ...props }: any) => {
+  input: ({ children, value, ...props }: any) => {
     const ctx = useContext(FormContext)
     const handleChange = useCallback((val: any) => {
       if (props.name) ctx?.setValue(props.name, val)
     }, [ctx, props.name])
+    console.log('props', props)
     switch (props.type) {
       case 'color':
-        return <ColorPicker className="rb:mb-4!" {...props} onChange={handleChange} />
+        return <ColorPicker className="rb:mb-4!" defaultValue={value} {...props} onChange={handleChange} />
       case 'time':
-        return <TimePicker className="rb:mb-4!" {...props} onChange={handleChange} />
+        return <TimePicker className="rb:mb-4!" defaultValue={value} {...props} onChange={handleChange} />
       case 'date':
-        return <DatePicker className="rb:mb-4!" {...props} onChange={handleChange} />
+        return <DatePicker className="rb:mb-4!" defaultValue={value} {...props} onChange={handleChange} />
       case 'datetime':
       case 'datetime-local':
-        return <DatePicker className="rb:mb-4!" showTime={true} {...props} onChange={handleChange} />
+        return <DatePicker className="rb:mb-4!" defaultValue={value} showTime={true} {...props} onChange={handleChange} />
       case 'week':
-        return <DatePicker className="rb:mb-4!" picker="week" {...props} onChange={handleChange} />
+        return <DatePicker className="rb:mb-4!" defaultValue={value} picker="week" {...props} onChange={handleChange} />
       case 'month':
-        return <DatePicker className="rb:mb-4!" picker="month" {...props} onChange={handleChange} />
+        return <DatePicker className="rb:mb-4!" defaultValue={value} picker="month" {...props} onChange={handleChange} />
       case 'number':
-        return <InputNumber className="rb:mb-4!" {...props} onChange={handleChange} />
+        return <InputNumber className="rb:mb-4!" defaultValue={value} {...props} onChange={handleChange} />
       case 'search':
-        return <Input.Search className="rb:mb-4!" {...props} onChange={(e) => handleChange(e.target.value)} />
+        return <Input.Search className="rb:mb-4!" defaultValue={value} {...props} onChange={(e) => handleChange(e.target.value)} />
       case 'range':
-        return <Slider className="rb:mb-4!" {...props} onChange={handleChange} />
+        return <Slider className="rb:mb-4!" defaultValue={value} {...props} onChange={handleChange} />
       case 'submit':
       case 'button':
-        return <RbButton className="rb:mb-4!" {...props} onClick={() => ctx?.onSubmit?.(ctx.values)}>{[props.value || children]}</RbButton>
+        return <RbButton className="rb:mb-4!" defaultValue={value} {...props} onClick={() => ctx?.onSubmit?.(ctx.values)}>{[props.value || children]}</RbButton>
       case 'checkbox':
-        return <Checkbox className="rb:mb-4!" {...props} onChange={(e) => handleChange(e.target.checked)}>{children}</Checkbox>
+        return <Checkbox className="rb:mb-4!" defaultValue={value} {...props} onChange={(e) => handleChange(e.target.checked)}>{children}</Checkbox>
       case 'password':
-        return <Input.Password className="rb:mb-4!" {...props} onChange={(e) => handleChange(e.target.value)} />
+        return <Input.Password className="rb:mb-4!" defaultValue={value} {...props} onChange={(e) => handleChange(e.target.value)} />
       case 'radio':
-        return <Radio className="rb:mb-4!" {...props} onChange={(e) => handleChange(e.target.value)}>{children}</Radio>
+        return <Radio className="rb:mb-4!" defaultValue={value} {...props} onChange={(e) => handleChange(e.target.value)}>{children}</Radio>
       case 'select': {
         const raw = props['data-options']
         const options = (typeof raw === 'string' ? JSON.parse(raw) : raw || []).map((v: string) => ({ label: v, value: v }))
-        return <Select className="rb:mb-4! rb:w-full!" options={options} onChange={(val) => { if (props.name) ctx?.setValue(props.name, val) }} />
+        return <Select className="rb:mb-4! rb:w-full!" defaultValue={value} options={options} onChange={(val) => { if (props.name) ctx?.setValue(props.name, val) }} />
       }
       default:
-        return <Input className="rb:mb-4!" value={children} {...props} onChange={(e) => handleChange(e.target.value)} />
+        return <Input className="rb:mb-4!" defaultValue={value} {...props} onChange={(e) => handleChange(e.target.value)} />
     }
   },
   select: ({ children, ...props }: any) => {

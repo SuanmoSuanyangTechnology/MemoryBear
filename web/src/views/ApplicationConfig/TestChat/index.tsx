@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 21:31:19
+ * @Last Modified time: 2026-04-07 21:48:30
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -95,7 +95,7 @@ const TestChat: FC<TestChatProps> = ({
 
   useEffect(() => {
     getVariables()
-  }, [application, config])
+  }, [application, JSON.stringify(config)])
 
   useEffect(() => {
     return () => {
