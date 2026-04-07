@@ -281,7 +281,7 @@ const CaseList: FC<CaseListProps> = ({
                                             options={options}
                                             size="small"
                                             allowClear={false}
-                                            onChange={(val) => handleLeftFieldChange(caseIndex, conditionIndex, val)}
+                                            onChange={(val) => handleLeftFieldChange(caseIndex, conditionIndex, val as string)}
                                             variant="borderless"
                                             className="rb:w-36!"
                                           />

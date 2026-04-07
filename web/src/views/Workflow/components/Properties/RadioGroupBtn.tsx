@@ -63,6 +63,7 @@ const RadioGroupBtn: FC<RadioCardProps> = ({
   allowClear = true,
   block = false,
   type,
+  className,
 }) => {
   /** Listen to value changes and trigger side effects via onValueChange callback */
   useEffect(() => {
@@ -86,7 +87,7 @@ const RadioGroupBtn: FC<RadioCardProps> = ({
   }
 
   return (
-    <div className={clsx(`rb:grid rb:grid-cols-${block ? 1 : options.length} rb:gap-1`)}>
+    <div className={clsx(`rb:grid rb:grid-cols-${block ? 1 : options.length} rb:gap-1`, className)}>
       {/* Render each option as a selectable card */}
       {options.map(option => (
         <div key={String(option.value)} className={clsx("rb:border rb:w-full rb:leading-4.5 rb:px-2.5  rb:text-center rb:text-[12px] rb:font-medium rb:cursor-pointer", {

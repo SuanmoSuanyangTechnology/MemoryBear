@@ -237,8 +237,11 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
       percent: 0,
       type: rcFile.type,
       originFileObj: rcFile,
-      thumbUrl: URL.createObjectURL(rcFile)
+      thumbUrl: URL.createObjectURL(rcFile),
+      size: rcFile.size,
     }
+
+    console.log('fileVo', fileVo)
     onChange?.(fileVo)
     request.uploadFile(action, formData, requestConfig)
       .then(res => {
