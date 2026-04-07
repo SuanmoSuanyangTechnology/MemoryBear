@@ -91,10 +91,10 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
     },
     {
       key: '3',
-      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/menuNew/userInfo.svg')]"></div>,
+      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/userInfo.svg')]"></div>,
       label: <Flex justify="space-between" align="center">
         {t('header.userInfo')}
-        <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/menuNew/arrow_t_r.svg')]"></div>
+        <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/arrow_t_r.svg')]"></div>
       </Flex>,
       className: 'rb:text-[#212332]!',
       onClick: () => {
@@ -103,10 +103,10 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
     },
     {
       key: '4',
-      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/menuNew/settings.svg')]"></div>,
+      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/settings.svg')]"></div>,
       label: <Flex justify="space-between" align="center">
         {t('header.settings')}
-        <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/menuNew/arrow_t_r.svg')]"></div>
+        <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/arrow_t_r.svg')]"></div>
       </Flex>,
       className: 'rb:text-[#212332]!',
       onClick: () => {
@@ -120,7 +120,7 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
     },
     {
       key: '6',
-      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/menuNew/logout_red.svg')]"></div>,
+      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/logout_red.svg')]"></div>,
       label: t('header.logout'),
       danger: true,
       className: 'rb:hover:rb:bg-transparent rb:hover:text-[#FF5D34]!',

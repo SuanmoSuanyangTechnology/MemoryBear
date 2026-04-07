@@ -1,4 +1,4 @@
-import { type FC, useEffect, useState } from "react";
+import { type FC, useEffect, useState, useMemo } from "react";
 import { useTranslation } from 'react-i18next'
 import { Form, Select, InputNumber, Switch, Cascader, type CascaderProps, Tooltip } from 'antd'
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
@@ -163,6 +163,24 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
 
     form.setFieldsValue(inititalValue)
   }
+  const getNumberOptions = useMemo(() => {
+    const list: Suggestion[] = []
+
+    options.forEach(vo => {
+      if (vo.children && vo?.children?.length > 0) {
+        const filterChild = vo.children.filter(child => child.dataType === 'number')
+
+        if (filterChild.length > 0) {
+          list.push({ ...vo, children: filterChild })
+        } else {
+          list.push({ ...vo, children: [] })
+        }
+      } else {
+        list.push({ ...vo })
+      }
+    })
+    return list
+  }, [options])
 
   return (
     <>
@@ -202,15 +220,14 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
                 : parameter.type === 'boolean'
                 ? <Switch size="small" />
                 : parameter.type === 'integer' || parameter.type === 'number'
-                ? <InputNumber
-                    min={parameter.minimum}
-                    max={parameter.maximum}
-                    step={parameter.type === 'integer' ? 1 : 0.01}
-                    placeholder={t('common.pleaseEnter')}
-                      className="rb:w-full!"
-                      size="small"
-                    onChange={(value) => form.setFieldValue(['tool_parameters', parameter.name], value)}
-                  />
+                ? <Editor
+                  variant="outlined"
+                  type="input"
+                  size="small"
+                  height={28}
+                  options={getNumberOptions}
+                  placeholder={t('common.pleaseEnter')}
+                />
                 : <Editor
                     variant="outlined"
                     type="input"

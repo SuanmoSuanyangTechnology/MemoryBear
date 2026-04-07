@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-02 17:12:41
+ * @Last Modified time: 2026-04-07 16:51:04
  */
 import { useEffect, useLayoutEffect, useState, useRef, type FC } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
@@ -168,7 +168,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
   // Group suggestions by node ID
   const groupedSuggestions = options.reduce((groups: Record<string, Suggestion[]>, suggestion) => {
     const { nodeData } = suggestion
-    const nodeId = nodeData.id as string;
+    const nodeId = nodeData?.id as string;
     if (!groups[nodeId]) {
       groups[nodeId] = [];
     }
@@ -291,67 +291,67 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
       }}
     >
       <div className="rb:py-1 rb:min-w-70 rb:max-h-50 rb:overflow-y-auto">
-      <Flex vertical gap={12}>
-        {Object.entries(groupedSuggestions).map(([nodeId, nodeOptions]) => {
-          const nodeName = nodeOptions[0]?.nodeData?.name || nodeId;
-          const nodeIcon = nodeOptions[0]?.nodeData?.icon;
-          return (
-            <div key={nodeId}>
-              <Flex align="center" gap={4} className="rb:px-3! rb:text-[12px] rb:py-1.25! rb:font-medium rb:text-[#5B6167]">
-                {nodeIcon && <div className={`rb:size-3 rb:bg-cover ${nodeIcon}`} />}
-                {nodeName}
-              </Flex>
-              {nodeOptions.map((option) => {
-                const globalIndex = flatOptions.indexOf(option);
-                const isExpanded = expandedParent?.key === option.key;
-                const hasChildren = !!option.children?.length;
-                return (
-                  <Flex
-                    key={option.key}
-                    ref={(el) => { if (el) itemRefs.current.set(option.key, el); }}
-                    data-selected={selectedIndex === globalIndex}
-                    className="rb:pl-6! rb:pr-3! rb:py-2!"
-                    align="center"
-                    justify="space-between"
-                    style={{
-                      cursor: option.disabled ? 'not-allowed' : 'pointer',
-                      background: (selectedIndex === globalIndex || isExpanded) ? '#f0f8ff' : 'white',
-                      opacity: option.disabled ? 0.5 : 1,
-                    }}
-                    onClick={() => {
-                      if (option.disabled) return;
-                      insertMention(option);
-                    }}
-                    onMouseEnter={() => {
-                      setSelectedIndex(globalIndex);
-                      if (hasChildren) {
-                        const el = itemRefs.current.get(option.key);
-                        if (el && popupRef.current) {
-                          const elRect = el.getBoundingClientRect();
-                          const popupRect = popupRef.current.getBoundingClientRect();
-                          setChildPanelTop(calcChildPanelTop(elRect, popupRect));
+        <Flex vertical gap={12}>
+          {Object.entries(groupedSuggestions).map(([nodeId, nodeOptions]) => {
+            const nodeName = nodeOptions[0]?.nodeData?.name || nodeId;
+            const nodeIcon = nodeOptions[0]?.nodeData?.icon;
+            return (
+              <div key={nodeId}>
+                {nodeName !== 'undefined' && <Flex align="center" gap={4} className="rb:px-3! rb:text-[12px] rb:py-1.25! rb:font-medium rb:text-[#5B6167]">
+                  {nodeIcon && <div className={`rb:size-3 rb:bg-cover ${nodeIcon}`} />}
+                  {nodeName}
+                </Flex>}
+                {nodeOptions.map((option) => {
+                  const globalIndex = flatOptions.indexOf(option);
+                  const isExpanded = expandedParent?.key === option.key;
+                  const hasChildren = !!option.children?.length;
+                  return (
+                    <Flex
+                      key={option.key}
+                      ref={(el) => { if (el) itemRefs.current.set(option.key, el); }}
+                      data-selected={selectedIndex === globalIndex}
+                      className="rb:pl-6! rb:pr-3! rb:py-2!"
+                      align="center"
+                      justify="space-between"
+                      style={{
+                        cursor: option.disabled ? 'not-allowed' : 'pointer',
+                        background: (selectedIndex === globalIndex || isExpanded) ? '#f0f8ff' : 'white',
+                        opacity: option.disabled ? 0.5 : 1,
+                      }}
+                      onClick={() => {
+                        if (option.disabled) return;
+                        insertMention(option);
+                      }}
+                      onMouseEnter={() => {
+                        setSelectedIndex(globalIndex);
+                        if (hasChildren) {
+                          const el = itemRefs.current.get(option.key);
+                          if (el && popupRef.current) {
+                            const elRect = el.getBoundingClientRect();
+                            const popupRect = popupRef.current.getBoundingClientRect();
+                            setChildPanelTop(calcChildPanelTop(elRect, popupRect));
+                          }
+                          setExpandedParent(option);
+                        } else {
+                          setExpandedParent(null);
                         }
-                        setExpandedParent(option);
-                      } else {
-                        setExpandedParent(null);
-                      }
-                    }}
-                  >
-                    <Space size={4}>
-                      <span className="rb:text-[#155EEF]">{option.isContext ? '📄' : `{x}`}</span>
-                      <span>{option.label}</span>
-                    </Space>
-                    <Space size={4}>
-                      {option.dataType && <span className="rb:text-[#5B6167]">{option.dataType}</span>}
-                      {hasChildren && <span className="rb:text-[#5B6167] rb:ml-1">›</span>}
-                    </Space>
-                  </Flex>
-                );
-              })}
-            </div>
-          );
-        })}
-      </Flex>
+                      }}
+                    >
+                      {option.label && <Space size={4}>
+                        <span className="rb:text-[#155EEF]">{option.isContext ? '📄' : `{x}`}</span>
+                        <span>{option.label}</span>
+                      </Space>}
+                      <Space size={4}>
+                        {option.dataType && <span className="rb:text-[#5B6167]">{option.dataType}</span>}
+                        {hasChildren && <span className="rb:text-[#5B6167] rb:ml-1">›</span>}
+                      </Space>
+                    </Flex>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </Flex>
       </div>
       {/* Child variables panel - floats to the left */}
       {expandedParent?.children?.length && (

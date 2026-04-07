@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-04-02 17:10:59 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-04-02 17:10:59 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-04-07 14:50:14
  */
 import { useEffect, useState, useRef, type FC } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
@@ -161,7 +161,7 @@ const Jinja2AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) =>
         {Object.entries(groupedSuggestions).map(([nodeId, nodeOptions]) => (
           <div key={nodeId}>
             <Flex align="center" gap={4} className="rb:px-3! rb:text-[12px] rb:py-1.25! rb:font-medium rb:text-[#5B6167]">
-              {nodeOptions[0]?.nodeData?.icon && <img src={nodeOptions[0].nodeData.icon} className="rb:size-3" alt="" />}
+              {nodeOptions[0]?.nodeData?.icon && <div className={`rb:size-3 rb:bg-cover ${nodeOptions[0].nodeData.icon}`} />}
               {nodeOptions[0]?.nodeData?.name || nodeId}
             </Flex>
             {nodeOptions.map((option) => {

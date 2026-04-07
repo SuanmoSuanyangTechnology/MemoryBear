@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:17:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-02 16:06:03
+ * @Last Modified time: 2026-04-07 15:14:02
  */
 /**
  * RbMarkdown Component
@@ -97,10 +97,6 @@ const buildComponents = (onFormSubmit?: (values: Record<string, any>) => void) =
     const ctx = useContext(FormContext)
     return <RbButton {...props} onClick={() => ctx?.onSubmit?.(ctx.values)}>{[children]}</RbButton>
   },
-  table: ({ children, ...props }: any) => <div className="rb:overflow-x-auto rb:max-w-full"><table className="rb:border rb:border-[#D9D9D9] rb:mb-2" {...props}>{children}</table></div>,
-  tr: ({ children, ...props }: any) => <tr className="rb:border rb:border-[#D9D9D9]" {...props}>{children}</tr>,
-  th: ({ children, ...props }: any) => <th className="rb:border rb:border-[#D9D9D9] rb:px-2 rb:py-1 rb:text-left rb:font-bold" {...props}>{children}</th>,
-  td: ({ children, ...props }: any) => <td className="rb:border rb:border-[#D9D9D9] rb:px-2 rb:py-1 rb:text-left" {...props}>{children}</td>,
   input: ({ children, ...props }: any) => {
     const ctx = useContext(FormContext)
     const handleChange = useCallback((val: any) => {
