@@ -16,6 +16,7 @@
     "@codemirror/lang-cpp": "^6.0.3",
     "@codemirror/lang-java": "^6.0.2",
     "@codemirror/lang-javascript": "^6.2.4",
+    "@codemirror/lang-json": "^6.0.2",
     "@codemirror/lang-python": "^6.2.1",
     "@codemirror/lang-rust": "^6.0.2",
     "@codemirror/state": "^6.5.4",

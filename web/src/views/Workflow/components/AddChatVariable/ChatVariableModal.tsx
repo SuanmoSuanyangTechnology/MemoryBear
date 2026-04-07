@@ -6,7 +6,7 @@
  */
 import { forwardRef, useImperativeHandle, useState, useRef, useMemo } from 'react';
 import { Form, Input, Select, InputNumber, Button, Row, Col, Flex, Spin } from 'antd';
-import clsx from 'clsx';
+import { PlusOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 
 import type { ChatVariableModalRef } from './types'
@@ -18,8 +18,30 @@ import UploadFileListModal from '@/views/Conversation/components/UploadFileListM
 import type { UploadFileListModalRef } from '@/views/Conversation/types'
 import { getFileInfoByUrl } from '@/api/fileStorage'
 import { transform_file_type } from '@/views/Conversation/components/FileUpload'
+import RadioGroupBtn from '../Properties/RadioGroupBtn';
+import CodeMirrorEditor from '@/components/CodeMirrorEditor';
+import FileList from '@/components/Chat/FileList'
 
 const FormItem = Form.Item;
+
+const object_placeholder = `# example
+# {
+#   "name": "redbear",
+#   "age": 2
+# }`
+
+const array_object_placeholder = `# example
+# [
+#   {
+#     "name": "redbear",
+#     "age": 2
+#   },
+#   {
+#     "name": "redbear",
+#     "age": 2
+#   }
+# ]
+`
 
 interface ChatVariableModalProps {
   refresh: (value: ChatVariable, editIndex?: number) => void;
@@ -233,7 +255,7 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
           <Select
             placeholder={t('common.pleaseSelect')}
             onChange={(value) => {
-              form.setFieldValue('defaultValue', undefined);
+              form.setFieldValue('defaultValue', value === 'array[string]' ? [] : undefined);
               setFileList([]);
               if (value === 'file' || value === 'array[file]') form.setFieldsValue(defaultFileUploadValues as any);
             }}
@@ -244,7 +266,8 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
           />
         </FormItem>
 
-        {type === 'file' || type === 'array[file]' ? (
+        {type?.includes('file')
+        ? (
           <>
             <UploadFileListModal
               ref={uploadFileListModalRef}
@@ -273,67 +296,53 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
                   </Col>
                 </Row>
               {previewFileList.length > 0 && (
-                <Flex gap={8} wrap className="rb:mt-2!">
-                  {previewFileList.map((file) => (
-                    <Spin key={`${file.url || file.uid}_${file.status}`} spinning={file.status === 'uploading'}>
-                      {file.type?.includes('image') ? (
-                        <div className={clsx('rb:inline-block rb:group rb:relative rb:rounded-lg rb:border', {
-                          'rb:border-[#FF5D34]': file.status === 'error',
-                          'rb:border-[#F6F6F6]': file.status !== 'error',
-                        })}>
-                          <img src={file.url} alt={file.name} className="rb:size-12! rb:rounded-lg rb:object-cover" />
-                          <div
-                            className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')] rb:hover:bg-[url('@/assets/images/conversation/delete_hover.svg')]"
-                            onClick={() => handleDelete(file)}
-                          />
-                        </div>
-                      ) : (
-                        <Flex
-                          align="center"
-                          gap={10}
-                          className={clsx('rb:w-45 rb:text-[12px] rb:group rb:relative rb:rounded-lg rb:bg-[#F6F6F6] rb:py-2! rb:px-2.5! rb:border', {
-                            'rb:border-[#FF5D34]': file.status === 'error',
-                            'rb:border-[#F6F6F6]': file.status !== 'error',
-                          })}
-                        >
-                          <div className={clsx(
-                            "rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/conversation/pdf_disabled.svg')]",
-                            file.type?.includes('pdf') ? "rb:bg-[url('@/assets/images/file/pdf.svg')]" :
-                              (file.type?.includes('excel') || file.type?.includes('spreadsheetml')) ? "rb:bg-[url('@/assets/images/file/excel.svg')]" :
-                                file.type?.includes('csv') ? "rb:bg-[url('@/assets/images/file/csv.svg')]" :
-                                  file.type?.includes('json') ? "rb:bg-[url('@/assets/images/file/json.svg')]" :
-                                    file.type?.includes('ppt') ? "rb:bg-[url('@/assets/images/file/ppt.svg')]" :
-                                      file.type?.includes('text') ? "rb:bg-[url('@/assets/images/file/txt.svg')]" :
-                                        file.type?.includes('markdown') ? "rb:bg-[url('@/assets/images/file/md.svg')]" :
-                                          (file.type?.includes('doc') || file.type?.includes('word')) ? "rb:bg-[url('@/assets/images/file/word.svg')]" : null
-                          )} />
-                          <div className="rb:flex-1 rb:w-32.5">
-                            <div className="rb:leading-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.name}</div>
-                            <div className="rb:leading-3.5 rb:mt-0.5 rb:text-[#5B6167] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">
-                              {file.type?.split('/').pop()} · {file.size}
-                            </div>
-                          </div>
-                          <div
-                            className="rb:hidden rb:group-hover:block rb:absolute rb:-right-1 rb:-top-1 rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/delete.svg')]"
-                            onClick={() => handleDelete(file)}
-                          />
-                        </Flex>
-                      )}
-                    </Spin>
-                  ))}
-                </Flex>
+                <FileList wrap="wrap" fileList={previewFileList} onDelete={handleDelete} className="rb:mt-2!" />
               )}
             </Form.Item>
           </>
-        ) : (
+        )
+        : ['array[string]', 'array[number]', 'array[boolean]'].includes(type)
+        ? (
+          <Form.Item label={t('workflow.config.parameter-extractor.default')}>
+            <Form.List name="defaultValue">
+              {(fields, { add, remove }) => (
+                <Flex vertical gap={8}>
+                  {fields.map(({ key, name }) => (
+                    <Flex key={key} align="center" gap={4}>
+                      <Form.Item name={name} noStyle>
+                        {type === 'array[number]'
+                          ? <InputNumber placeholder={t('common.enter')} className="rb:flex-1!" />
+                          : type === 'array[boolean]'
+                          ? <RadioGroupBtn size="large" options={[{ value: true, label: 'True' }, { value: false, label: 'False' }]} className="rb:flex-1!" />
+                          : <Input placeholder={t('common.enter')} className="rb:flex-1!" />
+                        }
+                      </Form.Item>
+                      <div
+                        className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
+                        onClick={() => remove(name)}
+                      ></div>
+                    </Flex>
+                  ))}
+                  <Button type="dashed" onClick={() => add()} icon={<PlusOutlined />} block>
+                    {t('common.add')}
+                  </Button>
+                </Flex>
+              )}
+            </Form.List>
+          </Form.Item>
+        )
+        : (
           <Form.Item name="defaultValue" label={t('workflow.config.parameter-extractor.default')}>
             {type === 'number'
               ? <InputNumber placeholder={t('common.enter')} style={{ width: '100%' }} />
               : type === 'boolean'
-              ? <Select
-                  placeholder={t('common.pleaseSelect')}
-                  options={[{ value: true, label: 'true' }, { value: false, label: 'false' }]}
-                />
+              ? <RadioGroupBtn size="large" options={[{ value: true, label: 'True' }, { value: false, label: 'False' }]} />
+              : type === 'object' || type === 'array[object]'
+              ? <CodeMirrorEditor
+                language="json"
+                placeholder={type === 'object' ? object_placeholder : array_object_placeholder}
+                variant="outlined"
+              />
               : <Input placeholder={t('common.enter')} />
             }
           </Form.Item>
