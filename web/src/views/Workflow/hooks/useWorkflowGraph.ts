@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 20:56:46
+ * @Last Modified time: 2026-04-07 23:17:50
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -444,7 +444,12 @@ export const useWorkflowGraph = ({
       setTimeout(() => {
         if (graphRef.current) {
           graphRef.current.centerContent()
-          graphRef.current.getNodes().forEach(node => node.toFront());
+          // graphRef.current.getNodes().forEach(node => node.toFront());
+          // Bring edges to front first, then child nodes above edges; parent nodes stay behind
+          graphRef.current.getEdges().forEach(edge => edge.toFront());
+          graphRef.current.getNodes().forEach(node => {
+            if (node.getData()?.cycle) node.toFront();
+          });
         }
       }, 200)
     }
@@ -915,12 +920,13 @@ export const useWorkflowGraph = ({
           if (!view) return null
           const cell = view.cell
           if (cell.isNode()) {
+            // Parent (iteration/loop) nodes are not restricted
+            if (cell.getData()?.type === 'iteration' || cell.getData()?.type === 'loop') return null
             const parent = cell.getParent()
             if (parent) {
               return parent.getBBox()
             }
           }
-
           return null
         },
       },
@@ -1022,10 +1028,30 @@ export const useWorkflowGraph = ({
     graphRef.current.on('scale', scaleEvent);
     // Listen to node move event
     graphRef.current.on('node:moved', nodeMoved);
+    // When parent (isGroup) node position changes, move children with it
+    graphRef.current.on('node:change:position', ({ node, current, previous }: { node: Node; current: { x: number; y: number }; previous: { x: number; y: number } }) => {
+      
+      if (!(node.getData()?.type === 'iteration' && node.getData()?.type === 'loop') || !current || !previous) return;
+
+      const dx = current.x - previous.x;
+      const dy = current.y - previous.y;
+      const parentId = node.getData()?.id || node.id;
+      graphRef.current?.getNodes().forEach(child => {
+        if (child.getData()?.cycle === parentId) {
+          const cp = child.getPosition();
+          child.setPosition(cp.x + dx, cp.y + dy, { silent: true });
+        }
+      });
+    });
     graphRef.current.on('node:removed', blankClick)
     // When edge connected, bring connected nodes' ports to front
-    graphRef.current.on('edge:connected', ({ isNew }) => {
-      graphRef.current?.getNodes().forEach(node => node.toFront());
+    graphRef.current.on('edge:connected', ({ isNew, edge }) => {
+      // Bring edge to front first, then bring child nodes above edges
+      // Parent (loop/iteration) nodes stay behind to avoid covering edges
+      edge.toFront();
+      graphRef.current?.getNodes().forEach(node => {
+        if (node.getData()?.cycle) node.toFront();
+      });
       // Reset any port hover state left from dragging
       if (isNew) {
         graphRef.current?.getNodes().forEach(node => {
