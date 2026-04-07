@@ -513,20 +513,27 @@ def get_dashboard_yesterday_changes(
     today_data: dict
 ) -> dict:
     """
-    计算各指标相比昨天的变化量。
-    
+    计算各指标相比昨天的变化百分比。
+
+    - total_app_change / total_knowledge_change：只看活跃记录，
+      百分比 = (截止今日活跃总量 - 截止昨日活跃总量) / 截止昨日活跃总量
+    - total_memory_change / total_api_call_change：
+      百分比 = (今日总量 - 昨日总量) / 昨日总量
+
+    昨日总量为 0 时返回 None。返回值为浮点数，例如 0.5 表示增长 50%。
+
     Args:
         db: 数据库会话
         workspace_id: 工作空间ID
         storage_type: 存储类型 'neo4j' | 'rag'
         today_data: 当前数据，包含 total_memory, total_app, total_knowledge, total_api_call
-    
+
     Returns:
         {
-            "total_memory_change": int | None,
-            "total_app_change": int | None,
-            "total_knowledge_change": int | None,
-            "total_api_call_change": int | None
+            "total_memory_change": float | None,
+            "total_app_change": float | None,
+            "total_knowledge_change": float | None,
+            "total_api_call_change": float | None
         }
     """
     from datetime import datetime, timedelta
@@ -536,7 +543,7 @@ def get_dashboard_yesterday_changes(
     from app.models.app_model import App
     from app.models.appshare_model import AppShare
 
-    business_logger.info(f"计算昨日对比: workspace_id={workspace_id}, storage_type={storage_type}")
+    business_logger.info(f"计算昨日对比百分比: workspace_id={workspace_id}, storage_type={storage_type}")
 
     now_local = datetime.now()
     today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -549,134 +556,104 @@ def get_dashboard_yesterday_changes(
         "total_api_call_change": None,
     }
 
-    # --- total_api_call_change ---
+    def _calc_percentage(today_val, yesterday_val):
+        """计算百分比，昨日为0时返回None"""
+        if yesterday_val is None or yesterday_val == 0:
+            return None
+        return round((today_val - yesterday_val) / yesterday_val, 4)
+
+    # --- total_api_call_change: (今日调用量 - 昨日调用量) / 昨日调用量 ---
     try:
-        # 获取该workspace下所有api_key的id
         api_key_ids = [
             row[0] for row in db.query(ApiKey.id).filter(
                 ApiKey.workspace_id == workspace_id
             ).all()
         ]
         if api_key_ids:
-            # 今日累计
+            # 今日累计调用量
             today_api_count = db.query(func.count(ApiKeyLog.id)).filter(
                 ApiKeyLog.api_key_id.in_(api_key_ids),
                 ApiKeyLog.created_at >= today_start,
                 ApiKeyLog.created_at < now_local
             ).scalar() or 0
-            # 昨日全天
+            # 昨日全天调用量
             yesterday_api_count = db.query(func.count(ApiKeyLog.id)).filter(
                 ApiKeyLog.api_key_id.in_(api_key_ids),
                 ApiKeyLog.created_at >= yesterday_start,
                 ApiKeyLog.created_at < today_start
             ).scalar() or 0
-            changes["total_api_call_change"] = today_api_count - yesterday_api_count
+            changes["total_api_call_change"] = _calc_percentage(today_api_count, yesterday_api_count)
         else:
-            # 没有api_key，如果今日也是0则无对比意义
             changes["total_api_call_change"] = None
     except Exception as e:
         business_logger.warning(f"计算API调用昨日对比失败: {str(e)}")
 
-    # --- total_knowledge_change ---
+    # --- total_knowledge_change: 只看活跃(status=1)且为顶层知识库(parent_id=workspace_id)，百分比 = (今日活跃总量 - 昨日活跃总量) / 昨日活跃总量 ---
     try:
-        # 今天有效总量：当前status=1的知识库总数，排除用户知识库(permission_id='Memory')
+        # 截止今日的活跃知识库总量（当前 status=1，parent_id=workspace_id）
         today_knowledge = db.query(func.count(Knowledge.id)).filter(
             Knowledge.workspace_id == workspace_id,
             Knowledge.status == 1,
-            Knowledge.permission_id != "Memory"
+            Knowledge.parent_id == Knowledge.workspace_id
         ).scalar() or 0
-        # 昨日有效总量：昨天之前创建的、当前仍有效的知识库，排除用户知识库
+        # 截止昨日的活跃知识库总量（昨日之前创建的、当前仍 status=1，parent_id=workspace_id）
         yesterday_knowledge = db.query(func.count(Knowledge.id)).filter(
             Knowledge.workspace_id == workspace_id,
             Knowledge.status == 1,
-            Knowledge.permission_id != "Memory",
+            Knowledge.parent_id == Knowledge.workspace_id,
             Knowledge.created_at < today_start
         ).scalar() or 0
-        # 今日软删：今天被软删的知识库(status=2 且 updated_at >= today_start)，排除用户知识库
-        today_deleted_knowledge = db.query(func.count(Knowledge.id)).filter(
-            Knowledge.workspace_id == workspace_id,
-            Knowledge.status == 2,
-            Knowledge.permission_id != "Memory",
-            Knowledge.updated_at >= today_start
-        ).scalar() or 0
 
-        if yesterday_knowledge == 0 and today_knowledge == 0 and today_deleted_knowledge == 0:
-            changes["total_knowledge_change"] = None
-        else:
-            # change = 今天有效总量 - 今日软删 - 昨日有效总量
-            changes["total_knowledge_change"] = today_knowledge - today_deleted_knowledge - yesterday_knowledge
+        changes["total_knowledge_change"] = _calc_percentage(today_knowledge, yesterday_knowledge)
     except Exception as e:
         business_logger.warning(f"计算知识库昨日对比失败: {str(e)}")
 
-    # --- total_app_change ---
+    # --- total_app_change: 只看活跃(is_active=True)，百分比 = (今日活跃总量 - 昨日活跃总量) / 昨日活跃总量 ---
     try:
         # === 自有app ===
-        # 今天有效总量
         today_own_apps = db.query(func.count(App.id)).filter(
             App.workspace_id == workspace_id,
             App.is_active == True
         ).scalar() or 0
-        # 昨日有效总量
         yesterday_own_apps = db.query(func.count(App.id)).filter(
             App.workspace_id == workspace_id,
             App.is_active == True,
             App.created_at < today_start
         ).scalar() or 0
-        # 今日软删
-        today_deleted_own_apps = db.query(func.count(App.id)).filter(
-            App.workspace_id == workspace_id,
-            App.is_active == False,
-            App.updated_at >= today_start
-        ).scalar() or 0
 
         # === 被分享app ===
-        # 今天有效总量
         today_shared_apps = db.query(func.count(AppShare.id)).filter(
             AppShare.target_workspace_id == workspace_id,
             AppShare.is_active == True
         ).scalar() or 0
-        # 昨日有效总量
         yesterday_shared_apps = db.query(func.count(AppShare.id)).filter(
             AppShare.target_workspace_id == workspace_id,
             AppShare.is_active == True,
             AppShare.created_at < today_start
         ).scalar() or 0
-        # 今日软删
-        today_deleted_shared_apps = db.query(func.count(AppShare.id)).filter(
-            AppShare.target_workspace_id == workspace_id,
-            AppShare.is_active == False,
-            AppShare.updated_at >= today_start
-        ).scalar() or 0
 
         today_total_app = today_own_apps + today_shared_apps
         yesterday_total_app = yesterday_own_apps + yesterday_shared_apps
-        total_deleted = today_deleted_own_apps + today_deleted_shared_apps
 
-        if yesterday_total_app == 0 and today_total_app == 0 and total_deleted == 0:
-            changes["total_app_change"] = None
-        else:
-            # change = 今天有效总量 - 今日软删 - 昨日有效总量
-            changes["total_app_change"] = today_total_app - total_deleted - yesterday_total_app
+        changes["total_app_change"] = _calc_percentage(today_total_app, yesterday_total_app)
     except Exception as e:
         business_logger.warning(f"计算应用数量昨日对比失败: {str(e)}")
 
-    # --- total_memory_change ---
+    # --- total_memory_change: (今日总量 - 昨日总量) / 昨日总量 ---
     try:
         today_memory = today_data.get("total_memory")
         if today_memory is None:
             changes["total_memory_change"] = None
         elif storage_type == "neo4j":
-            # 从 memory_increments 取最近一条 created_at < today_start 的记录
             last_record = db.query(MemoryIncrement).filter(
                 MemoryIncrement.workspace_id == workspace_id,
                 MemoryIncrement.created_at < today_start
             ).order_by(desc(MemoryIncrement.created_at)).first()
-            if last_record is None:
+            if last_record is None or last_record.total_num == 0:
                 changes["total_memory_change"] = None
             else:
-                changes["total_memory_change"] = today_memory - last_record.total_num
+                changes["total_memory_change"] = _calc_percentage(today_memory, last_record.total_num)
         elif storage_type == "rag":
-            # RAG: 查 documents 表中 created_at < today_start 的 chunk_num 之和
             from app.models.document_model import Document
             from app.models.end_user_model import EndUser as _EndUser
             from app.models.app_model import App as _App
@@ -691,18 +668,18 @@ def get_dashboard_yesterday_changes(
                 changes["total_memory_change"] = None
             else:
                 file_names = [f"{uid}.txt" for uid in end_user_ids]
-                yesterday_chunk = db.query(func.sum(Document.chunk_num)).filter(
+                yesterday_chunk = int(db.query(func.sum(Document.chunk_num)).filter(
                     Document.file_name.in_(file_names),
                     Document.created_at < today_start
-                ).scalar()
-                if yesterday_chunk is None:
+                ).scalar() or 0)
+                if yesterday_chunk == 0:
                     changes["total_memory_change"] = None
                 else:
-                    changes["total_memory_change"] = today_memory - int(yesterday_chunk)
+                    changes["total_memory_change"] = _calc_percentage(today_memory, yesterday_chunk)
     except Exception as e:
         business_logger.warning(f"计算记忆总量昨日对比失败: {str(e)}")
 
-    business_logger.info(f"昨日对比计算完成: {changes}")
+    business_logger.info(f"昨日对比百分比计算完成: {changes}")
     return changes
 
 
