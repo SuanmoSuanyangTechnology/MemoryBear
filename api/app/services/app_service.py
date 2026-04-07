@@ -1360,7 +1360,6 @@ class AppService:
             variables=cfg.get("variables", []),
             execution_config=cfg.get("execution_config", {}),
             triggers=cfg.get("triggers", []),
-            features=cfg.get("features", {}),
             is_active=True,
             created_at=now,
             updated_at=now,
