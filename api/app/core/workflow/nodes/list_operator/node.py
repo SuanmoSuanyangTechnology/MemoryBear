@@ -52,7 +52,7 @@ class ListOperatorNode(BaseNode):
             result = [result[idx]]
 
         # 3. Order
-        if cfg.order_by.enabled and cfg.order_by.key:
+        if cfg.order_by.enabled:
             reverse = cfg.order_by.value == "desc"
             key_fn = self._make_sort_key(cfg.order_by.key)
             result = sorted(result, key=key_fn, reverse=reverse)
