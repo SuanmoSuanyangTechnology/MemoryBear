@@ -668,14 +668,14 @@ def get_dashboard_yesterday_changes(
                 changes["total_memory_change"] = None
             else:
                 file_names = [f"{uid}.txt" for uid in end_user_ids]
-                yesterday_chunk = db.query(func.sum(Document.chunk_num)).filter(
+                yesterday_chunk = int(db.query(func.sum(Document.chunk_num)).filter(
                     Document.file_name.in_(file_names),
                     Document.created_at < today_start
-                ).scalar()
-                if yesterday_chunk is None or int(yesterday_chunk) == 0:
+                ).scalar() or 0)
+                if yesterday_chunk == 0:
                     changes["total_memory_change"] = None
                 else:
-                    changes["total_memory_change"] = _calc_percentage(today_memory, int(yesterday_chunk))
+                    changes["total_memory_change"] = _calc_percentage(today_memory, yesterday_chunk)
     except Exception as e:
         business_logger.warning(f"计算记忆总量昨日对比失败: {str(e)}")
 
