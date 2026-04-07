@@ -91,7 +91,8 @@ const FilterConditions: FC<FilterConditionsProps> = ({
                   const keyFieldValue = currentCondition.key;
                   const keyFieldOption = fileSubVariable.find(option => option.filed === keyFieldValue);
                   const keyFieldType = keyFieldOption?.dataType;
-                  const operatorList = operatorsObj[keyFieldValue === 'type' ? 'type' : keyFieldType || 'default'] || operatorsObj.default || [];
+                  const innerType = variableType?.match(/^array\[(.+)\]$/)?.[1];
+                  const operatorList = operatorsObj[innerType !== 'file' ? (innerType || 'default') : keyFieldValue === 'type' ? 'type' : keyFieldType || 'default'] || operatorsObj.default || [];
 
                   return (
                     <Flex
@@ -111,7 +112,7 @@ const FilterConditions: FC<FilterConditionsProps> = ({
                                   fieldNames={{ value: 'filed', label: 'label' }}
                                   onChange={(value) => handleKeyFieldChange(index, value)}
                                   variant="borderless"
-                                  className="rb:w-full!"
+                                  className="rb:w-full! rb:h-7!"
                                 />
                               </Form.Item>
                             </Col>
@@ -129,15 +130,15 @@ const FilterConditions: FC<FilterConditionsProps> = ({
                                 popupMatchSelectWidth={false}
                                 placeholder={t('common.pleaseSelect')}
                                 variant="borderless"
-                                className="rb:w-full!"
+                                className="rb:w-full! rb:h-7!"
                               />
                             </Form.Item>
                           </Col>
                           {!hideValueField && (
                             <Col flex="1">
                               <Form.Item name={[field.name, 'value']} className="rb:pt-0.5! rb:mb-0! rb:pl-2!">
-                                {variableType?.includes('boolean')
-                                  ? <RadioGroupBtn options={[{ value: true, label: 'True' }, { value: false, label: 'False' }]} />
+                                {innerType === 'boolean'
+                                  ? <RadioGroupBtn options={[{ value: true, label: 'True' }, { value: false, label: 'False' }]} type="inner" />
                                   : keyFieldValue === 'type'
                                   ? <Select
                                     placeholder={t('common.pleaseSelect')}
