@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 16:24:47
+ * @Last Modified time: 2026-04-07 18:08:52
  */
 /**
  * Conversation Page
@@ -178,7 +178,7 @@ const Conversation: FC = () => {
           }))
         })
     } else {
-      if (features?.opening_statement?.statement) {
+      if (features?.opening_statement.enabled && features?.opening_statement?.statement) {
         setChatList([{
           role: 'assistant',
           content: features.opening_statement.statement,

@@ -82,6 +82,7 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
     setVariables: (variables) => {
       console.log('variables', variables)
       form.setFieldValue('variables', variables)
+      onVariablesChange?.(variables)
     },
   }))
 
