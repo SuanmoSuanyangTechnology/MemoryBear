@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 18:08:18
+ * @Last Modified time: 2026-04-07 20:25:45
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -109,7 +109,7 @@ const TestChat: FC<TestChatProps> = ({
     setFeatures(config?.features || {} as FeaturesConfigForm)
 
 
-    if (config?.features?.opening_statement.enabled && config?.features?.opening_statement?.statement && config?.features?.opening_statement?.statement.trim() !== '') {
+    if (config?.features?.opening_statement?.enabled && config?.features?.opening_statement?.statement && config?.features?.opening_statement?.statement.trim() !== '') {
       setChatList(prev => [...prev, {
         role: 'assistant',
         created_at: Date.now(),

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:40:13 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-03 20:19:34
+ * @Last Modified time: 2026-04-07 19:40:27
  */
 import { useState, useRef, useEffect, useLayoutEffect, type FC } from 'react'
 import { createPortal } from 'react-dom'
@@ -232,15 +232,16 @@ const VariableSelect: FC<VariableSelectProps> = ({
             <span className="rb:text-[#bfbfbf] rb:flex-1 rb:text-[12px]">{placeholder}</span>
           )
         ) : selectedSuggestion ? (
-          <span className="rb:flex rb:flex-1 rb:min-w-0">
-            <span className="rb:inline-flex rb:items-center rb:gap-0.5 rb:bg-[#f0f8ff] rb:rounded rb:px-1 rb:py-0.5 rb:text-[11px] rb:max-w-full">
+          <div className="rb:flex rb:flex-1 rb:min-w-0 rb:max-w-full">
+            <span className="rb:inline-flex rb:items-center rb:gap-0.5 rb:bg-[#f0f8ff] rb:rounded rb:px-1 rb:py-0.5 rb:text-[11px] rb:max-w-full rb:overflow-hidden">
               {!isConversation && nodeData?.icon && <div className={`rb:size-3 rb:shrink-0 rb:bg-cover ${nodeData.icon}`} />}
-              {!isConversation && nodeData?.name && <span className="rb:text-[#5B6167]">{nodeData.name}{sep}</span>}
-              <span className="rb:text-[#171719]">
+                {!isConversation && nodeData?.name && <span className="rb:text-[#5B6167] rb:shrink rb:min-w-0 rb:truncate rb:max-w-[40%]">{nodeData.name}</span>}
+                {!isConversation && nodeData?.name && <span className="rb:text-[#5B6167]">{sep}</span>}
+              <span className="rb:text-[#171719] rb:shrink rb:min-w-0 rb:truncate">
                 {parentOfSelected ? <>{parentOfSelected.label}{sep}{selectedSuggestion.label}</> : selectedSuggestion.label}
               </span>
             </span>
-          </span>
+          </div>
         ) : (
           <span className="rb:text-[#bfbfbf] rb:flex-1">{placeholder}</span>
         )}
@@ -264,7 +265,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
       {open && createPortal(
         <div
           ref={dropdownRef}
-          className="rb:fixed rb:z-9999 rb:bg-white rb:text-[14px] rb:rounded-xl rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]"
+          className="rb:fixed rb:z-9999 rb:bg-white rb:text-[14px] rb:rounded-lg rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)] rb:p-1"
           style={{ top: dropdownPos.top, left: dropdownPos.left, minWidth: dropdownPos.width }}
         >
           <div className="rb:min-w-70 rb:max-h-60 rb:overflow-y-auto rb:py-1">
@@ -272,8 +273,8 @@ const VariableSelect: FC<VariableSelectProps> = ({
               const nd = suggestions[0].nodeData;
               return (
                 <div key={nodeId}>
-                  <Flex align="center" gap={4} className="rb:px-3! rb:py-1.25! rb:text-[12px] rb:font-medium rb:text-[#5B6167]">
-                    {nd.icon && <div className={`rb:size-3 rb:bg-cover ${nd.icon}`} />}
+                  <Flex align="center" gap={4} className="rb:px-3! rb:py-1.25! rb:text-[12px] rb:text-[#5B6167]">
+                    {nd.icon && <div className={`rb:size-4 rb:bg-cover ${nd.icon}`} />}
                     {nd.name}
                   </Flex>
                   {suggestions.map(s => {
@@ -286,14 +287,15 @@ const VariableSelect: FC<VariableSelectProps> = ({
                       <Flex
                         key={s.key}
                         ref={(el) => { if (el) itemRefs.current.set(s.key, el); }}
-                        className="rb:mx-3! rb:pl-3! rb:pr-3! rb:py-1.5! rb:rounded-lg!"
+                        className={clsx("rb:pl-6! rb:pr-3! rb:py-1.25! rb:rounded-lg!", {
+                          'rb:bg-[#e6f4ff]': isSelected || isExpanded,
+                          'rb:bg-white rb:hover:bg-[#F6F6F6]!': !(isSelected || isExpanded),
+                          'rb:opacity-60': s.disabled,
+                          'rb:cursor-not-allowed': s.disabled,
+                          'rb:cursor-pointer': !s.disabled,
+                        })}
                         align="center"
                         justify="space-between"
-                        style={{
-                          cursor: s.disabled ? 'not-allowed' : 'pointer',
-                          background: isSelected || isExpanded ? '#f0f8ff' : 'white',
-                          opacity: s.disabled ? 0.5 : 1,
-                        }}
                         onClick={() => {
                           if (s.disabled) return;
                           if (hasChildren) {
