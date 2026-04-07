@@ -642,7 +642,6 @@ class AgentRunService:
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
             #================= 为 OpenClaw 工具注入运行时上下文==========
             for t in tools:
-                logger.info(f"检查工具: {type(t).__name__}, has_tool_instance={hasattr(t, 'tool_instance')}, is_openclaw={getattr(getattr(t, 'tool_instance', None), '_is_openclaw', 'N/A')}")
                 if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, '_is_openclaw'):
                     if t.tool_instance._is_openclaw:
                         t.tool_instance._user_id = user_id or "anonymous"

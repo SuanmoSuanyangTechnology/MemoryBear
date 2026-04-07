@@ -358,11 +358,15 @@ class ToolService:
         self, custom_config: CustomToolConfig, schema: dict
     ) -> Dict[str, Any]:
         """测试 OpenClaw 连接"""
+        import aiohttp
         try:
             info = schema.get("info", {})
             servers = schema.get("servers", [])
-            base_url = servers[0]["url"] if servers else ""
-            token = (custom_config.auth_config or {}).get("token", "")
+            base_url = servers[0].get("url", "") if servers else ""
+            if not base_url:
+                return {"success": False, "message": "OpenClaw 未配置 server URL"}
+            auth = custom_config.auth_config or {}
+            token = auth.get("api_key") or auth.get("token") or ""
             agent_id = info.get("x-openclaw-agent-id", "main")
             model = info.get("x-openclaw-default-model", "openclaw")
 
