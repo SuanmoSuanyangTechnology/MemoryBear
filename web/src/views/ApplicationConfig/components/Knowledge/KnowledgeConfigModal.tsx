@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:25:37 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-24 11:47:27
+ * @Last Modified time: 2026-04-07 22:35:08
  */
 /**
  * Knowledge Configuration Modal
@@ -32,7 +32,9 @@ interface KnowledgeConfigModalProps {
 /**
  * Available retrieval types
  */
-const retrieveTypes: RetrieveType[] = ['participle', 'semantic', 'hybrid', 'graph']
+const retrieveTypes: RetrieveType[] = ['participle', 'semantic', 'hybrid',
+  // 'graph'
+]
 
 /**
  * Modal for configuring knowledge base retrieval settings
