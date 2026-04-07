@@ -25,7 +25,7 @@ from app.repositories.workflow_repository import (
     WorkflowExecutionRepository,
     WorkflowNodeExecutionRepository
 )
-from app.schemas import DraftRunRequest, FileInput
+from app.schemas import DraftRunRequest, FileInput, FileType
 from app.services.conversation_service import ConversationService
 from app.services.multi_agent_service import convert_uuids_to_str
 from app.services.multimodal_service import MultimodalService
@@ -466,7 +466,7 @@ class WorkflowService:
             if not isinstance(item, dict) or item.get("is_file"):
                 return item
             transfer_method = item.get("transfer_method", "remote_url")
-            file_type = item.get("type", "document")
+            file_type = FileType.trans(item.get("type", "document"))
             origin_file_type = item.get("file_type") or file_type
             if transfer_method == "remote_url":
                 url = item.get("url", "")

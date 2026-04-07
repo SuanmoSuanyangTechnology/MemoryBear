@@ -496,7 +496,23 @@ class DifyConverter(BaseConverter):
     def convert_assigner_node_config(self, node: dict) -> dict:
         node_data = node["data"]
         assignments = []
-        for assignment in node_data["items"]:
+
+        # Support both formats:
+        # 1. New format: node_data["items"] list
+        # 2. Flat format: assigned_variable_selector + input_variable_selector + write_mode
+        if "items" in node_data:
+            raw_items = node_data["items"]
+        elif "assigned_variable_selector" in node_data and "input_variable_selector" in node_data:
+            raw_items = [{
+                "variable_selector": node_data["assigned_variable_selector"],
+                "value": node_data["input_variable_selector"],
+                "input_type": ValueInputType.VARIABLE,
+                "operation": node_data.get("write_mode", "over-write"),
+            }]
+        else:
+            raw_items = []
+
+        for assignment in raw_items:
             if assignment.get("operation") is None or assignment.get("value") is None:
                 continue
             assignments.append(
