@@ -33,6 +33,18 @@ const VariableComponent: React.FC<{ nodeKey: NodeKey; data: Suggestion }> = ({
     setSelected(!isSelected);
   };
   
+  if (!data.nodeData?.name) {
+    return (
+      <span
+        onClick={handleClick}
+        className="rb:inline rb:cursor-pointer rb:text-[#171719]"
+        contentEditable={false}
+      >
+        {data.value}
+      </span>
+    );
+  }
+
   return (
     <span
       onClick={handleClick}

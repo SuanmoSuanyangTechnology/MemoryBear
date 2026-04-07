@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 11:13:23
+ * @Last Modified time: 2026-04-07 16:47:09
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -18,6 +18,7 @@ import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
 import { useUser } from '@/store/user';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types'
 import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils'
+import type { Suggestion } from '../components/Editor/plugin/AutocompletePlugin';
 
 /**
  * Props for useWorkflowGraph hook
@@ -73,6 +74,8 @@ export interface UseWorkflowGraphReturn {
   handleAddNotes: () => void;
   handleSaveFeaturesConfig: (value: FeaturesConfigForm) => void;
   features?: FeaturesConfigForm;
+  /** Get start node output variable list (user-defined + system variables) */
+  getStartNodeVariables: () => Array<{ name: string; type: string; readonly?: boolean }>;
 }
 
 /**
@@ -1363,9 +1366,49 @@ export const useWorkflowGraph = ({
       data: { ...cleanNodeData },
     });
   }
+  const getStartNodeVariables = (): Array<{ name: string; type: string; readonly?: boolean }> => {
+    const startNode = graphRef.current?.getNodes().find(n => n.getData()?.type === 'start')
+    if (!startNode) return []
+    const data = startNode.getData()
+    const userVars: Array<{ name: string; type: string; readonly?: boolean }> =
+      (data?.config?.variables?.defaultValue ?? []).map((v: any) => ({ name: v.name, type: v.type }))
+    return userVars
+  }
+
   const handleSaveFeaturesConfig = (value?: FeaturesConfigForm) => {
+    const { statement = '' } = value?.opening_statement || {}
     featuresRef.current = value
     onFeaturesLoad?.(value)
+
+    const usedVars = [...new Set([...(statement?.matchAll(/\{\{(\w+)\}\}/g) ?? [])].map(m => m[1]))]
+    const startVars = getStartNodeVariables()
+    const validNames = new Set(startVars.map(v => v.name))
+    const invalid = usedVars.filter(v => !validNames.has(v))
+    if (invalid.length > 0) {
+      const newVars = invalid.map(name => ({
+        name,
+        description: name,
+        type: 'string',
+        required: true,
+        defaultValue: '',
+      }))
+
+      const startNode = graphRef.current?.getNodes().find(n => n.getData()?.type === 'start')
+      if (startNode) {
+        const data = startNode.getData()
+        console.log('startNode', [...startVars, ...newVars])
+        startNode.setData({
+          ...data,
+          config: {
+            ...data.config,
+            variables: {
+              ...data.config.variables,
+              defaultValue: [...startVars, ...newVars],
+            },
+          },
+        })
+      }
+    }
   }
 
   return {
@@ -1389,5 +1432,6 @@ export const useWorkflowGraph = ({
     handleAddNotes,
     handleSaveFeaturesConfig,
     features: featuresRef.current,
+    getStartNodeVariables,
   };
 };

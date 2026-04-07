@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 19:07:24
+ * @Last Modified time: 2026-04-07 16:28:33
  */
 import { type FC, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -18,7 +18,6 @@ import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef, FeaturesConfigFor
 import { deleteApplication, appExport } from '@/api/application'
 import CopyModal from './CopyModal'
 import PageHeader from '@/components/Layout/PageHeader'
-import FeaturesConfig from './FeaturesConfig'
 
 /**
  * Tab keys for application configuration
@@ -70,7 +69,6 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
   application, activeTab, handleChangeTab, refresh,
   workflowRef,
   appRef,
-  features,
   onFeaturesChange,
 }) => {
   const { t } = useTranslation();
@@ -175,10 +173,9 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
     return items
   }, [t, handleClick, application])
 
-  const handleSaveFeaturesConfig = useCallback((value: FeaturesConfigForm) => {
-    appRef?.current?.handleSaveFeaturesConfig?.(value)
-    onFeaturesChange?.(value)
-  }, [appRef, onFeaturesChange])
+  const handleFeaturesConfig = () => {
+    workflowRef.current?.handleFeaturesConfig?.()
+  }
 
   return (
     <>
@@ -209,12 +206,12 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         </Flex>}
         extra={application?.type === 'workflow' && source !== 'sharing' && activeTab === 'arrangement'
           ? <Flex align="center" justify="end" gap={10} className="rb:h-8">
-            <FeaturesConfig
-              source={application?.type}
-              value={features as FeaturesConfigForm}
-              refresh={handleSaveFeaturesConfig}
-              chatVariables={(workflowRef.current?.chatVariables || []).map(v => ({ ...v, display_name: v.name }))}
-            />
+            <Popover content={t('application.features')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+              <div
+                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/features.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                onClick={handleFeaturesConfig}
+              ></div>
+            </Popover>
             <Popover content={t('workflow.clear')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
               <div
                 className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/clear.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-02 17:49:51
+ * @Last Modified time: 2026-04-07 16:13:44
  */
 /**
  * Copy Application Modal
@@ -205,6 +205,7 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
       />
       <OpenStatementSettingModal
         ref={openStatementSettingModalRef}
+        source={source}
         chatVariables={chatVariables}
         onSave={handleSaveStatement}
       />

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-02 18:01:09
+ * @Last Modified time: 2026-04-07 17:06:02
  */
 /**
  * Workflow Chat Component
@@ -40,6 +40,7 @@ import ChatToolbar from '@/components/Chat/ChatToolbar'
 import type { ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import Runtime from './Runtime';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
+import { replaceVariables } from '@/views/ApplicationConfig/Agent';
 
 const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: WorkflowConfig | null; features?: FeaturesConfigForm }>(({
   appId, graphRef, features
@@ -418,6 +419,22 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
     handleOpen,
     handleClose
   }));
+
+  useEffect(() => {
+    const opening_statement = features?.opening_statement
+
+    if (opening_statement?.enabled && opening_statement?.statement && opening_statement?.statement.trim() !== '') {
+      const assistantMsg: ChatItem = {
+        role: 'assistant',
+        content: replaceVariables(opening_statement.statement, variables as any),
+        meta_data: {
+          suggested_questions: opening_statement?.suggested_questions
+        }
+      }
+      console.log('variables', assistantMsg)
+      setChatList(prev => [assistantMsg, ...prev.slice(1)])
+    }
+  }, [chatList.length, features?.opening_statement, variables])
 
   return (
     <RbDrawer
