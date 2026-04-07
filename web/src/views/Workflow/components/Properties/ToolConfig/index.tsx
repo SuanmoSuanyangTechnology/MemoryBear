@@ -1,6 +1,6 @@
 import { type FC, useEffect, useState, useMemo } from "react";
 import { useTranslation } from 'react-i18next'
-import { Form, Select, InputNumber, Switch, Cascader, type CascaderProps, Tooltip } from 'antd'
+import { Form, Select, Switch, Cascader, type CascaderProps, Tooltip } from 'antd'
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import { getToolMethods, getToolDetail, getTools } from '@/api/tools'
 import type { ToolType, ToolItem } from '@/views/ToolManagement/types'
@@ -171,14 +171,15 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
         const filterChild = vo.children.filter(child => child.dataType === 'number')
 
         if (filterChild.length > 0) {
-          list.push({ ...vo, children: filterChild })
-        } else {
+          list.push({ ...vo, disabled: vo.dataType !== 'number', children: filterChild })
+        } else if (vo.dataType === 'number') {
           list.push({ ...vo, children: [] })
         }
-      } else {
+      } else if (vo.dataType === 'number') {
         list.push({ ...vo })
       }
     })
+    console.log('options', options, list)
     return list
   }, [options])
 
