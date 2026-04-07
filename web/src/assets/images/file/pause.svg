@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>播放</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="记忆验证-交互" transform="translate(-1204, -313)">
+            <g id="播放" transform="translate(1204, 313)">
+                <rect id="矩形" fill="#000000" fill-rule="nonzero" opacity="0" x="0" y="0" width="16" height="16"></rect>
+                <path d="M8,0 C3.6,0 0,3.6 0,8 C0,12.4 3.6,16 8,16 C12.4,16 16,12.4 16,8 C16,3.6 12.4,0 8,0 Z" id="路径" fill="#171719" fill-rule="nonzero"></path>
+                <g id="编组-4" transform="translate(5.3333, 5.3333)" fill="#FFFFFF">
+                    <rect id="矩形" x="0" y="0" width="1.33333333" height="5.33333333" rx="0.5"></rect>
+                    <rect id="矩形备份-2" x="4" y="0" width="1.33333333" height="5.33333333" rx="0.5"></rect>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>
