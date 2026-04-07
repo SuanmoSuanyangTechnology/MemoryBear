@@ -536,7 +536,7 @@ def get_dashboard_yesterday_changes(
             "total_api_call_change": float | None
         }
     """
-    from datetime import datetime, timedelta
+    from datetime import datetime
     from sqlalchemy import func
     from app.models.api_key_model import ApiKey, ApiKeyLog
     from app.models.knowledge_model import Knowledge
@@ -547,7 +547,6 @@ def get_dashboard_yesterday_changes(
 
     now_local = datetime.now()
     today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-    yesterday_start = today_start - timedelta(days=1)
 
     changes = {
         "total_memory_change": None,
@@ -562,7 +561,7 @@ def get_dashboard_yesterday_changes(
             return None
         return round((today_val - yesterday_val) / yesterday_val, 4)
 
-    # --- total_api_call_change: (今日调用量 - 昨日调用量) / 昨日调用量 ---
+    # --- total_api_call_change: (截止今日累计总数 - 截止昨日累计总数) / 截止昨日累计总数 ---
     try:
         api_key_ids = [
             row[0] for row in db.query(ApiKey.id).filter(
@@ -570,19 +569,17 @@ def get_dashboard_yesterday_changes(
             ).all()
         ]
         if api_key_ids:
-            # 今日累计调用量
-            today_api_count = db.query(func.count(ApiKeyLog.id)).filter(
+            # 截止今日的累计调用总数
+            total_api_until_now = db.query(func.count(ApiKeyLog.id)).filter(
                 ApiKeyLog.api_key_id.in_(api_key_ids),
-                ApiKeyLog.created_at >= today_start,
                 ApiKeyLog.created_at < now_local
             ).scalar() or 0
-            # 昨日全天调用量
-            yesterday_api_count = db.query(func.count(ApiKeyLog.id)).filter(
+            # 截止昨日的累计调用总数（today_start 即昨日结束）
+            total_api_until_yesterday = db.query(func.count(ApiKeyLog.id)).filter(
                 ApiKeyLog.api_key_id.in_(api_key_ids),
-                ApiKeyLog.created_at >= yesterday_start,
                 ApiKeyLog.created_at < today_start
             ).scalar() or 0
-            changes["total_api_call_change"] = _calc_percentage(today_api_count, yesterday_api_count)
+            changes["total_api_call_change"] = _calc_percentage(total_api_until_now, total_api_until_yesterday)
         else:
             changes["total_api_call_change"] = None
     except Exception as e:
@@ -1081,14 +1078,10 @@ def get_dashboard_common_stats(db: Session, workspace_id) -> dict:
     except Exception as e:
         business_logger.warning(f"获取知识库数量失败: {e}")
 
-    # total_api_call: 仅统计当天 api_key_log 调用次数
+    # total_api_call: 截止当前的历史累计调用总数
     try:
-        from datetime import datetime
         from sqlalchemy import func as _api_func
         from app.models.api_key_model import ApiKey as _ApiKey, ApiKeyLog as _ApiKeyLog
-
-        _now = datetime.now()
-        _today_start = _now.replace(hour=0, minute=0, second=0, microsecond=0)
 
         _api_key_ids = [
             row[0] for row in db.query(_ApiKey.id).filter(
@@ -1097,9 +1090,7 @@ def get_dashboard_common_stats(db: Session, workspace_id) -> dict:
         ]
         if _api_key_ids:
             total_api_calls = db.query(_api_func.count(_ApiKeyLog.id)).filter(
-                _ApiKeyLog.api_key_id.in_(_api_key_ids),
-                _ApiKeyLog.created_at >= _today_start,
-                _ApiKeyLog.created_at < _now
+                _ApiKeyLog.api_key_id.in_(_api_key_ids)
             ).scalar() or 0
         else:
             total_api_calls = 0
