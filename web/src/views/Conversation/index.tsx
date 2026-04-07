@@ -178,7 +178,7 @@ const Conversation: FC = () => {
           }))
         })
     } else {
-      if (features?.opening_statement.enabled && features?.opening_statement?.statement) {
+      if (features?.opening_statement?.enabled && features?.opening_statement?.statement) {
         setChatList([{
           role: 'assistant',
           content: features.opening_statement.statement,
@@ -436,7 +436,7 @@ const Conversation: FC = () => {
     setChatList(prev => {
       const firstMsg = prev[0]
       console.log('firstMsg', firstMsg)
-      if (firstMsg && firstMsg.role === 'assistant' && firstMsg.content && features?.opening_statement.enabled && features?.opening_statement.statement && variables.length > 0) {
+      if (firstMsg && firstMsg.role === 'assistant' && firstMsg.content && features?.opening_statement?.enabled && features?.opening_statement.statement && variables.length > 0) {
         firstMsg.content = replaceVariables(features?.opening_statement.statement, variables as unknown as AppVariable[])
       }
       return [firstMsg, ...prev.slice(1)]
