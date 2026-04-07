@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-19 17:00:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-02 16:58:40
+ * @Last Modified time: 2026-04-07 20:33:26
  */
 /**
  * useVariableList Hook
@@ -125,7 +125,7 @@ const processNodeVariables = (
   if (type in NODE_VARIABLES) {
     if (type === 'list-operator') {
       // Determine output type from the first variable in config
-      const variableValue = config?.variable;
+      const variableValue = config?.input_list?.defaultValue;
       let itemType = 'string';
       if (variableValue) {
         const refVar = variableList.find(v => `{{${v.value}}}` === variableValue);
@@ -321,7 +321,6 @@ export const getChildNodeVariables = (
         if (p?.name) addVariable(list, keys, `${nodeId}_${p.name}`, p.name, p.type || 'string', `${nodeId}.${p.name}`, nodeData);
       });
     }
-    
     // Add code node variables
     if (type === 'code') {
       (nodeData.config?.output_variables?.defaultValue || []).forEach((p: any) => {
@@ -393,8 +392,18 @@ export const useVariableList = (
     // Add chat variables
     chatVariables?.forEach(v => addVariable(list, keys, `CONVERSATION_${v.name}`, v.name, v.type, `conv.${v.name}`, { type: 'CONVERSATION', name: 'CONVERSATION', icon: '' }, { group: 'CONVERSATION' }));
 
-    // Process each relevant node
+    // Process each relevant node: non-list-operator first, then list-operator
+    const listOperatorIds: string[] = [];
     relevantIds.forEach(id => {
+      const node = nodes.find(n => n.id === id);
+      if (!node) return;
+      if (node.getData()?.type === 'list-operator') {
+        listOperatorIds.push(id);
+      } else {
+        processNodeVariables(node.getData(), node.getData().id, list, keys);
+      }
+    });
+    listOperatorIds.forEach(id => {
       const node = nodes.find(n => n.id === id);
       if (node) processNodeVariables(node.getData(), node.getData().id, list, keys);
     });

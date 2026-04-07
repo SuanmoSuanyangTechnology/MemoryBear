@@ -108,7 +108,7 @@ export interface ChatVariable {
   required: boolean;
   description: string;
   default?: string;
-  defaultValue: string;
+  defaultValue: string | any[];
 }
 export interface AddChatVariableRef {
   handleOpen: (value?: ChatVariable) => void;
