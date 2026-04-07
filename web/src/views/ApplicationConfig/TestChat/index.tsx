@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-02 17:58:07
+ * @Last Modified time: 2026-04-07 18:08:18
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -27,6 +27,7 @@ import type { TestChatProps } from './type'
 import type { SSEMessage } from '@/utils/stream'
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types'
 import { getFileStatusById } from '@/api/fileStorage'
+import { replaceVariables } from '@/views/ApplicationConfig/Agent'
 
 const formatParams = (message: string, conversation_id: string | null, files: any[] = [], variables: Record<string, any>) => {
   return {
@@ -86,6 +87,7 @@ const TestChat: FC<TestChatProps> = ({
   const [message, setMessage] = useState<string | undefined>(undefined)
   const [fileList, setFileList] = useState<any[]>([])
   const [features, setFeatures] = useState<FeaturesConfigForm>({} as FeaturesConfigForm)
+  const [variables, setVariables] = useState<Variable[]>([])
   
   const audioPollingRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
   const [audioStatusMap, setAudioStatusMap] = useState<Record<string, string>>({})
@@ -107,7 +109,7 @@ const TestChat: FC<TestChatProps> = ({
     setFeatures(config?.features || {} as FeaturesConfigForm)
 
 
-    if (config?.features?.opening_statement?.statement && config?.features?.opening_statement?.statement.trim() !== '') {
+    if (config?.features?.opening_statement.enabled && config?.features?.opening_statement?.statement && config?.features?.opening_statement?.statement.trim() !== '') {
       setChatList(prev => [...prev, {
         role: 'assistant',
         created_at: Date.now(),
@@ -144,6 +146,7 @@ const TestChat: FC<TestChatProps> = ({
     }
 
     toolbarRef.current?.setVariables([...initVariables])
+    setVariables([...initVariables])
   }
 
   const addUserMessage = (message: string, files: any[]) => {
@@ -560,6 +563,24 @@ const TestChat: FC<TestChatProps> = ({
     })
   }
 
+  useEffect(() => {
+    const opening_statement = features?.opening_statement
+
+    if (opening_statement?.enabled && opening_statement?.statement && opening_statement?.statement.trim() !== '') {
+      const assistantMsg: ChatItem = {
+        role: 'assistant',
+        content: replaceVariables(opening_statement.statement, variables as any),
+        meta_data: {
+          suggested_questions: opening_statement?.suggested_questions
+        }
+      }
+      setChatList(prev => {
+        prev[0] = assistantMsg
+        return [...prev]
+      })
+    }
+  }, [chatList.length, features?.opening_statement, variables])
+
   return (
     <div className="rb:w-250 rb:mx-auto rb:h-full">
       <RbCard
@@ -592,6 +613,7 @@ const TestChat: FC<TestChatProps> = ({
             ref={toolbarRef}
             features={features}
             onFilesChange={setFileList}
+            onVariablesChange={setVariables}
           />
         </Chat>
       </RbCard>

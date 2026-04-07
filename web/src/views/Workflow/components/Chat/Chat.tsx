@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 17:06:02
+ * @Last Modified time: 2026-04-07 18:07:38
  */
 /**
  * Workflow Chat Component
@@ -68,8 +68,8 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   const handleOpen = () => {
     setOpen(true)
 
-    if (features?.opening_statement?.statement && features?.opening_statement?.statement.trim() !== '') {
-      setChatList(prev => [...prev, {
+    if (features?.opening_statement?.enabled && features?.opening_statement?.statement && features?.opening_statement?.statement.trim() !== '') {
+      setChatList([{
         role: 'assistant',
         created_at: Date.now(),
         content: features?.opening_statement?.statement,
@@ -431,8 +431,12 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
           suggested_questions: opening_statement?.suggested_questions
         }
       }
-      console.log('variables', assistantMsg)
-      setChatList(prev => [assistantMsg, ...prev.slice(1)])
+      setChatList(prev => {
+        if (prev[0]?.role === 'assistant') {
+          prev[0] = assistantMsg
+        }
+        return [...prev]
+      })
     }
   }, [chatList.length, features?.opening_statement, variables])
 
