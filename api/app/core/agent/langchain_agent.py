@@ -14,6 +14,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
+from langgraph.errors import GraphRecursionError
 
 from app.core.logging_config import get_business_logger
 from app.core.models import RedBearLLM, RedBearModelConfig
@@ -377,7 +378,7 @@ class LangChainAgent:
                     {"messages": messages},
                     config={"recursion_limit": self.max_iterations}
                 )
-            except RecursionError as e:
+            except (RecursionError, GraphRecursionError) as e:
                 logger.warning(
                     f"Agent 达到最大迭代次数限制 ({self.max_iterations})，可能存在工具调用循环",
                     extra={"error": str(e)}
@@ -612,6 +613,12 @@ class LangChainAgent:
                         yield stream_total_tokens
                         break
 
+            except GraphRecursionError:
+                logger.warning(
+                    f"Agent 达到最大迭代次数限制 ({self.max_iterations})，模型可能不支持正确的工具调用停止判断"
+                )
+                if not full_content:
+                    yield "抱歉，我在处理您的请求时遇到了问题（已达最大处理步骤限制）。请尝试简化问题或更换模型后重试。"
             except Exception as e:
                 logger.error(f"Agent astream_events 失败: {str(e)}", exc_info=True)
                 raise

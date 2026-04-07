@@ -803,7 +803,6 @@ models:
   - vision
   - video
   - audio
-  - thinking
   is_omni: true
   tags:
   - 大语言模型
