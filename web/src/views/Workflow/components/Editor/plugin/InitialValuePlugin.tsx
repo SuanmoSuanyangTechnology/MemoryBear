@@ -52,7 +52,7 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
           const root = $getRoot();
           root.clear();
 
-          const parts = value.split(/(\{\{[^}]+\}\}|\n)/);
+          const parts = (value ?? '').split(/(\{\{[^}]+\}\}|\n)/);
           let paragraph = $createParagraphNode();
 
             parts.forEach(part => {

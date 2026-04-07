@@ -32,7 +32,7 @@ interface KnowledgeConfigModalProps {
 /**
  * Available retrieval types
  */
-const retrieveTypes: RetrieveType[] = ['participle', 'semantic', 'hybrid']
+const retrieveTypes: RetrieveType[] = ['participle', 'semantic', 'hybrid', 'graph']
 
 /**
  * Modal for configuring knowledge base retrieval settings

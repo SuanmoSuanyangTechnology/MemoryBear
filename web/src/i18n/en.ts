@@ -1270,6 +1270,7 @@ export const en = {
       participle: 'Participle retrieval',
       semantic: 'Semantic retrieval',
       hybrid: 'Hybrid Retrieval',
+      graph: 'Graph Retrieval',
 
       similarity_threshold: 'Semantic similarity threshold',
       similarity_threshold_desc: 'Only return results with semantic similarity higher than this threshold',
