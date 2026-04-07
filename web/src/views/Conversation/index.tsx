@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 18:08:52
+ * @Last Modified time: 2026-04-07 21:21:52
  */
 /**
  * Conversation Page
@@ -438,8 +438,9 @@ const Conversation: FC = () => {
       console.log('firstMsg', firstMsg)
       if (firstMsg && firstMsg.role === 'assistant' && firstMsg.content && features?.opening_statement?.enabled && features?.opening_statement.statement && variables.length > 0) {
         firstMsg.content = replaceVariables(features?.opening_statement.statement, variables as unknown as AppVariable[])
+        return [firstMsg, ...prev.slice(1)]
       }
-      return [firstMsg, ...prev.slice(1)]
+      return prev
     })
   }
 
