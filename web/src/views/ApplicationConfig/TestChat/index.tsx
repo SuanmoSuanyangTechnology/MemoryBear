@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 20:25:45
+ * @Last Modified time: 2026-04-07 21:31:19
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -90,6 +90,7 @@ const TestChat: FC<TestChatProps> = ({
   const [variables, setVariables] = useState<Variable[]>([])
   
   const audioPollingRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
+  const streamLoadingRef = useRef(false)
   const [audioStatusMap, setAudioStatusMap] = useState<Record<string, string>>({})
 
   useEffect(() => {
@@ -191,7 +192,10 @@ const TestChat: FC<TestChatProps> = ({
   }
   const updateAssistantReasoningMessage = (content: string) => {
     if (!content) return
-    if (streamLoading) setStreamLoading(false)
+    if (streamLoadingRef.current) {
+      streamLoadingRef.current = false
+      setStreamLoading(false)
+    }
     setChatList(prev => {
       const newList = [...prev]
       const lastMsg = newList[newList.length - 1]
@@ -251,6 +255,7 @@ const TestChat: FC<TestChatProps> = ({
     toolbarRef.current?.setFiles([])
     setFileList([])
     addAssistantMessage()
+    streamLoadingRef.current = true
     setStreamLoading(true)
     setLoading(true)
 
@@ -265,6 +270,7 @@ const TestChat: FC<TestChatProps> = ({
       })
       .finally(() => {
         setLoading(false)
+        streamLoadingRef.current = false
         setStreamLoading(false)
       })
   }
@@ -341,6 +347,7 @@ const TestChat: FC<TestChatProps> = ({
             updateAssistantMessage(content, audio_url, undefined, citations)
           }
           updateErrorAssistantMessage(message_length)
+          streamLoadingRef.current = false
           setStreamLoading(false)
           break
       }
@@ -361,6 +368,7 @@ const TestChat: FC<TestChatProps> = ({
     setFileList([])
     setMessage(undefined)
     setStreamLoading(true)
+    streamLoadingRef.current = true
 
     draftRun(
       application.id,
@@ -381,6 +389,7 @@ const TestChat: FC<TestChatProps> = ({
       .finally(() => {
         setLoading(false)
         setStreamLoading(false)
+        streamLoadingRef.current = false
       })
   }
 
@@ -419,6 +428,7 @@ const TestChat: FC<TestChatProps> = ({
             updateWorkflowEndMessage(item.data as NodeData, citations)
           }
           setStreamLoading(false)
+          streamLoadingRef.current = false
           setLoading(false)
           break
       }

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-02 16:05:01
+ * @Last Modified time: 2026-04-07 21:29:59
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -131,7 +131,9 @@ const ChatContent: FC<ChatContentProps> = ({
     <div ref={scrollContainerRef} className={clsx("rb:relative rb:overflow-y-auto", classNames)}>
       {data.length === 0 
         ? empty // Display empty state
-        : data.map((item, index) => (
+        : data.map((item, index) => {
+          if (!item) return null
+          return (
           <div key={index} className={clsx("rb:relative", {
             'rb:mt-6': index !== 0, // Add top margin for non-first messages
             'rb:right-0 rb:text-right': item.role === 'user', // User messages right-aligned
@@ -147,7 +149,7 @@ const ChatContent: FC<ChatContentProps> = ({
                     {labelFormat(item)}
                   </div>
                 }
-                {item.meta_data?.files && item.meta_data?.files.length > 0 && <Flex gap={8} vertical align="end" className="rb:mb-2!">
+                {item?.meta_data?.files && item.meta_data?.files.length > 0 && <Flex gap={8} vertical align="end" className="rb:mb-2!">
                   {item.meta_data?.files?.map((file) => {
                     if (file.type.includes('image')) {
                       return (
@@ -305,7 +307,7 @@ const ChatContent: FC<ChatContentProps> = ({
               </>
             }
           </div>
-        ))
+        )})
       }
     </div>
   )
