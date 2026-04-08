@@ -185,6 +185,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
     handleOpen,
   }));
   const [isFocus, setIsFocus] = useState(false)
+  const [isComposing, setIsComposing] = useState(false)
   const handleFocus = () => {
     setIsFocus(true)
   }
@@ -236,7 +237,9 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
               <Form.Item name="message" className="rb:flex-1 rb:mb-0!">
                 <Input
                   placeholder={t(`${source}.promptChatPlaceholder`)}
-                  onPressEnter={handleSend}
+                  onCompositionStart={() => setIsComposing(true)}
+                  onCompositionEnd={() => setIsComposing(false)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !isComposing) handleSend() }}
                   variant="borderless"
                   className="rb:p-0!"
                   onFocus={handleFocus}
