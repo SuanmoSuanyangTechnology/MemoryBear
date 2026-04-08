@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-30 13:59:36 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-08 00:08:50
+ * @Last Modified time: 2026-04-08 10:40:51
  */
 import { forwardRef, useImperativeHandle, useState, useRef, useMemo } from 'react';
 import { Form, Input, Select, InputNumber, Button, Row, Col, Flex, Spin } from 'antd';
@@ -73,37 +73,32 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
   const [editIndex, setEditIndex] = useState<number | undefined>(undefined);
 
   const type = Form.useWatch('type', form);
+  const max_size = 50;
   const allowed_transfer_methods = Form.useWatch('allowed_transfer_methods', form);
   const image_enabled = Form.useWatch('image_enabled', form);
   const audio_enabled = Form.useWatch('audio_enabled', form);
   const document_enabled = Form.useWatch('document_enabled', form);
   const video_enabled = Form.useWatch('video_enabled', form);
-  const image_max_size_mb = Form.useWatch('image_max_size_mb', form);
-  const audio_max_size_mb = Form.useWatch('audio_max_size_mb', form);
-  const document_max_size_mb = Form.useWatch('document_max_size_mb', form);
-  const video_max_size_mb = Form.useWatch('video_max_size_mb', form);
   const image_allowed_extensions = Form.useWatch('image_allowed_extensions', form);
   const audio_allowed_extensions = Form.useWatch('audio_allowed_extensions', form);
   const document_allowed_extensions = Form.useWatch('document_allowed_extensions', form);
   const video_allowed_extensions = Form.useWatch('video_allowed_extensions', form);
   const max_file_count = Form.useWatch('max_file_count', form);
 
-  const hasEnabledFileType = !!(image_enabled || audio_enabled || document_enabled || video_enabled);
-
   const featureConfig = useMemo(() => ({
-    enabled: hasEnabledFileType,
+    enabled: true,
     allowed_transfer_methods,
     max_file_count,
-    image_enabled, image_max_size_mb, image_allowed_extensions,
-    audio_enabled, audio_max_size_mb, audio_allowed_extensions,
-    document_enabled, document_max_size_mb, document_allowed_extensions,
-    video_enabled, video_max_size_mb, video_allowed_extensions,
+    image_enabled, image_max_size_mb: max_size, image_allowed_extensions,
+    audio_enabled, audio_max_size_mb: max_size, audio_allowed_extensions,
+    document_enabled, document_max_size_mb: max_size, document_allowed_extensions,
+    video_enabled, video_max_size_mb: max_size, video_allowed_extensions,
   }), [
-    hasEnabledFileType, allowed_transfer_methods, max_file_count,
-    image_enabled, image_max_size_mb, image_allowed_extensions,
-    audio_enabled, audio_max_size_mb, audio_allowed_extensions,
-    document_enabled, document_max_size_mb, document_allowed_extensions,
-    video_enabled, video_max_size_mb, video_allowed_extensions,
+    allowed_transfer_methods, max_file_count,
+    image_enabled, image_allowed_extensions,
+    audio_enabled, audio_allowed_extensions,
+    document_enabled, document_allowed_extensions,
+    video_enabled, video_allowed_extensions, max_size
   ]);
 
   const handleClose = () => {
