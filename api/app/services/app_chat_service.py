@@ -234,7 +234,7 @@ class AppChatService:
             file_list = []
             for file in files:
                 file_dict = file.model_dump()
-                file_dict["upload_file_id"] = str(file_dict["upload_file_id"])
+                file_dict["upload_file_id"] = str(file_dict["upload_file_id"]) if file_dict["upload_file_id"] else None
                 file_list.append(file_dict)
             messages = [
                 {"role": "user", "content": message, "files": file_list},
@@ -514,7 +514,7 @@ class AppChatService:
                 file_list = []
                 for file in files:
                     file_dict = file.model_dump()
-                    file_dict["upload_file_id"] = str(file_dict["upload_file_id"])
+                    file_dict["upload_file_id"] = str(file_dict["upload_file_id"]) if file_dict["upload_file_id"] else None
                     file_list.append(file_dict)
                 messages = [
                     {"role": "user", "content": message, "files": file_list},
