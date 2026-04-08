@@ -32,7 +32,7 @@ class ChatRequest(BaseModel):
     web_search: bool = Field(default=False, description="是否启用网络搜索")
     memory: bool = Field(default=True, description="是否启用记忆功能")
     thinking: bool = Field(default=False, description="是否启用深度思考（需Agent配置支持）")
-    files: Optional[List[FileInput]] = Field(default=None, description="附件列表（支持多文件）")
+    files: List[FileInput] = Field(default_factory=list, description="附件列表（支持多文件）")
 
 
 # ---------- Output Schemas ----------
