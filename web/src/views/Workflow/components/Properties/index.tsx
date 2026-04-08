@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 11:30:44
+ * @Last Modified time: 2026-04-08 14:10:40
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -38,7 +38,6 @@ import RbCard from '@/components/RbCard/Card';
 import ModelConfig from './ModelConfig'
 import ModelSelect from '@/components/ModelSelect'
 import ListOperator from './ListOperator'
-import type { Variable } from "./VariableList/types";
 
 /**
  * Props for Properties component

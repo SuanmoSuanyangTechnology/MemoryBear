@@ -140,7 +140,13 @@ const JinjaRender: FC<JinjaRenderProps> = ({ selectedNode, options, templateOpti
       if (existingMapping) {
         updatedTemplate = updatedTemplate.replace(regex, `{{${existingMapping.name}}}`)
       } else if (!existingNames.includes(varName)) {
-        const mappingName = varName.includes('.') ? varName.split('.').pop() || varName : varName
+        const baseName = varName.includes('.') ? varName.split('.').pop() || varName : varName
+        const usedNames = getMappingNames(updatedMapping)
+        let mappingName = baseName
+        let counter = 1
+        while (usedNames.includes(mappingName)) {
+          mappingName = `${baseName}_${counter++}`
+        }
         updatedMapping.push({ name: mappingName, value: `{{${varName}}}` })
         updatedTemplate = updatedTemplate.replace(regex, `{{${mappingName}}}`)
       }
