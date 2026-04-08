@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-30 13:59:36 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-08 10:40:51
+ * @Last Modified time: 2026-04-08 11:05:34
  */
 import { forwardRef, useImperativeHandle, useState, useRef, useMemo } from 'react';
 import { Form, Input, Select, InputNumber, Button, Row, Col, Flex, Spin } from 'antd';
@@ -121,6 +121,8 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
           const list = Array.isArray(defaultVal) ? defaultVal : [defaultVal];
           setFileList(list);
         }
+      } else if (variable.type.includes('object') && variable.defaultValue) {
+        form.setFieldValue('defaultValue', JSON.stringify(variable.defaultValue, null, 2))
       }
     } else {
       form.resetFields();

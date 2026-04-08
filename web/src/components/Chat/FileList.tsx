@@ -59,7 +59,7 @@ const FileList: FC<FileListProps> = ({ fileList, onDelete, wrap,
         ? "rb:bg-[url('@/assets/images/file/video.svg')]"
         : file.type?.includes('pdf')
           ? "rb:bg-[url('@/assets/images/file/pdf.svg')]"
-          : (file.type?.includes('excel') || file.type?.includes('spreadsheetml.sheet'))
+          : (file.type?.includes('excel') || file.type?.includes('spreadsheetml.sheet')) || file.type?.includes('xls') || file.type?.includes('xlsx')
             ? "rb:bg-[url('@/assets/images/file/excel.svg')]"
             : file.type?.includes('csv')
               ? "rb:bg-[url('@/assets/images/file/csv.svg')]"

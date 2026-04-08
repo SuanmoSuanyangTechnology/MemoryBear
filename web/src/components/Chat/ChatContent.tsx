@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 22:13:47
+ * @Last Modified time: 2026-04-08 11:23:18
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -187,23 +187,23 @@ const ChatContent: FC<ChatContentProps> = ({
                             "rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/pdf_disabled.svg')]",
                             file.type?.includes('pdf')
                               ? "rb:bg-[url('@/assets/images/file/pdf.svg')]"
-                              : (file.type?.includes('excel') || file.type?.includes('spreadsheetml.sheet'))
-                              ? "rb:bg-[url('@/assets/images/file/excel.svg')]"
-                              : file.type?.includes('csv')
-                              ? "rb:bg-[url('@/assets/images/file/csv.svg')]"
-                              : file.type?.includes('html')
-                              ? "rb:bg-[url('@/assets/images/file/html.svg')]"
-                              : file.type?.includes('json')
-                              ? "rb:bg-[url('@/assets/images/file/json.svg')]"
-                              : file.type?.includes('ppt')
-                              ? "rb:bg-[url('@/assets/images/file/ppt.svg')]"
-                              : file.type?.includes('text')
-                              ? "rb:bg-[url('@/assets/images/file/txt.svg')]"
-                              : file.type?.includes('markdown')
-                              ? "rb:bg-[url('@/assets/images/file/md.svg')]"
-                              : (file.type?.includes('doc') || file.type?.includes('docx') || file.type?.includes('word') || file.type?.includes('wordprocessingml.document'))
-                              ? "rb:bg-[url('@/assets/images/file/word.svg')]"
-                              : null
+                              : (file.type?.includes('excel') || file.type?.includes('spreadsheetml.sheet')) || file.type?.includes('xls') || file.type?.includes('xlsx')
+                                ? "rb:bg-[url('@/assets/images/file/excel.svg')]"
+                                : file.type?.includes('csv')
+                                  ? "rb:bg-[url('@/assets/images/file/csv.svg')]"
+                                  : file.type?.includes('html')
+                                    ? "rb:bg-[url('@/assets/images/file/html.svg')]"
+                                    : file.type?.includes('json')
+                                      ? "rb:bg-[url('@/assets/images/file/json.svg')]"
+                                      : file.type?.includes('ppt')
+                                        ? "rb:bg-[url('@/assets/images/file/ppt.svg')]"
+                                        : file.type?.includes('markdown')
+                                          ? "rb:bg-[url('@/assets/images/file/md.svg')]"
+                                          : file.type?.includes('text')
+                                            ? "rb:bg-[url('@/assets/images/file/txt.svg')]"
+                                            : (file.type?.includes('doc') || file.type?.includes('docx') || file.type?.includes('word') || file.type?.includes('wordprocessingml.document'))
+                                              ? "rb:bg-[url('@/assets/images/file/word.svg')]"
+                                              : "rb:bg-[url('@/assets/images/file/txt.svg')]"
                           )}
                         ></div>
                         <div className="rb:flex-1 rb:w-32.5">
@@ -220,7 +220,7 @@ const ChatContent: FC<ChatContentProps> = ({
                   'rb:bg-[rgba(255,93,52,0.08)] rb:text-[#FF5D34]': (item.status && item.status !== 'completed') || (errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime),
                   // Assistant message style
                   'rb:bg-[#E3EBFD] rb:p-[10px_12px_2px_12px] rb:rounded-lg rb:max-w-130': item.role === 'user',
-                  'rb:max-w-full': item.role === 'assistant',
+                  'rb:max-w-full rb:w-full': item.role === 'assistant',
                   // User message style
                   'rb:text-[#212332]': item.role === 'assistant' && (item.content || item.content === '' || typeof renderRuntime === 'function'),
                   'rb:mt-1': labelPosition === 'top',
