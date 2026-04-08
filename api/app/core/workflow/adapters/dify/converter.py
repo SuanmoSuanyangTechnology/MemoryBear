@@ -131,7 +131,7 @@ class DifyConverter(BaseConverter):
         selector = var_selector.split('.')
         if len(selector) not in [2, 3] and var_selector != "context":
             raise Exception(f"invalid variable selector: {var_selector}")
-        if len(selector) == 3:
+        if len(selector) == 3 and selector[0] in ("conversation", "sys"):
             selector = selector[1:]
         if selector[0] == "conversation":
             selector[0] = "conv"
