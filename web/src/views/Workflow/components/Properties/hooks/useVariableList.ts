@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-19 17:00:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 20:33:26
+ * @Last Modified time: 2026-04-08 10:12:27
  */
 /**
  * useVariableList Hook
@@ -26,7 +26,8 @@ export const fileSubVariable = [
   { label: 'url', dataType: 'string', filed: 'url' },
   { label: 'extension', dataType: 'string', filed: 'extension' },
   { label: 'mime_type', dataType: 'string', filed: 'mime_type' },
-  { label: 'related_id', dataType: 'string', filed: 'related_id' },
+  { label: 'origin_file_type', dataType: 'string', filed: 'origin_file_type' },
+  { label: 'file_id', dataType: 'string', filed: 'file_id' },
 ];
 
 /**
