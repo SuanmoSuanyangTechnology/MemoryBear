@@ -231,8 +231,13 @@ class AppChatService:
         if memory_flag:
             connected_config = get_end_user_connected_config(user_id, self.db)
             memory_config_id: str = connected_config.get("memory_config_id")
+            file_list = []
+            for file in files:
+                file_dict = file.model_dump()
+                file_dict["upload_file_id"] = str(file_dict["upload_file_id"])
+                file_list.append(file_dict)
             messages = [
-                {"role": "user", "content": message, "files": [file.model_dump() for file in files]},
+                {"role": "user", "content": message, "files": file_list},
                 {"role": "assistant", "content": result["content"]}
             ]
             if memory_config_id:
@@ -506,8 +511,13 @@ class AppChatService:
             if memory_flag:
                 connected_config = get_end_user_connected_config(user_id, self.db)
                 memory_config_id: str = connected_config.get("memory_config_id")
+                file_list = []
+                for file in files:
+                    file_dict = file.model_dump()
+                    file_dict["upload_file_id"] = str(file_dict["upload_file_id"])
+                    file_list.append(file_dict)
                 messages = [
-                    {"role": "user", "content": message, "files": [file.model_dump() for file in files]},
+                    {"role": "user", "content": message, "files": file_list},
                     {"role": "assistant", "content": full_content}
                 ]
                 if memory_config_id:
