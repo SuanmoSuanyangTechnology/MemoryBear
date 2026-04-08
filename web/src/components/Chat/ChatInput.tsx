@@ -27,6 +27,7 @@ const ChatInput: FC<ChatInputProps> = ({
 }) => {
   const [inputValue, setInputValue] = useState('')
   const [isFocus, setIsFocus] = useState(false)
+  const [isComposing, setIsComposing] = useState(false)
 
   // Clear input when external message is cleared
   useEffect(() => {
@@ -78,9 +79,11 @@ const ChatInput: FC<ChatInputProps> = ({
             setInputValue(e.target.value)
             onChange?.(e.target.value)
           }}
+          onCompositionStart={() => setIsComposing(true)}
+          onCompositionEnd={() => setIsComposing(false)}
           onKeyDown={(e) => {
             // Enter to send, Shift+Enter for new line
-            if (e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).value?.trim() !== '' && !loading) {
+            if (e.key === 'Enter' && !e.shiftKey && !isComposing && (e.target as HTMLTextAreaElement).value?.trim() !== '' && !loading) {
               e.preventDefault();
               handleSend();
             }
