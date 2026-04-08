@@ -307,90 +307,16 @@ def parse_document(file_path: str, document_id: uuid.UUID):
         db_document.run = 0
         db.commit()
 
-        # using graphrag
+        # Dispatch GraphRAG as a separate async task (non-blocking)
         if db_knowledge.parser_config and db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False):
-            graphrag_conf = db_knowledge.parser_config.get("graphrag", {})
-            with_resolution = graphrag_conf.get("resolution", False)
-            with_community = graphrag_conf.get("community", False)
-
-            def callback(*args, msg=None, **kwargs):
-                nonlocal progress_msg
-                message = msg or (args[0] if args else "No message")
-                progress_msg += f"{datetime.now().strftime('%H:%M:%S')} run graphrag msg: {message}.\n"
-
-            progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Start to run graphrag.\n"
-            start_time = time.time()
+            progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Dispatching GraphRAG task asynchronously.\n"
             db_document.progress_msg = progress_msg
             db.commit()
             db.refresh(db_document)
-
-            task = {
-                "id": str(db_document.id),
-                "workspace_id": str(db_knowledge.workspace_id),
-                "kb_id": str(db_knowledge.id),
-                "parser_config": db_knowledge.parser_config,
-            }
-
-            # init_graphrag
-            vts, _ = embedding_model.encode(["ok"])
-            vector_size = len(vts[0])
-            init_graphrag(task, vector_size)
-
-            async def _run(
-                    row: dict,
-                    document_ids: list[str],
-                    language: str,
-                    parser_config: dict,
-                    vector_service,
-                    chat_model,
-                    embedding_model,
-                    callback,
-                    with_resolution: bool = True,
-                    with_community: bool = True
-            ) -> dict:
-                await trio.sleep(5)  # Delay for 10 seconds
-                nonlocal progress_msg  # Declare the use of an external progress_msg variable
-                result = await run_graphrag_for_kb(
-                    row=row,
-                    document_ids=document_ids,
-                    language=language,
-                    parser_config=parser_config,
-                    vector_service=vector_service,
-                    chat_model=chat_model,
-                    embedding_model=embedding_model,
-                    callback=callback,
-                    with_resolution=with_resolution,
-                    with_community=with_community,
-                )
-                progress_msg += f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task result for task {task}:\n{result}\n"
-                return result
-
-            def sync_task():
-                trio.run(
-                    lambda: _run(
-                        row=task,
-                        document_ids=[str(db_document.id)],
-                        language="Chinese",
-                        parser_config=db_knowledge.parser_config,
-                        vector_service=vector_service,
-                        chat_model=chat_model,
-                        embedding_model=embedding_model,
-                        callback=callback,
-                        with_resolution=with_resolution,
-                        with_community=with_community,
-                    )
-                )
-
-            try:
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(sync_task)
-                    future.result()  # Blocks until the task completes
-            except Exception as e:
-                progress_msg += f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task failed for task {task}:\n{str(e)}\n"
-            progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Knowledge Graph done ({time.time() - start_time}s)"
-            db_document.progress_msg = progress_msg
-            db.commit()
-            db.refresh(db_document)
+            celery_app.send_task(
+                "app.core.rag.tasks.build_graphrag_for_document",
+                args=[str(db_document.id)],
+            )
 
         result = f"parse document '{db_document.file_name}' processed successfully."
         return result
@@ -401,6 +327,99 @@ def parse_document(file_path: str, document_id: uuid.UUID):
             db.commit()
         result = f"parse document '{db_document.file_name}' failed."
         return result
+    finally:
+        db.close()
+
+
+@celery_app.task(name="app.core.rag.tasks.build_graphrag_for_document")
+def build_graphrag_for_document(document_id: str):
+    """
+    Build knowledge graph for a single document.
+    Dispatched asynchronously from parse_document to avoid blocking the worker.
+    """
+    import importlib
+    import trio
+    importlib.reload(trio)
+
+    db = next(get_db())
+    try:
+        db_document = db.query(Document).filter(Document.id == document_id).first()
+        if not db_document:
+            logger.error(f"build_graphrag_for_document: document {document_id} not found")
+            return f"document {document_id} not found"
+
+        db_knowledge = db.query(Knowledge).filter(Knowledge.id == db_document.kb_id).first()
+        if not db_knowledge:
+            logger.error(f"build_graphrag_for_document: knowledge base not found for document {document_id}")
+            return f"knowledge base not found for document {document_id}"
+
+        graphrag_conf = db_knowledge.parser_config.get("graphrag", {})
+        with_resolution = graphrag_conf.get("resolution", False)
+        with_community = graphrag_conf.get("community", False)
+
+        chat_model = Base(
+            key=db_knowledge.llm.api_keys[0].api_key,
+            model_name=db_knowledge.llm.api_keys[0].model_name,
+            base_url=db_knowledge.llm.api_keys[0].api_base
+        )
+        embedding_model = OpenAIEmbed(
+            key=db_knowledge.embedding.api_keys[0].api_key,
+            model_name=db_knowledge.embedding.api_keys[0].model_name,
+            base_url=db_knowledge.embedding.api_keys[0].api_base
+        )
+        vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+
+        progress_msg = db_document.progress_msg or ""
+        progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Start to run graphrag.\n"
+        db_document.progress_msg = progress_msg
+        db.commit()
+        db.refresh(db_document)
+
+        start_time = time.time()
+
+        task_row = {
+            "id": str(db_document.id),
+            "workspace_id": str(db_knowledge.workspace_id),
+            "kb_id": str(db_knowledge.id),
+            "parser_config": db_knowledge.parser_config,
+        }
+
+        vts, _ = embedding_model.encode(["ok"])
+        vector_size = len(vts[0])
+        init_graphrag(task_row, vector_size)
+
+        def callback(*args, msg=None, **kwargs):
+            message = msg or (args[0] if args else "No message")
+            logger.info(f"[GraphRAG][doc:{document_id}] {message}")
+
+        async def _run():
+            return await run_graphrag_for_kb(
+                row=task_row,
+                document_ids=[str(db_document.id)],
+                language="Chinese",
+                parser_config=db_knowledge.parser_config,
+                vector_service=vector_service,
+                chat_model=chat_model,
+                embedding_model=embedding_model,
+                callback=callback,
+                with_resolution=with_resolution,
+                with_community=with_community,
+            )
+
+        result = trio.run(_run)
+
+        elapsed = time.time() - start_time
+        progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Knowledge Graph done ({elapsed:.1f}s). Result: {result}\n"
+        db_document.progress_msg = progress_msg
+        db.commit()
+
+        return f"GraphRAG for document '{db_document.file_name}' completed in {elapsed:.1f}s"
+    except Exception as e:
+        logger.exception(f"build_graphrag_for_document failed: {document_id}")
+        if 'db_document' in locals() and db_document:
+            db_document.progress_msg = (db_document.progress_msg or "") + f"GraphRAG failed: {str(e)}\n"
+            db.commit()
+        return f"GraphRAG for document {document_id} failed: {str(e)}"
     finally:
         db.close()
 

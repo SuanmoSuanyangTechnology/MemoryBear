@@ -49,6 +49,20 @@ services:
     networks:
       - celery
 
+  # GraphRAG worker - Long-running knowledge graph tasks (isolated from document parsing)
+  worker-graphrag:
+    image: redbear-mem-open:latest
+    container_name: worker-graphrag
+    env_file:
+      - .env
+    volumes:
+      - ./files:/files
+      - /etc/localtime:/etc/localtime:ro
+    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=2 --queues=graphrag_tasks --max-tasks-per-child=10 -n graphrag_worker@%h
+    restart: unless-stopped
+    networks:
+      - celery
+
   # Periodic worker - Scheduled/beat tasks + API-triggered tasks (prefork, low concurrency)
   worker-periodic:
     image: redbear-mem-open:latest

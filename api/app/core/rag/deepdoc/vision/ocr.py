@@ -69,6 +69,9 @@ def load_model(model_dir, nm, device_id: int | None = None):
 
     def cuda_is_available():
         try:
+            # Check if ONNX Runtime has CUDA provider first
+            if 'CUDAExecutionProvider' not in ort.get_available_providers():
+                return False
             pip_install_torch()
             import torch
             target_id = 0 if device_id is None else device_id
@@ -79,14 +82,15 @@ def load_model(model_dir, nm, device_id: int | None = None):
         return False
 
     options = ort.SessionOptions()
-    options.enable_cpu_mem_arena = False
     options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
 
     # https://github.com/microsoft/onnxruntime/issues/9509#issuecomment-951546580
     # Shrink GPU memory after execution
     run_options = ort.RunOptions()
     if cuda_is_available():
-        # GPU mode: minimal CPU threads since computation happens on GPU
+        # GPU mode: enable memory arena for GPU shrinkage to work
+        options.enable_cpu_mem_arena = False
+        options.enable_mem_pattern = False
         options.intra_op_num_threads = int(os.environ.get("ORT_GPU_INTRA_THREADS", "1"))
         options.inter_op_num_threads = int(os.environ.get("ORT_GPU_INTER_THREADS", "1"))
 
@@ -94,9 +98,9 @@ def load_model(model_dir, nm, device_id: int | None = None):
         arena_strategy = os.environ.get("OCR_ARENA_EXTEND_STRATEGY", "kNextPowerOfTwo")
         provider_device_id = 0 if device_id is None else device_id
         cuda_provider_options = {
-            "device_id": provider_device_id, # Use specific GPU
+            "device_id": provider_device_id,
             "gpu_mem_limit": max(gpu_mem_limit_mb, 0) * 1024 * 1024,
-            "arena_extend_strategy": arena_strategy,  # gpu memory allocation strategy
+            "arena_extend_strategy": arena_strategy,
         }
         sess = ort.InferenceSession(
             model_file_path,
@@ -104,9 +108,15 @@ def load_model(model_dir, nm, device_id: int | None = None):
             providers=['CUDAExecutionProvider'],
             provider_options=[cuda_provider_options]
             )
-        run_options.add_run_config_entry("memory.enable_memory_arena_shrinkage", "gpu:" + str(provider_device_id))
+        # Only set shrinkage if arena is actually available; wrap in try/except
+        # to avoid crash on ONNX Runtime versions that don't support it
+        try:
+            run_options.add_run_config_entry("memory.enable_memory_arena_shrinkage", "gpu:" + str(provider_device_id))
+        except Exception as e:
+            logging.warning(f"Failed to set GPU memory arena shrinkage: {e}")
         logging.info(f"load_model {model_file_path} uses GPU (device {provider_device_id}, gpu_mem_limit={cuda_provider_options['gpu_mem_limit']}, arena_strategy={arena_strategy})")
     else:
+        options.enable_cpu_mem_arena = False
         # CPU mode: more threads to speed up inference
         options.intra_op_num_threads = int(os.environ.get("ORT_CPU_INTRA_THREADS", "4"))
         options.inter_op_num_threads = int(os.environ.get("ORT_CPU_INTER_THREADS", "2"))
@@ -115,7 +125,6 @@ def load_model(model_dir, nm, device_id: int | None = None):
             model_file_path,
             options=options,
             providers=['CPUExecutionProvider'])
-        run_options.add_run_config_entry("memory.enable_memory_arena_shrinkage", "cpu")
         logging.info(f"load_model {model_file_path} uses CPU (intra_threads={options.intra_op_num_threads}, inter_threads={options.inter_op_num_threads})")
     loaded_model = (sess, run_options)
     loaded_models[model_cached_tag] = loaded_model
