@@ -80,11 +80,11 @@ RUN --mount=type=cache,id=mem_gpu_uv,target=/root/.cache/uv,sharing=locked \
     uv sync --locked --no-dev
 
 # 5. Replace onnxruntime (CPU) with onnxruntime-gpu (CUDA)
-#    This must happen AFTER uv sync to avoid lock conflicts
+#    Uninstall CPU version first to avoid conflicts
 ENV PATH=/code/.venv/bin:$PATH
-RUN pip install --no-cache-dir onnxruntime-gpu==1.20.1 && \
-    pip uninstall -y onnxruntime 2>/dev/null; \
-    echo "onnxruntime-gpu installed successfully"
+RUN pip uninstall -y onnxruntime 2>/dev/null; \
+    pip install --no-cache-dir onnxruntime-gpu==1.20.1 && \
+    python -c "import onnxruntime; print('Providers:', onnxruntime.get_available_providers())"
 
 # 6. GPU-specific environment defaults
 ENV PARALLEL_DEVICES=1
