@@ -112,7 +112,7 @@ class RedBearModelFactory:
                 params["stream_usage"] = True
             # 深度思考模式
             is_streaming = bool(config.extra_params.get("streaming"))
-            if is_streaming:
+            if is_streaming and not config.is_omni:
                 if provider == ModelProvider.VOLCANO:
                     # 火山引擎深度思考仅流式调用支持，非流式时不传 thinking 参数
                     thinking_config: Dict[str, Any] = {

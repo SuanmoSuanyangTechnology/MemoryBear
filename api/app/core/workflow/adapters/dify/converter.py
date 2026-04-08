@@ -483,11 +483,11 @@ class DifyConverter(BaseConverter):
         node_data = node["data"]
         result = IterationNodeConfig.model_construct(
             input=self._process_list_variable_literal(node_data["iterator_selector"]),
-            parallel=node_data["is_parallel"],
-            parallel_count=node_data["parallel_nums"],
+            parallel=node_data.get("is_parallel", False),
+            parallel_count=node_data.get("parallel_nums", 4),
             output=self._process_list_variable_literal(node_data["output_selector"]),
             output_type=self.variable_type_map(node_data.get("output_type")),
-            flatten=node_data["flatten_output"],
+            flatten=node_data.get("flatten_output", False),
         ).model_dump()
 
         self.config_validate(node["id"], node["data"]["title"], IterationNodeConfig, result)
