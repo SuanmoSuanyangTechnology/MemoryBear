@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:40:13 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 19:40:27
+ * @Last Modified time: 2026-04-08 10:48:21
  */
 import { useState, useRef, useEffect, useLayoutEffect, type FC } from 'react'
 import { createPortal } from 'react-dom'
@@ -191,10 +191,11 @@ const VariableSelect: FC<VariableSelectProps> = ({
       <div
         className={clsx(
           'rb:w-full rb:flex rb:items-center rb:justify-between rb:cursor-pointer rb:rounded-md rb:px-2 rb:transition-colors',
+          variant === 'filled' && 'rb:bg-[#F6F6F6] rb:border-none rb:shadow-none',
           variant === 'outlined' && 'rb:border rb:border-[#d9d9d9] hover:rb:border-[#4096ff] rb:bg-white',
           variant === 'outlined' && open && 'rb:border-[#4096ff] rb:shadow-[0_0_0_2px_rgba(5,145,255,0.1)]',
           variant === 'borderless' && 'rb:border-none rb:shadow-none rb:bg-transparent',
-          multiple && size === 'small' ? 'rb:min-h-6 rb:py-0.75' : multiple ? 'rb:min-h-8 rb:py-1' : size === 'small' ? 'rb:h-6 rb:text-[10px]' : size === 'large' ? 'rb:h-10' : 'rb:h-8 rb:text-[12px]',
+          multiple && size === 'small' ? 'rb:min-h-7 rb:py-0.75' : multiple ? 'rb:min-h-8 rb:py-1' : size === 'small' ? 'rb:h-7 rb:text-[10px]' : size === 'large' ? 'rb:h-10' : 'rb:h-8 rb:text-[12px]',
           !multiple && (size === 'small' ? 'rb:text-[12px]' : 'rb:text-[12px]'),
           className
         )}
