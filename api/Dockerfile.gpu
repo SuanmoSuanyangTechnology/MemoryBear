@@ -1,23 +1,19 @@
-# ============================================================
-# GPU Dockerfile for DeepDOC document parsing acceleration
-# Base: NVIDIA CUDA 12.1 + cuDNN 8 + Ubuntu 22.04
-# Automatically replaces onnxruntime with onnxruntime-gpu
-# ============================================================
-FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
+FROM python:3.12-slim
 USER root
 SHELL ["/bin/bash", "-c"]
 
 ARG NEED_MIRROR=1
-ARG PYTHON_VERSION=3.12
 
 WORKDIR /code
 
-# 1. Copy models
+# 1. Download dependencies through download_deps.py: python download_deps.py --china-mirrors
+# 2. Copy models
 COPY huggingface.co/InfiniFlow/deepdoc/ /code/res/deepdoc/
 COPY huggingface.co/InfiniFlow/text_concat_xgb_v1.0/ /code/res/text_concat_xgb_v1.0/
 COPY huggingface.co/InfiniFlow/huqie/huqie.txt.trie /code/res/
 
-# 2. Tika & NLTK offline data
+# https://github.com/chrismattmann/tika-python
+# 3. This is the only way to run python-tika without internet access. Without this set, the default is to check the tika version and pull latest every time from Apache.
 COPY nltk_data/ /root/nltk_data/
 COPY tika-server-standard-3.1.0.jar /tmp/tika-server.jar
 COPY tika-server-standard-3.1.0.jar.md5 /tmp/tika-server.jar.md5
@@ -26,21 +22,23 @@ COPY cl100k_base.tiktoken /code/res/9b5ad71b2ce5302211f9c61530b329a4922fc6a4
 ENV TIKA_SERVER_JAR="file:///tmp/tika-server.jar"
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 3. Install Python 3.12 + system dependencies
-RUN --mount=type=cache,id=mem_gpu_apt,target=/var/cache/apt,sharing=locked \
+# 4. Setup apt
+# Python package and implicit dependencies:
+# opencv-python: libglib2.0-0 libglx-mesa0 libgl1
+# libreoffice: libreoffice libreoffice-writer libreoffice-impress fonts-wqy-zenhei fonts-noto-cjk
+# python-docx:   default-jdk                              tika-server-standard-3.0.0.jar
+# Building C extensions: libpython3-dev libgtk-4-1 libnss3 xdg-utils libgbm-dev
+RUN --mount=type=cache,id=mem_apt,target=/var/cache/apt,sharing=locked \
     if [ "$NEED_MIRROR" == "1" ]; then \
+        sed -i 's|http://ports.ubuntu.com|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list; \
         sed -i 's|http://archive.ubuntu.com|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list; \
-        sed -i 's|http://security.ubuntu.com|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list; \
     fi; \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
     echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache && \
     chmod 1777 /tmp && \
     apt update && \
-    apt --no-install-recommends install -y ca-certificates software-properties-common && \
-    add-apt-repository ppa:deadsnakes/ppa -y && \
+    apt --no-install-recommends install -y ca-certificates && \
     apt update && \
-    apt install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev && \
-    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 && \
     apt install -y libglib2.0-0 libglx-mesa0 libgl1 && \
     apt install -y libreoffice libreoffice-writer libreoffice-impress fonts-wqy-zenhei fonts-noto-cjk && \
     apt install -y default-jdk && \
@@ -63,29 +61,24 @@ RUN if [ "$NEED_MIRROR" == "1" ]; then \
 ENV PYTHONDONTWRITEBYTECODE=1 DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 ENV PATH=/root/.local/bin:$PATH
 
-# 4. Install dependencies from uv.lock, then swap onnxruntime → onnxruntime-gpu
-COPY ./pyproject.toml /code/pyproject.toml
-COPY ./uv.lock /code/uv.lock
+
+# 5. install dependencies from uv.lock file
+COPY ./pyproject.gpu.toml /code/pyproject.toml
 COPY ./app /code/app
 COPY ./alembic.ini /code/alembic.ini
 COPY ./migrations /code/migrations
 
-RUN --mount=type=cache,id=mem_gpu_uv,target=/root/.cache/uv,sharing=locked \
+# https://github.com/astral-sh/uv/issues/10462
+# uv records index url into uv.lock but doesn't failover among multiple indexes
+RUN --mount=type=cache,id=mem_uv,target=/root/.cache/uv,sharing=locked \
     if [ "$NEED_MIRROR" == "1" ]; then \
         sed -i 's|pypi.org|pypi.tuna.tsinghua.edu.cn|g' uv.lock; \
     else \
         sed -i 's|pypi.tuna.tsinghua.edu.cn|pypi.org|g' uv.lock; \
     fi; \
-    uv lock && \
-    uv sync --locked --no-dev
+    uv sync && \
 
-# 5. Replace onnxruntime (CPU) with onnxruntime-gpu (CUDA)
-#    Uninstall CPU version first to avoid conflicts
 ENV PATH=/code/.venv/bin:$PATH
-RUN pip uninstall -y onnxruntime 2>/dev/null; \
-    pip install --no-cache-dir onnxruntime-gpu==1.20.1 && \
-    python -c "import onnxruntime; print('Providers:', onnxruntime.get_available_providers())"
-
 # 6. GPU-specific environment defaults
 ENV PARALLEL_DEVICES=1
 ENV OCR_GPU_MEM_LIMIT_MB=2048
