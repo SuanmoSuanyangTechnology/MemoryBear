@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:07:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-05 13:43:59
+ * @Last Modified time: 2026-04-07 12:18:58
  */
 /**
  * AppHeader Component
@@ -13,12 +13,12 @@
  * @component
  */
 
-import { type FC, useRef } from 'react';
-import { Layout, Dropdown, Breadcrumb } from 'antd';
+import { type FC, useRef, useState } from 'react';
+import { Layout, Dropdown, Breadcrumb, Flex } from 'antd';
 import type { MenuProps, BreadcrumbProps } from 'antd';
-import { UserOutlined, LogoutOutlined, SettingOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router-dom';
+import clsx from 'clsx';
 
 import { useUser } from '@/store/user';
 import { useMenu } from '@/store/menu';
@@ -76,27 +76,39 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
   const userMenuItems: MenuProps['items'] = [
     {
       key: '1',
+      icon: <Flex align="center" justify="center" className="rb:size-10 rb:rounded-xl rb:bg-[#155EEF] rb:text-white">
+        {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(0, 2) : user.username?.[0]}
+      </Flex>,
       label: (<>
-        <div>{user.username}</div>
-        <div className="rb:text-[12px] rb:text-[#5B6167] rb:mt-2">{user.email}</div>
+        <div className="rb:text-[#212332] rb:leading-5">{user.username}</div>
+        <div className="rb:text-[12px] rb:text-[#7B8085] rb:leading-4.5 rb:mt-0.5 rb:mr-2">{user.email}</div>
       </>),
     },
     {
       key: '2',
       type: 'divider',
+      className: 'rb:bg-[#EBEBEB]!'
     },
     {
       key: '3',
-      icon: <UserOutlined />,
-      label: t('header.userInfo'),
+      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/userInfo.svg')]"></div>,
+      label: <Flex justify="space-between" align="center">
+        {t('header.userInfo')}
+        <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/arrow_t_r.svg')]"></div>
+      </Flex>,
+      className: 'rb:text-[#212332]!',
       onClick: () => {
         userInfoModalRef.current?.handleOpen()
       },
     },
     {
       key: '4',
-      icon: <SettingOutlined />,
-      label: t('header.settings'),
+      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/settings.svg')]"></div>,
+      label: <Flex justify="space-between" align="center">
+        {t('header.settings')}
+        <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/arrow_t_r.svg')]"></div>
+      </Flex>,
+      className: 'rb:text-[#212332]!',
       onClick: () => {
         settingModalRef.current?.handleOpen()
       },
@@ -104,12 +116,14 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
     {
       key: '5',
       type: 'divider',
+      className: 'rb:bg-[#EBEBEB]!'
     },
     {
       key: '6',
-      icon: <LogoutOutlined />,
+      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/logout_red.svg')]"></div>,
       label: t('header.logout'),
       danger: true,
+      className: 'rb:hover:rb:bg-transparent rb:hover:text-[#FF5D34]!',
       onClick: handleLogout,
     },
   ];
@@ -147,18 +161,34 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
     });
   }
   
+  const [open, setOpen] = useState(false);
+  const handleOpenChange = (open: boolean) => {
+    setOpen(open);
+  }
   return (
     <Header className={styles.header}>
       {/* Breadcrumb navigation */}
       <Breadcrumb separator="<" items={formatBreadcrumbNames() as BreadcrumbProps['items']} className="rb:font-medium!" />
       {/* User info dropdown menu */}
-      <Dropdown
-        menu={{
-          items: userMenuItems
-        }}
-      >
-        <div className="rb:cursor-pointer rb:font-medium">{user.username}</div>
-      </Dropdown>
+      {user.username && (
+        <Dropdown
+          menu={{
+            items: userMenuItems
+          }}
+          onOpenChange={handleOpenChange}
+          overlayClassName={styles.userDropdown}
+        >
+          <Flex align="center" className="rb:cursor-pointer rb:font-medium">
+            <Flex align="center" justify="center" className="rb:size-8 rb:rounded-xl rb:bg-[#155EEF] rb:text-white rb:mr-2!">
+              {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(user.username.length, -2) : user.username[0]}
+            </Flex>
+            <span className="rb:text-[#212332] rb:text-[12px] rb:leading-4 rb:mr-1">{user.username}</span>
+            <div className={clsx("rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')]", {
+              'rb:rotate-180': !open,
+            })}></div>
+          </Flex>
+        </Dropdown>
+      )}
       <SettingModal
         ref={settingModalRef}
       />

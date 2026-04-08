@@ -213,9 +213,10 @@ class LLMNode(BaseNode):
                 messages = messages[:-1] + history_message + messages[-1:]
             self.messages = messages
         else:
-            # 使用简单的 prompt 格式（向后兼容）
+            # 使用简单的 prompt 格式（向后兼容）——包装为标准消息列表以兼容所有 provider
             prompt_template = self.config.get("prompt", "")
-            self.messages = self._render_template(prompt_template, variable_pool)
+            rendered = self._render_template(prompt_template, variable_pool)
+            self.messages = [{"role": "user", "content": rendered}]
 
         return llm
 
@@ -245,7 +246,10 @@ class LLMNode(BaseNode):
         logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(content)}")
 
         # 返回 AIMessage（包含响应元数据）
-        return AIMessage(content=content, response_metadata=response.response_metadata)
+        return AIMessage(content=content, response_metadata={
+            **response.response_metadata,
+            "token_usage": getattr(response, 'usage_metadata', None) or response.response_metadata.get('token_usage')
+        })
 
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """提取输入数据（用于记录）"""
@@ -304,15 +308,16 @@ class LLMNode(BaseNode):
 
         # 调用 LLM（流式，支持字符串或消息列表）
         last_meta_data = {}
+        last_usage_metadata = {}
         async for chunk in llm.astream(self.messages):
-            # 提取内容
             if hasattr(chunk, 'content'):
                 content = self.process_model_output(chunk.content)
             else:
                 content = str(chunk)
-            if hasattr(chunk, 'response_metadata'):
-                if chunk.response_metadata:
-                    last_meta_data = chunk.response_metadata
+            if hasattr(chunk, 'response_metadata') and chunk.response_metadata:
+                last_meta_data = chunk.response_metadata
+            if hasattr(chunk, 'usage_metadata') and chunk.usage_metadata:
+                last_usage_metadata = chunk.usage_metadata
 
             # 只有当内容不为空时才处理
             if content:
@@ -335,7 +340,10 @@ class LLMNode(BaseNode):
         # 构建完整的 AIMessage（包含元数据）
         final_message = AIMessage(
             content=full_response,
-            response_metadata=last_meta_data
+            response_metadata={
+                **last_meta_data,
+                "token_usage": last_usage_metadata or last_meta_data.get('token_usage')
+            }
         )
 
         # yield 完成标记

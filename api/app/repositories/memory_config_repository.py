@@ -78,6 +78,15 @@ class MemoryConfigRepository:
     OPTIONAL MATCH (n) WHERE n.end_user_id = $end_user_id RETURN 'ALL' AS Label, COUNT(n) AS Count
     """
 
+    # 批量查询多个用户的记忆数量（简化版本，只返回total）
+    SEARCH_FOR_ALL_BATCH = """
+    MATCH (n) WHERE n.end_user_id IN $end_user_ids
+    RETURN 
+        n.end_user_id as user_id,
+        count(n) as total
+    ORDER BY user_id
+    """
+
     # Extracted entity details within group/app/user
     SEARCH_FOR_DETIALS = """
     MATCH (n:ExtractedEntity)

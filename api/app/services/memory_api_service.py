@@ -280,6 +280,53 @@ class MemoryAPIService:
                 code=BizCode.MEMORY_READ_FAILED
             )
 
+    def create_end_user(
+            self,
+            workspace_id: uuid.UUID,
+            other_id: str,
+    ) -> Dict[str, Any]:
+        """Create or retrieve an end user for the workspace.
+        
+        Uses get_or_create semantics: if an end user with the same other_id
+        already exists in the workspace, returns the existing one.
+        
+        Args:
+            workspace_id: Workspace ID from API key authorization
+            other_id: External user identifier
+            
+        Returns:
+            Dict with id, other_id, other_name, and workspace_id
+            
+        Raises:
+            BusinessException: If creation fails
+        """
+        logger.info(f"Creating end user - other_id: {other_id}, workspace_id: {workspace_id}")
+
+        try:
+            from app.repositories.end_user_repository import EndUserRepository
+
+            end_user_repo = EndUserRepository(self.db)
+            end_user = end_user_repo.get_or_create_end_user(
+                app_id=None,
+                workspace_id=workspace_id,
+                other_id=other_id,
+            )
+
+            logger.info(f"End user ready: {end_user.id}")
+            return {
+                "id": str(end_user.id),
+                "other_id": end_user.other_id or "",
+                "other_name": end_user.other_name or "",
+                "workspace_id": str(end_user.workspace_id),
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to create end user for workspace {workspace_id}: {e}")
+            raise BusinessException(
+                message=f"Failed to create end user: {str(e)}",
+                code=BizCode.INTERNAL_ERROR
+            )
+
     def list_memory_configs(
             self,
             workspace_id: uuid.UUID,

@@ -11,7 +11,6 @@ from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.cycle_graph import LoopNodeConfig
 from app.core.workflow.nodes.enums import ValueInputType, ComparisonOperator, LogicOperator, NodeType
 from app.core.workflow.nodes.operators import TypeTransformer, ConditionExpressionResolver, CompareOperatorInstance
-from app.core.workflow.utils.expression_evaluator import evaluate_expression
 
 logger = logging.getLogger(__name__)
 
@@ -85,12 +84,7 @@ class LoopRuntime:
 
         for variable in self.typed_config.cycle_vars:
             if variable.input_type == ValueInputType.VARIABLE:
-                value = evaluate_expression(
-                    expression=variable.value,
-                    conv_var=self.variable_pool.get_all_conversation_vars(),
-                    node_outputs=self.variable_pool.get_all_node_outputs(),
-                    system_vars=self.variable_pool.get_all_system_vars(),
-                )
+                value = self.variable_pool.get_value(variable.value)
             else:
                 value = TypeTransformer.transform(variable.value, variable.type)
             await self.child_variable_pool.new(self.node_id, variable.name, value, variable.type, mut=True)
@@ -98,12 +92,7 @@ class LoopRuntime:
             **self.state
         )
         loopstate["node_outputs"][self.node_id] = {
-            variable.name: evaluate_expression(
-                expression=variable.value,
-                conv_var=self.variable_pool.get_all_conversation_vars(),
-                node_outputs=self.variable_pool.get_all_node_outputs(),
-                system_vars=self.variable_pool.get_all_system_vars(),
-            )
+            variable.name: self.variable_pool.get_value(variable.value)
             if variable.input_type == ValueInputType.VARIABLE
             else TypeTransformer.transform(variable.value, variable.type)
             for variable in self.typed_config.cycle_vars

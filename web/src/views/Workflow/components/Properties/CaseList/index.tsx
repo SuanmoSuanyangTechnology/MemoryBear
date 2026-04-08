@@ -281,8 +281,7 @@ const CaseList: FC<CaseListProps> = ({
                                             options={options}
                                             size="small"
                                             allowClear={false}
-                                            popupMatchSelectWidth={false}
-                                            onChange={(val) => handleLeftFieldChange(caseIndex, conditionIndex, val)}
+                                            onChange={(val) => handleLeftFieldChange(caseIndex, conditionIndex, val as string)}
                                             variant="borderless"
                                             className="rb:w-36!"
                                           />
@@ -326,7 +325,6 @@ const CaseList: FC<CaseListProps> = ({
                                                   placeholder={t('common.pleaseSelect')}
                                                   options={options.filter(vo => vo.dataType === 'number')}
                                                   allowClear={false}
-                                                  popupMatchSelectWidth={false}
                                                   variant="borderless"
                                                   size="small"
                                                 />

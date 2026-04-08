@@ -32,6 +32,18 @@ const VariableComponent: React.FC<{ nodeKey: NodeKey; data: Suggestion }> = ({
     e.stopPropagation();
     setSelected(!isSelected);
   };
+  
+  if (!data.nodeData?.name) {
+    return (
+      <span
+        onClick={handleClick}
+        className="rb:inline rb:cursor-pointer rb:text-[#171719]"
+        contentEditable={false}
+      >
+        {data.value}
+      </span>
+    );
+  }
 
   return (
     <span
@@ -44,17 +56,21 @@ const VariableComponent: React.FC<{ nodeKey: NodeKey; data: Suggestion }> = ({
     >
       {data.isContext ? (
         <span style={{ fontSize: '12px', marginRight: '4px' }}>📄</span>
-      ) : data.group !== 'CONVERSATION' ? (
-        <img 
-          src={data.nodeData?.icon} 
-          style={{ width: '12px', height: '12px', marginRight: '4px' }} 
-          alt=""
-        />
-      ) : null}
+      ) : data.group !== 'CONVERSATION' && !data.value.includes('conv') ? (
+        <span className={`rb:size-4 rb:mr-1 rb:bg-cover rb:inline-block rb:flex-shrink-0 ${data.nodeData?.icon}`} />
+      ) : <span className="rb:inline-block rb:h-4"></span>}
       {!data.isContext && data.group !== 'CONVERSATION' && (
         <>
-          <span className="rb:wrap-break-word rb:line-clamp-1">{data.nodeData?.name}</span>
-          <span style={{ color: '#DFE4ED', margin: '0 2px' }}>/</span>
+          {!data.value.includes('conv') && <>
+            <span className="rb:wrap-break-word rb:line-clamp-1">{data.nodeData?.name}</span>
+            <span style={{ color: '#DFE4ED', margin: '0 2px' }}>/</span>
+          </>}
+          {data.parentLabel && (
+            <>
+              <span className="rb:wrap-break-word rb:line-clamp-1">{data.parentLabel}</span>
+              <span style={{ color: '#DFE4ED', margin: '0 2px' }}>/</span>
+            </>
+          )}
         </>
       )}
       <span className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1 rb:text-[#171719]">{data.label}</span>
@@ -66,7 +82,7 @@ export class VariableNode extends DecoratorNode<React.JSX.Element> {
   __data: Suggestion;
 
   static getType(): string {
-    return 'tag';
+    return 'variable';
   }
 
   static clone(node: VariableNode): VariableNode {
@@ -104,7 +120,7 @@ export class VariableNode extends DecoratorNode<React.JSX.Element> {
   exportJSON(): SerializedVariableNode {
     return {
       data: this.__data,
-      type: 'tag',
+      type: 'variable',
       version: 1,
     };
   }

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="20px" height="20px" viewBox="0 0 20 20" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>PDF</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="记忆验证-交互" transform="translate(-1082, -80)">
+            <g id="编组-18" transform="translate(767, 80)">
+                <g id="PDF" transform="translate(315, 0)">
+                    <g id="编组-9" transform="translate(2.5, 0.8333)">
+                        <path d="M3,0 L10.4985967,0 L10.4985967,0 L15,4.58333333 L15,15.3333333 C15,16.9901876 13.6568542,18.3333333 12,18.3333333 L3,18.3333333 C1.34314575,18.3333333 0,16.9901876 0,15.3333333 L0,3 C0,1.34314575 1.34314575,0 3,0 Z" id="矩形" fill="#8A8A8B"></path>
+                        <path d="M10.5,0 L15,4.58333333 L12.228,4.58333333 C11.273652,4.58333333 10.5,3.80968138 10.5,2.85533333 L10.5,0 L10.5,0 Z" id="矩形" fill-opacity="0.5" fill="#FFFFFF"></path>
+                    </g>
+                    <text id="MD" font-family="Rubik-Medium, Rubik" font-size="9" font-weight="400" fill="#FFFFFF">
+                        <tspan x="3.2" y="14.6666667">MD</tspan>
+                    </text>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

@@ -26,7 +26,7 @@ interface FileUploadSettingModalProps {
   capability?: Capability[];
   source?: Application['type']
 }
-const documentType = {
+export const documentType = {
   type: 'document',
   icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/txt.svg')]"></div>,
   formats: [
@@ -41,7 +41,7 @@ const documentType = {
     "md",
   ],
 }
-const imageType = {
+export const imageType = {
   type: 'image',
   icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/image.svg')]"></div>,
   formats: [
@@ -50,7 +50,7 @@ const imageType = {
     "jpeg"
   ],
 }
-const audioType = {
+export const audioType = {
   type: 'audio',
   icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/audio.svg')]"></div>,
   formats: [
@@ -59,7 +59,7 @@ const audioType = {
     "m4a",
   ],
 }
-const videoType = {
+export const videoType = {
   type: 'video',
   icon: <div className="rb:size-9 rb:bg-cover rb:bg-[url('@/assets/images/file/video.svg')]"></div>,
   formats: [
@@ -68,7 +68,7 @@ const videoType = {
   ],
 }
 
-const defaultValues: FileUpload = {
+export const defaultValues: FileUpload = {
   enabled: false,
   image_enabled: false,
   image_max_size_mb: 20,

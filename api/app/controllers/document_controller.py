@@ -314,8 +314,10 @@ async def parse_documents(
         )
 
         # 4. Check if the file exists
+        api_logger.debug(f"Constructed file path: {file_path}")
+        api_logger.debug(f"File metadata - kb_id: {db_file.kb_id}, parent_id: {db_file.parent_id}, file_id: {db_file.id}, extension: {db_file.file_ext}")
         if not os.path.exists(file_path):
-            api_logger.warning(f"File not found (possibly deleted): file_path={file_path}")
+            api_logger.error(f"File not found (possibly deleted): file_path={file_path}, file_id={db_file.id}, document_id={document_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="File not found (possibly deleted)"

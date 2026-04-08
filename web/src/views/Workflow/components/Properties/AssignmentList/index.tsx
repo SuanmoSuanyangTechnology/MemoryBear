@@ -75,14 +75,13 @@ const AssignmentList: FC<AssignmentListProps> = ({
                         <VariableSelect
                           placeholder={t('common.pleaseSelect')}
                           options={options.filter(vo => vo.nodeData.type === 'loop' || vo.value.includes('conv.') || (vo.nodeData.type === 'iteration' && (vo.label === 'item' || vo.label === 'index')))}
-                          popupMatchSelectWidth={false}
                           onChange={() => {
                             form.setFieldValue([parentName, name, 'operation'], undefined);
                             form.setFieldValue([parentName, name, 'value'], undefined);
                           }}
                           size={size}
-                          className="rb:w-39! rb:bg-[#F6F6F6]!"
-                          variant="borderless"
+                          className="rb:flex-1!"
+                          variant="filled"
                         />
                       </Form.Item>
                       <Form.Item
@@ -121,10 +120,9 @@ const AssignmentList: FC<AssignmentListProps> = ({
                               ? <VariableSelect
                                 placeholder={t('common.pleaseSelect')}
                                 options={dataType ? options.filter(vo => vo.dataType === dataType) : options}
-                                popupMatchSelectWidth={false}
                                 size={size}
-                                variant="borderless"
-                                className="select"
+                                className="rb:flex-1!"
+                                variant="filled"
                               />
                               : dataType === 'number'
                                 ? <InputNumber
@@ -153,10 +151,9 @@ const AssignmentList: FC<AssignmentListProps> = ({
                                   : <VariableSelect
                                     placeholder={t('common.pleaseSelect')}
                                     options={dataType ? options.filter(vo => vo.dataType === dataType) : options}
-                                    popupMatchSelectWidth={false}
                                     size={size}
-                                    variant="borderless"
-                                    className="select"
+                                    className="rb:flex-1!"
+                                    variant="filled"
                                   />
                             }
                           </Form.Item>

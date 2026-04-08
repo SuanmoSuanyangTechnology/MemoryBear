@@ -62,6 +62,7 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("预定义模型加载已禁用 (LOAD_MODEL=false)")
     await create_all_indexes()
+    logger.info("All neo4j indexes and constraints created successfully!")
     logger.info("应用程序启动完成")
 
 

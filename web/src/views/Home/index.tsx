@@ -25,14 +25,18 @@ import ApiLineCard from './components/ApiLineCard'
  * Dashboard statistics data
  */
 export interface DashboardData {
-  totalMemoryCapacity?: number;
-  application?: number;
-  knowledgeBaseCount?: number;
-  apiCallCount?: number;
+  total_memory: number;
+  total_app: number;
+  total_knowledge: number;
+  total_api_call: number;
+  total_memory_change: number;
+  total_app_change: number;
+  total_knowledge_change: number;
+  total_api_call_change: number;
 }
 
 const Home = () => {
-  const [dashboardData, setDashboardData] = useState<DashboardData>({});
+  const [dashboardData, setDashboardData] = useState<DashboardData>({} as DashboardData);
   const [loading, setLoading] = useState({
     knowledgeTypeDistribution: true,
   });
@@ -65,12 +69,7 @@ const Home = () => {
       }
       const { storage_type = 'neo4j' } = response || {}
       const responseData = storage_type === 'neo4j' ? response.neo4j_data : response.rag_data
-      setDashboardData({
-        totalMemoryCapacity: responseData?.total_memory || 0,
-        application: responseData?.total_app || 0,
-        knowledgeBaseCount: responseData?.total_knowledge || 0,
-        apiCallCount: responseData?.total_api_call || 0
-      })
+      setDashboardData(responseData as DashboardData)
     })
   }
   /** Fetch knowledge base type distribution */

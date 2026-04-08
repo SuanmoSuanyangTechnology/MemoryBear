@@ -1,5 +1,5 @@
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Union
 from langchain_core.embeddings import Embeddings
 
 from app.core.models.base import RedBearModelConfig, get_provider_embedding_class, RedBearModelFactory
@@ -22,11 +22,40 @@ class RedBearEmbeddings(Embeddings):
             self._model = self._create_model(config)
             self._client = None
 
-    def _create_model(self, config: RedBearModelConfig) -> Embeddings:
+    @staticmethod
+    def _create_model(config: RedBearModelConfig) -> Embeddings:
         """根据配置创建 LangChain 模型"""
         embedding_class = get_provider_embedding_class(config.provider)
-        model_params = RedBearModelFactory.get_model_params(config)
-        return embedding_class(**model_params)
+        provider = config.provider.lower()
+        # Embedding models only need connection params, never LLM-specific ones
+        # (e.g. enable_thinking, model_kwargs) — build params directly.
+        if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK]:
+            import httpx
+            params = {
+                "model": config.model_name,
+                "base_url": config.base_url,
+                "api_key": config.api_key,
+                "timeout": httpx.Timeout(timeout=config.timeout, connect=60.0),
+                "max_retries": config.max_retries,
+                "check_embedding_ctx_length": False,
+                "encoding_format": "float"
+            }
+        elif provider == ModelProvider.DASHSCOPE:
+            params = {
+                "model": config.model_name,
+                "dashscope_api_key": config.api_key,
+                "max_retries": config.max_retries,
+            }
+        elif provider == ModelProvider.OLLAMA:
+            params = {
+                "model": config.model_name,
+                "base_url": config.base_url,
+            }
+        elif provider == ModelProvider.BEDROCK:
+            params = RedBearModelFactory.get_model_params(config)
+        else:
+            params = RedBearModelFactory.get_model_params(config)
+        return embedding_class(**params)
     
     def _create_volcano_client(self, config: RedBearModelConfig):
         """创建火山引擎客户端"""

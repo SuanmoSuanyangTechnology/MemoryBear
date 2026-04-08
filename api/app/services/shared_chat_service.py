@@ -1,26 +1,24 @@
 """基于分享链接的聊天服务"""
-import uuid
-import time
 import asyncio
+import json
+import time
+import uuid
 from typing import Optional, Dict, Any, AsyncGenerator
+
+from deprecated import deprecated
 from sqlalchemy.orm import Session
 
-from app.repositories.model_repository import ModelApiKeyRepository
-from app.services.memory_konwledges_server import write_rag
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException, ResourceNotFoundException
+from app.core.logging_config import get_business_logger
+from app.models import MultiAgentConfig
 from app.models import ReleaseShare, AppRelease, Conversation
+from app.repositories import knowledge_repository
 from app.services.conversation_service import ConversationService
 from app.services.draft_run_service import create_web_search_tool
 from app.services.model_service import ModelApiKeyService
-from app.services.release_share_service import ReleaseShareService
-from app.core.exceptions import BusinessException, ResourceNotFoundException
-from app.core.error_codes import BizCode
-from app.core.logging_config import get_business_logger
 from app.services.multi_agent_service import MultiAgentService
-from app.models import MultiAgentConfig
-from app.repositories import knowledge_repository
-import json
-from app.services.task_service import get_task_memory_write_result
-from app.tasks import write_message_task
+from app.services.release_share_service import ReleaseShareService
 
 logger = get_business_logger()
 
@@ -118,6 +116,7 @@ class SharedChatService:
 
         return conversation
 
+    @deprecated("Use the chat method under app_chat_service instead.")
     async def chat(
             self,
             share_token: str,
@@ -136,10 +135,7 @@ class SharedChatService:
         config_id = actual_config_id
         from app.core.agent.langchain_agent import LangChainAgent
         from app.services.draft_run_service import create_knowledge_retrieval_tool, create_long_term_memory_tool
-        from app.services.model_parameter_merger import ModelParameterMerger
         from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
-        from sqlalchemy import select
-        from app.models import ModelApiKey
 
         start_time = time.time()
         actual_config_id = None
@@ -252,7 +248,9 @@ class SharedChatService:
             max_tokens=model_parameters.get("max_tokens", 2000),
             system_prompt=system_prompt,
             tools=tools,
-
+            deep_thinking=model_parameters.get("deep_thinking", False),
+            thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
+            capability=api_key_obj.capability or [],
         )
 
         # 加载历史消息
@@ -273,11 +271,6 @@ class SharedChatService:
             message=message,
             history=history,
             context=None,
-            end_user_id=user_id,
-            storage_type=storage_type,
-            user_rag_memory_id=user_rag_memory_id,
-            config_id=config_id,
-            memory_flag=memory_flag
         )
 
         # 保存消息
@@ -324,6 +317,7 @@ class SharedChatService:
             "elapsed_time": elapsed_time
         }
 
+    @deprecated("Use the chat method under app_chat_service instead.")
     async def chat_stream(
             self,
             share_token: str,
@@ -341,8 +335,6 @@ class SharedChatService:
         from app.core.agent.langchain_agent import LangChainAgent
         from app.services.draft_run_service import create_knowledge_retrieval_tool, create_long_term_memory_tool
         from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
-        from sqlalchemy import select
-        from app.models import ModelApiKey
         import json
 
         start_time = time.time()
@@ -460,7 +452,10 @@ class SharedChatService:
                 max_tokens=model_parameters.get("max_tokens", 2000),
                 system_prompt=system_prompt,
                 tools=tools,
-                streaming=True
+                streaming=True,
+                deep_thinking=model_parameters.get("deep_thinking", False),
+                thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
+                capability=api_key_obj.capability or [],
             )
 
             # 加载历史消息
@@ -486,14 +481,11 @@ class SharedChatService:
                     message=message,
                     history=history,
                     context=None,
-                    end_user_id=user_id,
-                    storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id,
-                    config_id=config_id,
-                    memory_flag=memory_flag
             ):
                 if isinstance(chunk, int):
                     total_tokens = chunk
+                elif isinstance(chunk, dict) and chunk.get("type") == "reasoning":
+                    yield f"event: reasoning\ndata: {json.dumps({'content': chunk['content']}, ensure_ascii=False)}\n\n"
                 else:
                     full_content += chunk
                     # 发送消息块事件
@@ -585,6 +577,7 @@ class SharedChatService:
 
         return conversations, total
 
+    @deprecated("Use the chat method under app_chat_service instead.")
     async def multi_agent_chat(
             self,
             share_token: str,
@@ -680,6 +673,7 @@ class SharedChatService:
             "elapsed_time": elapsed_time
         }
 
+    @deprecated("Use the chat method under app_chat_service instead.")
     async def multi_agent_chat_stream(
             self,
             share_token: str,

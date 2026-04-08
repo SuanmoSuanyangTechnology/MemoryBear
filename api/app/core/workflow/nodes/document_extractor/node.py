@@ -14,12 +14,22 @@ logger = logging.getLogger(__name__)
 
 def _file_object_to_file_input(f: FileObject) -> FileInput:
     """Convert workflow FileObject to multimodal FileInput."""
+    file_type = f.origin_file_type or ""
+    # Prefer mime_type for more accurate type detection
+    if not file_type and f.mime_type:
+        file_type = f.mime_type
+    resolved_type = FileType.trans(f.type) if isinstance(f.type, str) else f.type
+    if resolved_type != FileType.DOCUMENT:
+        raise ValueError(
+            f"Document extractor only supports document files, got type '{f.type}' "
+            f"(name={f.name or f.file_id or f.url})"
+        )
     return FileInput(
-        type=FileType.DOCUMENT,
+        type=resolved_type,
         transfer_method=TransferMethod(f.transfer_method),
         url=f.url or None,
         upload_file_id=f.file_id or None,
-        file_type=f.origin_file_type or "",
+        file_type=file_type,
     )
 
 
@@ -81,6 +91,7 @@ class DocExtractorNode(BaseNode):
             from app.services.multimodal_service import MultimodalService
             svc = MultimodalService(db)
             for f in files:
+                label = f.name or f.url or f.file_id
                 try:
                     file_input = _file_object_to_file_input(f)
                     # Ensure URL is populated for local files
@@ -89,11 +100,11 @@ class DocExtractorNode(BaseNode):
                     # Reuse cached bytes if already fetched
                     if f.get_content():
                         file_input.set_content(f.get_content())
-                    text = await svc._extract_document_text(file_input)
+                    text = await svc.extract_document_text(file_input)
                     chunks.append(text)
                 except Exception as e:
                     logger.error(
-                        f"Node {self.node_id}: failed to extract file url={f.url} file_id={f.file_id}: {e}",
+                        f"Node {self.node_id}: failed to extract file '{label}': {e}",
                         exc_info=True,
                     )
                     chunks.append("")

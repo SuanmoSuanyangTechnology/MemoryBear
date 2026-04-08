@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:09:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 15:00:15
+ * @Last Modified time: 2026-03-31 12:21:56
  */
 /**
  * Memory Conversation Page
@@ -10,23 +10,27 @@
  * Supports deep thinking, normal reply, and quick reply modes
  */
 
-import { type FC, type ReactNode, useState, useEffect } from 'react'
+import { type FC, type ReactNode, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Col, Row, App, Skeleton, Select, Segmented, Tooltip, Flex } from 'antd'
+import { Col, Row, App, Skeleton, Segmented, Tooltip, Flex, Image } from 'antd'
 import dayjs from 'dayjs'
 import type { AnyObject } from 'antd/es/_util/type';
 
 import ConversationEmptyIcon from '@/assets/images/conversation/conversationEmpty.svg'
 import AnalysisEmptyIcon from '@/assets/images/conversation/analysisEmpty.png'
-import { readService, getUserMemoryList } from '@/api/memory'
+import { readService, userMemoryListUrl } from '@/api/memory'
 import Empty from '@/components/Empty'
+import DebounceSelect from '@/components/DebounceSelect'
 import Markdown from '@/components/Markdown'
 import type { Data } from '@/views/UserMemory/types'
+import type { DefaultOptionType } from 'antd/es/select'
 import Chat from '@/components/Chat'
 import type { ChatItem } from '@/components/Chat/types'
 import RbCard from '@/components/RbCard/Card';
 import styles from './index.module.css'
 import ResultCard from '@/components/RbCard/ResultCard'
+import AudioPlayer from '@/views/UserMemoryDetail/components/AudioPlayer'
+import VideoPlayer from '@/views/UserMemoryDetail/components/VideoPlayer'
 
 
 /** Search mode configuration */
@@ -60,7 +64,7 @@ export interface TestParams {
   search_switch: string;
   /** Conversation history */
   history: { role: string; content: string }[];
-  /** Enable web search */
+  /** Enable web keyword */
   web_search?: boolean;
   /** Enable memory function */
   memory?: boolean;
@@ -90,6 +94,7 @@ export interface LogItem {
   result?: string;
   original_query: string;
   index?: number;
+  result_count?: number;
 }
 
 /**
@@ -108,20 +113,9 @@ const MemoryConversation: FC = () => {
   const [loading, setLoading] = useState<boolean>(false)
   const [chatData, setChatData] = useState<ChatItem[]>([])
   const [logs, setLogs] = useState<LogItem[]>([])
-  const [userList, setUserList] = useState<Data[]>([])
   const [search_switch, setSearchSwitch] = useState('0')
   const [msg, setMsg] = useState<string>('')
   const [expandedLogs, setExpandedLogs] = useState<Record<number, boolean>>({})
-
-  /** Load user list on mount */
-  useEffect(() => {
-    getUserMemoryList().then(res => {
-      setUserList((res as Data[] || []).map(item => ({
-        ...item,
-        name: item.end_user?.other_name && item.end_user?.other_name !== '' ? item.end_user?.other_name : item.end_user?.id
-      })))
-    })
-  }, [])
 
   /** Handle message send */
   const handleSend = () => {
@@ -149,32 +143,38 @@ const MemoryConversation: FC = () => {
       })
   }
 
-  /** Handle search mode change */
+  /** Handle keyword mode change */
   const handleChange = (value: string) => {
     setSearchSwitch(value)
+  }
+  const handleDownload = (file_path?: string) => {
+    if (!file_path) return
+    window.open(file_path, '_blank')
   }
 
   return (
     <>
       <Row gutter={16}>
         <Col span={12}>
-          <Select
-            options={userList.map(item => ({
+          <DebounceSelect
+            url={userMemoryListUrl}
+            searchKey="keyword"
+            format={(items) => (items as Data[]).map(item => ({
+              ...item,
+              'end_user.id': item.end_user?.id,
+              label: item.end_user?.other_name || item.end_user?.id,
               value: item.end_user?.id,
-              label: item?.name,
             }))}
-            filterOption={(inputValue, option) => option?.label?.toLowerCase().indexOf(inputValue.toLowerCase()) !== -1}
-            showSearch={true}
-            // filterOption={(inputValue, option) => option.label?.toLowerCase().indexOf(inputValue.toLowerCase()) !== -1}
             placeholder={t('memoryConversation.searchPlaceholder')}
             style={{ width: '100%', marginBottom: '16px' }}
-            onChange={setUserId}
+            onChange={(opt: DefaultOptionType) => setUserId(opt?.value as string)}
+            variant="borderless"
             className="rb:bg-white rb:rounded-lg"
-            variant="filled"
+            showSearch
           />
         </Col>
       </Row>
-      <Row gutter={16} className="rb:h-[calc(100vh-118px)]!">
+      <Row gutter={16} className="rb:h-[calc(100%-48px)]!">
         <Col span={12} className="rb:h-full!">
           <RbCard 
             title={t('memoryConversation.conversationContent')}
@@ -242,7 +242,7 @@ const MemoryConversation: FC = () => {
                           <ContentWrapper key={vo.id}>
                             <>
                               <div className="rb:font-medium rb:text-[#212332]">{vo.id}. {vo.question}</div>
-                              <div className="rb:mt-2 rb:text-[12px] rb:text-[#5B6167]">{vo.reason}</div>
+                              <div className="rb:mt-2 rb:text-[#5B6167]">{vo.reason}</div>
                             </>
                           </ContentWrapper>
                         ))}
@@ -254,7 +254,7 @@ const MemoryConversation: FC = () => {
                             <>
                               <div className="rb:font-medium rb:text-[#212332]">{key}</div>
                               {(log.data as Record<string, string[]>)[key].map((item, index) => (
-                                <div key={index} className="rb:mt-2 rb:text-[#5B6167] rb:text-[12px]">{item}</div>
+                                <div key={index} className="rb:mt-2 rb:text-[#5B6167]">{item}</div>
                               ))}
                             </>
                           </ContentWrapper>
@@ -264,16 +264,16 @@ const MemoryConversation: FC = () => {
                       ? <ContentWrapper>
                           <div className="rb:font-medium rb:text-[#212332] rb:mb-2">{log.query}</div>
                           {(log.raw_results.reranked_results as AnyObject)?.communities?.length > 0 && <>
-                            <div className="rb:font-medium rb:text-[#212332] rb:text-[12px]">{t('memoryConversation.communities')}</div>
-                            <ul className='rb:mt-2 rb:text-[12px] rb:text-[#5B6167] rb:list-disc rb:pl-4'>
+                            <div className="rb:font-medium rb:text-[#212332]">{t('memoryConversation.communities')}</div>
+                            <ul className='rb:mt-2 rb:text-[#5B6167] rb:list-disc rb:pl-4'>
                                 {((log.raw_results.reranked_results as AnyObject)?.communities as { content: string }[]).map((item, index: number) => (
                                 <li key={index}>{item.content}</li>
                               ))}
                             </ul>
                           </>}
                           {(log.raw_results.reranked_results as AnyObject)?.summaries?.length > 0 && <>
-                            <div className="rb:font-medium rb:text-[#212332] rb:text-[12px]">{t('memoryConversation.summaries')}</div>
-                            <ul className='rb:mt-2 rb:text-[12px] rb:text-[#5B6167] rb:list-disc rb:pl-4'>
+                            <div className="rb:font-medium rb:text-[#212332]">{t('memoryConversation.summaries')}</div>
+                            <ul className='rb:mt-2 rb:text-[#5B6167] rb:list-disc rb:pl-4'>
                               {((log.raw_results.reranked_results as AnyObject)?.summaries as { content: string }[]).map((item, index: number) => (
                                 <li key={index}>{item.content}</li>
                               ))}
@@ -287,8 +287,8 @@ const MemoryConversation: FC = () => {
                     : log.type === 'verification'
                     ? <ContentWrapper>
                       <div className="rb:font-medium rb:text-[#212332]">{log.query}</div>
-                      <div className="rb:mt-2 rb:text-[12px] rb:text-[#5B6167]">{log.reason}</div>
-                      <div className="rb:mt-2 rb:text-[12px] rb:text-[#5B6167]">{log.result}</div>
+                      <div className="rb:mt-2 rb:text-[#5B6167]">{log.reason}</div>
+                      <div className="rb:mt-2 rb:text-[#5B6167]">{log.result}</div>
                     </ContentWrapper>
                     : log.type === 'output_type'
                     ? <ContentWrapper>
@@ -298,8 +298,8 @@ const MemoryConversation: FC = () => {
                     : log.type === 'input_summary' && log.raw_results
                     ? <ContentWrapper>
                         <div className="rb:font-medium rb:text-[#212332] rb:mb-2">{log.query}</div>
-                        <div className="rb:font-medium rb:text-[12px] rb:text-[#5B6167] rb:mb-2">{log.summary}</div>
-                        <div className='rb:mt-2 rb:text-[12px] rb:text-[#5B6167]'>
+                        <div className="rb:font-medium rb:text-[#5B6167] rb:mb-2">{log.summary}</div>
+                        <div className='rb:mt-2 rb:text-[#5B6167]'>
                           {typeof log.raw_results === 'string'
                             ? <Markdown content={log.raw_results} />
                             : <>
@@ -313,7 +313,65 @@ const MemoryConversation: FC = () => {
                           }
                         </div>
                       </ContentWrapper>
-                      : null
+                    : log.type === 'perceptual_retrieve' && log.data && log.data?.length > 0
+                    ? <Flex gap={12} vertical>
+                        {log.data.map((vo: any) => (
+                          <ContentWrapper key={vo.id}>
+                            <Flex vertical gap={16}>
+                              {vo.file_path
+                                ? <>
+                                  {/(jpg|jpeg|png|gif|webp|svg)$/i.test(vo.file_type)
+                                    ? <Image src={vo.file_path} alt={vo.file_name} width={432} className="rb:rounded-xl rb:h-45!" />
+                                    : /(mp4|webm|ogg|mov)$/i.test(vo.file_type)
+                                    ? <VideoPlayer src={vo.file_path} />
+                                    : /(mp3|wav|ogg|m4a|aac)$/i.test(vo.file_type)
+                                    ? <AudioPlayer src={vo.file_path} fileName={vo.file_name} fileSize='-' />
+                                    : <Flex gap={11} align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:min-h-15.5! rb:rounded-xl rb:p-3!">
+                                      <Flex gap={12} align="center">
+                                        <div className="rb:w-7.5 rb:h-9 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/file.svg')]"></div>
+                                        <div>
+                                          <div className="rb:leading-5 rb:font-medium rb:mb-1 rb:wrap-break-word rb:line-clamp-1">{vo.file_name}</div>
+                                          <div className="rb:text-[#5B6167] rb:leading-4.5">
+                                            -
+                                          </div>
+                                        </div>
+                                      </Flex>
+                                      <div
+                                        className="rb:size-6 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/userMemory/download.svg')] rb:hover:bg-[url('@/assets/images/userMemory/download_hover.svg')]"
+                                          onClick={() => handleDownload(vo.file_path)}
+                                      ></div>
+                                    </Flex>
+                                  }
+                                </>
+                                : <div className="rb:bg-[#F6F6F6] rb:min-h-15.5! rb:rounded-xl rb:p-3!">
+                                  <Empty size={44} />
+                                </div>
+                              }
+                              {['summary', 'keywords', 'topic', 'domain', 'scene', 'speaker_count', 'section_count'].map(key => {
+                                const value = vo[key]
+                                if (value) {
+                                  return (
+                                    <div key={key} className="rb:leading-5">
+                                      <div className="rb:text-[#5B6167] rb:mb-1">{t(`perceptualDetail.${key}`)}</div>
+
+                                      {typeof value === 'string'
+                                        ? <div>{value}</div>
+                                        : Array.isArray(value)
+                                          ? <Flex wrap gap={11}>
+                                            {value.map((vo, index) => <div key={index} className="rb:bg-[#F6F6F6] rb:rounded-[13px] rb:py-1 rb:px-2 rb:font-medium rb:leading-4.5">{vo}</div>)}
+                                          </Flex>
+                                          : '-'
+                                      }
+                                    </div>
+                                  )
+                                }
+                                return null
+                              })}
+                            </Flex>
+                          </ContentWrapper>
+                        ))}
+                      </Flex>
+                    : null
                     }
                   </ResultCard>
                 ))}

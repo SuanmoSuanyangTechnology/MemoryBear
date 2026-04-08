@@ -16,7 +16,6 @@ from app.core.workflow.adapters.registry import PlatformAdapterRegistry
 from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.validator import validate_workflow_config
-from app.core.workflow.variable.base_variable import FileObject
 from app.db import get_db
 from app.models import App
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution
@@ -26,7 +25,7 @@ from app.repositories.workflow_repository import (
     WorkflowExecutionRepository,
     WorkflowNodeExecutionRepository
 )
-from app.schemas import DraftRunRequest, FileInput
+from app.schemas import DraftRunRequest, FileInput, FileType
 from app.services.conversation_service import ConversationService
 from app.services.multi_agent_service import convert_uuids_to_str
 from app.services.multimodal_service import MultimodalService
@@ -453,22 +452,70 @@ class WorkflowService:
             "success_rate": completed / total if total > 0 else 0
         }
 
+    async def _resolve_variables_file_defaults(
+            self,
+            variables: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Convert FileInput-format defaults in workflow variables to full FileObject dicts."""
+        from app.core.workflow.utils.file_processor import (
+            resolve_local_file_object_dict,
+            fetch_remote_file_meta,
+        )
+
+        async def _resolve_one(item: dict) -> dict | None:
+            if not isinstance(item, dict) or item.get("is_file"):
+                return item
+            transfer_method = item.get("transfer_method", "remote_url")
+            file_type = FileType.trans(item.get("type", "document"))
+            origin_file_type = item.get("file_type") or file_type
+            if transfer_method == "remote_url":
+                url = item.get("url", "")
+                return await fetch_remote_file_meta(url, file_type, origin_file_type) if url else None
+            else:
+                return resolve_local_file_object_dict(self.db, item.get("upload_file_id"), file_type, origin_file_type)
+
+        result = []
+        for var_def in variables:
+            var_type = var_def.get("type", "")
+            default = var_def.get("default")
+            if var_type == "file" and isinstance(default, dict) and not default.get("is_file"):
+                var_def = {**var_def, "default": await _resolve_one(default)}
+            elif var_type == "array[file]" and isinstance(default, list):
+                resolved = []
+                for item in default:
+                    r = await _resolve_one(item)
+                    if r is not None:
+                        resolved.append(r)
+                var_def = {**var_def, "default": resolved}
+            result.append(var_def)
+        return result
+
     async def _handle_file_input(self, files: list[FileInput]):
         if not files:
             return []
 
+        from app.core.workflow.utils.file_processor import (
+            resolve_local_file_object_dict,
+            build_file_object_dict_from_meta,
+            fetch_remote_file_meta,
+        )
+
         files_struct = []
         for file in files:
-            files_struct.append(
-                FileObject(
-                    type=file.type,
-                    url=await self.multimodal_service.get_file_url(file),
-                    transfer_method=file.transfer_method,
-                    file_id=str(file.upload_file_id) if file.upload_file_id else None,
-                    origin_file_type=file.file_type,
-                    is_file=True
-                ).model_dump()
-            )
+            url = await self.multimodal_service.get_file_url(file)
+            file_type = str(file.type)
+            origin_file_type = file.file_type or file_type
+
+            if file.transfer_method.value == "local_file" and file.upload_file_id:
+                fo = resolve_local_file_object_dict(self.db, file.upload_file_id, file_type, origin_file_type)
+                files_struct.append(fo or build_file_object_dict_from_meta(
+                    file_type=file_type, transfer_method="local_file",
+                    origin_file_type=origin_file_type,
+                    file_id=str(file.upload_file_id), url=url,
+                    file_name=None, file_size=None, file_ext=None, content_type=None,
+                ))
+            else:
+                files_struct.append(await fetch_remote_file_meta(url, file_type, origin_file_type))
         return files_struct
 
     @staticmethod
@@ -545,6 +592,12 @@ class WorkflowService:
     def _get_memory_store_info(self, workspace_id: uuid.UUID) -> tuple[str, str]:
         storage_type = get_workspace_storage_type_without_auth(self.db, workspace_id)
         user_rag_memory_id = ""
+        # 如果 storage_type 为 None，使用默认值 'neo4j'
+        if not storage_type:
+            storage_type = 'neo4j'
+            logger.warning(
+                f"Storage type not set for workspace {workspace_id}, using default: neo4j"
+            )
         if storage_type == "rag":
             knowledge = knowledge_repository.get_knowledge_by_name(
                 db=self.db,
@@ -560,6 +613,24 @@ class WorkflowService:
                 )
                 storage_type = 'neo4j'
         return storage_type, user_rag_memory_id
+
+    def _get_history_info(self, conversation_id: uuid.UUID) -> tuple[dict, list] | None:
+        executions = self.execution_repo.get_by_conversation_id(
+            conversation_id=conversation_id,
+            status="completed",
+            limit_count=1
+        )
+
+        if executions:
+            last_state = executions[0].output_data
+            if isinstance(last_state, dict):
+                variables = last_state.get("variables", {})
+                conv_vars = variables.get("conv", {})
+                # input_data["conv"] = conv_vars
+                # input_data["conv_messages"] = last_state.get("messages") or []
+                conv_messages = last_state.get("messages") or []
+                return conv_vars, conv_messages
+        return None
 
     # ==================== 工作流执行 ====================
 
@@ -634,19 +705,32 @@ class WorkflowService:
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
 
-            executions = self.execution_repo.get_by_conversation_id(conversation_id=conversation_id_uuid)
-
-            for exec_res in executions:
-                if exec_res.status == "completed":
-                    last_state = exec_res.output_data
-                    if isinstance(last_state, dict):
-                        variables = last_state.get("variables", {})
-                        conv_vars = variables.get("conv", {})
-                        input_data["conv"] = conv_vars
-                        input_data["conv_messages"] = last_state.get("messages") or []
-                        break
-
+            history = self._get_history_info(conversation_id_uuid)
+            if history:
+                conv_vars, conv_messages = history
+                input_data["conv"] = conv_vars
+                input_data["conv_messages"] = conv_messages
             init_message_length = len(input_data.get("conv_messages", []))
+
+            # 新会话时写入开场白
+            is_new_conversation = init_message_length == 0
+            if is_new_conversation:
+                opening_cfg = feature_configs.get("opening_statement", {})
+                if isinstance(opening_cfg, dict) and opening_cfg.get("enabled") and opening_cfg.get("statement"):
+                    statement = opening_cfg["statement"]
+                    suggested_questions = opening_cfg.get("suggested_questions", [])
+                    if payload.variables:
+                        for var_name, var_value in payload.variables.items():
+                            statement = statement.replace(f"{{{{{var_name}}}}}", str(var_value))
+                    self.conversation_service.add_message(
+                        conversation_id=conversation_id_uuid,
+                        role="assistant",
+                        content=statement,
+                        meta_data={"suggested_questions": suggested_questions}
+                    )
+                    # 注入到 conv_messages，让 LLM 感知开场白
+                    input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
+                    init_message_length = 1
 
             result = await execute_workflow(
                 workflow_config=workflow_config_dict,
@@ -685,12 +769,21 @@ class WorkflowService:
                     content=human_message,
                     meta_data=human_meta
                 )
+                # 过滤 citations
+                citations = result.get("citations", [])
+                citation_cfg = feature_configs.get("citation", {})
+                filtered_citations = (
+                    citations if isinstance(citation_cfg, dict) and citation_cfg.get("enabled") else []
+                )
+                assistant_meta = {"usage": token_usage, "audio_url": None}
+                if filtered_citations:
+                    assistant_meta["citations"] = filtered_citations
                 self.conversation_service.add_message(
                     message_id=message_id,
                     conversation_id=conversation_id_uuid,
                     role="assistant",
                     content=assistant_message,
-                    meta_data={"usage": token_usage, "audio_url": None}
+                    meta_data=assistant_meta
                 )
                 self.update_execution_status(
                     execution.execution_id,
@@ -709,6 +802,7 @@ class WorkflowService:
                 )
                 logger.error(f"Workflow Run Failed, execution_id: {execution.execution_id},"
                              f" error: {result.get('error')}")
+                filtered_citations = []
 
             # 返回增强的响应结构
             return {
@@ -723,7 +817,8 @@ class WorkflowService:
                 "conversation_id": result.get("conversation_id"),  # 所有节点输出（详细数据）payload.,  # 会话 ID
                 "error_message": result.get("error"),
                 "elapsed_time": result.get("elapsed_time"),
-                "token_usage": result.get("token_usage")
+                "token_usage": result.get("token_usage"),
+                "citations": filtered_citations,
             }
 
         except Exception as e:
@@ -807,19 +902,34 @@ class WorkflowService:
             storage_type, user_rag_memory_id = self._get_memory_store_info(workspace_id)
             input_data["files"] = files
             self.update_execution_status(execution.execution_id, "running")
-            executions = self.execution_repo.get_by_conversation_id(conversation_id=conversation_id_uuid)
-
-            for exec_res in executions:
-                if exec_res.status == "completed":
-                    last_state = exec_res.output_data
-                    if isinstance(last_state, dict):
-                        variables = last_state.get("variables", {})
-                        conv_vars = variables.get("conv", {})
-                        input_data["conv"] = conv_vars
-                        input_data["conv_messages"] = last_state.get("messages") or []
-                        break
+            history = self._get_history_info(conversation_id_uuid)
+            if history:
+                conv_vars, conv_messages = history
+                input_data["conv"] = conv_vars
+                input_data["conv_messages"] = conv_messages
             init_message_length = len(input_data.get("conv_messages", []))
             message_id = uuid.uuid4()
+
+            # 新会话时写入开场白
+            is_new_conversation = init_message_length == 0
+            if is_new_conversation:
+                opening_cfg = feature_configs.get("opening_statement", {})
+                if isinstance(opening_cfg, dict) and opening_cfg.get("enabled") and opening_cfg.get("statement"):
+                    statement = opening_cfg["statement"]
+                    suggested_questions = opening_cfg.get("suggested_questions", [])
+                    if payload.variables:
+                        for var_name, var_value in payload.variables.items():
+                            statement = statement.replace(f"{{{{{var_name}}}}}", str(var_value))
+                    self.conversation_service.add_message(
+                        conversation_id=conversation_id_uuid,
+                        role="assistant",
+                        content=statement,
+                        meta_data={"suggested_questions": suggested_questions}
+                    )
+                    # 注入到 conv_messages，让 LLM 感知开场白
+                    input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
+                    init_message_length = 1
+
             async for event in execute_workflow_stream(
                     workflow_config=workflow_config_dict,
                     input_data=input_data,
@@ -857,12 +967,21 @@ class WorkflowService:
                             content=human_message,
                             meta_data=human_meta
                         )
+                        # 过滤 citations
+                        citations = event.get("data", {}).get("citations", [])
+                        citation_cfg = feature_configs.get("citation", {})
+                        filtered_citations = (
+                            citations if isinstance(citation_cfg, dict) and citation_cfg.get("enabled") else []
+                        )
+                        assistant_meta = {"usage": token_usage, "audio_url": None}
+                        if filtered_citations:
+                            assistant_meta["citations"] = filtered_citations
                         self.conversation_service.add_message(
                             message_id=message_id,
                             conversation_id=conversation_id_uuid,
                             role="assistant",
                             content=assistant_message,
-                            meta_data={"usage": token_usage, "audio_url": None}
+                            meta_data=assistant_meta
                         )
                         self.update_execution_status(
                             execution.execution_id,
@@ -870,6 +989,7 @@ class WorkflowService:
                             output_data=event.get("data"),
                             token_usage=token_usage.get("total_tokens", None)
                         )
+                        event.setdefault("data", {})["citations"] = filtered_citations
                         logger.info(f"Workflow Run Success, "
                                     f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
                     elif status == "failed":

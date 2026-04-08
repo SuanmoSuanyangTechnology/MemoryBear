@@ -52,7 +52,7 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
           const root = $getRoot();
           root.clear();
 
-          const parts = value.split(/(\{\{[^}]+\}\}|\n)/);
+          const parts = (value ?? '').split(/(\{\{[^}]+\}\}|\n)/);
           let paragraph = $createParagraphNode();
 
             parts.forEach(part => {
@@ -77,9 +77,20 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
 
               if (conversationMatch) {
                 const [_, variableName] = conversationMatch;
-                const conversationSuggestion = optionsRef.current.find(s =>
+                const fullValue = `conv.${variableName}`;
+                // First try direct match on top-level label
+                let conversationSuggestion = optionsRef.current.find(s =>
                   s.group === 'CONVERSATION' && s.label === variableName
                 );
+                // Then search children by value (e.g. conv.api_key.url)
+                if (!conversationSuggestion) {
+                  for (const s of optionsRef.current) {
+                    if (s.group === 'CONVERSATION' && s.children) {
+                      const child = s.children.find(c => c.value === fullValue);
+                      if (child) { conversationSuggestion = child; break; }
+                    }
+                  }
+                }
                 if (conversationSuggestion) {
                   paragraph.append($createVariableNode(conversationSuggestion));
                 } else {
@@ -89,14 +100,28 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
               }
 
               if (match) {
-                const [_, nodeId, label] = match;
+                const [_, nodeId, rest] = match;
+                const restParts = rest.split('.');
+                const isThreeLevel = restParts.length >= 2;
+                const parentLabel = isThreeLevel ? restParts.slice(0, -1).join('.') : undefined;
+                const label = restParts[restParts.length - 1];
 
-                const suggestion = optionsRef.current.find(s => {
+                let suggestion = optionsRef.current.find(s => {
                   if (nodeId === 'sys') {
-                    return s.nodeData.type === 'start' && s.label === `sys.${label}`
+                    return s.nodeData.type === 'start' && s.label === `sys.${rest}`
                   }
-                  return s.nodeData.id === nodeId && s.label === label
+                  return s.nodeData.id === nodeId && s.label === rest
                 });
+
+                // Search in children for three-level variables (e.g. nodeId.parentLabel.label)
+                if (!suggestion && isThreeLevel) {
+                  for (const s of optionsRef.current) {
+                    if (s.nodeData.id === nodeId && s.label === parentLabel && s.children) {
+                      const child = s.children.find(c => c.label === label);
+                      if (child) { suggestion = child; break; }
+                    }
+                  }
+                }
 
                 if (suggestion) {
                   paragraph.append($createVariableNode(suggestion));

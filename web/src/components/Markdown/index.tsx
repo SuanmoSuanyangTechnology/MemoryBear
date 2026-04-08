@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:17:31 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 15:17:31 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-04-07 21:56:00
  */
 /**
  * RbMarkdown Component
@@ -22,7 +22,7 @@
  * @component
  */
 
-import { useState, useRef, useEffect, type FC } from 'react'
+import { useState, useRef, useEffect, type FC, createContext, useContext, useCallback, useMemo } from 'react'
 import { Image, Input, Select, Form, Checkbox, Radio, ColorPicker, DatePicker, TimePicker, InputNumber, Slider } from 'antd'
 import ReactMarkdown from 'react-markdown'
 import RemarkGfm from 'remark-gfm'
@@ -37,6 +37,18 @@ import AudioBlock from './AudioBlock'
 import Link from './Link'
 import RbButton from './RbButton'
 
+/** Context for sharing form field values between form/input/button components */
+const FormContext = createContext<{
+  values: Record<string, any>;
+  setValue: (name: string, value: any) => void;
+  onSubmit?: (values: Record<string, any>) => void;
+} | null>(null)
+
+/** Stable form wrapper component — state lives in RbMarkdown, survives components object rebuilds */
+const RbForm: FC<any> = ({ children, ...props }) => (
+  <Form {...props}>{children}</Form>
+)
+
 /** Props interface for RbMarkdown component */
 interface RbMarkdownProps {
   /** Markdown content to render */
@@ -49,10 +61,12 @@ interface RbMarkdownProps {
   onContentChange?: (content: string) => void;
   /** Additional CSS classes */
   className?: string;
+  /** Callback when a form button is clicked, receives form field values */
+  onFormSubmit?: (values: Record<string, any>) => void;
 }
 
-/** Custom component mappings for markdown elements */
-const components = {
+/** Build stable components map — form submission handled via FormContext */
+const buildComponents = () => ({
   h1: ({ children, ...props }: any) => <h1 className="rb:text-2xl rb:font-bold rb:mb-2" {...props}>{children}</h1>,
   h2: ({ children, ...props }: any) => <h2 className="rb:text-xl rb:font-bold rb:mb-2" {...props}>{children}</h2>,
   h3: ({ children, ...props }: any) => <h3 className="rb:text-lg rb:font-bold rb:mb-2" {...props}>{children}</h3>,
@@ -62,7 +76,7 @@ const components = {
   ul: ({ children, ...props }: any) => <ul className="rb:list-disc rb:ml-6 rb:mb-2" {...props}>{children}</ul>,
   ol: ({ children, ...props }: any) => <ol className="rb:list-decimal rb:ml-6 rb:mb-2" {...props}>{children}</ol>,  
   li: ({ children, ...props }: any) => <li className="rb:mb-1" {...props}>{children}</li>,  
-  blockquote: ({ children, ...props }: any) => <blockquote className="rb:border-l-4 rb:border-[#D9D9D9] rb:pl-4 rb:mb-2" {...props}>{children}</blockquote>,
+  blockquote: ({ children, ...props }: any) => <blockquote className="rb:bg-[#F6F6F6] rb:rounded-lg rb:pt-2.5 rb:pb-0.5 rb:px-3 rb:mb-3 rb:mt-1" {...props}>{children}</blockquote>,
   p: ({ children, ...props }: any) => <p className="rb:mb-2" {...props}>{children}</p>,
   strong: ({ children, ...props }: any) => <strong className="rb:font-bold" {...props}>{children}</strong>,
   em: ({ children, ...props }: any) => <em className="rb:italic" {...props}>{children}</em>,
@@ -80,57 +94,85 @@ const components = {
   video: ({ src, ...props }: any) => <VideoBlock node={{ children: [{ properties: { src: src || '' } }] }} {...props} />,
   audio: ({ src, ...props }: any) => <AudioBlock node={{ children: [{ properties: { src: src || '' } }] }} {...props} />,
   a: ({ href, children, ...props }: any) => <Link href={href || '#'} {...props}>{children}</Link>,
-  button: ({ children }: any) => <RbButton node={{ children }}>{[children]}</RbButton>,
-  table: ({ children, ...props }: any) => <div className="rb:overflow-x-auto rb:max-w-full"><table className="rb:border rb:border-[#D9D9D9] rb:mb-2" {...props}>{children}</table></div>,
-  tr: ({ children, ...props }: any) => <tr className="rb:border rb:border-[#D9D9D9]" {...props}>{children}</tr>,
-  th: ({ children, ...props }: any) => <th className="rb:border rb:border-[#D9D9D9] rb:px-2 rb:py-1 rb:text-left rb:font-bold" {...props}>{children}</th>,
-  td: ({ children, ...props }: any) => <td className="rb:border rb:border-[#D9D9D9] rb:px-2 rb:py-1 rb:text-left" {...props}>{children}</td>,
-  input: ({ children, ...props }: any) => {
+  table: ({ children, ...props }: any) => <div className="rb:overflow-x-auto rb:max-w-full"><table className="rb:border rb:border-[#EBEBEB] rb:mb-2" {...props}>{children}</table></div>,
+  tr: ({ children, ...props }: any) => <tr className="rb:border rb:border-[#EBEBEB]" {...props}>{children}</tr>,
+  th: ({ children, ...props }: any) => <th className="rb:border rb:border-[#EBEBEB] rb:px-2 rb:py-1 rb:text-left rb:font-bold" {...props}>{children}</th>,
+  td: ({ children, ...props }: any) => <td className="rb:border rb:border-[#EBEBEB] rb:px-2 rb:py-1 rb:text-left" {...props}>{children}</td>,
+  button: ({ children, ...props }: any) => {
+    const ctx = useContext(FormContext)
+    return <RbButton {...props} onClick={() => ctx?.onSubmit?.(ctx?.values ?? {})}>{[children]}</RbButton>
+  },
+  input: ({ children, value, ...props }: any) => {
+    const ctx = useContext(FormContext)
+    const handleChange = useCallback((val: any) => {
+      if (props.name) ctx?.setValue(props.name, val)
+    }, [ctx, props.name])
+    console.log('props', props)
     switch (props.type) {
       case 'color':
-        return <ColorPicker {...props} />
+        return <ColorPicker className="rb:mb-4!" defaultValue={value} {...props} onChange={handleChange} />
       case 'time':
-        return <TimePicker {...props} />
+        return <TimePicker className="rb:mb-4!" defaultValue={value} {...props} onChange={handleChange} />
       case 'date':
-        return <DatePicker {...props} />
+        return <DatePicker className="rb:mb-4!" defaultValue={value} {...props} onChange={handleChange} />
       case 'datetime':
       case 'datetime-local':
-        return <DatePicker showTime={true} {...props} />
+        return <DatePicker className="rb:mb-4!" defaultValue={value} showTime={true} {...props} onChange={handleChange} />
       case 'week':
-        return <DatePicker picker="week" {...props} />
+        return <DatePicker className="rb:mb-4!" defaultValue={value} picker="week" {...props} onChange={handleChange} />
       case 'month':
-        return <DatePicker picker="month" {...props} />
+        return <DatePicker className="rb:mb-4!" defaultValue={value} picker="month" {...props} onChange={handleChange} />
       case 'number':
-        return <InputNumber {...props} />
+        return <InputNumber className="rb:mb-4!" defaultValue={value} {...props} onChange={handleChange} />
       case 'search':
-        return <Input.Search {...props} />
+        return <Input.Search className="rb:mb-4!" defaultValue={value} {...props} onChange={(e) => handleChange(e.target.value)} />
       case 'range':
-        return <Slider {...props} />
+        return <Slider className="rb:mb-4!" defaultValue={value} {...props} onChange={handleChange} />
       case 'submit':
       case 'button':
-        return <RbButton node={{ children: props.value || children }}>{[props.value || children]}</RbButton>
+        return <RbButton className="rb:mb-4!" defaultValue={value} {...props} onClick={() => ctx?.onSubmit?.(ctx?.values ?? {})}>{[props.value || children]}</RbButton>
       case 'checkbox':
-        return <Checkbox {...props}>{children}</Checkbox>
+        return <Checkbox className="rb:mb-4!" defaultValue={value} {...props} onChange={(e) => handleChange(e.target.checked)}>{children}</Checkbox>
       case 'password':
-        return <Input.Password {...props} />
+        return <Input.Password className="rb:mb-4!" defaultValue={value} {...props} onChange={(e) => handleChange(e.target.value)} />
       case 'radio':
-        return <Radio {...props}>{children}</Radio>
+        return <Radio className="rb:mb-4!" defaultValue={value} {...props} onChange={(e) => handleChange(e.target.value)}>{children}</Radio>
+      case 'select': {
+        const raw = props['data-options']
+        const options = (typeof raw === 'string' ? JSON.parse(raw) : raw || []).map((v: string) => ({ label: v, value: v }))
+        return <Select className="rb:mb-4! rb:w-full!" defaultValue={value} options={options} onChange={(val) => { if (props.name) ctx?.setValue(props.name, val) }} />
+      }
       default:
-        return <Input value={children} {...props} />
+        return <Input className="rb:mb-4!" defaultValue={value} {...props} onChange={(e) => handleChange(e.target.value)} />
     }
   },
-  select: ({ children, ...props }: any) => <Select style={{width: '100%'}} {...props}>{children}</Select>,
-  textarea: ({ children, ...props }: any) => <Input.TextArea {...props}>{children}</Input.TextArea>,
-  form: ({ children, ...props }: any) => <Form {...props}>{children}</Form>,
-}
+  select: ({ children, ...props }: any) => {
+    const ctx = useContext(FormContext)
+    return <Select className="rb:mb-4! rb:w-full!" {...props} onChange={(val) => { if (props.name) ctx?.setValue(props.name, val) }}>{children}</Select>
+  },
+  textarea: ({ children, ...props }: any) => {
+    const ctx = useContext(FormContext)
+    return <Input.TextArea className="rb:mb-4!" {...props} onChange={(e) => { if (props.name) ctx?.setValue(props.name, e.target.value) }}>{children}</Input.TextArea>
+  },
+  form: RbForm,
+  label: ({ children, ...props }: any) => {
+    return <label className="rb:block rb:font-medium rb:text-[#212332] rb:mb-2" {...props}>{children}</label>
+  },
+  hr: (props: any) => <hr className="rb:border-t rb:border-[#EBEBEB] rb:my-3" {...props} />,
+})
 
 const RbMarkdown: FC<RbMarkdownProps> = ({
   content,
   showHtmlComments = false,
   editable = false,
   onContentChange,
-  className
+  className,
+  onFormSubmit,
 }) => {
+  const [formValues, setFormValues] = useState<Record<string, any>>({})
+  const setValue = useCallback((name: string, value: any) => setFormValues(prev => ({ ...prev, [name]: value })), [])
+  const formCtx = useMemo(() => ({ values: formValues, setValue, onSubmit: onFormSubmit }), [formValues, setValue, onFormSubmit])
+  const components = useMemo(() => buildComponents(), [])
   const [editContent, setEditContent] = useState(content)
   const textareaRef = useRef<any>(null)
 
@@ -197,6 +239,7 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
 
   /** Render markdown preview mode */
   return (
+    <FormContext.Provider value={formCtx}>
     <div className={`rb:relative ${className || ''}`} onKeyDown={handleKeyDown} tabIndex={0}>
       <style>{`
         .html-comment {
@@ -206,8 +249,6 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
       `}</style>
 
       <ReactMarkdown
-        // allowElement={[]}
-        // allowedElements={[]}
         components={components as any}
         disallowedElements={['script', 'iframe', 'head', 'html', 'meta', 'link', 'style', 'body']}
         rehypePlugins={[
@@ -235,6 +276,7 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
         {processedContent}
       </ReactMarkdown>
     </div>
+    </FormContext.Provider>
   )
 }
 export default RbMarkdown

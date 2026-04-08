@@ -13,7 +13,7 @@ from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes import BaseNode
 from app.core.workflow.nodes.code.config import CodeNodeConfig
-from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,8 @@ class CodeNode(BaseNode):
             for output in self.typed_config.output_variables:
                 value = exec_result.get(output.name)
                 if value is None:
-                    raise RuntimeError(f"Return value {output.name} does not exist")
+                    result[output.name] = DEFAULT_VALUE(output.type)
+                    continue
                 match output.type:
                     case VariableType.STRING:
                         if not isinstance(value, str):

@@ -271,6 +271,13 @@ body {
 .ant-pagination .ant-pagination-item.ant-pagination-item-active {
   font-weight: 400;
 }
+.ant-pagination.ant-pagination-mini .ant-pagination-item {
+  margin-right: 8px;
+}
+.ant-pagination.ant-pagination-mini .ant-pagination-options-quick-jumper input,
+.ant-pagination.ant-pagination-mini .ant-select-single.ant-select-sm {
+  height: 28px;
+}
 
 .ant-modal .ant-modal-content {
   padding: 24px;
@@ -397,6 +404,11 @@ body {
   color: #FFFFFF;
   background-color: #171719;
 }
+.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item.ant-dropdown-menu-item-danger:not(.ant-dropdown-menu-item-disabled):hover,
+.ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-item.ant-dropdown-menu-item-danger:not(.ant-dropdown-menu-item-disabled):hover {
+  background-color: #F6F6F6;
+  color: #FF5D34;
+}
 
 .spin .ant-spin-nested-loading .ant-spin-container::after {
   background: transparent;
@@ -404,4 +416,8 @@ body {
 .upload-block,
 .upload-block.ant-upload-wrapper .ant-upload-select {
   display: block;
+}
+.ant-picker-outlined:focus,
+.ant-picker-outlined:focus-within {
+  box-shadow: none;
 }

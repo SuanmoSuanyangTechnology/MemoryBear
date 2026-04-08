@@ -12,11 +12,11 @@ const NormalNode: ReactShapeConfig['component'] = ({ node }) => {
   return (
     <div className={clsx('rb:cursor-pointer rb:group rb:relative rb:h-full rb:w-full rb:p-3 rb:border rb:rounded-2xl rb:bg-[#FCFCFD] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)]', {
       'rb:border-[#171719]': data.isSelected,
-      'rb:border-[#DFE4ED]': !data.isSelected
+      'rb:border-[#FCFCFD]': !data.isSelected
     })}>
       <NodeTools node={node} />
       <Flex align="center" gap={8} className="rb:flex-1">
-        <img src={data.icon} className="rb:size-6" />
+        <div className={`rb:size-6 rb:bg-cover ${data.icon}`} />
         <div className="rb:wrap-break-word rb:line-clamp-1">{data.name ?? t(`workflow.${data.type}`)}</div>
       </Flex>
 

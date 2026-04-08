@@ -5,7 +5,7 @@ export interface RerankerConfig {
   reranker_id?: string | undefined;
   reranker_top_k?: number | undefined;
 }
-export type RetrieveType = 'participle' | 'semantic' | 'hybrid'
+export type RetrieveType = 'participle' | 'semantic' | 'hybrid' | 'graph'
 export interface KnowledgeConfigForm {
   kb_id?: string;
   similarity_threshold?: number;

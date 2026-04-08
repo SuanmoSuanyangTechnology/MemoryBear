@@ -169,6 +169,7 @@ const Prompt: FC = () => {
     updateSession()
   }
   const [isFocus, setIsFocus] = useState(false)
+  const [isComposing, setIsComposing] = useState(false)
   const handleFocus = () => {
     setIsFocus(true)
   }
@@ -188,7 +189,7 @@ const Prompt: FC = () => {
 
             <RbCard
               title={t('prompt.chatTitle')}
-              headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:gont-bold"
+              headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:font-bold"
               headerType="borderless"
               bodyClassName="rb:px-4! rb:pt-0! rb:pb-3!"
             >
@@ -209,7 +210,9 @@ const Prompt: FC = () => {
                 <Form.Item name="message" className="rb:flex-1 rb:mb-0!">
                   <Input
                     placeholder={t(`prompt.promptChatPlaceholder`)}
-                    onPressEnter={handleSend}
+                    onCompositionStart={() => setIsComposing(true)}
+                    onCompositionEnd={() => setIsComposing(false)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !isComposing) handleSend() }}
                     variant="borderless"
                     className="rb:p-0!"
                     onFocus={handleFocus}
@@ -250,7 +253,7 @@ const Prompt: FC = () => {
             </Flex>
             <RbCard
               title={t('prompt.conversationOptimizationPrompt')}
-              headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:gont-bold"
+              headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:font-bold"
               headerType="borderless"
               bodyClassName="rb:px-4! rb:pt-0! rb:pb-3!"
               extra={

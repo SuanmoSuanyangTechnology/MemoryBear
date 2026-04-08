@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 17:30:47
+ * @Last Modified time: 2026-04-07 18:07:38
  */
 /**
  * Workflow Chat Component
@@ -40,6 +40,7 @@ import ChatToolbar from '@/components/Chat/ChatToolbar'
 import type { ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import Runtime from './Runtime';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
+import { replaceVariables } from '@/views/ApplicationConfig/Agent';
 
 const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: WorkflowConfig | null; features?: FeaturesConfigForm }>(({
   appId, graphRef, features
@@ -66,6 +67,17 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
    */
   const handleOpen = () => {
     setOpen(true)
+
+    if (features?.opening_statement?.enabled && features?.opening_statement?.statement && features?.opening_statement?.statement.trim() !== '') {
+      setChatList([{
+        role: 'assistant',
+        created_at: Date.now(),
+        content: features?.opening_statement?.statement,
+        meta_data: {
+          suggested_questions: features?.opening_statement?.suggested_questions || []
+        }
+      }])
+    }
   }
 
   useEffect(() => {
@@ -149,23 +161,8 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
       return
     }
 
-    setLoading(true)
     const message = msg
     const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
-    setChatList(prev => [...prev, {
-      role: 'user',
-      content: message,
-      created_at: Date.now(),
-      meta_data: {
-        files
-      },
-    }])
-    setChatList(prev => [...prev, {
-      role: 'assistant',
-      content: '',
-      created_at: Date.now(),
-      subContent: [],
-    }])
 
     /**
      * Handles SSE stream messages from workflow execution
@@ -179,7 +176,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
      */
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach(item => {
-        const { content, conversation_id, node_id, cycle_id, cycle_idx, input, output, error, elapsed_time, status } = item.data as {
+        const { content, conversation_id, node_id, cycle_id, cycle_idx, input, output, error, elapsed_time, status, citations } = item.data as {
           content: string;
           conversation_id: string | null;
           cycle_id: string;
@@ -192,7 +189,13 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
           elapsed_time?: string;
           error?: any;
           state: Record<string, any>;
-          status?: 'completed' | 'failed'
+          status?: 'completed' | 'failed',
+          citations?: {
+            document_id: string;
+            file_name: string;
+            knowledge_id: string;
+            score: string;
+          }[]
         };
 
         const node = graphRef.current?.getNodes().find(n => n.id === node_id);
@@ -327,6 +330,10 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
                   status,
                   error,
                   content: newList[lastIndex].content === '' ? null : newList[lastIndex].content,
+                  meta_data: {
+                    ...newList[lastIndex].meta_data || {},
+                    citations
+                  }
                 }
               }
               return newList
@@ -362,6 +369,24 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
         }
       })
     }
+    setChatList(prev => [
+      ...prev,
+      {
+        role: 'user',
+        content: message,
+        created_at: Date.now(),
+        meta_data: {
+          files
+        },
+      },
+      {
+        role: 'assistant',
+        content: '',
+        created_at: Date.now(),
+        subContent: [],
+      }
+    ])
+    setLoading(true)
     setStreamLoading(true)
     draftRun(appId, data, handleStreamMessage)
       .catch((error) => {
@@ -395,6 +420,26 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
     handleClose
   }));
 
+  useEffect(() => {
+    const opening_statement = features?.opening_statement
+
+    if (opening_statement?.enabled && opening_statement?.statement && opening_statement?.statement.trim() !== '') {
+      const assistantMsg: ChatItem = {
+        role: 'assistant',
+        content: replaceVariables(opening_statement.statement, variables as any),
+        meta_data: {
+          suggested_questions: opening_statement?.suggested_questions
+        }
+      }
+      setChatList(prev => {
+        if (prev[0]?.role === 'assistant') {
+          prev[0] = assistantMsg
+        }
+        return [...prev]
+      })
+    }
+  }, [chatList.length, features?.opening_statement, variables])
+
   return (
     <RbDrawer
       title={<Flex align="center" gap={10}>
@@ -418,6 +463,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
         renderRuntime={(item, index) => {
           return <Runtime item={item} index={index} />
         }}
+        onSend={handleSend}
       />
       <Flex align="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">
         <ChatInput

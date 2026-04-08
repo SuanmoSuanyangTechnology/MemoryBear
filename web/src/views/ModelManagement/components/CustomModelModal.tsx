@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 14:07:10
+ * @Last Modified time: 2026-03-31 13:56:18
  */
 /**
  * Custom Model Modal
@@ -11,7 +11,7 @@
  */
 
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
-import { Form, Input, App, Checkbox, Button } from 'antd';
+import { Form, Input, App, Checkbox, Button, Row, Col } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { CustomModelForm, ModelListItem, CustomModelModalRef, CustomModelModalProps } from '../types';
@@ -72,6 +72,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         is_vision: capability?.includes('vision') || false,
         is_video: capability?.includes('video') || false,
         is_audio: capability?.includes('audio') || false,
+        is_thinking: capability?.includes('thinking') || false,
       });
     } else {
       setIsEdit(false);
@@ -101,7 +102,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
     form
       .validateFields()
       .then((values) => {
-        const { logo, type, is_vision, is_video, is_audio, is_omni, ...rest } = values;
+        const { logo, type, is_vision, is_video, is_audio, is_omni, is_thinking, ...rest } = values;
         const formData: CustomModelForm = {
           ...rest,
           type,
@@ -119,6 +120,9 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
             if (is_video) {
               capability.push('video')
             }
+          }
+          if (is_thinking) {
+            capability.push('thinking')
           }
 
           formData.capability = capability
@@ -238,21 +242,34 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           <Input placeholder="https://api.example.com/v1" />
         </Form.Item>
 
-        {!['embedding', 'rerank'].includes(modelType as string) &&
-          <>
-            <Form.Item name="is_omni" valuePropName="checked" className="rb:mb-2!">
-              <Checkbox>{t('modelNew.is_omni')}</Checkbox>
-            </Form.Item>
-            <Form.Item name="is_vision" valuePropName="checked" className="rb:mb-2!">
-              <Checkbox disabled={isOmni}>{t('modelNew.is_vision')}</Checkbox>
-            </Form.Item>
-            <Form.Item name="is_video" valuePropName="checked" className="rb:mb-2!">
-              <Checkbox disabled={isOmni}>{t('modelNew.is_video')}</Checkbox>
-            </Form.Item>
-            <Form.Item name="is_audio" valuePropName="checked" className="rb:mb-0!">
-              <Checkbox disabled={isOmni}>{t('modelNew.is_audio')}</Checkbox>
-            </Form.Item>
-          </>
+        {['llm', 'chat'].includes(modelType as string) &&
+          <Row gutter={16}>
+            <Col span={24}>
+              <Form.Item name="is_omni" valuePropName="checked" className="rb:mb-2!">
+                <Checkbox>{t('modelNew.is_omni')}</Checkbox>
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="is_vision" valuePropName="checked" className="rb:mb-2!">
+                <Checkbox disabled={isOmni}>{t('modelNew.is_vision')}</Checkbox>
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="is_video" valuePropName="checked" className="rb:mb-2!">
+                <Checkbox disabled={isOmni}>{t('modelNew.is_video')}</Checkbox>
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="is_audio" valuePropName="checked" className="rb:mb-2!">
+                <Checkbox disabled={isOmni}>{t('modelNew.is_audio')}</Checkbox>
+              </Form.Item>
+            </Col>
+            <Col span={24}>
+              <Form.Item name="is_thinking" valuePropName="checked" className="rb:mb-0!">
+                <Checkbox>{t('modelNew.is_thinking')}</Checkbox>
+              </Form.Item>
+            </Col>
+          </Row>
         }
       </Form>
     </RbModal>

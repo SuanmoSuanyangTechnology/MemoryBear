@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-03 10:54:15
+ * @Last Modified time: 2026-04-03 20:13:16
  */
 import { useEffect, type FC } from 'react'
 import { useTranslation } from 'react-i18next';
@@ -87,9 +87,18 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
     let filteredOptions = options;
     if (value.length > 0) {
       const firstVariableValue = value[0];
-      const firstVariable = options.find(opt => `{{${opt.value}}}` === firstVariableValue);
+      const allSuggestions = options.flatMap(opt => opt.children ? [opt, ...opt.children] : [opt]);
+      const firstVariable = allSuggestions.find(opt => `{{${opt.value}}}` === firstVariableValue);
       if (firstVariable) {
-        filteredOptions = options.filter(opt => opt.dataType === firstVariable.dataType);
+        filteredOptions = options.flatMap(opt => {
+          if (opt.children?.length) {
+            const filteredChildren = opt.children.filter(c => c.dataType === firstVariable.dataType);
+            if (filteredChildren.length) return [{ ...opt, disabled: opt.dataType !== firstVariable.dataType, children: filteredChildren }];
+            return [{ ...opt, children: [] }];
+          }
+          if (opt.dataType === firstVariable.dataType) return [opt];
+          return [];
+        });
       }
     }
     
@@ -106,7 +115,7 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
           <VariableSelect
             placeholder={t('common.pleaseSelect')}
             options={filteredOptions}
-            mode="multiple"
+            multiple={true}
             size={size}
           />
         </Form.Item>
@@ -168,15 +177,27 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
                         const currentGroupValue = value[name]?.value || [];
                         if (currentGroupValue.length > 0) {
                           const firstVariableValue = currentGroupValue[0];
-                          const firstVariable = options.find(opt => `{{${opt.value}}}` === firstVariableValue);
+                          const allSuggestions = options.flatMap(opt => opt.children ? [opt, ...opt.children] : [opt]);
+                          const firstVariable = allSuggestions.find(opt => `{{${opt.value}}}` === firstVariableValue);
+
                           if (firstVariable) {
-                            return options.filter(opt => opt.dataType === firstVariable.dataType);
+                            return options.flatMap(vo => {
+                              if (vo.children?.length) {
+                                const filteredChildren = vo.children.filter(c => c.dataType === firstVariable.dataType);
+                                if (filteredChildren.length) return [{ ...vo, disabled: vo.dataType !== firstVariable.dataType, children: filteredChildren }];
+                                return [{ ...vo, children: [] }];
+                              }
+                              if (vo.dataType === firstVariable.dataType) return [vo];
+                              return [];
+                            });
                           }
+                          return []
                         }
                         return options;
                       })()
                       }
-                      mode="multiple"
+
+                      multiple={true}
                       size={size}
                     />
                   </Form.Item>

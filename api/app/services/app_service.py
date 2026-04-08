@@ -13,7 +13,7 @@ import uuid
 from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 from fastapi import Depends
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, update as sa_update
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -401,7 +401,7 @@ class AppService:
     def _create_workflow_config(
             self,
             app_id: uuid.UUID,
-            data: app_schema.WorkflowConfigCreate,
+            data,
             now: datetime.datetime
     ):
         workflow_cfg = WorkflowConfig(
@@ -678,7 +678,9 @@ class AppService:
                 self._create_multi_agent_config(app.id, data.multi_agent_config, now)
 
             if app.type == "workflow" and data.workflow_config:
-                self._create_workflow_config(app.id, data.workflow_config, now)
+                from app.schemas.workflow_schema import WorkflowConfigCreate
+                wf_data = WorkflowConfigCreate(**data.workflow_config) if isinstance(data.workflow_config, dict) else data.workflow_config
+                self._create_workflow_config(app.id, wf_data, now)
 
             self.db.commit()
             self.db.refresh(app)
@@ -757,6 +759,17 @@ class AppService:
 
         # 逻辑删除应用
         app.is_active = False
+        
+        # 更新 app_shares 表中该应用的所有共享记录为失效状态，并更新 updated_at 时间
+        stmt = sa_update(AppShare).where(
+            AppShare.source_app_id == app_id,
+            AppShare.is_active.is_(True)
+        ).values(
+            is_active=False,
+            updated_at=datetime.datetime.now()
+        )
+        self.db.execute(stmt)
+        
         self.db.commit()
 
         logger.info(
@@ -1347,6 +1360,7 @@ class AppService:
             variables=cfg.get("variables", []),
             execution_config=cfg.get("execution_config", {}),
             triggers=cfg.get("triggers", []),
+            features=cfg.get("features", {}),
             is_active=True,
             created_at=now,
             updated_at=now,

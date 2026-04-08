@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 19:07:24
+ * @Last Modified time: 2026-04-07 16:28:33
  */
 import { type FC, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -12,17 +12,12 @@ import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 
 import styles from '../index.module.css'
-import editIcon from '@/assets/images/edit_hover.svg'
-import copyIcon from '@/assets/images/copy_hover.svg'
-import exportIcon from '@/assets/images/export_hover.svg'
-import deleteIcon from '@/assets/images/delete_hover.svg'
 import type { Application, ApplicationModalRef } from '@/views/ApplicationManagement/types';
 import ApplicationModal from '@/views/ApplicationManagement/components/ApplicationModal'
 import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef, FeaturesConfigForm } from '../types'
 import { deleteApplication, appExport } from '@/api/application'
 import CopyModal from './CopyModal'
 import PageHeader from '@/components/Layout/PageHeader'
-import FeaturesConfig from './FeaturesConfig'
 
 /**
  * Tab keys for application configuration
@@ -38,10 +33,10 @@ const sharingTabKeys = [
  * Menu icon mapping
  */
 const menuIcons: Record<string, string> = {
-  edit: editIcon,
-  copy: copyIcon,
-  export: exportIcon,
-  delete: deleteIcon
+  edit: "rb:bg-[url('@/assets/images/common/edit_bold.svg')]",
+  copy: "rb:bg-[url('@/assets/images/copy_hover.svg')]",
+  export: "rb:bg-[url('@/assets/images/export_hover.svg')]",
+  delete: "rb:bg-[url('@/assets/images/common/delete_red_big.svg')]"
 }
 
 /**
@@ -70,11 +65,10 @@ interface ConfigHeaderProps {
  * Configuration header component
  * Displays application name, tabs, and action buttons
  */
-const ConfigHeader: FC<ConfigHeaderProps> = ({ 
+const ConfigHeader: FC<ConfigHeaderProps> = ({
   application, activeTab, handleChangeTab, refresh,
   workflowRef,
   appRef,
-  features,
   onFeaturesChange,
 }) => {
   const { t } = useTranslation();
@@ -172,17 +166,17 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
   const formatMenuItems = useMemo(() => {
     const items = (application?.type !== 'multi_agent' ? ['edit', 'copy', 'export', 'delete'] : ['edit', 'copy', 'delete']).map(key => ({
       key,
-      icon: <img src={menuIcons[key]} className="rb:w-4 rb:h-4 rb:mr-2" />,
+      icon: <div className={`rb:size-4 rb:mr-2 ${menuIcons[key]}`} />,
+      danger: key === 'delete',
       label: t(`common.${key}`),
     }))
     return items
   }, [t, handleClick, application])
 
-  const handleSaveFeaturesConfig = useCallback((value: FeaturesConfigForm) => {
-    appRef?.current?.handleSaveFeaturesConfig?.(value)
-    onFeaturesChange?.(value)
-  }, [appRef, onFeaturesChange])
-  
+  const handleFeaturesConfig = () => {
+    workflowRef.current?.handleFeaturesConfig?.()
+  }
+
   return (
     <>
       <PageHeader
@@ -212,12 +206,12 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         </Flex>}
         extra={application?.type === 'workflow' && source !== 'sharing' && activeTab === 'arrangement'
           ? <Flex align="center" justify="end" gap={10} className="rb:h-8">
-            <FeaturesConfig
-              source={application?.type}
-              value={features as FeaturesConfigForm}
-              refresh={handleSaveFeaturesConfig}
-              chatVariables={(workflowRef.current?.chatVariables || []).map(v => ({ ...v, display_name: v.name }))}
-            />
+            <Popover content={t('application.features')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+              <div
+                className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/features.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                onClick={handleFeaturesConfig}
+              ></div>
+            </Popover>
             <Popover content={t('workflow.clear')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
               <div
                 className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/clear.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
@@ -250,9 +244,9 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
             </Popover>
           </Flex>
           : <Flex justify="flex-end">
-            <Flex align="center" className="rb:leading-5 rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goToApplication}>
+            <Flex align="center" gap={8} className="rb:leading-5 rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goToApplication}>
               <div
-                className="rb:mr-2 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/logout.svg')]"
+                className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/logout.svg')]"
               ></div>
               {t('common.return')}
             </Flex>

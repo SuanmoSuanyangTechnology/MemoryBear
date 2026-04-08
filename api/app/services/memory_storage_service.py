@@ -613,37 +613,6 @@ async def search_entity(end_user_id: Optional[str] = None) -> Dict[str, Any]:
     return data
 
 
-async def search_all(end_user_id: Optional[str] = None) -> Dict[str, Any]:
-    result = await _neo4j_connector.execute_query(
-        MemoryConfigRepository.SEARCH_FOR_ALL,
-        end_user_id=end_user_id,
-    )
-
-    # 检查结果是否为空或长度不足
-    if not result or len(result) < 4:
-        data = {
-            "total": 0,
-            "counts": {
-                "dialogue": 0,
-                "chunk": 0,
-                "statement": 0,
-                "entity": 0,
-            },
-        }
-        return data
-
-    data = {
-        "total": result[-1]["Count"],
-        "counts": {
-            "dialogue": result[0]["Count"],
-            "chunk": result[1]["Count"],
-            "statement": result[2]["Count"],
-            "entity": result[3]["Count"],
-        },
-    }
-    return data
-
-
 async def kb_type_distribution(end_user_id: Optional[str] = None) -> Dict[str, Any]:
     """统一知识库类型分布接口。
 
@@ -693,6 +662,37 @@ async def search_edges(end_user_id: Optional[str] = None) -> List[Dict[str, Any]
         end_user_id=end_user_id,
     )
     return result
+
+
+async def search_all_batch(end_user_ids: List[str]) -> Dict[str, int]:
+    """批量查询多个用户的记忆数量（简化版本，只返回total）
+
+    Args:
+        end_user_ids: 用户ID列表
+
+    Returns:
+        Dict[str, int]: 以user_id为key的记忆数量字典
+        格式: {"user_id": total_count}
+    """
+    if not end_user_ids:
+        return {}
+
+    result = await _neo4j_connector.execute_query(
+        MemoryConfigRepository.SEARCH_FOR_ALL_BATCH,
+        end_user_ids=end_user_ids,
+    )
+
+    # 转换结果为字典格式，字典格式在查询中无需遍历结果集，直接返回
+    data = {}
+    for row in result:
+        data[row["user_id"]] = row["total"]
+
+    # 为没有数据的用户填充默认值，转换字典格式还为无数据填充默认值
+    for user_id in end_user_ids:
+        if user_id not in data:
+            data[user_id] = 0
+
+    return data
 
 
 async def analytics_hot_memory_tags(

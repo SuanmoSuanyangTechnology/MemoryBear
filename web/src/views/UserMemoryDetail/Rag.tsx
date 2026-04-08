@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:11 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 10:26:31
+ * @Last Modified time: 2026-03-31 15:29:45
  */
 /**
  * RAG User Memory Detail View
@@ -16,8 +16,6 @@ import { Row, Col, Skeleton, Spin, Flex, Tooltip } from 'antd'
 import { LoadingOutlined } from '@ant-design/icons';
 import { useParams } from 'react-router-dom'
 
-import aboutUs from '@/assets/images/userMemory/aboutUs.svg'
-import memoryInsight from '@/assets/images/userMemory/memoryInsight.svg'
 import RbCard from '@/components/RbCard/Card'
 import type { Data } from './types'
 import {
@@ -34,12 +32,12 @@ import ConversationMemory from './components/ConversationMemory'
  */
 interface TitleProps {
   title: string
-  icon: string
+  iconClassName: string
 }
 /** Collapsible section title */
-const Title: FC<TitleProps> = ({ title, icon }) => (
+const Title: FC<TitleProps> = ({ title, iconClassName }) => (
   <Flex align="center" gap={4} className="rb:font-medium rb:leading-5 rb:mb-2.25!">
-    <img src={icon} className="rb:size-4.5 rb:ml-0.5" />
+    <div className={`rb:size-4.5 rb:ml-0.5 rb:bg-cover ${iconClassName}`} />
     {title}
   </Flex>
 )
@@ -114,7 +112,7 @@ const Rag: FC = () => {
   }
   return (
     <Row gutter={[16, 16]} className="rb:h-full!">
-      <Col span={8}>
+      <Col span={8} className="rb:h-full!">
         <RbCard
           bodyClassName="rb:p-3! rb:pt-4!"
           className="rb:h-full!"
@@ -143,7 +141,7 @@ const Rag: FC = () => {
           <>
             <Title
               title={t('userMemory.aboutMe')}
-              icon={aboutUs}
+              iconClassName="rb:bg-[url('@/assets/images/userMemory/aboutUs.svg')]"
             />
             <div className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5 rb:px-3 rb:mb-4">
               {loading.summary
@@ -160,7 +158,7 @@ const Rag: FC = () => {
           <>
             <Title
               title={t('userMemory.memoryInsight')}
-              icon={memoryInsight}
+              iconClassName="rb:bg-[url('@/assets/images/userMemory/memoryInsight.svg')]"
             />
             <div className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5 rb:px-3">
               {loading.insight
@@ -175,7 +173,7 @@ const Rag: FC = () => {
           </>
         </RbCard>
       </Col>
-      <Col span={16}>
+      <Col span={16} className="rb:h-full!">
         <ConversationMemory />
       </Col>
     </Row>

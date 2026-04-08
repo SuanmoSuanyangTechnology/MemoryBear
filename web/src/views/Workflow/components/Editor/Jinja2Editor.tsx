@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-04-02 15:15:36 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-04-02 15:15:36 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-04-07 14:48:00
  */
 import { type FC, useEffect, useMemo } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
@@ -12,7 +12,7 @@ import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin';
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
 
 import { type Suggestion } from './plugin/AutocompletePlugin';
-import CharacterCountPlugin from './plugin/CharacterCountPlugin';
+import Jinjia2CharacterCountPlugin from './plugin/Jinjia2CharacterCountPlugin';
 import Jinja2InitialValuePlugin from './plugin/Jinja2InitialValuePlugin';
 import Jinja2AutocompletePlugin from './plugin/Jinja2AutocompletePlugin';
 import Jinja2HighlightPlugin from './plugin/Jinja2HighlightPlugin';
@@ -89,7 +89,7 @@ export interface Jinja2EditorProps {
 
 const Jinja2Editor: FC<Jinja2EditorProps> = ({
   placeholder = '请输入内容...',
-  value = '',
+  value,
   onChange,
   options = [],
   variant = 'borderless',
@@ -174,8 +174,8 @@ const Jinja2Editor: FC<Jinja2EditorProps> = ({
         <Jinja2HighlightPlugin />
         <LineNumberPlugin />
         <Jinja2AutocompletePlugin options={options} />
-        <CharacterCountPlugin setCount={() => {}} onChange={onChange} waitForInit />
-        <Jinja2InitialValuePlugin value={value} />
+        <Jinjia2CharacterCountPlugin setCount={() => {}} />
+        <Jinja2InitialValuePlugin value={value} onChange={onChange} />
         <Jinja2BlurPlugin />
       </div>
     </LexicalComposer>

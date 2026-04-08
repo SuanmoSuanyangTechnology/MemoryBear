@@ -24,6 +24,7 @@ class NodeType(StrEnum):
     MEMORY_READ = "memory-read"
     MEMORY_WRITE = "memory-write"
     DOCUMENT_EXTRACTOR = "document-extractor"
+    LIST_OPERATOR = "list-operator"
 
     UNKNOWN = "unknown"
     NOTES = "notes"
@@ -45,6 +46,8 @@ class ComparisonOperator(StrEnum):
     LE = "le"
     GT = "gt"
     GE = "ge"
+    IN = "in"
+    NOT_IN = "not_in"
 
 
 class LogicOperator(StrEnum):

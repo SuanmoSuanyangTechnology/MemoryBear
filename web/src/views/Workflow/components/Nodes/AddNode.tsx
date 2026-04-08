@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:31:30 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 11:43:58
+ * @Last Modified time: 2026-03-30 11:55:10
  */
 import { useState } from 'react';
 import { Popover, Flex } from 'antd';
@@ -151,7 +151,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
                   e.currentTarget.style.background = 'white';
                 }}
               >
-                <img src={nodeType.icon} className="rb:w-4 rb:h-4" />
+                <div className={`rb:size-4 rb:bg-cover ${nodeType.icon}`} />
                 <span style={{ fontSize: '14px' }}>{t(`workflow.${nodeType.type}`)}</span>
               </div>
             ))}
@@ -173,7 +173,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
         align="center"
         justify="center"
         gap={4}
-        className={clsx('rb:text-[#212332] rb:font-medium rb:text-[12px] rb:cursor-pointer rb:group rb:relative rb:h-full rb:w-full rb:border rb:rounded-lg rb:bg-[#FCFCFD] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)] rb:border-[#DFE4ED] rb:flex rb:items-center rb:justify-center', {
+        className={clsx('rb:text-[#212332] rb:font-medium rb:text-[12px] rb:cursor-pointer rb:group rb:relative rb:h-full rb:w-full rb:border rb:rounded-lg rb:bg-[#FCFCFD] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)] rb:border-[#FCFCFD] rb:flex rb:items-center rb:justify-center', {
           'rb:border-orange-500 rb:border-[3px] rb:bg-[#FCFCFD] rb:text-[#475467]': data.isSelected,
           'rb:border-[#d1d5db] rb:bg-[#FCFCFD] rb:text-[#374151]': !data.isSelected
         })}

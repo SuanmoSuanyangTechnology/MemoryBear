@@ -1,3 +1,5 @@
+import asyncio
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -47,64 +49,64 @@ def get_workspace_total_end_users(
 
 @router.get("/end_users", response_model=ApiResponse)
 async def get_workspace_end_users(
+    workspace_id: Optional[uuid.UUID] = Query(None, description="工作空间ID（可选，默认当前用户工作空间）"),
+    keyword: Optional[str] = Query(None, description="搜索关键词（同时模糊匹配 other_name 和 id）"),
+    page: int = Query(1, ge=1, description="页码，从1开始"),
+    pagesize: int = Query(10, ge=1, description="每页数量"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    获取工作空间的宿主列表（高性能优化版本 v2）
-    
-    优化策略：
-    1. 批量查询 end_users（一次查询而非循环）
-    2. 并发查询所有用户的记忆数量（Neo4j）
-    3. RAG 模式使用批量查询（一次 SQL）
-    4. 只返回必要字段减少数据传输
-    5. 添加短期缓存减少重复查询
-    6. 并发执行配置查询和记忆数量查询
-    
-    返回格式：
-    {
-        "end_user": {"id": "uuid", "other_name": "名称"},
-        "memory_num": {"total": 数量},
-        "memory_config": {"memory_config_id": "id", "memory_config_name": "名称"}
-    }
+    获取工作空间的宿主列表（分页查询，支持模糊搜索）
+
+    返回工作空间下的宿主列表，支持分页查询和模糊搜索。
+    通过 keyword 参数同时模糊匹配 other_name 和 id 字段。
+
+    Args:
+        workspace_id: 工作空间ID（可选，默认当前用户工作空间）
+        keyword: 搜索关键词（可选，同时模糊匹配 other_name 和 id）
+        page: 页码（从1开始，默认1）
+        pagesize: 每页数量（默认10）
+        db: 数据库会话
+        current_user: 当前用户
+
+    Returns:
+        ApiResponse: 包含宿主列表和分页信息
     """
-    import asyncio
-    import json
-    from app.aioRedis import aio_redis_get, aio_redis_set
-    
-    workspace_id = current_user.current_workspace_id
-    
-    # 尝试从缓存获取（30秒缓存）
-    cache_key = f"end_users:workspace:{workspace_id}"
-    try:
-        cached_data = await aio_redis_get(cache_key)
-        if cached_data:
-            api_logger.info(f"从缓存获取宿主列表: workspace_id={workspace_id}")
-            return success(data=json.loads(cached_data), msg="宿主列表获取成功")
-    except Exception as e:
-        api_logger.warning(f"Redis 缓存读取失败: {str(e)}")
-    
+    # 如果未提供 workspace_id，使用当前用户的工作空间
+    if workspace_id is None:
+        workspace_id = current_user.current_workspace_id
     # 获取当前空间类型
     current_workspace_type = memory_dashboard_service.get_current_workspace_type(db, workspace_id, current_user)
-    api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的宿主列表")
-    
-    # 获取 end_users（已优化为批量查询）
-    end_users = memory_dashboard_service.get_workspace_end_users(
+    api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的宿主列表, 类型: {current_workspace_type}")
+
+    # 获取分页的 end_users
+    end_users_result = memory_dashboard_service.get_workspace_end_users_paginated(
         db=db,
         workspace_id=workspace_id,
-        current_user=current_user
+        current_user=current_user,
+        page=page,
+        pagesize=pagesize,
+        keyword=keyword
     )
+
+    end_users = end_users_result.get("items", [])
+    total = end_users_result.get("total", 0)
+
     if not end_users:
-        api_logger.info("工作空间下没有宿主")
-        # 缓存空结果，避免重复查询
-        try:
-            await aio_redis_set(cache_key, json.dumps([]), expire=30)
-        except Exception as e:
-            api_logger.warning(f"Redis 缓存写入失败: {str(e)}")
-        return success(data=[], msg="宿主列表获取成功")
-    
+        api_logger.info(f"工作空间下没有宿主或当前页无数据: total={total}, page={page}")
+        return success(data={
+            "items": [],
+            "page": {
+                "page": page,
+                "pagesize": pagesize,
+                "total": total,
+                "hasnext": (page * pagesize) < total
+            }
+        }, msg="宿主列表获取成功")
+
     end_user_ids = [str(user.id) for user in end_users]
-    
+
     # 并发执行两个独立的查询任务
     async def get_memory_configs():
         """获取记忆配置（在线程池中执行同步查询）"""
@@ -116,7 +118,7 @@ async def get_workspace_end_users(
         except Exception as e:
             api_logger.error(f"批量获取记忆配置失败: {str(e)}")
             return {}
-    
+
     async def get_memory_nums():
         """获取记忆数量"""
         if current_workspace_type == "rag":
@@ -130,26 +132,18 @@ async def get_workspace_end_users(
             except Exception as e:
                 api_logger.error(f"批量获取 RAG chunk 数量失败: {str(e)}")
                 return {uid: {"total": 0} for uid in end_user_ids}
-        
+
         elif current_workspace_type == "neo4j":
-            # Neo4j 模式：并发查询（带并发限制）
-            # 使用信号量限制并发数，避免大量用户时压垮 Neo4j
-            MAX_CONCURRENT_QUERIES = 10
-            semaphore = asyncio.Semaphore(MAX_CONCURRENT_QUERIES)
-            
-            async def get_neo4j_memory_num(end_user_id: str):
-                async with semaphore:
-                    try:
-                        return await memory_storage_service.search_all(end_user_id)
-                    except Exception as e:
-                        api_logger.error(f"获取用户 {end_user_id} Neo4j 记忆数量失败: {str(e)}")
-                        return {"total": 0}
-            
-            memory_nums_list = await asyncio.gather(*[get_neo4j_memory_num(uid) for uid in end_user_ids])
-            return {end_user_ids[i]: memory_nums_list[i] for i in range(len(end_user_ids))}
-        
+            # Neo4j 模式：批量查询（简化版本，只返回total）
+            try:
+                batch_result = await memory_storage_service.search_all_batch(end_user_ids)
+                return {uid: {"total": count} for uid, count in batch_result.items()}
+            except Exception as e:
+                api_logger.error(f"批量获取 Neo4j 记忆数量失败: {str(e)}")
+                return {uid: {"total": 0} for uid in end_user_ids}
+
         return {uid: {"total": 0} for uid in end_user_ids}
-    
+
     # 触发按需初始化：为 implicit_emotions_storage 中没有记录的用户异步生成数据
     try:
         from app.celery_app import celery_app as _celery_app
@@ -170,13 +164,13 @@ async def get_workspace_end_users(
         get_memory_configs(),
         get_memory_nums()
     )
-    
-    # 构建结果（优化：使用列表推导式）
-    result = []
+
+    # 构建结果列表
+    items = []
     for end_user in end_users:
         user_id = str(end_user.id)
         config_info = memory_configs_map.get(user_id, {})
-        result.append({
+        items.append({
             'end_user': {
                 'id': user_id,
                 'other_name': end_user.other_name
@@ -187,12 +181,6 @@ async def get_workspace_end_users(
                 "memory_config_name": config_info.get("memory_config_name")
             }
         })
-    
-    # 写入缓存（30秒过期）
-    try:
-        await aio_redis_set(cache_key, json.dumps(result), expire=30)
-    except Exception as e:
-        api_logger.warning(f"Redis 缓存写入失败: {str(e)}")
 
     # 触发社区聚类补全任务（异步，不阻塞接口响应）
     try:
@@ -202,7 +190,18 @@ async def get_workspace_end_users(
     except Exception as e:
         api_logger.warning(f"触发社区聚类补全任务失败（不影响主流程）: {str(e)}")
 
-    api_logger.info(f"成功获取 {len(end_users)} 个宿主记录")
+    # 构建分页响应
+    result = {
+        "items": items,
+        "page": {
+            "page": page,
+            "pagesize": pagesize,
+            "total": total,
+            "hasnext": (page * pagesize) < total
+        }
+    }
+
+    api_logger.info(f"成功获取 {len(end_users)} 个宿主记录，总计 {total} 条")
     return success(data=result, msg="宿主列表获取成功")
 
 
@@ -592,7 +591,7 @@ async def dashboard_data(
                 "total_api_call": None
             }
             
-            # 1. 获取记忆总量（total_memory）
+            # 1. 获取记忆总量（total_memory）—— neo4j 独有逻辑：查询 neo4j 存储节点
             try:
                 total_memory_data = await memory_dashboard_service.get_workspace_total_memory_count(
                     db=db,
@@ -601,49 +600,33 @@ async def dashboard_data(
                     end_user_id=end_user_id
                 )
                 neo4j_data["total_memory"] = total_memory_data.get("total_memory_count", 0)
-                # total_app: 统计当前空间下的所有app数量
-                # 包含自有app + 被分享给本工作空间的app
-                from app.services import app_service as _app_svc
-                _, total_app = _app_svc.AppService(db).list_apps(
-                    workspace_id=workspace_id, include_shared=True, pagesize=1
-                )
-                neo4j_data["total_app"] = total_app
-                api_logger.info(f"成功获取记忆总量: {neo4j_data['total_memory']}, 应用数量: {neo4j_data['total_app']}")
+                api_logger.info(f"成功获取记忆总量: {neo4j_data['total_memory']}")
             except Exception as e:
                 api_logger.warning(f"获取记忆总量失败: {str(e)}")
             
-            # 2. 获取知识库类型统计（total_knowledge）
-            try:
-                from app.services.memory_agent_service import MemoryAgentService 
-                memory_agent_service = MemoryAgentService()
-                knowledge_stats = await memory_agent_service.get_knowledge_type_stats(
-                    end_user_id=end_user_id,
-                    only_active=True,
-                    current_workspace_id=workspace_id,
-                    db=db
-                )
-                neo4j_data["total_knowledge"] = knowledge_stats.get("total", 0)
-                api_logger.info(f"成功获取知识库类型统计total: {neo4j_data['total_knowledge']}")
-            except Exception as e:
-                api_logger.warning(f"获取知识库类型统计失败: {str(e)}")
+            # 2. 获取共享统计数据（total_app、total_knowledge、total_api_call）
+            common_stats = memory_dashboard_service.get_dashboard_common_stats(db, workspace_id)
+            neo4j_data.update(common_stats)
+            api_logger.info(f"成功获取共享统计: app={common_stats['total_app']}, knowledge={common_stats['total_knowledge']}, api_call={common_stats['total_api_call']}")
             
-            # 3. 获取API调用统计（total_api_call）
+            # 计算昨日对比
             try:
-                # 使用 AppStatisticsService 获取真实的API调用统计
-                app_stats_service = AppStatisticsService(db)
-                api_stats = app_stats_service.get_workspace_api_statistics(
+                changes = memory_dashboard_service.get_dashboard_yesterday_changes(
+                    db=db,
                     workspace_id=workspace_id,
-                    start_date=start_date,
-                    end_date=end_date
+                    storage_type=storage_type,
+                    today_data=neo4j_data
                 )
-                # 计算总调用次数
-                total_api_calls = sum(item.get("total_calls", 0) for item in api_stats)
-                neo4j_data["total_api_call"] = total_api_calls
-                api_logger.info(f"成功获取API调用统计: {neo4j_data['total_api_call']}")
+                neo4j_data.update(changes)
             except Exception as e:
-                api_logger.error(f"获取API调用统计失败: {str(e)}")
-                neo4j_data["total_api_call"] = 0
-            
+                api_logger.warning(f"计算neo4j昨日对比失败: {str(e)}")
+                neo4j_data.update({
+                    "total_memory_change": None,
+                    "total_app_change": None,
+                    "total_knowledge_change": None,
+                    "total_api_call_change": None,
+                })
+
             result["neo4j_data"] = neo4j_data
             api_logger.info("成功获取neo4j_data")
         
@@ -656,44 +639,37 @@ async def dashboard_data(
                 "total_api_call": None
             }
             
-            # 获取RAG相关数据
+            # 1. 获取记忆总量（total_memory）—— rag 独有逻辑：查询 document 表的 chunk_num
             try:
-                # total_memory: 只统计用户知识库（permission_id='Memory'）的chunk数
                 total_chunk = memory_dashboard_service.get_rag_user_kb_total_chunk(db, current_user)
                 rag_data["total_memory"] = total_chunk
-                
-                # total_app: 统计当前空间下的所有app数量
-                # 包含自有app + 被分享给本工作空间的app
-                from app.services import app_service as _app_svc
-                _, total_app = _app_svc.AppService(db).list_apps(
-                    workspace_id=workspace_id, include_shared=True, pagesize=1
-                )
-                rag_data["total_app"] = total_app
-                
-                # total_knowledge: 使用 total_kb（总知识库数）
-                total_kb = memory_dashboard_service.get_rag_total_kb(db, current_user)
-                rag_data["total_knowledge"] = total_kb
-                
-                # total_api_call: 使用 AppStatisticsService 获取真实的API调用统计
-                try:
-                    app_stats_service = AppStatisticsService(db)
-                    api_stats = app_stats_service.get_workspace_api_statistics(
-                        workspace_id=workspace_id,
-                        start_date=start_date,
-                        end_date=end_date
-                    )
-                    # 计算总调用次数
-                    total_api_calls = sum(item.get("total_calls", 0) for item in api_stats)
-                    rag_data["total_api_call"] = total_api_calls
-                    api_logger.info(f"成功获取RAG模式API调用统计: {rag_data['total_api_call']}")
-                except Exception as e:
-                    api_logger.warning(f"获取RAG模式API调用统计失败，使用默认值: {str(e)}")
-                    rag_data["total_api_call"] = 0
-                
-                api_logger.info(f"成功获取RAG相关数据: memory={total_chunk}, app={total_app}, knowledge={total_kb}, api_calls={rag_data['total_api_call']}")
+                api_logger.info(f"成功获取RAG记忆总量: {total_chunk}")
             except Exception as e:
-                api_logger.warning(f"获取RAG相关数据失败: {str(e)}")
+                api_logger.warning(f"获取RAG记忆总量失败: {str(e)}")
             
+            # 2. 获取共享统计数据（total_app、total_knowledge、total_api_call）
+            common_stats = memory_dashboard_service.get_dashboard_common_stats(db, workspace_id)
+            rag_data.update(common_stats)
+            api_logger.info(f"成功获取共享统计: app={common_stats['total_app']}, knowledge={common_stats['total_knowledge']}, api_call={common_stats['total_api_call']}")
+            
+            # 计算昨日对比
+            try:
+                changes = memory_dashboard_service.get_dashboard_yesterday_changes(
+                    db=db,
+                    workspace_id=workspace_id,
+                    storage_type=storage_type,
+                    today_data=rag_data
+                )
+                rag_data.update(changes)
+            except Exception as e:
+                api_logger.warning(f"计算RAG昨日对比失败: {str(e)}")
+                rag_data.update({
+                    "total_memory_change": None,
+                    "total_app_change": None,
+                    "total_knowledge_change": None,
+                    "total_api_call_change": None,
+                })
+
             result["rag_data"] = rag_data
             api_logger.info("成功获取rag_data")
         

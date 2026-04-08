@@ -1,6 +1,6 @@
 import os
 from jinja2 import Environment, FileSystemLoader
-
+from app.core.memory.models.ontology_extraction_models import OntologyTypeList
 from app.core.memory.utils.log.logging_utils import log_prompt_rendering, log_template_rendering
 
 # Setup Jinja2 environment
@@ -205,6 +205,7 @@ async def render_triplet_extraction_prompt(
     predicate_instructions: dict = None,
     language: str = "zh",
     ontology_types: "OntologyTypeList | None" = None,
+    speaker: str = None,
 ) -> str:
     """
     Renders the triplet extraction prompt using the extract_triplet.jinja2 template.
@@ -216,6 +217,7 @@ async def render_triplet_extraction_prompt(
         predicate_instructions: Optional predicate instructions
         language: The language to use for entity descriptions ("zh" for Chinese, "en" for English)
         ontology_types: Optional OntologyTypeList containing predefined ontology types for entity classification
+        speaker: Speaker role ("user" or "assistant") for the current statement
 
     Returns:
         Rendered prompt content as string
@@ -223,7 +225,7 @@ async def render_triplet_extraction_prompt(
     template = prompt_env.get_template("extract_triplet.jinja2")
     
     # 准备本体类型数据
-    ontology_type_section = ""
+    ontology_type_section = None
     ontology_type_names = []
     type_hierarchy_hints = []
     if ontology_types and ontology_types.types:
@@ -240,6 +242,7 @@ async def render_triplet_extraction_prompt(
         ontology_types=ontology_type_section,
         ontology_type_names=ontology_type_names,
         type_hierarchy_hints=type_hierarchy_hints,
+        speaker=speaker,
     )
     # 记录渲染结果到提示日志（与示例日志结构一致）
     log_prompt_rendering('triplet extraction', rendered_prompt)

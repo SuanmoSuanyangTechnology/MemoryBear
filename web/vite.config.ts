@@ -8,10 +8,11 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   server: {
     host: '0.0.0.0', // 支持通过IP地址访问
+    port: 5175,
     proxy: {
       // 主要API代理，支持 /api 和 /api/* 格式
       '/api': {
-        target: 'http://0.0.0.0:5173', // 后端服务地址
+        target: 'http://localhost:5173',
         changeOrigin: true,
 
         // 匹配所有以/api开头的请求，包括/api/token
@@ -83,7 +84,7 @@ export default defineConfig({
     minify: 'terser',
     terserOptions: {
       compress: {
-        drop_console: true, // 移除 console
+        drop_console: false, // 移除 console
         drop_debugger: true, // 移除 debugger
       },
     },

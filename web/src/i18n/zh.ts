@@ -657,6 +657,7 @@ export const zh = {
       participle: '分词检索',
       semantic: '语义检索',
       hybrid: '混合检索',
+      graph: '图谱检索',
 
       similarity_threshold: '语义相似度阈值',
       similarity_threshold_desc: '仅返回语义相似度高于此阈值的结果',
@@ -795,6 +796,7 @@ export const zh = {
       citation: '引用和归属',
       citation_desc: '显示源文档和生成内容的归属部分',
       invalidVariablesTitle: "对话开场白中引用了以下未定义的变量，是否保存开场白配置？",
+      deep_thinking: '开启深度思考',
 
       apps: '我的应用',
       sharing: '共享',
@@ -828,6 +830,7 @@ export const zh = {
       appCount: '{{count}}个应用共享到此空间',
       resetFeaturesTip: '请重新配置【对话功能-文件上传】功能',
       logTitle: '描述',
+      range: '范围',
     },
     table: {
       totalRecords: '共 {{total}} 条记录'
@@ -841,15 +844,15 @@ export const zh = {
       desc_spaces: '多于上周',
       desc_users: '本周新增',
       desc_running_apps: '今日成功率',
-      totalMemoryCapacity: '总记忆容量',
+      total_memory: '总记忆容量',
       userMemory: '用户记忆',
-      knowledgeBaseCount: '知识库数量',
-      apiCallCount: 'API调用次数',
+      total_knowledge: '知识库数量',
+      total_api_call: 'API调用次数',
       comparedToYesterday: '与昨天相比',
       thisWeek: '本周',
       thisDay: '本日',
       failureRate: '故障率',
-      application: '应用数量',
+      total_app: '应用数量',
       total_num: '总记忆容量',
 
       lastDays: '最近{{days}}天',
@@ -905,7 +908,7 @@ export const zh = {
       createNewApplicationDesc: '零代码，3 分钟搭建应用',
       createNewKnowledge: '创建知识库',
       createNewKnowledgeDesc: '秒级生成可搜索知识库',
-      memoryConversation: '记忆对话',
+      memoryConversation: '记忆验证',
       memoryConversationDesc: '越用越懂你的 AI',
       helpCenter: '帮助中心',
       helpCenterDesc: '一站式上手与支持',
@@ -1274,6 +1277,8 @@ export const zh = {
       vision: '视觉',
       audio: '音频',
       video: '视频',
+      thinking: '深度思考',
+      is_thinking: '支持深度思考',
     },
     timezones: {
       'Asia/Shanghai': '中国标准时间 (UTC+8)',
@@ -1375,6 +1380,7 @@ export const zh = {
       scene_id: '本体场景',
     },
     member: {
+      memberList: '成员列表',
       username: '用户名',
       account: '账号',
       role: '角色',
@@ -1591,6 +1597,8 @@ export const zh = {
       core_entities: '核心实体',
       communityDetailEmptyDesc: '点击左侧图表中的社区查看详情',
       communityLoadingTip: '社区图谱生成中',
+      assistant: 'AI 助手',
+      totalRagMemory: '记忆总数',
     },
     space: {
       createSpace: '创建空间',
@@ -1777,6 +1785,11 @@ export const zh = {
       vision_id: '视觉模型',
       audio_id: '音频模型',
       video_id: '视频模型',
+      onlyDelete: '仅删填充',
+      semanticFiltering: '语义过滤',
+      sceneFocus: '场景聚焦',
+      loose: '宽松',
+      strict: '严格',
     },
     memoryConversation: {
       chatEmpty:'有什么我可以帮您的吗？',
@@ -1824,6 +1837,7 @@ export const zh = {
       stopAudioRecorder: '停止录音',
       startAudioRecorder: '开始录音',
       citations: '引用',
+      reasoning_content: '深度思考内容',
     },
     login: {
       title: '红熊记忆科学',
@@ -1905,7 +1919,8 @@ export const zh = {
       permissionInfo: '授权信息',
       is_expired: '状态',
       active: '活跃',
-      inactive: '过期'
+      inactive: '过期',
+      noScopes: '暂无权限信息…',
     },
     tool: {
       mcp: 'MCP 服务',
@@ -2161,6 +2176,7 @@ export const zh = {
       unknown: '未知节点',
       notes: '便签',
       'document-extractor': '文档提取器',
+      'list-operator': '列表操作',
 
       clickToConfigure: '点击配置节点参数',
       nodeProperties: '节点属性',
@@ -2234,6 +2250,8 @@ export const zh = {
           'string': 'String',
           'number': 'Number',
           'boolean': 'Boolean',
+          'file': 'File',
+          'array[file]': 'Array[File]',
           'array[string]': 'Array[String]',
           'array[number]': 'Array[Number]',
           'array[boolean]': 'Array[Boolean]',
@@ -2364,6 +2382,20 @@ export const zh = {
         },
         'document-extractor': {
           file_selector: '输入变量',
+        },
+        'list-operator': {
+          variable: '输入变量',
+          filter_by: '过滤条件',
+          addCondition: '添加过滤条件',
+          order_by: '排序',
+          asc: 'asc',
+          desc: 'desc',
+          extract_by: '取第 N 项',
+          limit: '取前 N 项',
+          type: {
+            eq: '在',
+            ne: '不在',
+          }
         },
         name: '键',
         type: '类型',

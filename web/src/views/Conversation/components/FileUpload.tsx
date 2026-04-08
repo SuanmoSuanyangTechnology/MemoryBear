@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 18:23:04
+ * @Last Modified time: 2026-04-02 18:29:48
  */
 /**
  * File Upload Component
@@ -21,7 +21,7 @@
  * @component
  */
 import { useState, useEffect, forwardRef, useImperativeHandle, useMemo } from 'react';
-import { Upload, Progress, App, Flex } from 'antd';
+import { Upload, Progress, App, Flex, Button } from 'antd';
 import type { UploadProps, UploadFile } from 'antd';
 import type { UploadProps as RcUploadProps, RcFile, UploadFileStatus } from 'antd/es/upload/interface';
 import { useTranslation } from 'react-i18next';
@@ -56,7 +56,9 @@ interface UploadFilesProps extends Omit<UploadProps, 'onChange'> {
   /** Custom file removal callback */
   onRemove?: (file: UploadFile) => boolean | void | Promise<boolean | void>;
 
-  featureConfig: FeaturesConfigForm['file_upload']
+  featureConfig: FeaturesConfigForm['file_upload'];
+  textType?: 'button' | 'text';
+  block?: boolean;
 }
 
 export const transform_file_type: Record<string, string> = {
@@ -149,6 +151,8 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
   onRemove: customOnRemove,
   requestConfig,
   featureConfig,
+  textType = 'text',
+  block,
   ...props
 }, ref) => {
   const { t } = useTranslation();
@@ -159,11 +163,11 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
   const fileType = useMemo(() => {
     let types: string[] = [];
     ['image', 'document', 'video', 'audio'].forEach(type => {
-      if (featureConfig[`${type}_enabled` as keyof FeaturesConfigForm['file_upload']]) {
-        types = types.concat(featureConfig[`${type}_allowed_extensions` as keyof FeaturesConfigForm['file_upload']] as string[])
+      if (featureConfig?.[`${type}_enabled` as keyof FeaturesConfigForm['file_upload']]) {
+        const exts = featureConfig[`${type}_allowed_extensions` as keyof FeaturesConfigForm['file_upload']] as string[];
+        if (Array.isArray(exts)) types = types.concat(exts.filter(Boolean));
       }
     })
-
     return types
   }, [featureConfig])
 
@@ -205,6 +209,7 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
         return Upload.LIST_IGNORE;
       }
     }
+    console.log('onChange', isAutoUpload)
 
     if (!isAutoUpload) {
       const newFileList = [...fileList, file as UploadFile];
@@ -230,19 +235,22 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
       name: rcFile.name,
       status: 'uploading' as UploadFileStatus,
       percent: 0,
-      type: rcFile.type,
+      type: (rcFile.type && transform_file_type[rcFile.type as keyof typeof transform_file_type]) || rcFile.type || 'document',
       originFileObj: rcFile,
-      thumbUrl: URL.createObjectURL(rcFile)
+      thumbUrl: URL.createObjectURL(rcFile),
+      size: rcFile.size,
     }
+
+    console.log('fileVo', fileVo)
     onChange?.(fileVo)
     request.uploadFile(action, formData, requestConfig)
       .then(res => {
         onSuccess?.({ data: res });
+        onChange?.({ ...fileVo, status: 'done', response: { data: res } })
       })
       .catch((error) => {
         onError?.(error as Error);
-        fileVo.status = 'error'
-        onChange?.(fileVo)
+        onChange?.({ ...fileVo, status: 'error' })
       })
   };
 
@@ -327,7 +335,10 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
     <Upload
       {...uploadProps}
     >
-      <div>{t('memoryConversation.uploadFile')}</div>
+      {textType === 'text'
+        ? <div>{t('memoryConversation.uploadFile')}</div>
+        : <Button disabled={disabled} block={block}>{t('memoryConversation.uploadFile')}</Button>
+      }
     </Upload>
   );
 });

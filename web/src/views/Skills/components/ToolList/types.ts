@@ -32,6 +32,7 @@ export interface ToolOption {
   tool_id?: string;
   /** Whether tool is enabled */
   enabled?: boolean;
+  is_active?: boolean;
 }
 
 /**

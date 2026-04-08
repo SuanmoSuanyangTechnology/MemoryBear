@@ -2,107 +2,227 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-30 13:59:36 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-28 16:19:26
+ * @Last Modified time: 2026-04-08 11:05:34
  */
-/**
- * ChatVariableModal Component
- * 
- * This component provides a modal for adding or editing chat variables in workflows.
- * It supports various variable types and provides appropriate input fields based on the selected type.
- */
-import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, Select, InputNumber } from 'antd';
+import { forwardRef, useImperativeHandle, useState, useRef, useMemo } from 'react';
+import { Form, Input, Select, InputNumber, Button, Row, Col, Flex, Spin } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 
 import type { ChatVariableModalRef } from './types'
 import type { ChatVariable } from '../../types';
 import RbModal from '@/components/RbModal'
+import { defaultValues as defaultFileUploadValues } from '@/views/ApplicationConfig/components/FeaturesConfig/FileUploadSettingModal'
+import UploadFiles from '@/views/Conversation/components/FileUpload'
+import UploadFileListModal from '@/views/Conversation/components/UploadFileListModal'
+import type { UploadFileListModalRef } from '@/views/Conversation/types'
+import { getFileInfoByUrl } from '@/api/fileStorage'
+import { transform_file_type } from '@/views/Conversation/components/FileUpload'
+import RadioGroupBtn from '../Properties/RadioGroupBtn';
+import CodeMirrorEditor from '@/components/CodeMirrorEditor';
+import FileList from '@/components/Chat/FileList'
 
 const FormItem = Form.Item;
 
-/**
- * Props for ChatVariableModal component
- */
+const object_placeholder = `# example
+# {
+#   "name": "redbear",
+#   "age": 2
+# }`
+
+const array_object_placeholder = `# example
+# [
+#   {
+#     "name": "redbear",
+#     "age": 2
+#   },
+#   {
+#     "name": "redbear",
+#     "age": 2
+#   }
+# ]
+`
+
 interface ChatVariableModalProps {
-  /**
-   * Callback function to refresh variable list
-   * @param {ChatVariable} value - The variable data
-   * @param {number} [editIndex] - Optional index for editing existing variable
-   */
   refresh: (value: ChatVariable, editIndex?: number) => void;
 }
 
-/**
- * Supported variable types
- */
 const types = [
-  'string',          // String type
-  'number',          // Number type
-  'boolean',         // Boolean type
-  'object',          // Object type
-  'array[string]',   // Array of strings
-  'array[number]',   // Array of numbers
-  'array[boolean]',  // Array of booleans
-  'array[object]',   // Array of objects
+  'string',
+  'number',
+  'boolean',
+  'object',
+  // 'file',
+  'array[file]',
+  'array[string]',
+  'array[number]',
+  'array[boolean]',
+  'array[object]',
 ]
 
-/**
- * ChatVariableModal component
- */
 const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProps>(({
   refresh
 }, ref) => {
   const { t } = useTranslation();
+  const uploadFileListModalRef = useRef<UploadFileListModalRef>(null);
 
-  // State management
-  const [visible, setVisible] = useState(false);           // Modal visibility
-  const [form] = Form.useForm<ChatVariable>();            // Form instance
-  const [loading, setLoading] = useState(false);           // Loading state
-  const [editIndex, setEditIndex] = useState<number | undefined>(undefined); // Index of variable being edited
-  const type = Form.useWatch('type', form);                // Current selected type
+  const [visible, setVisible] = useState(false);
+  const [form] = Form.useForm<ChatVariable>();
+  const [loading, setLoading] = useState(false);
+  const [fileList, setFileList] = useState<any[]>([]);
+  const [editIndex, setEditIndex] = useState<number | undefined>(undefined);
 
-  /**
-   * Handle modal close
-   */
+  const type = Form.useWatch('type', form);
+  const max_size = 50;
+  const allowed_transfer_methods = Form.useWatch('allowed_transfer_methods', form);
+  const image_enabled = Form.useWatch('image_enabled', form);
+  const audio_enabled = Form.useWatch('audio_enabled', form);
+  const document_enabled = Form.useWatch('document_enabled', form);
+  const video_enabled = Form.useWatch('video_enabled', form);
+  const image_allowed_extensions = Form.useWatch('image_allowed_extensions', form);
+  const audio_allowed_extensions = Form.useWatch('audio_allowed_extensions', form);
+  const document_allowed_extensions = Form.useWatch('document_allowed_extensions', form);
+  const video_allowed_extensions = Form.useWatch('video_allowed_extensions', form);
+  const max_file_count = Form.useWatch('max_file_count', form);
+
+  const featureConfig = useMemo(() => ({
+    enabled: true,
+    allowed_transfer_methods,
+    max_file_count,
+    image_enabled, image_max_size_mb: max_size, image_allowed_extensions,
+    audio_enabled, audio_max_size_mb: max_size, audio_allowed_extensions,
+    document_enabled, document_max_size_mb: max_size, document_allowed_extensions,
+    video_enabled, video_max_size_mb: max_size, video_allowed_extensions,
+  }), [
+    allowed_transfer_methods, max_file_count,
+    image_enabled, image_allowed_extensions,
+    audio_enabled, audio_allowed_extensions,
+    document_enabled, document_allowed_extensions,
+    video_enabled, video_allowed_extensions, max_size
+  ]);
+
   const handleClose = () => {
+    setFileList([]);
     setVisible(false);
     form.resetFields();
     setLoading(false);
     setEditIndex(undefined);
   };
 
-  /**
-   * Handle modal open
-   */
   const handleOpen = (variable?: ChatVariable, index?: number) => {
     setVisible(true);
     if (variable) {
-      // Exclude 'default' property and set form values
       const { default: _, ...rest } = variable;
       form.setFieldsValue({ ...rest });
       setEditIndex(index);
+      if (variable.type === 'file' || variable.type === 'array[file]') {
+        const defaultVal = variable.defaultValue;
+        if (defaultVal) {
+          const list = Array.isArray(defaultVal) ? defaultVal : [defaultVal];
+          setFileList(list);
+        }
+      } else if (variable.type.includes('object') && variable.defaultValue) {
+        form.setFieldValue('defaultValue', JSON.stringify(variable.defaultValue, null, 2))
+      }
     } else {
-      // Reset form for new variable
       form.resetFields();
       setEditIndex(undefined);
     }
   };
 
-  /**
-   * Handle save/submit action
-   */
   const handleSave = () => {
     form.validateFields().then((values) => {
-      // Create variable with 'default' property mapped from 'defaultValue'
-      refresh({ ...values, default: values.defaultValue }, editIndex);
+      const defaultValue = Array.isArray(values.defaultValue)
+        ? values.defaultValue.filter((v: any) => v !== undefined && v !== null && v !== '')
+        : values.type.includes('object')
+        ? JSON.parse(values.defaultValue)
+        : values.defaultValue;
+      refresh({ ...values, defaultValue }, editIndex);
       handleClose();
     });
   };
 
-  // Expose handleOpen method to parent component via ref
-  useImperativeHandle(ref, () => ({
-    handleOpen
-  }));
+  useImperativeHandle(ref, () => ({ handleOpen }));
+
+  const setFormFileValue = (updated: any[]) => {
+    const isSingle = form.getFieldValue('type') === 'file';
+    form.setFieldValue('defaultValue', isSingle ? (updated[0] ?? null) : updated);
+  };
+
+  const fileChange = (file?: any) => {
+    const fileObj = file ? {
+      ...file,
+      type: file.type,
+      transfer_method: "local_file",
+      upload_file_id: file.response?.data?.file_id,
+    } : undefined
+    if (form.getFieldValue('type') === 'file') {
+      const updated = [fileObj];
+      setFileList(updated);
+      setTimeout(() => setFormFileValue(updated), 0);
+      return;
+    }
+    setFileList(prev => {
+      const index = prev.findIndex((item: any) => item.uid === fileObj.uid);
+      const updated = index > -1
+        ? prev.map((item, i) => i === index ? fileObj : item)
+        : [...prev, fileObj];
+      setTimeout(() => setFormFileValue(updated), 0);
+      return updated;
+    });
+  };
+
+  const addFileList = (list?: any[]) => {
+    if (!list?.length) return;
+    const uploadingList = list.map(f => ({ ...f, status: 'uploading' }));
+    setFileList(prev => {
+      const isSingle = form.getFieldValue('type') === 'file';
+      const updated = isSingle ? [uploadingList[0]] : [...prev, ...uploadingList];
+      setTimeout(() => setFormFileValue(updated), 0);
+      return updated;
+    });
+    const isSingle = form.getFieldValue('type') === 'file';
+    (isSingle ? [uploadingList[0]] : uploadingList).forEach(file => {
+      getFileInfoByUrl(file.url)
+        .then((res) => {
+          const { file_name, file_size, content_type } = res as { file_name: string; file_size: number; content_type: string };
+          setFileList(prev => {
+            const updated = prev.map(f =>
+              f.uid === file.uid
+                ? { ...f, status: 'done', name: file_name, size: file_size, type: transform_file_type[content_type] || content_type }
+                : f
+            );
+            setFormFileValue(updated);
+            return updated;
+          });
+        })
+        .catch(() => {
+          setFileList(prev => {
+            const updated = prev.map(f => f.uid === file.uid ? { ...f, status: 'error' } : f);
+            setFormFileValue(updated);
+            return updated;
+          });
+        });
+    });
+  };
+
+
+  const previewFileList = useMemo(() => {
+    return fileList.map(file => ({
+      ...file,
+      url: file.thumbUrl || file.url || (file.originFileObj ? URL.createObjectURL(file.originFileObj) : undefined)
+    }));
+  }, [fileList]);
+
+  const handleDelete = (file: any) => {
+    const updated = fileList.filter(item =>
+      item.thumbUrl && file.thumbUrl ? item.thumbUrl !== file.thumbUrl
+        : item.url && file.url ? item.url !== file.url
+        : item.uid !== file.uid
+    );
+    setFileList(updated);
+    setFormFileValue(updated);
+  };
 
   return (
     <RbModal
@@ -118,7 +238,6 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
         layout="vertical"
         scrollToFirstError={{ behavior: 'instant', block: 'end', focus: true }}
       >
-        {/* Variable name field */}
         <FormItem
           name="name"
           label={t('workflow.config.parameter-extractor.name')}
@@ -129,8 +248,7 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
         >
           <Input placeholder={t('common.enter')} />
         </FormItem>
-        
-        {/* Variable type field */}
+
         <FormItem
           name="type"
           label={t('workflow.config.parameter-extractor.type')}
@@ -138,42 +256,101 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
         >
           <Select
             placeholder={t('common.pleaseSelect')}
-            onChange={() => form.setFieldValue('defaultValue', undefined)}
+            onChange={(value) => {
+              form.setFieldValue('defaultValue', value === 'array[string]' ? [] : undefined);
+              setFileList([]);
+              if (value === 'file' || value === 'array[file]') form.setFieldsValue(defaultFileUploadValues as any);
+            }}
             options={types.map(key => ({
               value: key,
               label: t(`workflow.config.parameter-extractor.${key}`),
             }))}
           />
         </FormItem>
-        
-        {/* Default value field - dynamic based on type */}
-        <Form.Item
-          name="defaultValue"
-          label={t('workflow.config.parameter-extractor.default')}
-        >
-          {type === 'number'
-            ? <InputNumber 
-              placeholder={t('common.enter')} 
-              style={{ width: '100%' }}
-              onChange={(value) => form.setFieldValue('defaultValue', value)}
+
+        {type?.includes('file')
+        ? (
+          <>
+            <UploadFileListModal
+              ref={uploadFileListModalRef}
+              featureConfig={featureConfig}
+              refresh={addFileList}
             />
-            : type === 'boolean'
-            ? <Select
-              placeholder={t('common.pleaseSelect')}
-              options={[
-                { value: true, label: 'true' },
-                { value: false, label: 'false' }
-              ]}
-            />
-            : <Input placeholder={t('common.enter')} />
-          }
-        </Form.Item>
-        
-        {/* Variable description field */}
-        <FormItem
-          name="description"
-          label={t('workflow.config.parameter-extractor.desc')}
-        >
+            <Form.Item name="defaultValue" hidden noStyle />
+            <Form.Item label={t('workflow.config.parameter-extractor.default')}>
+              
+                <Row gutter={8}>
+                  <Col span={12}>
+                    <UploadFiles
+                      featureConfig={featureConfig}
+                      onChange={fileChange}
+                      block={true}
+                      textType="button"
+                      disabled={type === 'file' && fileList.length > 0}
+                    />
+                  </Col>
+                  <Col span={12}>
+                    <Button block
+                      disabled={type === 'file' && fileList.length > 0}
+                      onClick={() => uploadFileListModalRef.current?.handleOpen()}>
+                      {t('memoryConversation.addRemoteFile')}
+                    </Button>
+                  </Col>
+                </Row>
+              {previewFileList.length > 0 && (
+                <FileList wrap="wrap" fileList={previewFileList} onDelete={handleDelete} className="rb:mt-2!" />
+              )}
+            </Form.Item>
+          </>
+        )
+        : ['array[string]', 'array[number]', 'array[boolean]'].includes(type)
+        ? (
+          <Form.Item label={t('workflow.config.parameter-extractor.default')}>
+            <Form.List name="defaultValue">
+              {(fields, { add, remove }) => (
+                <Flex vertical gap={8}>
+                  {fields.map(({ key, name }) => (
+                    <Flex key={key} align="center" gap={4}>
+                      <Form.Item name={name} noStyle>
+                        {type === 'array[number]'
+                          ? <InputNumber placeholder={t('common.enter')} className="rb:flex-1!" />
+                          : type === 'array[boolean]'
+                          ? <RadioGroupBtn size="large" options={[{ value: true, label: 'True' }, { value: false, label: 'False' }]} className="rb:flex-1!" />
+                          : <Input placeholder={t('common.enter')} className="rb:flex-1!" />
+                        }
+                      </Form.Item>
+                      <div
+                        className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
+                        onClick={() => remove(name)}
+                      ></div>
+                    </Flex>
+                  ))}
+                  <Button type="dashed" onClick={() => add()} icon={<PlusOutlined />} block>
+                    {t('common.add')}
+                  </Button>
+                </Flex>
+              )}
+            </Form.List>
+          </Form.Item>
+        )
+        : (
+          <Form.Item name="defaultValue" label={t('workflow.config.parameter-extractor.default')}>
+            {type === 'number'
+              ? <InputNumber placeholder={t('common.enter')} style={{ width: '100%' }} />
+              : type === 'boolean'
+              ? <RadioGroupBtn size="large" options={[{ value: true, label: 'True' }, { value: false, label: 'False' }]} />
+              : type === 'object' || type === 'array[object]'
+              ? <CodeMirrorEditor
+                language="json"
+                placeholder={type === 'object' ? object_placeholder : array_object_placeholder}
+                variant="outlined"
+              />
+              : <Input placeholder={t('common.enter')} />
+            }
+          </Form.Item>
+        )}
+
+        <FormItem name="description" label={t('workflow.config.parameter-extractor.desc')}>
           <Input.TextArea placeholder={t('common.enter')} />
         </FormItem>
       </Form>

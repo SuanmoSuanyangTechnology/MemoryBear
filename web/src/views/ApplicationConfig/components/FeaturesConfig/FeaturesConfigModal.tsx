@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 17:32:10
+ * @Last Modified time: 2026-04-07 16:13:44
  */
 /**
  * Copy Application Modal
@@ -116,24 +116,24 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
           layout="vertical"
         >
           <Flex vertical gap={12}>
+            <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
+              <SwitchFormItem
+                title={t('application.opening_statement')}
+                name={['opening_statement', "enabled"]}
+                desc={values?.opening_statement?.enabled ? undefined : t('application.opening_statement_desc')}
+              />
+              {values?.opening_statement?.enabled && (() => {
+                const statement = values.opening_statement?.statement
+                return statement && statement.trim() !== '' ? <>
+                  <div className="rb:bg-white rb:rounded-lg rb:py-1 rb:px-3 rb:mb-1">
+                    {statement}
+                  </div>
+                  <Button block onClick={handleOpenStatementSettings}>{t('application.editOpeningStatement')}</Button>
+                </> : <Button block onClick={handleOpenStatementSettings}>{t('application.editOpeningStatement')}</Button>
+              })()}
+              <Form.Item name="opening_statement" hidden />
+            </div>
             {source !== 'workflow' && <>
-              <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
-                <SwitchFormItem
-                  title={t('application.opening_statement')}
-                  name={['opening_statement', "enabled"]}
-                  desc={values?.opening_statement?.enabled ? undefined : t('application.opening_statement_desc')}
-                />
-                {values?.opening_statement?.enabled && (() => {
-                  const statement = values.opening_statement?.statement
-                  return statement && statement.trim() !== '' ? <>
-                    <div className="rb:bg-white rb:rounded-lg rb:py-1 rb:px-3 rb:mb-1">
-                      {statement}
-                    </div>
-                    <Button block onClick={handleOpenStatementSettings}>{t('application.editOpeningStatement')}</Button>
-                  </> : <Button block onClick={handleOpenStatementSettings}>{t('application.editOpeningStatement')}</Button>
-                })()}
-                <Form.Item name="opening_statement" hidden />
-              </div>
               <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
                 <SwitchFormItem
                   title={t(`memoryConversation.web_search`)}
@@ -148,14 +148,14 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
                   desc={t('application.text_to_speech_desc')}
                 />
               </div>
-              <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
-                <SwitchFormItem
-                  title={t(`application.citation`)}
-                  name={['citation', "enabled"]}
-                  desc={t('application.citation_desc')}
-                />
-              </div>
             </>}
+            <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
+              <SwitchFormItem
+                title={t(`application.citation`)}
+                name={['citation', "enabled"]}
+                desc={t('application.citation_desc')}
+              />
+            </div>
 
             <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
               <SwitchFormItem
@@ -205,6 +205,7 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
       />
       <OpenStatementSettingModal
         ref={openStatementSettingModalRef}
+        source={source}
         chatVariables={chatVariables}
         onSave={handleSaveStatement}
       />

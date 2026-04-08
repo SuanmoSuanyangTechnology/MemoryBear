@@ -480,21 +480,21 @@ def create_workspace_invite(
     try:
         # 检查权限
         _check_workspace_admin_permission(db, workspace_id, user)
-        if settings.ENABLE_SINGLE_WORKSPACE:
-            # 检查被邀请用户是否已经在工作空间中
-            from app.repositories import user_repository
-            invited_user = user_repository.get_user_by_email(db, invite_data.email)
+        # if settings.ENABLE_SINGLE_WORKSPACE:
+        # 检查被邀请用户是否已经在工作空间中
+        from app.repositories import user_repository
+        invited_user = user_repository.get_user_by_email(db, invite_data.email)
 
-            if invited_user:
-                # 用户存在，检查是否已经是工作空间成员
-                existing_member = workspace_repository.get_member_in_workspace(
-                    db=db,
-                    user_id=invited_user.id,
-                    workspace_id=workspace_id
-                )
-                if existing_member:
-                    business_logger.warning(f"用户 {invite_data.email} 已经是工作空间成员")
-                    raise BusinessException("该用户已经是工作空间成员", BizCode.RESOURCE_ALREADY_EXISTS)
+        if invited_user:
+            # 用户存在，检查是否已经是工作空间成员
+            existing_member = workspace_repository.get_member_in_workspace(
+                db=db,
+                user_id=invited_user.id,
+                workspace_id=workspace_id
+            )
+            if existing_member:
+                business_logger.warning(f"用户 {invite_data.email} 已经是工作空间成员")
+                raise BusinessException("该用户已经是工作空间成员", BizCode.RESOURCE_ALREADY_EXISTS)
 
         # 检查是否已有待处理的邀请
         invite_repo = WorkspaceInviteRepository(db)

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 10:58:47
+ * @Last Modified time: 2026-04-07 16:29:36
  */
 import { type FC, useState, useMemo } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
@@ -57,7 +57,6 @@ const Editor: FC<LexicalEditorProps> =({
   language = 'string',
   height,
   className,
-  waitForInit = false,
 }) => {
   console.log('Editor value', value)
   const [_count, setCount] = useState(0);
@@ -77,15 +76,16 @@ const Editor: FC<LexicalEditorProps> =({
     );
   }
 
-  // Lexical editor configuration
-  const initialConfig = {
+  // Lexical editor configuration — must be stable (never recreated)
+  const initialConfig = useMemo(() => ({
     namespace: 'AutocompleteEditor',
     theme,
     nodes: [VariableNode],
     onError: (error: Error) => {
       console.error(error);
     },
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
 
   // Calculate minimum height based on type and size
   const minheight = useMemo(() => {
@@ -133,7 +133,7 @@ const Editor: FC<LexicalEditorProps> =({
               style={{
                 minHeight: placeHolderMinheight,
                 position: 'absolute',
-                top: variant === 'borderless' ? '0' : '6px',
+                top: variant === 'borderless' ? '2px' : '6px',
                 left: variant === 'borderless' ? '0' : '11px',
                 color: '#A8A9AA',
                 fontSize: fontSize,
@@ -149,7 +149,7 @@ const Editor: FC<LexicalEditorProps> =({
         <HistoryPlugin />
         <CommandPlugin />
         <AutocompletePlugin options={options} />
-        <CharacterCountPlugin setCount={(count) => { setCount(count) }} onChange={onChange} waitForInit={waitForInit || !!value} />
+        <CharacterCountPlugin setCount={setCount} onChange={onChange} />
         <InitialValuePlugin value={value} options={options} />
         <BlurPlugin />
       </div>

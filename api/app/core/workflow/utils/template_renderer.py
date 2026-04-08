@@ -1,7 +1,8 @@
 """
-模板渲染器
+Template Renderer
 
-使用 Jinja2 提供安全的模板渲染功能，支持变量引用和表达式。
+Provides safe template rendering using Jinja2, supporting variable references
+and expressions.
 """
 
 import logging
@@ -10,11 +11,15 @@ from typing import Any
 
 from jinja2 import TemplateSyntaxError, UndefinedError, Environment, StrictUndefined, Undefined
 
+from app.core.workflow.engine.variable_pool import LazyVariableDict
+
 logger = logging.getLogger(__name__)
+
+_NORMALIZE_PATTERN = re.compile(r"\{\{\s*(\d+)\.(\w+)\s*}}")
 
 
 class SafeUndefined(Undefined):
-    """访问未定义属性不会报错，返回空字符串"""
+    """Return empty string instead of raising error when accessing undefined variables"""
     __slots__ = ()
 
     def _fail_with_undefined_error(self, *args, **kwargs):
@@ -26,26 +31,22 @@ class SafeUndefined(Undefined):
 
 
 class TemplateRenderer:
-    """模板渲染器"""
-
     def __init__(self, strict: bool = True):
-        """初始化渲染器
-        
+        """Initialize renderer
+
         Args:
-            strict: 是否使用严格模式（未定义变量会抛出异常）
+            strict: Whether to enable strict mode (raise error on undefined variables)
         """
         self.strict = strict
         self.env = Environment(
             undefined=StrictUndefined if strict else SafeUndefined,
-            autoescape=False  # 不自动转义，因为我们处理的是文本而非 HTML
+            autoescape=False  # Disable auto-escaping since we handle plain text instead of HTML
         )
 
     @staticmethod
     def normalize_template(template: str) -> str:
-        pattern = re.compile(
-            r"\{\{\s*(\d+)\.(\w+)\s*}}"
-        )
-        return pattern.sub(
+        """Normalize template syntax (convert numeric node reference to dict access)"""
+        return _NORMALIZE_PATTERN.sub(
             r'{{ node["\1"].\2 }}',
             template
         )
@@ -53,24 +54,24 @@ class TemplateRenderer:
     def render(
             self,
             template: str,
-            conv_vars: dict[str, Any],
-            node_outputs: dict[str, Any],
-            system_vars: dict[str, Any] | None = None
+            conv_vars: dict[str, Any] | LazyVariableDict,
+            node_outputs: dict[str, Any] | dict[str, LazyVariableDict],
+            system_vars: dict[str, Any] | LazyVariableDict | None = None
     ) -> str:
-        """渲染模板
-        
+        """Render template
+
         Args:
-            template: 模板字符串
-            conv_vars: 会话变量
-            node_outputs: 节点输出结果
-            system_vars: 系统变量
-        
+            template: Template string
+            conv_vars: Conversation variables
+            node_outputs: Node outputs
+            system_vars: System variables
+
         Returns:
-            渲染后的字符串
-        
+            Rendered string
+
         Raises:
-            ValueError: 模板语法错误或变量未定义
-        
+            ValueError: If template syntax is invalid or variables are undefined
+
         Examples:
             >>> renderer = TemplateRenderer()
             >>> renderer.render(
@@ -80,122 +81,119 @@ class TemplateRenderer:
             ...     {}
             ... )
             'Hello World!'
-            
+
             >>> renderer.render(
-            ...     "分析结果: {{node.analyze.output}}",
+            ...     "Analysis result: {{node.analyze.output}}",
             ...     {},
-            ...     {"analyze": {"output": "正面情绪"}},
+            ...     {"analyze": {"output": "positive sentiment"}},
             ...     {}
             ... )
-            '分析结果: 正面情绪'
+            'Analysis result: positive sentiment'
         """
-        # 构建命名空间上下文
+        # Build namespace context
         context = {
-            "conv": conv_vars,  # 会话变量：{{conv.user_name}}
-            "node": node_outputs,  # 节点输出：{{node.node_1.output}}
-            "sys": system_vars,  # 系统变量：{{sys.execution_id}}
+            "conv": conv_vars,  # Conversation variables: {{conv.user_name}}
+            "node": node_outputs,  # Node outputs: {{node.node_1.output}}
+            "sys": system_vars,  # System variables: {{sys.execution_id}}
         }
 
-        # 支持直接通过节点ID访问节点输出：{{llm_qa.output}}
-        # 将所有节点输出添加到顶层上下文
+        # Allow direct access to node outputs by node ID: {{llm_qa.output}}
         if node_outputs:
             context.update(node_outputs)
 
-        # 支持直接访问会话变量（不需要 conv. 前缀）：{{user_name}}
-        if conv_vars:
-            context.update(conv_vars)
-
-        context["nodes"] = node_outputs or {}  # 旧语法兼容
+        # # 支持直接访问会话变量（不需要 conv. 前缀）：{{user_name}}
+        # if conv_vars:
+        #     context.update(conv_vars)
+        #
+        # context["nodes"] = node_outputs or {}  # 旧语法兼容
         template = self.normalize_template(template)
         try:
             tmpl = self.env.from_string(template)
             return tmpl.render(**context)
 
         except TemplateSyntaxError as e:
-            logger.error(f"模板语法错误: {template}, 错误: {e}")
-            raise ValueError(f"模板语法错误: {e}")
-
+            logger.error(f"Template syntax error: {template}, error: {e}")
+            raise ValueError(f"Template syntax error: {e}")
         except UndefinedError as e:
-            logger.error(f"模板中引用了未定义的变量: {template}, 错误: {e}")
-            raise ValueError(f"未定义的变量: {e}")
-
+            logger.error(f"Undefined variable in template: {template}, error: {e}")
+            raise ValueError(f"Undefined variable: {e}")
         except Exception as e:
-            logger.error(f"模板渲染异常: {template}, 错误: {e}")
-            raise ValueError(f"模板渲染失败: {e}")
+            logger.error(f"Template rendering error: {template}, error: {e}")
+            raise ValueError(f"Template rendering failed: {e}")
 
     def validate(self, template: str) -> list[str]:
-        """验证模板语法
-        
+        """Validate template syntax
+
         Args:
-            template: 模板字符串
-        
+            template: Template string
+
         Returns:
-            错误列表，如果为空则验证通过
-        
+            List of errors (empty if valid)
+
         Examples:
             >>> renderer = TemplateRenderer()
             >>> renderer.validate("Hello {{var.name}}!")
             []
-            
-            >>> renderer.validate("Hello {{var.name")  # 缺少结束标记
-            ['模板语法错误: ...']
+
+            >>> renderer.validate("Hello {{var.name")  # Missing closing tag
+            ['Template syntax error: ...']
         """
         errors = []
 
         try:
             self.env.from_string(template)
         except TemplateSyntaxError as e:
-            errors.append(f"模板语法错误: {e}")
+            errors.append(f"Template syntax error: {e}")
         except Exception as e:
-            errors.append(f"模板验证失败: {e}")
+            errors.append(f"Template validation failed: {e}")
 
         return errors
 
 
-# 全局渲染器实例（严格模式）
+# Global renderer instances (strict / lenient)
 _strict_renderer = TemplateRenderer(strict=True)
 _lenient_renderer = TemplateRenderer(strict=False)
 
 
 def render_template(
         template: str,
-        conv_vars: dict[str, Any],
-        node_outputs: dict[str, Any],
-        system_vars: dict[str, Any],
+        conv_vars: dict[str, Any] | LazyVariableDict,
+        node_outputs: dict[str, Any] | dict[str, LazyVariableDict],
+        system_vars: dict[str, Any] | LazyVariableDict,
         strict: bool = True
 ) -> str:
-    """渲染模板（便捷函数）
-    
+    """Render template (convenience function)
+
     Args:
-        strict: 严格模式
-        template: 模板字符串
-        conv_vars: 会话变量
-        node_outputs: 节点输出
-        system_vars: 系统变量
-    
+        strict: Whether to use strict mode
+        template: Template string
+        conv_vars: Conversation variables
+        node_outputs: Node outputs
+        system_vars: System variables
+
     Returns:
-        渲染后的字符串
-    
+        Rendered string
+
     Examples:
         >>> render_template(
-        ...     "请分析: {{var.text}}",
-        ...     {"text": "这是一段文本"},
+        ...     "Analyze: {{var.text}}",
+        ...     {"text": "This is a text"},
         ...     {},
         ...     {}
         ... )
-        '请分析: 这是一段文本'
+        'Analyze: This is a text'
     """
     renderer = _strict_renderer if strict else _lenient_renderer
     return renderer.render(template, conv_vars, node_outputs, system_vars)
 
 
 def validate_template(template: str) -> list[str]:
-    """验证模板语法（便捷函数）
-    
+    """Validate template syntax (convenience function)
+
     Args:
-        template: 模板字符串
-    
+        template: Template string
+
     Returns:
-        错误列表
+        List of errors
     """
     return _strict_renderer.validate(template)

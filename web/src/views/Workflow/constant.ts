@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 18:30:52
+ * @Last Modified time: 2026-04-07 19:56:56
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -12,28 +12,6 @@ import AddNode from './components/Nodes/AddNode'
 import NoteNode from './components/Nodes/NoteNode';
 import type { PortMetadata, GroupMetadata } from '@antv/x6/lib/model/port';
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
-
-// Import workflow icons
-import startIcon from '@/assets/images/workflow/start.svg';
-import endIcon from '@/assets/images/workflow/end.svg';
-import llmIcon from '@/assets/images/workflow/llm.svg';
-import ragIcon from '@/assets/images/workflow/rag.svg';
-import parameterExtractionIcon from '@/assets/images/workflow/parameter_extraction.svg';
-import conditionIcon from '@/assets/images/workflow/condition.svg';
-import iterationIcon from '@/assets/images/workflow/iteration.svg';
-import loopIcon from '@/assets/images/workflow/loop.svg';
-import aggregatorIcon from '@/assets/images/workflow/aggregator.svg';
-import httpRequestIcon from '@/assets/images/workflow/http_request.svg';
-import toolsIcon from '@/assets/images/workflow/tools.svg';
-import codeExecutionIcon from '@/assets/images/workflow/code_execution.svg';
-import templateRenderingIcon from '@/assets/images/workflow/template_rendering.svg';
-import questionClassifierIcon from '@/assets/images/workflow/question-classifier.svg'
-import breakIcon from '@/assets/images/workflow/break.svg'
-import assignerIcon from '@/assets/images/workflow/assigner.svg'
-import memoryReadIcon from '@/assets/images/workflow/memory-read.svg'
-import memoryWriteIcon from '@/assets/images/workflow/memory-write.svg'
-import unknownIcon from '@/assets/images/workflow/unknown.svg'
-import documentExtractorIcon from '@/assets/images/workflow/document-extractor.svg'
 
 import { memoryConfigListUrl } from '@/api/memory'
 import type { NodeLibrary } from './types'
@@ -46,7 +24,7 @@ export const nodeLibrary: NodeLibrary[] = [
   {
     category: "coreNode",
     nodes: [
-      { type: "start", icon: startIcon,
+      { type: "start", icon: 'rb:bg-[url("@/assets/images/workflow/start.svg")]',
         config: {
           variables: {
             type: 'define',
@@ -87,7 +65,7 @@ export const nodeLibrary: NodeLibrary[] = [
         }
       },
       {
-        type: "end", icon: endIcon,
+        type: "end", icon: 'rb:bg-[url("@/assets/images/workflow/end.svg")]',
         config: {
           output: {
             type: 'editor'
@@ -100,7 +78,7 @@ export const nodeLibrary: NodeLibrary[] = [
   {
     category: "aiAndCognitiveProcessing",
     nodes: [
-      { type: "llm", icon: llmIcon,
+      { type: "llm", icon: 'rb:bg-[url("@/assets/images/workflow/llm.svg")]',
         config: {
           model_id: {
             type: 'define',
@@ -150,11 +128,11 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           vision_input: {
             type: 'variableList',
-            onFilterVariableNames: ['sys.files']
+            onFilterVariableType: ['array[file]']
           }
         }
       },
-      { type: "knowledge-retrieval", icon: ragIcon,
+      { type: "knowledge-retrieval", icon: 'rb:bg-[url("@/assets/images/workflow/rag.svg")]',
         config: {
           query: {
             type: 'variableList',
@@ -164,7 +142,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "parameter-extractor", icon: parameterExtractionIcon,
+      { type: "parameter-extractor", icon: 'rb:bg-[url("@/assets/images/workflow/parameter_extraction.svg")]',
         config: {
           model_id: {
             type: 'modelSelect',
@@ -191,7 +169,7 @@ export const nodeLibrary: NodeLibrary[] = [
   {
     category: "cognitiveUpgrading",
     nodes: [
-      { type: "memory-read", icon: memoryReadIcon,
+      { type: "memory-read", icon: 'rb:bg-[url("@/assets/images/workflow/memory-read.svg")]',
         config: {
           message: {
             type: 'editor',
@@ -214,7 +192,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "memory-write", icon: memoryWriteIcon,
+      { type: "memory-write", icon: 'rb:bg-[url("@/assets/images/workflow/memory-write.svg")]',
         config: {
           message: {
             type: 'editor',
@@ -240,7 +218,7 @@ export const nodeLibrary: NodeLibrary[] = [
   {
     category: "flowControl",
     nodes: [
-      { type: "if-else", icon: conditionIcon,
+      { type: "if-else", icon: 'rb:bg-[url("@/assets/images/workflow/condition.svg")]',
         config: {
           cases: {
             type: 'caseList',
@@ -253,7 +231,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "question-classifier", icon: questionClassifierIcon,
+      { type: "question-classifier", icon: 'rb:bg-[url("@/assets/images/workflow/question-classifier.svg")]',
         config: {
           model_id: {
             type: 'modelSelect',
@@ -277,7 +255,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "iteration", icon: iterationIcon,
+      { type: "iteration", icon: 'rb:bg-[url("@/assets/images/workflow/iteration.svg")]',
         config: {
           input: {
             type: 'variableList',
@@ -310,7 +288,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         },
       },
-      { type: "loop", icon: loopIcon,
+      { type: "loop", icon: 'rb:bg-[url("@/assets/images/workflow/loop.svg")]',
         config: {
           cycle_vars: {
             type: 'cycleVarsList',
@@ -333,9 +311,9 @@ export const nodeLibrary: NodeLibrary[] = [
           },
         }
       },
-      { type: "cycle-start", icon: startIcon },
-      { type: "break", icon: breakIcon },
-      { type: "var-aggregator", icon: aggregatorIcon,
+      { type: "cycle-start", icon: 'rb:bg-[url("@/assets/images/workflow/start.svg")]'},
+      { type: "break", icon: 'rb:bg-[url("@/assets/images/workflow/break.svg")]'},
+      { type: "var-aggregator", icon: 'rb:bg-[url("@/assets/images/workflow/aggregator.svg")]',
         config: {
           group: {
             type: 'switch',
@@ -350,7 +328,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "assigner", icon: assignerIcon,
+      { type: "assigner", icon: 'rb:bg-[url("@/assets/images/workflow/assigner.svg")]',
         config: {
           assignments: {
             type: 'assignmentList',
@@ -363,7 +341,7 @@ export const nodeLibrary: NodeLibrary[] = [
   {
     category: "externalInteraction",
     nodes: [
-      { type: "http-request", icon: httpRequestIcon,
+      { type: "http-request", icon: 'rb:bg-[url("@/assets/images/workflow/http_request.svg")]',
         config: {
           method: {
             type: 'select',
@@ -423,7 +401,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "tool", icon: toolsIcon, 
+      { type: "tool", icon: 'rb:bg-[url("@/assets/images/workflow/tools.svg")]',
         config: {
           tool_id: {
             type: 'cascader'
@@ -433,7 +411,7 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      { type: "code", icon: codeExecutionIcon,
+      { type: "code", icon: 'rb:bg-[url("@/assets/images/workflow/code_execution.svg")]',
         config: {
           input_variables: {
             type: 'inputList',
@@ -459,7 +437,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
         }
       },
-      { type: "jinja-render", icon: templateRenderingIcon,
+      { type: "jinja-render", icon: 'rb:bg-[url("@/assets/images/workflow/template_rendering.svg")]',
         config: {
           mapping: {
             type: 'mappingList',
@@ -474,13 +452,49 @@ export const nodeLibrary: NodeLibrary[] = [
           },
         }
       },
-      { type: "document-extractor", icon: documentExtractorIcon,
+      { type: "document-extractor", icon: 'rb:bg-[url("@/assets/images/workflow/document-extractor.svg")]',
         config: {
           file_selector: {
             type: 'variableList',
             placeholder: 'common.pleaseSelect',
-            onFilterVariableNames: ['sys.files']
+            onFilterVariableType: ['array[file]', 'file']
           }
+        }
+      },
+      { type: "list-operator", icon: 'rb:bg-[url("@/assets/images/workflow/list-operator.svg")]',
+        config: {
+          input_list: {
+            type: 'variableList',
+          },
+          filter_by: {
+            type: 'define',
+            defaultValue: {
+              enabled: false,
+              conditions: [{}]
+            }
+          },
+          order_by: {
+            type: 'define',
+            defaultValue: {
+              "enabled": false,
+              "key": "",
+              "value": "asc"
+            }
+          },
+          limit: {
+            type: 'define',
+            defaultValue: {
+              "enabled": false,
+              "size": 1
+            }
+          },
+          extract_by: {
+            type: 'define',
+            defaultValue: {
+              "enabled": false,
+              "serial": ""
+            }
+          },
         }
       },
     ]
@@ -527,7 +541,8 @@ export const THEME_MAP: Record<string, { outer: string; title: string; bg: strin
 }
 
 export const notesConfig = {
-  type: "notes", icon: templateRenderingIcon,
+  type: "notes",
+  icon: 'rb:bg-[url("@/assets/images/workflow/unknown.svg")]',
   config: {
     text: {
       type: 'define',
@@ -555,16 +570,16 @@ export const notesConfig = {
 }
 export const unknownNode = {
   type: 'unknown',
-  icon: unknownIcon
+  icon: 'rb:bg-[url("@/assets/images/workflow/unknown.svg")]'
 }
 export const noteNode = {
   type: 'notes',
-  icon: unknownIcon
+  icon: 'rb:bg-[url("@/assets/images/workflow/unknown.svg")]'
 }
 
 export const nodeWidth = 240;
 
-export const conditionNodePortItemArgsY = 60;
+export const conditionNodePortItemArgsY = 56.5;
 export const conditionNodeItemHeight = 26;
 export const conditionNodeHeight = 110;
 /**
@@ -688,13 +703,64 @@ export const portTextAttrs = { fontSize: 12, fill: '#5B6167' }
 /**
  * Port position arguments
  */
-export const portItemArgsY = 26;
+export const portItemArgsY = 26.5;
 export const portArgs = { x: nodeWidth, y: portItemArgsY }
 
 const defaultPortGroup = {
   position: { name: 'absolute' },
-  markup: portMarkup,
-  attrs: portAttrs
+  markup: [
+    { tagName: 'rect', selector: 'body' },
+    { tagName: 'circle', selector: 'hoverBody' },
+    { tagName: 'text', selector: 'label' },
+  ],
+  attrs: {
+    body: {
+      width: 1,
+      height: 8,
+      x: 0.75,
+      magnet: true,
+      stroke: port_color,
+      strokeWidth: edge_width,
+      fill: port_color,
+    },
+    hoverBody: {
+      r: 6,
+      cy: 2,
+      magnet: true,
+      stroke: port_color,
+      strokeWidth: edge_width,
+      fill: port_color,
+      opacity: 0,
+    },
+    label: {
+      text: '+',
+      fontSize: 12,
+      fontWeight: 'bold',
+      fill: '#FFFFFF',
+      textAnchor: 'middle',
+      textVerticalAnchor: 'middle',
+      pointerEvents: 'none',
+      y: '0.15em',
+      opacity: 0,
+    },
+  },
+}
+
+const leftPortGroup = {
+  position: { name: 'absolute' },
+  markup: [{ tagName: 'rect', selector: 'body' }],
+  attrs: {
+    body: {
+      width: 1,
+      height: 8,
+      x: -1.75,
+      y: -4,
+      magnet: true,
+      stroke: port_color,
+      strokeWidth: edge_width,
+      fill: port_color,
+    },
+  },
 }
 
 /**
@@ -703,7 +769,7 @@ const defaultPortGroup = {
  */
 export const defaultAbsolutePortGroups = {
   right: defaultPortGroup,
-  left: defaultPortGroup,
+  left: leftPortGroup,
 }
 /**
  * Default port items for standard nodes
@@ -797,7 +863,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 28,
     shape: 'add-node',
     ports: {
-      groups: { left: defaultPortGroup },
+      groups: { left: leftPortGroup },
       items: [{ group: 'left', args: { x: 0, y: 18 }}],
     },
   },
@@ -824,7 +890,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 28,
     shape: 'add-node',
     ports: {
-      groups: { left: defaultPortGroup },
+      groups: { left: leftPortGroup },
       items: [{ group: 'left', args: { x: 0, y: 14 } }],
     },
   },
@@ -833,7 +899,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 76,
     shape: 'normal-node',
     ports: {
-      groups: { left: defaultPortGroup },
+      groups: { left: leftPortGroup },
       items: [defaultPortItems[0]],
     },
   },
@@ -877,11 +943,74 @@ export const edgeAttrs = {
     line: {
       stroke: edge_color,
       strokeWidth: edge_width,
-      targetMarker: {
-        name: 'block',
-        width: 4,
-        height: 4,
+      targetMarker: null,
+      sourceMarker: null,
+    },
+  },
+}
+
+/**
+ * Edge hover tool: circular "+" button shown at midpoint on hover
+ */
+export const edgeHoverTool = {
+  name: 'button',
+  args: {
+    markup: [
+      {
+        tagName: 'circle',
+        selector: 'button',
+        attrs: {
+          r: 6,
+          stroke: port_color,
+          strokeWidth: edge_width,
+          fill: port_color,
+          cursor: 'pointer',
+        },
       },
+      {
+        tagName: 'text',
+        textContent: '+',
+        selector: 'icon',
+        attrs: {
+          fontSize: 12,
+          fontWeight: 'bold',
+          fill: '#FFFFFF',
+          textAnchor: 'middle',
+          textVerticalAnchor: 'middle',
+          pointerEvents: 'none',
+          y: '0.3em',
+        },
+      },
+    ],
+    distance: 0.5,
+    offset: { x: 0, y: 0 },
+    onClick({ e, cell: edge }: any) {
+      e.stopPropagation();
+      const graph = edge.model?.graph;
+      if (!graph) return;
+      const sourceCell = graph.getCellById(edge.getSourceCellId());
+      const targetCell = graph.getCellById(edge.getTargetCellId());
+      const sourcePort = edge.getSourcePortId();
+      const targetPort = edge.getTargetPortId();
+      if (!sourceCell || !targetCell) return;
+      const rect = (e.target as HTMLElement).getBoundingClientRect();
+      const tempDiv = document.createElement('div');
+      tempDiv.style.position = 'fixed';
+      tempDiv.style.left = rect.left + 'px';
+      tempDiv.style.top = rect.top + 'px';
+      tempDiv.style.width = '1px';
+      tempDiv.style.height = '1px';
+      tempDiv.style.zIndex = '9999';
+      document.body.appendChild(tempDiv);
+      window.dispatchEvent(new CustomEvent('port:click', {
+        detail: {
+          node: sourceCell,
+          port: sourcePort,
+          element: tempDiv,
+          rect,
+          edgeInsertion: { edge, sourceCell, targetCell, sourcePort, targetPort }
+        }
+      }));
     },
   },
 }

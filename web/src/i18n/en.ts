@@ -131,15 +131,15 @@ export const en = {
       desc_spaces: 'compared to last week',
       desc_users: 'New additions this week',
       desc_running_apps: "Today's success rate",
-      totalMemoryCapacity: 'Total Stored Memories',
+      total_memory: 'Total Stored Memories',
       userMemory: 'User Memory',
-      knowledgeBaseCount: 'Knowledge Bases',
-      apiCallCount: 'API Calls',
+      total_knowledge: 'Knowledge Bases',
+      total_api_call: 'API Calls',
       comparedToYesterday: 'compared to yesterday',
       thisWeek: 'this week',
       thisDay: 'day on day',
       failureRate: 'Failure Rate',
-      application: 'Applications',
+      total_app: 'Applications',
       total_num: 'Total Memory Capacity',
 
       lastDays: 'last {{days}} days',
@@ -195,7 +195,7 @@ export const en = {
       createNewApplicationDesc: 'Build an app in 3 minutes, no code.',
       createNewKnowledge: 'Create New Knowledge',
       createNewKnowledgeDesc: 'Create a searchable knowledge base instantly.',
-      memoryConversation: 'Memory Conversation',
+      memoryConversation: 'Memory Validation',
       memoryConversationDesc: 'The more you use it, the better AI knows you.',
       helpCenter: 'Help Center',
       helpCenterDesc: 'One place to get help and start fast.',
@@ -627,6 +627,8 @@ export const en = {
       vision: 'Vision',
       audio: 'Audio',
       video: 'Video',
+      thinking: 'Deep Thinking',
+      is_thinking: 'Deep Thinking Support',
     },
     knowledgeBase: {
       home: 'Home',
@@ -980,6 +982,7 @@ export const en = {
       scene_id: 'Ontology Scenario',
     },
     member: {
+      memberList: 'Member List',
       username: 'Username',
       account: 'Account',
       role: 'Role',
@@ -1267,6 +1270,7 @@ export const en = {
       participle: 'Participle retrieval',
       semantic: 'Semantic retrieval',
       hybrid: 'Hybrid Retrieval',
+      graph: 'Graph Retrieval',
 
       similarity_threshold: 'Semantic similarity threshold',
       similarity_threshold_desc: 'Only return results with semantic similarity higher than this threshold',
@@ -1420,6 +1424,7 @@ export const en = {
       citation: 'Citation and Attribution',
       citation_desc: 'Display the attribution of source documents and generated content',
       invalidVariablesTitle: "The following undefined variables are referenced in the conversation opening. Do you want to save the opening configuration?",
+      deep_thinking: 'Enable Deep Thinking',
 
       apps: 'My Apps',
       sharing: 'Sharing',
@@ -1453,6 +1458,7 @@ export const en = {
       appCount: '{{count}} apps shared to this space',
       resetFeaturesTip: 'Please reconfigure the [Conversation Features - File Upload] settings',
       logTitle: 'Description',
+      range: 'Range',
     },
     userMemory: {
       userMemory: 'User Memory',
@@ -1593,6 +1599,8 @@ export const en = {
       core_entities: 'Core Entities',
       communityDetailEmptyDesc: 'Click on a community in the chart on the left to view details',
       communityLoadingTip: 'Generating community graph',
+      assistant: 'AI Assistant',
+      totalRagMemory: 'Total number of memories',
     },
     space: {
       createSpace: 'Create Space',
@@ -1781,6 +1789,11 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       vision_id: 'Vision model',
       audio_id: 'Audio model',
       video_id: 'Video model',
+      onlyDelete: 'Only Delete Fill',
+      semanticFiltering: 'Semantic Filtering',
+      sceneFocus: 'Scene Focus',
+      loose: 'Loose',
+      strict: 'Strict',
     },
     memoryConversation: {
       searchPlaceholder: 'Enter user ID...',
@@ -1828,6 +1841,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       stopAudioRecorder: 'Stop Recording',
       startAudioRecorder: 'Start Recording',
       citations: 'Citations',
+      reasoning_content: 'Deep reasoning Content',
     },
     login: {
       title: 'Red Bear Memory Science',
@@ -1909,7 +1923,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       permissionInfo: 'Permission Information',
       is_expired: 'Status',
       active: 'Active',
-      inactive: 'Expired'
+      inactive: 'Expired',
+      noScopes: 'There is no permission information here…',
     },
     tool: {
       mcp: 'MCP Services',
@@ -2165,6 +2180,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       unknown: 'Unknown Node',
       notes: 'Sticky Note',
       'document-extractor': 'Document Extractor',
+      'list-operator': 'List Operator',
 
       clickToConfigure: 'Click to configure node parameters',
       nodeProperties: 'Node Properties',
@@ -2238,6 +2254,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           'string': 'String',
           'number': 'Number',
           'boolean': 'Boolean',
+          'file': 'File',
+          'array[file]': 'Array[File]',
           'array[string]': 'Array[String]',
           'array[number]': 'Array[Number]',
           'array[boolean]': 'Array[Boolean]',
@@ -2365,6 +2383,20 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         },
         'document-extractor': {
           file_selector: 'Input Variable',
+        },
+        'list-operator': {
+          variable: 'Input Variable',
+          filter_by: 'Filter Conditions',
+          addCondition: 'Add Filter Condition',
+          order_by: 'Sort',
+          asc: 'asc',
+          desc: 'desc',
+          extract_by: 'Extract Nth Item',
+          limit: 'Take First N Items',
+          type: {
+            eq: 'In',
+            ne: 'Not In',
+          }
         },
         name: 'Key',
         type: 'Type',

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 18:13:51
+ * @Last Modified time: 2026-04-07 18:04:49
  */
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { useTranslation } from 'react-i18next'
@@ -194,7 +194,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
    * Open model configuration modal
    */
   const handleModelConfig = () => {
-    modelConfigModalRef.current?.handleOpen('model')
+    modelConfigModalRef.current?.handleOpen('model', { ...defaultModel, model_parameters : values?.model_parameters })
   }
   /**
    * Clear all debugging chat sessions
@@ -287,7 +287,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
       setChatList([{
         label: filterValue?.name || '',
         model_config_id: filterValue?.id || '',
-        model_parameters: {...(filterValue?.config || {})} as unknown as ModelConfig,
+        model_parameters: {...(values?.model_parameters || {})} as unknown as ModelConfig,
         list: []
       }])
       form.setFieldValue('capability', filterValue?.capability)
@@ -354,6 +354,25 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
 
   const handleSaveFeaturesConfig = (value: FeaturesConfigForm) => {
     form.setFieldValue('features', value)
+    const { statement = '' } = value?.opening_statement || {}
+    onFeaturesLoad?.(value)
+
+    const usedVars = [...new Set([...(statement?.matchAll(/\{\{(\w+)\}\}/g) ?? [])].map(m => m[1]))]
+    const variables = values?.variables
+    const validNames = new Set(variables.map(v => v.name))
+    const invalid = usedVars.filter(v => !validNames.has(v))
+    if (invalid.length > 0) {
+      const newVars = invalid.map((name, i) => ({
+        index: variables.length + i,
+        name,
+        display_name: name,
+        type: 'text',
+        required: true,
+        max_length: 48,
+      }))
+
+      form.setFieldValue('variables', [...variables, ...newVars])
+    }
   }
   const modelLogo = useMemo(() => {
     return defaultModel?.name && getListLogoUrl(defaultModel.provider, defaultModel.logo as string)
@@ -361,7 +380,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
 
   useEffect(() => {
     const opening_statement = form.getFieldValue(['features', 'opening_statement'])
-    console.log('opening_statement', opening_statement, defaultModel, chatList)
 
     if (opening_statement?.enabled && opening_statement?.statement && opening_statement?.statement.trim() !== '') {
       const assistantMsg: ChatItem = {
@@ -386,7 +404,8 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
           if (vo.list?.length === 0) {
             return { ...vo, list: [assistantMsg] }
           } else if (vo.list && vo.list[0].role === 'assistant') {
-            return { ...vo, list: [assistantMsg, ...vo.list.slice(1)] }
+            vo.list[0] = assistantMsg
+            return { ...vo, list: [...vo.list] }
           } else {
             return { ...vo, list: [assistantMsg, ...(vo.list || [])] }
           }
@@ -406,7 +425,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
               <Flex align="center" justify="space-between" className="rb:p-3! rb:bg-white rb:rounded-xl">
                 <Button type="primary" ghost onClick={handleModelConfig} className="rb:group">
                   {modelLogo
-                    ? <img src={modelLogo} className="rb:size-4 rb:rounded-md" alt="" />
+                    ? <img src={modelLogo} className="rb:size-4 rb:rounded-md" alt={modelLogo} />
                     : defaultModel?.name
                     ? <div className="rb:size-4 rb:bg-[url('@/assets/images/application/model.svg')]"></div> : null}
                   {defaultModel?.name || t('application.chooseModel')}

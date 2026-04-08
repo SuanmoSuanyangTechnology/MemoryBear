@@ -11,19 +11,20 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Row, Col, Form, App, Button, Space, Select, Flex } from 'antd';
+import { Row, Col, Form, App, Button, Space, Select, Flex, Divider } from 'antd';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import clsx from 'clsx';
 
 import RbCard from '@/components/RbCard/Card';
 import { getMemoryReflectionConfig, updateMemoryReflectionConfig, pilotRunMemoryReflectionConfig } from '@/api/memory'
-import type { ConfigForm, Result, ReflexionData, MemoryVerify, QualityAssessment } from './types'
-import Tag from '@/components/Tag'
+import type { ConfigForm, Result, ReflexionData } from './types'
 import { useI18n } from '@/store/locale';
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import LabelWrapper from '@/components/FormItem/LabelWrapper'
 import DescWrapper from '@/components/FormItem/DescWrapper'
 import ModelSelect from '@/components/ModelSelect';
+import BtnTabs from '@/components/BtnTabs'
 
 /** Configuration list */
 const configList = [
@@ -91,6 +92,8 @@ const SelfReflectionEngine: React.FC = () => {
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false)
   const [runLoading, setRunLoading] = useState(false)
+  const [activeTabMap, setActiveTabMap] = useState<Record<number, string>>({});
+  const [expanded, setExpanded] = useState({ conflict: true, quality: true, privacy: true });
   const [result, setResult] = useState<Result | null>(null)
   const { language } = useI18n()
 
@@ -158,6 +161,8 @@ const SelfReflectionEngine: React.FC = () => {
         })
           .then((res) => {
             setResult(res as Result)
+            setExpanded({ conflict: true, quality: true, privacy: true })
+            setActiveTabMap({})
           })
           .finally(() => {
             setRunLoading(false)
@@ -174,8 +179,8 @@ const SelfReflectionEngine: React.FC = () => {
         <RbCard
           title={t('reflectionEngine.reflectionEngineConfig')}
           extra={<Space>
-            <Button block onClick={handleReset}>{t('common.reset')}</Button>
-            <Button type="primary" loading={loading} block onClick={handleSave}>{t('common.save')}</Button>
+            <Button onClick={handleReset}>{t('common.reset')}</Button>
+            <Button type="primary" loading={loading} onClick={handleSave}>{t('common.save')}</Button>
           </Space>}
           headerType="borderless"
           headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
@@ -253,100 +258,110 @@ const SelfReflectionEngine: React.FC = () => {
         </RbCard>
       </Col>
       <Col span={12} className="rb:h-full!">
-        <Flex gap={16} vertical className="rb:h-full!">
-          <RbCard
-            title={t('memoryExtractionEngine.example')}
-          >
-            <div className="rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:mb-6">
+        <RbCard
+          title={t('memoryExtractionEngine.example')}
+          extra={<Space>
+            <Button type="primary" loading={runLoading} disabled={!values?.reflection_enabled} onClick={handleRun}>{t('reflectionEngine.run')}</Button>
+          </Space>}
+          headerType="borderless"
+          headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
+          className="rb:h-full!"
+          bodyClassName="rb:h-[calc(100%-54px)] rb:overflow-y-auto! rb:p-4! rb:pt-0!"
+        >
+          <Flex vertical gap={12}>
+            <div className="rb:bg-[#F6F6F6] rb:rounded-xl rb:py-2.5 rb:px-3 rb:leading-5.5">
               {t('reflectionEngine.exampleText')}
             </div>
 
-            <Button type="primary" block loading={runLoading} disabled={!values?.reflection_enabled} onClick={handleRun}>{t('reflectionEngine.run')}</Button>
-          </RbCard>
-          {result && <>
-            <RbCard
-              title={t('reflectionEngine.runTitle')}
-            >
-              <div 
-                className="rb:flex rb:gap-4 rb:justify-start rb:text-[#5B6167] rb:text-[14px] rb:leading-5 rb:mb-3"
-              >
-                <div className="rb:whitespace-nowrap rb:w-45 rb:font-medium">{t(`reflectionEngine.baseline`)}</div>
-                <div className='rb:flex-inline rb:text-left rb:py-px rb:rounded rb:text-[#5B6167] rb:flex-1'>
-                  {result.baseline}
-                </div>
-              </div>
-            </RbCard>
-            {result.reflexion_data.length > 0 && (
-              <RbCard
-                title={t('reflectionEngine.conflictDetection')}
-              >
-                <Space size={12} direction="vertical" className="rb:w-full">
-                  {result.reflexion_data.map((item, index) => (
-                    <div key={index} className="rb:bg-[#F0F3F8] rb:px-3 rb:py-2.5 rb:rounded-md rb:text-[12px]">
-                      {['reason', 'solution'].map(key => (
-                        <div
-                          key={key}
-                          className="rb:flex rb:gap-4 rb:justify-start rb:text-[14px] rb:leading-5 rb:mb-3"
-                        >
-                          <div className="rb:whitespace-nowrap rb:w-45 rb:font-medium">{t(`reflectionEngine.${key}`)}</div>
-                          <div className='rb:flex-inline rb:text-left rb:py-px rb:rounded rb:text-[#5B6167] rb:flex-1'>
-                            {item[key as keyof ReflexionData]}
-                          </div>
-                        </div>
-                      ))}
+            {result && <>
+              <Flex justify="space-between" className="rb:bg-[#F6F6F6] rb:rounded-xl rb:py-2.5! rb:px-3! rb:leading-5">
+                <span className="rb:font-medium rb:text-[#212332]">{t('reflectionEngine.runTitle')}</span>
+                <span className="rb:text-[#5B6167]">{t(`reflectionEngine.baseline`)}: {t(`reflectionEngine.${result.baseline}`)}</span>
+              </Flex>
+
+              {result.reflexion_data.length > 0 &&
+                <Flex vertical gap={12} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:py-2.5! rb:px-3! rb:leading-5.5">
+                  <Flex justify="space-between" className="rb:font-medium rb:text-[#212332] rb:cursor-pointer" onClick={() => setExpanded(p => ({ ...p, conflict: !p.conflict }))}>
+                    {t('reflectionEngine.conflictDetection')}
+                    <div className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:transition-transform", {
+                      'rb:rotate-180': !expanded.conflict,
+                    })}></div>
+                  </Flex>
+
+                  {expanded.conflict && result.reflexion_data.map((item, index) => (
+                    <div key={index} className="rb:bg-white rb:rounded-xl rb:py-2.5! rb:px-3!">
+                      <BtnTabs
+                        className="rb:mb-3!"
+                        variant="outline"
+                        activeKey={activeTabMap[index] ?? 'reason'}
+                        items={['reason', 'solution'].map(key => ({
+                          label: t(`reflectionEngine.${key}`),
+                          key
+                        }))}
+                        onChange={(key) => setActiveTabMap(prev => ({ ...prev, [index]: key }))}
+                      />
+                      <div className="rb:leading-5.5">{item[(activeTabMap[index] ?? 'reason') as keyof ReflexionData]}</div>
                     </div>
                   ))}
-                </Space>
-              </RbCard>
-            )}
-            {result.quality_assessments.length > 0 && (
-              <RbCard
-                title={t('reflectionEngine.qualityAssessment')}
-              >
-                {result.quality_assessments.map((item, index) => (
-                  <div key={index} className="rb:bg-[#F0F3F8] rb:px-3 rb:py-2.5 rb:rounded-md rb:text-[12px]">
-                    {['score', 'summary'].map(key => (
-                      <div
-                        key={key}
-                        className="rb:flex rb:gap-4 rb:justify-start rb:text-[14px] rb:leading-5 rb:mb-3"
-                      >
-                        <div className="rb:whitespace-nowrap rb:w-45 rb:font-medium">{t(`reflectionEngine.qualityAssessmentObj.${key}`)}</div>
-                        <div className='rb:flex-inline rb:text-left rb:py-px rb:rounded rb:text-[#5B6167] rb:flex-1'>
-                          {item[key as keyof QualityAssessment]}
-                        </div>
+
+                </Flex>
+              }
+              {result.quality_assessments.length > 0 &&
+                <Flex vertical gap={12} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:py-2.5! rb:px-3! rb:leading-5.5">
+                  <Flex justify="space-between" className="rb:font-medium rb:text-[#212332] rb:cursor-pointer" onClick={() => setExpanded(p => ({ ...p, quality: !p.quality }))}>
+                    {t('reflectionEngine.qualityAssessment')}
+                    <div className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:transition-transform", {
+                      'rb:rotate-180': !expanded.quality,
+                    })}></div>
+                  </Flex>
+
+                  {expanded.quality && result.quality_assessments.map((item, index) => (
+                    <div key={index} className="rb:bg-white rb:rounded-xl rb:py-2.5! rb:px-3!">
+                      <div>
+                        <span className="rb:font-medium rb:text-[#212332] rb:leading-5 rb:mr-4.5">{t(`reflectionEngine.qualityAssessmentObj.score`)}</span>
+                        <span className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[#155EEF] rb:leading-5">{item.score}</span>
                       </div>
-                    ))}
-                  </div>
-                ))}
-              </RbCard>
-            )}
-            {result.memory_verifies.length > 0 && (
-              <RbCard
-                title={t('reflectionEngine.privacyAudit')}
-              >
-                {result.memory_verifies.map((item, index) => (
-                  <div key={index} className="rb:bg-[#F0F3F8] rb:px-3 rb:py-2.5 rb:rounded-md rb:text-[12px]">
-                    {['has_privacy', 'privacy_types', 'summary'].map(key => (
-                      <div
-                        key={key}
-                        className="rb:flex rb:gap-4 rb:justify-start rb:text-[14px] rb:leading-5 rb:mb-3"
-                      >
-                        <div className="rb:whitespace-nowrap rb:w-45 rb:font-medium">{t(`reflectionEngine.privacyAuditObj.${key}`)}</div>
-                        <div className='rb:flex-inline rb:text-left rb:py-px rb:rounded rb:text-[#5B6167] rb:flex-1'>
-                          {key === 'has_privacy'
-                            ? <Tag color={item[key as keyof MemoryVerify] ? 'success' : 'error'}>{t(`reflectionEngine.privacyAuditObj.${item[key as keyof MemoryVerify]}`)}</Tag>
-                            : key === 'privacy_types' ? (item[key as keyof MemoryVerify] as string[]).join('、')
-                            : item[key as keyof MemoryVerify]
-                          }
-                        </div>
+                      <Divider className="rb:my-3!" />
+                      <div className="rb:font-medium rb:text-[#212332] rb:leading-5 rb:mb-2">{t(`reflectionEngine.qualityAssessmentObj.summary`)}</div>
+                      <div className="rb:mt-1 rb:leading-5.5">{item.summary}</div>
+                    </div>
+                  ))}
+
+                </Flex>
+              }
+              {result.memory_verifies.length > 0 &&
+                <Flex vertical gap={12} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:py-2.5! rb:px-3! rb:leading-5.5">
+                  <Flex justify="space-between" className="rb:font-medium rb:text-[#212332] rb:cursor-pointer" onClick={() => setExpanded(p => ({ ...p, privacy: !p.privacy }))}>
+                    {t('reflectionEngine.privacyAudit')}
+                    <div className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:transition-transform", {
+                      'rb:rotate-180': !expanded.privacy,
+                    })}></div>
+                  </Flex>
+
+                  {expanded.privacy && result.memory_verifies.map((item, index) => (
+                    <div key={index} className="rb:bg-white rb:rounded-xl rb:py-2.5! rb:px-3!">
+                      <div>
+                        <span className="rb:font-medium rb:text-[#212332] rb:leading-5 rb:mr-4.5">{t(`reflectionEngine.privacyAuditObj.has_privacy`)}</span>
+                        <span className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[#155EEF] rb:leading-5">{item.has_privacy}</span>
                       </div>
-                    ))}
-                  </div>
-                ))}
-              </RbCard>
-            )}
-          </>}
-        </Flex>
+
+                      <Divider className="rb:my-3!" />
+
+                      <div className="rb:font-medium rb:text-[#212332] rb:leading-5 rb:mb-2">{t(`reflectionEngine.privacyAuditObj.privacy_types`)}</div>
+                      <div className="rb:mt-1 rb:leading-5.5">{item.privacy_types.join(', ')}</div>
+
+                      <Divider className="rb:my-3!" />
+
+                      <div className="rb:font-medium rb:text-[#212332] rb:leading-5 rb:mb-2">{t(`reflectionEngine.privacyAuditObj.summary`)}</div>
+                      <div className="rb:mt-1 rb:leading-5.5">{item.summary}</div>
+                    </div>
+                  ))}
+
+                </Flex>
+              }
+            </>}
+          </Flex>
+        </RbCard>
       </Col>
     </Row>
   );

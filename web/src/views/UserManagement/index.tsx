@@ -144,7 +144,7 @@ const UserManagement: React.FC = () => {
   return (
     <div className="rb:h-full rb:overflow-hidden rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
       <Flex justify="space-between" align="center" className="rb:px-1! rb:mb-3!">
-        <div className="rb:gont-[MiSans-Bold] rb:font-bold rb:text-[#212332] rb:leading-5">{t('user.userList')}</div>
+        <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[#212332] rb:leading-5">{t('user.userList')}</div>
         <Button type="primary" onClick={handleCreate}>
           + {t('user.createUser')}
         </Button>
