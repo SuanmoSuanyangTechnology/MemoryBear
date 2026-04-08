@@ -91,7 +91,7 @@ async def fetch_remote_file_meta(
     """
     import httpx
 
-    name = size = mime_type = extension = None
+    name = extension = None
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.head(url, follow_redirects=True)

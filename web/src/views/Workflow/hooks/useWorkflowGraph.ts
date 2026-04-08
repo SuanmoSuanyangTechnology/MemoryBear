@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 11:13:23
+ * @Last Modified time: 2026-04-07 23:17:50
  */
 import { useRef, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -18,6 +18,7 @@ import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
 import { useUser } from '@/store/user';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types'
 import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils'
+import type { Suggestion } from '../components/Editor/plugin/AutocompletePlugin';
 
 /**
  * Props for useWorkflowGraph hook
@@ -73,6 +74,8 @@ export interface UseWorkflowGraphReturn {
   handleAddNotes: () => void;
   handleSaveFeaturesConfig: (value: FeaturesConfigForm) => void;
   features?: FeaturesConfigForm;
+  /** Get start node output variable list (user-defined + system variables) */
+  getStartNodeVariables: () => Array<{ name: string; type: string; readonly?: boolean }>;
 }
 
 /**
@@ -441,7 +444,12 @@ export const useWorkflowGraph = ({
       setTimeout(() => {
         if (graphRef.current) {
           graphRef.current.centerContent()
-          graphRef.current.getNodes().forEach(node => node.toFront());
+          // graphRef.current.getNodes().forEach(node => node.toFront());
+          // Bring edges to front first, then child nodes above edges; parent nodes stay behind
+          graphRef.current.getEdges().forEach(edge => edge.toFront());
+          graphRef.current.getNodes().forEach(node => {
+            if (node.getData()?.cycle) node.toFront();
+          });
         }
       }, 200)
     }
@@ -722,6 +730,41 @@ export const useWorkflowGraph = ({
     // Delete all collected nodes and edges
     if (cells.length > 0) {
       graphRef.current?.removeCells(cells);
+
+      // If parent is iteration/loop and only cycle-start remains, add add-node connected to it
+      parentNodesToUpdate.forEach(parentNode => {
+        const parentShape = parentNode.shape;
+        if (parentShape !== 'loop-node' && parentShape !== 'iteration-node') return;
+        const parentData = parentNode.getData();
+        const remainingChildren = graphRef.current!.getNodes().filter(
+          n => n.getData()?.cycle === parentData.id
+        );
+        const cycleStartNodes = remainingChildren.filter(n => n.getData()?.type === 'cycle-start');
+        if (cycleStartNodes.length === 1 && remainingChildren.length === 1) {
+          const cycleStartNode = cycleStartNodes[0];
+          const bbox = cycleStartNode.getBBox();
+          const addNode = graphRef.current!.addNode({
+            ...graphNodeLibrary.addStart,
+            x: bbox.x + 84,
+            y: bbox.y + 4,
+            data: {
+              type: 'add-node',
+              parentId: parentNode.id,
+              cycle: parentData.id,
+              label: t('workflow.addNode'),
+              icon: '+',
+            },
+          });
+          parentNode.addChild(addNode);
+          const sourcePort = cycleStartNode.getPorts().find(p => p.group === 'right')?.id || 'right';
+          const targetPort = addNode.getPorts().find(p => p.group === 'left')?.id || 'left';
+          graphRef.current!.addEdge({
+            source: { cell: cycleStartNode.id, port: sourcePort },
+            target: { cell: addNode.id, port: targetPort },
+            ...edgeAttrs,
+          });
+        }
+      });
     }
     return false;
   };
@@ -877,12 +920,13 @@ export const useWorkflowGraph = ({
           if (!view) return null
           const cell = view.cell
           if (cell.isNode()) {
+            // Parent (iteration/loop) nodes are not restricted
+            if (cell.getData()?.type === 'iteration' || cell.getData()?.type === 'loop') return null
             const parent = cell.getParent()
             if (parent) {
               return parent.getBBox()
             }
           }
-
           return null
         },
       },
@@ -984,10 +1028,30 @@ export const useWorkflowGraph = ({
     graphRef.current.on('scale', scaleEvent);
     // Listen to node move event
     graphRef.current.on('node:moved', nodeMoved);
+    // When parent (isGroup) node position changes, move children with it
+    graphRef.current.on('node:change:position', ({ node, current, previous }: { node: Node; current: { x: number; y: number }; previous: { x: number; y: number } }) => {
+      
+      if (!(node.getData()?.type === 'iteration' && node.getData()?.type === 'loop') || !current || !previous) return;
+
+      const dx = current.x - previous.x;
+      const dy = current.y - previous.y;
+      const parentId = node.getData()?.id || node.id;
+      graphRef.current?.getNodes().forEach(child => {
+        if (child.getData()?.cycle === parentId) {
+          const cp = child.getPosition();
+          child.setPosition(cp.x + dx, cp.y + dy, { silent: true });
+        }
+      });
+    });
     graphRef.current.on('node:removed', blankClick)
     // When edge connected, bring connected nodes' ports to front
-    graphRef.current.on('edge:connected', ({ isNew }) => {
-      graphRef.current?.getNodes().forEach(node => node.toFront());
+    graphRef.current.on('edge:connected', ({ isNew, edge }) => {
+      // Bring edge to front first, then bring child nodes above edges
+      // Parent (loop/iteration) nodes stay behind to avoid covering edges
+      edge.toFront();
+      graphRef.current?.getNodes().forEach(node => {
+        if (node.getData()?.cycle) node.toFront();
+      });
       // Reset any port hover state left from dragging
       if (isNew) {
         graphRef.current?.getNodes().forEach(node => {
@@ -1363,9 +1427,49 @@ export const useWorkflowGraph = ({
       data: { ...cleanNodeData },
     });
   }
+  const getStartNodeVariables = (): Array<{ name: string; type: string; readonly?: boolean }> => {
+    const startNode = graphRef.current?.getNodes().find(n => n.getData()?.type === 'start')
+    if (!startNode) return []
+    const data = startNode.getData()
+    const userVars: Array<{ name: string; type: string; readonly?: boolean }> =
+      (data?.config?.variables?.defaultValue ?? []).map((v: any) => ({ name: v.name, type: v.type }))
+    return userVars
+  }
+
   const handleSaveFeaturesConfig = (value?: FeaturesConfigForm) => {
+    const { statement = '' } = value?.opening_statement || {}
     featuresRef.current = value
     onFeaturesLoad?.(value)
+
+    const usedVars = [...new Set([...(statement?.matchAll(/\{\{(\w+)\}\}/g) ?? [])].map(m => m[1]))]
+    const startVars = getStartNodeVariables()
+    const validNames = new Set(startVars.map(v => v.name))
+    const invalid = usedVars.filter(v => !validNames.has(v))
+    if (invalid.length > 0) {
+      const newVars = invalid.map(name => ({
+        name,
+        description: name,
+        type: 'string',
+        required: true,
+        defaultValue: '',
+      }))
+
+      const startNode = graphRef.current?.getNodes().find(n => n.getData()?.type === 'start')
+      if (startNode) {
+        const data = startNode.getData()
+        console.log('startNode', [...startVars, ...newVars])
+        startNode.setData({
+          ...data,
+          config: {
+            ...data.config,
+            variables: {
+              ...data.config.variables,
+              defaultValue: [...startVars, ...newVars],
+            },
+          },
+        })
+      }
+    }
   }
 
   return {
@@ -1389,5 +1493,6 @@ export const useWorkflowGraph = ({
     handleAddNotes,
     handleSaveFeaturesConfig,
     features: featuresRef.current,
+    getStartNodeVariables,
   };
 };

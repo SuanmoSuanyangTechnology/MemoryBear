@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 15:45:17
+ * @Last Modified time: 2026-04-07 15:46:19
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
@@ -168,6 +168,7 @@ export interface WorkflowRef {
   chatVariables: ChatVariable[];
   config: WorkflowConfig | null;
   features: WorkflowConfig['features'];
+  handleFeaturesConfig?: () => void;
   handleSaveFeaturesConfig?: (value: FeaturesConfigForm) => void;
 }
 

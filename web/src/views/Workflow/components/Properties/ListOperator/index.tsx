@@ -23,6 +23,29 @@ const ListOperator: FC<ListOperatorProps> = ({ options }) => {
   const variableOption = options.find(option => `{{${option.value}}}` === values?.input_list)
   const variableType = variableOption?.dataType
 
+  const handleChangeInputList = (value: string | string[]) => {
+    form.setFieldsValue({
+      input_list: value,
+      filter_by: {
+        enabled: false,
+        conditions: [{}]
+      },
+      order_by: {
+        enabled: false,
+        key: variableType === 'array[file]' ? 'name' : '',
+        value: 'asc'
+      },
+      extract_by: {
+        enabled: false,
+        serial: undefined
+      },
+      limit: {
+        enabled: false,
+        size: 1
+      }
+    })
+  }
+
   return (
     <>
       <Form.Item name="input_list" label={t('workflow.config.list-operator.variable')} required>
@@ -30,6 +53,7 @@ const ListOperator: FC<ListOperatorProps> = ({ options }) => {
           placeholder={t('common.pleaseSelect')}
           options={options.filter(vo => vo.dataType.includes('array') && vo.dataType !== 'array[object]')}
           size="small"
+          onChange={handleChangeInputList}
         />
       </Form.Item>
 
@@ -58,6 +82,7 @@ const ListOperator: FC<ListOperatorProps> = ({ options }) => {
                 <Select
                   options={fileSubVariable}
                   fieldNames={{ value: 'filed', label: 'label' }}
+                  placeholder={t('common.pleaseSelect')}
                 />
               </Form.Item>
             </Col>

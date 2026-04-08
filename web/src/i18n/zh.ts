@@ -657,6 +657,7 @@ export const zh = {
       participle: '分词检索',
       semantic: '语义检索',
       hybrid: '混合检索',
+      graph: '图谱检索',
 
       similarity_threshold: '语义相似度阈值',
       similarity_threshold_desc: '仅返回语义相似度高于此阈值的结果',

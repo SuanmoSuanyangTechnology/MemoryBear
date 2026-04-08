@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:07:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-05 13:43:59
+ * @Last Modified time: 2026-04-07 12:18:58
  */
 /**
  * AppHeader Component
@@ -77,7 +77,7 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
     {
       key: '1',
       icon: <Flex align="center" justify="center" className="rb:size-10 rb:rounded-xl rb:bg-[#155EEF] rb:text-white">
-        {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(0, 2) : user.username[0]}
+        {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(0, 2) : user.username?.[0]}
       </Flex>,
       label: (<>
         <div className="rb:text-[#212332] rb:leading-5">{user.username}</div>
@@ -91,10 +91,10 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
     },
     {
       key: '3',
-      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/menuNew/userInfo.svg')]"></div>,
+      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/userInfo.svg')]"></div>,
       label: <Flex justify="space-between" align="center">
         {t('header.userInfo')}
-        <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/menuNew/arrow_t_r.svg')]"></div>
+        <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/arrow_t_r.svg')]"></div>
       </Flex>,
       className: 'rb:text-[#212332]!',
       onClick: () => {
@@ -103,10 +103,10 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
     },
     {
       key: '4',
-      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/menuNew/settings.svg')]"></div>,
+      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/settings.svg')]"></div>,
       label: <Flex justify="space-between" align="center">
         {t('header.settings')}
-        <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/menuNew/arrow_t_r.svg')]"></div>
+        <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/arrow_t_r.svg')]"></div>
       </Flex>,
       className: 'rb:text-[#212332]!',
       onClick: () => {
@@ -120,7 +120,7 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
     },
     {
       key: '6',
-      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('src/assets/images/menuNew/logout_red.svg')]"></div>,
+      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/logout_red.svg')]"></div>,
       label: t('header.logout'),
       danger: true,
       className: 'rb:hover:rb:bg-transparent rb:hover:text-[#FF5D34]!',
@@ -180,7 +180,7 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
         >
           <Flex align="center" className="rb:cursor-pointer rb:font-medium">
             <Flex align="center" justify="center" className="rb:size-8 rb:rounded-xl rb:bg-[#155EEF] rb:text-white rb:mr-2!">
-              {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(0, 2) : user.username[0]}
+              {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(user.username.length, -2) : user.username[0]}
             </Flex>
             <span className="rb:text-[#212332] rb:text-[12px] rb:leading-4 rb:mr-1">{user.username}</span>
             <div className={clsx("rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')]", {

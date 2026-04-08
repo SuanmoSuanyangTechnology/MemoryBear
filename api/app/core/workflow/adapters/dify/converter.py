@@ -131,7 +131,7 @@ class DifyConverter(BaseConverter):
         selector = var_selector.split('.')
         if len(selector) not in [2, 3] and var_selector != "context":
             raise Exception(f"invalid variable selector: {var_selector}")
-        if len(selector) == 3:
+        if len(selector) == 3 and selector[0] in ("conversation", "sys"):
             selector = selector[1:]
         if selector[0] == "conversation":
             selector[0] = "conv"
@@ -483,11 +483,11 @@ class DifyConverter(BaseConverter):
         node_data = node["data"]
         result = IterationNodeConfig.model_construct(
             input=self._process_list_variable_literal(node_data["iterator_selector"]),
-            parallel=node_data["is_parallel"],
-            parallel_count=node_data["parallel_nums"],
+            parallel=node_data.get("is_parallel", False),
+            parallel_count=node_data.get("parallel_nums", 4),
             output=self._process_list_variable_literal(node_data["output_selector"]),
             output_type=self.variable_type_map(node_data.get("output_type")),
-            flatten=node_data["flatten_output"],
+            flatten=node_data.get("flatten_output", False),
         ).model_dump()
 
         self.config_validate(node["id"], node["data"]["title"], IterationNodeConfig, result)
@@ -496,7 +496,23 @@ class DifyConverter(BaseConverter):
     def convert_assigner_node_config(self, node: dict) -> dict:
         node_data = node["data"]
         assignments = []
-        for assignment in node_data["items"]:
+
+        # Support both formats:
+        # 1. New format: node_data["items"] list
+        # 2. Flat format: assigned_variable_selector + input_variable_selector + write_mode
+        if "items" in node_data:
+            raw_items = node_data["items"]
+        elif "assigned_variable_selector" in node_data and "input_variable_selector" in node_data:
+            raw_items = [{
+                "variable_selector": node_data["assigned_variable_selector"],
+                "value": node_data["input_variable_selector"],
+                "input_type": ValueInputType.VARIABLE,
+                "operation": node_data.get("write_mode", "over-write"),
+            }]
+        else:
+            raw_items = []
+
+        for assignment in raw_items:
             if assignment.get("operation") is None or assignment.get("value") is None:
                 continue
             assignments.append(

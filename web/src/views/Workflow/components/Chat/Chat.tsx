@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-02 18:01:09
+ * @Last Modified time: 2026-04-07 18:07:38
  */
 /**
  * Workflow Chat Component
@@ -40,6 +40,7 @@ import ChatToolbar from '@/components/Chat/ChatToolbar'
 import type { ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import Runtime from './Runtime';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
+import { replaceVariables } from '@/views/ApplicationConfig/Agent';
 
 const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: WorkflowConfig | null; features?: FeaturesConfigForm }>(({
   appId, graphRef, features
@@ -67,8 +68,8 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   const handleOpen = () => {
     setOpen(true)
 
-    if (features?.opening_statement?.statement && features?.opening_statement?.statement.trim() !== '') {
-      setChatList(prev => [...prev, {
+    if (features?.opening_statement?.enabled && features?.opening_statement?.statement && features?.opening_statement?.statement.trim() !== '') {
+      setChatList([{
         role: 'assistant',
         created_at: Date.now(),
         content: features?.opening_statement?.statement,
@@ -418,6 +419,26 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
     handleOpen,
     handleClose
   }));
+
+  useEffect(() => {
+    const opening_statement = features?.opening_statement
+
+    if (opening_statement?.enabled && opening_statement?.statement && opening_statement?.statement.trim() !== '') {
+      const assistantMsg: ChatItem = {
+        role: 'assistant',
+        content: replaceVariables(opening_statement.statement, variables as any),
+        meta_data: {
+          suggested_questions: opening_statement?.suggested_questions
+        }
+      }
+      setChatList(prev => {
+        if (prev[0]?.role === 'assistant') {
+          prev[0] = assistantMsg
+        }
+        return [...prev]
+      })
+    }
+  }, [chatList.length, features?.opening_statement, variables])
 
   return (
     <RbDrawer

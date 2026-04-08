@@ -48,8 +48,8 @@ const ConversationMemory: FC = () => {
               gap={12}
             >
               <div className={clsx("rb:size-8 rb:bg-cover", {
-                'rb:bg-[url(src/assets/images/conversation/user.png)]': item.role === 'user',
-                'rb:bg-[url(src/assets/images/conversation/ai.png)]': item.role === 'assistant',
+                'rb:bg-[url(@/assets/images/conversation/user.png)]': item.role === 'user',
+                'rb:bg-[url(@/assets/images/conversation/ai.png)]': item.role === 'assistant',
               })}></div>
               <div
                 className="rb:flex-1"

@@ -1,5 +1,5 @@
 from typing import Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig
 from app.core.workflow.nodes.enums import ComparisonOperator
@@ -30,6 +30,11 @@ class Limit(BaseModel):
 class ExtractConfig(BaseModel):
     enabled: bool = False
     serial: str = "1"  # 1-based index string, e.g. "1" = first
+
+    @field_validator("serial", mode="before")
+    @classmethod
+    def coerce_serial(cls, v):
+        return str(v)
 
 
 class ListOperatorNodeConfig(BaseNodeConfig):

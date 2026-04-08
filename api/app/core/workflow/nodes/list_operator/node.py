@@ -11,7 +11,7 @@ from app.core.workflow.variable.base_variable import VariableType
 logger = logging.getLogger(__name__)
 
 # File object fields that hold string values
-_FILE_STRING_KEYS = {"name", "extension", "mime_type", "url", "transfer_method", "origin_file_type", "file_id"}
+_FILE_STRING_KEYS = {"type", "name", "url", "extension", "mime_type", "transfer_method", "origin_file_type", "file_id"}
 _FILE_NUMBER_KEYS = {"size"}
 
 
@@ -52,7 +52,7 @@ class ListOperatorNode(BaseNode):
             result = [result[idx]]
 
         # 3. Order
-        if cfg.order_by.enabled and cfg.order_by.key:
+        if cfg.order_by.enabled:
             reverse = cfg.order_by.value == "desc"
             key_fn = self._make_sort_key(cfg.order_by.key)
             result = sorted(result, key=key_fn, reverse=reverse)
@@ -100,10 +100,17 @@ class ListOperatorNode(BaseNode):
         else:
             left = item  # primitive array: compare element directly
 
+        # Determine if this field should be compared as a string
+        is_string_field = isinstance(item, dict) and cond.key in _FILE_STRING_KEYS
+
         # Numeric operators
         if op == ComparisonOperator.EQ:
+            if is_string_field:
+                return str(left) == str(value)
             return self._safe_num(left) == self._safe_num(value)
         if op == ComparisonOperator.NE:
+            if is_string_field:
+                return str(left) != str(value)
             return self._safe_num(left) != self._safe_num(value)
         if op == ComparisonOperator.LT:
             return self._safe_num(left) < self._safe_num(value)

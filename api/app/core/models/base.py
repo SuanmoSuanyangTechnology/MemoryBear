@@ -79,8 +79,10 @@ class RedBearModelFactory:
                 model_kwargs: Dict[str, Any] = config.extra_params.get("model_kwargs", {})
                 if is_streaming:
                     model_kwargs["enable_thinking"] = config.deep_thinking
-                    if config.deep_thinking and config.thinking_budget_tokens:
-                        model_kwargs["thinking_budget"] = config.thinking_budget_tokens
+                    if config.deep_thinking:
+                        model_kwargs["incremental_output"] = True
+                        if config.thinking_budget_tokens:
+                            model_kwargs["thinking_budget"] = config.thinking_budget_tokens
                 else:
                     model_kwargs["enable_thinking"] = False
                 params["model_kwargs"] = model_kwargs
@@ -110,7 +112,7 @@ class RedBearModelFactory:
                 params["stream_usage"] = True
             # 深度思考模式
             is_streaming = bool(config.extra_params.get("streaming"))
-            if is_streaming:
+            if is_streaming and not config.is_omni:
                 if provider == ModelProvider.VOLCANO:
                     # 火山引擎深度思考仅流式调用支持，非流式时不传 thinking 参数
                     thinking_config: Dict[str, Any] = {
@@ -140,8 +142,10 @@ class RedBearModelFactory:
                 model_kwargs: Dict[str, Any] = config.extra_params.get("model_kwargs", {})
                 if is_streaming:
                     model_kwargs["enable_thinking"] = config.deep_thinking
-                    if config.deep_thinking and config.thinking_budget_tokens:
-                        model_kwargs["thinking_budget"] = config.thinking_budget_tokens
+                    if config.deep_thinking:
+                        model_kwargs["incremental_output"] = True
+                        if config.thinking_budget_tokens:
+                            model_kwargs["thinking_budget"] = config.thinking_budget_tokens
                 else:
                     model_kwargs["enable_thinking"] = False
                 params["model_kwargs"] = model_kwargs

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-03 20:28:08
+ * @Last Modified time: 2026-04-07 19:56:56
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -128,7 +128,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           vision_input: {
             type: 'variableList',
-            onFilterVariableNames: ['sys.files']
+            onFilterVariableType: ['array[file]']
           }
         }
       },
@@ -457,7 +457,7 @@ export const nodeLibrary: NodeLibrary[] = [
           file_selector: {
             type: 'variableList',
             placeholder: 'common.pleaseSelect',
-            onFilterVariableNames: ['sys.files']
+            onFilterVariableType: ['array[file]', 'file']
           }
         }
       },
@@ -579,7 +579,7 @@ export const noteNode = {
 
 export const nodeWidth = 240;
 
-export const conditionNodePortItemArgsY = 60;
+export const conditionNodePortItemArgsY = 56.5;
 export const conditionNodeItemHeight = 26;
 export const conditionNodeHeight = 110;
 /**
@@ -703,7 +703,7 @@ export const portTextAttrs = { fontSize: 12, fill: '#5B6167' }
 /**
  * Port position arguments
  */
-export const portItemArgsY = 26;
+export const portItemArgsY = 26.5;
 export const portArgs = { x: nodeWidth, y: portItemArgsY }
 
 const defaultPortGroup = {

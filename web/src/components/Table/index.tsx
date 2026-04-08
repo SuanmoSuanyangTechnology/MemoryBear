@@ -169,6 +169,8 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
   const paginationConfig = pagination ? ({
     ...(typeof pagination === 'object' ? pagination : {}),
     ...currentPagination,
+    current: currentPagination.page,
+    pageSize: currentPagination.pagesize,
     total,
     onChange: handlePageChange,
     showSizeChanger: true,

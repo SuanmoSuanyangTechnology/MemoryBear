@@ -136,7 +136,10 @@ class QuestionClassifierNode(BaseNode):
 
             response = await llm.ainvoke(messages)
             result = self.process_model_output(response.content)
-            self.response_metadata = response.response_metadata
+            self.response_metadata = {
+                **response.response_metadata,
+                "token_usage": getattr(response, 'usage_metadata', None) or response.response_metadata.get('token_usage')
+            }
 
             if result in category_names:
                 category = result

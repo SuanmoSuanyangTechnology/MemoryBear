@@ -21,7 +21,9 @@
   line-height: 16px;
 }
 .collapse-item:global(.ant-collapse-item>.ant-collapse-header) {
-  padding: 8px 12px;
+  padding: 8px 16px 8px 10px;
+  display: flex;
+  align-items: center;
 }
 .collapse-item:global(.ant-collapse-item>.ant-collapse-header .ant-collapse-expand-icon) {
   height: 16px;
@@ -45,4 +47,7 @@
 }
 .collapse-item :global(.ant-collapse .ant-collapse-content>.ant-collapse-content-box) {
   padding: 0 4px 4px 4px;
+}
+:global(.ant-collapse-borderless)>.collapse-item:global(.ant-collapse-item>.ant-collapse-content>.ant-collapse-content-box) {
+  padding: 0 12px 12px 12px;
 }

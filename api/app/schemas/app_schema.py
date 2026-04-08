@@ -4,6 +4,10 @@ from typing import Optional, Any, List, Dict, Union
 from enum import Enum, StrEnum
 
 from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator
+
+from app.schemas.workflow_schema import WorkflowConfigCreate
+
+
 # ---------- Multimodal File Support ----------
 
 class FileType(StrEnum):
@@ -313,7 +317,7 @@ class AppCreate(BaseModel):
     # only for type=multi_agent
     multi_agent_config: Optional[Dict[str, Any]] = None
 
-    workflow_config: Optional[Dict[str, Any]] = None
+    workflow_config: Optional[WorkflowConfigCreate] = None
 
 
 class AppUpdate(BaseModel):
