@@ -12,7 +12,7 @@ from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.parameter_extractor.config import ParameterExtractorNodeConfig
-from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 from app.db import get_db_read
 from app.models import ModelType
 from app.services.model_service import ModelConfigService
@@ -44,6 +44,12 @@ class ParameterExtractorNode(BaseNode):
             "params": [param.model_dump(mode="json") for param in self.typed_config.params],
             "model_id": str(self.typed_config.model_id),
         }
+
+    def _extract_output(self, business_result: Any) -> Any:
+        final_output = {}
+        for param in self.typed_config.params:
+            final_output[param.name] = business_result.get(param.name) or DEFAULT_VALUE(self.output_types[param.name])
+        return final_output
 
     def _output_types(self) -> dict[str, VariableType]:
         outputs = {}
