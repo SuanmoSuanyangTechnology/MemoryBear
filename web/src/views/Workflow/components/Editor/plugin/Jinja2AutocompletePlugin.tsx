@@ -118,6 +118,7 @@ const Jinja2AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) =>
         selection.focus.offset = newOffset;
       }
     });
+    document.dispatchEvent(new CustomEvent('jinja2-variable-inserted', { detail: { value: suggestion.value } }));
     setShowSuggestions(false);
     setExpandedParent(null);
     setChildPanelTop(0);
