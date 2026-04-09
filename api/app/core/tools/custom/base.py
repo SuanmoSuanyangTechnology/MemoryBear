@@ -31,14 +31,7 @@ class CustomTool(BaseTool):
         self.base_url = config.get("base_url", "")
         self.timeout = config.get("timeout", 30)
 
-        # 解析 schema
-        schema = self.schema_content
-        if isinstance(schema, str):
-            try:
-                schema = json.loads(schema)
-                self.schema_content = schema
-            except json.JSONDecodeError:
-                schema = {}
+        # 解析schema
         self._parsed_operations = self._parse_openapi_schema()
     
     @property
