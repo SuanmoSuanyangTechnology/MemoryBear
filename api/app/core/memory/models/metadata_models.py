@@ -12,8 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class UserMetadataProfile(BaseModel):
     """用户画像信息"""
     model_config = ConfigDict(extra='ignore')
-    role: str = Field(default="", description="用户职业或角色，如 teacher, doctor, software_engineer")
-    domain: str = Field(default="", description="用户所在领域，如 education, healthcare, software_development")
+    role: str = Field(default="", description="用户职业或角色")
+    domain: str = Field(default="", description="用户所在领域")
     expertise: List[str] = Field(default_factory=list, description="用户擅长的技能或工具")
     interests: List[str] = Field(default_factory=list, description="用户关注的话题或领域标签")
 

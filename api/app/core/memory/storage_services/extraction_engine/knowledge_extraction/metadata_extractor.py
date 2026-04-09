@@ -111,10 +111,15 @@ class MetadataExtractor:
             )
         return result
 
-    async def extract_metadata(self, statements: List[str]) -> Optional[UserMetadata]:
+    async def extract_metadata(self, statements: List[str], existing_metadata: Optional[dict] = None) -> Optional[UserMetadata]:
         """
         对筛选后的 statement 列表调用 LLM 提取元数据。
         语言根据 statement 内容自动检测，不依赖系统界面语言。
+        传入已有元数据作为上下文，让 LLM 能判断 replace/remove 操作。
+
+        Args:
+            statements: 用户发言的 statement 文本列表
+            existing_metadata: 数据库已有的元数据（可选），用于 LLM 对比判断变更
 
         Returns:
             UserMetadata on success, None on failure
@@ -133,6 +138,7 @@ class MetadataExtractor:
             prompt = template.render(
                 statements=statements,
                 language=detected_language,
+                existing_metadata=existing_metadata,
                 json_schema="",
             )
 

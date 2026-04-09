@@ -13,6 +13,16 @@ Extract user metadata from the following conversation statements spoken by the u
 - 如果文本中没有可提取的用户画像信息，返回空的 user_metadata 对象
 - **输出语言必须与输入文本的语言一致**（输入中文则输出中文值，输入英文则输出英文值）
 
+{% if existing_metadata %}
+**重要：合并已有元数据**
+下方提供了数据库中已有的用户元数据。请结合用户最新发言，输出**合并后的完整元数据**：
+- 如果用户明确否定了已有信息（如"我不再教高中物理了"），在输出中**移除**该信息
+- 如果用户提到了新信息，**添加**到对应字段中
+- 如果已有信息未被用户否定，**保留**在输出中
+- 标量字段（如 role、domain）：如果用户提到了新值，用新值替换；否则保留已有值
+- 最终输出应该是完整的、合并后的元数据，不是增量
+{% endif %}
+
 **字段说明：**
 - profile.role：用户的职业或角色，如 教师、医生、后端工程师
 - profile.domain：用户所在领域，如 教育、医疗、软件开发
@@ -34,6 +44,16 @@ Extract user metadata from the following conversation statements spoken by the u
 - If no user profile information can be extracted, return an empty user_metadata object
 - **Output language must match the input text language**
 
+{% if existing_metadata %}
+**Important: Merge with existing metadata**
+Existing user metadata from the database is provided below. Combine with the user's latest statements to output the **complete merged metadata**:
+- If the user explicitly negates existing info (e.g. "I no longer teach high school physics"), **remove** it from output
+- If the user mentions new info, **add** it to the corresponding field
+- If existing info is not negated by the user, **keep** it in the output
+- Scalar fields (e.g. role, domain): replace with new value if user mentions one; otherwise keep existing
+- The final output should be the complete, merged metadata — not an incremental update
+{% endif %}
+
 **Field descriptions:**
 - profile.role: User's occupation or role, e.g. teacher, doctor, software engineer
 - profile.domain: User's domain, e.g. education, healthcare, software development
@@ -49,6 +69,13 @@ Extract user metadata from the following conversation statements spoken by the u
 {% for stmt in statements %}
 - {{ stmt }}
 {% endfor %}
+
+{% if existing_metadata %}
+===Existing User Metadata===
+```json
+{{ existing_metadata | tojson }}
+```
+{% endif %}
 
 ===Output Format===
 Return a JSON object with the following structure:

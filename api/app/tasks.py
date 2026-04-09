@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import re
 import shutil
@@ -2916,6 +2917,20 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
 
 # ─── User Metadata Extraction Task ───────────────────────────────────────────
 
+
+def _update_timestamps(existing: dict, new: dict, updated_at: dict, now: str, prefix: str = "") -> None:
+    """对比新旧元数据，更新变更字段的 _updated_at 时间戳。"""
+    for key, new_val in new.items():
+        if key == "_updated_at":
+            continue
+        path = f"{prefix}.{key}" if prefix else key
+        old_val = existing.get(key)
+
+        if isinstance(new_val, dict) and isinstance(old_val, dict):
+            _update_timestamps(old_val, new_val, updated_at, now, prefix=path)
+        elif old_val != new_val:
+            updated_at[path] = now
+
 @celery_app.task(
     bind=True,
     name='app.tasks.extract_user_metadata',
@@ -2954,7 +2969,7 @@ def extract_user_metadata_task(
 
     async def _run() -> Dict[str, Any]:
         from app.core.memory.storage_services.extraction_engine.knowledge_extraction.metadata_extractor import MetadataExtractor
-        from app.core.memory.utils.metadata_utils import clean_metadata, merge_metadata, validate_metadata
+        from app.core.memory.utils.metadata_utils import clean_metadata, validate_metadata
         from app.repositories.end_user_info_repository import EndUserInfoRepository
         from app.repositories.end_user_repository import EndUserRepository
         from app.services.memory_config_service import MemoryConfigService
@@ -2985,24 +3000,43 @@ def extract_user_metadata_task(
                 return {"status": "FAILURE", "error": "Memory config has no LLM model configured"}
             llm_client = factory.get_llm_client(memory_config.llm_id)
 
-        # 3. 提取元数据
+            # 2.5 读取已有元数据，传给 extractor 作为上下文
+            existing_metadata = None
+            try:
+                info = EndUserInfoRepository(db).get_by_end_user_id(end_user_uuid)
+                if info and info.meta_data:
+                    existing_metadata = info.meta_data
+                    logger.info("[CELERY METADATA] 已读取数据库已有元数据作为 LLM 上下文")
+            except Exception as e:
+                logger.warning(f"[CELERY METADATA] 读取已有元数据失败（继续无上下文提取）: {e}")
+
+        # 3. 提取元数据（传入已有元数据作为上下文）
         extractor = MetadataExtractor(llm_client=llm_client, language=language)
-        user_metadata = await extractor.extract_metadata(statements)
+        user_metadata = await extractor.extract_metadata(statements, existing_metadata=existing_metadata)
 
         if not user_metadata:
             logger.info(f"[CELERY METADATA] No metadata extracted for end_user_id={end_user_id}")
             return {"status": "SUCCESS", "result": "no_metadata_extracted"}
 
-        # 4. 清洗、校验、合并、写入
-        raw_dict = user_metadata.model_dump()
+        # 4. 清洗、校验、覆盖写入
+        raw_dict = user_metadata.model_dump(exclude_none=True)
+        logger.info(f"[CELERY METADATA] LLM 输出完整元数据: {json.dumps(raw_dict, ensure_ascii=False)}")
+
         cleaned = clean_metadata(raw_dict)
         if not cleaned:
             logger.info(f"[CELERY METADATA] Cleaned metadata is empty for end_user_id={end_user_id}")
             return {"status": "SUCCESS", "result": "empty_after_cleaning"}
 
+        logger.info(f"[CELERY METADATA] 清洗后元数据: {json.dumps(cleaned, ensure_ascii=False)}")
+
         validated = validate_metadata(cleaned)
         if not validated:
             return {"status": "FAILURE", "error": "Metadata validation failed after cleaning"}
+
+        # 直接覆盖写入（LLM 已完成语义合并，输出的是完整结果）
+        # 保留 _updated_at 时间戳追踪
+        from datetime import datetime as dt, timezone as tz
+        now = dt.now(tz.utc).isoformat()
 
         with get_db_context() as db:
             end_user_uuid = uuid.UUID(end_user_id)
@@ -3010,11 +3044,17 @@ def extract_user_metadata_task(
 
             if info:
                 existing_meta = info.meta_data if info.meta_data else {}
-                info.meta_data = merge_metadata(existing_meta, cleaned)
-                logger.info(f"[CELERY METADATA] Updated metadata for end_user_id={end_user_id}")
+                logger.info(f"[CELERY METADATA] 数据库已有元数据: {json.dumps(existing_meta, ensure_ascii=False)}")
+
+                # 保留已有的 _updated_at，更新变更字段的时间戳
+                updated_at = dict(existing_meta.get("_updated_at", {}))
+                _update_timestamps(existing_meta, cleaned, updated_at, now)
+
+                final = dict(cleaned)
+                final["_updated_at"] = updated_at
+                info.meta_data = final
+                logger.info(f"[CELERY METADATA] 覆盖写入元数据: {json.dumps(final, ensure_ascii=False)}")
             else:
-                # No end_user_info record yet - metadata will be written when alias sync creates it,
-                # or we create a minimal record here
                 logger.info(
                     f"[CELERY METADATA] No end_user_info record for end_user_id={end_user_id}, "
                     f"skipping metadata write (will be created by alias sync)"
