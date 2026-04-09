@@ -3000,70 +3000,149 @@ def extract_user_metadata_task(
                 return {"status": "FAILURE", "error": "Memory config has no LLM model configured"}
             llm_client = factory.get_llm_client(memory_config.llm_id)
 
-            # 2.5 读取已有元数据，传给 extractor 作为上下文
+            # 2.5 读取已有元数据和别名，传给 extractor 作为上下文
             existing_metadata = None
+            existing_aliases = None
             try:
                 info = EndUserInfoRepository(db).get_by_end_user_id(end_user_uuid)
-                if info and info.meta_data:
-                    existing_metadata = info.meta_data
-                    logger.info("[CELERY METADATA] 已读取数据库已有元数据作为 LLM 上下文")
+                if info:
+                    if info.meta_data:
+                        existing_metadata = info.meta_data
+                    existing_aliases = info.aliases if info.aliases else []
+                    logger.info(f"[CELERY METADATA] 已读取已有元数据和别名（aliases={existing_aliases}）")
             except Exception as e:
-                logger.warning(f"[CELERY METADATA] 读取已有元数据失败（继续无上下文提取）: {e}")
+                logger.warning(f"[CELERY METADATA] 读取已有数据失败（继续无上下文提取）: {e}")
 
-        # 3. 提取元数据（传入已有元数据作为上下文）
+        # 3. 提取元数据和别名（传入已有数据作为上下文）
         extractor = MetadataExtractor(llm_client=llm_client, language=language)
-        user_metadata = await extractor.extract_metadata(statements, existing_metadata=existing_metadata)
+        extract_result = await extractor.extract_metadata(
+            statements,
+            existing_metadata=existing_metadata,
+            existing_aliases=existing_aliases,
+        )
 
-        if not user_metadata:
+        if not extract_result:
             logger.info(f"[CELERY METADATA] No metadata extracted for end_user_id={end_user_id}")
             return {"status": "SUCCESS", "result": "no_metadata_extracted"}
 
-        # 4. 清洗、校验、覆盖写入
-        raw_dict = user_metadata.model_dump(exclude_none=True)
+        user_metadata, aliases_to_add, aliases_to_remove = extract_result
+        logger.info(f"[CELERY METADATA] LLM 别名新增: {aliases_to_add}, 移除: {aliases_to_remove}")
+
+        # 4. 清洗元数据、覆盖写入元数据和别名
+        raw_dict = user_metadata.model_dump(exclude_none=True) if user_metadata else {}
         logger.info(f"[CELERY METADATA] LLM 输出完整元数据: {json.dumps(raw_dict, ensure_ascii=False)}")
 
-        cleaned = clean_metadata(raw_dict)
-        if not cleaned:
-            logger.info(f"[CELERY METADATA] Cleaned metadata is empty for end_user_id={end_user_id}")
-            return {"status": "SUCCESS", "result": "empty_after_cleaning"}
-
+        cleaned = clean_metadata(raw_dict) if raw_dict else {}
         logger.info(f"[CELERY METADATA] 清洗后元数据: {json.dumps(cleaned, ensure_ascii=False)}")
 
-        validated = validate_metadata(cleaned)
-        if not validated:
-            return {"status": "FAILURE", "error": "Metadata validation failed after cleaning"}
-
-        # 直接覆盖写入（LLM 已完成语义合并，输出的是完整结果）
-        # 保留 _updated_at 时间戳追踪
         from datetime import datetime as dt, timezone as tz
         now = dt.now(tz.utc).isoformat()
+
+        # 过滤别名中的占位名称，执行增量增删
+        _PLACEHOLDER_NAMES = {"用户", "我", "user", "i"}
+
+        def _filter_aliases(aliases_list):
+            seen = set()
+            result = []
+            for a in aliases_list:
+                a_stripped = a.strip()
+                if a_stripped and a_stripped.lower() not in _PLACEHOLDER_NAMES and a_stripped.lower() not in seen:
+                    result.append(a_stripped)
+                    seen.add(a_stripped.lower())
+            return result
+
+        filtered_add = _filter_aliases(aliases_to_add)
+        filtered_remove = _filter_aliases(aliases_to_remove)
+        remove_lower = {a.lower() for a in filtered_remove}
 
         with get_db_context() as db:
             end_user_uuid = uuid.UUID(end_user_id)
             info = EndUserInfoRepository(db).get_by_end_user_id(end_user_uuid)
+            end_user = EndUserRepository(db).get_by_id(end_user_uuid)
 
             if info:
-                existing_meta = info.meta_data if info.meta_data else {}
-                logger.info(f"[CELERY METADATA] 数据库已有元数据: {json.dumps(existing_meta, ensure_ascii=False)}")
+                # 元数据覆盖写入
+                if cleaned:
+                    existing_meta = info.meta_data if info.meta_data else {}
+                    updated_at = dict(existing_meta.get("_updated_at", {}))
+                    _update_timestamps(existing_meta, cleaned, updated_at, now)
+                    final = dict(cleaned)
+                    final["_updated_at"] = updated_at
+                    info.meta_data = final
+                    logger.info("[CELERY METADATA] 覆盖写入元数据")
 
-                # 保留已有的 _updated_at，更新变更字段的时间戳
-                updated_at = dict(existing_meta.get("_updated_at", {}))
-                _update_timestamps(existing_meta, cleaned, updated_at, now)
+                # 别名增量增删：(已有 - remove) + add
+                old_aliases = info.aliases if info.aliases else []
+                # 先移除
+                merged = [a for a in old_aliases if a.strip().lower() not in remove_lower]
+                # 再追加（去重）
+                existing_lower = {a.strip().lower() for a in merged}
+                for a in filtered_add:
+                    if a.lower() not in existing_lower:
+                        merged.append(a)
+                        existing_lower.add(a.lower())
 
-                final = dict(cleaned)
-                final["_updated_at"] = updated_at
-                info.meta_data = final
-                logger.info(f"[CELERY METADATA] 覆盖写入元数据: {json.dumps(final, ensure_ascii=False)}")
+                if merged != old_aliases:
+                    info.aliases = merged
+                    # other_name 更新逻辑
+                    if merged and (
+                        not info.other_name
+                        or info.other_name.strip().lower() in _PLACEHOLDER_NAMES
+                        or info.other_name.strip().lower() in remove_lower
+                    ):
+                        info.other_name = merged[0]
+                    if end_user and merged and (
+                        not end_user.other_name
+                        or end_user.other_name.strip().lower() in _PLACEHOLDER_NAMES
+                        or end_user.other_name.strip().lower() in remove_lower
+                    ):
+                        end_user.other_name = merged[0]
+                    logger.info(
+                        f"[CELERY METADATA] 别名增量更新: {old_aliases} - {filtered_remove} + {filtered_add} → {merged}"
+                    )
             else:
-                logger.info(
-                    f"[CELERY METADATA] No end_user_info record for end_user_id={end_user_id}, "
-                    f"skipping metadata write (will be created by alias sync)"
-                )
-                return {"status": "SUCCESS", "result": "no_info_record"}
+                # 没有 end_user_info 记录，创建一条
+                from app.models.end_user_info_model import EndUserInfo
+                initial_aliases = filtered_add  # 新记录只有 add，没有 remove
+                first_alias = initial_aliases[0] if initial_aliases else ""
+                if first_alias or cleaned:
+                    new_info = EndUserInfo(
+                        end_user_id=end_user_uuid,
+                        other_name=first_alias or "",
+                        aliases=initial_aliases,
+                        meta_data=cleaned if cleaned else None,
+                    )
+                    db.add(new_info)
+                    if end_user and first_alias and (
+                        not end_user.other_name or end_user.other_name.strip().lower() in _PLACEHOLDER_NAMES
+                    ):
+                        end_user.other_name = first_alias
+                    logger.info(f"[CELERY METADATA] 创建 end_user_info: other_name={first_alias}, aliases={initial_aliases}")
+                else:
+                    return {"status": "SUCCESS", "result": "no_data_to_write"}
 
             db.commit()
 
-        return {"status": "SUCCESS", "result": "metadata_written"}
+            # 同步 PgSQL aliases 到 Neo4j 用户实体（PgSQL 为权威源）
+            final_aliases = info.aliases if info else initial_aliases
+            if final_aliases:
+                try:
+                    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+                    neo4j_connector = Neo4jConnector()
+                    cypher = """
+                    MATCH (e:ExtractedEntity)
+                    WHERE e.end_user_id = $end_user_id AND e.name IN ['用户', '我', 'User', 'I']
+                    SET e.aliases = $aliases
+                    """
+                    await neo4j_connector.execute_query(
+                        cypher, end_user_id=end_user_id, aliases=final_aliases
+                    )
+                    await neo4j_connector.close()
+                    logger.info(f"[CELERY METADATA] Neo4j 用户实体 aliases 已同步: {final_aliases}")
+                except Exception as neo4j_err:
+                    logger.warning(f"[CELERY METADATA] Neo4j aliases 同步失败（不影响主流程）: {neo4j_err}")
+
+        return {"status": "SUCCESS", "result": "metadata_and_aliases_written"}
 
     loop = None
     try:

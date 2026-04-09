@@ -32,6 +32,22 @@ Extract user metadata from the following conversation statements spoken by the u
 - behavioral_hints.preferred_depth：偏好深度（概览/技术细节/深入探讨）
 - behavioral_hints.tone_preference：语气偏好（轻松随意/专业简洁/学术严谨）
 - knowledge_tags：用户涉及的知识领域标签
+
+**用户别名变更（增量模式）：**
+- **aliases_to_add**：本次新发现的用户别名，包括：
+  * 用户主动自我介绍：如"我叫张三"、"我的名字是XX"、"我的网名是XX"
+  * 他人对用户的称呼：如"同事叫我陈哥"、"大家叫我小张"、"领导叫我老陈"
+  * 只提取原文中逐字出现的名字，严禁推测或创造
+  * 禁止提取：用户给 AI 取的名字、第三方人物自身的名字、"用户"/"我" 等占位词
+  * 如果没有新别名，返回空数组 `[]`
+- **aliases_to_remove**：用户明确否认的别名，包括：
+  * 用户说"我不叫XX了"、"别叫我XX"、"我改名了，不叫XX" → 将 XX 放入此数组
+  * **严格限制**：只将用户原文中**逐字提到**的被否认名字放入，不要推断关联的其他别名
+  * 例如：用户说"我不叫陈小刀了" → 只移除"陈小刀"，不要移除"陈哥"、"老陈"等未被提及的别名
+  * 如果没有要移除的别名，返回空数组 `[]`
+{% if existing_aliases %}
+- 已有别名：{{ existing_aliases | tojson }}（仅供参考，不需要在输出中重复）
+{% endif %}
 {% else %}
 **"Three-Degree Principle" criteria:**
 - Reusability: Will this information be used by multiple functional modules?
@@ -63,6 +79,22 @@ Existing user metadata from the database is provided below. Combine with the use
 - behavioral_hints.preferred_depth: Preferred depth (overview/detailed/deep dive)
 - behavioral_hints.tone_preference: Tone preference (casual/professional/academic)
 - knowledge_tags: Knowledge domain tags related to the user
+
+**User alias changes (incremental mode):**
+- **aliases_to_add**: Newly discovered user aliases from this conversation, including:
+  * User self-introductions: e.g. "I'm John", "My name is XX", "My username is XX"
+  * How others address the user: e.g. "My colleagues call me Johnny", "People call me Mike"
+  * Only extract names that appear VERBATIM in the text — never infer or fabricate
+  * Do NOT extract: names the user gives to the AI, third-party people's own names, placeholder words like "User"/"I"
+  * If no new aliases, return empty array `[]`
+- **aliases_to_remove**: Aliases the user explicitly denies, including:
+  * User says "Don't call me XX anymore", "I'm not called XX", "I changed my name from XX" → put XX in this array
+  * **Strict rule**: Only include the exact name the user **verbatim mentions** as denied. Do NOT infer or remove related aliases
+  * Example: User says "I'm not called John anymore" → only remove "John", do NOT remove "Johnny", "J" or other related aliases not mentioned
+  * If no aliases to remove, return empty array `[]`
+{% if existing_aliases %}
+- Existing aliases: {{ existing_aliases | tojson }} (for reference only, do not repeat in output)
+{% endif %}
 {% endif %}
 
 ===User Statements===
@@ -94,7 +126,9 @@ Return a JSON object with the following structure:
       "tone_preference": ""
     },
     "knowledge_tags": []
-  }
+  },
+  "aliases_to_add": [],
+  "aliases_to_remove": []
 }
 ```
 

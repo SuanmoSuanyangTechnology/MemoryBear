@@ -14,9 +14,9 @@ from app.core.memory.models.graph_models import (
     StatementNode,
 )
 from app.core.memory.models.metadata_models import (
-    MetadataExtractionResponse,
     UserMetadata,
 )
+from app.core.memory.models.message_models import DialogData
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,35 @@ class MetadataExtractor:
         if re.search(r'[\u4e00-\u9fff]', combined):
             return "zh"
         return "en"
+
+    # def collect_user_raw_messages(
+    #     self,
+    #     dialog_data_list: List[DialogData],
+    # ) -> List[str]:
+    #     """
+    #     从原始对话数据中提取 speaker="user" 的消息原文。
+
+    #     直接使用用户的原始输入，不经过陈述句提取阶段的 LLM 改写，
+    #     避免第一人称被替换为第三人称导致元数据/别名提取错误。
+
+    #     Returns:
+    #         用户原始消息文本列表
+    #     """
+    #     result = []
+    #     for dialog in dialog_data_list:
+    #         if not dialog.context or not dialog.context.msgs:
+    #             continue
+    #         for msg in dialog.context.msgs:
+    #             if getattr(msg, 'role', '') == 'user':
+    #                 text = (getattr(msg, 'msg', '') or '').strip()
+    #                 if text:
+    #                     result.append(text)
+
+    #     logger.info(f"收集到 {len(result)} 条用户原始消息")
+    #     if result:
+    #         for i, text in enumerate(result):
+    #             logger.info(f"  [user message {i+1}] {text[:200]}")
+    #     return result
 
     def collect_user_related_statements(
         self,
@@ -104,6 +133,9 @@ class MetadataExtractor:
             f"(直接关联: {total_associated}, speaker=user: {len(result)}, "
             f"跳过非user: {skipped_non_user})"
         )
+        if result:
+            for i, text in enumerate(result):
+                logger.info(f"  [user statement {i+1}] {text}")
         if total_associated > 0 and len(result) == 0:
             logger.warning(
                 f"有 {total_associated} 条直接关联 statement 但全部被 speaker 过滤，"
@@ -111,18 +143,22 @@ class MetadataExtractor:
             )
         return result
 
-    async def extract_metadata(self, statements: List[str], existing_metadata: Optional[dict] = None) -> Optional[UserMetadata]:
+    async def extract_metadata(
+        self,
+        statements: List[str],
+        existing_metadata: Optional[dict] = None,
+        existing_aliases: Optional[List[str]] = None,
+    ) -> Optional[tuple]:
         """
-        对筛选后的 statement 列表调用 LLM 提取元数据。
-        语言根据 statement 内容自动检测，不依赖系统界面语言。
-        传入已有元数据作为上下文，让 LLM 能判断 replace/remove 操作。
+        对筛选后的 statement 列表调用 LLM 提取元数据和用户别名。
 
         Args:
             statements: 用户发言的 statement 文本列表
-            existing_metadata: 数据库已有的元数据（可选），用于 LLM 对比判断变更
+            existing_metadata: 数据库已有的元数据（可选）
+            existing_aliases: 数据库已有的用户别名列表（可选）
 
         Returns:
-            UserMetadata on success, None on failure
+            (UserMetadata, List[str], List[str]) tuple: (metadata, aliases_to_add, aliases_to_remove) on success, None on failure
         """
         if not statements:
             return None
@@ -130,7 +166,6 @@ class MetadataExtractor:
         try:
             from app.core.memory.utils.prompt.prompt_utils import prompt_env
 
-            # 根据写入内容的语言自动检测，而非使用系统界面语言
             detected_language = self.detect_language(statements)
             logger.info(f"元数据提取语言检测结果: {detected_language}")
 
@@ -139,18 +174,23 @@ class MetadataExtractor:
                 statements=statements,
                 language=detected_language,
                 existing_metadata=existing_metadata,
+                existing_aliases=existing_aliases,
                 json_schema="",
             )
 
+            from app.core.memory.models.metadata_models import MetadataExtractionResponse
             response = await self.llm_client.response_structured(
                 messages=[{"role": "user", "content": prompt}],
                 response_model=MetadataExtractionResponse,
             )
 
-            if response and response.user_metadata:
-                return response.user_metadata
+            if response:
+                metadata = response.user_metadata if response.user_metadata else None
+                to_add = response.aliases_to_add if response.aliases_to_add else []
+                to_remove = response.aliases_to_remove if response.aliases_to_remove else []
+                return metadata, to_add, to_remove
 
-            logger.warning("LLM 返回的元数据为空")
+            logger.warning("LLM 返回的响应为空")
             return None
 
         except Exception as e:

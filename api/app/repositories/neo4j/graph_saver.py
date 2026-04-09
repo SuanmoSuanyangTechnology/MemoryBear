@@ -187,6 +187,58 @@ async def save_dialog_and_statements_to_neo4j(
         bool: True if successful, False otherwise
     """
 
+    # 预处理：对特殊实体（"用户"、"AI助手"）复用 Neo4j 中已有节点的 ID，
+    # 确保同一个 end_user_id 下只有一个"用户"节点和一个"AI助手"节点。
+    if entity_nodes:
+        _SPECIAL_NAMES = {"用户", "我", "user", "i", "ai助手", "助手", "ai assistant", "assistant"}
+        end_user_id = entity_nodes[0].end_user_id if entity_nodes else None
+        if end_user_id:
+            try:
+                # 查询已有的特殊实体
+                cypher = """
+                MATCH (e:ExtractedEntity)
+                WHERE e.end_user_id = $end_user_id AND toLower(e.name) IN $names
+                RETURN e.id AS id, e.name AS name
+                """
+                existing = await connector.execute_query(
+                    cypher,
+                    end_user_id=end_user_id,
+                    names=list(_SPECIAL_NAMES),
+                )
+                # 建立 name(lower) → existing_id 映射
+                existing_id_map = {}
+                for record in (existing or []):
+                    name_lower = (record.get("name") or "").strip().lower()
+                    if name_lower and record.get("id"):
+                        existing_id_map[name_lower] = record["id"]
+
+                if existing_id_map:
+                    # 替换新实体的 ID 为已有 ID，同时更新所有引用该 ID 的边
+                    for ent in entity_nodes:
+                        name_lower = (ent.name or "").strip().lower()
+                        if name_lower in existing_id_map:
+                            old_id = ent.id
+                            new_id = existing_id_map[name_lower]
+                            if old_id != new_id:
+                                ent.id = new_id
+                                # 更新 statement_entity_edges 中的引用
+                                for edge in statement_entity_edges:
+                                    if edge.target == old_id:
+                                        edge.target = new_id
+                                    if edge.source == old_id:
+                                        edge.source = new_id
+                                # 更新 entity_edges 中的引用
+                                for edge in entity_edges:
+                                    if edge.source == old_id:
+                                        edge.source = new_id
+                                    if edge.target == old_id:
+                                        edge.target = new_id
+                                logger.info(
+                                    f"特殊实体 '{ent.name}' ID 复用: {old_id[:8]}... → {new_id[:8]}..."
+                                )
+            except Exception as e:
+                logger.warning(f"特殊实体 ID 复用查询失败（不影响写入）: {e}")
+
     # 定义事务函数，将所有写操作放在一个事务中
     async def _save_all_in_transaction(tx):
         """在单个事务中执行所有保存操作，避免死锁"""

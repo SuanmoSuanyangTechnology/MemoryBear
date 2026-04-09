@@ -311,9 +311,8 @@ class ExtractionOrchestrator:
                 dialog_data_list,
             )
 
-            # 步骤 7: 同步用户别名到数据库表 + 触发异步元数据提取（仅正式模式）
+            # 步骤 7: 触发异步元数据和别名提取（仅正式模式）
             if not is_pilot_run:
-                # 收集用户相关 statement 并触发异步元数据提取
                 try:
                     from app.core.memory.storage_services.extraction_engine.knowledge_extraction.metadata_extractor import MetadataExtractor
                     metadata_extractor = MetadataExtractor(llm_client=self.llm_client, language=self.language)
@@ -322,7 +321,6 @@ class ExtractionOrchestrator:
                         statement_entity_edges
                     )
                     if user_statements:
-                        # 获取 end_user_id 和 config_id
                         end_user_id = dialog_data_list[0].end_user_id if dialog_data_list else None
                         config_id = dialog_data_list[0].config_id if dialog_data_list and hasattr(dialog_data_list[0], 'config_id') else None
                         if end_user_id:
@@ -339,9 +337,7 @@ class ExtractionOrchestrator:
                 except Exception as e:
                     logger.error(f"触发元数据提取任务失败（不影响主流程）: {e}", exc_info=True)
 
-                # 同步用户别名到数据库表
-                logger.info("步骤 7: 同步用户别名到 end_user 和 end_user_info 表")
-                await self._update_end_user_other_name(entity_nodes, dialog_data_list)
+                # 别名同步已迁移到 Celery 元数据提取任务中，不再在此处执行
 
             logger.info(f"知识提取流水线运行完成（{mode_str}）")
             return (

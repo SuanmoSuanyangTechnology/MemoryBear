@@ -82,6 +82,18 @@ class StatementExtractor:
         logger.warning(f"Chunk {getattr(chunk, 'id', 'unknown')} has no speaker field or is empty")
         return None
 
+    @staticmethod
+    def _replace_first_person_with_user(text: str) -> str:
+        """将用户消息中的第一人称代词"我"替换为"用户"。
+        
+        替换规则：
+        - 所有独立的"我"都替换为"用户"（包括"我的"→"用户的"、"叫我"→"叫用户"）
+        - 不替换"我们"中的"我"（"我们"是复数，不指代用户个人）
+        """
+        import re
+        result = re.sub(r'我(?!们)', '用户', text)
+        return result
+
     async def _extract_statements(self, chunk, end_user_id: Optional[str] = None, dialogue_content: str = None) -> List[Statement]:
         """Process a single chunk and return extracted statements
 
@@ -98,6 +110,13 @@ class StatementExtractor:
         if not chunk_content or len(chunk_content.strip()) < 5:
             logger.warning(f"Chunk {chunk.id} content too short or empty, skipping")
             return []
+
+        # 对 speaker="user" 的 chunk，将第一人称"我"替换为"用户"，
+        # 避免 LLM 在陈述句提取时将"我"替换为具体名字（如"齐齐"），
+        # 导致下游元数据/别名提取无法识别第一人称语义。
+        chunk_speaker = self._get_speaker_from_chunk(chunk)
+        if chunk_speaker == "user":
+            chunk_content = self._replace_first_person_with_user(chunk_content)
 
         prompt_content = await render_statement_extraction_prompt(
             chunk_content=chunk_content,
@@ -149,8 +168,6 @@ class StatementExtractor:
                     relevence_info = RelevenceInfo[relevence_str] if relevence_str in RelevenceInfo.__members__ else RelevenceInfo.RELEVANT
                 except (KeyError, ValueError):
                     relevence_info = RelevenceInfo.RELEVANT
-               
-                chunk_speaker = self._get_speaker_from_chunk(chunk)
             
                 chunk_statement = Statement(
                     statement=extracted_stmt.statement,
