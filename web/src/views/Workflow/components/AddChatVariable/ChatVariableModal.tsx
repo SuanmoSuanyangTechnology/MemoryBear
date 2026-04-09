@@ -52,7 +52,7 @@ const types = [
   'number',
   'boolean',
   'object',
-  // 'file',
+  'file',
   'array[file]',
   'array[string]',
   'array[number]',
