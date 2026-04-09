@@ -803,7 +803,6 @@ def get_rag_content(
                 "page": {
                     "page": page,
                     "pagesize": pagesize,
-                    "total": 0,
                     "hasnext": False,
                 },
                 "items": []
@@ -897,13 +896,12 @@ def get_rag_content(
             "page": {
                 "page": page,
                 "pagesize": pagesize,
-                "total": global_total,
                 "hasnext": offset_end < global_total,
             },
             "items": conversations
         }
         
-        business_logger.info(f"成功获取RAG内容: total={global_total}, page={page}, 返回={len(conversations)} 条对话")
+        business_logger.info(f"成功获取RAG内容: page={page}, 返回={len(conversations)} 条对话")
         return result
         
     except Exception as e:
