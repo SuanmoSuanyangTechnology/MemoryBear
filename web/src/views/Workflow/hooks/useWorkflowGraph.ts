@@ -979,24 +979,6 @@ export const useWorkflowGraph = ({
     graphRef.current.on('edge:click', edgeClick);
     // Listen to port click event
     graphRef.current.on('node:port:click', nodePortClickEvent);
-    // Port hover: show circle style on right ports
-    graphRef.current.on('node:port:mouseenter', ({ node, port }) => {
-      console.log('node:port:mouseenter', port)
-      if (!port) return;
-      const portData = node.getPort(port);
-      if (portData?.group !== 'right') return;
-      node.setPortProp(port, 'attrs/body/opacity', 0);
-      node.setPortProp(port, 'attrs/hoverBody/opacity', 1);
-      node.setPortProp(port, 'attrs/label/opacity', 1);
-    });
-    graphRef.current.on('node:port:mouseleave', ({ node, port }) => {
-      if (!port) return;
-      const portData = node.getPort(port);
-      if (portData?.group !== 'right') return;
-      node.setPortProp(port, 'attrs/body/opacity', 1);
-      node.setPortProp(port, 'attrs/hoverBody/opacity', 0);
-      node.setPortProp(port, 'attrs/label/opacity', 0);
-    });
     // Listen to canvas click event, cancel selection
     graphRef.current.on('blank:click', blankClick);
     // Node hover: highlight connected edges
@@ -1014,11 +996,6 @@ export const useWorkflowGraph = ({
           edge.setData({ ...edge.getData(), isNodeHover: true });
         }
       });
-      node.getPorts().filter(p => p.group === 'right').forEach(p => {
-        node.setPortProp(p.id!, 'attrs/body/opacity', 0);
-        node.setPortProp(p.id!, 'attrs/hoverBody/opacity', 1);
-        node.setPortProp(p.id!, 'attrs/label/opacity', 1);
-      });
     });
     graphRef.current.on('node:mouseleave', ({ node }) => {
       graphRef.current?.getConnectedEdges(node).forEach(edge => {
@@ -1026,11 +1003,6 @@ export const useWorkflowGraph = ({
           edge.setAttrByPath('line/stroke', edge_color);
           edge.setData({ ...edge.getData(), isNodeHover: false });
         }
-      });
-      node.getPorts().filter(p => p.group === 'right').forEach(p => {
-        node.setPortProp(p.id!, 'attrs/body/opacity', 1);
-        node.setPortProp(p.id!, 'attrs/hoverBody/opacity', 0);
-        node.setPortProp(p.id!, 'attrs/label/opacity', 0);
       });
     });
     // Listen to zoom event
@@ -1057,11 +1029,6 @@ export const useWorkflowGraph = ({
         });
         graphRef.current?.getNodes().forEach(node => {
           if (node.getData()?.cycle) node.toFront();
-          node.getPorts().filter(p => p.group === 'right').forEach(p => {
-            node.setPortProp(p.id!, 'attrs/body/opacity', 1);
-            node.setPortProp(p.id!, 'attrs/hoverBody/opacity', 0);
-            node.setPortProp(p.id!, 'attrs/label/opacity', 0);
-          });
         });
       }
     });
@@ -1091,33 +1058,9 @@ export const useWorkflowGraph = ({
         if (found) break;
       }
 
-      if (found?.node.id !== lastHoveredPort?.node.id || found?.portId !== lastHoveredPort?.portId) {
-        // Leave previous
-        if (lastHoveredPort) {
-          const { node, portId } = lastHoveredPort;
-          node.setPortProp(portId, 'attrs/body/opacity', 1);
-          node.setPortProp(portId, 'attrs/hoverBody/opacity', 0);
-          node.setPortProp(portId, 'attrs/label/opacity', 0);
-        }
-        // Enter new
-        if (found) {
-          const { node, portId } = found;
-          node.setPortProp(portId, 'attrs/body/opacity', 0);
-          node.setPortProp(portId, 'attrs/hoverBody/opacity', 1);
-          node.setPortProp(portId, 'attrs/label/opacity', 1);
-        }
-        lastHoveredPort = found;
-      }
+      lastHoveredPort = found;
     });
-    graphRef.current.on('edge:mouseup', () => {
-      if (lastHoveredPort) {
-        const { node, portId } = lastHoveredPort;
-        node.setPortProp(portId, 'attrs/body/opacity', 1);
-        node.setPortProp(portId, 'attrs/hoverBody/opacity', 0);
-        node.setPortProp(portId, 'attrs/label/opacity', 0);
-        lastHoveredPort = null;
-      }
-    });
+    graphRef.current.on('edge:mouseup', () => { lastHoveredPort = null; });
     // Listen to copy keyboard event
     graphRef.current.bindKey(['ctrl+c', 'cmd+c'], copyEvent);
     // Listen to paste keyboard event
