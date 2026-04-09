@@ -45,6 +45,7 @@ const array_object_placeholder = `# example
 
 interface ChatVariableModalProps {
   refresh: (value: ChatVariable, editIndex?: number) => void;
+  variables?: ChatVariable[];
 }
 
 const types = [
@@ -61,7 +62,8 @@ const types = [
 ]
 
 const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProps>(({
-  refresh
+  refresh,
+  variables
 }, ref) => {
   const { t } = useTranslation();
   const uploadFileListModalRef = useRef<UploadFileListModalRef>(null);
@@ -244,6 +246,12 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
           rules={[
             { required: true, message: t('common.pleaseEnter') },
             { pattern: /^[a-zA-Z_][a-zA-Z0-9_]*$/, message: t('workflow.config.parameter-extractor.invalidParamName') },
+            {
+              validator: (_, value) => {
+                const duplicate = variables?.some((v, i) => v.name === value && i !== editIndex);
+                return duplicate ? Promise.reject(t('workflow.config.duplicateName')) : Promise.resolve();
+              }
+            },
           ]}
         >
           <Input placeholder={t('common.enter')} />

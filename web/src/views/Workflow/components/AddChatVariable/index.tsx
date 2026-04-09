@@ -104,6 +104,7 @@ const AddChatVariable = forwardRef<AddChatVariableRef, AddChatVariableProps>(({
       <ChatVariableModal
         ref={chatVariableRef}
         refresh={handleSave}
+        variables={variables}
       />
     </RbDrawer>
   );

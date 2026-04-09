@@ -104,6 +104,7 @@ const VariableList: FC<VariableListProps> = ({
       <VariableEditModal
         ref={variableModalRef}
         refresh={handleRefreshVariable}
+        variables={value}
       />
     </div>
   )
