@@ -233,7 +233,7 @@ class KnowledgeRetrievalNode(BaseNode):
                         }
                     )
                 )
-            case RetrieveType.HYBRID | RetrieveType.Graph:
+            case (RetrieveType.HYBRID, RetrieveType.Graph):
                 rs1_task = asyncio.to_thread(
                     vector_service.search_by_vector, **{
                         "query": query,
