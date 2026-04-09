@@ -31,7 +31,7 @@ def _is_user_entity(ent: ExtractedEntityNode) -> bool:
 class MetadataExtractor:
     """Extracts user metadata from post-dedup graph data via independent LLM call."""
 
-    def __init__(self, llm_client, language: str = "zh"):
+    def __init__(self, llm_client, language: Optional[str] = None):
         self.llm_client = llm_client
         self.language = language
 
@@ -134,8 +134,12 @@ class MetadataExtractor:
         try:
             from app.core.memory.utils.prompt.prompt_utils import prompt_env
 
-            detected_language = self.detect_language(statements)
-            logger.info(f"元数据提取语言检测结果: {detected_language}")
+            if self.language:
+                detected_language = self.language
+                logger.info(f"元数据提取使用显式指定语言: {detected_language}")
+            else:
+                detected_language = self.detect_language(statements)
+                logger.info(f"元数据提取语言自动检测结果: {detected_language}")
 
             template = prompt_env.get_template("extract_user_metadata.jinja2")
             prompt = template.render(

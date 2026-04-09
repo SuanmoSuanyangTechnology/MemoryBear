@@ -3030,11 +3030,17 @@ def extract_user_metadata_task(
         # 4. 清洗元数据、覆盖写入元数据和别名
         def clean_metadata(raw: dict) -> dict:
             """递归移除空字符串、空列表、空字典。"""
-            return {
-                k: (cleaned if isinstance(v, dict) and (cleaned := clean_metadata(v)) else v)
-                for k, v in raw.items()
-                if not (v == "" or v == [] or (isinstance(v, dict) and not clean_metadata(v)))
-            }
+            result = {}
+            for k, v in raw.items():
+                if v == "" or v == []:
+                    continue
+                if isinstance(v, dict):
+                    cleaned = clean_metadata(v)
+                    if cleaned:
+                        result[k] = cleaned
+                else:
+                    result[k] = v
+            return result
 
         raw_dict = user_metadata.model_dump(exclude_none=True) if user_metadata else {}
         logger.info(f"[CELERY METADATA] LLM 输出完整元数据: {json.dumps(raw_dict, ensure_ascii=False)}")
