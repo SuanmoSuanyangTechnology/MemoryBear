@@ -59,6 +59,9 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
         target: { cell: addNode.id, port: targetPort },
         ...edgeAttrs,
       });
+
+      cycleStartNode.toFront()
+      addNode.toFront()
     }
   }
 
@@ -117,6 +120,12 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
       ...edgeAttrs
     }
     graph.addEdge(edgeConfig)
+
+    setTimeout(() => {
+
+      cycleStartNode.toFront()
+      addNode.toFront()
+    }, 0)
   }
 
   return (
