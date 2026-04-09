@@ -149,8 +149,8 @@ const Editor: FC<LexicalEditorProps> =({
         <HistoryPlugin />
         <CommandPlugin />
         <AutocompletePlugin options={options} />
-        <CharacterCountPlugin setCount={setCount} onChange={onChange} />
-        <InitialValuePlugin value={value} options={options} />
+        <CharacterCountPlugin setCount={setCount} />
+        <InitialValuePlugin value={value} options={options} onChange={onChange} />
         <BlurPlugin />
       </div>
     </LexicalComposer>
