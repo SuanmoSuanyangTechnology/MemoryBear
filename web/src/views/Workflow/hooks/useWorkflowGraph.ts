@@ -1056,9 +1056,7 @@ export const useWorkflowGraph = ({
           }
         });
         graphRef.current?.getNodes().forEach(node => {
-          graphRef.current?.getNodes().forEach(node => {
-            if (node.getData()?.cycle) node.toFront();
-          });
+          if (node.getData()?.cycle) node.toFront();
           node.getPorts().filter(p => p.group === 'right').forEach(p => {
             node.setPortProp(p.id!, 'attrs/body/opacity', 1);
             node.setPortProp(p.id!, 'attrs/hoverBody/opacity', 0);
