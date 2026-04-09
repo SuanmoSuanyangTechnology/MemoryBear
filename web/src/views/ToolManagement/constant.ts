@@ -186,5 +186,43 @@ export const InnerConfigData: Record<string, InnerConfigItem> = {
       'multilingualSupport',
       'highPrecisionRecognition'
     ],
+  },
+  OpenClawTool: {
+    link: 'https://openclaw.ai/',
+    config: {
+      server_url: {
+        name: ['config', 'parameters', 'server_url'],
+        type: 'input',
+        desc: 'OpenClawTool_server_url_desc',
+        rules: [
+          { required: true, message: 'common.pleaseEnter' }
+        ]
+      },
+      api_key: {
+        name: ['config', 'parameters', 'api_key'],
+        type: 'input',
+        desc: 'OpenClawTool_api_key_desc',
+        rules: [
+          { required: true, message: 'common.pleaseEnter' }
+        ]
+      },
+      agent_id: {
+        name: ['config', 'parameters', 'agent_id'],
+        type: 'input',
+        desc: 'OpenClawTool_agent_id_desc',
+        defaultValue: 'main',
+      },
+      OpenClawTool_enable: {
+        name: ['config', 'is_enabled'],
+        type: 'checkbox',
+        defaultValue: true,
+      },
+    },
+    features: [
+      '3dPrinting',
+      'deviceManagement',
+      'multimodalInteraction',
+      'remoteAgent'
+    ],
   }
 }
