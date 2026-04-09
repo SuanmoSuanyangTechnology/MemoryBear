@@ -117,6 +117,7 @@ const Knowledge: FC<{value?: KnowledgeConfig; onChange?: (config: KnowledgeConfi
       const list = [...knowledgeList]
       list[index] = {
         ...list[index],
+        ...values,
         config: {...values as KnowledgeConfigForm}
       }
       setKnowledgeList([...list])

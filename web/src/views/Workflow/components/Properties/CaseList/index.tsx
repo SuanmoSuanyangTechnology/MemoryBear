@@ -61,6 +61,20 @@ const CaseList: FC<CaseListProps> = ({
   const { t } = useTranslation();
   const form = Form.useFormInstance();
 
+  const bringLoopChildrenToFront = (cell: any) => {
+    const type = cell?.getData()?.type;
+    if ((type !== 'loop' && type !== 'iteration') || !graphRef?.current) return;
+    const cycleId = cell.getData().id;
+    graphRef.current.getEdges().forEach((edge: any) => {
+      const src = graphRef.current?.getCellById(edge.getSourceCellId());
+      const tgt = graphRef.current?.getCellById(edge.getTargetCellId());
+      if (src?.getData()?.cycle === cycleId || tgt?.getData()?.cycle === cycleId) edge.toFront();
+    });
+    graphRef.current.getNodes().forEach((n: any) => {
+      if (n.getData()?.cycle === cycleId) n.toFront();
+    });
+  };
+
   // Recalculate node height and port Y positions without rebuilding ports
   const updateNodeLayout = (cases: any[]) => {
     if (!selectedNode || !graphRef?.current) return;
@@ -141,6 +155,8 @@ const CaseList: FC<CaseListProps> = ({
           }
           sourceCell.toFront()
           selectedNode.toFront()
+          bringLoopChildrenToFront(sourceCell)
+          bringLoopChildrenToFront(selectedNode)
           graphRef.current?.removeCell(edge);
           return;
         }
@@ -186,7 +202,9 @@ const CaseList: FC<CaseListProps> = ({
               ...edgeAttrs
             });
             selectedNode.toFront()
+            bringLoopChildrenToFront(selectedNode)
             targetCell.toFront()
+            bringLoopChildrenToFront(targetCell)
           }
         }
         
