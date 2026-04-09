@@ -14,7 +14,7 @@ const caculateIsSet = (item: any, type: string) => {
     case 'cases': {
       if (!item.left) return false
       if (['not_empty', 'empty'].includes(item.operator)) return true
-      return !!item.left && (!!item.right || typeof item.right === 'boolean')
+      return !!item.left && (!!item.right || typeof item.right === 'boolean' || typeof item.right === 'number')
     }
   }
 }
@@ -22,7 +22,7 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
   const data = node?.getData() || {};
   const { t } = useTranslation()
   const graphRef = useRef(node?.model?.graph)
-  const variableList = useVariableList(node ?? null, graphRef, [])
+  const variableList = useVariableList(node ?? null, graphRef, data.chatVariables ?? [])
 
   const getLocaleField = (field: string, filedType: string) => {
     const key = filedType === 'boolean' ? `workflow.config.if-else..boolean.${field}` : filedType === 'number' ? `workflow.config.if-else.num.${field}` : `workflow.config.if-else.${field}`

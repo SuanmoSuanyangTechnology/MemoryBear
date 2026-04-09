@@ -107,6 +107,16 @@ export const useWorkflowGraph = ({
   const featuresRef = useRef<FeaturesConfigForm | undefined>(undefined)
 
   useEffect(() => {
+    if (!graphRef.current) return
+    graphRef.current.getNodes().forEach(node => {
+      const data = node.getData()
+      if (data?.type === 'if-else' || data?.type === 'question-classifier') {
+        node.setData({ ...data, chatVariables }, { silent: true })
+      }
+    })
+  }, [chatVariables])
+
+  useEffect(() => {
     getConfig()
   }, [id])
   /**
@@ -211,7 +221,7 @@ export const useWorkflowGraph = ({
           id,
           type,
           name,
-          data: { ...node, ...nodeLibraryConfig},
+          data: { ...node, ...nodeLibraryConfig, ...((type === 'if-else' || type === 'question-classifier') ? { chatVariables } : {}) },
           ...position,
         }
 
