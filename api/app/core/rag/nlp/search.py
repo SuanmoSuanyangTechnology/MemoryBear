@@ -115,9 +115,8 @@ def knowledge_retrieval(
         # Use the specified reranker for re-ranking
         if reranker_id:
             try:
-                return rerank(db=db, reranker_id=reranker_id, query=query, docs=all_results, top_k=reranker_top_k)
+                all_results = rerank(db=db, reranker_id=reranker_id, query=query, docs=all_results, top_k=reranker_top_k)
             except Exception as rerank_error:
-                # If reranker fails, log warning and continue with original results
                 logger.warning(
                     "Reranker failed, falling back to original results",
                     extra={
@@ -254,6 +253,12 @@ def _retrieve_for_knowledge(
                     seen_ids.add(doc.metadata["doc_id"])
                     unique_rs.append(doc)
             rs = unique_rs
+            if unique_rs:
+                rs = vector_service.rerank(
+                    query=kb_config["query"],
+                    docs=unique_rs,
+                    top_k=kb_config["top_k"]
+                )
             if kb_config["retrieve_type"] == "graph":
                 try:
                     from app.core.rag.common.settings import kg_retriever

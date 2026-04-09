@@ -223,7 +223,6 @@ def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collec
 
             retrieve_chunks_result = knowledge_retrieval(query, kb_config)
             if retrieve_chunks_result:
-                logger.warning(f"检索知识结果：{retrieve_chunks_result}")
                 retrieval_knowledge = [i.page_content for i in retrieve_chunks_result]
                 context = '\n\n'.join(retrieval_knowledge)
                 logger.info(
