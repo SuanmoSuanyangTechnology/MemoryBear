@@ -229,10 +229,11 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
         ...knowledgeRest,
         knowledge_bases: knowledge_bases.map(item => ({
           kb_id: item.kb_id || item.id,
+          retrieve_type: item.retrieve_type,
           top_k: item.top_k,
           similarity_threshold: item.similarity_threshold,
           vector_similarity_weight: item.vector_similarity_weight,
-          ...(item.config || {})
+          // ...(item.config || {})
         }))
       } as KnowledgeConfig : null,
       tools: tools.map(vo => {
