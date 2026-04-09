@@ -28,6 +28,7 @@ from app.core.rag.common.float_utils import get_float
 from app.core.rag.common.constants import PAGERANK_FLD, TAG_FLD
 from app.core.rag.llm.chat_model import Base
 from app.core.rag.llm.embedding_model import OpenAIEmbed
+from app.services.model_service import ModelApiKeyService
 import logging
 
 logger = logging.getLogger(__name__)
@@ -198,16 +199,18 @@ def _retrieve_for_knowledge(
         workspace_ids.append(str(db_knowledge.workspace_id))
 
     if not chat_model:
+        llm_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.llm_id)
         chat_model = Base(
-            key=db_knowledge.llm.api_keys[0].api_key,
-            model_name=db_knowledge.llm.api_keys[0].model_name,
-            base_url=db_knowledge.llm.api_keys[0].api_base,
+            key=llm_key.api_key,
+            model_name=llm_key.model_name,
+            base_url=llm_key.api_base,
         )
     if not embedding_model:
+        emb_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.embedding_id)
         embedding_model = OpenAIEmbed(
-            key=db_knowledge.embedding.api_keys[0].api_key,
-            model_name=db_knowledge.embedding.api_keys[0].model_name,
-            base_url=db_knowledge.embedding.api_keys[0].api_base,
+            key=emb_key.api_key,
+            model_name=emb_key.model_name,
+            base_url=emb_key.api_base,
         )
 
     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
@@ -248,6 +251,20 @@ def _retrieve_for_knowledge(
                     seen_ids.add(doc.metadata["doc_id"])
                     unique_rs.append(doc)
             rs = unique_rs
+            if kb_config["retrieve_type"] == "graph":
+                try:
+                    from app.core.rag.common.settings import kg_retriever
+                    graph_doc = kg_retriever.retrieval(
+                        question=kb_config["query"],
+                        workspace_ids=[str(db_knowledge.workspace_id)],
+                        kb_ids=[str(db_knowledge.id)],
+                        emb_mdl=embedding_model,
+                        llm=chat_model,
+                    )
+                    if graph_doc:
+                        rs.insert(0, graph_doc)
+                except Exception as graph_error:
+                    logger.warning(f"Graph retrieval failed for kb {db_knowledge.id}: {graph_error}")
 
     results.extend(rs)
     return results, chat_model, embedding_model
