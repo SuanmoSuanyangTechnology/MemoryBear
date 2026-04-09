@@ -139,6 +139,8 @@ const CaseList: FC<CaseListProps> = ({
               ...edgeAttrs,
             });
           }
+          sourceCell.toFront()
+          selectedNode.toFront()
           graphRef.current?.removeCell(edge);
           return;
         }
@@ -183,6 +185,8 @@ const CaseList: FC<CaseListProps> = ({
               target: { cell: targetCellId, port: targetPortId },
               ...edgeAttrs
             });
+            selectedNode.toFront()
+            targetCell.toFront()
           }
         }
         

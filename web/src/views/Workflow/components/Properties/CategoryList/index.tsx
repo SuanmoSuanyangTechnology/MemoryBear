@@ -88,6 +88,8 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
               target: { cell: selectedNode.id, port: targetPortId },
               ...edgeAttrs
             });
+            sourceCell.toFront()
+            selectedNode.toFront()
           }
           return;
         }
@@ -119,6 +121,8 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
               target: { cell: targetCellId, port: targetPortId },
               ...edgeAttrs
             });
+            selectedNode.toFront()
+            targetCell.toFront()
           }
         }
       });

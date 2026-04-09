@@ -49,23 +49,24 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
 
     const incomingEdges = graph.getIncomingEdges(node);
     const outgoingEdges = graph.getOutgoingEdges(node);
-    
-    incomingEdges?.forEach(edge => {
-      graph.addEdge({
+    const addedEdges: any[] = [];
+
+    incomingEdges?.forEach((edge: any) => {
+      addedEdges.push(graph.addEdge({
         source: { cell: edge.getSourceCellId(), port: edge.getSourcePortId() },
         target: { cell: newNode.id, port: newNode.getPorts().find((port: any) => port.group === 'left')?.id || 'left' },
         ...edgeAttrs
-      });
+      }));
     });
 
-    outgoingEdges?.forEach(edge => {
+    outgoingEdges?.forEach((edge: any) => {
       const targetCell = graph.getCellById(edge.getTargetCellId()) as any;
       const targetPortId = targetCell?.getPorts?.()?.find((port: any) => port.group === 'left')?.id || edge.getTargetPortId();
-      graph.addEdge({
+      addedEdges.push(graph.addEdge({
         source: { cell: newNode.id, port: newNode.getPorts().find((port: any) => port.group === 'right')?.id || 'right' },
         target: { cell: edge.getTargetCellId(), port: targetPortId },
         ...edgeAttrs
-      });
+      }));
     });
 
     // Remove all add-node type nodes
@@ -74,6 +75,15 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
         n.remove();
       }
     });
+
+    setTimeout(() => {
+      addedEdges.forEach(e => {
+        const src = graph.getCellById(e.getSourceCellId());
+        const tgt = graph.getCellById(e.getTargetCellId());
+        if (src?.isNode()) src.toFront();
+        if (tgt?.isNode()) tgt.toFront();
+      });
+    }, 50);
 
     // Automatically adjust loop node size
     const loopNode = graph.getNodes().find((n: any) => n.getData()?.id === cycleId);
