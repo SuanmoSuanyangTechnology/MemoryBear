@@ -33,7 +33,7 @@ interface KnowledgeConfigModalProps {
  * Available retrieval types
  */
 const retrieveTypes: RetrieveType[] = ['participle', 'semantic', 'hybrid',
-  // 'graph'
+  'graph'
 ]
 
 /**
