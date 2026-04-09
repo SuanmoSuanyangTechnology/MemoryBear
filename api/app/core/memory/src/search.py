@@ -1,4 +1,3 @@
-import argparse
 import asyncio
 import json
 import math
@@ -6,7 +5,6 @@ import os
 import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
-from uuid import UUID
 
 if TYPE_CHECKING:
     from app.schemas.memory_config_schema import MemoryConfig
@@ -23,7 +21,7 @@ from app.core.memory.utils.config.config_utils import (
 )
 from app.core.memory.utils.data.text_utils import extract_plain_query
 from app.core.memory.utils.data.time_utils import normalize_date_safe
-from app.core.memory.utils.llm.llm_utils import get_reranker_client
+# from app.core.memory.utils.llm.llm_utils import get_reranker_client
 from app.core.models.base import RedBearModelConfig
 from app.db import get_db_context
 from app.repositories.neo4j.graph_search import (
@@ -748,11 +746,10 @@ async def run_hybrid_search(
         if search_type in ["keyword", "hybrid"]:
             # Keyword-based search
             logger.info("[PERF] Starting keyword search...")
-            keyword_start = time.time()
             keyword_task = asyncio.create_task(
                 search_graph(
                     connector=connector,
-                    q=query_text,
+                    query=query_text,
                     end_user_id=end_user_id,
                     limit=limit,
                     include=include
@@ -762,7 +759,6 @@ async def run_hybrid_search(
         if search_type in ["embedding", "hybrid"]:
             # Embedding-based search
             logger.info("[PERF] Starting embedding search...")
-            embedding_start = time.time()
 
             # 从数据库读取嵌入器配置（按 ID）并构建 RedBearModelConfig
             config_load_start = time.time()
@@ -904,10 +900,10 @@ async def run_hybrid_search(
         else:
             results["latency_metrics"] = latency_metrics
 
-        logger.info(f"[PERF] ===== SEARCH PERFORMANCE SUMMARY =====")
+        logger.info("[PERF] ===== SEARCH PERFORMANCE SUMMARY =====")
         logger.info(f"[PERF] Total search completed in {total_latency:.4f}s")
         logger.info(f"[PERF] Latency breakdown: {json.dumps(latency_metrics, indent=2)}")
-        logger.info(f"[PERF] =========================================")
+        logger.info("[PERF] =========================================")
 
         # Sanitize results: drop large/unused fields
         _remove_keys_recursive(results, ["name_embedding"])  # drop entity name embeddings from outputs

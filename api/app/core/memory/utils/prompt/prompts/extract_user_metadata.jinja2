@@ -1,0 +1,74 @@
+===Task===
+Extract user metadata from the following conversation statements spoken by the user.
+
+{% if language == "zh" %}
+**"三度原则"判断标准：**
+- 复用度：该信息是否会被多个功能模块使用？
+- 约束度：该信息是否会影响系统行为？
+- 时效性：该信息是长期稳定的还是临时的？仅提取长期稳定信息。
+
+**提取规则：**
+- **只提取关于"用户本人"的画像信息**，忽略用户提到的第三方人物（如朋友、同事、家人）的信息
+- 仅提取文本中明确提到的信息，不要推测
+- 如果文本中没有可提取的用户画像信息，返回空的 user_metadata 对象
+- **输出语言必须与输入文本的语言一致**（输入中文则输出中文值，输入英文则输出英文值）
+
+**字段说明：**
+- profile.role：用户的职业或角色，如 教师、医生、后端工程师
+- profile.domain：用户所在领域，如 教育、医疗、软件开发
+- profile.expertise：用户擅长的技能或工具（通用，不限于编程），如 Python、心理咨询、高中物理
+- profile.interests：用户主动表达兴趣的话题或领域标签
+- behavioral_hints.learning_stage：学习阶段（初学者/中级/高级）
+- behavioral_hints.preferred_depth：偏好深度（概览/技术细节/深入探讨）
+- behavioral_hints.tone_preference：语气偏好（轻松随意/专业简洁/学术严谨）
+- knowledge_tags：用户涉及的知识领域标签
+{% else %}
+**"Three-Degree Principle" criteria:**
+- Reusability: Will this information be used by multiple functional modules?
+- Constraint: Will this information affect system behavior?
+- Timeliness: Is this information long-term stable or temporary? Only extract long-term stable information.
+
+**Extraction rules:**
+- **Only extract profile information about the user themselves**, ignore information about third parties (friends, colleagues, family) mentioned by the user
+- Only extract information explicitly mentioned in the text, do not speculate
+- If no user profile information can be extracted, return an empty user_metadata object
+- **Output language must match the input text language**
+
+**Field descriptions:**
+- profile.role: User's occupation or role, e.g. teacher, doctor, software engineer
+- profile.domain: User's domain, e.g. education, healthcare, software development
+- profile.expertise: User's skills or tools (general, not limited to programming)
+- profile.interests: Topics or domain tags the user actively expressed interest in
+- behavioral_hints.learning_stage: Learning stage (beginner/intermediate/advanced)
+- behavioral_hints.preferred_depth: Preferred depth (overview/detailed/deep dive)
+- behavioral_hints.tone_preference: Tone preference (casual/professional/academic)
+- knowledge_tags: Knowledge domain tags related to the user
+{% endif %}
+
+===User Statements===
+{% for stmt in statements %}
+- {{ stmt }}
+{% endfor %}
+
+===Output Format===
+Return a JSON object with the following structure:
+```json
+{
+  "user_metadata": {
+    "profile": {
+      "role": "",
+      "domain": "",
+      "expertise": [],
+      "interests": []
+    },
+    "behavioral_hints": {
+      "learning_stage": "",
+      "preferred_depth": "",
+      "tone_preference": ""
+    },
+    "knowledge_tags": []
+  }
+}
+```
+
+{{ json_schema }}

@@ -1001,7 +1001,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                     except Exception as e:
                         print(f"\n\nError during fetch feishu: {e}")
             case _:  # General
-                print(f"General: No synchronization needed\n")
+                print("General: No synchronization needed\n")
 
         result = f"sync knowledge '{db_knowledge.name}' processed successfully."
         return result
@@ -1510,6 +1510,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
                             "status": "SUCCESS",
                             "total_num": total_num,
                             "end_user_count": len(end_users),
+                            "end_user_details": end_user_details,
                             "memory_increment_id": str(memory_increment.id),
                             "created_at": memory_increment.created_at.isoformat(),
                         })
@@ -2602,35 +2603,34 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
 
         service = MemoryAgentService()
 
-        with get_db_context() as db:
-            for end_user_id in end_user_ids:
-                # 存在性检查：缓存有数据则跳过
-                cached = await InterestMemoryCache.get_interest_distribution(
+        for end_user_id in end_user_ids:
+            # 存在性检查：缓存有数据则跳过
+            cached = await InterestMemoryCache.get_interest_distribution(
+                end_user_id=end_user_id,
+                language=language,
+            )
+            if cached is not None:
+                skipped += 1
+                continue
+
+            logger.info(f"用户 {end_user_id} 无兴趣分布缓存，开始生成")
+            try:
+                result = await service.get_interest_distribution_by_user(
                     end_user_id=end_user_id,
+                    limit=5,
                     language=language,
                 )
-                if cached is not None:
-                    skipped += 1
-                    continue
-
-                logger.info(f"用户 {end_user_id} 无兴趣分布缓存，开始生成")
-                try:
-                    result = await service.get_interest_distribution_by_user(
-                        end_user_id=end_user_id,
-                        limit=5,
-                        language=language,
-                    )
-                    await InterestMemoryCache.set_interest_distribution(
-                        end_user_id=end_user_id,
-                        language=language,
-                        data=result,
-                        expire=INTEREST_CACHE_EXPIRE,
-                    )
-                    initialized += 1
-                    logger.info(f"用户 {end_user_id} 兴趣分布缓存生成成功")
-                except Exception as e:
-                    failed += 1
-                    logger.error(f"用户 {end_user_id} 兴趣分布缓存生成失败: {e}")
+                await InterestMemoryCache.set_interest_distribution(
+                    end_user_id=end_user_id,
+                    language=language,
+                    data=result,
+                    expire=INTEREST_CACHE_EXPIRE,
+                )
+                initialized += 1
+                logger.info(f"用户 {end_user_id} 兴趣分布缓存生成成功")
+            except Exception as e:
+                failed += 1
+                logger.error(f"用户 {end_user_id} 兴趣分布缓存生成失败: {e}")
 
         logger.info(f"兴趣分布按需初始化完成: 初始化={initialized}, 跳过={skipped}, 失败={failed}")
         return {
@@ -2912,6 +2912,141 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
             "elapsed_time": time.time() - start_time,
             "task_id": self.request.id,
         }
+
+
+# ─── User Metadata Extraction Task ───────────────────────────────────────────
+
+@celery_app.task(
+    bind=True,
+    name='app.tasks.extract_user_metadata',
+    ignore_result=False,
+    max_retries=0,
+    acks_late=True,
+    time_limit=300,
+    soft_time_limit=240,
+)
+def extract_user_metadata_task(
+    self,
+    end_user_id: str,
+    statements: List[str],
+    config_id: Optional[str] = None,
+    language: str = "zh",
+) -> Dict[str, Any]:
+    """异步提取用户元数据并写入数据库。
+
+    在去重消歧完成后由编排器触发，使用独立 LLM 调用提取元数据。
+    LLM 配置优先使用 config_id 对应的应用配置，失败时回退到工作空间默认配置。
+
+    Args:
+        end_user_id: 终端用户 ID
+        statements: 用户相关的 statement 文本列表
+        config_id: 应用配置 ID（可选）
+        language: 语言类型 ("zh" 中文, "en" 英文)
+
+    Returns:
+        包含任务执行结果的字典
+    """
+    start_time = time.time()
+    logger.info(
+        f"[CELERY METADATA] Starting metadata extraction - end_user_id={end_user_id}, "
+        f"statements_count={len(statements)}, config_id={config_id}, language={language}"
+    )
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.memory.storage_services.extraction_engine.knowledge_extraction.metadata_extractor import MetadataExtractor
+        from app.core.memory.utils.metadata_utils import clean_metadata, merge_metadata, validate_metadata
+        from app.repositories.end_user_info_repository import EndUserInfoRepository
+        from app.repositories.end_user_repository import EndUserRepository
+        from app.services.memory_config_service import MemoryConfigService
+
+        # 1. 获取 LLM 配置（应用配置 → 工作空间配置兜底）并创建 LLM client
+        with get_db_context() as db:
+            end_user_uuid = uuid.UUID(end_user_id)
+
+            # 获取 workspace_id from end_user
+            end_user = EndUserRepository(db).get_by_id(end_user_uuid)
+            if not end_user:
+                return {"status": "FAILURE", "error": f"End user not found: {end_user_id}"}
+
+            workspace_id = end_user.workspace_id
+
+            config_service = MemoryConfigService(db)
+            memory_config = config_service.get_config_with_fallback(
+                memory_config_id=uuid.UUID(config_id) if config_id else None,
+                workspace_id=workspace_id,
+            )
+            if not memory_config:
+                return {"status": "FAILURE", "error": "No LLM config available (app + workspace fallback failed)"}
+
+            # 2. 创建 LLM client
+            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+            factory = MemoryClientFactory(db)
+            if not memory_config.llm_id:
+                return {"status": "FAILURE", "error": "Memory config has no LLM model configured"}
+            llm_client = factory.get_llm_client(memory_config.llm_id)
+
+        # 3. 提取元数据
+        extractor = MetadataExtractor(llm_client=llm_client, language=language)
+        user_metadata = await extractor.extract_metadata(statements)
+
+        if not user_metadata:
+            logger.info(f"[CELERY METADATA] No metadata extracted for end_user_id={end_user_id}")
+            return {"status": "SUCCESS", "result": "no_metadata_extracted"}
+
+        # 4. 清洗、校验、合并、写入
+        raw_dict = user_metadata.model_dump()
+        cleaned = clean_metadata(raw_dict)
+        if not cleaned:
+            logger.info(f"[CELERY METADATA] Cleaned metadata is empty for end_user_id={end_user_id}")
+            return {"status": "SUCCESS", "result": "empty_after_cleaning"}
+
+        validated = validate_metadata(cleaned)
+        if not validated:
+            return {"status": "FAILURE", "error": "Metadata validation failed after cleaning"}
+
+        with get_db_context() as db:
+            end_user_uuid = uuid.UUID(end_user_id)
+            info = EndUserInfoRepository(db).get_by_end_user_id(end_user_uuid)
+
+            if info:
+                existing_meta = info.meta_data if info.meta_data else {}
+                info.meta_data = merge_metadata(existing_meta, cleaned)
+                logger.info(f"[CELERY METADATA] Updated metadata for end_user_id={end_user_id}")
+            else:
+                # No end_user_info record yet - metadata will be written when alias sync creates it,
+                # or we create a minimal record here
+                logger.info(
+                    f"[CELERY METADATA] No end_user_info record for end_user_id={end_user_id}, "
+                    f"skipping metadata write (will be created by alias sync)"
+                )
+                return {"status": "SUCCESS", "result": "no_info_record"}
+
+            db.commit()
+
+        return {"status": "SUCCESS", "result": "metadata_written"}
+
+    loop = None
+    try:
+        loop = set_asyncio_event_loop()
+        result = loop.run_until_complete(_run())
+        elapsed = time.time() - start_time
+        result["elapsed_time"] = elapsed
+        result["task_id"] = self.request.id
+        logger.info(f"[CELERY METADATA] Task completed - elapsed={elapsed:.2f}s, result={result.get('result')}")
+        return result
+
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.error(f"[CELERY METADATA] Task failed - elapsed={elapsed:.2f}s, error={e}", exc_info=True)
+        return {
+            "status": "FAILURE",
+            "error": str(e),
+            "elapsed_time": elapsed,
+            "task_id": self.request.id,
+        }
+    finally:
+        if loop:
+            _shutdown_loop_gracefully(loop)
 
 
 # unused task

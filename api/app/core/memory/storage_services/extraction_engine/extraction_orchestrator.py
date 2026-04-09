@@ -311,8 +311,35 @@ class ExtractionOrchestrator:
                 dialog_data_list,
             )
 
-            # 步骤 7: 同步用户别名到数据库表（仅正式模式）
+            # 步骤 7: 同步用户别名到数据库表 + 触发异步元数据提取（仅正式模式）
             if not is_pilot_run:
+                # 收集用户相关 statement 并触发异步元数据提取
+                try:
+                    from app.core.memory.storage_services.extraction_engine.knowledge_extraction.metadata_extractor import MetadataExtractor
+                    metadata_extractor = MetadataExtractor(llm_client=self.llm_client, language=self.language)
+                    user_statements = metadata_extractor.collect_user_related_statements(
+                        entity_nodes, statement_nodes,
+                        statement_entity_edges
+                    )
+                    if user_statements:
+                        # 获取 end_user_id 和 config_id
+                        end_user_id = dialog_data_list[0].end_user_id if dialog_data_list else None
+                        config_id = dialog_data_list[0].config_id if dialog_data_list and hasattr(dialog_data_list[0], 'config_id') else None
+                        if end_user_id:
+                            from app.tasks import extract_user_metadata_task
+                            extract_user_metadata_task.delay(
+                                end_user_id=str(end_user_id),
+                                statements=user_statements,
+                                config_id=str(config_id) if config_id else None,
+                                language=self.language,
+                            )
+                            logger.info(f"已触发异步元数据提取任务，共 {len(user_statements)} 条用户相关 statement")
+                    else:
+                        logger.info("未找到用户相关 statement，跳过元数据提取")
+                except Exception as e:
+                    logger.error(f"触发元数据提取任务失败（不影响主流程）: {e}", exc_info=True)
+
+                # 同步用户别名到数据库表
                 logger.info("步骤 7: 同步用户别名到 end_user 和 end_user_info 表")
                 await self._update_end_user_other_name(entity_nodes, dialog_data_list)
 
@@ -1107,6 +1134,7 @@ class ExtractionOrchestrator:
                     end_user_id=dialog_data.end_user_id,
                     run_id=dialog_data.run_id,  # 使用 dialog_data 的 run_id
                     content=chunk.content,
+                    speaker=getattr(chunk, 'speaker', None),
                     chunk_embedding=chunk.chunk_embedding,
                     sequence_number=chunk_idx,  # 添加必需的 sequence_number 字段
                     created_at=dialog_data.created_at,
@@ -1342,7 +1370,7 @@ class ExtractionOrchestrator:
     async def _update_end_user_other_name(
             self,
             entity_nodes: List[ExtractedEntityNode],
-            dialog_data_list: List[DialogData]
+            dialog_data_list: List[DialogData],
     ) -> None:
         """
         将本轮提取的用户别名同步到 end_user 和 end_user_info 表。
@@ -1470,7 +1498,6 @@ class ExtractionOrchestrator:
                             end_user_id=end_user_uuid,
                             other_name=first_alias,
                             aliases=merged_aliases,
-                            meta_data={}
                         ))
                         logger.info(f"创建 end_user_info 记录，other_name={first_alias}, aliases={merged_aliases}")
 
