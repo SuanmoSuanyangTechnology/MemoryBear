@@ -32,12 +32,13 @@ interface ModelListDetailProps {
   refresh?: () => void;
   handleEdit: (vo?: ModelListItem) => void;
   handleCloseConfig?: () => void;
+  query?: any;
 }
 
 /**
  * Model list detail drawer component
  */
-const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ refresh, handleEdit, handleCloseConfig }, ref) => {
+const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ refresh, handleEdit, handleCloseConfig, query }, ref) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<ProviderModelItem>({} as ProviderModelItem)
@@ -58,7 +59,8 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
     if (!vo.provider) return
   
     getModelNewList({
-      provider: vo.provider
+      provider: vo.provider,
+      ...query,
     })
       .then(res => {
         const response = res as ProviderModelItem[]

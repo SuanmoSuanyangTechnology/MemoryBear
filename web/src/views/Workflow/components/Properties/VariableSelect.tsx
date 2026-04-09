@@ -186,7 +186,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
   const nodeData = (parentOfSelected ?? selectedSuggestion)?.nodeData;
 
   return (
-    <div ref={containerRef} className="rb:relative rb:w-full">
+    <div ref={containerRef} className={`rb:relative rb:w-full ${className}`}>
       {/* Trigger */}
       <div
         className={clsx(

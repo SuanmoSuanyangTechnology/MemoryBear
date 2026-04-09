@@ -12,6 +12,7 @@ import type { ChatVariable, GraphRef, WorkflowConfig } from '@/views/Workflow/ty
 import type { ApiKey } from '@/views/ApiKeyManagement/types'
 import type { SkillConfigForm } from './components/Skill/types'
 import type { Capability } from '@/views/ModelManagement/types'
+import { Node } from '@antv/x6';
 
 /**
  * Model configuration parameters
@@ -170,6 +171,7 @@ export interface WorkflowRef {
   features: WorkflowConfig['features'];
   handleFeaturesConfig?: () => void;
   handleSaveFeaturesConfig?: (value: FeaturesConfigForm) => void;
+  nodeClick: ({ node }: { node: Node }) => void;
 }
 
 /**

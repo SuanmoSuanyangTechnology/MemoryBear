@@ -18,7 +18,6 @@ import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
 import { useUser } from '@/store/user';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types'
 import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils'
-import type { Suggestion } from '../components/Editor/plugin/AutocompletePlugin';
 
 /**
  * Props for useWorkflowGraph hook
@@ -76,6 +75,7 @@ export interface UseWorkflowGraphReturn {
   features?: FeaturesConfigForm;
   /** Get start node output variable list (user-defined + system variables) */
   getStartNodeVariables: () => Array<{ name: string; type: string; readonly?: boolean }>;
+  nodeClick: ({ node }: { node: Node }) => void;
 }
 
 /**
@@ -1494,6 +1494,7 @@ export const useWorkflowGraph = ({
     setIsHandMode,
     onDrop,
     blankClick,
+    nodeClick,
     deleteEvent,
     copyEvent,
     parseEvent,

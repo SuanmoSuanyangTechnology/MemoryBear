@@ -585,7 +585,7 @@ const Properties: FC<PropertiesProps> = ({
 
                       if (config.type === 'messageEditor') {
                         return (
-                          <Form.Item key={key} name={key} label={selectedNode?.data?.type === 'memory-write' ? t(`workflow.config.${selectedNode?.data?.type}.${key}`) : undefined}>
+                          <Form.Item key={key} name={key} required={config.required} label={selectedNode?.data?.type === 'memory-write' ? t(`workflow.config.${selectedNode?.data?.type}.${key}`) : undefined}>
                             <MessageEditor
                               title={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
                               placeholder={t(config.placeholder || 'common.pleaseEnter')}
@@ -733,6 +733,7 @@ const Properties: FC<PropertiesProps> = ({
                                   : ''
                           }
                           hidden={Boolean(config.hidden)}
+                          required={config.required}
                         >
                           {config.type === 'input'
                             ? <Input placeholder={t('common.pleaseEnter')} />

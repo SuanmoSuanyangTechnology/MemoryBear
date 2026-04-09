@@ -4,7 +4,7 @@
  * @Last Modified by: ZhaoYing
  * @Last Modified time: 2026-04-07 16:28:33
  */
-import { type FC, useRef, useMemo, useCallback } from 'react';
+import { type FC, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Tabs, Dropdown, Flex, Popover } from 'antd';
 import type { MenuProps } from 'antd';
@@ -18,6 +18,7 @@ import type { CopyModalRef, AgentRef, ClusterRef, WorkflowRef, FeaturesConfigFor
 import { deleteApplication, appExport } from '@/api/application'
 import CopyModal from './CopyModal'
 import PageHeader from '@/components/Layout/PageHeader'
+import CheckList from '@/views/Workflow/components/CheckList'
 
 /**
  * Tab keys for application configuration
@@ -206,6 +207,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         </Flex>}
         extra={application?.type === 'workflow' && source !== 'sharing' && activeTab === 'arrangement'
           ? <Flex align="center" justify="end" gap={10} className="rb:h-8">
+            <CheckList workflowRef={workflowRef} />
             <Popover content={t('application.features')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
               <div
                 className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/features.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"

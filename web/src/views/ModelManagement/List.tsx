@@ -106,6 +106,10 @@ const ModelList = forwardRef<BaseRef, { query: any; handleEdit: (vo?: ModelListI
       />
       <ModelListDetail
         ref={modelListDetailRef}
+        query={{
+          ...query,
+          is_composite: false,
+        }}
         refresh={getList}
         handleEdit={handleEdit}
         handleCloseConfig={handleCloseModel}
