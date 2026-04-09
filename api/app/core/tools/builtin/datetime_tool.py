@@ -253,9 +253,9 @@ class DateTimeTool(BuiltinTool):
         return {
             "datetime": input_value,
             "timezone": timezone_str,
-            "timestamp": int(dt.timestamp()),
+            "timestamp": int(dt.timestamp()) * 1000,
             "iso_format": dt.isoformat(),
-            "result_data": int(dt.timestamp())
+            "result_data": int(dt.timestamp()) * 1000
         }
 
     def _calculate_datetime(self, kwargs) -> dict:

@@ -574,6 +574,29 @@ class ToolService:
                     "default": "Asia/Shanghai"
                 }
             ]
+        elif operation == "datetime_to_timestamp":
+            return [
+                {
+                    "name": "input_value",
+                    "type": "string",
+                    "description": "输入值（时间字符串，如：2026-04-07 10:30:25）",
+                    "required": True
+                },
+                {
+                    "name": "input_format",
+                    "type": "string",
+                    "description": "输入时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    "required": False,
+                    "default": "%Y-%m-%d %H:%M:%S"
+                },
+                {
+                    "name": "from_timezone",
+                    "type": "string",
+                    "description": "源时区（如：UTC, Asia/Shanghai）",
+                    "required": False,
+                    "default": "Asia/Shanghai"
+                }
+            ]
         else:
             # 默认返回所有参数（除了operation）
             return [
