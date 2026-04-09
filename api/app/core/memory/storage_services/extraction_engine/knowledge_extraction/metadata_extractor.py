@@ -13,10 +13,6 @@ from app.core.memory.models.graph_models import (
     StatementEntityEdge,
     StatementNode,
 )
-from app.core.memory.models.metadata_models import (
-    UserMetadata,
-)
-from app.core.memory.models.message_models import DialogData
 
 logger = logging.getLogger(__name__)
 
@@ -45,39 +41,11 @@ class MetadataExtractor:
         如果文本中包含中文字符则返回 "zh"，否则返回 "en"。
         """
         import re
+
         combined = " ".join(statements)
-        if re.search(r'[\u4e00-\u9fff]', combined):
+        if re.search(r"[\u4e00-\u9fff]", combined):
             return "zh"
         return "en"
-
-    # def collect_user_raw_messages(
-    #     self,
-    #     dialog_data_list: List[DialogData],
-    # ) -> List[str]:
-    #     """
-    #     从原始对话数据中提取 speaker="user" 的消息原文。
-
-    #     直接使用用户的原始输入，不经过陈述句提取阶段的 LLM 改写，
-    #     避免第一人称被替换为第三人称导致元数据/别名提取错误。
-
-    #     Returns:
-    #         用户原始消息文本列表
-    #     """
-    #     result = []
-    #     for dialog in dialog_data_list:
-    #         if not dialog.context or not dialog.context.msgs:
-    #             continue
-    #         for msg in dialog.context.msgs:
-    #             if getattr(msg, 'role', '') == 'user':
-    #                 text = (getattr(msg, 'msg', '') or '').strip()
-    #                 if text:
-    #                     result.append(text)
-
-    #     logger.info(f"收集到 {len(result)} 条用户原始消息")
-    #     if result:
-    #         for i, text in enumerate(result):
-    #             logger.info(f"  [user message {i+1}] {text[:200]}")
-    #     return result
 
     def collect_user_related_statements(
         self,
@@ -119,7 +87,7 @@ class MetadataExtractor:
         for stmt_node in statement_nodes:
             if stmt_node.id in target_stmt_ids and stmt_node.id not in seen:
                 total_associated += 1
-                speaker = getattr(stmt_node, 'speaker', None) or 'unknown'
+                speaker = getattr(stmt_node, "speaker", None) or "unknown"
                 if speaker == "user":
                     text = (stmt_node.statement or "").strip()
                     if text:
@@ -135,7 +103,7 @@ class MetadataExtractor:
         )
         if result:
             for i, text in enumerate(result):
-                logger.info(f"  [user statement {i+1}] {text}")
+                logger.info(f"  [user statement {i + 1}] {text}")
         if total_associated > 0 and len(result) == 0:
             logger.warning(
                 f"有 {total_associated} 条直接关联 statement 但全部被 speaker 过滤，"
@@ -178,7 +146,10 @@ class MetadataExtractor:
                 json_schema="",
             )
 
-            from app.core.memory.models.metadata_models import MetadataExtractionResponse
+            from app.core.memory.models.metadata_models import (
+                MetadataExtractionResponse,
+            )
+
             response = await self.llm_client.response_structured(
                 messages=[{"role": "user", "content": prompt}],
                 response_model=MetadataExtractionResponse,
@@ -187,7 +158,9 @@ class MetadataExtractor:
             if response:
                 metadata = response.user_metadata if response.user_metadata else None
                 to_add = response.aliases_to_add if response.aliases_to_add else []
-                to_remove = response.aliases_to_remove if response.aliases_to_remove else []
+                to_remove = (
+                    response.aliases_to_remove if response.aliases_to_remove else []
+                )
                 return metadata, to_add, to_remove
 
             logger.warning("LLM 返回的响应为空")
