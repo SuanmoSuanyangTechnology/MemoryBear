@@ -131,7 +131,7 @@ class LangchainAdapter:
     def _tool_supports_operations(tool: BaseTool) -> bool:
         """检查工具是否支持多操作"""
         # 内置工具中支持操作的工具
-        builtin_operation_tools = ['datetime_tool', 'json_tool']
+        builtin_operation_tools = ['datetime_tool', 'json_tool', 'openclaw_tool']
         
         # 检查内置工具
         if tool.tool_type.value == "builtin" and tool.name in builtin_operation_tools:

@@ -34,7 +34,8 @@ BUILTIN_TOOLS = {
     "JsonTool": "app.core.tools.builtin.json_tool",
     "BaiduSearchTool": "app.core.tools.builtin.baidu_search_tool",
     "MinerUTool": "app.core.tools.builtin.mineru_tool",
-    "TextInTool": "app.core.tools.builtin.textin_tool"
+    "TextInTool": "app.core.tools.builtin.textin_tool",
+    "OpenClawTool": "app.core.tools.builtin.openclaw_tool",
 }
 
 
@@ -330,20 +331,6 @@ class ToolService:
             if config.tool_type == ToolType.MCP.value:
                 return await self._test_mcp_connection(config)
             elif config.tool_type == ToolType.CUSTOM.value:
-                 # ========== 测试工具连接 OpenClaw 特判 ==========
-                custom_config = self.custom_repo.find_by_tool_id(self.db, config.id)
-                if custom_config and custom_config.schema_content:
-                    schema = custom_config.schema_content
-                    if isinstance(schema, str):
-                        try:
-                            schema = json.loads(schema)
-                        except json.JSONDecodeError:
-                            schema = {}
-                    #请求头中包含OpenClaw字段
-                    if isinstance(schema, dict) and schema.get("info", {}).get("x-openclaw"):
-                        return await self._test_openclaw_connection(custom_config, schema)
-                # ========== OpenClaw 特判结束 ==========
-                #正常自定义工具逻辑
                 return await self._test_custom_connection(config)
             elif config.tool_type == ToolType.BUILTIN.value:
                 return await self._test_builtin_connection(config)
@@ -353,62 +340,19 @@ class ToolService:
         except Exception as e:
             return {"success": False, "message": f"测试失败: {str(e)}"}
 
-    #=============测试openclaw连接 特判===============
-    async def _test_openclaw_connection(
-        self, custom_config: CustomToolConfig, schema: dict
-    ) -> Dict[str, Any]:
-        """测试 OpenClaw 连接"""
-        import aiohttp
-        try:
-            info = schema.get("info", {})
-            servers = schema.get("servers", [])
-            base_url = servers[0].get("url", "") if servers else ""
-            if not base_url:
-                return {"success": False, "message": "OpenClaw 未配置 server URL"}
-            auth = custom_config.auth_config or {}
-            token = auth.get("api_key") or auth.get("token") or ""
-            agent_id = info.get("x-openclaw-agent-id", "main")
-            model = info.get("x-openclaw-default-model", "openclaw")
-
-            url = f"{base_url.rstrip('/')}/v1/responses"
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-                "x-openclaw-agent-id": agent_id
-            }
-            body = {
-                "model": model,
-                "user": "connection-test",
-                "input": "hi",
-                "stream": False
-            }
-
-            timeout_config = aiohttp.ClientTimeout(total=30)
-            async with aiohttp.ClientSession(timeout=timeout_config) as session:
-                async with session.post(url, json=body, headers=headers) as resp:
-                    if resp.status < 400:
-                        return {"success": True, "message": "OpenClaw 连接成功"}
-                    error_text = await resp.text()
-                    return {
-                        "success": False,
-                        "message": f"OpenClaw HTTP {resp.status}: {error_text[:200]}"
-                    }
-        except Exception as e:
-            return {"success": False, "message": f"OpenClaw 连接失败: {str(e)}"}
-    #=============测试openclaw连接结束===========
     def ensure_builtin_tools_initialized(self, tenant_id: uuid.UUID):
-        """确保内置工具已初始化"""
-        existing = self.tool_repo.exists_builtin_for_tenant(self.db, tenant_id)
-
-        if existing:
+        """确保内置工具已初始化（支持增量补充新工具）"""
+        builtin_config = self._load_builtin_config()
+        if not builtin_config:
             return
 
-        # 从配置文件加载内置工具定义
-        builtin_config = self._load_builtin_config()
+        existing_classes = self.builtin_repo.get_existing_tool_classes(self.db, tenant_id)
 
+        added = False
         for tool_key, tool_info in builtin_config.items():
+            if tool_info['tool_class'] in existing_classes:
+                continue
             try:
-                # 创建工具配置
                 initial_status = self._determine_initial_status(tool_info)
                 tool_config = ToolConfig(
                     name=tool_info['name'],
@@ -424,7 +368,6 @@ class ToolService:
                 self.db.add(tool_config)
                 self.db.flush()
 
-                # 创建内置工具配置
                 builtin_config_obj = BuiltinToolConfig(
                     id=tool_config.id,
                     tool_class=tool_info['tool_class'],
@@ -432,12 +375,14 @@ class ToolService:
                     requires_config=tool_info.get('requires_config', False)
                 )
                 self.db.add(builtin_config_obj)
+                added = True
 
             except Exception as e:
                 logger.error(f"初始化内置工具失败: {tool_key}, {e}")
 
-        self.db.commit()
-        logger.info(f"租户 {tenant_id} 内置工具初始化完成")
+        if added:
+            self.db.commit()
+            logger.info(f"租户 {tenant_id} 内置工具增量初始化完成")
 
     async def get_tool_methods(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[List[Dict[str, Any]]]:
         """获取工具的所有方法
@@ -515,6 +460,9 @@ class ToolService:
         # 对于json_tool，根据操作类型返回相关参数
         elif hasattr(tool_instance, 'name') and tool_instance.name == 'json_tool':
             return self._get_json_tool_params(operation)
+        # 对于openclaw_tool，根据操作类型返回不同描述的参数
+        elif hasattr(tool_instance, 'name') and tool_instance.name == 'openclaw_tool':
+            return self._get_openclaw_tool_params(operation)
         
         # 其他工具的默认处理：返回除operation外的所有参数
         return [{
@@ -743,6 +691,65 @@ class ToolService:
             ]
         
         return base_params
+
+    @staticmethod
+    def _get_openclaw_tool_params(operation: str) -> List[Dict[str, Any]]:
+        """获取 openclaw_tool 特定操作的参数"""
+        if operation == "print_task":
+            return [
+                {
+                    "name": "message",
+                    "type": "string",
+                    "description": "发送给 OpenClaw 的打印任务描述，将用户的原始消息原封不动地传递给 OpenClaw，禁止改写、补充或润色用户的原文",
+                    "required": True
+                },
+                {
+                    "name": "image_url",
+                    "type": "string",
+                    "description": "可选，附带的设计图片或参考图，OpenClaw 可据此生成 3D 模型",
+                    "required": False
+                }
+            ]
+        elif operation == "device_query":
+            return [
+                {
+                    "name": "message",
+                    "type": "string",
+                    "description": "发送给 OpenClaw 的设备查询指令",
+                    "required": True
+                }
+            ]
+        elif operation == "image_understand":
+            return [
+                {
+                    "name": "message",
+                    "type": "string",
+                    "description": "发送给 OpenClaw 的图片理解任务，应描述需要对图片做什么（如描述内容、提取文字、分析信息）",
+                    "required": True
+                },
+                {
+                    "name": "image_url",
+                    "type": "string",
+                    "description": "必须提供，要分析的图片 URL 或 base64 data URI",
+                    "required": True
+                }
+            ]
+        else:
+            # general 及其他
+            return [
+                {
+                    "name": "message",
+                    "type": "string",
+                    "description": "发送给 OpenClaw Agent 的任务描述，应包含完整的任务需求",
+                    "required": True
+                },
+                {
+                    "name": "image_url",
+                    "type": "string",
+                    "description": "可选，附带的图片 URL 或 base64 data URI",
+                    "required": False
+                }
+            ]
 
     async def _get_custom_tool_methods(self, config: ToolConfig) -> List[Dict[str, Any]]:
         """获取自定义工具的方法"""
@@ -1196,27 +1203,6 @@ class ToolService:
             custom_config = self.db.query(CustomToolConfig).filter(
                 CustomToolConfig.id == tool_config.id
             ).first()
-            # ========== 更新工具 OpenClaw 特判 ==========
-            if custom_config and custom_config.schema_content:
-                schema = custom_config.schema_content
-                if isinstance(schema, str):
-                    try:
-                        schema = json.loads(schema)
-                    except json.JSONDecodeError:
-                        schema = {}
-                info = schema.get("info", {}) if isinstance(schema, dict) else {}
-                if info.get("x-openclaw"):
-                    servers = schema.get("servers", [])
-                    has_url = bool(servers and servers[0].get("url"))
-                    has_agent_id = bool(info.get("x-openclaw-agent-id"))
-                    has_token = bool(custom_config.auth_config
-                                    and custom_config.auth_config.get("api_key"))
-                    if has_url and has_agent_id and has_token:
-                        tool_config.status = ToolStatus.AVAILABLE.value
-                    else:
-                        tool_config.status = ToolStatus.UNCONFIGURED.value
-                    return
-            # ========== OpenClaw 特判结束 ==========
 
             if custom_config and tool_config.name and (custom_config.schema_content or custom_config.schema_url):
                 tool_config.status = ToolStatus.AVAILABLE.value

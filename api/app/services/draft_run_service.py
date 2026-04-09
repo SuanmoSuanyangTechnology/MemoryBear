@@ -640,17 +640,14 @@ class AgentRunService:
                 multimodal_service = MultimodalService(self.db, model_info)
                 processed_files = await multimodal_service.process_files(files)
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
-            #================= 为 OpenClaw 工具注入运行时上下文==========
+            # 为需要运行时上下文的工具注入上下文
             for t in tools:
-                if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, '_is_openclaw'):
-                    if t.tool_instance._is_openclaw:
-                        t.tool_instance._user_id = user_id or "anonymous"
-                        t.tool_instance._conversation_id = (
-                            str(conversation_id) if conversation_id else None)
-                        if processed_files:
-                            t.tool_instance._uploaded_files = processed_files
-                            logger.info(f"已注入 _uploaded_files, 数量: {len(processed_files)}")
-            #================= 为 OpenClaw 工具注入运行时上下文结束==========
+                if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
+                    t.tool_instance.set_runtime_context(
+                        user_id=user_id or "anonymous",
+                        conversation_id=str(conversation_id) if conversation_id else None,
+                        uploaded_files=processed_files or []
+                    )
             # 7. 知识库检索
             context = None
 
@@ -900,18 +897,14 @@ class AgentRunService:
                 multimodal_service = MultimodalService(self.db, model_info)
                 processed_files = await multimodal_service.process_files(files)
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
-            #============为 OpenClaw 工具注入会话session======
-            # 为 OpenClaw 工具注入运行时上下文
+            # 为需要运行时上下文的工具注入上下文
             for t in tools:
-                if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, '_is_openclaw'):
-                    if t.tool_instance._is_openclaw:
-                        t.tool_instance._user_id = user_id or "anonymous"
-                        t.tool_instance._conversation_id = (
-                            str(conversation_id) if conversation_id else None)
-                        # 注入用户上传的文件
-                        if processed_files:
-                            t.tool_instance._uploaded_files = processed_files
-            #============为 OpenClaw 工具注入会话session======
+                if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
+                    t.tool_instance.set_runtime_context(
+                        user_id=user_id or "anonymous",
+                        conversation_id=str(conversation_id) if conversation_id else None,
+                        uploaded_files=processed_files or []
+                    )
             # 7. 知识库检索
             context = None
 
