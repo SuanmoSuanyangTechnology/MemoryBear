@@ -34,9 +34,12 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
     };
 
     window.addEventListener('port:click', handlePortClick as EventListener);
+    const handleBlankClick = () => handlePopoverClose();
+    window.addEventListener('blank:click', handleBlankClick);
     
     return () => {
       window.removeEventListener('port:click', handlePortClick as EventListener);
+      window.removeEventListener('blank:click', handleBlankClick);
     };
   }, []);
 
