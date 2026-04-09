@@ -10,6 +10,7 @@ const FormItem = Form.Item;
 
 interface VariableEditModalProps {
   refresh: (values: Variable) => void;
+  variables?: Variable[];
 }
 
 const types = [
@@ -32,7 +33,8 @@ const initialValues = {
 }
 
 const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProps>(({
-  refresh
+  refresh,
+  variables
 }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
@@ -123,6 +125,12 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
           rules={[
             { required: true, message: t('common.pleaseEnter') },
             { pattern: /^[a-zA-Z_][a-zA-Z0-9_]*$/, message: t('workflow.config.start.invalidVariableName') },
+            {
+              validator: (_, value) => {
+                const duplicate = variables?.some(v => v.name === value && v.name !== editVo?.name);
+                return duplicate ? Promise.reject(t('workflow.config.duplicateName')) : Promise.resolve();
+              }
+            },
           ]}
         >
           <Input placeholder={t('common.enter')} onBlur={nameChange} />

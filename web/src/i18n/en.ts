@@ -2453,7 +2453,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         value: 'Value',
         addCase: 'Add Condition',
         addVariable: 'Add Variables',
-        output: 'Output Variable'
+        output: 'Output Variable',
+        duplicateName: 'Variable name cannot be duplicated',
       },
 
       clear: 'Clear',
@@ -2480,7 +2481,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         input_cycle_vars: 'Initial Loop Variables',
         output_cycle_vars: 'Final Loop Variables',
       },
-      sureReplace: '确认替换',
+      sureReplace: 'Confirm Replace',
       checkList: 'Check List',
       checkListDesc: 'Ensure all issues are resolved before publishing',
       checkListEmpty: 'No issues found',
