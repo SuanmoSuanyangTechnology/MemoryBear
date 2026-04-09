@@ -133,7 +133,10 @@ def knowledge_retrieval(
                 from app.core.rag.common.settings import kg_retriever
                 doc = kg_retriever.retrieval(question=query, workspace_ids=workspace_ids, kb_ids=kb_ids, emb_mdl=embedding_model, llm=chat_model)
                 if doc:
-                    all_results.insert(0, doc)
+                    all_results.insert(0, DocumentChunk(
+                        page_content=doc.get("page_content", ""),
+                        metadata=doc.get("metadata", {})
+                    ))
             except Exception as graph_error:
                 print(f"Failed to retrieve from knowledge graph: {str(graph_error)}")
         
@@ -262,7 +265,10 @@ def _retrieve_for_knowledge(
                         llm=chat_model,
                     )
                     if graph_doc:
-                        rs.insert(0, graph_doc)
+                        rs.insert(0, DocumentChunk(
+                            page_content=graph_doc.get("page_content", ""),
+                            metadata=graph_doc.get("metadata", {})
+                        ))
                 except Exception as graph_error:
                     logger.warning(f"Graph retrieval failed for kb {db_knowledge.id}: {graph_error}")
 
