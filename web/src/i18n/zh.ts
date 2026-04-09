@@ -2109,6 +2109,21 @@ export const zh = {
       return_text_position_enable: '返回文本位置信息',
       return_text_position_enable_desc: '是否返回识别文字的坐标位置',
 
+      OpenClawTool_desc: 'OpenClaw远程Agent',
+      OpenClawTool_features: 'OpenClaw远程Agent —3D打印控制、设备管理等',
+      OpenClawTool_config_desc: '配置OpenClaw Gateway连接信息，需要提供服务地址和API Key。',
+      OpenClawTool_server_url_desc: 'OpenClaw Gateway 服务地址，如 http://xxx.xxx.xxx.xx:xxx',
+      OpenClawTool_api_key_desc: 'OpenClaw API Key，在 OpenClaw 管理后台创建',
+      OpenClawTool_agent_id_desc: '目标 Agent ID，默认为 main，通常无需修改',
+      OpenClawTool_enable: '启用 OpenClaw',
+      agent_id: 'Agent ID',
+      '3dPrinting': '3D 打印',
+      deviceManagement: '设备管理',
+      multimodalInteraction: '多模态交互',
+      remoteAgent: '远程 Agent',
+
+
+
       addCustom: '添加自定义工具',
       editCustom: '编辑自定义工具',
       schema: 'Schema',
