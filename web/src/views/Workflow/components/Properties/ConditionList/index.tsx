@@ -58,7 +58,7 @@ const ConditionList: FC<CaseListProps> = ({
   const { t } = useTranslation();
   const form = Form.useFormInstance();
 
-  const handleLeftFieldChange = (index: number, newValue: string) => {
+  const handleLeftFieldChange = (index: number, newValue?: string | string[]) => {
     form.setFieldsValue({
       [parentName]: {
         expressions: {

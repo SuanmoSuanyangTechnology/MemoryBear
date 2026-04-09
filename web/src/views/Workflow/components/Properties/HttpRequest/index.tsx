@@ -87,7 +87,9 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
   return (
     <>
       <Flex align="center" justify="space-between" className="rb:mb-1!">
-        <div className="rb:font-medium rb:text-[12px] rb:leading-4.5">API</div>
+        <div className="rb:font-medium rb:text-[12px] rb:leading-4.5">
+          <span className="rb:text-[#ff5d34] rb:text-[14px] rb:font-[SimSun,sans-serif] rb:mr-1">*</span>API
+        </div>
         <Button onClick={handleChangeAuth}
           size="small"
           type="text"
@@ -145,7 +147,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
         />
       </Form.Item>
 
-      <Form.Item label="BODY" className="rb:mb-0!">
+      <Form.Item label="BODY" className="rb:mb-0!" required>
         <Form.Item name={['body', 'content_type']} className="rb:mb-3!">
           <Radio.Group
             size="small"

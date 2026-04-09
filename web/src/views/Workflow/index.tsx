@@ -28,6 +28,7 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
     setIsHandMode,
     onDrop,
     blankClick,
+    nodeClick,
     deleteEvent,
     copyEvent,
     parseEvent,
@@ -71,7 +72,8 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
     config,
     features: features,
     handleFeaturesConfig,
-    handleSaveFeaturesConfig
+    handleSaveFeaturesConfig,
+    nodeClick
   }))
   return (
     <div className="rb:h-full rb:relative">

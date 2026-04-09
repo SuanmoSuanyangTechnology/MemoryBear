@@ -64,11 +64,11 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
-      {
-        type: "end", icon: 'rb:bg-[url("@/assets/images/workflow/end.svg")]',
+      { type: "end", icon: 'rb:bg-[url("@/assets/images/workflow/end.svg")]',
         config: {
           output: {
-            type: 'editor'
+            type: 'editor',
+            required: true,
           }
         }
       },
@@ -82,6 +82,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           model_id: {
             type: 'define',
+            required: true,
             params: { type: 'llm,chat' }, // llm/chat
             valueKey: 'id',
             labelKey: 'name',
@@ -106,6 +107,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           messages: {
             type: 'define',
+            required: true,
             defaultValue: [
               {
                 role: 'SYSTEM',
@@ -138,7 +140,8 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'variableList',
           },
           knowledge_retrieval: {
-            type: 'knowledge'
+            type: 'knowledge',
+            required: true,
           }
         }
       },
@@ -146,15 +149,18 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           model_id: {
             type: 'modelSelect',
+            required: true,
             params: { type: 'llm,chat' }, // llm/chat
           },
           text: {
             type: 'variableList',
+            required: true,
             filterLoopIterationVars: true,
             placeholder: 'workflow.config.parameter-extractor.textPlaceholder'
           },
           params: {
             type: 'paramList',
+            required: true,
           },
           prompt: {
             type: 'messageEditor',
@@ -173,16 +179,19 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           message: {
             type: 'editor',
+            required: true,
             isArray: false
           },
           config_id: {
             type: 'customSelect',
+            required: true,
             url: memoryConfigListUrl,
             valueKey: 'config_id',
             labelKey: 'config_name'
           },
           search_switch: {
             type: 'select',
+            required: true,
             options: [
               { value: '0', label: 'memoryConversation.deepThinking' },
               { value: '1', label: 'memoryConversation.normalReply' },
@@ -201,12 +210,14 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           messages: {
             type: 'messageEditor',
+            required: true,
             defaultValue: [],
             placeholder: 'workflow.config.llm.messagesPlaceholder',
             isArray: true
           },
           config_id: {
             type: 'customSelect',
+            required: true,
             url: memoryConfigListUrl,
             valueKey: 'config_id',
             labelKey: 'config_name'
@@ -222,6 +233,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           cases: {
             type: 'caseList',
+            required: true,
             defaultValue: [
               {
                 logical_operator: 'and',
@@ -235,13 +247,16 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           model_id: {
             type: 'modelSelect',
+            required: true,
             params: { type: 'llm,chat' }, // llm/chat
           },
           input_variable: {
             type: 'variableList',
+            required: true,
           },
           categories: {
             type: 'categoryList',
+            required: true,
             defaultValue: [
               {},
               {}
@@ -259,6 +274,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           input: {
             type: 'variableList',
+            required: true,
             filterNodeTypes: ['knowledge-retrieval', 'iteration', 'loop', 'parameter-extractor', 'code', 'CONVERSATION'],
             filterVariableNames: ['message']
           },
@@ -281,6 +297,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           output: {
             type: 'variableList',
+            required: true,
             filterChildNodes: true
           },
           output_type: {
@@ -321,6 +338,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           group_variables: {
             type: 'groupVariableList',
+            required: true,
             defaultValue: [],
           },
           group_type: {
@@ -332,6 +350,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           assignments: {
             type: 'assignmentList',
+            required: true,
             filterLoopIterationVars: true
           }
         }
@@ -357,6 +376,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           url: {
             type: 'messageEditor',
+            required: true,
             isArray: false,
           },
           auth: {
@@ -415,6 +435,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           input_variables: {
             type: 'inputList',
+            required: true,
             defaultValue: [{ name: 'arg1' }, { name: 'arg2' }]
           },
           language: {
@@ -423,6 +444,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           code: {
             type: 'messageEditor',
+            required: true,
             isArray: false,
             language: ['python3', 'javascript'],
             titleVariant: 'borderless',
@@ -433,6 +455,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           output_variables: {
             type: 'outputList',
+            required: true,
             defaultValue: [{name: 'result', type: 'string'}]
           },
         }
@@ -441,10 +464,12 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           mapping: {
             type: 'mappingList',
+            required: true,
             defaultValue: [{name: 'arg1'}]
           },
           template: {
             type: 'messageEditor',
+            required: true,
             isArray: false,
             language: 'jinja2',
             titleVariant: 'borderless',
@@ -456,6 +481,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           file_selector: {
             type: 'variableList',
+            required: true,
             placeholder: 'common.pleaseSelect',
             onFilterVariableType: ['array[file]', 'file']
           }
@@ -465,6 +491,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           input_list: {
             type: 'variableList',
+            required: true,
           },
           filter_by: {
             type: 'define',

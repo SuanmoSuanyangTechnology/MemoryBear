@@ -41,7 +41,7 @@ const ParamsList: FC<ParamsListProps> = ({
   return (
     <div>
       <div className="rb:leading-4.25 rb:text-[12px] rb:font-medium rb:mb-2">
-        {label}
+        <span className="rb:text-[#ff5d34] rb:text-[14px] rb:font-[SimSun,sans-serif] rb:mr-1">*</span>{label}
       </div>
 
       <Flex gap={10} vertical>
