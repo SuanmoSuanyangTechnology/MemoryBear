@@ -11,6 +11,11 @@ class OperationTool(BaseTool):
         self.base_tool = base_tool
         self.operation = operation
         super().__init__(base_tool.tool_id, base_tool.config)
+
+    def set_runtime_context(self, **kwargs):
+        """转发运行时上下文到 base_tool"""
+        if hasattr(self.base_tool, 'set_runtime_context'):
+            self.base_tool.set_runtime_context(**kwargs)
     
     @property
     def name(self) -> str:
