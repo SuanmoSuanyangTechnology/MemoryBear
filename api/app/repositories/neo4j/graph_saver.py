@@ -186,7 +186,7 @@ async def save_dialog_and_statements_to_neo4j(
     Returns:
         bool: True if successful, False otherwise
     """
-
+    # TODO 需要在去重消歧节阶段，做以下逻辑的处理
     # 预处理：对特殊实体（"用户"、"AI助手"）复用 Neo4j 中已有节点的 ID，
     # 确保同一个 end_user_id 下只有一个"用户"节点和一个"AI助手"节点。
     if entity_nodes:
