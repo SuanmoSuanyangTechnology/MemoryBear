@@ -616,7 +616,7 @@ class AppChatRequest(BaseModel):
     stream: bool = Field(default=False, description="是否流式返回")
     thinking: bool = Field(default=False, description="是否启用深度思考（需Agent配置支持）")
     files: List[FileInput] = Field(default_factory=list, description="附件列表（支持多文件）")
-    version: Optional[int] = Field(default=None, description="指定发布版本号，不传则使用当前发布版本")
+    version: Optional[uuid.UUID] = Field(default=None, description="指定发布版本ID，不传则使用当前生效版本")
 
 
 class DraftRunRequest(BaseModel):
