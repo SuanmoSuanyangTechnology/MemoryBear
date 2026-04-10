@@ -55,9 +55,9 @@ class CycleGraphNode(BaseNode):
             if config.output_type in [
                 VariableType.ARRAY_FILE,
                 VariableType.ARRAY_STRING,
-                VariableType.NUMBER,
+                VariableType.ARRAY_NUMBER,
                 VariableType.ARRAY_OBJECT,
-                VariableType.BOOLEAN
+                VariableType.ARRAY_BOOLEAN
             ]:
                 if config.flatten:
                     outputs['output'] = config.output_type
