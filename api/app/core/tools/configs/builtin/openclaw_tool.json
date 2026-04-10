@@ -1,0 +1,15 @@
+{
+  "name": "openclaw_tool",
+  "description": "调用OpenClaw Agent远程服务",
+  "tool_class": "OpenClawTool",
+  "category": "agent",
+  "requires_config": true,
+  "version": "1.0.0",
+  "enabled": true,
+  "parameters": {
+    "server_url": "",
+    "api_key": "",
+    "agent_id": "main"
+  },
+  "tags": ["agent", "openclaw", "multimodal", "3d-printing", "builtin"]
+}

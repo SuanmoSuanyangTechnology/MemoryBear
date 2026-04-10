@@ -165,7 +165,14 @@ class AppChatService:
             multimodal_service = MultimodalService(self.db, model_info)
             processed_files = await multimodal_service.process_files(files)
             logger.info(f"处理了 {len(processed_files)} 个文件")
-
+        # 为需要运行时上下文的工具注入上下文
+        for t in tools:
+            if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
+                t.tool_instance.set_runtime_context(
+                    user_id=user_id or "anonymous",
+                    conversation_id=str(conversation_id) if conversation_id else None,
+                    uploaded_files=processed_files or []
+                )
         # 调用 Agent（支持多模态）
         result = await agent.chat(
             message=message,
@@ -412,6 +419,15 @@ class AppChatService:
                 multimodal_service = MultimodalService(self.db, model_info)
                 processed_files = await multimodal_service.process_files(files)
                 logger.info(f"处理了 {len(processed_files)} 个文件")
+
+            # 为需要运行时上下文的工具注入上下文
+            for t in tools:
+                if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
+                    t.tool_instance.set_runtime_context(
+                        user_id=user_id or "anonymous",
+                        conversation_id=str(conversation_id) if conversation_id else None,
+                        uploaded_files=processed_files or []
+                    )
 
             # 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""

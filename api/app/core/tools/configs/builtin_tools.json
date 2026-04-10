@@ -30,5 +30,18 @@
     "parameters": {
       "api_key": {"type": "string", "description": "百度搜索API密钥", "sensitive": true, "required": true}
     }
+  },
+  "openclaw": {
+    "name": "OpenClaw远程Agent",
+    "description": "OpenClaw Agent远程服务",
+    "tool_class": "OpenClawTool",
+    "category": "agent",
+    "requires_config": true,
+    "version": "1.0.0",
+    "enabled": true,
+    "parameters": {
+      "server_url": {"type": "string", "description": "OpenClaw Gateway 地址", "required": true},
+      "api_key": {"type": "string", "description": "OpenClaw API Key", "sensitive": true, "required": true}
+    }
   }
 }

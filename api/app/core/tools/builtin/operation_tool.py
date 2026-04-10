@@ -11,6 +11,11 @@ class OperationTool(BaseTool):
         self.base_tool = base_tool
         self.operation = operation
         super().__init__(base_tool.tool_id, base_tool.config)
+
+    def set_runtime_context(self, **kwargs):
+        """转发运行时上下文到 base_tool"""
+        if hasattr(self.base_tool, 'set_runtime_context'):
+            self.base_tool.set_runtime_context(**kwargs)
     
     @property
     def name(self) -> str:
@@ -32,6 +37,8 @@ class OperationTool(BaseTool):
             return self._get_datetime_params()
         elif self.base_tool.name == 'json_tool':
             return self._get_json_params()
+        elif self.base_tool.name == 'openclaw_tool':
+            return self._get_openclaw_params()
         else:
             # 默认返回除operation外的所有参数
             return [p for p in self.base_tool.parameters if p.name != "operation"]
@@ -232,6 +239,64 @@ class OperationTool(BaseTool):
         else:
             return base_params
     
+    def _get_openclaw_params(self) -> List[ToolParameter]:
+        """获取 openclaw_tool 特定操作的参数"""
+        if self.operation == "print_task":
+            return [
+                ToolParameter(
+                    name="message",
+                    type=ParameterType.STRING,
+                    description="发送给 OpenClaw 的打印任务描述，将用户的原始消息原封不动地传递给 OpenClaw，禁止改写、补充或润色用户的原文",
+                    required=True
+                ),
+                ToolParameter(
+                    name="image_url",
+                    type=ParameterType.STRING,
+                    description="可选，附带的设计图片或参考图，OpenClaw 可据此生成 3D 模型",
+                    required=False
+                )
+            ]
+        elif self.operation == "device_query":
+            return [
+                ToolParameter(
+                    name="message",
+                    type=ParameterType.STRING,
+                    description="发送给 OpenClaw 的设备查询指令",
+                    required=True
+                )
+            ]
+        elif self.operation == "image_understand":
+            return [
+                ToolParameter(
+                    name="message",
+                    type=ParameterType.STRING,
+                    description="发送给 OpenClaw 的图片理解任务，应描述需要对图片做什么（如描述内容、提取文字、分析信息）",
+                    required=True
+                ),
+                ToolParameter(
+                    name="image_url",
+                    type=ParameterType.STRING,
+                    description="要分析的图片 URL 或 base64 data URI",
+                    required=False
+                )
+            ]
+        else:
+            # general 及其他
+            return [
+                ToolParameter(
+                    name="message",
+                    type=ParameterType.STRING,
+                    description="发送给 OpenClaw Agent 的任务描述，应包含完整的任务需求",
+                    required=True
+                ),
+                ToolParameter(
+                    name="image_url",
+                    type=ParameterType.STRING,
+                    description="可选，附带的图片 URL 或 base64 data URI",
+                    required=False
+                )
+            ]
+
     async def execute(self, **kwargs) -> ToolResult:
         """执行特定操作"""
         # 添加operation参数

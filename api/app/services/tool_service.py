@@ -34,7 +34,8 @@ BUILTIN_TOOLS = {
     "JsonTool": "app.core.tools.builtin.json_tool",
     "BaiduSearchTool": "app.core.tools.builtin.baidu_search_tool",
     "MinerUTool": "app.core.tools.builtin.mineru_tool",
-    "TextInTool": "app.core.tools.builtin.textin_tool"
+    "TextInTool": "app.core.tools.builtin.textin_tool",
+    "OpenClawTool": "app.core.tools.builtin.openclaw_tool",
 }
 
 
@@ -340,18 +341,18 @@ class ToolService:
             return {"success": False, "message": f"测试失败: {str(e)}"}
 
     def ensure_builtin_tools_initialized(self, tenant_id: uuid.UUID):
-        """确保内置工具已初始化"""
-        existing = self.tool_repo.exists_builtin_for_tenant(self.db, tenant_id)
-
-        if existing:
+        """确保内置工具已初始化（支持增量补充新工具）"""
+        builtin_config = self._load_builtin_config()
+        if not builtin_config:
             return
 
-        # 从配置文件加载内置工具定义
-        builtin_config = self._load_builtin_config()
+        existing_classes = self.builtin_repo.get_existing_tool_classes(self.db, tenant_id)
 
+        added = False
         for tool_key, tool_info in builtin_config.items():
+            if tool_info['tool_class'] in existing_classes:
+                continue
             try:
-                # 创建工具配置
                 initial_status = self._determine_initial_status(tool_info)
                 tool_config = ToolConfig(
                     name=tool_info['name'],
@@ -367,7 +368,6 @@ class ToolService:
                 self.db.add(tool_config)
                 self.db.flush()
 
-                # 创建内置工具配置
                 builtin_config_obj = BuiltinToolConfig(
                     id=tool_config.id,
                     tool_class=tool_info['tool_class'],
@@ -375,12 +375,14 @@ class ToolService:
                     requires_config=tool_info.get('requires_config', False)
                 )
                 self.db.add(builtin_config_obj)
+                added = True
 
             except Exception as e:
                 logger.error(f"初始化内置工具失败: {tool_key}, {e}")
 
-        self.db.commit()
-        logger.info(f"租户 {tenant_id} 内置工具初始化完成")
+        if added:
+            self.db.commit()
+            logger.info(f"租户 {tenant_id} 内置工具增量初始化完成")
 
     async def get_tool_methods(self, tool_id: str, tenant_id: uuid.UUID) -> Optional[List[Dict[str, Any]]]:
         """获取工具的所有方法
@@ -458,6 +460,9 @@ class ToolService:
         # 对于json_tool，根据操作类型返回相关参数
         elif hasattr(tool_instance, 'name') and tool_instance.name == 'json_tool':
             return self._get_json_tool_params(operation)
+        # 对于openclaw_tool，根据操作类型返回不同描述的参数
+        elif hasattr(tool_instance, 'name') and tool_instance.name == 'openclaw_tool':
+            return self._get_openclaw_tool_params(operation)
         
         # 其他工具的默认处理：返回除operation外的所有参数
         return [{
@@ -709,6 +714,65 @@ class ToolService:
             ]
         
         return base_params
+
+    @staticmethod
+    def _get_openclaw_tool_params(operation: str) -> List[Dict[str, Any]]:
+        """获取 openclaw_tool 特定操作的参数"""
+        if operation == "print_task":
+            return [
+                {
+                    "name": "message",
+                    "type": "string",
+                    "description": "发送给 OpenClaw 的打印任务描述，将用户的原始消息原封不动地传递给 OpenClaw，禁止改写、补充或润色用户的原文",
+                    "required": True
+                },
+                {
+                    "name": "image_url",
+                    "type": "string",
+                    "description": "可选，附带的设计图片或参考图，OpenClaw 可据此生成 3D 模型",
+                    "required": False
+                }
+            ]
+        elif operation == "device_query":
+            return [
+                {
+                    "name": "message",
+                    "type": "string",
+                    "description": "发送给 OpenClaw 的设备查询指令",
+                    "required": True
+                }
+            ]
+        elif operation == "image_understand":
+            return [
+                {
+                    "name": "message",
+                    "type": "string",
+                    "description": "发送给 OpenClaw 的图片理解任务，应描述需要对图片做什么（如描述内容、提取文字、分析信息）",
+                    "required": True
+                },
+                {
+                    "name": "image_url",
+                    "type": "string",
+                    "description": "要分析的图片 URL 或 base64 data URI",
+                    "required": False
+                }
+            ]
+        else:
+            # general 及其他
+            return [
+                {
+                    "name": "message",
+                    "type": "string",
+                    "description": "发送给 OpenClaw Agent 的任务描述，应包含完整的任务需求",
+                    "required": True
+                },
+                {
+                    "name": "image_url",
+                    "type": "string",
+                    "description": "可选，附带的图片 URL 或 base64 data URI",
+                    "required": False
+                }
+            ]
 
     async def _get_custom_tool_methods(self, config: ToolConfig) -> List[Dict[str, Any]]:
         """获取自定义工具的方法"""
