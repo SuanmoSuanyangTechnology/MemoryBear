@@ -63,7 +63,7 @@ def get_apps_by_id(db: Session, app_id: uuid.UUID) -> App:
     return repo.get_apps_by_id(app_id)
 
 
-def get_release_by_version(db: Session, app_id: uuid.UUID, release_id: uuid.UUID):
+def get_release_by_id(db: Session, app_id: uuid.UUID, release_id: uuid.UUID):
     """根据发布版本ID查询发布快照（仅返回激活状态）"""
     from app.models.app_release_model import AppRelease
     return db.scalars(

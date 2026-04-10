@@ -619,7 +619,7 @@ class AppService:
         self._validate_app_accessible(app, workspace_id)
         return app
 
-    def get_release_by_version(self, app_id: uuid.UUID, release_id: uuid.UUID) -> AppRelease:
+    def get_release_by_id(self, app_id: uuid.UUID, release_id: uuid.UUID) -> AppRelease:
         """按发布版本ID获取发布快照
 
         Args:
@@ -632,8 +632,8 @@ class AppService:
         Raises:
             BusinessException: 版本不存在或已下线
         """
-        from app.repositories.app_repository import get_release_by_version
-        release = get_release_by_version(self.db, app_id, release_id)
+        from app.repositories.app_repository import get_release_by_id
+        release = get_release_by_id(self.db, app_id, release_id)
         if not release:
             raise BusinessException(
                 f"版本 {release_id} 不存在或已下线",
