@@ -119,9 +119,12 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
             if variable:
                 self.conv_variables.append(con_var)
 
-        # for variables in config.get("workflow").get("environment_variables"):
-        #     variable = self._convert_variable(variables)
-        #     conv_variables.append(variable)
+        # 开始节点的文件变量合并到会话变量
+        self.conv_variables.extend(self._file_vars_to_conv)
+
+        features = self.convert_features(
+            self.config.get("workflow", {}).get("features", {})
+        )
 
         trigger = self._convert_trigger({})
         execution_config = self._convert_execution({})
@@ -135,6 +138,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
             edges=self.edges,
             nodes=self.nodes,
             variables=self.conv_variables,
+            features=features,
             warnings=self.warnings,
             errors=self.errors
         )
