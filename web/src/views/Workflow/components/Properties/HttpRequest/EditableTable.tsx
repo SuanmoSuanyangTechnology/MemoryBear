@@ -38,13 +38,6 @@ const EditableTable: FC<EditableTableProps> = ({
     ...(typeOptions.length > 0 && { type: typeOptions[0].value })
   });
 
-  // Filter options based on boolean type if needed
-  const booleanFilterOptions = useMemo(() => {
-    return filterBooleanType
-      ? options.filter(option => option.dataType !== 'boolean')
-      : options
-  }, [options, filterBooleanType])
-
   const namefilterOptions = useMemo(() => {
     const filterList: Suggestion[] = [];
     options.forEach(vo => {
@@ -76,7 +69,7 @@ const EditableTable: FC<EditableTableProps> = ({
           ...vo,
           disabled: true
         })
-      } else {
+      } else if (vo.dataType !== 'array[file]') {
         filterOptions.push(vo)
       }
     })

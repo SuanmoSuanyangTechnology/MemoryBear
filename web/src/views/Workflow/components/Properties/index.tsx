@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-08 14:10:40
+ * @Last Modified time: 2026-04-10 17:24:19
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -315,8 +315,24 @@ const Properties: FC<PropertiesProps> = ({
 
       return filteredList;
     }
-    if (nodeType === 'knowledge-retrieval'
-      || (nodeType === 'parameter-extractor' && key === 'text')
+    if (nodeType === 'knowledge-retrieval') {
+      const allList = addParentIterationVars(variableList);
+      let filteredList: Suggestion[] = []
+      allList.forEach(variable => {
+        if (variable.dataType === 'string') {
+          filteredList.push(variable)
+        } else if (variable.dataType === 'file') {
+          filteredList.push({
+            ...variable,
+            disabled: true,
+            children: variable.children.filter((child: Suggestion) => child.dataType === 'string')
+          })
+        }
+      })
+
+      return filteredList
+    }
+    if ((nodeType === 'parameter-extractor' && key === 'text')
       || (nodeType === 'question-classifier' && ['input_variable', 'categories'].includes(key as string))
     ) {
       const allList = addParentIterationVars(variableList);
@@ -359,8 +375,20 @@ const Properties: FC<PropertiesProps> = ({
       return filteredList;
     }
     if (nodeType === 'memory-write') {
-      let filteredList = addParentIterationVars(variableList).filter(variable => variable.dataType === 'string' || variable.dataType.includes('file'));
-      return filteredList;
+      const allList = addParentIterationVars(variableList);
+      let filteredList: Suggestion[] = []
+      allList.forEach(variable => {
+        if (['string', 'array[file]'].includes(variable.dataType)) {
+          filteredList.push(variable)
+        } else if (variable.dataType === 'file') {
+          filteredList.push({
+            ...variable,
+            children: variable.children.filter((child: Suggestion) => child.dataType === 'string')
+          })
+        }
+      })
+
+      return filteredList
     }
     if (nodeType === 'parameter-extractor' && key === 'prompt') {
       let filteredList = addParentIterationVars(variableList).filter(variable => variable.dataType === 'string' || variable.dataType === 'number');
@@ -400,9 +428,7 @@ const Properties: FC<PropertiesProps> = ({
       return variableList.filter(variable => variable.dataType.includes('array'));
     }
 
-    if (nodeType === 'code'
-      || (nodeType === 'if-else' && key === 'cases')
-    ) {
+    if ((nodeType === 'if-else' && key === 'cases')) {
       const allList = addParentIterationVars(variableList);
       let filteredList: Suggestion[] = []
       allList.forEach(variable => {
@@ -919,7 +945,7 @@ const Properties: FC<PropertiesProps> = ({
                                                 options={getFilteredVariableList(selectedNode?.data?.type, key)}
                                               />
                                               : config.type === 'editor'
-                                                ? <Editor options={variableList} variant="outlined" size="small" placeholder={config.placeholder || t('common.pleaseEnter')} />
+                                                ? <Editor options={getFilteredVariableList(selectedNode?.data?.type, key)} variant="outlined" size="small" placeholder={config.placeholder || t('common.pleaseEnter')} />
                                                 : null
                           }
                         </Form.Item>

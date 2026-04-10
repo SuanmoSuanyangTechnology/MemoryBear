@@ -2,12 +2,13 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:41 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 15:24:41
+ * @Last Modified time: 2026-04-10 17:02:07
  */
 import { type FC, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 import { Space, Input, Form, App, Flex } from 'antd';
+import copy from 'copy-to-clipboard';
 
 import Tag, { type TagProps } from './components/Tag'
 import RbCard from '@/components/RbCard/Card'
@@ -15,8 +16,9 @@ import { getReleaseList, rollbackRelease, appExport } from '@/api/application'
 import ReleaseModal from './components/ReleaseModal'
 import ReleaseShareModal from './components/ReleaseShareModal'
 import AppSharingModal from './components/AppSharingModal'
-import type { Release, ReleaseModalRef, ReleaseShareModalRef, AppSharingModalRef } from './types'
+import type { Release, ReleaseModalRef, ReleaseShareModalRef, AppSharingModalRef, WorkflowRef } from './types'
 import type { Application } from '@/views/ApplicationManagement/types'
+import { runCheckOnGraph } from '@/views/Workflow/components/CheckList'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
 import Markdown from '@/components/Markdown'
@@ -37,7 +39,7 @@ const heightClass = 'rb:max-h-[calc(100vh-140px)]'
  * @param data - Application data
  * @param refresh - Function to refresh application data
  */
-const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refresh}) => {
+const ReleasePage: FC<{data: Application; refresh: () => void; workflowRef?: React.RefObject<WorkflowRef>}> = ({data, refresh, workflowRef}) => {
   const { t } = useTranslation();
   const { message } = App.useApp()
   const releaseModalRef = useRef<ReleaseModalRef>(null)
@@ -75,6 +77,10 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
     if (!selectedVersion) return
     appExport(data.id, data.name, { release_id: selectedVersion.id})
   }
+  const handleCopy = (id: string) => {
+    copy(id)
+    message.success(t('common.copySuccess'))
+  }
   return (
     <Flex gap={12}>
       <div className="rb:w-101 rb:h-full">
@@ -102,7 +108,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                         </Tag>}
                       </>}
                       className={clsx("rb:hover:shadow-[0px_2px_8px_0px_rgba(0,0,0,0.2)]! rb:cursor-pointer rb:bg-white", {
-                        'rb:border-[#171719]!': version.id === selectedVersion.id,
+                        'rb:border! rb:border-[#171719]!': version.id === selectedVersion.id,
                         'rb:border-[#DFE4ED] ': version.id !== selectedVersion.id
                       })}
                       headerType="borderless"
@@ -140,13 +146,33 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                 <RbButton type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</RbButton>
                 {data?.type !== 'multi_agent' && <RbButton type="primary" ghost onClick={() => appSharingModalRef.current?.handleOpen()}>{t('application.sharing')}</RbButton>}
               </>}
-              <RbButton type="primary" onClick={() => releaseModalRef.current?.handleOpen()}>{t('application.release')}</RbButton>
+              <RbButton type="primary" onClick={async () => {
+                if (data?.type === 'workflow') {
+                  const graph = workflowRef?.current?.graphRef?.current
+                  if (graph) {
+                    const errors = await runCheckOnGraph(graph, t)
+                    if (errors.length) {
+                      message.error(t('workflow.checkListHasErrors'))
+                      return
+                    }
+                  }
+                }
+                releaseModalRef.current?.handleOpen()
+              }}>{t('application.release')}</RbButton>
             </Space>
           </Flex>
           {selectedVersion && 
             <Flex gap={16} vertical className={`${heightClass} rb:overflow-y-auto`}>
               <RbCard
-                title={t('application.VersionInformation')}
+                title={() => <Flex>{t('application.VersionInformation')}
+                  <Flex align="center" className="rb:text-[#5B6167] rb:text-[12px]">
+                    (ID: {selectedVersion.id}
+                      <div className="rb:size-4.5 rb:ml-1 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"
+                        onClick={() => handleCopy(selectedVersion.id)}
+                      ></div>
+                    )
+                  </Flex>
+                </Flex>}
                 headerType="borderless"
               >
                 <div className="rb:grid rb:grid-cols-3 rb:gap-4">
