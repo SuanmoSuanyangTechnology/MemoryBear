@@ -619,12 +619,12 @@ class AppService:
         self._validate_app_accessible(app, workspace_id)
         return app
 
-    def get_release_by_version(self, app_id: uuid.UUID, version: int) -> AppRelease:
-        """按版本号获取发布快照
+    def get_release_by_id(self, app_id: uuid.UUID, release_id: uuid.UUID) -> AppRelease:
+        """按发布版本ID获取发布快照
 
         Args:
             app_id: 应用ID
-            version: 版本号（整数，按应用内递增）
+            release_id: 发布版本ID
 
         Returns:
             AppRelease: 发布快照
@@ -632,11 +632,11 @@ class AppService:
         Raises:
             BusinessException: 版本不存在或已下线
         """
-        from app.repositories.app_repository import get_release_by_version
-        release = get_release_by_version(self.db, app_id, version)
+        from app.repositories.app_repository import get_release_by_id
+        release = get_release_by_id(self.db, app_id, release_id)
         if not release:
             raise BusinessException(
-                f"版本 {version} 不存在或已下线",
+                f"版本 {release_id} 不存在或已下线",
                 BizCode.RELEASE_NOT_FOUND,
             )
         return release
