@@ -831,6 +831,32 @@ export const zh = {
       resetFeaturesTip: '请重新配置【对话功能-文件上传】功能',
       logTitle: '描述',
       range: '范围',
+      body: 'BODY 参数示例',
+      bodyRequestExample: `{
+  "message": "用户消息内容",
+  // string，必填，用户输入的对话内容；
+
+  "conversation_id": "conversation_id",
+  // string，可选，会话ID，多轮对话时传上一次返回的conversation_id，首次不传；
+
+  "user_id": "user_id",
+  // string，可选，终端用户标识，用于区分不同用户的记忆和会话，建议传业务系统的用户ID；
+
+  "variables": {},
+  // object，可选（需要应用配置才支持生效）；
+
+  "stream": false,
+  // boolean，可选，是否流式返回；默认 false，true时返回SSE事件流；
+
+  "thinking": false,
+  // boolean，可选，是否启用深度思考；默认 false（true时需要应用配置才支持生效）；
+
+  "files": [],
+  // array，可选，多模态附件列表（需要应用配置才支持生效）；
+
+  "version":"app_release_id"
+  //string，可选，应用版本ID；指定历史发布版本ID，不传则使用当前生效版本；
+}`,
     },
     table: {
       totalRecords: '共 {{total}} 条记录'
@@ -2489,6 +2515,7 @@ export const zh = {
         'document-extractor.file_selector': '文件变量',
         'list-operator.input_list': '输入变量',
       },
+      checkListHasErrors: '发布前确认检查清单中所有问题均已解决',
     },
     emotionEngine: {
       emotionEngineConfig: '情感引擎配置',
