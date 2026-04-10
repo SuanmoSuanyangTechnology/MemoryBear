@@ -101,7 +101,6 @@ celery_app.conf.update(
         'app.core.memory.agent.read_message_priority': {'queue': 'memory_tasks'},
         'app.core.memory.agent.read_message': {'queue': 'memory_tasks'},
         'app.core.memory.agent.write_message': {'queue': 'memory_tasks'},
-        'app.tasks.write_perceptual_memory': {'queue': 'memory_tasks'},
 
         # Long-term storage tasks → memory_tasks queue (batched write strategies)
         'app.core.memory.agent.long_term_storage.window': {'queue': 'memory_tasks'},
