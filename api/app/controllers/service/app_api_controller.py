@@ -63,9 +63,16 @@ async def list_apps():
 
 
 def _checkAppConfig(release: AppRelease):
-    if not release.config:
-        raise BusinessException("应用未配置，无法使用", BizCode.AGENT_CONFIG_MISSING)
-    if release.type not in (AppType.AGENT, AppType.MULTI_AGENT, AppType.WORKFLOW):
+    if release.type == AppType.AGENT:
+        if not release.config:
+            raise BusinessException("Agent 应用未配置模型", BizCode.AGENT_CONFIG_MISSING)
+    elif release.type == AppType.MULTI_AGENT:
+        if not release.config:
+            raise BusinessException("Multi-Agent 应用未配置模型", BizCode.AGENT_CONFIG_MISSING)
+    elif release.type == AppType.WORKFLOW:
+        if not release.config:
+            raise BusinessException("工作流应用未配置模型", BizCode.AGENT_CONFIG_MISSING)
+    else:
         raise BusinessException("不支持的应用类型", BizCode.APP_TYPE_NOT_SUPPORTED)
 
 
