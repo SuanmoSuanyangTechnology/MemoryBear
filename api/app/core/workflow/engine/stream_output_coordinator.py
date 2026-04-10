@@ -14,7 +14,7 @@ from app.core.workflow.engine.variable_pool import VariablePool
 logger = get_logger(__name__)
 
 SCOPE_PATTERN = re.compile(
-    r"\{\{\s*([a-zA-Z0-9_]+)\.[a-zA-Z0-9_]+\s*}}"
+    r"\{\{\s*([a-zA-Z0-9_]+)\.[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)?\s*}}"
 )
 
 

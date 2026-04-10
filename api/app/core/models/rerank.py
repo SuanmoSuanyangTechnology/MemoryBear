@@ -76,5 +76,9 @@ class RedBearRerank(BaseDocumentCompressor):
             from langchain_community.document_compressors import JinaRerank
             model_instance: JinaRerank = self._model
             return model_instance.rerank(documents=documents, query=query, top_n=top_n)
+        elif provider == ModelProvider.DASHSCOPE:
+            from langchain_community.document_compressors.dashscope_rerank import DashScopeRerank
+            model_instance: DashScopeRerank = self._model
+            return model_instance.rerank(documents=documents, query=query, top_n=top_n)
         else:
             raise ValueError(f"不支持的模型提供商: {provider}")

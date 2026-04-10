@@ -1,4 +1,36 @@
 {
+  "v0.2.10": {
+    "introduction": {
+      "codeName": "炼剑",
+      "releaseDate": "2026-4-8",
+      "upgradePosition": "🐻 全面强化工作流引擎、引入 Agent 深度思考模式与多模态记忆读取，百炼成锋，剑指生产就绪",
+      "coreUpgrades": [
+        "1. 工作流引擎增强<br>* 会话变量文件格式支持：支持文件类型值及本地/远程默认值配置<br>* 列表操作节点：新增专用列表操作节点<br>* 模板转换支持 HTML：扩展富内容渲染能力<br>* 表单返回与提交：工作流返回交互式表单，前端支持提交<br>* HTTP 节点 XML 响应：拓宽企业级 API 集成兼容性<br>* 开场白与文件引用：支持配置开场白及附件引用<br>* 模板转换三级变量：支持深层嵌套变量访问<br>* 节点连线添加按钮：连线处新增内联添加按钮",
+        "2. Agent 智能 🧠<br>* Agent 深度思考模式：支持更充分的推理以产出高质量回答<br>* 模型深度思考特性开关：模型级特性标识与应用级开关控制",
+        "3. 记忆系统升级 📚<br>* 用户记忆库分页：支持大规模记忆集合分页浏览<br>* RAG 用户记忆数据结构刷新：后端 API 数据结构重新设计<br>* 多模态记忆读取：支持检索图像、音频等非文本记忆<br>* 语义剪枝阈值提示文案：显示描述性区间标签",
+        "4. 前端与体验 🎨<br>* 技能工具删除状态展示：工具列表显示删除状态标识<br>* 仪表盘日环比数据：关键指标增加与昨日对比数据",
+        "5. 稳健性与缺陷修复 🔧<br>* 参数提取空值处理：优雅处理缺失数据<br>* Token 消耗展示优化：确保用量报告准确<br>* 模型参数负值修复：明确参数范围定义<br>* 应用共享删除同步：正确更新所有共享记录<br>* 记忆写入任务排序：按时间戳顺序执行<br>* 多模态模型缺失优雅处理：不再中断感知记忆写入<br>* 自定义工具 Number 变量传递：解决类型转换问题<br>* 集群子代理保存后显示：修复未反显问题<br>* 记忆开启后流式输出修复：解决字符串序列化问题",
+        "<br>",
+        "v0.2.10 标志着平台向生产成熟度迈出的重要一步。深度思考、交互式表单工作流与多模态记忆的结合展现了平台从记忆存储向综合认知基础设施的演进。我们期待 4 月 17 日 v0.3.0 发布会，届时将带来更深层的 Agent 推理能力、多智能体协作功能及记忆智能管线的进一步优化。剑已炼成，只待出鞘。",
+        "MemoryBear — 百炼成锋 🐻✨"
+      ]
+    },
+    "introduction_en": {
+      "codeName": "LianJian",
+      "releaseDate": "2026-4-8",
+      "upgradePosition": "🐻 Comprehensive workflow engine enhancements, Agent deep thinking mode, and multimodal memory reading — forging the blade for production readiness",
+      "coreUpgrades": [
+        "1. Workflow Engine Enhancements<br>* Session Variable File Support: File-type values with local/remote defaults<br>* List Operation Node: Dedicated node for array manipulation<br>* Template Conversion HTML Support: Rich-content rendering<br>* Form Return & Submission: Interactive forms in workflow conversations<br>* HTTP Node XML Response: Enterprise API integration compatibility<br>* Opening Remarks & File References: Configurable conversation openers<br>* Template Conversion Three-Level Variables: Deep nested variable access<br>* Node Connection Add Button: Inline add button on connections",
+        "2. Agent Intelligence 🧠<br>* Agent Deep Thinking Mode: Thorough reasoning for complex queries<br>* Model Deep Thinking Feature Toggle: Model-level flag with per-app control",
+        "3. Memory System Upgrades 📚<br>* User Memory Pagination: Paginated browsing for large collections<br>* RAG User Memory Data Structure Refresh: Redesigned backend API contracts<br>* Multimodal Memory Reading: Retrieval of image, audio, and non-text memory<br>* Semantic Pruning Threshold Hints: Descriptive range labels for configuration",
+        "4. Frontend & Usability 🎨<br>* Skill Tool Deletion Status Display: Deletion indicators in tool list<br>* Dashboard Day-over-Day Comparison: Key metrics with yesterday comparison",
+        "5. Robustness & Bug Fixes 🔧<br>* Parameter Extraction Null Handling: Graceful handling of missing data<br>* Token Consumption Display Optimization: Accurate usage reporting<br>* Model Parameter Negative Value Fix: Clear parameter range definitions<br>* App Share Deletion Sync: Correct update of all share records<br>* Memory Write Task Ordering: Chronological execution per end_user<br>* Multimodal Model Missing Graceful Handling: No more interrupted writes<br>* Custom Tool Number Variable Pass-through: Type coercion fix<br>* Cluster Sub-Agent Display After Save: Fixed UI reflection<br>* Memory-Enabled Streaming Output Fix: String serialization resolved",
+        "<br>",
+        "v0.2.10 marks a significant step toward production maturity. The combination of deep thinking, interactive form workflows, and multimodal memory demonstrates the platform's evolution from memory storage to comprehensive cognitive infrastructure. We look forward to the v0.3.0 launch on April 17, bringing deeper agent reasoning, multi-agent collaboration, and further memory intelligence refinements. The blade has been forged — now it's time to wield it.",
+        "MemoryBear — Forging the Blade 🐻✨"
+      ]
+    }
+  },
   "v0.2.8": {
     "introduction": {
       "codeName": "景玉",

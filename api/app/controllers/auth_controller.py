@@ -136,7 +136,7 @@ async def refresh_token(
     # 检查用户是否存在
     user = auth_service.get_user_by_id(db, userId)
     if not user:
-        raise BusinessException(t("auth.user.not_found"), code=BizCode.USER_NOT_FOUND)
+        raise BusinessException(t("auth.user.not_found"), code=BizCode.USER_NO_ACCESS)
     
     # 检查 refresh token 黑名单
     if settings.ENABLE_SINGLE_SESSION:

@@ -23,7 +23,7 @@ class UserRepository:
         db_logger.debug(f"根据 ID 查询用户：user_id={user_id}")
         
         try:
-            user = self.db.query(User).options(joinedload(User.tenant)).filter(User.id == user_id).first()
+            user = self.db.query(User).options(joinedload(User.tenant)).filter(User.id == user_id, User.is_active.is_(True)).first()
             if user:
                 # 检查租户状态，租户禁用时返回 None
                 if user.tenant and not user.tenant.is_active:

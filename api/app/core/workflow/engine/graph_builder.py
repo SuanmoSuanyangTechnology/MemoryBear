@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 #   ["Hello ", "{{user.name}}", "!"]
 _OUTPUT_PATTERN = re.compile(r'\{\{.*?}}|[^{}]+')
 # Strict variable format: {{ node_id.field_name }}
-_VARIABLE_PATTERN = re.compile(r'\{\{\s*[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+\s*}}')
+_VARIABLE_PATTERN = re.compile(r'\{\{\s*[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)?\s*}}')
 
 
 class GraphBuilder:
