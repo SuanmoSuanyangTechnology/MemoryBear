@@ -86,10 +86,36 @@ async def chat(
         app_service: Annotated[AppService, Depends(get_app_service)] = None,
         message: str = Body(..., description="聊天消息内容"),
 ):
+    """
+    Agent/Workflow 聊天接口
+
+    - 不传 version：使用当前发布版本（current_release）
+    - 传 version=N：使用指定版本号的历史快照，例如 /v1/app/chat?version=2
+    """
     body = await request.json()
     payload = AppChatRequest(**body)
 
     app = app_service.get_app(api_key_auth.resource_id, api_key_auth.workspace_id)
+
+    # 版本切换：指定 version 时查找对应历史快照
+    if payload.version is not None:
+        from sqlalchemy import select as _select
+        from app.models.app_release_model import AppRelease as _AppRelease
+        release = db.scalars(
+            _select(_AppRelease).where(
+                _AppRelease.app_id == app.id,
+                _AppRelease.version == payload.version,
+                _AppRelease.is_active.is_(True),
+            )
+        ).first()
+        if not release:
+            raise BusinessException(
+                f"版本 {payload.version} 不存在或已下线",
+                BizCode.AGENT_CONFIG_MISSING,
+            )
+        # 临时替换 current_release，后续逻辑无需改动
+        app.current_release = release
+        app.current_release_id = release.id
     other_id = payload.user_id
     workspace_id = api_key_auth.workspace_id
     end_user_repo = EndUserRepository(db)
