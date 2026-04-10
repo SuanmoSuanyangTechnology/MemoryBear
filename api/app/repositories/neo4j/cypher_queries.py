@@ -23,6 +23,7 @@ SET s += {
     end_user_id: statement.end_user_id,
     stmt_type: statement.stmt_type,
     statement: statement.statement,
+    speaker: statement.speaker,
     emotion_intensity: statement.emotion_intensity,
     emotion_target: statement.emotion_target,
     emotion_subject: statement.emotion_subject,
@@ -56,6 +57,7 @@ SET c += {
     expired_at: chunk.expired_at,
     dialog_id: chunk.dialog_id,
     content: chunk.content,
+    speaker: chunk.speaker,
     chunk_embedding: chunk.chunk_embedding,
     sequence_number: chunk.sequence_number,
     start_index: chunk.start_index,
@@ -283,7 +285,7 @@ LIMIT $limit
 """
 
 SEARCH_STATEMENTS_BY_KEYWORD = """
-CALL db.index.fulltext.queryNodes("statementsFulltext", $q) YIELD node AS s, score
+CALL db.index.fulltext.queryNodes("statementsFulltext", $query) YIELD node AS s, score
 WHERE ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
 OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
 OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
@@ -307,7 +309,7 @@ LIMIT $limit
 """
 # 查询实体名称包含指定字符串的实体
 SEARCH_ENTITIES_BY_NAME = """
-CALL db.index.fulltext.queryNodes("entitiesFulltext", $q) YIELD node AS e, score
+CALL db.index.fulltext.queryNodes("entitiesFulltext", $query) YIELD node AS e, score
 WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
 OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
 OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
@@ -337,21 +339,21 @@ LIMIT $limit
 """
 
 SEARCH_ENTITIES_BY_NAME_OR_ALIAS = """
-CALL db.index.fulltext.queryNodes("entitiesFulltext", $q) YIELD node AS e, score
+CALL db.index.fulltext.queryNodes("entitiesFulltext", $query) YIELD node AS e, score
 WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
 WITH e, score
-WITH collect({entity: e, score: score}) AS fulltextResults
+With collect({entity: e, score: score}) AS fulltextResults
 
 OPTIONAL MATCH (ae:ExtractedEntity)
 WHERE ($end_user_id IS NULL OR ae.end_user_id = $end_user_id)
   AND ae.aliases IS NOT NULL
-  AND ANY(alias IN ae.aliases WHERE toLower(alias) CONTAINS toLower($q))
+  AND ANY(alias IN ae.aliases WHERE toLower(alias) CONTAINS toLower($query))
 WITH fulltextResults, collect(ae) AS aliasEntities
 
 UNWIND (fulltextResults + [x IN aliasEntities | {entity: x, score:
      CASE 
-       WHEN ANY(alias IN x.aliases WHERE toLower(alias) = toLower($q)) THEN 1.0
-       WHEN ANY(alias IN x.aliases WHERE toLower(alias) STARTS WITH toLower($q)) THEN 0.9
+       WHEN ANY(alias IN x.aliases WHERE toLower(alias) = toLower($query)) THEN 1.0
+       WHEN ANY(alias IN x.aliases WHERE toLower(alias) STARTS WITH toLower($query)) THEN 0.9
        ELSE 0.8
      END
 }]) AS row
@@ -384,7 +386,7 @@ LIMIT $limit
 
 
 SEARCH_CHUNKS_BY_CONTENT = """
-CALL db.index.fulltext.queryNodes("chunksFulltext", $q) YIELD node AS c, score
+CALL db.index.fulltext.queryNodes("chunksFulltext", $query) YIELD node AS c, score
 WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
 OPTIONAL MATCH (c)-[:CONTAINS]->(s:Statement)
 OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
@@ -501,7 +503,7 @@ LIMIT $limit
 """
 
 SEARCH_STATEMENTS_BY_KEYWORD_TEMPORAL = """
-CALL db.index.fulltext.queryNodes("statementsFulltext", $q) YIELD node AS s, score
+CALL db.index.fulltext.queryNodes("statementsFulltext", $query) YIELD node AS s, score
 WHERE ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
   AND ((($start_date IS NULL OR (s.created_at IS NOT NULL AND datetime(s.created_at) >= datetime($start_date)))
   AND ($end_date IS NULL OR (s.created_at IS NOT NULL AND datetime(s.created_at) <= datetime($end_date))))
@@ -677,7 +679,7 @@ SET n.invalid_at = $new_invalid_at
 
 # MemorySummary keyword search using fulltext index
 SEARCH_MEMORY_SUMMARIES_BY_KEYWORD = """
-CALL db.index.fulltext.queryNodes("summariesFulltext", $q) YIELD node AS m, score
+CALL db.index.fulltext.queryNodes("summariesFulltext", $query) YIELD node AS m, score
 WHERE ($end_user_id IS NULL OR m.end_user_id = $end_user_id)
 OPTIONAL MATCH (m)-[:DERIVED_FROM_STATEMENT]->(s:Statement)
 RETURN m.id AS id,
@@ -1363,7 +1365,7 @@ RETURN c.community_id AS community_id
 
 # Community keyword search: matches name or summary via fulltext index
 SEARCH_COMMUNITIES_BY_KEYWORD = """
-CALL db.index.fulltext.queryNodes("communitiesFulltext", $q) YIELD node AS c, score
+CALL db.index.fulltext.queryNodes("communitiesFulltext", $query) YIELD node AS c, score
 WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
 RETURN c.community_id AS id,
        c.name AS name,
@@ -1451,7 +1453,7 @@ RETURN elementId(r) AS uuid
 """
 
 SEARCH_PERCEPTUAL_BY_KEYWORD = """
-CALL db.index.fulltext.queryNodes("perceptualFulltext", $q) YIELD node AS p, score
+CALL db.index.fulltext.queryNodes("perceptualFulltext", $query) YIELD node AS p, score
 WHERE p.end_user_id = $end_user_id
 RETURN p.id AS id,
        p.end_user_id AS end_user_id,

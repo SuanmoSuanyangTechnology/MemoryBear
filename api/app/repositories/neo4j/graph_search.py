@@ -2,6 +2,7 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
+from app.core.memory.utils.data.text_utils import escape_lucene_query
 from app.repositories.neo4j.cypher_queries import (
     CHUNK_EMBEDDING_SEARCH,
     COMMUNITY_EMBEDDING_SEARCH,
@@ -87,7 +88,7 @@ async def _update_activation_values_batch(
             unique_node_ids.append(node_id)
 
     if not unique_node_ids:
-        logger.warning(f"批量更新激活值：没有有效的节点ID")
+        logger.warning("批量更新激活值：没有有效的节点ID")
         return nodes
 
     # 记录去重信息（仅针对具有有效 ID 的节点）
@@ -223,7 +224,7 @@ async def _update_search_results_activation(
 
 async def search_graph(
         connector: Neo4jConnector,
-        q: str,
+        query: str,
         end_user_id: Optional[str] = None,
         limit: int = 50,
         include: List[str] = None,
@@ -234,14 +235,14 @@ async def search_graph(
     OPTIMIZED: Runs all queries in parallel using asyncio.gather()
     INTEGRATED: Updates activation values for knowledge nodes before returning results
 
-    - Statements: matches s.statement CONTAINS q
-    - Entities: matches e.name CONTAINS q
-    - Chunks: matches s.content CONTAINS q (from Statement nodes)
-    - Summaries: matches ms.content CONTAINS q
+    - Statements: matches s.statement CONTAINS query
+    - Entities: matches e.name CONTAINS query
+    - Chunks: matches s.content CONTAINS query (from Statement nodes)
+    - Summaries: matches ms.content CONTAINS query
 
     Args:
         connector: Neo4j connector
-        q: Query text
+        query: Query text for full-text search
         end_user_id: Optional group filter
         limit: Max results per category
         include: List of categories to search (default: all)
@@ -252,6 +253,9 @@ async def search_graph(
     if include is None:
         include = ["statements", "chunks", "entities", "summaries"]
 
+    # Escape Lucene special characters to prevent query parse errors
+    escaped_query = escape_lucene_query(query)
+
     # Prepare tasks for parallel execution
     tasks = []
     task_keys = []
@@ -260,7 +264,7 @@ async def search_graph(
         tasks.append(connector.execute_query(
             SEARCH_STATEMENTS_BY_KEYWORD,
             json_format=True,
-            q=q,
+            query=escaped_query,
             end_user_id=end_user_id,
             limit=limit,
         ))
@@ -270,7 +274,7 @@ async def search_graph(
         tasks.append(connector.execute_query(
             SEARCH_ENTITIES_BY_NAME_OR_ALIAS,
             json_format=True,
-            q=q,
+            query=escaped_query,
             end_user_id=end_user_id,
             limit=limit,
         ))
@@ -280,7 +284,7 @@ async def search_graph(
         tasks.append(connector.execute_query(
             SEARCH_CHUNKS_BY_CONTENT,
             json_format=True,
-            q=q,
+            query=escaped_query,
             end_user_id=end_user_id,
             limit=limit,
         ))
@@ -290,7 +294,7 @@ async def search_graph(
         tasks.append(connector.execute_query(
             SEARCH_MEMORY_SUMMARIES_BY_KEYWORD,
             json_format=True,
-            q=q,
+            query=escaped_query,
             end_user_id=end_user_id,
             limit=limit,
         ))
@@ -300,7 +304,7 @@ async def search_graph(
         tasks.append(connector.execute_query(
             SEARCH_COMMUNITIES_BY_KEYWORD,
             json_format=True,
-            q=q,
+            query=escaped_query,
             end_user_id=end_user_id,
             limit=limit,
         ))
@@ -482,7 +486,7 @@ async def search_graph_by_embedding(
         update_time = time.time() - update_start
         logger.info(f"[PERF] Activation value updates took: {update_time:.4f}s")
     else:
-        logger.info(f"[PERF] Skipping activation updates (only summaries)")
+        logger.info("[PERF] Skipping activation updates (only summaries)")
 
     return results
 
@@ -520,7 +524,7 @@ async def get_dedup_candidates_for_entities(  # 适配新版查询：使用全�
                 # 全文索引按名称检索（包含 CONTAINS 语义）
                 rows = await connector.execute_query(
                     SEARCH_ENTITIES_BY_NAME,
-                    q=name,
+                    query=escape_lucene_query(name),
                     end_user_id=end_user_id,
                     limit=100,
                 )
@@ -544,7 +548,7 @@ async def get_dedup_candidates_for_entities(  # 适配新版查询：使用全�
                 try:
                     rows = await connector.execute_query(
                         SEARCH_ENTITIES_BY_NAME,
-                        q=name.lower(),
+                        query=escape_lucene_query(name.lower()),
                         end_user_id=end_user_id,
                         limit=100,
                     )
@@ -593,11 +597,12 @@ async def search_graph_by_keyword_temporal(
     - Returns up to 'limit' statements
     """
     if not query_text:
-        logger.warning(f"query_text不能为空")
+        logger.warning("query_text不能为空")
         return {"statements": []}
+    escaped_query = escape_lucene_query(query_text)
     statements = await connector.execute_query(
         SEARCH_STATEMENTS_BY_KEYWORD_TEMPORAL,
-        q=query_text,
+        query=escaped_query,
         end_user_id=end_user_id,
         start_date=start_date,
         end_date=end_date,
@@ -671,7 +676,7 @@ async def search_graph_by_dialog_id(
     - Returns up to 'limit' dialogues
     """
     if not dialog_id:
-        logger.warning(f"dialog_id不能为空")
+        logger.warning("dialog_id不能为空")
         return {"dialogues": []}
 
     dialogues = await connector.execute_query(
@@ -690,7 +695,7 @@ async def search_graph_by_chunk_id(
         limit: int = 1,
 ) -> Dict[str, List[Dict[str, Any]]]:
     if not chunk_id:
-        logger.warning(f"chunk_id不能为空")
+        logger.warning("chunk_id不能为空")
         return {"chunks": []}
     chunks = await connector.execute_query(
         SEARCH_CHUNK_BY_CHUNK_ID,
@@ -968,7 +973,7 @@ async def search_graph_l_valid_at(
 
 async def search_perceptual(
         connector: Neo4jConnector,
-        q: str,
+        query: str,
         end_user_id: Optional[str] = None,
         limit: int = 10,
 ) -> Dict[str, List[Dict[str, Any]]]:
@@ -979,7 +984,7 @@ async def search_perceptual(
 
     Args:
         connector: Neo4j connector
-        q: Query text
+        query: Query text for full-text search
         end_user_id: Optional user filter
         limit: Max results
 
@@ -989,7 +994,7 @@ async def search_perceptual(
     try:
         perceptuals = await connector.execute_query(
             SEARCH_PERCEPTUAL_BY_KEYWORD,
-            q=q,
+            query=escape_lucene_query(query),
             end_user_id=end_user_id,
             limit=limit,
         )

@@ -153,7 +153,7 @@ class PerceptualSearchService:
             return []
         try:
             r = await search_perceptual(
-                connector=connector, q=escaped,
+                connector=connector, query=escaped,
                 end_user_id=self.end_user_id,
                 limit=limit * 5,  # 多查一些以提高命中率
             )
@@ -178,7 +178,7 @@ class PerceptualSearchService:
             if not escaped.strip():
                 return []
             r = await search_perceptual(
-                connector=connector, q=escaped,
+                connector=connector, query=escaped,
                 end_user_id=self.end_user_id, limit=limit,
             )
             return r.get("perceptuals", [])
