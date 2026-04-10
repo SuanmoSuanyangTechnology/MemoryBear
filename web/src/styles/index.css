@@ -421,3 +421,6 @@ body {
 .ant-picker-outlined:focus-within {
   box-shadow: none;
 }
+.ͼ1.cm-focused {
+  outline: none;
+}

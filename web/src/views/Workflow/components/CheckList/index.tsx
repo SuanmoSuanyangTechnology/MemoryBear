@@ -1,4 +1,4 @@
-import { type FC, useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, type FC } from 'react'
 import { Popover, Flex } from 'antd'
 import { WarningFilled } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -8,17 +8,19 @@ import type { WorkflowRef } from '@/views/ApplicationConfig/types'
 import { nodeLibrary } from '../../constant'
 import { getToolMethods } from '@/api/tools'
 import RbDrawer from '@/components/RbDrawer'
+import { useWorkflowStore } from '@/store/workflow'
 
 interface CheckListProps {
   workflowRef: React.RefObject<WorkflowRef>
+  appId: string
 }
 
-interface CheckError {
+export interface CheckError {
   key: string
   message: string
 }
 
-interface NodeCheckResult {
+export interface NodeCheckResult {
   id: string
   name: string
   type: string
@@ -112,10 +114,67 @@ function validateNode(type: string, config: Record<string, any>): CheckError[] {
   return errors
 }
 
-const CheckList: FC<CheckListProps> = ({ workflowRef }) => {
+export async function runCheckOnGraph(
+  graph: import('@antv/x6').Graph,
+  t: (key: string) => string
+): Promise<NodeCheckResult[]> {
+  const nodes = graph.getNodes()
+  const edges = graph.getEdges()
+  const targetIds = new Set<string>()
+  const childTargetIds = new Set<string>()
+  edges.forEach(e => {
+    targetIds.add(e.getTargetCellId())
+    const srcData = graph.getCellById(e.getSourceCellId())?.getData()
+    const tgtData = graph.getCellById(e.getTargetCellId())?.getData()
+    if (srcData?.cycle && tgtData?.cycle && srcData.cycle === tgtData.cycle) {
+      childTargetIds.add(e.getTargetCellId())
+    }
+  })
+
+  const checked: NodeCheckResult[] = []
+  for (const node of nodes) {
+    const data = node.getData()
+    if (!data || ['add-node', 'notes', 'cycle-start', 'break'].includes(data.type)) continue
+
+    const errors: CheckError[] = []
+    const isChildNode = !!data.cycle
+    const hasIncoming = isChildNode ? childTargetIds.has(node.id) : !['start', 'cycle-start'].includes(data.type) ? targetIds.has(node.id) : true
+    if (!hasIncoming) errors.push({ key: 'notConnected', message: t('workflow.notConnected') })
+
+    const configErrors = validateNode(data.type, data.config ?? {})
+    configErrors.forEach(e => {
+      errors.push({ key: e.key, message: `${t(`workflow.checkListErrors.${e.key}`)} ${t('workflow.cannotBeEmpty')}`.trim() })
+    })
+
+    if (data.type === 'tool') {
+      const toolId = data.config?.tool_id?.defaultValue ?? data.config?.tool_id
+      const toolParameters = data.config?.tool_parameters?.defaultValue ?? data.config?.tool_parameters ?? {}
+      if (toolId) {
+        try {
+          const methods = await getToolMethods(toolId) as Array<{ name: string; parameters: Array<{ name: string; required: boolean }> }>
+          const operation = toolParameters?.operation
+          const method = operation ? methods.find(m => m.name === operation) : methods[0]
+          if (method) {
+            method.parameters
+              .filter(p => p.required && (toolParameters[p.name] === undefined || toolParameters[p.name] === null || toolParameters[p.name] === ''))
+              .forEach(p => errors.push({ key: 'tool.tool_parameters', message: `${p.name} ${t('workflow.cannotBeEmpty')}` }))
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    if (errors.length) {
+      checked.push({ id: node.id, name: data.name || t(`workflow.${data.type}`), type: data.type, icon: nodeIconMap[data.type] ?? '', errors })
+    }
+  }
+  return checked
+}
+
+const CheckList: FC<CheckListProps> = ({ workflowRef, appId }) => {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
-  const [results, setResults] = useState<NodeCheckResult[]>([])
+  const { setCheckResults, getCheckResults } = useWorkflowStore()
+  const results = getCheckResults(appId)
   const timerRef = useRef<ReturnType<typeof setTimeout>>()
 
   const runCheck = useCallback(async () => {
@@ -195,7 +254,7 @@ const CheckList: FC<CheckListProps> = ({ workflowRef }) => {
   const scheduleCheck = useCallback(() => {
     clearTimeout(timerRef.current)
     timerRef.current = setTimeout(async () => {
-      setResults(await runCheck())
+      setCheckResults(appId, await runCheck())
     }, 500)
   }, [runCheck])
 
@@ -211,7 +270,7 @@ const CheckList: FC<CheckListProps> = ({ workflowRef }) => {
     }
   }, [workflowRef.current?.graphRef?.current])
 
-  const handleOpen = () => {
+const handleOpen = () => {
     setOpen(true)
   }
 

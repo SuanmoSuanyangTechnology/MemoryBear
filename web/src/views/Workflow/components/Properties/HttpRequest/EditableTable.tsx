@@ -38,12 +38,44 @@ const EditableTable: FC<EditableTableProps> = ({
     ...(typeOptions.length > 0 && { type: typeOptions[0].value })
   });
 
-  // Filter options based on boolean type if needed
-  const booleanFilterOptions = useMemo(() => {
-    return filterBooleanType
-      ? options.filter(option => option.dataType !== 'boolean')
-      : options
-  }, [options, filterBooleanType])
+  const namefilterOptions = useMemo(() => {
+    const filterList: Suggestion[] = [];
+    options.forEach(vo => {
+      if (vo.dataType === 'file') {
+        filterList.push({
+          ...vo,
+          disabled: true,
+          children: vo.children?.filter(child => child.dataType !== 'boolean')
+        })
+      } else if (vo.dataType !== 'array[file]') {
+        filterList.push(vo)
+      }
+    })
+
+    return filterList
+  }, [options])
+  const valueFilterOptions = (type?: string) => {
+    let filterOptions: Suggestion[] = []
+    options.forEach(vo => {
+      if (type === 'file' && vo.dataType === 'file') {
+        filterOptions.push({
+          ...vo,
+          children: []
+        })
+      } else if (type === 'file' && vo.dataType === 'array[file]') {
+        filterOptions.push(vo)
+      } else if (vo.dataType === 'file') {
+        filterOptions.push({
+          ...vo,
+          disabled: true
+        })
+      } else if (vo.dataType !== 'array[file]') {
+        filterOptions.push(vo)
+      }
+    })
+
+    return filterOptions
+  }
 
   const getColumns = (remove: (index: number) => void): TableProps<TableRow>['columns'] => {
     const hasType = typeOptions.length > 0;
@@ -57,7 +89,7 @@ const EditableTable: FC<EditableTableProps> = ({
         render: (_: any, __: TableRow, index: number) => (
           <Form.Item name={[index, 'name']} className={formClassName}>
             <Editor
-              options={booleanFilterOptions.filter(option => !option.dataType.includes('file'))}
+              options={namefilterOptions}
               type="input"
               className={contentClassName}
               size={size}
@@ -105,9 +137,7 @@ const EditableTable: FC<EditableTableProps> = ({
           >
             {(form) => {
               const currentType = form.getFieldValue([...Array.isArray(parentName) ? parentName : [parentName], index, 'type']);
-              const filteredOptions = currentType === 'file'
-                ? booleanFilterOptions.filter(option => option.dataType.includes('file'))
-                : booleanFilterOptions.filter(option => !option.dataType.includes('file'));
+              const filteredOptions = valueFilterOptions(currentType)
               
               return (
                 <Form.Item name={[index, 'value']} className={formClassName}>
