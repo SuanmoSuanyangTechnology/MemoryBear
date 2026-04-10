@@ -69,6 +69,7 @@ class WorkflowImportService:
             edges=workflow_config.edges,
             nodes=workflow_config.nodes,
             variables=workflow_config.variables,
+            features=workflow_config.features,
             warnings=workflow_config.warnings,
             errors=workflow_config.errors
         )
@@ -95,7 +96,8 @@ class WorkflowImportService:
                 workflow_config=WorkflowConfigCreate(
                     nodes=config["nodes"],
                     edges=config["edges"],
-                    variables=config["variables"]
+                    variables=config["variables"],
+                    features=config.get("features", {})
                 )
             )
         )

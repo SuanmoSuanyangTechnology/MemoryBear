@@ -15,7 +15,7 @@ from app.core.workflow.adapters.errors import (
     ExceptionType
 )
 from app.core.workflow.nodes.assigner.config import AssignmentItem
-from app.core.workflow.nodes.base_config import VariableDefinition, BaseNodeConfig
+from app.core.workflow.nodes.base_config import VariableDefinition as NodeVariableDefinition, BaseNodeConfig
 from app.core.workflow.nodes.code.config import InputVariable, OutputVariable
 from app.core.workflow.nodes.configs import (
     StartNodeConfig,
@@ -36,6 +36,7 @@ from app.core.workflow.nodes.configs import (
     ListOperatorNodeConfig,
     DocExtractorNodeConfig,
 )
+from app.schemas.workflow_schema import VariableDefinition as SchemaVariableDefinition
 from app.core.workflow.nodes.cycle_graph.config import (
     ConditionDetail as LoopConditionDetail,
     ConditionsConfig,
@@ -98,6 +99,7 @@ class DifyConverter(BaseConverter):
             NodeType.CYCLE_START: lambda x: {},
             NodeType.BREAK: lambda x: {},
         }
+        self._file_vars_to_conv: list[SchemaVariableDefinition] = []
 
     def get_node_convert(self, node_type):
         func = self.CONFIG_CONVERT_MAP.get(node_type, lambda x: {})
@@ -286,19 +288,25 @@ class DifyConverter(BaseConverter):
                 )
                 continue
 
-            if var_type in ["file", "array[file]"]:
-                self.errors.append(
-                    ExceptionDefinition(
-                        type=ExceptionType.VARIABLE,
-                        node_id=node["id"],
-                        node_name=node_data["title"],
-                        name=var["variable"],
-                        detail=f"Unsupported Variable type for start node: {var_type}"
-                    )
-                )
+            if var_type in [VariableType.FILE, VariableType.ARRAY_FILE]:
+                # 开始节点不支持文件变量，转为会话变量
+                self._file_vars_to_conv.append(SchemaVariableDefinition(
+                    name=var["variable"],
+                    type=var_type.value,
+                    required=var.get("required", False),
+                    default=None,
+                    description=var.get("label", ""),
+                ))
+                self.warnings.append(ExceptionDefinition(
+                    type=ExceptionType.VARIABLE,
+                    node_id=node["id"],
+                    node_name=node_data["title"],
+                    name=var["variable"],
+                    detail=f"File variable '{var['variable']}' is not supported in start node, moved to conversation variables"
+                ))
                 continue
 
-            var_def = VariableDefinition(
+            var_def = NodeVariableDefinition(
                 name=var["variable"],
                 type=var_type,
                 required=var["required"],
@@ -836,4 +844,77 @@ class DifyConverter(BaseConverter):
             file_selector=file_selector,
         ).model_dump()
         self.config_validate(node["id"], node["data"]["title"], DocExtractorNodeConfig, result)
+        return result
+
+    @staticmethod
+    def convert_features(features: dict) -> dict:
+        """Convert Dify features to MemoryBear FeaturesConfigForm format."""
+        if not features:
+            return {}
+
+        result: dict = {}
+
+        # opening_statement
+        opening = features.get("opening_statement", "")
+        suggested = features.get("suggested_questions", [])
+        result["opening_statement"] = {
+            "enabled": bool(opening),
+            "statement": opening or None,
+            "suggested_questions": suggested,
+        }
+
+        # citation (对应 Dify retriever_resource)
+        retriever = features.get("retriever_resource", {})
+        result["citation"] = {
+            "enabled": retriever.get("enabled", False) if isinstance(retriever, dict) else False,
+        }
+
+        # file_upload: Dify allowed_file_types 数组 -> 前端扁平字段
+        file_upload = features.get("file_upload", {})
+        allowed_types = file_upload.get("allowed_file_types", []) if file_upload else []
+        allowed_methods = file_upload.get("allowed_file_upload_methods", ["local_file", "remote_url"])
+        if isinstance(allowed_methods, list):
+            if len(allowed_methods) >= 2:
+                transfer_method = "both"
+            elif allowed_methods:
+                transfer_method = allowed_methods[0]
+            else:
+                transfer_method = "both"
+        else:
+            transfer_method = allowed_methods or "both"
+
+        file_config = file_upload.get("fileUploadConfig", {})
+        result["file_upload"] = {
+            "enabled": file_upload.get("enabled", False) if file_upload else False,
+            "image_enabled": "image" in allowed_types,
+            "image_max_size_mb": file_config.get("image_file_size_limit", 10) if file_config else 10,
+            "image_allowed_extensions": ["png", "jpg", "jpeg"],
+            "audio_enabled": "audio" in allowed_types,
+            "audio_max_size_mb": file_config.get("audio_file_size_limit", 50) if file_config else 50,
+            "audio_allowed_extensions": ["mp3", "wav", "m4a"],
+            "document_enabled": "document" in allowed_types,
+            "document_max_size_mb": file_config.get("file_size_limit", 100) if file_config else 100,
+            "document_allowed_extensions": ["pdf", "docx", "doc", "xlsx", "xls", "txt", "csv", "json", "md"],
+            "video_enabled": "video" in allowed_types,
+            "video_max_size_mb": file_config.get("video_file_size_limit", 100) if file_config else 100,
+            "video_allowed_extensions": ["mp4", "mov"],
+            "max_file_count": file_upload.get("number_limits", 1) if file_upload else 1,
+            "allowed_transfer_methods": transfer_method,
+        }
+
+        # text_to_speech
+        tts = features.get("text_to_speech", {})
+        result["text_to_speech"] = {
+            "enabled": tts.get("enabled", False) if isinstance(tts, dict) else False,
+            "voice": tts.get("voice") if isinstance(tts, dict) else None,
+            "language": tts.get("language") if isinstance(tts, dict) else None,
+            "autoplay": False,
+        }
+
+        # suggested_questions_after_answer
+        sqa = features.get("suggested_questions_after_answer", {})
+        result["suggested_questions_after_answer"] = {
+            "enabled": sqa.get("enabled", False) if isinstance(sqa, dict) else False,
+        }
+
         return result

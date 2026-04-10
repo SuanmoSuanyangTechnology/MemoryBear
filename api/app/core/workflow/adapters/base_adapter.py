@@ -40,6 +40,7 @@ class WorkflowParserResult(BaseModel):
     edges: list[EdgeDefinition] = Field(default_factory=list)
     nodes: list[NodeDefinition] = Field(default_factory=list)
     variables: list[VariableDefinition] = Field(default_factory=list)
+    features: dict[str, Any] = Field(default_factory=dict)
     warnings: list[ExceptionDefinition] = Field(default_factory=list)
     errors: list[ExceptionDefinition] = Field(default_factory=list)
 
@@ -51,6 +52,7 @@ class WorkflowImportResult(BaseModel):
     edges: list[EdgeDefinition] = Field(default_factory=list)
     nodes: list[NodeDefinition] = Field(default_factory=list)
     variables: list[VariableDefinition] = Field(default_factory=list)
+    features: dict[str, Any] = Field(default_factory=dict)
     warnings: list[ExceptionDefinition] = Field(default_factory=list)
     errors: list[ExceptionDefinition] = Field(default_factory=list)
 

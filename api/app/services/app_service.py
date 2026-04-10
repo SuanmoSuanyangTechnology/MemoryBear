@@ -411,6 +411,7 @@ class AppService:
             edges=[edge.model_dump() for edge in data.edges] if data.edges else [],
             variables=[var.model_dump() for var in data.variables] if data.variables else [],
             execution_config=data.execution_config.model_dump() if data.execution_config else {},
+            features=data.features if data.features else {},
             triggers=[trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
             is_active=True,
             created_at=now,
