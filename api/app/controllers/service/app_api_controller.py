@@ -111,7 +111,7 @@ async def chat(
         if not release:
             raise BusinessException(
                 f"版本 {payload.version} 不存在或已下线",
-                BizCode.AGENT_CONFIG_MISSING,
+                BizCode.RELEASE_NOT_FOUND,
             )
         # 临时替换 current_release，后续逻辑无需改动
         app.current_release = release
@@ -328,6 +328,4 @@ async def chat(
             msg="工作流任务执行成功"
         )
     else:
-        from app.core.exceptions import BusinessException
-        from app.core.error_codes import BizCode
         raise BusinessException(f"不支持的应用类型: {app_type}", BizCode.APP_TYPE_NOT_SUPPORTED)
