@@ -46,6 +46,9 @@ class OpenClawTool(BuiltinTool):
             "Shell 命令执行、网络搜索等能力。支持文本和图片多模态交互。"
         )
 
+    def get_required_config_parameters(self) -> List[str]:
+        return ["server_url", "api_key"]
+        
     @property
     def parameters(self) -> List[ToolParameter]:
         return [
