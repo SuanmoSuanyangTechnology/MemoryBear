@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # Example:
 #   "Hello {{user.name}}!" ->
 #   ["Hello ", "{{user.name}}", "!"]
-_OUTPUT_PATTERN = re.compile(r'\{\{.*?}}|[^{}]+')
+_OUTPUT_PATTERN = re.compile(r'\{\{.*?}}|[^{]+|{')
 # Strict variable format: {{ node_id.field_name }}
 _VARIABLE_PATTERN = re.compile(r'\{\{\s*[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+\s*}}')
 
