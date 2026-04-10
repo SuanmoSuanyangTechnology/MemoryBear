@@ -16,9 +16,9 @@ import { getReleaseList, rollbackRelease, appExport } from '@/api/application'
 import ReleaseModal from './components/ReleaseModal'
 import ReleaseShareModal from './components/ReleaseShareModal'
 import AppSharingModal from './components/AppSharingModal'
-import type { Release, ReleaseModalRef, ReleaseShareModalRef, AppSharingModalRef, WorkflowRef } from './types'
+import type { Release, ReleaseModalRef, ReleaseShareModalRef, AppSharingModalRef } from './types'
 import type { Application } from '@/views/ApplicationManagement/types'
-import { runCheckOnGraph } from '@/views/Workflow/components/CheckList'
+import { useWorkflowStore } from '@/store/workflow'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
 import Markdown from '@/components/Markdown'
@@ -39,9 +39,10 @@ const heightClass = 'rb:max-h-[calc(100vh-140px)]'
  * @param data - Application data
  * @param refresh - Function to refresh application data
  */
-const ReleasePage: FC<{data: Application; refresh: () => void; workflowRef?: React.RefObject<WorkflowRef>}> = ({data, refresh, workflowRef}) => {
+const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refresh}) => {
   const { t } = useTranslation();
   const { message } = App.useApp()
+  const { getCheckResults } = useWorkflowStore()
   const releaseModalRef = useRef<ReleaseModalRef>(null)
   const releaseShareModalRef = useRef<ReleaseShareModalRef>(null)
   const appSharingModalRef = useRef<AppSharingModalRef>(null)
@@ -148,13 +149,10 @@ const ReleasePage: FC<{data: Application; refresh: () => void; workflowRef?: Rea
               </>}
               <RbButton type="primary" onClick={async () => {
                 if (data?.type === 'workflow') {
-                  const graph = workflowRef?.current?.graphRef?.current
-                  if (graph) {
-                    const errors = await runCheckOnGraph(graph, t)
-                    if (errors.length) {
-                      message.error(t('workflow.checkListHasErrors'))
-                      return
-                    }
+                  const errors = getCheckResults(data.id)
+                  if (errors.length) {
+                    message.error(t('workflow.checkListHasErrors'))
+                    return
                   }
                 }
                 releaseModalRef.current?.handleOpen()

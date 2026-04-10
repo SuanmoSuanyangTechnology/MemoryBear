@@ -207,7 +207,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
         </Flex>}
         extra={application?.type === 'workflow' && source !== 'sharing' && activeTab === 'arrangement'
           ? <Flex align="center" justify="end" gap={10} className="rb:h-8">
-            <CheckList workflowRef={workflowRef} />
+            <CheckList workflowRef={workflowRef} appId={application?.id ?? ''} />
             <Popover content={t('application.features')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
               <div
                 className="rb:cursor-pointer rb:size-7.5 rb:border rb:border-[#EBEBEB] rb:hover:bg-[#F6F6F6] rb:rounded-[10px] rb:bg-[url('@/assets/images/workflow/features.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
