@@ -2200,6 +2200,7 @@ export const zh = {
       addvariable: '会话变量',
       addChatVariable: '添加会话变量',
       editChatVariable: '编辑会话变量',
+      invalidJSON: 'JSON 格式不正确',
 
       config: {
         llm: {

@@ -2239,6 +2239,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       addvariable: 'Chat Variables',
       addChatVariable: 'Add Chat Variable',
       editChatVariable: 'Edit Chat Variable',
+      invalidJSON: 'Invalid JSON format',
 
       config: {
         llm: {

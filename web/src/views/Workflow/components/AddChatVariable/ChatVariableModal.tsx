@@ -124,7 +124,7 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
           setFileList(list);
         }
       } else if (variable.type.includes('object') && variable.defaultValue) {
-        form.setFieldValue('defaultValue', JSON.stringify(variable.defaultValue, null, 2))
+        form.setFieldValue('defaultValue', variable.defaultValue ? JSON.stringify(variable.defaultValue, null, 2) : undefined)
       }
     } else {
       form.resetFields();
@@ -342,7 +342,19 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
           </Form.Item>
         )
         : (
-          <Form.Item name="defaultValue" label={t('workflow.config.parameter-extractor.default')}>
+          <Form.Item
+            name="defaultValue"
+            label={t('workflow.config.parameter-extractor.default')}
+            rules={[
+              (type === 'object' || type === 'array[object]') ? {
+                validator: (_, value) => {
+                  if (!value) return Promise.resolve();
+                  try { JSON.parse(value); return Promise.resolve(); }
+                  catch { return Promise.reject(t('workflow.invalidJSON')); }
+                }
+              } : {}
+            ]}
+          >
             {type === 'number'
               ? <InputNumber placeholder={t('common.enter')} style={{ width: '100%' }} />
               : type === 'boolean'
