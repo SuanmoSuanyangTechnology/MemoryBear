@@ -2,13 +2,15 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
+import numpy as np
+
+from app.core.memory.llm_tools import OpenAIEmbedderClient
 from app.repositories.neo4j.cypher_queries import (
     CHUNK_EMBEDDING_SEARCH,
     COMMUNITY_EMBEDDING_SEARCH,
     ENTITY_EMBEDDING_SEARCH,
     EXPAND_COMMUNITY_STATEMENTS,
     MEMORY_SUMMARY_EMBEDDING_SEARCH,
-    PERCEPTUAL_EMBEDDING_SEARCH,
     SEARCH_CHUNK_BY_CHUNK_ID,
     SEARCH_CHUNKS_BY_CONTENT,
     SEARCH_COMMUNITIES_BY_KEYWORD,
@@ -16,7 +18,6 @@ from app.repositories.neo4j.cypher_queries import (
     SEARCH_ENTITIES_BY_NAME,
     SEARCH_ENTITIES_BY_NAME_OR_ALIAS,
     SEARCH_MEMORY_SUMMARIES_BY_KEYWORD,
-    SEARCH_PERCEPTUAL_BY_KEYWORD,
     SEARCH_STATEMENTS_BY_CREATED_AT,
     SEARCH_STATEMENTS_BY_KEYWORD,
     SEARCH_STATEMENTS_BY_KEYWORD_TEMPORAL,
@@ -27,12 +28,39 @@ from app.repositories.neo4j.cypher_queries import (
     SEARCH_STATEMENTS_L_CREATED_AT,
     SEARCH_STATEMENTS_L_VALID_AT,
     STATEMENT_EMBEDDING_SEARCH,
+    SEARCH_PERCEPTUAL_BY_KEYWORD,
+    SEARCH_PERCEPTUAL_BY_IDS,
+    SEARCH_PERCEPTUAL_BY_USER_ID,
 )
-
 # 使用新的仓储层
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 logger = logging.getLogger(__name__)
+
+
+def cosine_similarity_search(
+        query: list[float],
+        vectors: list[list[float]],
+        limit: int
+) -> dict[int, float]:
+    if not vectors:
+        return {}
+    vectors: np.ndarray = np.array(vectors, dtype=np.float32)
+    vectors_norm = vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
+    query: np.ndarray = np.array(query, dtype=np.float32)
+    query_norm = query / np.linalg.norm(query)
+
+    similarities = vectors_norm @ query_norm
+    similarities = (similarities + 1) / 2
+    top_k = min(limit, similarities.shape[0])
+    if top_k <= 0:
+        return {}
+    top_indices = np.argpartition(-similarities, top_k - 1)[-top_k:]
+    top_indices = top_indices[np.argsort(-similarities[top_indices])]
+    result = {}
+    for idx in top_indices:
+        result[idx] = similarities[idx]
+    return result
 
 
 async def _update_activation_values_batch(
@@ -348,7 +376,7 @@ async def search_graph_by_embedding(
         query_text: str,
         end_user_id: Optional[str] = None,
         limit: int = 50,
-        include: List[str] = ["statements", "chunks", "entities", "summaries"],
+        include=None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
     Embedding-based semantic search across Statements, Chunks, and Entities.
@@ -361,6 +389,8 @@ async def search_graph_by_embedding(
     - Filters by end_user_id if provided
     - Returns up to 'limit' per included type
     """
+    if include is None:
+        include = ["statements", "chunks", "entities", "summaries"]
     import time
 
     # Get embedding for the query
@@ -1006,7 +1036,7 @@ async def search_perceptual(
 
 async def search_perceptual_by_embedding(
         connector: Neo4jConnector,
-        embedder_client,
+        embedder_client: OpenAIEmbedderClient,
         query_text: str,
         end_user_id: Optional[str] = None,
         limit: int = 10,
@@ -1035,11 +1065,22 @@ async def search_perceptual_by_embedding(
 
     try:
         perceptuals = await connector.execute_query(
-            PERCEPTUAL_EMBEDDING_SEARCH,
-            embedding=embedding,
+            SEARCH_PERCEPTUAL_BY_USER_ID,
             end_user_id=end_user_id,
-            limit=limit,
         )
+        ids = [item['id'] for item in perceptuals]
+        vectors = [item['summary_embedding'] for item in perceptuals]
+        sim_res = cosine_similarity_search(embedding, vectors, limit=limit)
+        perceptual_res = {
+            ids[idx]: score
+            for idx, score in sim_res.items()
+        }
+        perceptuals = await connector.execute_query(
+            SEARCH_PERCEPTUAL_BY_IDS,
+            ids=list(perceptual_res.keys())
+        )
+        for perceptual in perceptuals:
+            perceptual["score"] = perceptual_res[perceptual["id"]]
     except Exception as e:
         logger.warning(f"search_perceptual_by_embedding: vector search failed: {e}")
         perceptuals = []

@@ -37,7 +37,6 @@ class RedBearEmbeddings(Embeddings):
                 "api_key": config.api_key,
                 "timeout": httpx.Timeout(timeout=config.timeout, connect=60.0),
                 "max_retries": config.max_retries,
-                "check_embedding_ctx_length": False,
                 "encoding_format": "float"
             }
         elif provider == ModelProvider.DASHSCOPE:

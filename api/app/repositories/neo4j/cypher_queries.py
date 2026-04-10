@@ -1450,9 +1450,16 @@ ON CREATE SET r.end_user_id = edge.end_user_id,
 RETURN elementId(r) AS uuid
 """
 
-SEARCH_PERCEPTUAL_BY_KEYWORD = """
-CALL db.index.fulltext.queryNodes("perceptualFulltext", $q) YIELD node AS p, score
+SEARCH_PERCEPTUAL_BY_USER_ID = """
+MATCH (p:Perceptual)
 WHERE p.end_user_id = $end_user_id
+RETURN p.id AS id,
+       p.summary_embedding AS summary_embedding
+"""
+
+SEARCH_PERCEPTUAL_BY_IDS = """
+MATCH (p:Perceptual)
+WHERE p.id IN $ids
 RETURN p.id AS id,
        p.end_user_id AS end_user_id,
        p.perceptual_type AS perceptual_type,
@@ -1464,16 +1471,12 @@ RETURN p.id AS id,
        p.topic AS topic,
        p.domain AS domain,
        p.created_at AS created_at,
-       p.file_type AS file_type,
-       score
-ORDER BY score DESC
-LIMIT $limit
+       p.file_type AS file_type
 """
 
-PERCEPTUAL_EMBEDDING_SEARCH = """
-CALL db.index.vector.queryNodes('perceptual_summary_embedding_index', $limit * 100, $embedding)
-YIELD node AS p, score
-WHERE p.summary_embedding IS NOT NULL AND p.end_user_id = $end_user_id
+SEARCH_PERCEPTUAL_BY_KEYWORD = """
+CALL db.index.fulltext.queryNodes("perceptualFulltext", $q) YIELD node AS p, score
+WHERE p.end_user_id = $end_user_id
 RETURN p.id AS id,
        p.end_user_id AS end_user_id,
        p.perceptual_type AS perceptual_type,
