@@ -253,8 +253,8 @@ class OperationTool(BaseTool):
                 ToolParameter(
                     name="image_url",
                     type=ParameterType.STRING,
-                    description="必须提供，要分析的图片 URL 或 base64 data URI",
-                    required=True
+                    description="要分析的图片 URL 或 base64 data URI",
+                    required=False
                 )
             ]
         else:

@@ -122,7 +122,6 @@ class OpenClawTool(BuiltinTool):
         start_time = time.time()
         try:
             message = kwargs.get("message", "")
-            operation = kwargs.get("operation", "unknown")
             if not message:
                 return ToolResult.error_result(
                     error="message 参数不能为空",
