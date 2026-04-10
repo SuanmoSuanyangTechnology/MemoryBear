@@ -91,16 +91,16 @@ async def chat(
     Agent/Workflow 聊天接口
 
     - 不传 version：使用当前生效版本（current_release，回滚后为回滚目标版本）
-    - 传 version=N：使用指定版本号的历史快照，例如 {"version": 2}
+    - 传 version=release_id：使用指定版本uuid的历史快照，例如 {"version": "{{release_id}}"}
     """
     body = await request.json()
     payload = AppChatRequest(**body)
 
     app = app_service.get_app(api_key_auth.resource_id, api_key_auth.workspace_id)
 
-    # 版本切换：指定 version 时查找对应历史快照，否则使用当前激活版本
+    # 版本切换：指定 release_id 时查找对应历史快照，否则使用当前激活版本
     if payload.version is not None:
-        active_release = app_service.get_release_by_version(app.id, payload.version)
+        active_release = app_service.get_release_by_id(app.id, payload.version)
     else:
         active_release = app.current_release
     other_id = payload.user_id
