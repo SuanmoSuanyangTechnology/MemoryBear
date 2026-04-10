@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { $getRoot, $createParagraphNode, $createTextNode } from 'lexical';
+import { $getRoot, $createParagraphNode, $createTextNode, $isParagraphNode } from 'lexical';
 
 import { $createVariableNode } from '../nodes/VariableNode';
 import { type Suggestion } from '../plugin/AutocompletePlugin'
@@ -14,24 +14,34 @@ import { type Suggestion } from '../plugin/AutocompletePlugin'
 interface InitialValuePluginProps {
   value: string;
   options?: Suggestion[];
+  onChange?: (value: string) => void;
 }
 
-const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options = [] }) => {
+const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options = [], onChange }) => {
   const [editor] = useLexicalComposerContext();
   const prevValueRef = useRef<string>('');
   const isUserInputRef = useRef(false);
   const optionsRef = useRef(options);
   optionsRef.current = options;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   useEffect(() => {
     return editor.registerUpdateListener(({ editorState, tags }) => {
       if (tags.has('programmatic')) return;
       editorState.read(() => {
         const root = $getRoot();
-        const textContent = root.getTextContent();
-        if (textContent !== prevValueRef.current) {
+        const paragraphs: string[] = [];
+        root.getChildren().forEach(child => {
+          if ($isParagraphNode(child)) {
+            paragraphs.push(child.getChildren().map(n => n.getTextContent()).join(''));
+          }
+        });
+        const text = paragraphs.join('\n');
+        if (text !== prevValueRef.current) {
           isUserInputRef.current = true;
-          prevValueRef.current = textContent;
+          prevValueRef.current = text;
+          onChangeRef.current?.(text);
         }
       });
     });

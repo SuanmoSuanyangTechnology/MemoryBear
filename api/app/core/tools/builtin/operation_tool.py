@@ -138,6 +138,29 @@ class OperationTool(BaseTool):
                     default="Asia/Shanghai"
                 )
             ]
+        elif self.operation == "datetime_to_timestamp":
+            return [
+                ToolParameter(
+                    name="input_value",
+                    type=ParameterType.STRING,
+                    description="输入值（时间字符串，如：2026-04-07 10:30:25）",
+                    required=True
+                ),
+                ToolParameter(
+                    name="input_format",
+                    type=ParameterType.STRING,
+                    description="输入时间格式（如：%Y-%m-%d %H:%M:%S）",
+                    required=False,
+                    default="%Y-%m-%d %H:%M:%S"
+                ),
+                ToolParameter(
+                    name="from_timezone",
+                    type=ParameterType.STRING,
+                    description="源时区（如：UTC, Asia/Shanghai）",
+                    required=False,
+                    default="Asia/Shanghai"
+                )
+            ]
         else:
             return []
     

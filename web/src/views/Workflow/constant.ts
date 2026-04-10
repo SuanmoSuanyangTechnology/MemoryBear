@@ -757,7 +757,7 @@ const defaultPortGroup = {
       stroke: port_color,
       strokeWidth: edge_width,
       fill: port_color,
-      opacity: 0,
+      opacity: 1,
     },
     label: {
       text: '+',
@@ -768,7 +768,7 @@ const defaultPortGroup = {
       textVerticalAnchor: 'middle',
       pointerEvents: 'none',
       y: '0.15em',
-      opacity: 0,
+      opacity: 1,
     },
   },
 }

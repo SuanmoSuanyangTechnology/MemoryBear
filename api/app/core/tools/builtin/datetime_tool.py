@@ -230,7 +230,7 @@ class DateTimeTool(BuiltinTool):
     @staticmethod
     def _datetime_to_timestamp(kwargs) -> dict:
         """日期时间转时间戳"""
-        input_value = kwargs.get("input_value")
+        input_value = kwargs.get("input_value").strip()
         input_format = kwargs.get("input_format", "%Y-%m-%d %H:%M:%S")
         timezone_str = kwargs.get("from_timezone", "Asia/Shanghai")
         
@@ -253,9 +253,9 @@ class DateTimeTool(BuiltinTool):
         return {
             "datetime": input_value,
             "timezone": timezone_str,
-            "timestamp": int(dt.timestamp()),
+            "timestamp": int(dt.timestamp()) * 1000,
             "iso_format": dt.isoformat(),
-            "result_data": int(dt.timestamp())
+            "result_data": int(dt.timestamp()) * 1000
         }
 
     def _calculate_datetime(self, kwargs) -> dict:

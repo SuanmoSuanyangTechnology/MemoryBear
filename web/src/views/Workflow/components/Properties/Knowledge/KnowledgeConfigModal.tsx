@@ -13,7 +13,7 @@ interface KnowledgeConfigModalProps {
   refresh: (values: KnowledgeConfigForm, type: 'knowledgeConfig') => void;
 }
 const retrieveTypes: RetrieveType[] = ['participle', 'semantic', 'hybrid',
-  // 'graph'
+  'graph'
 ]
 
 const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfigModalProps>(({

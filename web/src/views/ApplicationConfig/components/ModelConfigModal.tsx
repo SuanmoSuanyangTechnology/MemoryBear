@@ -155,12 +155,10 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
         </FormItem>
         {['model', 'chat'].includes(source) && <>
           <FormItem name="capability" hidden />
-          {(values?.deep_thinking || values?.capability?.includes('thinking')) && (
-            <FormItem name="deep_thinking" valuePropName="checked">
-              <Checkbox>{t('application.deep_thinking')}</Checkbox>
-            </FormItem>
-          )}
         </>}
+        <FormItem name="deep_thinking" valuePropName="checked" hidden={!['model', 'chat'].includes(source) || !(values?.deep_thinking || values?.capability?.includes('thinking'))}>
+          <Checkbox>{t('application.deep_thinking')}</Checkbox>
+        </FormItem>
         {source === 'chat' && <FormItem name="label" hidden />}
 
 

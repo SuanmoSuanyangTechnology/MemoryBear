@@ -89,14 +89,6 @@ const WordCloud: FC = () => {
     
     return {
       color: ['#155EEF'],
-      tooltip: {
-        trigger: 'item',
-        formatter: (params: any) => {
-          const dataIndex = params.dataIndex
-          const item = radarData[dataIndex]
-          return `${item.name}<br/>${item.percentage.toFixed(1)}%`
-        }
-      },
       radar: {
         indicator: radarData.map(item => ({
           name: t(`statementDetail.${item.name}`),
