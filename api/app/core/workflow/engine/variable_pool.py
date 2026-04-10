@@ -34,19 +34,22 @@ class LazyVariableDict:
             return self._cache[key]
         var_struct = self._source.get(key)
         if var_struct is None:
-            raise KeyError(key)
-        value = var_struct.instance.to_literal() if self._literal else var_struct.instance.get_value()
+            return None
+        raw = var_struct.instance.get_value()
+        # literal 模式下 dict/list 保留结构，让 Jinja2 能继续访问子字段（如 .type）
+        value = raw if (not self._literal or isinstance(raw, (dict, list))) else var_struct.instance.to_literal()
         self._cache[key] = value
         return value
 
     def get(self, key, default=None):
-        try:
-            return self._resolve(key)
-        except KeyError:
-            return default
+        value = self._resolve(key)
+        return default if value is None else value
 
     def __getitem__(self, key):
-        return self._resolve(key)
+        value = self._resolve(key)
+        if value is None:
+            raise KeyError(key)
+        return value
 
     def __getattr__(self, key):
         if key.startswith('_'):
@@ -164,7 +167,7 @@ class VariablePool:
     def transform_selector(selector):
         variable_literal = VARIABLE_PATTERN.sub(r"\1", selector).strip()
         selector = VariableSelector.from_string(variable_literal).path
-        if len(selector) != 2:
+        if len(selector) not in (2, 3):
             raise ValueError(f"Selector not valid - {selector}")
         return selector
 
@@ -195,6 +198,16 @@ class VariablePool:
         if var_instance is None:
             return None
         return var_instance
+
+    @staticmethod
+    def _extract_field(struct: "VariableStruct", field: str | None) -> Any:
+        """If field is given, drill into a dict/object variable's value."""
+        if field is None:
+            return struct.instance.get_value()
+        value = struct.instance.get_value()
+        if not isinstance(value, dict):
+            raise KeyError(f"Variable is not an object, cannot access field '{field}'")
+        return value.get(field)
 
     def get_instance(
             self,
@@ -250,12 +263,14 @@ class VariablePool:
         Raises:
             KeyError: If strict is True and the variable does not exist.
         """
+        path = self.transform_selector(selector)
         variable_struct = self._get_variable_struct(selector)
         if variable_struct is None:
             if strict:
                 raise KeyError(f"{selector} not exist")
             return default
-
+        if len(path) == 3:
+            return self._extract_field(variable_struct, path[2])
         return variable_struct.instance.get_value()
 
     def get_literal(
@@ -282,12 +297,15 @@ class VariablePool:
         Raises:
             KeyError: If strict is True and the variable does not exist.
         """
+        path = self.transform_selector(selector)
         variable_struct = self._get_variable_struct(selector)
         if variable_struct is None:
             if strict:
                 raise KeyError(f"{selector} not exist")
             return default
-
+        if len(path) == 3:
+            value = self._extract_field(variable_struct, path[2])
+            return str(value) if value is not None else ""
         return variable_struct.instance.to_literal()
 
     async def set(
@@ -345,7 +363,14 @@ class VariablePool:
         Returns:
             变量是否存在
         """
-        return self._get_variable_struct(selector) is not None
+        path = self.transform_selector(selector)
+        struct = self._get_variable_struct(selector)
+        if struct is None:
+            return False
+        if len(path) == 3:
+            value = struct.instance.get_value()
+            return isinstance(value, dict) and path[2] in value
+        return True
 
     def lazy_namespace(self, namespace: str, literal: bool = False) -> LazyVariableDict:
         return LazyVariableDict(self.variables.get(namespace, {}), literal)

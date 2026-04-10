@@ -206,8 +206,13 @@ class RedBearModelFactory:
         if provider in [ModelProvider.XINFERENCE, ModelProvider.GPUSTACK]:
             return {
                 "model": config.model_name,
-                # "base_url": config.base_url,
                 "jina_api_key": config.api_key,
+                **config.extra_params
+            }
+        elif provider == ModelProvider.DASHSCOPE:
+            return {
+                "model": config.model_name,
+                "dashscope_api_key": config.api_key,
                 **config.extra_params
             }
         else:
@@ -265,6 +270,9 @@ def get_provider_rerank_class(provider: str):
     if provider in [ModelProvider.XINFERENCE, ModelProvider.GPUSTACK]:
         from langchain_community.document_compressors import JinaRerank
         return JinaRerank
+    elif provider == ModelProvider.DASHSCOPE:
+        from langchain_community.document_compressors.dashscope_rerank import DashScopeRerank
+        return DashScopeRerank
         # elif provider == ModelProvider.OLLAMA:
     #     from langchain_ollama import OllamaEmbeddings
     #     return OllamaEmbeddings
