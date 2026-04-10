@@ -89,8 +89,8 @@ async def chat(
     """
     Agent/Workflow 聊天接口
 
-    - 不传 version：使用当前发布版本（current_release）
-    - 传 version=N：使用指定版本号的历史快照，例如 /v1/app/chat?version=2
+    - 不传 version：使用当前生效版本（current_release，回滚后为回滚目标版本）
+    - 传 version=N：使用指定版本号的历史快照，例如 {"version": 2}
     """
     body = await request.json()
     payload = AppChatRequest(**body)
