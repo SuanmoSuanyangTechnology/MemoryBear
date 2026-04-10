@@ -23,6 +23,7 @@ from app.models.user_model import User
 from app.schemas import chunk_schema
 from app.schemas.response_schema import ApiResponse
 from app.services import knowledge_service, document_service, file_service, knowledgeshare_service
+from app.services.model_service import ModelApiKeyService
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
@@ -460,18 +461,20 @@ async def retrieve_chunks(
             if retrieve_data.retrieve_type == chunk_schema.RetrieveType.Graph:
                 kb_ids = [str(kb_id) for kb_id in private_kb_ids]
                 workspace_ids = [str(workspace_id) for workspace_id in private_workspace_ids]
+                llm_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.llm_id)
+                emb_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.embedding_id)
                 # Prepare to configure chat_mdl、embedding_model、vision_model information
                 chat_model = Base(
-                    key=db_knowledge.llm.api_keys[0].api_key,
-                    model_name=db_knowledge.llm.api_keys[0].model_name,
-                    base_url=db_knowledge.llm.api_keys[0].api_base
+                    key=llm_key.api_key,
+                    model_name=llm_key.model_name,
+                    base_url=llm_key.api_base
                 )
                 embedding_model = OpenAIEmbed(
-                    key=db_knowledge.embedding.api_keys[0].api_key,
-                    model_name=db_knowledge.embedding.api_keys[0].model_name,
-                    base_url=db_knowledge.embedding.api_keys[0].api_base
+                    key=emb_key.api_key,
+                    model_name=emb_key.model_name,
+                    base_url=emb_key.api_base
                 )
-                doc = kg_retriever.retrieval(question=retrieve_data.query, workspace_ids=workspace_ids, kb_ids= kb_ids, emb_mdl=embedding_model, llm=chat_model)
+                doc = kg_retriever.retrieval(question=retrieve_data.query, workspace_ids=workspace_ids, kb_ids=kb_ids, emb_mdl=embedding_model, llm=chat_model)
                 if doc:
                     rs.insert(0, doc)
             return success(data=jsonable_encoder(rs), msg="retrieval successful")

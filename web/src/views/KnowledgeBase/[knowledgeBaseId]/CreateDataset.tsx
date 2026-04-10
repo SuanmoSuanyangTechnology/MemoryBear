@@ -94,7 +94,7 @@ const CreateDataset = () => {
   const [processingMethod, setProcessingMethod] = useState<ProcessingMethod>('directBlock');
   const [parameterSettings, setParameterSettings] = useState<ParameterSettings>('defaultSettings');
   const [pdfEnhancementEnabled, setPdfEnhancementEnabled] = useState<boolean>(true);
-  const [pdfEnhancementMethod, setPdfEnhancementMethod] = useState<string>('deepdoc');
+  const [pdfEnhancementMethod, setPdfEnhancementMethod] = useState<string>('mineru');
   const fileType = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'htm', 'html', 'json', 'ppt', 'pptx', 'txt','png','jpg','mp3','mp4','mov','wav']
   const steps = useMemo(
     () => [

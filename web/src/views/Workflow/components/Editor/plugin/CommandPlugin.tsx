@@ -50,7 +50,7 @@ const CommandPlugin = () => {
               
               // Create and insert the variable node
               const tagNode = $createVariableNode(payload.data);
-              const spaceNode = $createTextNode(' ');
+              const spaceNode = $createTextNode('');
               
               anchorNode.insertAfter(tagNode);
               tagNode.insertAfter(spaceNode);
