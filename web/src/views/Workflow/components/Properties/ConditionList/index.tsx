@@ -1,4 +1,4 @@
-import { type FC } from 'react'
+import { type FC, useMemo } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next';
 import { Form, Button, Select, InputNumber, Input, Divider, type SelectProps, Flex, Space, Row, Col } from 'antd'
@@ -47,6 +47,18 @@ const operatorsObj: { [key: string]: SelectProps['options'] } = {
     { value: 'ne', label: 'workflow.config.if-else.boolean.ne' },
     { value: 'empty', label: 'workflow.config.if-else.empty' },
     { value: 'not_empty', label: 'workflow.config.if-else.not_empty' },
+  ],
+  // 为空、不为空
+  object: [
+    { value: 'empty', label: 'workflow.config.if-else.empty' },
+    { value: 'not_empty', label: 'workflow.config.if-else.not_empty' },
+  ],
+  // 包含、不包含、为空、不为空
+  'array': [
+    { value: 'contains', label: 'workflow.config.if-else.contains' },
+    { value: 'not_contains', label: 'workflow.config.if-else.not_contains' },
+    { value: 'empty', label: 'workflow.config.if-else.empty' },
+    { value: 'not_empty', label: 'workflow.config.if-else.not_empty' },
   ]
 }
 
@@ -81,6 +93,23 @@ const ConditionList: FC<CaseListProps> = ({
     const currentValue = form.getFieldValue([parentName, 'logical_operator']);
     form.setFieldValue([parentName, 'logical_operator'], currentValue === 'and' ? 'or' : 'and');
   };
+
+  const getNumVariable = useMemo(() => {
+    const filterList: Suggestion[] = []
+    options.forEach(variable => {
+      if (variable.dataType === 'number') {
+        filterList.push(variable)
+      } else if (variable.dataType === 'file') {
+        filterList.push({
+          ...variable,
+          disabled: true,
+          children: variable.children?.filter(child => child.dataType === 'number')
+        })
+      }
+    })
+
+    return filterList
+  }, [options])
   return (
     <>
       <Form.List name={[parentName, 'expressions']}>
@@ -125,11 +154,19 @@ const ConditionList: FC<CaseListProps> = ({
                     const expressions = form.getFieldValue([parentName, 'expressions']) || [];
                     const currentExpression = expressions[index] || {};
                     const currentOperator = currentExpression.operator;
-                    const hideRightField = currentOperator === 'empty' || currentOperator === 'not_empty';
                     const leftFieldValue = currentExpression.left;
                     const leftFieldOption = options.find(option => `{{${option.value}}}` === leftFieldValue);
                     const leftFieldType = leftFieldOption?.dataType;
-                    const operatorList = operatorsObj[leftFieldType || 'default'] || operatorsObj.default || [];
+                    const hideRightField = currentOperator === 'empty' || currentOperator === 'not_empty' || ['array[object]', 'object'].includes(leftFieldType as string);
+                    const operatorList = leftFieldType && ['array[object]', 'object'].includes(leftFieldType)
+                      ? operatorsObj.object
+                      : leftFieldType && ['array[boolean]', 'boolean'].includes(leftFieldType)
+                      ? operatorsObj.boolean
+                      : leftFieldType && operatorsObj[leftFieldType]
+                      ? operatorsObj[leftFieldType]
+                      : leftFieldType?.includes('array')
+                      ? operatorsObj.array
+                      : operatorsObj.default
                     const inputType = leftFieldType === 'number' ? currentExpression.input_type : undefined;
                     return (
                       <Flex
@@ -146,10 +183,11 @@ const ConditionList: FC<CaseListProps> = ({
                               <Form.Item name={[field.name, 'left']} noStyle>
                                 <VariableSelect
                                   options={options.filter(vo =>
-                                    vo.value.includes('sys.') ||
+                                    !['file', 'array[file]'].includes(vo.dataType) &&
+                                    (vo.value.includes('sys.') ||
                                     vo.value.includes('conv.') ||
                                     vo.nodeData.type === 'loop' ||
-                                    (vo.nodeData.cycle && vo.nodeData.cycle === selectedNode?.id)
+                                    (vo.nodeData.cycle && vo.nodeData.cycle === selectedNode?.id))
                                   )}
                                   size="small"
                                   allowClear={false}
@@ -163,7 +201,7 @@ const ConditionList: FC<CaseListProps> = ({
                             <Col flex="96px">
                               <Form.Item name={[field.name, 'operator']} noStyle>
                                 <Select
-                                  options={operatorList.map(vo => ({
+                                  options={(operatorList??[]).map(vo => ({
                                     ...vo,
                                     label: t(String(vo?.label || ''))
                                   }))}
@@ -198,7 +236,7 @@ const ConditionList: FC<CaseListProps> = ({
                                         ? (
                                           <VariableSelect
                                             placeholder={t('common.pleaseSelect')}
-                                            options={options.filter(vo => vo.dataType === 'number')}
+                                            options={getNumVariable}
                                             allowClear={false}
                                             variant="borderless"
                                             size="small"
@@ -219,7 +257,7 @@ const ConditionList: FC<CaseListProps> = ({
                                 : (
                                   <Form.Item name={[field.name, 'right']} noStyle>
                                     {leftFieldType === 'boolean'
-                                      ? <RadioGroupBtn options={[ { value: true, label: 'True' }, { value: false, label: 'False' }]} />
+                                      ? <RadioGroupBtn options={[ { value: true, label: 'True' }, { value: false, label: 'False' }]} type="inner" />
                                       : <Input variant="borderless" placeholder={t('common.pleaseEnter')} />
                                     }
                                   </Form.Item>

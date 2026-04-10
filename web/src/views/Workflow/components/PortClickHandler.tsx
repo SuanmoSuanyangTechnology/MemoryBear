@@ -328,7 +328,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
   };
 
   const content = (
-    <Flex vertical gap={16} className="rb:max-h-[300px] rb:overflow-y-auto rb:p-3" style={{ minWidth: `${nodeWidth}px` }}>
+    <Flex vertical gap={16} className="rb:max-h-75 rb:overflow-y-auto rb:p-3" style={{ minWidth: `${nodeWidth}px` }}>
       {nodeLibrary.map((category) => {
         const sourceNodeData = sourceNode?.getData();
         const isChildOfLoop = sourceNodeData?.cycle && graph?.getNodes().find((n: any) => n.getData()?.id === sourceNodeData.cycle && n.getData()?.type === 'loop');

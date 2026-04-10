@@ -2342,6 +2342,11 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
             "eq": 'Is',
             "ne": 'Is Not',
           },
+          file: {
+            "empty": 'Not Exist',
+            "not_empty": 'Exists',
+            eq: 'All Are'
+          },
           else_desc: 'Used to define the logic that should be executed when the if condition is not met.',
           unset: 'Condition Not Set',
           set: 'Set',

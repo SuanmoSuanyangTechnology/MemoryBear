@@ -2303,6 +2303,11 @@ export const zh = {
             "eq": '是',
             "ne": '不是',
           },
+          file: {
+            "empty": '不存在',
+            "not_empty": '存在',
+            eq: '全都是'
+          },
           else_desc: '用于定义当 if 条件不满足时应执行的逻辑。',
           unset: '条件未设置',
           set: '已设置',
