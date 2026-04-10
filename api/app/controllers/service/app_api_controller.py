@@ -14,6 +14,7 @@ from app.core.response_utils import success
 from app.db import get_db
 from app.models.app_model import App
 from app.models.app_model import AppType
+from app.models.app_release_model import AppRelease
 from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas import AppChatRequest, conversation_schema
@@ -61,18 +62,18 @@ async def list_apps():
 #     return success(data={"received": True}, msg="消息已接收")
 
 
-def _checkAppConfig(app: App):
-    if app.type == AppType.AGENT:
-        if not app.current_release.config:
+def _checkAppConfig(release: AppRelease):
+    if release.type == AppType.AGENT:
+        if not release.config:
             raise BusinessException("Agent 应用未配置模型", BizCode.AGENT_CONFIG_MISSING)
-    elif app.type == AppType.MULTI_AGENT:
-        if not app.current_release.config:
+    elif release.type == AppType.MULTI_AGENT:
+        if not release.config:
             raise BusinessException("Multi-Agent 应用未配置模型", BizCode.AGENT_CONFIG_MISSING)
-    elif app.type == AppType.WORKFLOW:
-        if not app.current_release.config:
+    elif release.type == AppType.WORKFLOW:
+        if not release.config:
             raise BusinessException("工作流应用未配置模型", BizCode.AGENT_CONFIG_MISSING)
     else:
-        raise BusinessException("不支持的应用类型", BizCode.AGENT_CONFIG_MISSING)
+        raise BusinessException("不支持的应用类型", BizCode.APP_TYPE_NOT_SUPPORTED)
 
 
 @router.post("/chat")
@@ -86,10 +87,22 @@ async def chat(
         app_service: Annotated[AppService, Depends(get_app_service)] = None,
         message: str = Body(..., description="聊天消息内容"),
 ):
+    """
+    Agent/Workflow 聊天接口
+
+    - 不传 version：使用当前生效版本（current_release，回滚后为回滚目标版本）
+    - 传 version=N：使用指定版本号的历史快照，例如 {"version": 2}
+    """
     body = await request.json()
     payload = AppChatRequest(**body)
 
     app = app_service.get_app(api_key_auth.resource_id, api_key_auth.workspace_id)
+
+    # 版本切换：指定 version 时查找对应历史快照，否则使用当前激活版本
+    if payload.version is not None:
+        active_release = app_service.get_release_by_version(app.id, payload.version)
+    else:
+        active_release = app.current_release
     other_id = payload.user_id
     workspace_id = api_key_auth.workspace_id
     end_user_repo = EndUserRepository(db)
@@ -127,7 +140,7 @@ async def chat(
             storage_type = 'neo4j'
     app_type = app.type
     # check app config
-    _checkAppConfig(app)
+    _checkAppConfig(active_release)
 
     # 获取或创建会话（提前验证）
     conversation = conversation_service.create_or_get_conversation(
@@ -142,7 +155,7 @@ async def chat(
 
         # print("="*50)
         # print(app.current_release.default_model_config_id)
-        agent_config = agent_config_4_app_release(app.current_release)
+        agent_config = agent_config_4_app_release(active_release)
         # print(agent_config.default_model_config_id)
 
         # thinking 开关：仅当 agent 配置了 deep_thinking 且请求 thinking=True 时才启用
@@ -194,7 +207,7 @@ async def chat(
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type == AppType.MULTI_AGENT:
         # 多 Agent 流式返回
-        config = multi_agent_config_4_app_release(app.current_release)
+        config = multi_agent_config_4_app_release(active_release)
         if payload.stream:
             async def event_generator():
                 async for event in app_chat_service.multi_agent_chat_stream(
@@ -237,7 +250,7 @@ async def chat(
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type == AppType.WORKFLOW:
         # 多 Agent 流式返回
-        config = workflow_config_4_app_release(app.current_release)
+        config = workflow_config_4_app_release(active_release)
         if payload.stream:
             async def event_generator():
                 async for event in app_chat_service.workflow_chat_stream(
@@ -253,7 +266,7 @@ async def chat(
                         user_rag_memory_id=user_rag_memory_id,
                         app_id=app.id,
                         workspace_id=workspace_id,
-                        release_id=app.current_release.id,
+                        release_id=active_release.id,
                         public=True
                 ):
                     event_type = event.get("event", "message")
@@ -288,7 +301,7 @@ async def chat(
             files=payload.files,
             app_id=app.id,
             workspace_id=workspace_id,
-            release_id=app.current_release.id
+            release_id=active_release.id
         )
         logger.debug(
             "工作流试运行返回结果",
@@ -302,6 +315,4 @@ async def chat(
             msg="工作流任务执行成功"
         )
     else:
-        from app.core.exceptions import BusinessException
-        from app.core.error_codes import BizCode
         raise BusinessException(f"不支持的应用类型: {app_type}", BizCode.APP_TYPE_NOT_SUPPORTED)

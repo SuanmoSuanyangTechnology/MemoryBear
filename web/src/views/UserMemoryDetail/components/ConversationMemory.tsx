@@ -2,9 +2,9 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:34:04 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 15:35:13
+ * @Last Modified time: 2026-04-10 16:32:52
  */
-import { type FC, useState } from 'react'
+import { type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Divider, Flex } from 'antd'
@@ -23,7 +23,6 @@ interface DataItem {
 const ConversationMemory: FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()
-  const [total, setTotal] = useState(0)
 
   return (
     <RbCard
@@ -32,14 +31,12 @@ const ConversationMemory: FC = () => {
       headerClassName="rb:min-h-[54px]! rb:pt-0! rb:mb-0!"
       bodyClassName="rb:p-4! rb:pt-0! rb:pb-1! rb:h-[calc(100%-54px)]!"
       className="rb:h-full!"
-      extra={<div className="rb:text-[#5B6167] rb:leading-5">{t('userMemory.totalRagMemory')}: <span className="rb:font-medium rb:text-[#171719]">{total}</span></div>}
     >
       <PageScrollList<DataItem>
         url={getRagContentUrl}
         query={{ end_user_id: id }}
         column={1}
         gutter={0}
-        onTotalChange={setTotal}
         renderItem={(item, index) => (
           <div>
             {index !== 0 && <Divider className="rb:mt-1! rb:mb-3! rb:ml-11!" />}

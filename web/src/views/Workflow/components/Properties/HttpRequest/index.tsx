@@ -4,7 +4,7 @@
  * @Last Modified by: ZhaoYing
  * @Last Modified time: 2026-04-02 17:17:06
  */
-import { type FC, useRef, useState } from "react";
+import { type FC, useMemo, useRef, useState } from "react";
 import { useTranslation } from 'react-i18next'
 import { Form, Row, Col, Select, Button, Divider, InputNumber, Switch, Input, Flex, Radio } from 'antd'
 import { CaretDownOutlined, CaretRightOutlined, SettingOutlined } from '@ant-design/icons';
@@ -84,6 +84,64 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
     setCollapsed((prev: boolean) => !prev)
   }
 
+  const filterVariables = useMemo(() => {
+    const filterList: Suggestion[] = []
+    options.forEach(variable => {
+      if (['number', 'string'].includes(variable.dataType)) {
+        filterList.push(variable)
+      } else if (variable.dataType === 'file') {
+        filterList.push({
+          ...variable,
+          disabled: true,
+          children: variable.children?.filter(child => ['number', 'string'].includes(child.dataType))
+        })
+      }
+    })
+
+    return filterList
+  }, [options])
+  const filterVariablesWithFile = useMemo(() => {
+    const filterList: Suggestion[] = []
+    options.forEach(variable => {
+      if (['number', 'string', 'file', 'array[file]'].includes(variable.dataType)) {
+        filterList.push(variable)
+      }
+    })
+
+    return filterList
+  }, [options])
+  const jsonRawFilterVariables = useMemo(() => {
+    const filterList: Suggestion[] = []
+    options.forEach(variable => {
+      if (['number', 'string', 'array[string]', 'array[number]'].includes(variable.dataType)) {
+        filterList.push(variable)
+      } else if (variable.dataType === 'file') {
+        filterList.push({
+          ...variable,
+          disabled: true,
+          children: variable.children?.filter(child => ['number', 'string', 'file', 'array[string]', 'array[number]'].includes(child.dataType))
+        })
+      }
+    })
+
+    return filterList
+  }, [options])
+  const fileFilterVariables = useMemo(() => {
+    const filterList: Suggestion[] = []
+    options.forEach(variable => {
+      if (['array[file]'].includes(variable.dataType)) {
+        filterList.push(variable)
+      } else if (variable.dataType === 'file') {
+        filterList.push({
+          ...variable,
+          children: []
+        })
+      }
+    })
+
+    return filterList
+  }, [options])
+
   return (
     <>
       <Flex align="center" justify="space-between" className="rb:mb-1!">
@@ -117,7 +175,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
           <Form.Item name="url">
             <Editor 
               key="url"
-              options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')} 
+              options={filterVariables} 
               variant="outlined"
               type="input"
               size="small"
@@ -134,7 +192,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
           size="small"
           parentName="headers"
           title="HEADERS"
-          options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
+          options={filterVariables}
         />
       </Form.Item>
 
@@ -143,7 +201,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
           size="small"
           parentName="params"
           title="PARAMS"
-          options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
+          options={filterVariables}
         />
       </Form.Item>
 
@@ -167,7 +225,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
             <EditableTable
               size="small"
               parentName={['body', 'data']}
-              options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number' || vo.dataType.includes('file'))}
+              options={filterVariablesWithFile}
               typeOptions={[
                 { label: 'text', value: 'text' },
                 { label: 'file', value: 'file' }
@@ -180,7 +238,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
             <EditableTable
               size="small"
               parentName={['body', 'data']}
-              options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
+              options={filterVariablesWithFile}
               filterBooleanType={true}
             />
           </Form.Item>
@@ -190,7 +248,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
             <MessageEditor
               key="json"
               parentName={['body', 'data']}
-              options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
+              options={jsonRawFilterVariables}
               isArray={false}
               title="JSON"
               titleVariant="borderless"
@@ -204,7 +262,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
             <MessageEditor
               key="raw"
               parentName={['body', 'data']}
-              options={options.filter(vo => vo.dataType === 'string' || vo.dataType === 'number')}
+              options={jsonRawFilterVariables}
               isArray={false}
               title="RAW TEXT"
               titleVariant="borderless"
@@ -220,7 +278,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
             <Editor
               key={['body', 'data'].join('_')}
               placeholder={t('common.pleaseSelect')}
-              options={options.filter(vo => vo.dataType.includes('file'))}
+              options={fileFilterVariables}
               type="input"
               size="small"
               height={28}

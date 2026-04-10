@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:29 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 15:31:36
+ * @Last Modified time: 2026-04-10 18:09:56
  */
 import { type FC, useState, useRef, useEffect } from 'react';
 import clsx from 'clsx';
@@ -18,6 +18,7 @@ import ApiKeyConfigModal from './components/ApiKeyConfigModal';
 import { getApiKeyList, getApiKeyStats, deleteApiKey } from '@/api/apiKey';
 import { maskApiKeys } from '@/utils/apiKeyReplacer'
 import RbCard from '@/components/RbCard/Card';
+import CodeMirrorEditor from '@/components/CodeMirrorEditor'
 
 /**
  * API configuration page component
@@ -155,6 +156,21 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
               {t('common.copy')}
             </Button>
           </Flex>
+
+          <div className="rb:font-medium rb:mt-4!">
+            {t('application.body')}
+          </div>
+          <Flex align="start" justify="space-between" className="rb:text-[#5B6167] rb:mt-3! rb:py-2! rb:px-4! rb:bg-white rb-border rb:rounded-lg rb:leading-5">
+            <CodeMirrorEditor readOnly={true} value={t('application.bodyRequestExample')} />
+
+            <Button className="rb:px-2! rb:h-7! rb:group" onClick={() => handleCopy(t('application.bodyRequestExample'))}>
+              <div
+                className="rb:w-4 rb:h-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/copy.svg')] rb:group-hover:bg-[url('@/assets/images/copy_active.svg')]"
+              ></div>
+              {t('common.copy')}
+            </Button>
+          </Flex>
+
         </RbCard>
         <RbCard
           title={() => (<Flex align="center">

@@ -1496,6 +1496,32 @@ export const en = {
       resetFeaturesTip: 'Please reconfigure the [Conversation Features - File Upload] settings',
       logTitle: 'Description',
       range: 'Range',
+      body: 'BODY Parameter Example',
+      bodyRequestExample: `{
+  "message": "user message content",
+  // string, required, the conversation content entered by the user;
+
+  "conversation_id": "conversation_id",
+  // string, optional, session ID; for multi-turn conversations, pass the conversation_id from the previous response; omit on first request;
+
+  "user_id": "user_id",
+  // string, optional, end-user identifier to distinguish memory and sessions across users; recommended to pass your business system user ID;
+
+  "variables": {},
+  // object, optional (requires application configuration to take effect);
+
+  "stream": false,
+  // boolean, optional, whether to stream the response; defaults to false; when true, returns an SSE event stream;
+
+  "thinking": false,
+  // boolean, optional, whether to enable deep thinking; defaults to false (requires application configuration when true);
+
+  "files": [],
+  // array, optional, list of multimodal attachments (requires application configuration to take effect);
+
+  "version":"app_release_id"
+  // string, optional, application version ID; specify a historical release version ID, or omit to use the currently active version;
+}`,
     },
     userMemory: {
       userMemory: 'User Memory',
@@ -2239,6 +2265,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       addvariable: 'Chat Variables',
       addChatVariable: 'Add Chat Variable',
       editChatVariable: 'Edit Chat Variable',
+      invalidJSON: 'Invalid JSON format',
 
       config: {
         llm: {
@@ -2340,6 +2367,11 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           boolean: {
             "eq": 'Is',
             "ne": 'Is Not',
+          },
+          file: {
+            "empty": 'Not Exist',
+            "not_empty": 'Exists',
+            eq: 'All Are'
           },
           else_desc: 'Used to define the logic that should be executed when the if condition is not met.',
           unset: 'Condition Not Set',
@@ -2519,6 +2551,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         'document-extractor.file_selector': 'File variable',
         'list-operator.input_list': 'Input list',
       },
+      checkListHasErrors: 'Please resolve all issues in the checklist before publishing',
     },
     emotionEngine: {
       emotionEngineConfig: 'Emotion Engine Configuration',
