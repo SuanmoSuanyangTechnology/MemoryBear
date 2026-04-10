@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 15:02:07
+ * @Last Modified time: 2026-04-10 18:51:43
  */
 /**
  * Chat debugging component for application testing
@@ -291,7 +291,6 @@ const Chat: FC<ChatProps> = ({
         addAssistantMessage()
 
         const handleStreamMessage = (data: SSEMessage[]) => {
-          setCompareLoading(false)
 
           data.map(item => {
             const { model_config_id, conversation_id, content, message_length, audio_url, citations } = item.data as {
@@ -306,12 +305,21 @@ const Chat: FC<ChatProps> = ({
             
             switch (item.event) {
               case 'model_reasoning':
+                if (compareLoading) {
+                  setCompareLoading(false)
+                }
                 updateAssistantReasoningMessage(content, model_config_id, conversation_id)
                 break;
               case 'model_message':
+                if (compareLoading) {
+                  setCompareLoading(false)
+                }
                 updateAssistantMessage(content, model_config_id, conversation_id, audio_url)
                 break;
               case 'model_end':
+                if (compareLoading) {
+                  setCompareLoading(false)
+                }
                 const idToPoll = `${model_config_id}_${audio_url}`
                 if (audio_url && !audioStatusMap[idToPoll]) {
                   setAudioStatusMap(prev => ({
@@ -352,6 +360,9 @@ const Chat: FC<ChatProps> = ({
                 updateErrorAssistantMessage(message_length, model_config_id)
                 break;
               case 'compare_end':
+                if (compareLoading) {
+                  setCompareLoading(false)
+                }
                 setLoading(false);
                 break;
             }
@@ -473,7 +484,6 @@ const Chat: FC<ChatProps> = ({
         addClusterAssistantMessage()
 
         const handleStreamMessage = (data: SSEMessage[]) => {
-          setCompareLoading(false)
 
           data.map(item => {
             const { conversation_id, content, message_length } = item.data as { conversation_id: string, content: string, message_length: number };
@@ -485,15 +495,24 @@ const Chat: FC<ChatProps> = ({
                 }
                 break
               case 'message':
+                if (compareLoading) {
+                  setCompareLoading(false)
+                }
                 updateClusterAssistantMessage(content)
                 if (conversation_id && conversationId !== conversation_id) {
                   setConversationId(conversation_id);
                 }
                 break;
               case 'model_end':
+                if (compareLoading) {
+                  setCompareLoading(false)
+                }
                 updateClusterErrorAssistantMessage(message_length)
                 break;
               case 'compare_end':
+                if (compareLoading) {
+                  setCompareLoading(false)
+                }
                 setLoading(false);
                 break;
             }
