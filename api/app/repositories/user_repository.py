@@ -297,6 +297,10 @@ def get_user_by_id(db: Session, user_id: uuid.UUID) -> Optional[User]:
     """根据ID获取用户"""
     return UserRepository(db).get_user_by_id(user_id)
 
+def get_user_by_id_regardless_active(db: Session, user_id: uuid.UUID) -> Optional[User]:
+    """根据ID获取用户（不过滤 is_active，用于启用/禁用场景）"""
+    return db.query(User).filter(User.id == user_id).first()
+
 def get_user_by_email(db: Session, email: str) -> Optional[User]:
     """根据邮箱获取用户"""
     return UserRepository(db).get_user_by_email(email)

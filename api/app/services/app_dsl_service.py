@@ -73,15 +73,14 @@ class AppDslService:
             AppType.MULTI_AGENT: "multi_agent_config",
             AppType.WORKFLOW: "workflow"
         }.get(app.type, "config")
-        config_data = self._enrich_release_config(app.type, release.config or {})
+        config_data = self._enrich_release_config(app.type, release.config or {}, release.default_model_config_id)
         dsl = {**meta, "app": app_meta, config_key: config_data}
         return yaml.dump(dsl, default_flow_style=False, allow_unicode=True), f"{release.name}_v{release.version_name}.yaml"
 
-    def _enrich_release_config(self, app_type: str, cfg: dict) -> dict:
+    def _enrich_release_config(self, app_type: str, cfg: dict, default_model_config_id=None) -> dict:
         if app_type == AppType.AGENT:
             enriched = {**cfg}
-            if "default_model_config_id" in cfg:
-                enriched["default_model_config_ref"] = self._model_ref(cfg["default_model_config_id"])
+            enriched["default_model_config_ref"] = self._model_ref(default_model_config_id)
             if "knowledge_retrieval" in cfg:
                 enriched["knowledge_retrieval"] = self._enrich_knowledge_retrieval(cfg["knowledge_retrieval"])
             if "tools" in cfg:
@@ -91,8 +90,7 @@ class AppDslService:
             return enriched
         if app_type == AppType.MULTI_AGENT:
             enriched = {**cfg}
-            if "default_model_config_id" in cfg:
-                enriched["default_model_config_ref"] = self._model_ref(cfg["default_model_config_id"])
+            enriched["default_model_config_ref"] = self._model_ref(default_model_config_id)
             if "master_agent_id" in cfg:
                 enriched["master_agent_ref"] = self._release_ref(cfg["master_agent_id"])
             if "sub_agents" in cfg:
