@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 23:17:50
+ * @Last Modified time: 2026-04-13 12:00:09
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, type Edge } from '@antv/x6';
 import { register } from '@antv/x6-react-shape';
@@ -1022,24 +1022,39 @@ export const useWorkflowGraph = ({
 
     graphRef.current.on('node:removed', blankClick)
     // When edge connected, bring connected nodes' ports to front
-    graphRef.current.on('edge:connected', ({ isNew }) => {
-      // Bring edge to front first, then bring child nodes above edges
-      // Parent (loop/iteration) nodes stay behind to avoid covering edges
-      // Reset any port hover state left from dragging
+    graphRef.current.on('edge:connected', ({ isNew, edge }) => {
       if (isNew) {
-        graphRef.current?.getNodes().forEach(node => {
-          if (!node.getData()?.cycle) node.toFront();
-        });
-        graphRef.current?.getEdges().forEach(edge => {
-          const sourceCell = graphRef.current?.getCellById(edge.getSourceCellId());
-          const targetCell = graphRef.current?.getCellById(edge.getTargetCellId());
-          if (sourceCell?.getData()?.cycle || targetCell?.getData()?.cycle) {
-            edge.toFront();
-          }
-        });
-        graphRef.current?.getNodes().forEach(node => {
-          if (node.getData()?.cycle) node.toFront();
-        });
+        const sourceCellId = edge.getSourceCellId()
+        const targetCellId = edge.getTargetCellId()
+        const sourceCell = graphRef.current?.getCellById(sourceCellId);
+        const targetCell = graphRef.current?.getCellById(targetCellId);
+
+        sourceCell?.toFront();
+        targetCell?.toFront()
+        if (['loop', 'iteration'].includes(sourceCell?.getData()?.type)) {
+          graphRef.current?.getEdges().forEach(edge => {
+            const edgeSourceCell = graphRef.current?.getCellById(edge.getSourceCellId());
+            const edgeTargetCell = graphRef.current?.getCellById(edge.getTargetCellId());
+            if (edgeSourceCell?.getData()?.cycle === sourceCellId || edgeTargetCell?.getData()?.cycle === sourceCellId) {
+              edge.toFront();
+            }
+          });
+          graphRef.current?.getNodes().forEach(node => {
+            if (node.getData()?.cycle === sourceCellId) node.toFront();
+          });
+        }
+        if (['loop', 'iteration'].includes(targetCell?.getData()?.type)) {
+          graphRef.current?.getEdges().forEach(edge => {
+            const edgeSourceCell = graphRef.current?.getCellById(edge.getSourceCellId());
+            const edgeTargetCell = graphRef.current?.getCellById(edge.getTargetCellId());
+            if (edgeSourceCell?.getData()?.cycle === targetCellId || edgeTargetCell?.getData()?.cycle === targetCellId) {
+              edge.toFront();
+            }
+          });
+          graphRef.current?.getNodes().forEach(node => {
+            if (node.getData()?.cycle === targetCellId) node.toFront();
+          });
+        }
       }
     });
 
