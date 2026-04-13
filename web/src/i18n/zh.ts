@@ -116,7 +116,7 @@ export const zh = {
       prompt: '提示词工程',
       skills: '技能库',
       workbench: '工作台',
-      memoryRelated: '记忆相关',
+      memoryRelated: '记忆中枢',
       advancedSettings: '高级设置',
       promptHistory: '我的历史',
       platformManagement: '平台管理',
