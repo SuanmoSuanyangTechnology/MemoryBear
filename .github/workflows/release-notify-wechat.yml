@@ -49,19 +49,37 @@ jobs:
       - name: AI Summary (Qwen)
         if: steps.check.outputs.ok == 'true'
         id: ai
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
-          CONTENT=$(cat commits.txt | sed ':a;N;$!ba;s/\n/\\n/g')
+          python3 << 'PYEOF'
+          import json, os, urllib.request
 
-          SUMMARY=$(curl -s https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation \
-            -H "Authorization: Bearer ${{ secrets.DASHSCOPE_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"model\": \"qwen-plus\",
-              \"input\": {
-                \"prompt\": \"请用中文总结以下代码提交，输出3-5条要点，面向测试人员。直接输出编号列表，不要输出标题或前言：\\n$CONTENT\"
-              }
-            }" | jq -r '.output.text')
+          with open("commits.txt", "r") as f:
+            commits = f.read().strip()
 
+          prompt = "请用中文总结以下代码提交，输出3-5条要点，面向测试人员。直接输出编号列表，不要输出标题或前言：\n" + commits
+          payload = {"model": "qwen-plus", "input": {"prompt": prompt}}
+          data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+          req = urllib.request.Request(
+            "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
+            data=data,
+            headers={
+              "Authorization": "Bearer " + os.environ["DASHSCOPE_API_KEY"],
+              "Content-Type": "application/json"
+            }
+          )
+          resp = urllib.request.urlopen(req)
+          result = json.loads(resp.read().decode())
+          summary = result.get("output", {}).get("text", "AI 摘要生成失败")
+          print(summary)
+
+          with open("ai_summary.txt", "w", encoding="utf-8") as f:
+            f.write(summary)
+          PYEOF
+
+          SUMMARY=$(cat ai_summary.txt)
           echo "summary<<EOF" >> $GITHUB_OUTPUT
           echo "$SUMMARY" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
