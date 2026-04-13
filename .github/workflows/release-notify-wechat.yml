@@ -78,7 +78,7 @@ jobs:
           AI_SUMMARY: ${{ steps.ai.outputs.summary }}
         run: |
           python3 << 'PYEOF'
-          import json, os
+          import json, os, urllib.request
           content = (
             "## 🚀 Release 发布通知\n"
             "> 📦 **分支**: " + os.environ["BRANCH"] + "\n"
@@ -90,10 +90,12 @@ jobs:
             "🔗 [查看PR详情](" + os.environ["PR_URL"] + ")"
           )
           payload = {"msgtype": "markdown", "markdown": {"content": content}}
-          with open("wechat.json", "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False)
+          data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+          req = urllib.request.Request(
+            os.environ["WECHAT_WEBHOOK"],
+            data=data,
+            headers={"Content-Type": "application/json"}
+          )
+          resp = urllib.request.urlopen(req)
+          print(resp.read().decode())
           PYEOF
-
-          curl -s "$WECHAT_WEBHOOK" \
-            -H 'Content-Type: application/json' \
-            -d @wechat.json
