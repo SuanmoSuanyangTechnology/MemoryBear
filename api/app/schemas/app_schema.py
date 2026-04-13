@@ -44,6 +44,8 @@ class FileInput(BaseModel):
     upload_file_id: Optional[uuid.UUID] = Field(None, description="已上传文件ID（local_file时必填）")
     url: Optional[str] = Field(None, description="远程URL（remote_url时必填）")
     file_type: Optional[str] = Field(None, description="具体文件格式（如image/jpg、audio/wav、document/docx、video/mp4）")
+    name: Optional[str] = Field(None, description="文件名")
+    size: Optional[int] = Field(None, description="文件大小（字节）")
 
     _content = None
 
