@@ -89,11 +89,22 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
           AI_SUMMARY: ${{ steps.ai.outputs.summary }}
         run: |
-          CONTENT=$(printf '## 🚀 Release 发布通知\n> 📦 **分支**: %s\n> 👤 **提交人**: %s\n> 📝 **标题**: %s\n\n### 🧠 AI变更摘要\n%s\n\n---\n🔗 [查看PR详情](%s)' \
-            "$BRANCH" "$AUTHOR" "$PR_TITLE" "$AI_SUMMARY" "$PR_URL")
-
-          jq -n --arg content "$CONTENT" \
-            '{"msgtype": "markdown", "markdown": {"content": $content}}' > wechat_payload.json
+          python3 -c "
+          import json, os
+          content = (
+              '## 🚀 Release 发布通知\n'
+              '> 📦 **分支**: ' + os.environ['BRANCH'] + '\n'
+              '> 👤 **提交人**: ' + os.environ['AUTHOR'] + '\n'
+              '> 📝 **标题**: ' + os.environ['PR_TITLE'] + '\n\n'
+              '### 🧠 AI变更摘要\n'
+              + os.environ['AI_SUMMARY'] + '\n\n'
+              '---\n'
+              '🔗 [查看PR详情](' + os.environ['PR_URL'] + ')'
+          )
+          payload = {'msgtype': 'markdown', 'markdown': {'content': content}}
+          with open('wechat_payload.json', 'w') as f:
+              json.dump(payload, f, ensure_ascii=False)
+          "
 
           curl -s "$WECHAT_WEBHOOK" \
             -H 'Content-Type: application/json' \
