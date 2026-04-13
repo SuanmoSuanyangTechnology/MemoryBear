@@ -155,7 +155,9 @@ const ConditionList: FC<CaseListProps> = ({
                     const currentExpression = expressions[index] || {};
                     const currentOperator = currentExpression.operator;
                     const leftFieldValue = currentExpression.left;
-                    const leftFieldOption = options.find(option => `{{${option.value}}}` === leftFieldValue);
+                    const leftFieldOption = options.find(option => `{{${option.value}}}` === leftFieldValue)
+                      ?? options.flatMap(o => o.children ?? []).find(child => `{{${child.value}}}` === leftFieldValue)
+                      ?? options.flatMap(o => o.children ?? []).flatMap((c: any) => c.children ?? []).find((gc: any) => `{{${gc.value}}}` === leftFieldValue);
                     const leftFieldType = leftFieldOption?.dataType;
                     const hideRightField = currentOperator === 'empty' || currentOperator === 'not_empty' || ['array[object]', 'object'].includes(leftFieldType as string);
                     const operatorList = leftFieldType && ['array[object]', 'object'].includes(leftFieldType)

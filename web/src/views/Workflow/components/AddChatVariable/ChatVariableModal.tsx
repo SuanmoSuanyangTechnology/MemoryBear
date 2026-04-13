@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-30 13:59:36 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-13 12:16:00
+ * @Last Modified time: 2026-04-13 15:26:33
  */
 import { forwardRef, useImperativeHandle, useState, useRef, useMemo } from 'react';
 import { Form, Input, Select, InputNumber, Button, Row, Col, Flex } from 'antd';
@@ -136,7 +136,7 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
     form.validateFields().then((values) => {
       const defaultValue = Array.isArray(values.defaultValue)
         ? values.defaultValue.filter((v: any) => v !== undefined && v !== null && v !== '')
-        : values.type.includes('object')
+        : values.type.includes('object') && values.defaultValue
         ? JSON.parse(values.defaultValue)
         : values.defaultValue;
       refresh({ ...values, defaultValue }, editIndex);

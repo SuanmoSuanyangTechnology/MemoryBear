@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-13 12:00:09
+ * @Last Modified time: 2026-04-13 15:33:58
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, type Edge } from '@antv/x6';
 import { register } from '@antv/x6-react-shape';
@@ -111,6 +111,7 @@ export const useWorkflowGraph = ({
     graphRef.current.getNodes().forEach(node => {
       const data = node.getData()
       if (data?.type === 'if-else' || data?.type === 'question-classifier') {
+        console.log('chatVariables', chatVariables)
         node.setData({ ...data, chatVariables }, { silent: true })
       }
     })

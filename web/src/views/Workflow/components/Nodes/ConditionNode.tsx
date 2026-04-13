@@ -31,6 +31,8 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
   };
   const labelRender = (value: string) => {
     const filterOption = variableList.find(vo => `{{${vo.value}}}` === value)
+      ?? variableList.flatMap(vo => vo.children ?? []).find(child => `{{${child.value}}}` === value)
+      ?? variableList.flatMap(vo => vo.children ?? []).flatMap((child: any) => child.children ?? []).find((grandchild: any) => `{{${grandchild.value}}}` === value)
 
     if (filterOption) {
       return (

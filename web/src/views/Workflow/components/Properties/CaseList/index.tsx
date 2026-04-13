@@ -329,7 +329,9 @@ const CaseList: FC<CaseListProps> = ({
                               const currentExpression = currentCase.expressions?.[conditionIndex] || {};
                               const currentOperator = currentExpression.operator;
                               const leftFieldValue = currentExpression.left;
-                              const leftFieldOption = options.find(option => `{{${option.value}}}` === leftFieldValue);
+                              const leftFieldOption = options.find(option => `{{${option.value}}}` === leftFieldValue)
+                                ?? options.flatMap(o => o.children ?? []).find(child => `{{${child.value}}}` === leftFieldValue)
+                                ?? options.flatMap(o => o.children ?? []).flatMap((c: any) => c.children ?? []).find((gc: any) => `{{${gc.value}}}` === leftFieldValue);
                               const leftFieldType = leftFieldOption?.dataType;
                               const hideRightField = currentOperator === 'empty' || currentOperator === 'not_empty' || leftFieldType === 'file' || leftFieldType === 'array[object]' || leftFieldType === 'array[file]';
                               const operatorList = leftFieldType && operatorsObj[leftFieldType]
