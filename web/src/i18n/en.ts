@@ -116,7 +116,7 @@ export const en = {
       prompt: 'Prompt Engineering',
       skills: 'Skill Library',
       workbench: 'Workbench',
-      memoryRelated: 'Memory-Related',
+      memoryRelated: 'Memory Hub',
       advancedSettings: 'Advanced Settings',
       promptHistory: 'My history',
       platformManagement: 'Platform Management',
