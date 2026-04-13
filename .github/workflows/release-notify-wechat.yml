@@ -69,12 +69,31 @@ jobs:
       # 5️⃣ 企业微信通知（Markdown）
       - name: Notify WeChat
         if: steps.check.outputs.ok == 'true'
+        env:
+          WECHAT_WEBHOOK: ${{ secrets.WECHAT_WEBHOOK }}
+          BRANCH: ${{ github.event.pull_request.base.ref }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          AI_SUMMARY: ${{ steps.ai.outputs.summary }}
         run: |
-          curl '${{ secrets.WECHAT_WEBHOOK }}' \
+          python3 << 'PYEOF'
+          import json, os
+          content = (
+            "## 🚀 Release 发布通知\n"
+            "> 📦 **分支**: " + os.environ["BRANCH"] + "\n"
+            "> 👤 **提交人**: " + os.environ["AUTHOR"] + "\n"
+            "> 📝 **标题**: " + os.environ["PR_TITLE"] + "\n\n"
+            "### 🧠 AI变更摘要\n" +
+            os.environ["AI_SUMMARY"] + "\n\n"
+            "---\n"
+            "🔗 [查看PR详情](" + os.environ["PR_URL"] + ")"
+          )
+          payload = {"msgtype": "markdown", "markdown": {"content": content}}
+          with open("wechat.json", "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+          PYEOF
+
+          curl -s "$WECHAT_WEBHOOK" \
             -H 'Content-Type: application/json' \
-            -d "{
-              \"msgtype\": \"markdown\",
-              \"markdown\": {
-                \"content\": \"## 🚀 Release 发布通知\n> 📦 **分支**: ${{ github.event.pull_request.base.ref }}\n> 👤 **提交人**: ${{ github.event.pull_request.user.login }}\n> 📝 **标题**: ${{ github.event.pull_request.title }}\n\n### 🧠 AI变更摘要\n${{ steps.ai.outputs.summary }}\n\n---\n🔗 [查看PR详情](${{ github.event.pull_request.html_url }})\"
-              }
-            }"
+            -d @wechat.json
