@@ -1,0 +1,107 @@
+name: Release Notify (Ali AI Final)
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  notify:
+    if: >
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.base.ref, 'release')
+    runs-on: ubuntu-latest
+
+    steps:
+      # 防止 GitHub HEAD 未同步
+      - name: Wait for ref sync
+        run: sleep 3
+
+      # 1️⃣ 获取分支 HEAD
+      - name: Get HEAD
+        id: head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          HEAD_SHA=$(curl -s \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$REPO/git/ref/heads/$BASE_REF" \
+            | jq -r '.object.sha')
+          echo "head_sha=$HEAD_SHA" >> $GITHUB_OUTPUT
+
+      # 2️⃣ 判断是否最终PR
+      - name: Check Latest
+        id: check
+        env:
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          HEAD_SHA: ${{ steps.head.outputs.head_sha }}
+        run: |
+          if [ "$MERGE_SHA" = "$HEAD_SHA" ]; then
+            echo "ok=true" >> $GITHUB_OUTPUT
+          else
+            echo "ok=false" >> $GITHUB_OUTPUT
+          fi
+
+      # 3️⃣ 获取 commits
+      - name: Get Commits
+        if: steps.check.outputs.ok == 'true'
+        id: commits
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMITS_URL: ${{ github.event.pull_request.commits_url }}
+        run: |
+          curl -s \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "$COMMITS_URL" \
+            | jq -r '.[].commit.message' | head -n 20 > commits.txt
+
+      # 4️⃣ 阿里 AI 总结（通义千问）
+      - name: AI Summary (Qwen)
+        if: steps.check.outputs.ok == 'true'
+        id: ai
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+        run: |
+          COMMIT_MESSAGES=$(cat commits.txt)
+
+          jq -n --arg msgs "请用中文总结以下代码提交，输出3-5条，面向测试人员：
+          $COMMIT_MESSAGES" \
+            '{"model": "qwen-plus", "input": {"prompt": $msgs}}' > ai_payload.json
+
+          SUMMARY=$(curl -s https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation \
+            -H "Authorization: Bearer $DASHSCOPE_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d @ai_payload.json | jq -r '.output.text')
+
+          echo "summary<<EOF" >> $GITHUB_OUTPUT
+          echo "$SUMMARY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      # 5️⃣ 企业微信通知（Markdown）
+      - name: Notify WeChat
+        if: steps.check.outputs.ok == 'true'
+        env:
+          WECHAT_WEBHOOK: ${{ secrets.WECHAT_WEBHOOK }}
+          BRANCH: ${{ github.event.pull_request.base.ref }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          AI_SUMMARY: ${{ steps.ai.outputs.summary }}
+        run: |
+          jq -n \
+            --arg branch "$BRANCH" \
+            --arg author "$AUTHOR" \
+            --arg title "$PR_TITLE" \
+            --arg url "$PR_URL" \
+            --arg summary "$AI_SUMMARY" \
+            '{
+              msgtype: "markdown",
+              markdown: {
+                content: "## 🚀 Release 发布通知\n> 📦 **分支**: \($branch)\n> 👤 **提交人**: \($author)\n> 📝 **标题**: \($title)\n\n### 🧠 AI变更摘要\n\($summary)\n\n---\n🔗 [查看PR详情](\($url))"
+              }
+            }' > wechat_payload.json
+
+          curl -s "$WECHAT_WEBHOOK" \
+            -H 'Content-Type: application/json' \
+            -d @wechat_payload.json
