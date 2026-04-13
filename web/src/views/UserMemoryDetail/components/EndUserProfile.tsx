@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:33:30 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 11:11:09
+ * @Last Modified time: 2026-04-10 18:40:52
  */
 /**
  * End User Profile Component
@@ -22,6 +22,7 @@ import {
 } from '@/api/memory'
 import EndUserProfileModal from './EndUserProfileModal'
 import type { EndUser, EndUserProfileModalRef, EndUserProfileRef } from '../types'
+import Tag from '@/components/Tag';
 
 /**
  * Component props
@@ -56,14 +57,6 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
       setLoading(false)
     })
   }
-  /** Format profile items for display */
-  const formatItems = useCallback(() => {
-    return ['other_name'].map(key => ({
-      key,
-      label: t(`userMemory.${key}`),
-      children: String(data?.[key as keyof EndUser] || '-'),
-    }))
-  }, [data])
   /** Open edit modal */
   const handleEdit = () => {
     if (!data) return
@@ -89,13 +82,31 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
     >
       {loading
         ? <Skeleton />
-        : <Flex vertical gap={20}>
-            {formatItems().map(vo => (
-              <div key={vo.key} className="rb:leading-5">
-                <div className="rb:text-[#7B8085]">{vo.label}</div>
-                <div className="rb:mt-0.5">{vo.children}</div>
-              </div>
-            ))}
+        : <Flex vertical gap={20} className="rb:leading-5">
+          <div>
+            <div className="rb:text-[#7B8085]">{t('userMemory.other_name')}</div>
+            <div className="rb:mt-0.5">{data?.other_name || '-'}</div>
+          </div>
+          <div>
+            <div className="rb:text-[#7B8085]">{t('userMemory.role')}</div>
+            <div className="rb:mt-0.5">{data?.profile?.role || '-'}</div>
+          </div>
+          <div>
+            <div className="rb:text-[#7B8085]">{t('userMemory.domain')}</div>
+            <div className="rb:mt-0.5">{data?.profile?.domain || '-'}</div>
+          </div>
+          <div>
+            <div className="rb:text-[#7B8085]">{t('userMemory.expertise')}</div>
+            <div className="rb:mt-0.5">{data?.profile?.expertise?.join(' | ') || '-'}</div>
+          </div>
+          <div>
+            <div className="rb:text-[#7B8085]">{t('userMemory.interests')}</div>
+            <div className="rb:mt-0.5">{data?.profile?.interests?.join(' | ') || '-'}</div>
+          </div>
+          <div>
+            <div className="rb:text-[#7B8085]">{t('userMemory.knowledge_tags')}</div>
+            <Flex wrap gap={4} className="rb:mt-0.5!">{data?.knowledge_tags?.map((tag: string) => <Tag>{tag}</Tag>) || '-'}</Flex>
+          </div>
 
             <div className="rb:text-[#7B8085] rb:text-[12px] rb:leading-4.5">
             {t('userMemory.updated_at')}: {data?.updated_at ? dayjs(data?.updated_at).format('YYYY/MM/DD HH:mm:ss') : ''}

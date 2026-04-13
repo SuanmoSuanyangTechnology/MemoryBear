@@ -1589,6 +1589,11 @@ export const en = {
       created_at: 'Created At',
       updated_at: 'Last Updated',
       fullScreen: 'Full Screen',
+      role: 'Role',
+      domain: 'Domain',
+      expertise: 'Expertise',
+      interests: 'Interests',
+      knowledge_tags: 'Knowledge Tags',
 
       memoryWindow: "{{name}}'s Memory Overview",
       memory_insight: 'Overall Overview',
