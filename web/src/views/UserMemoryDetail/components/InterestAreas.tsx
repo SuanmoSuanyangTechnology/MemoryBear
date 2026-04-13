@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:53 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-16 14:27:12
+ * @Last Modified time: 2026-04-13 13:37:43
  */
 import { useEffect, useState, forwardRef, useImperativeHandle, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -93,7 +93,7 @@ const InterestAreas = forwardRef<{ handleRefresh: () => void; }>((_props, ref) =
             ref={chartRef}
             option={{
               color: Colors,
-              grid: { top: 8, left: 38, right: 8, bottom: 24 },
+              grid: { top: 14, left: 38, right: 8, bottom: 24 },
               xAxis: {
                 type: 'category',
                 data: keys.map(k => t(`implicitDetail.${k}`)),
