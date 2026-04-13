@@ -1300,13 +1300,20 @@ class AgentRunService:
             }
             if files:
                 from app.models.file_metadata_model import FileMetadata
+                local_ids = [f.upload_file_id for f in files
+                             if f.transfer_method.value == "local_file" and f.upload_file_id
+                             and (not f.name or not f.size)]
+                meta_map = {}
+                if local_ids:
+                    rows = self.db.query(FileMetadata).filter(
+                        FileMetadata.id.in_(local_ids),
+                        FileMetadata.status == "completed"
+                    ).all()
+                    meta_map = {str(r.id): r for r in rows}
                 for f in files:
                     name, size = f.name, f.size
                     if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
-                        meta = self.db.query(FileMetadata).filter(
-                            FileMetadata.id == f.upload_file_id,
-                            FileMetadata.status == "completed"
-                        ).first()
+                        meta = meta_map.get(str(f.upload_file_id))
                         if meta:
                             name = name or meta.file_name
                             size = size or meta.file_size

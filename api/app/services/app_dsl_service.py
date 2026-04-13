@@ -279,7 +279,7 @@ class AppDslService:
         tenant_id: uuid.UUID,
         warnings: list,
         now: datetime.datetime,
-    ) -> tuple[type(App), list]:
+    ) -> tuple[App, list[str]]:
         """覆盖已有应用的配置，类型不一致时抛出异常"""
         app = self.db.query(App).filter(
             App.id == app_id,
