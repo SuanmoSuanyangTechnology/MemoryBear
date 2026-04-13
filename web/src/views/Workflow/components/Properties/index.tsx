@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-10 17:24:19
+ * @Last Modified time: 2026-04-13 10:44:19
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -266,7 +266,7 @@ const Properties: FC<PropertiesProps> = ({
                 key,
                 label: cycleVar.name,
                 type: 'variable',
-                dataType: cycleVar.type || 'String',
+                dataType: cycleVar.type || 'string',
                 value: `${parentNodeId}.${cycleVar.name}`,
                 nodeData: parentData,
               });
@@ -643,7 +643,7 @@ const Properties: FC<PropertiesProps> = ({
                               key: contextKey,
                               label: 'context',
                               type: 'variable',
-                              dataType: 'String',
+                              dataType: 'string',
                               value: `context`,
                               nodeData: selectedNode.getData(),
                               isContext: true,
@@ -791,7 +791,7 @@ const Properties: FC<PropertiesProps> = ({
                                   key: `${selectedNode.id}_cycle_${cycleVar.name}`,
                                   label: cycleVar.name,
                                   type: 'variable',
-                                  dataType: cycleVar.type || 'String',
+                                  dataType: cycleVar.type || 'string',
                                   value: `${selectedNode.getData().id}.${cycleVar.name}`,
                                   nodeData: selectedNode.getData(),
                                 }));

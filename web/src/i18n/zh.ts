@@ -2516,6 +2516,9 @@ export const zh = {
         'list-operator.input_list': '输入变量',
       },
       checkListHasErrors: '发布前确认检查清单中所有问题均已解决',
+      variableSelect: {
+        empty: '暂无变量',
+      },
     },
     emotionEngine: {
       emotionEngineConfig: '情感引擎配置',
