@@ -26,6 +26,7 @@ from app.services.model_service import ModelApiKeyService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
 from app.services.multimodal_service import MultimodalService
 from app.services.workflow_service import WorkflowService
+from app.models.file_metadata_model import FileMetadata
 
 logger = get_business_logger()
 
@@ -218,11 +219,29 @@ class AppChatService:
             "reasoning_content": result.get("reasoning_content")
         }
         if files:
+            local_ids = [f.upload_file_id for f in files
+                         if f.transfer_method.value == "local_file" and f.upload_file_id
+                         and (not f.name or not f.size)]
+            meta_map = {}
+            if local_ids:
+                rows = self.db.query(FileMetadata).filter(
+                    FileMetadata.id.in_(local_ids),
+                    FileMetadata.status == "completed"
+                ).all()
+                meta_map = {str(r.id): r for r in rows}
             for f in files:
-                # url = await MultimodalService(self.db).get_file_url(f)
+                name, size = f.name, f.size
+                if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
+                    meta = meta_map.get(str(f.upload_file_id))
+                    if meta:
+                        name = name or meta.file_name
+                        size = size or meta.file_size
                 human_meta["files"].append({
                     "type": f.type,
-                    "url": f.url
+                    "url": f.url,
+                    "name": name,
+                    "size": size,
+                    "file_type": f.file_type,
                 })
 
         if processed_files:
@@ -509,10 +528,29 @@ class AppChatService:
             }
 
             if files:
+                local_ids = [f.upload_file_id for f in files
+                             if f.transfer_method.value == "local_file" and f.upload_file_id
+                             and (not f.name or not f.size)]
+                meta_map = {}
+                if local_ids:
+                    rows = self.db.query(FileMetadata).filter(
+                        FileMetadata.id.in_(local_ids),
+                        FileMetadata.status == "completed"
+                    ).all()
+                    meta_map = {str(r.id): r for r in rows}
                 for f in files:
+                    name, size = f.name, f.size
+                    if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
+                        meta = meta_map.get(str(f.upload_file_id))
+                        if meta:
+                            name = name or meta.file_name
+                            size = size or meta.file_size
                     human_meta["files"].append({
                         "type": f.type,
-                        "url": f.url
+                        "url": f.url,
+                        "name": name,
+                        "size": size,
+                        "file_type": f.file_type,
                     })
             if processed_files:
                 human_meta["history_files"] = {

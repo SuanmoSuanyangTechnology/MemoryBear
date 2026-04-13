@@ -123,7 +123,7 @@ class CycleGraphNode(BaseNode):
 
         return cycle_nodes, cycle_edges
 
-    def build_graph(self):
+    def build_graph(self, variable_pool: VariablePool):
         """
         Build and compile the internal subgraph for this cycle node.
 
@@ -135,6 +135,7 @@ class CycleGraphNode(BaseNode):
         from app.core.workflow.engine.graph_builder import GraphBuilder
 
         self.child_variable_pool = VariablePool()
+        self.child_variable_pool.copy(variable_pool)
         builder = GraphBuilder(
             {
                 "nodes": self.cycle_nodes,
@@ -165,8 +166,8 @@ class CycleGraphNode(BaseNode):
         Raises:
             RuntimeError: If the node type is unsupported.
         """
-        self.build_graph()
         if self.node_type == NodeType.LOOP:
+            self.build_graph(variable_pool)
             return await LoopRuntime(
                 start_id=self.start_node_id,
                 stream=False,
@@ -179,20 +180,19 @@ class CycleGraphNode(BaseNode):
             ).run()
         if self.node_type == NodeType.ITERATION:
             return await IterationRuntime(
-                start_id=self.start_node_id,
                 stream=False,
-                graph=self.graph,
                 node_id=self.node_id,
                 config=self.config,
                 state=state,
                 variable_pool=variable_pool,
-                child_variable_pool=self.child_variable_pool
+                cycle_nodes=self.cycle_nodes,
+                cycle_edges=self.cycle_edges,
             ).run()
         raise RuntimeError("Unknown cycle node type")
 
     async def execute_stream(self, state: WorkflowState, variable_pool: VariablePool):
-        self.build_graph()
         if self.node_type == NodeType.LOOP:
+            self.build_graph(variable_pool)
             yield {
                 "__final__": True,
                 "result": await LoopRuntime(
@@ -211,14 +211,13 @@ class CycleGraphNode(BaseNode):
             yield {
                 "__final__": True,
                 "result": await IterationRuntime(
-                    start_id=self.start_node_id,
                     stream=True,
-                    graph=self.graph,
                     node_id=self.node_id,
                     config=self.config,
                     state=state,
                     variable_pool=variable_pool,
-                    child_variable_pool=self.child_variable_pool
+                    cycle_nodes=self.cycle_nodes,
+                    cycle_edges=self.cycle_edges,
                 ).run()
             }
             return

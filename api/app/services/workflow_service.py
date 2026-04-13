@@ -957,7 +957,10 @@ class WorkflowService:
                                     for file in message["content"]:
                                         human_meta["files"].append({
                                             "type": file.get("type"),
-                                            "url": file.get("url")
+                                            "url": file.get("url"),
+                                            "file_type": file.get("origin_file_type"),
+                                            "name": file.get("name"),
+                                            "size": file.get("size")
                                         })
                             if message["role"] == "assistant":
                                 assistant_message = message["content"]

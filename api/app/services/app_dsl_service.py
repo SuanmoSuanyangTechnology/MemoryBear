@@ -229,8 +229,11 @@ class AppDslService:
         workspace_id: uuid.UUID,
         tenant_id: uuid.UUID,
         user_id: uuid.UUID,
+        app_id: Optional[uuid.UUID] = None,
     ) -> tuple[App, list[str]]:
-        """解析 DSL，创建应用及配置，返回 (new_app, warnings)"""
+        """解析 DSL，创建或覆盖应用配置，返回 (app, warnings)。
+        app_id 不为空时：校验类型一致后覆盖配置；为空时创建新应用。
+        """
         app_meta = dsl.get("app", {})
         app_type = app_meta.get("type")
         if app_type not in (AppType.AGENT, AppType.MULTI_AGENT, AppType.WORKFLOW):
@@ -238,6 +241,9 @@ class AppDslService:
 
         warnings: list[str] = []
         now = datetime.datetime.now()
+
+        if app_id is not None:
+            return self._overwrite_dsl(dsl, app_id, app_type, workspace_id, tenant_id, warnings, now)
 
         new_app = App(
             id=uuid.uuid4(),
@@ -258,11 +264,57 @@ class AppDslService:
         self.db.add(new_app)
         self.db.flush()
 
+        self._write_config(new_app.id, app_type, dsl, workspace_id, tenant_id, warnings, now, create=True)
+
+        self.db.commit()
+        self.db.refresh(new_app)
+        return new_app, warnings
+
+    def _overwrite_dsl(
+        self,
+        dsl: dict,
+        app_id: uuid.UUID,
+        app_type: str,
+        workspace_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        warnings: list,
+        now: datetime.datetime,
+    ) -> tuple[App, list[str]]:
+        """覆盖已有应用的配置，类型不一致时抛出异常"""
+        app = self.db.query(App).filter(
+            App.id == app_id,
+            App.workspace_id == workspace_id,
+            App.is_active.is_(True)
+        ).first()
+        if not app:
+            raise ResourceNotFoundException("应用", str(app_id))
+        if app.type != app_type:
+            raise BusinessException(
+                f"YAML 类型 '{app_type}' 与应用类型 '{app.type}' 不一致，无法导入",
+                BizCode.BAD_REQUEST
+            )
+
+        self._write_config(app_id, app_type, dsl, workspace_id, tenant_id, warnings, now, create=False)
+
+        self.db.commit()
+        self.db.refresh(app)
+        return app, warnings
+
+    def _write_config(
+        self,
+        app_id: uuid.UUID,
+        app_type: str,
+        dsl: dict,
+        workspace_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        warnings: list,
+        now: datetime.datetime,
+        create: bool,
+    ) -> None:
+        """写入（新建或覆盖）应用配置"""
         if app_type == AppType.AGENT:
             cfg = dsl.get("agent_config") or {}
-            self.db.add(AgentConfig(
-                id=uuid.uuid4(),
-                app_id=new_app.id,
+            fields = dict(
                 system_prompt=cfg.get("system_prompt"),
                 model_parameters=cfg.get("model_parameters"),
                 default_model_config_id=self._resolve_model(cfg.get("default_model_config_ref"), tenant_id, warnings),
@@ -272,16 +324,21 @@ class AppDslService:
                 tools=self._resolve_tools(cfg.get("tools", []), tenant_id, warnings),
                 skills=self._resolve_skills(cfg.get("skills", {}), tenant_id, warnings),
                 features=cfg.get("features", {}),
-                is_active=True,
-                created_at=now,
                 updated_at=now,
-            ))
+            )
+            if create:
+                self.db.add(AgentConfig(id=uuid.uuid4(), app_id=app_id, is_active=True, created_at=now, **fields))
+            else:
+                existing = self.db.query(AgentConfig).filter(AgentConfig.app_id == app_id).first()
+                if existing:
+                    for k, v in fields.items():
+                        setattr(existing, k, v)
+                else:
+                    self.db.add(AgentConfig(id=uuid.uuid4(), app_id=app_id, is_active=True, created_at=now, **fields))
 
         elif app_type == AppType.MULTI_AGENT:
             cfg = dsl.get("multi_agent_config") or {}
-            self.db.add(MultiAgentConfig(
-                id=uuid.uuid4(),
-                app_id=new_app.id,
+            fields = dict(
                 orchestration_mode=cfg.get("orchestration_mode", "collaboration"),
                 master_agent_name=cfg.get("master_agent_name"),
                 model_parameters=cfg.get("model_parameters"),
@@ -291,10 +348,17 @@ class AppDslService:
                 routing_rules=self._resolve_routing_rules(cfg.get("routing_rules"), warnings),
                 execution_config=cfg.get("execution_config", {}),
                 aggregation_strategy=cfg.get("aggregation_strategy", "merge"),
-                is_active=True,
-                created_at=now,
                 updated_at=now,
-            ))
+            )
+            if create:
+                self.db.add(MultiAgentConfig(id=uuid.uuid4(), app_id=app_id, is_active=True, created_at=now, **fields))
+            else:
+                existing = self.db.query(MultiAgentConfig).filter(MultiAgentConfig.app_id == app_id).first()
+                if existing:
+                    for k, v in fields.items():
+                        setattr(existing, k, v)
+                else:
+                    self.db.add(MultiAgentConfig(id=uuid.uuid4(), app_id=app_id, is_active=True, created_at=now, **fields))
 
         elif app_type == AppType.WORKFLOW:
             adapter = MemoryBearAdapter(dsl)
@@ -306,20 +370,39 @@ class AppDslService:
             for w in result.warnings:
                 warnings.append(f"[节点警告] {w.node_name or w.node_id}: {w.detail}")
             wf = dsl.get("workflow") or {}
-            WorkflowService(self.db).create_workflow_config(
-                app_id=new_app.id,
-                nodes=[n.model_dump() for n in result.nodes],
-                edges=[e.model_dump() for e in result.edges],
-                variables=[v.model_dump() for v in result.variables],
-                execution_config=wf.get("execution_config", {}),
-                features=wf.get("features", {}),
-                triggers=wf.get("triggers", []),
-                validate=False,
-            )
-
-        self.db.commit()
-        self.db.refresh(new_app)
-        return new_app, warnings
+            wf_service = WorkflowService(self.db)
+            if create:
+                wf_service.create_workflow_config(
+                    app_id=app_id,
+                    nodes=[n.model_dump() for n in result.nodes],
+                    edges=[e.model_dump() for e in result.edges],
+                    variables=[v.model_dump() for v in result.variables],
+                    execution_config=wf.get("execution_config", {}),
+                    features=wf.get("features", {}),
+                    triggers=wf.get("triggers", []),
+                    validate=False,
+                )
+            else:
+                existing = self.db.query(WorkflowConfig).filter(WorkflowConfig.app_id == app_id).first()
+                if existing:
+                    existing.nodes = [n.model_dump() for n in result.nodes]
+                    existing.edges = [e.model_dump() for e in result.edges]
+                    existing.variables = [v.model_dump() for v in result.variables]
+                    existing.execution_config = wf.get("execution_config", {})
+                    existing.features = wf.get("features", {})
+                    existing.triggers = wf.get("triggers", [])
+                    existing.updated_at = now
+                else:
+                    wf_service.create_workflow_config(
+                        app_id=app_id,
+                        nodes=[n.model_dump() for n in result.nodes],
+                        edges=[e.model_dump() for e in result.edges],
+                        variables=[v.model_dump() for v in result.variables],
+                        execution_config=wf.get("execution_config", {}),
+                        features=wf.get("features", {}),
+                        triggers=wf.get("triggers", []),
+                        validate=False,
+                    )
 
     def _unique_app_name(self, name: str, workspace_id: uuid.UUID, app_type: AppType) -> str:
         """生成唯一应用名称，同时检查本空间自有应用和共享到本空间的应用"""

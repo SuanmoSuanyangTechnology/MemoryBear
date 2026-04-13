@@ -1250,9 +1250,11 @@ async def export_app(
 async def import_app(
         file: UploadFile = File(...),
         db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        current_user: User = Depends(get_current_user),
+        app_id: Optional[str] = Form(None),
 ):
     """从 YAML 文件导入 agent / multi_agent / workflow 应用。
+    传入 app_id 时覆盖该应用的配置（类型必须一致），否则创建新应用。
     跨空间/跨租户导入时，模型/工具/知识库会按名称匹配，匹配不到则置空并返回 warnings。
     """
     if not file.filename.lower().endswith((".yaml", ".yml")):
@@ -1263,13 +1265,15 @@ async def import_app(
     if not dsl or "app" not in dsl:
         return fail(msg="YAML 格式无效，缺少 app 字段", code=BizCode.BAD_REQUEST)
 
-    new_app, warnings = AppDslService(db).import_dsl(
+    target_app_id = uuid.UUID(app_id) if app_id else None
+    result_app, warnings = AppDslService(db).import_dsl(
         dsl=dsl,
         workspace_id=current_user.current_workspace_id,
         tenant_id=current_user.tenant_id,
         user_id=current_user.id,
+        app_id=target_app_id,
     )
     return success(
-        data={"app": app_schema.App.model_validate(new_app), "warnings": warnings},
+        data={"app": app_schema.App.model_validate(result_app), "warnings": warnings},
         msg="应用导入成功" + ("，但部分资源需手动配置" if warnings else "")
     )
