@@ -265,11 +265,49 @@ async def Translation_English(modid, text, fields=None):
     # 其他类型（数字、布尔值、None等）：原样返回
     else:
         return text
+# 隐性记忆画像生成所需的最低 MemorySummary 节点数量
+MIN_MEMORY_SUMMARY_COUNT = 5
+
+
 class MemoryBaseService:
     """记忆服务基类，提供共享的辅助方法"""
     
     def __init__(self):
         self.neo4j_connector = Neo4jConnector()
+    
+    async def get_valid_memory_summary_count(
+        self,
+        end_user_id: str
+    ) -> int:
+        """获取用户有效的 MemorySummary 节点数量（排除孤立节点）。
+
+        只统计存在 DERIVED_FROM_STATEMENT 关系的 MemorySummary 节点。
+
+        Args:
+            end_user_id: 终端用户ID
+
+        Returns:
+            有效 MemorySummary 节点数量
+        """
+        try:
+            query = """
+            MATCH (n:MemorySummary)-[:DERIVED_FROM_STATEMENT]->(:Statement)
+            WHERE n.end_user_id = $end_user_id
+            RETURN count(DISTINCT n) as count
+            """
+            result = await self.neo4j_connector.execute_query(
+                query, end_user_id=end_user_id
+            )
+            count = result[0]["count"] if result and len(result) > 0 else 0
+            logger.debug(
+                f"有效 MemorySummary 节点数量: {count} (end_user_id={end_user_id})"
+            )
+            return count
+        except Exception as e:
+            logger.error(
+                f"获取有效 MemorySummary 数量失败: {str(e)}", exc_info=True
+            )
+            return 0
     
     @staticmethod
     def parse_timestamp(timestamp_value) -> Optional[int]:
