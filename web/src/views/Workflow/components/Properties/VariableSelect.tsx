@@ -334,7 +334,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
 
                         <Space size={2}>
                           {s.dataType && <span>{s.dataType}</span>}
-                          {hasChildren && <div className="rb:size-3 rb:bg-cover rb:bg-[url('src/assets/images/common/arrow_up.svg')] rb:rotate-90"></div>}
+                          {hasChildren && <div className="rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:rotate-90"></div>}
                         </Space>
                       </Flex>
                     );

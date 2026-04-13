@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-13 11:12:18
+ * @Last Modified time: 2026-04-13 14:00:07
  */
 import { useEffect, useLayoutEffect, useState, useRef, type FC } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
@@ -285,23 +285,24 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
       ref={popupRef}
       data-autocomplete-popup="true"
       onMouseDown={(e) => e.preventDefault()}
-      className="rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto rb:fixed rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
+      className="rb:fixed rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
       style={{
         top: popupPosition.top,
         left: popupPosition.left,
       }}
     >
-      <Flex vertical gap={12}>
-        {Object.entries(groupedSuggestions).map(([nodeId, nodeOptions]) => {
-          const nodeName = nodeOptions[0]?.nodeData?.name || nodeId;
-          return (
-            <div key={nodeId} className="rb:text-[12px]">
-              {nodeName !== 'undefined' &&
-                <div className="rb:px-2 rb:leading-4.25 rb:mb-1.25 rb:font-medium rb:text-[#5B6167]">
-                  {nodeName}
-                </div>
-              }
-              <Flex vertical gap={2}>
+      <div className="rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto">
+        <Flex vertical gap={12}>
+          {Object.entries(groupedSuggestions).map(([nodeId, nodeOptions]) => {
+            const nodeName = nodeOptions[0]?.nodeData?.name || nodeId;
+            return (
+              <div key={nodeId} className="rb:text-[12px]">
+                {nodeName !== 'undefined' &&
+                  <div className="rb:px-2 rb:leading-4.25 rb:mb-1.25 rb:font-medium rb:text-[#5B6167]">
+                    {nodeName}
+                  </div>
+                }
+                <Flex vertical gap={2}>
                 {nodeOptions.map((option) => {
                   const globalIndex = flatOptions.indexOf(option);
                   const isExpanded = expandedParent?.key === option.key;
@@ -344,20 +345,21 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
                       }
                       <Space size={2}>
                         {option.dataType && <span>{option.dataType}</span>}
-                        {hasChildren && <div className="rb:size-3 rb:bg-cover rb:bg-[url('src/assets/images/common/arrow_up.svg')] rb:rotate-90"></div>}
+                        {hasChildren && <div className="rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:rotate-90"></div>}
                       </Space>
                     </Flex>
                   );
                 })}
-              </Flex>
-            </div>
-          );
-        })}
-      </Flex>
+                </Flex>
+              </div>
+            );
+          })}
+        </Flex>
+      </div>
       {/* Child variables panel - floats to the left */}
       {expandedParent?.children?.length && (
         <div
-          className="rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto rb:text-[12px] rb:fixed rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
+          className="rb:absolute rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto rb:text-[12px] rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
           style={{
             top: childPanelTop,
             right: 'calc(100% + 8px)',
@@ -387,7 +389,9 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
                 onClick={() => !child.disabled && insertMention(child)}
                 onMouseEnter={() => setSelectedIndex(childIndex)}
               >
-                <span className="rb:font-medium">{child.label}</span>
+                <span className="rb:font-medium">
+                  <span className="rb:text-[#155EEF]">{`{x}`}</span> {child.label}
+                </span>
                 {child.dataType && <span>{child.dataType}</span>}
               </Flex>
             );
