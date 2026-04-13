@@ -1500,7 +1500,7 @@ async def analytics_memory_types(
     2. 工作记忆 (WORKING_MEMORY) = 会话数量（通过 ConversationRepository.get_conversation_by_user_id 获取）
     3. 短期记忆 (SHORT_TERM_MEMORY) = /short_term 接口返回的问答对数量
     4. 显性记忆 (EXPLICIT_MEMORY) = 情景记忆 + 语义记忆（通过 MemoryBaseService.get_explicit_memory_count 获取）
-    5. 隐性记忆 (IMPLICIT_MEMORY) = Statement 节点数量的三分之一
+    5. 隐性记忆 (IMPLICIT_MEMORY) = MemorySummary 节点数量（需 >= 5 才显示，否则为 0）
     6. 情绪记忆 (EMOTIONAL_MEMORY) = 情绪标签统计总数（通过 MemoryBaseService.get_emotional_memory_count 获取）
     7. 情景记忆 (EPISODIC_MEMORY) = memory_summary（通过 MemoryBaseService.get_episodic_memory_count 获取）
     8. 遗忘记忆 (FORGET_MEMORY) = 激活值低于阈值的节点数（通过 MemoryBaseService.get_forget_memory_count 获取）
@@ -1557,23 +1557,23 @@ async def analytics_memory_types(
             logger.warning(f"获取会话数量失败，工作记忆数量设为0: {str(e)}")
             work_count = 0
     
-    # 获取隐性记忆数量（基于 Statement 节点数量的三分之一）
+    # 获取隐性记忆数量（基于有关联关系的 MemorySummary 节点数量，需 >= 5 才计入）
     implicit_count = 0
     if end_user_id:
         try:
-            # 查询 Statement 节点数量
+            # 只统计有 DERIVED_FROM_STATEMENT 关系的 MemorySummary 节点，排除孤立节点
             query = """
-            MATCH (n:Statement)
+            MATCH (n:MemorySummary)-[:DERIVED_FROM_STATEMENT]->(:Statement)
             WHERE n.end_user_id = $end_user_id
-            RETURN count(n) as count
+            RETURN count(DISTINCT n) as count
             """
             result = await _neo4j_connector.execute_query(query, end_user_id=end_user_id)
-            statement_count = result[0]["count"] if result and len(result) > 0 else 0
-            # 取三分之一作为隐性记忆数量
-            implicit_count = round(statement_count / 3)
-            logger.debug(f"隐性记忆数量（Statement数量的1/3）: {implicit_count} (Statement总数={statement_count}, end_user_id={end_user_id})")
+            memory_summary_count = result[0]["count"] if result and len(result) > 0 else 0
+            # 仅当 MemorySummary 节点数量 >= 5 时才显示数量，否则为 0
+            implicit_count = memory_summary_count if memory_summary_count >= 5 else 0
+            logger.debug(f"隐性记忆数量（有效MemorySummary节点数）: {implicit_count} (有效MemorySummary总数={memory_summary_count}, end_user_id={end_user_id})")
         except Exception as e:
-            logger.warning(f"获取Statement数量失败，隐性记忆数量设为0: {str(e)}")
+            logger.warning(f"获取MemorySummary数量失败，隐性记忆数量设为0: {str(e)}")
             implicit_count = 0
     
     # 原有的基于行为习惯的统计方式（已注释）
@@ -1639,7 +1639,7 @@ async def analytics_memory_types(
         "WORKING_MEMORY": work_count,                             # 工作记忆（基于会话数量）
         "SHORT_TERM_MEMORY": short_term_count,                    # 短期记忆（基于问答对数量）
         "EXPLICIT_MEMORY": explicit_count,                        # 显性记忆（情景记忆 + 语义记忆）
-        "IMPLICIT_MEMORY": implicit_count,                        # 隐性记忆（Statement数量的1/3）
+        "IMPLICIT_MEMORY": implicit_count,                        # 隐性记忆（MemorySummary节点数，需>=5）
         "EMOTIONAL_MEMORY": emotion_count,                        # 情绪记忆（使用情绪标签统计）
         "EPISODIC_MEMORY": episodic_count,                        # 情景记忆
         "FORGET_MEMORY": forget_count                             # 遗忘记忆（激活值低于阈值）
