@@ -398,12 +398,16 @@ class UserMemoryService:
                 }
             
             # 构建响应数据（转换时间为毫秒时间戳）
+            # 将 meta_data 中的 profile、knowledge_tags、behavioral_hints 平铺到顶层
+            meta = end_user_info_record.meta_data or {}
             response_data = {
                 "end_user_info_id": str(end_user_info_record.id),
                 "end_user_id": str(end_user_info_record.end_user_id),
                 "other_name": end_user_info_record.other_name,
                 "aliases": end_user_info_record.aliases,
-                "meta_data": end_user_info_record.meta_data,
+                "profile": meta.get("profile"),
+                "knowledge_tags": meta.get("knowledge_tags"),
+                "behavioral_hints": meta.get("behavioral_hints"),
                 "created_at": datetime_to_timestamp(end_user_info_record.created_at),
                 "updated_at": datetime_to_timestamp(end_user_info_record.updated_at)
             }
