@@ -34,6 +34,7 @@ from app.services.memory_storage_service import (
     search_entity,
     search_statement,
 )
+from app.core.quota_stub import check_memory_engine_quota
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -76,6 +77,7 @@ async def get_storage_info(
 
 
 @router.post("/create_config", response_model=ApiResponse)  # 创建配置文件，其他参数默认
+@check_memory_engine_quota
 def create_config(
         payload: ConfigParamsCreate,
         current_user: User = Depends(get_current_user),

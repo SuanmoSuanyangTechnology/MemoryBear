@@ -28,6 +28,7 @@ from app.services.app_statistics_service import AppStatisticsService
 from app.services.workflow_import_service import WorkflowImportService
 from app.services.workflow_service import WorkflowService, get_workflow_service
 from app.services.app_dsl_service import AppDslService
+from app.core.quota_stub import check_app_quota
 
 router = APIRouter(prefix="/apps", tags=["Apps"])
 logger = get_business_logger()
@@ -35,6 +36,7 @@ logger = get_business_logger()
 
 @router.post("", summary="创建应用（可选创建 Agent 配置）")
 @cur_workspace_access_guard()
+@check_app_quota
 def create_app(
         payload: app_schema.AppCreate,
         db: Session = Depends(get_db),

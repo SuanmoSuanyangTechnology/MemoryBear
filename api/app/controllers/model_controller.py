@@ -15,6 +15,7 @@ from app.core.response_utils import success
 from app.schemas.response_schema import ApiResponse, PageData
 from app.services.model_service import ModelConfigService, ModelApiKeyService, ModelBaseService
 from app.core.logging_config import get_api_logger
+from app.core.quota_stub import check_model_quota, check_model_activation_quota
 
 # 获取API专用日志器
 api_logger = get_api_logger()
@@ -236,6 +237,7 @@ def delete_model_base(
 
 
 @router.post("/model_plaza/{model_base_id}/add", response_model=ApiResponse)
+@check_model_quota
 def add_model_from_plaza(
     model_base_id: uuid.UUID,
     db: Session = Depends(get_db),
@@ -273,6 +275,7 @@ def get_model_by_id(
 
 
 @router.post("", response_model=ApiResponse)
+@check_model_quota
 async def create_model(
     model_data: model_schema.ModelConfigCreate,
     db: Session = Depends(get_db),
@@ -303,6 +306,7 @@ async def create_model(
 
 
 @router.post("/composite", response_model=ApiResponse)
+@check_model_quota
 async def create_composite_model(
     model_data: model_schema.CompositeModelCreate,
     db: Session = Depends(get_db),
@@ -329,6 +333,7 @@ async def create_composite_model(
 
 
 @router.put("/composite/{model_id}", response_model=ApiResponse)
+@check_model_activation_quota
 async def update_composite_model(
     model_id: uuid.UUID,
     model_data: model_schema.CompositeModelCreate,
@@ -370,6 +375,7 @@ def delete_composite_model(
 
 
 @router.put("/{model_id}", response_model=ApiResponse)
+@check_model_activation_quota
 def update_model(
     model_id: uuid.UUID,
     model_data: model_schema.ModelConfigUpdate,

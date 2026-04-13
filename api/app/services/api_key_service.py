@@ -248,6 +248,35 @@ class RateLimiterService:
     def __init__(self):
         self.redis = aio_redis
 
+    async def check_tenant_rate_limit(self, tenant_id: uuid.UUID, limit: int) -> Tuple[bool, dict]:
+        """
+        按 tenant_id 做 1 秒滑动窗口限速，限制值来自套餐配额 api_ops_rate_limit
+        """
+        now = time.time()
+        window_start = now - 1  # 1 秒窗口
+        key = f"rate_limit:tenant_qps:{tenant_id}"
+
+        async with self.redis.pipeline() as pipe:
+            # 清理 1 秒前的旧记录
+            pipe.zremrangebyscore(key, 0, window_start)
+            # 加入当前请求（score=时间戳，member=时间戳+随机数保证唯一）
+            pipe.zadd(key, {f"{now}:{uuid.uuid4().hex}": now})
+            # 统计窗口内请求数
+            pipe.zcard(key)
+            # 设置 key 过期（2 秒后自动清理）
+            pipe.expire(key, 2)
+            results = await pipe.execute()
+
+        current = results[2]
+        remaining = max(0, limit - current)
+        reset_time = int(now) + 1
+
+        return current <= limit, {
+            "limit": limit,
+            "remaining": remaining,
+            "reset": reset_time,
+        }
+
     async def check_qps(self, api_key_id: uuid.UUID, limit: int) -> Tuple[bool, dict]:
         """
         检查QPS限制

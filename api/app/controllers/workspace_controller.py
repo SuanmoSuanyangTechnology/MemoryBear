@@ -35,6 +35,7 @@ from app.schemas.workspace_schema import (
     WorkspaceUpdate,
 )
 from app.services import workspace_service
+from app.core.quota_stub import check_workspace_quota
 
 # 获取API专用日志器
 api_logger = get_api_logger()
@@ -106,6 +107,7 @@ def get_workspaces(
 
 
 @router.post("", response_model=ApiResponse)
+@check_workspace_quota
 def create_workspace(
     workspace: WorkspaceCreate,
     language_type: str = Header(default="zh", alias="X-Language-Type"),
