@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 18:59:53
+ * @Last Modified time: 2026-04-14 16:04:08
  */
 /**
  * Neo4j User Memory Detail View
@@ -22,7 +22,7 @@ import InterestDistribution from './components/InterestDistribution'
 import NodeStatistics from './components/NodeStatistics'
 import RelationshipNetwork from './components/RelationshipNetwork'
 import MemoryInsight from './components/MemoryInsight'
-import type { EndUserProfileRef, MemoryInsightRef, AboutMeRef } from './types'
+import type { EndUserProfileRef, MemoryInsightRef, AboutMeRef, EndUser } from './types'
 import {
   analyticsRefresh,
 } from '@/api/memory'
@@ -39,8 +39,10 @@ const Neo4j: FC = () => {
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
 
   /** Update displayed name */
-  const handleNameUpdate = (data: { other_name?: string; id: string }) => {
-    setName(data.other_name && data.other_name !== '' ? data.other_name : data.id)
+  const handleNameUpdate = (data?: EndUser) => {
+    if (!data) return
+    let name = data.other_name && data.other_name !== '' ? data.other_name : data.id || data.end_user_id
+    setName(name)
   }
 
   /** Navigate back */
