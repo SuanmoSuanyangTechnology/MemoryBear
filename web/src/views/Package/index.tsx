@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-25 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 14:48:13
+ * @Last Modified time: 2026-04-14 14:59:11
  */
 /**
  * Package Component
@@ -112,21 +112,21 @@ const Package: FC = () => {
                           return (
                             <div key={key} className="rb:flex rb:items-center rb:justify-between rb:text-sm">
                               <span className="rb:text-gray-500">{t(`package.${key}`)}</span>
-                              <span>{pkg.quotas[key as keyof Package['quotas']]}{unit}</span>
+                              <span>{pkg.quotas[key as keyof Package['quotas']]}{t(`package.${unit}`)}</span>
                             </div>
                           )
                         }
                       })}
+                      {pkg.api_ops_rate_limit &&
+                        <div className="rb:flex rb:items-center rb:justify-between rb:text-sm">
+                          <span className="rb:text-gray-500">{t(`package.api_ops_rate_limit`)}</span>
+                          <span>{pkg.api_ops_rate_limit}{t('package.ops')}</span>
+                        </div>
+                      }
                       {pkg.tech_support &&
                         <div className="rb:flex rb:items-center rb:justify-between rb:text-sm">
                           <span className="rb:text-gray-500">{t(`package.tech_support`)}</span>
                           <span>{String(pkg[getKeyWithLanguage('tech_support')] ?? '')}</span>
-                        </div>
-                      }
-                      {pkg.api_ops_rate_limit &&
-                        <div className="rb:flex rb:items-center rb:justify-between rb:text-sm">
-                          <span className="rb:text-gray-500">{t(`package.api_ops_rate_limit`)}</span>
-                          <span>{pkg.api_ops_rate_limit}（次/秒)</span>
                         </div>
                       }
                     </div>
