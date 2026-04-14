@@ -457,7 +457,7 @@ async def retrieve_chunks(
                 if doc.metadata["doc_id"] not in seen_ids:
                     seen_ids.add(doc.metadata["doc_id"])
                     unique_rs.append(doc)
-            rs = vector_service.rerank(query=retrieve_data.query, docs=unique_rs, top_k=retrieve_data.top_k)
+            rs = vector_service.rerank(query=retrieve_data.query, docs=unique_rs, top_k=retrieve_data.top_k) if unique_rs else []
             if retrieve_data.retrieve_type == chunk_schema.RetrieveType.Graph:
                 kb_ids = [str(kb_id) for kb_id in private_kb_ids]
                 workspace_ids = [str(workspace_id) for workspace_id in private_workspace_ids]
