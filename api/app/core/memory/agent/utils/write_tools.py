@@ -191,15 +191,34 @@ async def write(
             if success:
                 logger.info("Successfully saved all data to Neo4j")
                 
-                # 使用 Celery 异步任务触发聚类（不阻塞主流程）
                 if all_entity_nodes:
+                    end_user_id = all_entity_nodes[0].end_user_id
+
+                    # Neo4j 写入完成后，用 PgSQL 权威 aliases 覆盖 Neo4j 用户实体
+                    try:
+                        from app.repositories.end_user_info_repository import EndUserInfoRepository
+                        if end_user_id:
+                            with get_db_context() as db_session:
+                                info = EndUserInfoRepository(db_session).get_by_end_user_id(uuid.UUID(end_user_id))
+                                pg_aliases = info.aliases if info and info.aliases else []
+                            if pg_aliases:
+                                await neo4j_connector.execute_query(
+                                    """
+                                    MATCH (e:ExtractedEntity)
+                                    WHERE e.end_user_id = $end_user_id AND e.name IN ['用户', '我', 'User', 'I']
+                                    SET e.aliases = $aliases
+                                    """,
+                                    end_user_id=end_user_id, aliases=pg_aliases,
+                                )
+                                logger.info(f"[AliasSync] Neo4j 用户实体 aliases 已用 PgSQL 权威源覆盖: {pg_aliases}")
+                    except Exception as sync_err:
+                        logger.warning(f"[AliasSync] PgSQL→Neo4j aliases 同步失败（不影响主流程）: {sync_err}")
+
+                    # 使用 Celery 异步任务触发聚类（不阻塞主流程）
                     try:
                         from app.tasks import run_incremental_clustering
                         
-                        end_user_id = all_entity_nodes[0].end_user_id
                         new_entity_ids = [e.id for e in all_entity_nodes]
-                        
-                        # 异步提交 Celery 任务
                         task = run_incremental_clustering.apply_async(
                             kwargs={
                                 "end_user_id": end_user_id,
@@ -207,7 +226,6 @@ async def write(
                                 "llm_model_id": str(memory_config.llm_model_id) if memory_config.llm_model_id else None,
                                 "embedding_model_id": str(memory_config.embedding_model_id) if memory_config.embedding_model_id else None,
                             },
-                            # 设置任务优先级（低优先级，不影响主业务）
                             priority=3,
                         )
                         logger.info(
@@ -215,7 +233,6 @@ async def write(
                             f"task_id={task.id}, end_user_id={end_user_id}, entity_count={len(new_entity_ids)}"
                         )
                     except Exception as e:
-                        # 聚类任务提交失败不影响主流程
                         logger.error(f"[Clustering] 提交聚类任务失败（不影响主流程）: {e}", exc_info=True)
                 
                 break
