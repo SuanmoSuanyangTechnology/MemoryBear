@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 15:05:33
+ * @Last Modified time: 2026-04-14 17:43:14
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, type Edge } from '@antv/x6';
 import { register } from '@antv/x6-react-shape';
@@ -1200,9 +1200,6 @@ export const useWorkflowGraph = ({
       }) || [];
       const edges = graphRef.current?.getEdges() || []
 
-
-      console.log('config', config)
-
       const params = {
         ...config,
         features: featuresRef.current,
@@ -1261,6 +1258,14 @@ export const useWorkflowGraph = ({
                   value.forEach((vo: any) => {
                     itemConfig[key][vo.key] = vo.value
                   })
+                }
+              } else if (data.type === 'http-request' && key === 'body' && data.config[key] && 'defaultValue' in data.config[key]) {
+                const value = data.config[key].defaultValue
+                itemConfig[key] = value
+                if (value.content_type === 'json' && value.data && value.data !== '') {
+                  itemConfig[key].data = value.data.replace(/\u00a0/g, ' ')
+                } else {
+                  itemConfig[key].data = value.data
                 }
               } else if (data.config[key] && 'defaultValue' in data.config[key] && key !== 'knowledge_retrieval') {
                 itemConfig[key] = data.config[key].defaultValue
