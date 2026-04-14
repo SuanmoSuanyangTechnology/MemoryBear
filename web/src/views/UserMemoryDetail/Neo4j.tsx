@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 18:59:53
+ * @Last Modified time: 2026-04-14 16:57:59
  */
 /**
  * Neo4j User Memory Detail View
@@ -10,7 +10,7 @@
  * Shows profile, interests, node statistics, relationships, and insights
  */
 
-import { type FC, useRef, useState, type MouseEvent } from 'react'
+import { type FC, useRef, useState, type MouseEvent, useEffect } from 'react'
 import clsx from 'clsx'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Flex, Popover } from 'antd'
@@ -22,10 +22,11 @@ import InterestDistribution from './components/InterestDistribution'
 import NodeStatistics from './components/NodeStatistics'
 import RelationshipNetwork from './components/RelationshipNetwork'
 import MemoryInsight from './components/MemoryInsight'
-import type { EndUserProfileRef, MemoryInsightRef, AboutMeRef } from './types'
+import type { EndUserProfileRef, MemoryInsightRef, AboutMeRef, EndUser } from './types'
 import {
   analyticsRefresh,
 } from '@/api/memory'
+import { useI18n } from '@/store/locale'
 
 const Neo4j: FC = () => {
   const { id } = useParams()
@@ -33,15 +34,21 @@ const Neo4j: FC = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false)
   const [name, setName] = useState('')
+  const { language } = useI18n()
   const ref = useRef<EndUserProfileRef>(null)
   const memoryInsightRef = useRef<MemoryInsightRef>(null)
   const aboutMeRef = useRef<AboutMeRef>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
 
   /** Update displayed name */
-  const handleNameUpdate = (data: { other_name?: string; id: string }) => {
-    setName(data.other_name && data.other_name !== '' ? data.other_name : data.id)
+  const handleNameUpdate = (data?: EndUser) => {
+    if (!data) return
+    let name = data.other_name && data.other_name !== '' ? data.other_name : data.id || data.end_user_id
+    setName(name)
   }
+  useEffect(() => {
+    document.title = `${name} - ${t('memoryBear')}`;
+  }, [name, language])
 
   /** Navigate back */
   const goBack = () => {
@@ -78,7 +85,7 @@ const Neo4j: FC = () => {
       <Flex className="rb:h-full!" gap={12}>
         <Flex gap={15} vertical justify="space-between" align="center" className="rb:h-full! rb:px-4! rb:pt-6! rb:pb-5! rb:bg-white rb:w-20 rb:rounded-xl">
           <Flex gap={15} vertical>
-            <Popover 
+            <Popover
               content={t('userMemory.memoryWindow', { name: name })}
               placement="right"
               arrow={false}
@@ -87,7 +94,7 @@ const Neo4j: FC = () => {
               <div className="rb:mb-4.25! rb:size-12 rb:rounded-xl rb:bg-cover rb:bg-[url('@/assets/images/userMemory/logo.png')]"></div>
             </Popover>
 
-            <Flex 
+            <Flex
               align="center"
               justify="center"
               className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group", {
@@ -155,7 +162,7 @@ const Neo4j: FC = () => {
             <div className="rb:cursor-pointer rb:size-6 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/logout.svg')]" onClick={goBack}></div>
           </Flex>
         </Flex>
-        
+
         <Flex vertical className="rb:flex-1">
           <NodeStatistics />
           <RelationshipNetwork />

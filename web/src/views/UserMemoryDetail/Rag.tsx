@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:11 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 15:29:45
+ * @Last Modified time: 2026-04-14 16:56:36
  */
 /**
  * RAG User Memory Detail View
@@ -26,6 +26,7 @@ import {
 } from '@/api/memory'
 import Empty from '@/components/Empty'
 import ConversationMemory from './components/ConversationMemory'
+import { useI18n } from '@/store/locale'
 
 /**
  * Title component props
@@ -45,6 +46,7 @@ const Title: FC<TitleProps> = ({ title, iconClassName }) => (
 const Rag: FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()
+  const { language } = useI18n()
   const [data, setData] = useState<Data | null>(null)
   const [summary, setSummary] = useState<string | null>('')
   const [loading, setLoading] = useState<Record<string, boolean>>({
@@ -96,6 +98,10 @@ const Rag: FC = () => {
     })
   }
   const name = loading.detail ? '' : data?.name && data?.name !== '' ? data.name : id
+
+  useEffect(() => {
+    document.title = `${name} - ${t('memoryBear')}`;
+  }, [name, language])
 
   const [refreshLoading, setRefreshLoading] = useState(false)
   const handleRefresh = () => {

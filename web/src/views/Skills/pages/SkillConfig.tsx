@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-05 10:44:08 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-05 10:56:28
+ * @Last Modified time: 2026-04-14 16:57:52
  */
 import { type FC, useEffect, useRef, useState } from "react";
 import { useTranslation } from 'react-i18next';
@@ -17,6 +17,7 @@ import type { SkillFormData } from '../types'
 import { getSkillDetail, createSkill, updateSkill } from '@/api/skill'
 import { stringRegExp } from '@/utils/validator';
 import PageHeader from '@/components/Layout/PageHeader'
+import { useI18n } from '@/store/locale'
 
 /**
  * Skill Configuration Page Component
@@ -43,6 +44,7 @@ const SkillConfig: FC = () => {
   const [loading, setLoading] = useState(false)
   const [form] = Form.useForm<SkillFormData>();
   const [data, setData] = useState<SkillFormData | null>(null)
+  const { language } = useI18n()
 
   /**
    * Effect: Load skill data if editing existing skill
@@ -76,6 +78,11 @@ const SkillConfig: FC = () => {
         setLoading(false)
       })
   }
+
+  useEffect(() => {
+    if (!data) return;
+    document.title = `${data?.name} - ${t('memoryBear')}`;
+  }, [language, data?.name])
   
   const aiPromptModalRef = useRef<AiPromptModalRef>(null)
   

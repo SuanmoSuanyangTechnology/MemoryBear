@@ -328,6 +328,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
       <Space size={24} className="rb:mt-4! rb:mb-3!">
         {['processData', 'finalResult'].map(tab => (
           <div
+            key={tab}
             className={clsx('rb:font-[MiSans-Bold] rb:font-bold rb:leading-5 rb:cursor-pointer', {
               'rb:text-[#212332]': activeTab === tab,
               'rb:text-[#A8A9AA]': activeTab !== tab,
