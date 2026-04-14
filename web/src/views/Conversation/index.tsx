@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 21:21:52
+ * @Last Modified time: 2026-04-13 18:32:58
  */
 /**
  * Conversation Page
@@ -397,7 +397,10 @@ const Conversation: FC = () => {
           return {
             type: file.type,
             transfer_method: 'local_file',
-            upload_file_id: file.response.data.file_id
+            upload_file_id: file.response.data.file_id,
+            file_type: file.response.data.file_type,
+            size: file.response.data.file_size,
+            name: file.response.data.file_name
           }
         }
       }),
@@ -444,7 +447,7 @@ const Conversation: FC = () => {
     })
   }
 
-  console.log('chatList', chatList, streamLoadingRef.current)
+  console.log('chatList', fileList, streamLoadingRef.current)
 
   return (
     <Flex className="rb:w-full rb:p-[-16px]!">

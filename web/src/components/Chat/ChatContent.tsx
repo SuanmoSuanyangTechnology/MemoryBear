@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-10 18:46:57
+ * @Last Modified time: 2026-04-14 10:13:56
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -174,6 +174,7 @@ const ChatContent: FC<ChatContentProps> = ({
                       )
                     }
 
+                    const documentType = (file.file_type || file.type)?.split('/')
                     return (
                       <Flex
                         key={file.url || file.uid}
@@ -208,7 +209,7 @@ const ChatContent: FC<ChatContentProps> = ({
                         ></div>
                         <div className="rb:flex-1 rb:w-32.5">
                           <div className="rb:leading-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.name}</div>
-                          <div className="rb:leading-3.5 rb:mt-0.5 rb:text-[#5B6167] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.type?.split('/')[file.type?.split('/').length - 1]} · {file.size}</div>
+                          <div className="rb:leading-3.5 rb:mt-0.5 rb:text-[#5B6167] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{documentType?.[documentType.length - 1]} · {file.size}</div>
                         </div>
                       </Flex>
                     )
