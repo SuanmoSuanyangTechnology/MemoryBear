@@ -77,7 +77,7 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
     {
       key: '1',
       icon: <Flex align="center" justify="center" className="rb:size-10 rb:rounded-xl rb:bg-[#155EEF] rb:text-white">
-        {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(0, 2) : user.username?.[0]}
+        {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(-2) : user.username[0]}
       </Flex>,
       label: (<>
         <div className="rb:text-[#212332] rb:leading-5">{user.username}</div>
@@ -135,9 +135,10 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
    * - Disables navigation for the last breadcrumb item
    */
   const formatBreadcrumbNames = () => {
-    return breadcrumbs.filter(item => item.type !== 'group').map((menu, index) => {
+    const filtered = breadcrumbs.filter(item => item.type !== 'group');
+    return filtered.map((menu, index) => {
       const label = menu.i18nKey ? t(menu.i18nKey) : menu.label;
-      const isLast = index === breadcrumbs.length - 1;
+      const isLast = index === filtered.length - 1;
       const item: any = {
         title: (
           <Tooltip title={label} placement="bottom">
@@ -181,7 +182,7 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
         >
           <Flex align="center" className="rb:cursor-pointer rb:font-medium">
             <Flex align="center" justify="center" className="rb:size-8 rb:rounded-xl rb:bg-[#155EEF] rb:text-white rb:mr-2!">
-              {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(user.username.length, -2) : user.username[0]}
+              {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(-2) : user.username[0]}
             </Flex>
             <span className="rb:text-[#212332] rb:text-[12px] rb:leading-4 rb:mr-1">{user.username}</span>
             <div className={clsx("rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')]", {
