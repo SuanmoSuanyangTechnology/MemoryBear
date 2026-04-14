@@ -672,10 +672,15 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
         excel_parser = ExcelParser()
         if parser_config.get("html4excel") and parser_config.get("html4excel").lower() == "true":
             sections = [(_, "") for _ in excel_parser.html(binary, 12) if _]
-            parser_config["chunk_token_num"] = 0
         else:
             sections = [(_, "") for _ in excel_parser(binary) if _]
-        parser_config["chunk_token_num"] = 0
+        callback(0.8, "Finish parsing.")
+        # Excel 每行直接作为一个 chunk，不经过 naive_merge 避免被 delimiter 拆分
+        chunks = [s for s, _ in sections]
+        res.extend(tokenize_chunks(chunks, doc, is_english, None))
+        res.extend(embed_res)
+        res.extend(url_res)
+        return res
 
     elif re.search(r"\.(txt|py|js|java|c|cpp|h|php|go|ts|sh|cs|kt|sql)$", filename, re.IGNORECASE):
         callback(0.1, "Start to parse.")
