@@ -120,6 +120,7 @@ const Index = () => {
               rowKey="id"
               bordered={false}
               scrollY="100%"
+              pagination={{pagesize: 10}}
             />
           </div>
         </Flex>
