@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_logger
+from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import _USER_PLACEHOLDER_NAMES
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.repositories.conversation_repository import ConversationRepository
@@ -473,7 +474,7 @@ class UserMemoryService:
             allowed_fields = {'other_name', 'aliases', 'meta_data'}
             
             # 用户占位名称黑名单，不允许作为 other_name 或出现在 aliases 中
-            _user_placeholder_names = {'用户', '我', 'User', 'I'}
+            _user_placeholder_names = _USER_PLACEHOLDER_NAMES
             
             # 过滤 other_name：不允许设置为占位名称
             if 'other_name' in update_data and update_data['other_name'] and update_data['other_name'].strip() in _user_placeholder_names:

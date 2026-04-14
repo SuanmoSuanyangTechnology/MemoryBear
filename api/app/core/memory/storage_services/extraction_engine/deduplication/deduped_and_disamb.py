@@ -88,11 +88,14 @@ def _merge_attribute(canonical: ExtractedEntityNode, ent: ExtractedEntityNode):
         if canonical_name.lower() not in _USER_PLACEHOLDER_NAMES:
             incoming_name = (getattr(ent, "name", "") or "").strip()
             
-            # 收集所有需要合并的别名
+            # 收集所有需要合并的别名，过滤掉用户占位名避免污染非用户实体
             all_aliases = list(getattr(canonical, "aliases", []) or [])
-            if incoming_name and incoming_name != canonical_name:
+            if incoming_name and incoming_name != canonical_name and incoming_name.lower() not in _USER_PLACEHOLDER_NAMES:
                 all_aliases.append(incoming_name)
-            all_aliases.extend(getattr(ent, "aliases", []) or [])
+            all_aliases.extend(
+                a for a in (getattr(ent, "aliases", []) or [])
+                if a and a.strip().lower() not in _USER_PLACEHOLDER_NAMES
+            )
             
             try:
                 from app.core.memory.utils.alias_utils import normalize_aliases

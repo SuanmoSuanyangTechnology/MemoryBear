@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
+from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import _USER_PLACEHOLDER_NAMES
 from app.core.memory.storage_services.extraction_engine.extraction_orchestrator import ExtractionOrchestrator
 from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import \
     memory_summary_generation
@@ -201,14 +202,17 @@ async def write(
                             with get_db_context() as db_session:
                                 info = EndUserInfoRepository(db_session).get_by_end_user_id(uuid.UUID(end_user_id))
                                 pg_aliases = info.aliases if info and info.aliases else []
-                            if pg_aliases:
+                            if info is not None:
+                                # 将 Python 侧占位名集合作为参数传入，避免 Cypher 硬编码
+                                placeholder_names = list(_USER_PLACEHOLDER_NAMES)
                                 await neo4j_connector.execute_query(
                                     """
                                     MATCH (e:ExtractedEntity)
-                                    WHERE e.end_user_id = $end_user_id AND e.name IN ['用户', '我', 'User', 'I']
+                                    WHERE e.end_user_id = $end_user_id AND toLower(e.name) IN $placeholder_names
                                     SET e.aliases = $aliases
                                     """,
                                     end_user_id=end_user_id, aliases=pg_aliases,
+                                    placeholder_names=placeholder_names,
                                 )
                                 logger.info(f"[AliasSync] Neo4j 用户实体 aliases 已用 PgSQL 权威源覆盖: {pg_aliases}")
                     except Exception as sync_err:
