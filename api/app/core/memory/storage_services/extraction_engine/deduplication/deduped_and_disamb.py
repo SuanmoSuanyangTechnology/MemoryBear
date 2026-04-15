@@ -82,51 +82,38 @@ def _merge_attribute(canonical: ExtractedEntityNode, ent: ExtractedEntityNode):
             canonical.connect_strength = next(iter(pair))
 
     # 别名合并（去重保序，使用标准化工具）
+    # 用户实体的 aliases 由 PgSQL end_user_info 作为唯一权威源，去重合并时不修改
     try:
         canonical_name = (getattr(canonical, "name", "") or "").strip()
-        incoming_name = (getattr(ent, "name", "") or "").strip()
-        
-        # 收集所有需要合并的别名
-        all_aliases = []
-        
-        # 1. 添加canonical现有的别名
-        existing = getattr(canonical, "aliases", []) or []
-        all_aliases.extend(existing)
-        
-        # 2. 添加incoming实体的名称（如果不同于canonical的名称）
-        if incoming_name and incoming_name != canonical_name:
-            all_aliases.append(incoming_name)
-        
-        # 3. 添加incoming实体的所有别名
-        incoming = getattr(ent, "aliases", []) or []
-        all_aliases.extend(incoming)
-        
-        # 4. 标准化并去重（优先使用alias_utils工具函数）
-        try:
-            from app.core.memory.utils.alias_utils import normalize_aliases
-            canonical.aliases = normalize_aliases(canonical_name, all_aliases)
-        except Exception:
-            # 如果导入失败，使用增强的去重逻辑
-            seen_normalized = set()
-            unique_aliases = []
+        if canonical_name.lower() not in _USER_PLACEHOLDER_NAMES:
+            incoming_name = (getattr(ent, "name", "") or "").strip()
             
-            for alias in all_aliases:
-                if not alias:
-                    continue
-                
-                alias_stripped = str(alias).strip()
-                if not alias_stripped or alias_stripped == canonical_name:
-                    continue
-                
-                # 标准化：转小写用于去重判断
-                alias_normalized = alias_stripped.lower()
-                
-                if alias_normalized not in seen_normalized:
-                    seen_normalized.add(alias_normalized)
-                    unique_aliases.append(alias_stripped)
+            # 收集所有需要合并的别名，过滤掉用户占位名避免污染非用户实体
+            all_aliases = list(getattr(canonical, "aliases", []) or [])
+            if incoming_name and incoming_name != canonical_name and incoming_name.lower() not in _USER_PLACEHOLDER_NAMES:
+                all_aliases.append(incoming_name)
+            all_aliases.extend(
+                a for a in (getattr(ent, "aliases", []) or [])
+                if a and a.strip().lower() not in _USER_PLACEHOLDER_NAMES
+            )
             
-            # 排序并赋值
-            canonical.aliases = sorted(unique_aliases)
+            try:
+                from app.core.memory.utils.alias_utils import normalize_aliases
+                canonical.aliases = normalize_aliases(canonical_name, all_aliases)
+            except Exception:
+                seen_normalized = set()
+                unique_aliases = []
+                for alias in all_aliases:
+                    if not alias:
+                        continue
+                    alias_stripped = str(alias).strip()
+                    if not alias_stripped or alias_stripped == canonical_name:
+                        continue
+                    alias_normalized = alias_stripped.lower()
+                    if alias_normalized not in seen_normalized:
+                        seen_normalized.add(alias_normalized)
+                        unique_aliases.append(alias_stripped)
+                canonical.aliases = sorted(unique_aliases)
     except Exception:
         pass
 
@@ -733,66 +720,37 @@ def fuzzy_match(
 
 
     def _merge_entities_with_aliases(canonical: ExtractedEntityNode, losing: ExtractedEntityNode):
-        """ 模糊匹配中的实体合并。
+        """模糊匹配中的实体合并（别名部分）。
         
-        合并策略：
-        1. 保留canonical的主名称不变
-        2. 将losing的主名称添加为alias（如果不同）
-        3. 合并两个实体的所有aliases
-        4. 自动去重（case-insensitive）并排序
-        
-        Args:
-            canonical: 规范实体（保留）
-            losing: 被合并实体（删除）
-            
-        Note:
-            使用alias_utils.normalize_aliases进行标准化去重
+        用户实体的 aliases 由 PgSQL end_user_info 作为唯一权威源，跳过合并。
         """
-        # 获取规范实体的名称
         canonical_name = (getattr(canonical, "name", "") or "").strip()
+        if canonical_name.lower() in _USER_PLACEHOLDER_NAMES:
+            return
+
         losing_name = (getattr(losing, "name", "") or "").strip()
         
-        # 收集所有需要合并的别名
-        all_aliases = []
-        
-        # 1. 添加canonical现有的别名
-        current_aliases = getattr(canonical, "aliases", []) or []
-        all_aliases.extend(current_aliases)
-        
-        # 2. 添加losing实体的名称（如果不同于canonical的名称）
+        all_aliases = list(getattr(canonical, "aliases", []) or [])
         if losing_name and losing_name != canonical_name:
             all_aliases.append(losing_name)
+        all_aliases.extend(getattr(losing, "aliases", []) or [])
         
-        # 3. 添加losing实体的所有别名
-        losing_aliases = getattr(losing, "aliases", []) or []
-        all_aliases.extend(losing_aliases)
-        
-        # 4. 标准化并去重（使用标准化后的字符串进行去重）
         try:
             from app.core.memory.utils.alias_utils import normalize_aliases
             canonical.aliases = normalize_aliases(canonical_name, all_aliases)
         except Exception:
-            # 如果导入失败，使用增强的去重逻辑
-            # 使用标准化后的字符串作为key进行去重
             seen_normalized = set()
             unique_aliases = []
-            
             for alias in all_aliases:
                 if not alias:
                     continue
-                
                 alias_stripped = str(alias).strip()
                 if not alias_stripped or alias_stripped == canonical_name:
                     continue
-                
-                # 标准化：转小写用于去重判断
                 alias_normalized = alias_stripped.lower()
-                
                 if alias_normalized not in seen_normalized:
                     seen_normalized.add(alias_normalized)
                     unique_aliases.append(alias_stripped)
-            
-            # 排序并赋值
             canonical.aliases = sorted(unique_aliases)
     
     # ========== 主循环：遍历所有实体对进行模糊匹配 ==========

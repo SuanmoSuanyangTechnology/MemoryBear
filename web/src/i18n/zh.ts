@@ -116,7 +116,7 @@ export const zh = {
       prompt: '提示词工程',
       skills: '技能库',
       workbench: '工作台',
-      memoryRelated: '记忆相关',
+      memoryRelated: '记忆中枢',
       advancedSettings: '高级设置',
       promptHistory: '我的历史',
       platformManagement: '平台管理',
@@ -2523,6 +2523,9 @@ export const zh = {
         'list-operator.input_list': '输入变量',
       },
       checkListHasErrors: '发布前确认检查清单中所有问题均已解决',
+      variableSelect: {
+        empty: '暂无变量',
+      },
     },
     emotionEngine: {
       emotionEngineConfig: '情感引擎配置',

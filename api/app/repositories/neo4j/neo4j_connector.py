@@ -77,11 +77,11 @@ class Neo4jConnector:
         """
         await self.driver.close()
 
-    async def execute_query(self, query: str, json_format=False, **kwargs: Any) -> List[Dict[str, Any]]:
+    async def execute_query(self, cypher: str, json_format=False, **kwargs: Any) -> List[Dict[str, Any]]:
         """执行Cypher查询
         
         Args:
-            query: Cypher查询语句
+            cypher: Cypher查询语句
             json_format: json格式化
             **kwargs: 查询参数，将作为参数传递给Cypher查询
             
@@ -92,7 +92,7 @@ class Neo4jConnector:
 
         """
         result = await self.driver.execute_query(
-            query,
+            cypher,
             database="neo4j",
             **kwargs
         )

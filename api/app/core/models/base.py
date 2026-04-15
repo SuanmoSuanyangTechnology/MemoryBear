@@ -112,22 +112,23 @@ class RedBearModelFactory:
                 params["stream_usage"] = True
             # 深度思考模式
             is_streaming = bool(config.extra_params.get("streaming"))
-            if is_streaming and not config.is_omni:
-                if provider == ModelProvider.VOLCANO:
-                    # 火山引擎深度思考仅流式调用支持，非流式时不传 thinking 参数
-                    thinking_config: Dict[str, Any] = {
-                        "type": "enabled" if config.deep_thinking else "disabled"
-                    }
-                    if config.deep_thinking and config.thinking_budget_tokens:
-                        thinking_config["budget_tokens"] = config.thinking_budget_tokens
-                    params["extra_body"] = {"thinking": thinking_config}
-                else:
-                    # 始终显式传递 enable_thinking，不支持该参数的模型（如 DeepSeek-R1）会直接忽略
-                    model_kwargs: Dict[str, Any] = config.extra_params.get("model_kwargs", {})
-                    model_kwargs["enable_thinking"] = config.deep_thinking
-                    if config.deep_thinking and config.thinking_budget_tokens:
-                        model_kwargs["thinking_budget"] = config.thinking_budget_tokens
-                    params["model_kwargs"] = model_kwargs
+            if config.support_thinking:
+                if is_streaming and not config.is_omni:
+                    if provider == ModelProvider.VOLCANO:
+                        # 火山引擎深度思考仅流式调用支持，非流式时不传 thinking 参数
+                        thinking_config: Dict[str, Any] = {
+                            "type": "enabled" if config.deep_thinking else "disabled"
+                        }
+                        if config.deep_thinking and config.thinking_budget_tokens:
+                            thinking_config["budget_tokens"] = config.thinking_budget_tokens
+                        params["extra_body"] = {"thinking": thinking_config}
+                    else:
+                        # 始终显式传递 enable_thinking，不支持该参数的模型（如 DeepSeek-R1）会直接忽略
+                        model_kwargs: Dict[str, Any] = config.extra_params.get("model_kwargs", {})
+                        model_kwargs["enable_thinking"] = config.deep_thinking
+                        if config.deep_thinking and config.thinking_budget_tokens:
+                            model_kwargs["thinking_budget"] = config.thinking_budget_tokens
+                        params["model_kwargs"] = model_kwargs
             return params
         elif provider == ModelProvider.DASHSCOPE:
             params = {

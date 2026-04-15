@@ -227,10 +227,20 @@ class PromptOptimizerService:
             content = getattr(chunk, "content", chunk)
             if not content:
                 continue
-            buffer += content
+            if isinstance(content, str):
+                buffer += content
+            elif isinstance(content, list):
+                for _ in content:
+                    buffer += _["text"]
+            else:
+                logger.error(f"Unsupported content type - {content}")
+                raise Exception("Unsupported content type")
             cache = buffer[:-20]
+            last_idx = 19
+            while cache and cache[-1] == '\\' and last_idx > 0:
+                cache = buffer[:-last_idx]
+                last_idx -= 1
 
-            # 尝试找到 "prompt": " 开始位置
             if prompt_finished:
                 continue
 
@@ -272,7 +282,7 @@ class PromptOptimizerService:
     def parser_prompt_variables(prompt: str):
         try:
             pattern = r'\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}'
-            matches = re.findall(pattern, prompt)
+            matches = re.findall(pattern, str(prompt))
             variables = list(set(matches))
             return variables
         except Exception as e:

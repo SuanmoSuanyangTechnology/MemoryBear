@@ -116,7 +116,7 @@ export const en = {
       prompt: 'Prompt Engineering',
       skills: 'Skill Library',
       workbench: 'Workbench',
-      memoryRelated: 'Memory-Related',
+      memoryRelated: 'Memory Hub',
       advancedSettings: 'Advanced Settings',
       promptHistory: 'My history',
       platformManagement: 'Platform Management',
@@ -2559,6 +2559,9 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         'list-operator.input_list': 'Input list',
       },
       checkListHasErrors: 'Please resolve all issues in the checklist before publishing',
+      variableSelect: {
+        empty: 'No variables available',
+      },
     },
     emotionEngine: {
       emotionEngineConfig: 'Emotion Engine Configuration',

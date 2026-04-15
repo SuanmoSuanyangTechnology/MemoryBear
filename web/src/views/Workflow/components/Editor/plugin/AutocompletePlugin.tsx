@@ -2,12 +2,13 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 16:51:04
+ * @Last Modified time: 2026-04-13 14:00:07
  */
 import { useEffect, useLayoutEffect, useState, useRef, type FC } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { $getSelection, $isRangeSelection, COMMAND_PRIORITY_HIGH, KEY_ENTER_COMMAND, KEY_ARROW_DOWN_COMMAND, KEY_ARROW_UP_COMMAND, KEY_ESCAPE_COMMAND } from 'lexical';
 import { Space, Flex } from 'antd';
+import clsx from 'clsx';
 
 import { INSERT_VARIABLE_COMMAND, CLOSE_AUTOCOMPLETE_COMMAND } from '../commands';
 import type { NodeProperties } from '../../../types'
@@ -284,23 +285,24 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
       ref={popupRef}
       data-autocomplete-popup="true"
       onMouseDown={(e) => e.preventDefault()}
-      className="rb:fixed rb:z-1000 rb:bg-white rb:rounded-xl rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]"
+      className="rb:fixed rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
       style={{
         top: popupPosition.top,
         left: popupPosition.left,
       }}
     >
-      <div className="rb:py-1 rb:min-w-70 rb:max-h-50 rb:overflow-y-auto">
+      <div className="rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto">
         <Flex vertical gap={12}>
           {Object.entries(groupedSuggestions).map(([nodeId, nodeOptions]) => {
             const nodeName = nodeOptions[0]?.nodeData?.name || nodeId;
-            const nodeIcon = nodeOptions[0]?.nodeData?.icon;
             return (
-              <div key={nodeId}>
-                {nodeName !== 'undefined' && <Flex align="center" gap={4} className="rb:px-3! rb:text-[12px] rb:py-1.25! rb:font-medium rb:text-[#5B6167]">
-                  {nodeIcon && <div className={`rb:size-3 rb:bg-cover ${nodeIcon}`} />}
-                  {nodeName}
-                </Flex>}
+              <div key={nodeId} className="rb:text-[12px]">
+                {nodeName !== 'undefined' &&
+                  <div className="rb:px-2 rb:leading-4.25 rb:mb-1.25 rb:font-medium rb:text-[#5B6167]">
+                    {nodeName}
+                  </div>
+                }
+                <Flex vertical gap={2}>
                 {nodeOptions.map((option) => {
                   const globalIndex = flatOptions.indexOf(option);
                   const isExpanded = expandedParent?.key === option.key;
@@ -310,14 +312,13 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
                       key={option.key}
                       ref={(el) => { if (el) itemRefs.current.set(option.key, el); }}
                       data-selected={selectedIndex === globalIndex}
-                      className="rb:pl-6! rb:pr-3! rb:py-2!"
+                      className={clsx("rb:px-2! rb:py-0.75! rb:rounded-sm rb:leading-4.5 rb:text-[#5B6167] rb:hover:bg-[#F6F6F6]", {
+                        'rb:bg-[#F6F6F6]': selectedIndex === globalIndex || isExpanded,
+                        'rb:cursor-not-allowed rb:opacity-65': option.disabled,
+                        'rb:cursor-pointer': !option.disabled,
+                      })}
                       align="center"
                       justify="space-between"
-                      style={{
-                        cursor: option.disabled ? 'not-allowed' : 'pointer',
-                        background: (selectedIndex === globalIndex || isExpanded) ? '#f0f8ff' : 'white',
-                        opacity: option.disabled ? 0.5 : 1,
-                      }}
                       onClick={() => {
                         if (option.disabled) return;
                         insertMention(option);
@@ -337,17 +338,19 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
                         }
                       }}
                     >
-                      {option.label && <Space size={4}>
-                        <span className="rb:text-[#155EEF]">{option.isContext ? '📄' : `{x}`}</span>
-                        <span>{option.label}</span>
-                      </Space>}
-                      <Space size={4}>
-                        {option.dataType && <span className="rb:text-[#5B6167]">{option.dataType}</span>}
-                        {hasChildren && <span className="rb:text-[#5B6167] rb:ml-1">›</span>}
+                      {option.label &&
+                        <div className="rb:font-medium">
+                          <span className="rb:text-[#155EEF]">{`{x}`}</span> {option.label}
+                        </div>
+                      }
+                      <Space size={2}>
+                        {option.dataType && <span>{option.dataType}</span>}
+                        {hasChildren && <div className="rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:rotate-90"></div>}
                       </Space>
                     </Flex>
                   );
                 })}
+                </Flex>
               </div>
             );
           })}
@@ -356,7 +359,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
       {/* Child variables panel - floats to the left */}
       {expandedParent?.children?.length && (
         <div
-          className="rb:absolute rb:bg-white rb:rounded-xl rb:py-1 rb:min-w-60 rb:max-h-60 rb:overflow-y-auto rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]"
+          className="rb:absolute rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto rb:text-[12px] rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
           style={{
             top: childPanelTop,
             right: 'calc(100% + 8px)',
@@ -364,9 +367,8 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
           }}
           onMouseEnter={() => setExpandedParent(expandedParent)}
         >
-          {/* Header */}
-          <div className="rb:px-3 rb:py-2 rb:text-[12px] rb:font-medium rb:text-[#5B6167] rb:border-b rb:border-[#F0F0F0]">
-            <Flex justify="space-between" align="center">
+          <div className="rb:pb-2 rb:mb-1 rb:font-medium rb:text-[#5B6167] rb-border-b">
+            <Flex justify="space-between" align="center" gap={8}>
               <span>{expandedParent.nodeData.name}.{expandedParent.label}</span>
               <span>{expandedParent.dataType}</span>
             </Flex>
@@ -377,19 +379,20 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
               <Flex
                 key={child.key}
                 data-selected={selectedIndex === childIndex}
-                className="rb:px-3! rb:py-2!"
+                className={clsx("rb:px-2! rb:py-0.75! rb:rounded-sm rb:leading-4.5 rb:text-[#5B6167] rb:hover:bg-[#F6F6F6]", {
+                  'rb:bg-[#F6F6F6]': selectedIndex === childIndex,
+                  'rb:cursor-not-allowed rb:opacity-65': child.disabled,
+                  'rb:cursor-pointer': !child.disabled,
+                })}
                 align="center"
                 justify="space-between"
-                style={{
-                  cursor: child.disabled ? 'not-allowed' : 'pointer',
-                  background: selectedIndex === childIndex ? '#f0f8ff' : 'white',
-                  opacity: child.disabled ? 0.5 : 1,
-                }}
                 onClick={() => !child.disabled && insertMention(child)}
                 onMouseEnter={() => setSelectedIndex(childIndex)}
               >
-                <span>{child.label}</span>
-                {child.dataType && <span className="rb:text-[#5B6167]">{child.dataType}</span>}
+                <span className="rb:font-medium">
+                  <span className="rb:text-[#155EEF]">{`{x}`}</span> {child.label}
+                </span>
+                {child.dataType && <span>{child.dataType}</span>}
               </Flex>
             );
           })}

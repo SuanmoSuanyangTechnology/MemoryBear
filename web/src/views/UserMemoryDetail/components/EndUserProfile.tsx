@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:33:30 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-10 18:40:52
+ * @Last Modified time: 2026-04-14 16:03:41
  */
 /**
  * End User Profile Component
@@ -28,11 +28,11 @@ import Tag from '@/components/Tag';
  * Component props
  */
 interface EndUserProfileProps {
-  onDataLoaded?: (data: { other_name?: string; id: string }) => void;
+  onDataLoaded?: (data?: EndUser) => void;
   className?: string;
 }
 
-const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ className }, ref) => {
+const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ className, onDataLoaded }, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const endUserProfileModalRef = useRef<EndUserProfileModalRef>(null)
@@ -52,6 +52,7 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
       const userData = res as EndUser
       setData(userData)
       setLoading(false) 
+      onDataLoaded?.(userData as EndUser)
     })
     .finally(() => {
       setLoading(false)

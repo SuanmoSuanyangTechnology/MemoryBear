@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 16:58:10
+ * @Last Modified time: 2026-04-13 15:13:36
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Button, Form, Input, Flex, App } from 'antd';
@@ -35,8 +35,6 @@ const OpenStatementSettingModal = forwardRef<OpenStatementSettingModalRef, OpenS
   const { modal } = App.useApp()
   const [visible, setVisible] = useState(false);
   const [form] = Form.useForm<FeaturesConfigForm['opening_statement']>();
-
-  console.log('chatVariables', chatVariables)
 
   const handleClose = () => {
     setVisible(false);
