@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-04 17:20:52 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-04 17:20:52 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-04-14 18:24:29
  */
 import { useEffect, useRef, useMemo } from 'react';
 import { EditorView, basicSetup } from 'codemirror';
@@ -156,7 +156,7 @@ const CodeMirrorEditor = ({
     <div
       ref={editorRef}
       style={{ minHeight, fontSize, lineHeight }}
-      className={variant === 'borderless' ? '' : 'rb-border rb:rounded-[8px]'}
+      className={variant === 'borderless' ? '' : 'rb-border rb:rounded-lg'}
     />
   );
 };

@@ -6,11 +6,15 @@
  */
 import { create } from 'zustand'
 import type { NodeCheckResult } from '@/views/Workflow/components/CheckList'
+import type { ChatItem } from '@/components/Chat/types'
 
 interface WorkflowState {
   checkResults: Record<string, NodeCheckResult[]>
   setCheckResults: (appId: string, results: NodeCheckResult[]) => void
   getCheckResults: (appId: string) => NodeCheckResult[]
+  chatHistoryMap: Record<string, ChatItem[]>
+  setChatHistory: (conversationId: string, history: ChatItem[]) => void
+  getChatHistory: (conversationId: string) => ChatItem[]
 }
 
 export const useWorkflowStore = create<WorkflowState>((set, get) => ({
@@ -18,4 +22,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   setCheckResults: (appId, results) =>
     set(state => ({ checkResults: { ...state.checkResults, [appId]: results } })),
   getCheckResults: (appId) => get().checkResults[appId] ?? [],
+  chatHistoryMap: {},
+  setChatHistory: (conversationId, history) =>
+    set(state => ({ chatHistoryMap: { ...state.chatHistoryMap, [conversationId]: history } })),
+  getChatHistory: (conversationId) => get().chatHistoryMap[conversationId] ?? [],
 }))

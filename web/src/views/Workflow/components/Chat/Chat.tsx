@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 18:07:38
+ * @Last Modified time: 2026-04-15 15:57:35
  */
 /**
  * Workflow Chat Component
@@ -41,12 +41,15 @@ import type { ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import Runtime from './Runtime';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
 import { replaceVariables } from '@/views/ApplicationConfig/Agent';
+import { useWorkflowStore } from '@/store/workflow';
 
-const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: WorkflowConfig | null; features?: FeaturesConfigForm }>(({
+const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: WorkflowConfig | null; features?: FeaturesConfigForm }>(({ // eslint-disable-line
   appId, graphRef, features
 }, ref) => {
   const { t } = useTranslation()
   const { message: messageApi } = App.useApp()
+  const { setChatHistory } = useWorkflowStore()
+  const conversationIdRef = useRef<string>('draft')
   const toolbarRef = useRef<ChatToolbarRef>(null)
   const [toolbarReady, setToolbarReady] = useState(false)
   const toolbarCallbackRef = useCallback((node: ChatToolbarRef | null) => {
@@ -118,6 +121,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
     setChatList([])
     setVariables([])
     setConversationId(null)
+    conversationIdRef.current = 'draft'
     setMessage(undefined)
     toolbarRef.current?.setFiles([])
     toolbarRef.current?.setVariables([])
@@ -189,7 +193,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
           elapsed_time?: string;
           error?: any;
           state: Record<string, any>;
-          status?: 'completed' | 'failed',
+          status?: 'completed' | 'failed' | 'running',
           citations?: {
             document_id: string;
             file_name: string;
@@ -231,6 +235,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
                     node_name: name,
                     node_type: type,
                     icon,
+                    status: 'running',
                     content: {},
                   }
                 } else {
@@ -240,6 +245,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
                     node_name: name,
                     node_type: type,
                     icon,
+                    status: 'running',
                     content: {},
                   })
                 }
@@ -344,6 +350,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
         }
 
         if (conversation_id && conversationId !== conversation_id) {
+          conversationIdRef.current = conversation_id
           setConversationId(conversation_id)
         }
       })
@@ -439,6 +446,10 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
       })
     }
   }, [chatList.length, features?.opening_statement, variables])
+
+  useEffect(() => {
+    setChatHistory(conversationIdRef.current, chatList)
+  }, [chatList])
 
   return (
     <RbDrawer
