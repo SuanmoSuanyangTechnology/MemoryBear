@@ -2,14 +2,14 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:25:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-26 11:18:04
+ * @Last Modified time: 2026-04-15 14:00:07
  */
 /**
  * Rich text editor component using Lexical framework
  * Provides text editing with insert, append, clear, and scroll capabilities
  */
 
-import {forwardRef, useImperativeHandle } from 'react';
+import {forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import clsx from 'clsx';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
@@ -50,7 +50,7 @@ interface LexicalEditorProps {
   /** Callback when content changes */
   onChange?: (value: string) => void;
   /** Editor height in pixels */
-  height?: number;
+  height?: string;
   disabled?: boolean;
 }
 
@@ -73,9 +73,42 @@ const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
   value,
   placeholder = "Please enter content...",
   onChange,
-  disabled
+  disabled,
+  height
 }, ref) => {
   const [editor] = useLexicalComposerContext();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pendingTextRef = useRef<string>('');
+  const rafRef = useRef<number | null>(null);
+  const isAppendingRef = useRef(false);
+  const scrollTopRef = useRef(0);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onPointerDown = () => {
+      if (!isAppendingRef.current) scrollTopRef.current = el.scrollTop;
+    };
+    el.addEventListener('pointerdown', onPointerDown);
+    return () => el.removeEventListener('pointerdown', onPointerDown);
+  }, []);
+
+  useEffect(() => {
+    return editor.registerUpdateListener(({ tags }) => {
+      if (!scrollRef.current) return;
+      if (tags.has('append-text')) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      } else {
+        scrollRef.current.scrollTop = scrollTopRef.current;
+      }
+    });
+  }, [editor]);
+
+  const scrollToBottom = () => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  };
   
   /**
    * Expose editor methods to parent component
@@ -94,24 +127,33 @@ const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
       });
     },
     appendText: (text: string) => {
-      editor.update(() => {
-        const root = $getRoot();
-        const lastChild = root.getLastChild();
-        if (lastChild && $isParagraphNode(lastChild)) {
-          const lastTextNode = lastChild.getLastChild();
-          if (lastTextNode && $isTextNode(lastTextNode)) {
-            const currentText = lastTextNode.getTextContent();
-            lastTextNode.setTextContent(currentText + text);
+      pendingTextRef.current += text;
+      if (rafRef.current !== null) return;
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        const batch = pendingTextRef.current;
+        pendingTextRef.current = '';
+        if (scrollRef.current) scrollTopRef.current = scrollRef.current.scrollTop;
+        isAppendingRef.current = true;
+        editor.update(() => {
+          const root = $getRoot();
+          const lastChild = root.getLastChild();
+          if (lastChild && $isParagraphNode(lastChild)) {
+            const lastTextNode = lastChild.getLastChild();
+            if (lastTextNode && $isTextNode(lastTextNode)) {
+              lastTextNode.setTextContent(lastTextNode.getTextContent() + batch);
+            } else {
+              lastChild.append($createTextNode(batch));
+            }
           } else {
-            const textNode = $createTextNode(text);
-            lastChild.append(textNode);
+            const paragraph = $createParagraphNode();
+            paragraph.append($createTextNode(batch));
+            root.append(paragraph);
           }
-        } else {
-          const paragraph = $createParagraphNode();
-          const textNode = $createTextNode(text);
-          paragraph.append(textNode);
-          root.append(paragraph);
-        }
+        }, {
+          tag: 'append-text',
+          onUpdate: () => { isAppendingRef.current = false; }
+        });
       });
     },
     clear: () => {
@@ -122,21 +164,16 @@ const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
         root.append(paragraph);
       });
     },
-    scrollToBottom: () => {
-      const editorElement = editor.getRootElement();
-      if (editorElement) {
-        editorElement.scrollTop = editorElement.scrollHeight;
-      }
-    }
+    scrollToBottom,
   }), [editor]);
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div ref={scrollRef} style={{ position: 'relative' }} className={height ? `${height} rb:overflow-y-auto` : ''}>
       <RichTextPlugin
         contentEditable={
           <ContentEditable
             className={clsx(
-              "rb:outline-none rb:resize-none rb:text-[14px] rb:leading-5 rb:px-4 rb:py-5 rb:bg-[#FBFDFF] rb-border rb:rounded-lg rb:overflow-auto",
+              "rb:outline-none rb:resize-none rb:text-[14px] rb:leading-5 rb:px-4 rb:py-5 rb:bg-[#FBFDFF] rb-border rb:rounded-lg",
               disabled && "rb:cursor-not-allowed rb:bg-[#F6F8FC] rb:text-[#5B6167]",
               className
             )}
