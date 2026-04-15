@@ -1,19 +1,10 @@
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, ConfigDict
 
-from app.core.memory.enums import StorageType
-from app.schemas import MemoryConfig
+from app.core.memory.enums import StorageType, SearchStrategy
+from app.core.memory.models.service_models import Memory, MemoryContext
+from app.core.memory.pipelines.memory_read import ReadPipeLine
+from app.db import get_db_context
 from app.services.memory_config_service import MemoryConfigService
-
-
-class MemoryContext(BaseModel):
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
-
-    end_user_id: str
-    memory_config: MemoryConfig
-    storage_type: StorageType = StorageType.NEO4J
-    user_rag_memory_id: str | None = None
-    language: str = "zh"
 
 
 class MemoryService:
@@ -44,8 +35,9 @@ class MemoryService:
     async def write(self, messages: list[dict]) -> str:
         raise NotImplementedError
 
-    async def read(self, query: str, history: list, search_switch: str) -> dict:
-        raise NotImplementedError
+    async def read(self, query: str, history: list, search_switch: SearchStrategy) -> list[Memory]:
+        with get_db_context() as db:
+            return await ReadPipeLine(self.ctx, db).run(query, search_switch, limit=10)
 
     async def forget(self, max_batch: int = 100, min_days: int = 30) -> dict:
         raise NotImplementedError

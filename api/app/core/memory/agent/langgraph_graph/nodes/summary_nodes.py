@@ -19,6 +19,7 @@ from app.core.memory.agent.utils.llm_tools import (
 from app.core.memory.agent.utils.redis_tool import store
 from app.core.memory.agent.utils.session_tools import SessionService
 from app.core.memory.agent.utils.template_tools import TemplateService
+from app.core.memory.enums import Neo4jNodeType
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_db_context
 
@@ -338,7 +339,7 @@ async def Input_Summary(state: ReadState) -> ReadState:
         "end_user_id": end_user_id,
         "question": data,
         "return_raw_results": True,
-        "include": ["summaries", "communities"]  # MemorySummary 和 Community 同为高维度概括节点
+        "include": [Neo4jNodeType.MEMORYSUMMARY, Neo4jNodeType.COMMUNITY]  # MemorySummary 和 Community 同为高维度概括节点
     }
 
     try:

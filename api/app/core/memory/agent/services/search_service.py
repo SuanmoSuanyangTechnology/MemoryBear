@@ -7,6 +7,7 @@ and deduplication.
 from typing import List, Tuple, Optional
 
 from app.core.logging_config import get_agent_logger
+from app.core.memory.enums import Neo4jNodeType
 from app.core.memory.src.search import run_hybrid_search
 from app.core.memory.utils.data.text_utils import escape_lucene_query
 
@@ -111,13 +112,13 @@ class SearchService:
         content_parts = []
 
         # Statements: extract statement field
-        if 'statement' in result and result['statement']:
-            content_parts.append(result['statement'])
+        if Neo4jNodeType.STATEMENT in result and result[Neo4jNodeType.STATEMENT]:
+            content_parts.append(result[Neo4jNodeType.STATEMENT])
 
         # Community 节点：有 member_count 或 core_entities 字段，或 node_type 明确指定
         # 用 "[主题：{name}]" 前缀区分，让 LLM 知道这是主题级摘要
         is_community = (
-                node_type == "community"
+                node_type == Neo4jNodeType.COMMUNITY
                 or 'member_count' in result
                 or 'core_entities' in result
         )
@@ -204,7 +205,7 @@ class SearchService:
             raw_results is None if return_raw_results=False
         """
         if include is None:
-            include = ["statements", "chunks", "entities", "summaries", "communities"]
+            include = [Neo4jNodeType.STATEMENT, Neo4jNodeType.CHUNK, Neo4jNodeType.EXTRACTEDENTITY, Neo4jNodeType.MEMORYSUMMARY, Neo4jNodeType.COMMUNITY]
 
         # Clean query
         cleaned_query = self.clean_query(question)
@@ -231,7 +232,7 @@ class SearchService:
                 reranked_results = answer.get('reranked_results', {})
 
                 # Priority order: summaries first (most contextual), then communities, statements, chunks, entities
-                priority_order = ['summaries', 'communities', 'statements', 'chunks', 'entities']
+                priority_order = [Neo4jNodeType.STATEMENT, Neo4jNodeType.CHUNK, Neo4jNodeType.EXTRACTEDENTITY, Neo4jNodeType.MEMORYSUMMARY, Neo4jNodeType.COMMUNITY]
 
                 for category in priority_order:
                     if category in include and category in reranked_results:
@@ -241,7 +242,7 @@ class SearchService:
             else:
                 # For keyword or embedding search, results are directly in answer dict
                 # Apply same priority order
-                priority_order = ['summaries', 'communities', 'statements', 'chunks', 'entities']
+                priority_order = [Neo4jNodeType.STATEMENT, Neo4jNodeType.CHUNK, Neo4jNodeType.EXTRACTEDENTITY, Neo4jNodeType.MEMORYSUMMARY, Neo4jNodeType.COMMUNITY]
 
                 for category in priority_order:
                     if category in include and category in answer:
@@ -250,11 +251,11 @@ class SearchService:
                             answer_list.extend(category_results)
 
             # 对命中的 community 节点展开其成员 statements（路径 "0"/"1" 需要，路径 "2" 不需要）
-            if expand_communities and "communities" in include:
+            if expand_communities and Neo4jNodeType.COMMUNITY in include:
                 community_results = (
-                    answer.get('reranked_results', {}).get('communities', [])
+                    answer.get('reranked_results', {}).get(Neo4jNodeType.COMMUNITY.value, [])
                     if search_type == "hybrid"
-                    else answer.get('communities', [])
+                    else answer.get(Neo4jNodeType.COMMUNITY.value, [])
                 )
                 cleaned_stmts, new_texts = await expand_communities_to_statements(
                     community_results=community_results,
@@ -266,7 +267,7 @@ class SearchService:
             content_list = []
             for ans in answer_list:
                 # community 节点有 member_count 或 core_entities 字段
-                ntype = "community" if ('member_count' in ans or 'core_entities' in ans) else ""
+                ntype = Neo4jNodeType.COMMUNITY if ('member_count' in ans or 'core_entities' in ans) else ""
                 content_list.append(self.extract_content_from_result(ans, node_type=ntype))
 
             # Filter out empty strings and join with newlines
