@@ -221,7 +221,7 @@ class CustomTool(BaseTool):
         query_params = {}
         for param_name, param_info in operation.get("parameters", {}).items():
             if param_info.get("in") == "query" and param_name in params:
-                query_params[param_name] = self._coerce_param(params[param_name], param_info.get("type", "string"))
+                query_params[param_name] = params[param_name]
         
         if query_params:
             from urllib.parse import urlencode
@@ -251,34 +251,21 @@ class CustomTool(BaseTool):
         return headers
 
     @staticmethod
-    def _coerce_param(value: Any, schema_type: str) -> Any:
-        """根据 schema 类型转换参数值"""
-        if value is None:
-            return value
-        try:
-            if schema_type == "integer":
-                return int(value)
-            elif schema_type == "number":
-                return float(value)
-            elif schema_type == "boolean":
-                if isinstance(value, str):
-                    return value.lower() not in ("false", "0", "")
-                return bool(value)
-        except (ValueError, TypeError):
-            pass
-        return value
-
-    def _build_request_data(self, operation: Dict[str, Any], params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _build_request_data(operation: Dict[str, Any], params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """构建请求数据"""
         if operation["method"] in ["POST", "PUT", "PATCH"]:
             request_body = operation.get("request_body")
             if request_body:
+                # 构建请求体数据
                 data = {}
                 properties = request_body.get("properties", {})
+                
                 for prop_name, prop_schema in properties.items():
                     if prop_name in params:
-                        data[prop_name] = self._coerce_param(params[prop_name], prop_schema.get("type", "string"))
+                        data[prop_name] = params[prop_name]
+                
                 return data if data else None
+        
         return None
     
     async def _send_http_request(
