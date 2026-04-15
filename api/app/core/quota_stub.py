@@ -1,44 +1,36 @@
 """
-配额检查 stub - 社区版使用，所有检查直接放行。
-企业版通过 premium.platform_admin.quota_decorator 提供真实实现。
+配额检查 stub - 社区版和 SaaS 版统一使用 core.quota_manager 实现
+
+所有配额检查逻辑统一在 core 层实现，两个版本共用：
+- 社区版：从 default_free_plan.py 读取配额限制
+- SaaS 版：优先从 tenant_subscriptions 表读取，降级到配置文件
 """
-from functools import wraps
-from typing import Callable
+from app.core.quota_manager import (
+    check_workspace_quota,
+    check_skill_quota,
+    check_app_quota,
+    check_knowledge_capacity_quota,
+    check_memory_engine_quota,
+    check_end_user_quota,
+    check_ontology_project_quota,
+    check_model_quota,
+    check_model_activation_quota,
+    get_quota_usage,
+    _check_quota,
+    QuotaUsageRepository,
+)
 
-
-def _noop_decorator(func: Callable) -> Callable:
-    """空装饰器，直接放行"""
-    return func
-
-
-def _noop_check(*args, **kwargs):
-    """空检查函数，直接放行"""
-    pass
-
-
-try:
-    from premium.platform_admin.quota_decorator import (
-        check_workspace_quota,
-        check_skill_quota,
-        check_app_quota,
-        check_knowledge_capacity_quota,
-        check_memory_engine_quota,
-        check_end_user_quota,
-        check_ontology_project_quota,
-        check_model_quota,
-        check_model_activation_quota,
-        get_quota_usage,
-        _check_quota,
-    )
-except ModuleNotFoundError:
-    check_workspace_quota = _noop_decorator
-    check_skill_quota = _noop_decorator
-    check_app_quota = _noop_decorator
-    check_knowledge_capacity_quota = _noop_decorator
-    check_memory_engine_quota = _noop_decorator
-    check_end_user_quota = _noop_decorator
-    check_ontology_project_quota = _noop_decorator
-    check_model_quota = _noop_decorator
-    check_model_activation_quota = _noop_decorator
-    get_quota_usage = lambda db, tenant_id: {}
-    _check_quota = _noop_check
+__all__ = [
+    "check_workspace_quota",
+    "check_skill_quota",
+    "check_app_quota",
+    "check_knowledge_capacity_quota",
+    "check_memory_engine_quota",
+    "check_end_user_quota",
+    "check_ontology_project_quota",
+    "check_model_quota",
+    "check_model_activation_quota",
+    "get_quota_usage",
+    "_check_quota",
+    "QuotaUsageRepository",
+]

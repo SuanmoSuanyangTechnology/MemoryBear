@@ -1,6 +1,7 @@
 """
 租户套餐查询接口（普通用户可访问）
 """
+import datetime
 from typing import Callable
 
 from fastapi import APIRouter, Depends
@@ -46,8 +47,36 @@ async def get_my_tenant_subscription(
         return success(data=svc.build_response(sub))
 
     except ModuleNotFoundError:
-        # 社区版无 premium 模块，返回空
-        return success(data=None, msg="套餐功能未启用")
+        # 社区版无 premium 模块，从配置文件读取免费套餐
+        if not current_user.tenant:
+            return JSONResponse(status_code=404, content=fail(code=404, msg="用户未关联租户"))
+
+        from app.config.default_free_plan import DEFAULT_FREE_PLAN
+
+        plan = DEFAULT_FREE_PLAN
+        response_data = {
+            "subscription_id": None,
+            "tenant_id": str(current_user.tenant.id),
+            "package_plan_id": None,
+            "package_version": plan["version"],
+            "package_plan": {
+                "id": None,
+                "name": plan["name"],
+                "version": plan["version"],
+                "category": plan["category"],
+                "tier_level": plan["tier_level"],
+                "price": float(plan["price"]),
+                "billing_cycle": plan["billing_cycle"],
+            },
+            "started_at": None,
+            "expired_at": None,
+            "status": "active",
+            "quota": plan["quotas"],
+            "created_at": int(datetime.datetime.utcnow().timestamp() * 1000),
+            "updated_at": int(datetime.datetime.utcnow().timestamp() * 1000),
+        }
+        return success(data=response_data, msg="社区版免费套餐")
+
     except Exception as e:
         logger.error(f"获取租户套餐信息失败: {e}", exc_info=True)
         return JSONResponse(status_code=500, content=fail(code=500, msg="获取套餐信息失败"))
