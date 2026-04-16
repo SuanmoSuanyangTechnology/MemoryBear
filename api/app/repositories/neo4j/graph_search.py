@@ -45,14 +45,17 @@ def cosine_similarity_search(
     vectors: np.ndarray = np.array(vectors, dtype=np.float32)
     vectors_norm = vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
     query: np.ndarray = np.array(query, dtype=np.float32)
-    query_norm = query / np.linalg.norm(query)
+    norm = np.linalg.norm(query)
+    if norm == 0:
+        return {}
+    query_norm = query / norm
 
     similarities = vectors_norm @ query_norm
     similarities = np.clip(similarities, 0, 1)
     top_k = min(limit, similarities.shape[0])
     if top_k <= 0:
         return {}
-    top_indices = np.argpartition(-similarities, top_k - 1)[-top_k:]
+    top_indices = np.argpartition(-similarities, top_k - 1)[:top_k]
     top_indices = top_indices[np.argsort(-similarities[top_indices])]
     result = {}
     for idx in top_indices:
@@ -510,7 +513,7 @@ async def search_graph_by_embedding(
     task_keys = []
 
     for node_type in include:
-        tasks.append(search_by_embedding(connector, node_type, end_user_id, embedding, limit))
+        tasks.append(search_by_embedding(connector, node_type, end_user_id, embedding, limit*2))
         task_keys.append(node_type.value)
 
     task_results = await asyncio.gather(*tasks, return_exceptions=True)

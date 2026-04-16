@@ -19,7 +19,8 @@ async def create_fulltext_indexes():
         # """)
         # 创建 Entities 索引
         await connector.execute_query("""
-            CREATE FULLTEXT INDEX entitiesFulltext IF NOT EXISTS FOR (e:ExtractedEntity) ON EACH [e.name]
+            CREATE FULLTEXT INDEX entitiesFulltext IF NOT EXISTS 
+            FOR (e:ExtractedEntity) ON EACH [e.name, e.description, e.aliases]
             OPTIONS { indexConfig: { `fulltext.analyzer`: 'cjk' } }
         """)
 
@@ -137,6 +138,16 @@ async def create_vector_indexes():
         """)
     finally:
         await connector.close()
+
+
+async def create_user_indexes():
+    connector = Neo4jConnector()
+    await connector.execute_query(
+        """
+        CREATE INDEX user_perceptual IF NOT EXISTS
+        FOR (p:Perceptual) ON (p.end_user_id);
+        """
+    )
 
 
 async def create_unique_constraints():

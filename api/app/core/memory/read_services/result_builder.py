@@ -61,14 +61,18 @@ class EntityBuilder(BaseBuilder):
     def data(self) -> dict:
         return {
             "id": self.record.get("id"),
-            "content": self.record.get("name"),
+            "name": self.record.get("name"),
+            "description": self.record.get("description"),
             "kw_score": self.record.get("kw_score", 0.0),
             "emb_score": self.record.get("embedding_score", 0.0)
         }
 
     @property
     def content(self) -> str:
-        return self.record.get("name")
+        return (f"<entity>"
+                f"<name>{self.record.get("name")}<name>"
+                f"<description>{self.record.get("description")}</description>"
+                f"</entity>")
 
 
 class SummaryBuilder(BaseBuilder):

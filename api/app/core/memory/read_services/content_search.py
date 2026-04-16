@@ -12,8 +12,8 @@ from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ALPHA = 0.7
-DEFAULT_FULLTEXT_SCORE_THRESHOLD = 1
+DEFAULT_ALPHA = 0.6
+DEFAULT_FULLTEXT_SCORE_THRESHOLD = 1.5
 DEFAULT_COSINE_SCORE_THRESHOLD = 0.5
 DEFAULT_CONTENT_SCORE_THRESHOLD = 0.5
 
@@ -112,7 +112,7 @@ class Neo4jSearchService:
             kw = float(combined[item_id].get("kw_score", 0) or 0)
             emb = float(combined[item_id].get("embedding_score", 0) or 0)
             base = self.alpha * emb + (1 - self.alpha) * kw
-            combined[item_id]["content_score"] = base + min(1 - base, kw * emb)
+            combined[item_id]["content_score"] = base + min(1 - base, 0.1 * kw * emb)
         results = sorted(combined.values(), key=lambda x: x["content_score"], reverse=True)
         # results = [
         #     res for res in results
