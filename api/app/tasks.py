@@ -3157,8 +3157,6 @@ def extract_user_metadata_task(
                         leaf = parts[-1]
 
                         current_list = target.get(leaf, [])
-                        if not isinstance(current_list, list):
-                            current_list = []
 
                         if action == "set":
                             if value not in current_list:

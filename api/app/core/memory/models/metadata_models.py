@@ -4,7 +4,7 @@ Independent from triplet_models.py - these models are used by the
 standalone metadata extraction pipeline (post-dedup async Celery task).
 """
 
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,9 +35,9 @@ class MetadataFieldChange(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
     field_path: str = Field(
-        description="字段路径，用点号分隔，如 'profile.role'、'knowledge_tags'、'behavioral_hints.tone_preference'"
+        description="字段路径，用点号分隔，如 'profile.role'、'profile.expertise'"
     )
-    action: str = Field(
+    action: Literal["set", "remove"] = Field(
         description="操作类型：'set' 表示新增或修改，'remove' 表示移除"
     )
     value: Optional[str] = Field(
