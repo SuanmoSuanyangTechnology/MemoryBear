@@ -40,7 +40,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const [expandedParent, setExpandedParent] = useState<Suggestion | null>(null);
+  const [expandedParentKey, setExpandedParentKey] = useState<string | null>(null);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
   const [childPanelPos, setChildPanelPos] = useState({ top: 0, right: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
@@ -83,6 +83,10 @@ const VariableSelect: FC<VariableSelectProps> = ({
   const parentOfSelected = !multiple && value
     ? filteredOptions.find(o => o.children?.some(c => `{{${c.value}}}` === value))
     : undefined;
+
+  const expandedParent = expandedParentKey
+    ? filteredOptions.find(o => o.key === expandedParentKey) ?? null
+    : null;
 
   const groupedSuggestions = filteredOptions.reduce((groups: Record<string, Suggestion[]>, s) => {
     const nodeId = s.nodeData.id as string;
@@ -139,7 +143,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
       ) {
         setOpen(false);
         setSearch('');
-        setExpandedParent(null);
+        setExpandedParentKey(null);
         setChildPanelPos({ top: 0, right: 0 });
       }
     };
@@ -159,7 +163,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
       onChange?.(`{{${suggestion.value}}}`, suggestion);
       setOpen(false);
       setSearch('');
-      setExpandedParent(null);
+      setExpandedParentKey(null);
     }
   };
 
@@ -312,16 +316,16 @@ const VariableSelect: FC<VariableSelectProps> = ({
                           if (s.disabled) return;
                           if (hasChildren) {
                             updateChildPos(s.key);
-                            setExpandedParent(prev => prev?.key === s.key ? null : s);
+                            setExpandedParentKey(prev => prev === s.key ? null : s.key);
                           }
                           handleSelect(s);
                         }}
                         onMouseEnter={() => {
                           if (hasChildren) {
                             updateChildPos(s.key);
-                            setExpandedParent(s);
+                            setExpandedParentKey(s.key);
                           } else {
-                            setExpandedParent(null);
+                            setExpandedParentKey(null);
                           }
                         }}
                       >
@@ -358,7 +362,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
           id="variable-select-child-panel"
           className="rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto rb:text-[12px] rb:fixed rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
           style={{ top: childPanelPos.top, right: childPanelPos.right }}
-          onMouseEnter={() => setExpandedParent(expandedParent)}
+          onMouseEnter={() => setExpandedParentKey(expandedParentKey)}
         >
           <div className="rb:pb-2 rb:mb-1 rb:font-medium rb:text-[#5B6167] rb-border-b">
             <Flex justify="space-between" align="center" gap={8}>
