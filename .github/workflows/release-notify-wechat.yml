@@ -121,6 +121,8 @@ jobs:
           AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
           SOURCERY_FOUND: ${{ steps.sourcery.outputs.found }}
           SOURCERY_SUMMARY: ${{ steps.sourcery.outputs.summary }}
           QWEN_SUMMARY: ${{ steps.qwen.outputs.summary }}
@@ -135,11 +137,16 @@ jobs:
               label = "AI变更摘要"
               summary = os.environ.get("QWEN_SUMMARY", "AI 摘要生成失败")
 
+          pr_number = os.environ.get("PR_NUMBER", "")
+          short_sha = os.environ.get("MERGE_SHA", "")[:7]
+
           content = (
             "## 🚀 Release 发布通知\n"
-            "> 📦 **分支**: " + os.environ["BRANCH"] + "\n"
+            "> � **分支**: " + os.environ["BRANCH"] + "\n"
             "> 👤 **提交人**: " + os.environ["AUTHOR"] + "\n"
-            "> 📝 **标题**: " + os.environ["PR_TITLE"] + "\n\n"
+            "> 📝 **标题**: " + os.environ["PR_TITLE"] + "\n"
+            "> 🔢 **PR编号**: #" + pr_number + "\n"
+            "> 🔖 **Commit**: " + short_sha + "\n\n"
             "### 🧠 " + label + "\n" +
             summary + "\n\n"
             "---\n"
