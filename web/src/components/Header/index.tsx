@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:07:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-16 10:28:18
+ * @Last Modified time: 2026-04-16 10:31:21
  */
 /**
  * AppHeader Component
@@ -76,9 +76,11 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
   const userMenuItems: MenuProps['items'] = [
     {
       key: '1',
-      icon: <Flex align="center" justify="center" className="rb:size-10 rb:rounded-xl rb:bg-[#155EEF] rb:text-white">
-        {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(-2) : user.username[0]}
-      </Flex>,
+      icon: user.username
+        ? <Flex align="center" justify="center" className="rb:size-10 rb:rounded-xl rb:bg-[#155EEF] rb:text-white">
+          {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(-2) : user.username[0]}
+        </Flex>
+        : null,
       label: (<>
         <div className="rb:text-[#212332] rb:leading-5">{user.username}</div>
         <div className="rb:text-[12px] rb:text-[#7B8085] rb:leading-4.5 rb:mt-0.5 rb:mr-2">{user.email}</div>
@@ -181,9 +183,9 @@ const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) 
           overlayClassName={styles.userDropdown}
         >
           <Flex align="center" className="rb:cursor-pointer rb:font-medium">
-            <Flex align="center" justify="center" className="rb:size-8 rb:rounded-xl rb:bg-[#155EEF] rb:text-white rb:mr-2!">
+            {user.username && <Flex align="center" justify="center" className="rb:size-8 rb:rounded-xl rb:bg-[#155EEF] rb:text-white rb:mr-2!">
               {/[\u4e00-\u9fa5]/.test(user.username) ? user.username.slice(-2) : user.username[0]}
-            </Flex>
+            </Flex>}
             <span className="rb:text-[#212332] rb:text-[12px] rb:leading-4 rb:mr-1">{user.username}</span>
             <div className={clsx("rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')]", {
               'rb:rotate-180': !open,
