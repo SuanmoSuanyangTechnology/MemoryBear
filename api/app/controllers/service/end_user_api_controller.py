@@ -9,6 +9,7 @@ from app.core.api_key_auth import require_api_key
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
+from app.core.quota_stub import check_end_user_quota
 from app.core.response_utils import success
 from app.db import get_db
 from app.repositories.end_user_repository import EndUserRepository
@@ -22,6 +23,7 @@ logger = get_business_logger()
 
 @router.post("/create")
 @require_api_key(scopes=["memory"])
+@check_end_user_quota
 async def create_end_user(
     request: Request,
     api_key_auth: ApiKeyAuth = None,

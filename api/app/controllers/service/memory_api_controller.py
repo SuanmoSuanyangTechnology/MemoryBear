@@ -2,6 +2,7 @@
 
 from app.core.api_key_auth import require_api_key
 from app.core.logging_config import get_business_logger
+from app.core.quota_stub import check_end_user_quota
 from app.core.response_utils import success
 from app.db import get_db
 from app.schemas.api_key_schema import ApiKeyAuth
@@ -119,6 +120,7 @@ async def list_memory_configs(
 
 @router.post("/end_users")
 @require_api_key(scopes=["memory"])
+@check_end_user_quota
 async def create_end_user(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
