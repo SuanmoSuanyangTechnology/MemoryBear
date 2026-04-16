@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:07:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 12:18:58
+ * @Last Modified time: 2026-04-16 10:28:18
  */
 /**
  * AppHeader Component
@@ -31,7 +31,7 @@ const { Header } = Layout;
 /**
  * @param source - Breadcrumb source type ('space' or 'manage'), defaults to 'manage'
  */
-const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
+const AppHeader: FC<{ source?: 'space' | 'manage'; }> = ({ source = 'manage' }) => {
   const { t } = useTranslation();
   const location = useLocation();
   const settingModalRef = useRef<SettingModalRef>(null)
@@ -39,7 +39,7 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
 
   const { user, logout } = useUser();
   const { allBreadcrumbs } = useMenu();
-  
+
   /**
    * Dynamically select breadcrumb source based on current route
    * - Knowledge base list: uses 'space' breadcrumb
@@ -48,24 +48,24 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
    */
   const getBreadcrumbSource = () => {
     const pathname = location.pathname;
-    
+
     // Knowledge base list page uses default space breadcrumb
     if (pathname === '/knowledge-base') {
       return 'space';
     }
-    
+
     // Knowledge base detail pages use independent breadcrumb
     if (pathname.includes('/knowledge-base/') && pathname !== '/knowledge-base') {
       return 'space-detail';
     }
-    
+
     // Other pages use the passed source
     return source;
   };
-  
+
   const breadcrumbSource = getBreadcrumbSource();
   const breadcrumbs = allBreadcrumbs[breadcrumbSource] || [];
-  
+
 
   /** Handle user logout */
   const handleLogout = () => {
@@ -127,7 +127,7 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
       onClick: handleLogout,
     },
   ];
-  
+
   /**
    * Format breadcrumb items with proper titles, paths, and click handlers
    * - Translates i18n keys to display text
@@ -146,7 +146,7 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
           </Tooltip>
         ),
       };
-      
+
       if (!isLast) {
         if ((menu as any).onClick) {
           item.onClick = (e: React.MouseEvent) => {
@@ -162,7 +162,7 @@ const AppHeader: FC<{source?: 'space' | 'manage';}> = ({source = 'manage'}) => {
       return item;
     });
   }
-  
+
   const [open, setOpen] = useState(false);
   const handleOpenChange = (open: boolean) => {
     setOpen(open);
