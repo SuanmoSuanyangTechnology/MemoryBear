@@ -859,6 +859,7 @@ export const zh = {
 }`,
       uploadCover: '导入并覆盖',
       refresh: '刷新当前页',
+      json_output: '支持JSON格式化输出',
     },
     table: {
       totalRecords: '共 {{total}} 条记录'
@@ -1307,6 +1308,7 @@ export const zh = {
       video: '视频',
       thinking: '深度思考',
       is_thinking: '支持深度思考',
+      json_output: '支持JSON格式化输出',
     },
     timezones: {
       'Asia/Shanghai': '中国标准时间 (UTC+8)',
@@ -2248,6 +2250,7 @@ export const zh = {
           messagesPlaceholder: '在此处编写提示，输入“{”插入变量，输入“insert”插入',
           vision: '视觉',
           parameterSettings: '参数设置',
+          json_output: '支持JSON格式化输出',
         },
         start: {
           variables: '输入字段',

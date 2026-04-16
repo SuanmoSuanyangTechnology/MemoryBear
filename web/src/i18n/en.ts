@@ -629,6 +629,7 @@ export const en = {
       video: 'Video',
       thinking: 'Deep Thinking',
       is_thinking: 'Deep Thinking Support',
+      json_output: 'Support JSON formatted output',
     },
     knowledgeBase: {
       home: 'Home',
@@ -1524,6 +1525,7 @@ export const en = {
 }`,
       uploadCover: 'Import and Overwrite',
       refresh: 'Refresh Current Page',
+      json_output: 'Support JSON formatted output',
     },
     userMemory: {
       userMemory: 'User Memory',
@@ -2287,6 +2289,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           messagesPlaceholder: 'Write prompts here, type "{" to insert variables, type "insert" to insert',
           vision: 'Vision',
           parameterSettings: 'Parameter Settings',
+          json_output: 'Support JSON formatted output',
         },
         start: {
           variables: 'Input Fields',

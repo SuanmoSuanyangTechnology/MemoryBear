@@ -2,9 +2,9 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-07 16:49:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 11:21:59
+ * @Last Modified time: 2026-04-16 17:46:02
  */
-import { useEffect, useState, type FC } from 'react';
+import { useEffect, useState, forwardRef, useImperativeHandle } from 'react';
 import { Select, Flex, Space } from 'antd';
 import type { SelectProps } from 'antd/es/select';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +13,10 @@ import { getModelList } from '@/api/models';
 import type { Query, Model } from '@/views/ModelManagement/types';
 import { getListLogoUrl } from '@/views/ModelManagement/utils';
 import Tag from '@/components/Tag';
+
+export interface ModelSelectRef {
+  options: Model[];
+}
 
 /** Extends AntD SelectProps; omits filterOption since it's handled internally */
 interface ModelSelectProps extends SelectProps {
@@ -24,16 +28,14 @@ interface ModelSelectProps extends SelectProps {
   initialData?: Model[];
 }
 
-const ModelSelect: FC<ModelSelectProps> = ({
-  params,
-  placeholder,
-  fontClassName,
-  isAutoFetch = true,
-  initialData = [],
-  ...props
-}) => {
+const ModelSelect = forwardRef<ModelSelectRef, ModelSelectProps>((
+  { params, placeholder, fontClassName, isAutoFetch = true, initialData = [], ...props },
+  ref
+) => {
   const { t } = useTranslation();
   const [options, setOptions] = useState<Model[]>([]);
+
+  useImperativeHandle(ref, () => ({ options }), [options]);
 
   // Fetch active models whenever params change; stringify for stable deep comparison
   useEffect(() => {
@@ -89,6 +91,6 @@ const ModelSelect: FC<ModelSelectProps> = ({
       {...props}
     />
   );
-};
+});
 
 export default ModelSelect;

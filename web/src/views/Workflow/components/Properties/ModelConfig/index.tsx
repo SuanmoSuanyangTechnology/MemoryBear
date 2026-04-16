@@ -1,15 +1,28 @@
-import { type FC } from "react";
+import { type FC, useEffect, useRef, useState } from "react";
 import { useTranslation } from 'react-i18next'
-import { Form } from 'antd'
+import { Form, Switch } from 'antd'
 
 import RbSlider from '@/components/RbSlider'
 import RbCard from '@/components/RbCard/Card'
-import ModelSelect from '@/components/ModelSelect'
+import ModelSelect, { type ModelSelectRef } from '@/components/ModelSelect'
+import type { Model } from '@/views/ModelManagement/types';
 
 const ModelConfig: FC = () => {
   const { t } = useTranslation()
   const form = Form.useFormInstance()
   const model_id = Form.useWatch(['model_id'], form)
+  const modelSelectRef = useRef<ModelSelectRef>(null)
+  const [selectedModel, setSelectedModel] = useState<Model | null>(null)
+
+  useEffect(() => {
+    if (model_id && modelSelectRef.current?.options) {
+      const model = modelSelectRef.current?.options.find(item => item.id === model_id)
+      setSelectedModel(model || null)
+      form.setFieldValue('json_output', false)
+    } else {
+      setSelectedModel(null)
+    }
+  }, [model_id, modelSelectRef.current?.options])
   console.log('ModelConfig', model_id)
 
   return (
@@ -21,6 +34,7 @@ const ModelConfig: FC = () => {
         required
       >
         <ModelSelect
+          ref={modelSelectRef}
           placeholder={t('common.pleaseSelect')}
           params={{ type: 'llm,chat' }}
           className="rb:w-full!"
@@ -52,7 +66,7 @@ const ModelConfig: FC = () => {
           <Form.Item
             name="max_tokens"
             label={t('workflow.config.llm.max_tokens')}
-            className="rb:mb-0!"
+            className="rb:mb-1.5!"
           >
             <RbSlider 
               min={256}
@@ -62,6 +76,16 @@ const ModelConfig: FC = () => {
               size="small"
               className="rb:-mt-2!"
             />
+          </Form.Item>
+          <Form.Item
+            name="json_output"
+            valuePropName="checked"
+            label={t('workflow.config.llm.json_output')}
+            layout="horizontal"
+            className="rb:mb-0!"
+            hidden={!(selectedModel?.capability?.includes('json_output'))}
+          >
+            <Switch />
           </Form.Item>
         </RbCard>
       )}

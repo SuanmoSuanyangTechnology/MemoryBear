@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:28:07 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 16:56:57
+ * @Last Modified time: 2026-04-16 18:51:01
  */
 /**
  * Model Configuration Modal
@@ -102,14 +102,15 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
   }
   /** Handle model selection change */
   const handleChange: SelectProps['onChange'] = (_value, option) => {
-    if (source === 'chat') {
-      form.setFieldValue('label', (option as Model).name)
-    }
-
-    form.setFieldsValue({
+    const newValues: ModelConfig = {
       capability: (option as Model).capability,
       deep_thinking: false,
-    })
+      json_output: false
+    }
+    if (source === 'chat') {
+      newValues.label = (option as Model).name
+    }
+    form.setFieldsValue(newValues)
   }
 
   /** Expose methods to parent component */
@@ -119,12 +120,10 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
   }));
 
   useEffect(() => {
-    const { deep_thinking: _, ...rest } = data?.model_parameters || {}
+    const { deep_thinking: _, json_output: __, ...rest } = data?.model_parameters || {}
     form.setFieldsValue(rest)
   }, [values?.default_model_config_id])
 
-
-  console.log('handleChange values', values)
   return (
     <RbModal
       title={t('application.modelConfig')}
@@ -158,6 +157,9 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
         </>}
         <FormItem name="deep_thinking" valuePropName="checked" hidden={!['model', 'chat'].includes(source) || !(values?.deep_thinking || values?.capability?.includes('thinking'))}>
           <Checkbox>{t('application.deep_thinking')}</Checkbox>
+        </FormItem>
+        <FormItem name="json_output" valuePropName="checked" hidden={!(values?.capability?.includes('json_output'))}>
+          <Checkbox>{t('application.json_output')}</Checkbox>
         </FormItem>
         {source === 'chat' && <FormItem name="label" hidden />}
 
