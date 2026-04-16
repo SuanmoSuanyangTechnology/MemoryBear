@@ -43,7 +43,8 @@ export const maskApiKeys = (text: string): string => {
     result = result.replace(API_KEY_PATTERNS[key as keyof typeof API_KEY_PREFIX], (match) => {
       const prefixLength = API_KEY_PREFIX[key].length
       const prefix = match.substring(0, prefixLength)
-      return prefix + '*'.repeat(match.length - prefixLength)
+      const suffix = match.slice(-4)
+      return prefix + '*'.repeat(match.length - prefixLength - 4) + suffix
     })
   })
 
