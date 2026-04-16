@@ -461,7 +461,7 @@ models:
   capability:
   - vision
   - video
-  - qwen-vl-plus-latest
+  - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -480,7 +480,7 @@ models:
   capability:
   - vision
   - video
-  - qwen-vl-plus-latest
+  - json_output
   is_omni: false
   tags:
   - 大语言模型
