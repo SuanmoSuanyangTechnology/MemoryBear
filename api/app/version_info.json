@@ -1,4 +1,40 @@
 {
+  "v0.3.0": {
+    "introduction": {
+      "codeName": "破晓",
+      "releaseDate": "2026-4-15",
+      "upgradePosition": "🐻 全面升级应用工作流、记忆智能与系统稳健性，引入版本化API、多模态记忆感知及大量工作流增强，打造更可靠、精准的 MemoryBear",
+      "coreUpgrades": [
+        "1. 应用与API增强<br>* 版本化API调用支持：对外服务API支持指定版本调用<br>* 工作流检查清单：新增结构化验证步骤<br>* 深度思考参数精准控制：仅向支持深度推理的模型发送思考参数<br>* 提示器模型返回优化：优化提示器模型响应处理",
+        "2. 记忆智能 🧠<br>* 多模态记忆感知Agent：支持多模态记忆读取与写入<br>* OpenClaw内置工具：新增内置工具扩展Agent工具集",
+        "3. 用户体验 🎨<br>* 流式渲染稳定性优化：解决LLM流式输出页面抖动问题<br>* 记忆中枢更名：「记忆相关」更名为「记忆中枢」",
+        "4. 工作流改进 ⚙️<br>* 三级变量模板转换：支持三级变量解析<br>* VL模型Token统计：修复模型组合中VL模型Token未统计问题<br>* 导入工作流功能特性同步：正确同步开场白、引用等属性<br>* 会话变量名称唯一性校验：防止变量名冲突<br>* 文件类型提取修复：正确提取file.type信息<br>* 条件分支显示修复：值为0或会话变量时正确渲染<br>* Object/Array校验规则：防止JSON序列化错误<br>* HTTP请求Body字段修正：body字段从name改为key",
+        "5. 知识库 📚<br>* Embedding Token截断安全边界：统一添加8000 token截断，优化Excel独立chunk处理",
+        "6. 稳健性与缺陷修复 🔧<br>* 原子性更新与批量访问失败修复<br>* 对话别名提取错误修复<br>* 工作流别名提取修正（区分用户和AI回复）<br>* RAG记忆分页数据修复<br>* 隐式记忆详情显示修复<br>* 向量查询驱动关闭异常修复<br>* 用户管理启停异常修复<br>* 模型列表筛选不一致修复",
+        "<br>",
+        "v0.3.0 标志着 MemoryBear 向生产成熟度迈出坚实一步。后续版本将持续深化工作流表达力、记忆检索精度和跨模态理解能力，强化复杂Agent编排支持，稳固大规模生产部署基础。",
+        "<br>",
+        "MemoryBear — 破晓 🐻✨"
+      ]
+    },
+    "introduction_en": {
+      "codeName": "PoXiao",
+      "releaseDate": "2026-4-15",
+      "upgradePosition": "🐻 Comprehensive upgrades across application workflows, memory intelligence, and system robustness — introducing versioned APIs, multimodal memory perception, and extensive workflow enhancements for a more reliable MemoryBear",
+      "coreUpgrades": [
+        "1. Application & API Enhancements<br>* Versioned API Support: External APIs now support version-specific calls<br>* Workflow Checklist: Structured validation steps before deployment<br>* Deep Thinking Parameter Control: Only send thinking params to supported models<br>* Prompt Optimizer Return Optimization: Improved prompt optimizer response handling",
+        "2. Memory Intelligence 🧠<br>* Multimodal Memory Perception Agent: Read/write multimodal memory<br>* OpenClaw Built-in Tool: New built-in tool for agent operations",
+        "3. User Experience 🎨<br>* Streaming Render Stabilization: Eliminated page jitter during LLM output<br>* Memory Hub Renaming: Renamed to better reflect central memory role",
+        "4. Workflow Improvements ⚙️<br>* Three-Level Variable Template Conversion: Support for three-level variable resolution<br>* VL Model Token Tracking: Fixed token tracking for VL models in model groups<br>* Imported Workflow Feature Sync: Properly sync opening messages, citations, etc.<br>* Session Variable Name Uniqueness: Prevent variable name conflicts<br>* File Type Extraction Fix: Correctly extract file.type information<br>* Condition Branch Display Fix: Correct rendering for value 0 or session variables<br>* Object/Array Validation Rules: Prevent JSON serialization save errors<br>* HTTP Request Body Key Fix: Body field uses key instead of name",
+        "5. Knowledge Base 📚<br>* Embedding Token Truncation Safety: Unified 8000-token boundary, optimized Excel chunk processing",
+        "6. Robustness & Bug Fixes 🔧<br>* Atomic update & batch access failure fixes<br>* Conversation alias extraction fix<br>* Workflow alias extraction correction (user vs AI distinction)<br>* RAG memory pagination fix<br>* Implicit memory detail display fix<br>* Vector query driver closed exception fix<br>* User management enable/disable fix<br>* Model list filter inconsistency fix",
+        "<br>",
+        "v0.3.0 marks a meaningful step toward production maturity for MemoryBear. Upcoming releases will deepen workflow expressiveness, memory retrieval precision, and cross-modal understanding while strengthening complex agent orchestration and large-scale deployment foundations.",
+        "<br>",
+        "MemoryBear — Daybreak 🐻✨"
+      ]
+    }
+  },
   "v0.2.10": {
     "introduction": {
       "codeName": "炼剑",
