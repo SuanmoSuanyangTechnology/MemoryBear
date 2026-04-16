@@ -12,8 +12,8 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_openai import ChatOpenAI
 
 
-class VolcanoChatOpenAI(ChatOpenAI):
-    """火山引擎 Chat 模型，支持深度思考内容（reasoning_content）的流式和非流式透传。"""
+class CompatibleChatOpenAI(ChatOpenAI):
+    """火山和千问的omni兼容模型，支持深度思考内容（reasoning_content）的流式和非流式透传。"""
 
     def _create_chat_result(self, response: Union[dict, Any], generation_info: Optional[dict] = None) -> ChatResult:
         result = super()._create_chat_result(response, generation_info)

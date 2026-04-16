@@ -120,6 +120,7 @@ class AppChatService:
             tools=tools,
             deep_thinking=model_parameters.get("deep_thinking", False),
             thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
+            json_output=model_parameters.get("json_output", False),
             capability=api_key_obj.capability or [],
         )
 
@@ -392,6 +393,7 @@ class AppChatService:
                 streaming=True,
                 deep_thinking=model_parameters.get("deep_thinking", False),
                 thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
+                json_output=model_parameters.get("json_output", False),
                 capability=api_key_obj.capability or [],
             )
 
