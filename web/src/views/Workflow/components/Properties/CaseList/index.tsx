@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:24:53 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-17 20:45:31
+ * @Last Modified time: 2026-04-17 20:47:49
  */
 import { useEffect, useMemo, type FC } from 'react'
 import clsx from 'clsx'
@@ -22,8 +22,8 @@ import { typeOptions } from '../ListOperator/FilterConditions'
 interface SubCondition {
   key: string;
   operator: string;
-  value: string | number;
-  input_type: string;
+  value?: string | number;
+  input_type?: string;
 }
 
 interface SubVariableCondition {
@@ -32,8 +32,8 @@ interface SubVariableCondition {
 }
 
 interface Expression {
-  left: string;
-  operator: string;
+  left?: string;
+  operator?: string;
   right?: string | number;
   input_type?: string;
   sub_variable_condition?: SubVariableCondition;
