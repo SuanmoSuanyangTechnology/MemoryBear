@@ -5,6 +5,7 @@
  * @Last Modified time: 2026-04-13 14:00:07
  */
 import { useEffect, useLayoutEffect, useState, useRef, type FC } from 'react';
+import { createPortal } from 'react-dom';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { $getSelection, $isRangeSelection, COMMAND_PRIORITY_HIGH, KEY_ENTER_COMMAND, KEY_ARROW_DOWN_COMMAND, KEY_ARROW_UP_COMMAND, KEY_ESCAPE_COMMAND } from 'lexical';
 import { Space, Flex } from 'antd';
@@ -35,61 +36,62 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [popupPosition, setPopupPosition] = useState({ top: 0, left: 0, anchorBottom: 0 });
   const [expandedParent, setExpandedParent] = useState<Suggestion | null>(null);
-  const [childPanelTop, setChildPanelTop] = useState(0);
+  const [childPanelPos, setChildPanelPos] = useState({ top: 0, right: 0 });
+  const [activePanel, setActivePanel] = useState<'main' | 'child'>('main');
+  const [childActiveIndex, setChildActiveIndex] = useState(-1);
   const popupRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const childItemRefs = useRef<Map<string, HTMLElement>>(new Map());
 
-  // Adjust popup position after render based on actual height
+  // Adjust popup position after render based on actual size
   useLayoutEffect(() => {
     if (!popupRef.current || !showSuggestions) return;
-    const { top, anchorBottom } = popupPosition;
+    const { top, left, anchorBottom } = popupPosition;
     const popupHeight = popupRef.current.offsetHeight;
+    const popupWidth = popupRef.current.offsetWidth;
     const viewportHeight = window.innerHeight;
+    const viewportWidth = window.innerWidth;
     const MARGIN = 10;
 
     let finalTop: number;
     if (top - popupHeight - MARGIN >= 0) {
-      // Enough space above: show above cursor
       finalTop = top - popupHeight - MARGIN;
     } else {
-      // Not enough space above: show below cursor
       finalTop = anchorBottom + MARGIN;
       if (finalTop + popupHeight > viewportHeight - MARGIN) {
         finalTop = viewportHeight - popupHeight - MARGIN;
       }
     }
 
-    if (finalTop !== top) {
-      setPopupPosition(prev => ({ ...prev, top: finalTop }));
+    let finalLeft = left;
+    if (finalLeft + popupWidth > viewportWidth - MARGIN) {
+      finalLeft = viewportWidth - popupWidth - MARGIN;
+    }
+    if (finalLeft < MARGIN) finalLeft = MARGIN;
+
+    if (finalTop !== top || finalLeft !== left) {
+      setPopupPosition(prev => ({ ...prev, top: finalTop, left: finalLeft }));
     }
   }, [showSuggestions, popupPosition.anchorBottom]);
 
-  const CHILD_PANEL_HEIGHT = 280; // max-h-60 (240) + header (~40)
+  const CHILD_PANEL_HEIGHT = 280;
 
-  const calcChildPanelTop = (elRect: DOMRect, popupRect: DOMRect) => {
-    const relativeTop = elRect.top - popupRect.top;
-    const absoluteBottom = popupRect.top + relativeTop + CHILD_PANEL_HEIGHT;
-    const overflow = absoluteBottom - (window.innerHeight - 10);
-    return overflow > 0 ? relativeTop - overflow : relativeTop;
+  const calcChildPanelPos = (key: string) => {
+    const el = itemRefs.current.get(key);
+    if (!el || !popupRef.current) return;
+    const elRect = el.getBoundingClientRect();
+    const popupRect = popupRef.current.getBoundingClientRect();
+    const actualChildHeight = Math.min(CHILD_PANEL_HEIGHT, popupRect.height);
+    const top = Math.max(10, popupRect.bottom - actualChildHeight);
+    setChildPanelPos({ top, right: window.innerWidth - elRect.left + 8 });
   };
 
-  const scrollSelectedIntoView = () => {
-    if (!popupRef.current) return;
-    
-    const selectedElement = popupRef.current.querySelector('[data-selected="true"]');
-    if (!selectedElement) return;
-    
-    const container = popupRef.current;
-    const element = selectedElement as HTMLElement;
-    
-    const containerRect = container.getBoundingClientRect();
-    const elementRect = element.getBoundingClientRect();
-    
-    if (elementRect.bottom > containerRect.bottom) {
-      container.scrollTop += elementRect.bottom - containerRect.bottom;
-    } else if (elementRect.top < containerRect.top) {
-      container.scrollTop -= containerRect.top - elementRect.top;
-    }
+  const resetState = () => {
+    setShowSuggestions(false);
+    setExpandedParent(null);
+    setChildPanelPos({ top: 0, right: 0 });
+    setActivePanel('main');
+    setChildActiveIndex(-1);
   };
 
   // Listen to editor updates and show suggestions when '/' is typed
@@ -105,11 +107,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
 
         const anchorNode = selection.anchor.getNode();
         const anchorOffset = selection.anchor.offset;
-        
-        // Get the text content of the current node
         const nodeText = anchorNode.getTextContent();
-        
-        // Check if we have a '/' at the current position or after line break
         const textBeforeCursor = nodeText.substring(0, anchorOffset);
         const shouldShow = textBeforeCursor.endsWith('/') || 
                           (textBeforeCursor === '/' && anchorOffset === 1);
@@ -118,10 +116,11 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
         if (!shouldShow) {
           setSelectedIndex(0);
           setExpandedParent(null);
-          setChildPanelTop(0);
+          setChildPanelPos({ top: 0, right: 0 });
+          setActivePanel('main');
+          setChildActiveIndex(-1);
         }
 
-        // Calculate popup position to keep it within viewport bounds
         if (shouldShow) {
           const domSelection = window.getSelection();
           if (domSelection && domSelection.rangeCount > 0) {
@@ -149,9 +148,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
     return editor.registerCommand(
       CLOSE_AUTOCOMPLETE_COMMAND,
       () => {
-        setShowSuggestions(false);
-        setExpandedParent(null);
-        setChildPanelTop(0);
+        resetState();
         return true;
       },
       COMMAND_PRIORITY_HIGH
@@ -161,9 +158,7 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
   // Insert selected suggestion into editor
   const insertMention = (suggestion: Suggestion) => {
     editor.dispatchCommand(INSERT_VARIABLE_COMMAND, { data: suggestion });
-    setShowSuggestions(false);
-    setExpandedParent(null);
-    setChildPanelTop(0);
+    resetState();
   };
 
   // Group suggestions by node ID
@@ -177,13 +172,28 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
     return groups;
   }, {});
 
-  // Flat list for keyboard navigation
-  const flatOptions = Object.values(groupedSuggestions).flat().flatMap(option => {
-    if (option.key === expandedParent?.key && option.children?.length) {
-      return [option, ...option.children];
+  // Flat list of main-panel items for keyboard navigation
+  const flatOptions = Object.values(groupedSuggestions).flat();
+
+  // Sync child panel position when keyboard navigates to a parent with children
+  useEffect(() => {
+    if (selectedIndex < 0 || selectedIndex >= flatOptions.length) return;
+    const s = flatOptions[selectedIndex];
+    if (s.children?.length) {
+      calcChildPanelPos(s.key);
+      setExpandedParent(s);
+    } else {
+      setExpandedParent(null);
     }
-    return [option];
-  });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIndex]);
+
+  // Scroll child active item into view
+  useEffect(() => {
+    if (!expandedParent?.children?.length || childActiveIndex < 0) return;
+    const child = expandedParent.children[childActiveIndex];
+    if (child) childItemRefs.current.get(child.key)?.scrollIntoView({ block: 'nearest' });
+  }, [childActiveIndex, expandedParent]);
 
   // Handle Enter key to select suggestion
   useEffect(() => {
@@ -192,7 +202,15 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
     return editor.registerCommand(
       KEY_ENTER_COMMAND,
       (event) => {
-        if (showSuggestions && flatOptions.length > 0) {
+        if (!showSuggestions) return false;
+        if (activePanel === 'child' && expandedParent?.children?.length) {
+          const child = expandedParent.children[childActiveIndex];
+          if (child && !child.disabled) {
+            event?.preventDefault();
+            insertMention(child);
+            return true;
+          }
+        } else if (flatOptions.length > 0) {
           const selectedOption = flatOptions[selectedIndex];
           if (selectedOption && !selectedOption.disabled) {
             event?.preventDefault();
@@ -204,57 +222,56 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
       },
       COMMAND_PRIORITY_HIGH
     );
-  }, [showSuggestions, selectedIndex, flatOptions, insertMention, editor]);
+  }, [showSuggestions, selectedIndex, flatOptions, insertMention, editor, activePanel, childActiveIndex, expandedParent]);
 
-  // Handle keyboard navigation (Arrow Up/Down, Escape)
+  // Handle keyboard navigation (Arrow Up/Down/Left/Right, Escape)
   useEffect(() => {
     if (!showSuggestions) return;
 
-    // Navigate down through suggestions, skip disabled items
     const unregisterArrowDown = editor.registerCommand(
       KEY_ARROW_DOWN_COMMAND,
       (event) => {
-        if (showSuggestions && flatOptions.length > 0) {
-          event?.preventDefault();
+        if (!showSuggestions) return false;
+        event?.preventDefault();
+        if (activePanel === 'child' && expandedParent?.children) {
+          setChildActiveIndex(i => Math.min(i + 1, expandedParent.children!.length - 1));
+        } else {
           setSelectedIndex(prev => {
-            let nextIndex = prev + 1;
-            while (nextIndex < flatOptions.length && flatOptions[nextIndex].disabled) {
-              nextIndex++;
-            }
-            const newIndex = nextIndex >= flatOptions.length ? prev : nextIndex;
-            setTimeout(() => scrollSelectedIntoView(), 0);
+            let next = prev + 1;
+            // skip items that are disabled AND have no children
+            while (next < flatOptions.length && flatOptions[next].disabled && !flatOptions[next].children?.length) next++;
+            const newIndex = next >= flatOptions.length ? prev : next;
+            setTimeout(() => itemRefs.current.get(flatOptions[newIndex]?.key)?.scrollIntoView({ block: 'nearest' }), 0);
             return newIndex;
           });
-          return true;
         }
-        return false;
+        return true;
       },
       COMMAND_PRIORITY_HIGH
     );
 
-    // Navigate up through suggestions, skip disabled items
     const unregisterArrowUp = editor.registerCommand(
       KEY_ARROW_UP_COMMAND,
       (event) => {
-        if (showSuggestions && flatOptions.length > 0) {
-          event?.preventDefault();
+        if (!showSuggestions) return false;
+        event?.preventDefault();
+        if (activePanel === 'child' && expandedParent?.children) {
+          setChildActiveIndex(i => Math.max(i - 1, 0));
+        } else {
           setSelectedIndex(prev => {
-            let prevIndex = prev - 1;
-            while (prevIndex >= 0 && flatOptions[prevIndex].disabled) {
-              prevIndex--;
-            }
-            const newIndex = prevIndex < 0 ? prev : prevIndex;
-            setTimeout(() => scrollSelectedIntoView(), 0);
+            let prevIdx = prev - 1;
+            // skip items that are disabled AND have no children
+            while (prevIdx >= 0 && flatOptions[prevIdx].disabled && !flatOptions[prevIdx].children?.length) prevIdx--;
+            const newIndex = prevIdx < 0 ? prev : prevIdx;
+            setTimeout(() => itemRefs.current.get(flatOptions[newIndex]?.key)?.scrollIntoView({ block: 'nearest' }), 0);
             return newIndex;
           });
-          return true;
         }
-        return false;
+        return true;
       },
       COMMAND_PRIORITY_HIGH
     );
 
-    // Close suggestions on Escape key
     const unregisterEscape = editor.registerCommand(
       KEY_ESCAPE_COMMAND,
       (event) => {
@@ -273,99 +290,122 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
       unregisterArrowUp();
       unregisterEscape();
     };
-  }, [showSuggestions, selectedIndex, flatOptions, editor]);
+  }, [showSuggestions, selectedIndex, flatOptions, editor, activePanel, childActiveIndex, expandedParent]);
+
+  // Handle ArrowLeft/Right for panel switching via native keydown (lexical doesn't expose these commands)
+  useEffect(() => {
+    if (!showSuggestions) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') {
+        const current = flatOptions[selectedIndex];
+        if (activePanel === 'main' && current?.children?.length) {
+          e.preventDefault();
+          setActivePanel('child');
+          setChildActiveIndex(0);
+        }
+      } else if (e.key === 'ArrowRight') {
+        if (activePanel === 'child') {
+          e.preventDefault();
+          setActivePanel('main');
+          setChildActiveIndex(-1);
+        }
+      }
+    };
+    document.addEventListener('keydown', handler, true);
+    return () => document.removeEventListener('keydown', handler, true);
+  }, [showSuggestions, activePanel, selectedIndex, flatOptions]);
 
   if (!showSuggestions) return null;
+  if (Object.entries(groupedSuggestions).length === 0) return null;
 
-  if (Object.entries(groupedSuggestions).length === 0) {
-    return null
-  }
   return (
-    <div
-      ref={popupRef}
-      data-autocomplete-popup="true"
-      onMouseDown={(e) => e.preventDefault()}
-      className="rb:fixed rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
-      style={{
-        top: popupPosition.top,
-        left: popupPosition.left,
-      }}
-    >
-      <div className="rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto">
-        <Flex vertical gap={12}>
-          {Object.entries(groupedSuggestions).map(([nodeId, nodeOptions]) => {
-            const nodeName = nodeOptions[0]?.nodeData?.name || nodeId;
-            return (
-              <div key={nodeId} className="rb:text-[12px]">
-                {nodeName !== 'undefined' &&
-                  <div className="rb:px-2 rb:leading-4.25 rb:mb-1.25 rb:font-medium rb:text-[#5B6167]">
-                    {nodeName}
-                  </div>
-                }
-                <Flex vertical gap={2}>
-                {nodeOptions.map((option) => {
-                  const globalIndex = flatOptions.indexOf(option);
-                  const isExpanded = expandedParent?.key === option.key;
-                  const hasChildren = !!option.children?.length;
-                  return (
-                    <Flex
-                      key={option.key}
-                      ref={(el) => { if (el) itemRefs.current.set(option.key, el); }}
-                      data-selected={selectedIndex === globalIndex}
-                      className={clsx("rb:px-2! rb:py-0.75! rb:rounded-sm rb:leading-4.5 rb:text-[#5B6167] rb:hover:bg-[#F6F6F6]", {
-                        'rb:bg-[#F6F6F6]': selectedIndex === globalIndex || isExpanded,
-                        'rb:cursor-not-allowed rb:opacity-65': option.disabled,
-                        'rb:cursor-pointer': !option.disabled,
-                      })}
-                      align="center"
-                      justify="space-between"
-                      onClick={() => {
-                        if (option.disabled) return;
-                        insertMention(option);
-                      }}
-                      onMouseEnter={() => {
-                        setSelectedIndex(globalIndex);
-                        if (hasChildren) {
-                          const el = itemRefs.current.get(option.key);
-                          if (el && popupRef.current) {
-                            const elRect = el.getBoundingClientRect();
-                            const popupRect = popupRef.current.getBoundingClientRect();
-                            setChildPanelTop(calcChildPanelTop(elRect, popupRect));
+    <>
+      <div
+        ref={popupRef}
+        data-autocomplete-popup="true"
+        onMouseDown={(e) => e.preventDefault()}
+        className="rb:fixed rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
+        style={{
+          top: popupPosition.top,
+          left: popupPosition.left,
+        }}
+      >
+        <div className="rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto">
+          <Flex vertical gap={12}>
+            {Object.entries(groupedSuggestions).map(([nodeId, nodeOptions]) => {
+              const nodeName = nodeOptions[0]?.nodeData?.name || nodeId;
+              return (
+                <div key={nodeId} className="rb:text-[12px]">
+                  {nodeName !== 'undefined' &&
+                    <div className="rb:px-2 rb:leading-4.25 rb:mb-1.25 rb:font-medium rb:text-[#5B6167]">
+                      {nodeName}
+                    </div>
+                  }
+                  <Flex vertical gap={2}>
+                  {nodeOptions.map((option) => {
+                    const globalIndex = flatOptions.indexOf(option);
+                    const isExpanded = expandedParent?.key === option.key;
+                    const hasChildren = !!option.children?.length;
+                    const isActive = activePanel === 'main' && selectedIndex === globalIndex;
+                    return (
+                      <Flex
+                        key={option.key}
+                        ref={(el) => { if (el) itemRefs.current.set(option.key, el); }}
+                        className={clsx("rb:px-2! rb:py-0.75! rb:rounded-sm rb:leading-4.5 rb:text-[#5B6167] rb:hover:bg-[#F6F6F6]", {
+                          'rb:bg-[#F6F6F6]': isActive || isExpanded,
+                          'rb:cursor-not-allowed rb:opacity-65': option.disabled,
+                          'rb:cursor-pointer': !option.disabled,
+                        })}
+                        align="center"
+                        justify="space-between"
+                        onClick={() => {
+                          if (option.disabled && !hasChildren) return;
+                          if (!option.disabled) insertMention(option);
+                          if (hasChildren) {
+                            calcChildPanelPos(option.key);
+                            setExpandedParent(option);
                           }
-                          setExpandedParent(option);
-                        } else {
-                          setExpandedParent(null);
+                        }}
+                        onMouseEnter={() => {
+                          setSelectedIndex(globalIndex);
+                          setActivePanel('main');
+                          setChildActiveIndex(-1);
+                          if (hasChildren) {
+                            calcChildPanelPos(option.key);
+                            setExpandedParent(option);
+                          } else {
+                            setExpandedParent(null);
+                          }
+                        }}
+                      >
+                        {option.label &&
+                          <div className="rb:font-medium">
+                            <span className="rb:text-[#155EEF]">{`{x}`}</span> {option.label}
+                          </div>
                         }
-                      }}
-                    >
-                      {option.label &&
-                        <div className="rb:font-medium">
-                          <span className="rb:text-[#155EEF]">{`{x}`}</span> {option.label}
-                        </div>
-                      }
-                      <Space size={2}>
-                        {option.dataType && <span>{option.dataType}</span>}
-                        {hasChildren && <div className="rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:rotate-90"></div>}
-                      </Space>
-                    </Flex>
-                  );
-                })}
-                </Flex>
-              </div>
-            );
-          })}
-        </Flex>
+                        <Space size={2}>
+                          {option.dataType && <span>{option.dataType}</span>}
+                          {hasChildren && <div className="rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:rotate-90"></div>}
+                        </Space>
+                      </Flex>
+                    );
+                  })}
+                  </Flex>
+                </div>
+              );
+            })}
+          </Flex>
+        </div>
       </div>
-      {/* Child variables panel - floats to the left */}
-      {expandedParent?.children?.length && (
+
+      {/* Child variables panel - fixed positioned via portal to avoid clipping */}
+      {expandedParent?.children?.length && createPortal(
         <div
-          className="rb:absolute rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto rb:text-[12px] rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
-          style={{
-            top: childPanelTop,
-            right: 'calc(100% + 8px)',
-            transform: 'translateY(-8px)',
-          }}
-          onMouseEnter={() => setExpandedParent(expandedParent)}
+          onMouseDown={(e) => e.preventDefault()}
+          className="rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto rb:text-[12px] rb:fixed rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
+          style={{ top: childPanelPos.top, right: childPanelPos.right }}
+          onMouseEnter={() => setActivePanel('child')}
+          onMouseLeave={() => { setActivePanel('main'); setChildActiveIndex(-1); }}
         >
           <div className="rb:pb-2 rb:mb-1 rb:font-medium rb:text-[#5B6167] rb-border-b">
             <Flex justify="space-between" align="center" gap={8}>
@@ -373,21 +413,21 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
               <span>{expandedParent.dataType}</span>
             </Flex>
           </div>
-          {expandedParent.children.map((child) => {
-            const childIndex = flatOptions.indexOf(child);
+          {expandedParent.children.map((child, ci) => {
+            const isChildActive = activePanel === 'child' && ci === childActiveIndex;
             return (
               <Flex
                 key={child.key}
-                data-selected={selectedIndex === childIndex}
+                ref={(el) => { if (el) childItemRefs.current.set(child.key, el); }}
                 className={clsx("rb:px-2! rb:py-0.75! rb:rounded-sm rb:leading-4.5 rb:text-[#5B6167] rb:hover:bg-[#F6F6F6]", {
-                  'rb:bg-[#F6F6F6]': selectedIndex === childIndex,
+                  'rb:bg-[#F6F6F6]': isChildActive,
                   'rb:cursor-not-allowed rb:opacity-65': child.disabled,
                   'rb:cursor-pointer': !child.disabled,
                 })}
                 align="center"
                 justify="space-between"
                 onClick={() => !child.disabled && insertMention(child)}
-                onMouseEnter={() => setSelectedIndex(childIndex)}
+                onMouseEnter={() => { setActivePanel('child'); setChildActiveIndex(ci); }}
               >
                 <span className="rb:font-medium">
                   <span className="rb:text-[#155EEF]">{`{x}`}</span> {child.label}
@@ -396,9 +436,10 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
               </Flex>
             );
           })}
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   );
 }
 export default AutocompletePlugin

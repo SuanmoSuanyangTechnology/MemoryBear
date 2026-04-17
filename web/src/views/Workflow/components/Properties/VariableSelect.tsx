@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:40:13 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-13 11:25:40
+ * @Last Modified time: 2026-04-16 13:57:30
  */
 import { useState, useRef, useEffect, useLayoutEffect, type FC } from 'react'
 import { createPortal } from 'react-dom'
@@ -41,13 +41,32 @@ const VariableSelect: FC<VariableSelectProps> = ({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [expandedParentKey, setExpandedParentKey] = useState<string | null>(null);
+  const [activeIndex, setActiveIndex] = useState<number>(-1);
+  const [activePanel, setActivePanel] = useState<'main' | 'child'>('main');
+  const [childActiveIndex, setChildActiveIndex] = useState<number>(-1);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
   const [childPanelPos, setChildPanelPos] = useState({ top: 0, right: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const childItemRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const activeKeyRef = useRef<string | null>(null);
 
   const CHILD_PANEL_HEIGHT = 280; // max-h-60 (240) + header (~40)
+
+  const calcChildPos = (key: string) => {
+    const el = itemRefs.current.get(key);
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const dropdownEl = dropdownRef.current;
+    if (!dropdownEl) return;
+    const dropdownRect = dropdownEl.getBoundingClientRect();
+    const dropdownBottom = dropdownRect.bottom;
+    const actualChildHeight = Math.min(CHILD_PANEL_HEIGHT, dropdownRect.height);
+    // Bottom-align child panel with main panel
+    const top = Math.max(10, dropdownBottom - actualChildHeight);
+    setChildPanelPos({ top, right: window.innerWidth - rect.left + 8 });
+  };
 
   // Calculate dropdown position (runs synchronously after DOM paint to avoid flicker)
   useLayoutEffect(() => {
@@ -69,7 +88,9 @@ const VariableSelect: FC<VariableSelectProps> = ({
       ? triggerRect.bottom + MARGIN
       : Math.max(MARGIN, triggerRect.top - dropdownHeight - MARGIN);
     setDropdownPos({ top, left, width });
-  }, [open, search, Array.isArray(value) ? value.length : 0]);
+    // Re-calculate child panel position if expanded
+    if (expandedParentKey) calcChildPos(expandedParentKey);
+  }, [open, search, Array.isArray(value) ? value.length : 0, options.length, expandedParentKey]);
 
   const filteredOptions = filterBooleanType
     ? options.filter(o => o.dataType !== 'boolean')
@@ -106,6 +127,12 @@ const VariableSelect: FC<VariableSelectProps> = ({
       return acc;
     }, {})
     : groupedSuggestions;
+
+  useEffect(() => {
+    if (!expandedParentKey) return;
+    calcChildPos(expandedParentKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dropdownPos, expandedParentKey]);
 
   useEffect(() => {
     if (!open) return;
@@ -151,6 +178,87 @@ const VariableSelect: FC<VariableSelectProps> = ({
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
+  // Flat list of all visible selectable items (main panel only, no children expanded inline)
+  const flatItems = Object.values(filteredGroups).flat();
+
+  useEffect(() => {
+    setActiveIndex(-1);
+    setActivePanel('main');
+    setChildActiveIndex(-1);
+  }, [open, search]);
+
+  useEffect(() => {
+    if (activeIndex < 0 || activeIndex >= flatItems.length) {
+      setExpandedParentKey(null);
+      return;
+    }
+    const s = flatItems[activeIndex];
+    activeKeyRef.current = s.key;
+    itemRefs.current.get(s.key)?.scrollIntoView({ block: 'nearest' });
+    if (s.children?.length) {
+      calcChildPos(s.key);
+      setExpandedParentKey(s.key);
+    } else {
+      setExpandedParentKey(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIndex]);
+
+  useEffect(() => {
+    if (!expandedParent?.children?.length || childActiveIndex < 0) return;
+    const child = expandedParent.children[childActiveIndex];
+    if (child) childItemRefs.current.get(child.key)?.scrollIntoView({ block: 'nearest' });
+  }, [childActiveIndex, expandedParent]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      const children = expandedParent?.children ?? [];
+      if (activePanel === 'child') {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setChildActiveIndex(i => Math.min(i + 1, children.length - 1));
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setChildActiveIndex(i => Math.max(i - 1, 0));
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          setActivePanel('main');
+          setChildActiveIndex(-1);
+        } else if (e.key === 'Enter' && childActiveIndex >= 0 && childActiveIndex < children.length) {
+          e.preventDefault();
+          const child = children[childActiveIndex];
+          if (!child.disabled) handleSelect(child);
+        } else if (e.key === 'Escape') {
+          setOpen(false);
+        }
+      } else {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setActiveIndex(i => Math.min(i + 1, flatItems.length - 1));
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setActiveIndex(i => Math.max(i - 1, 0));
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          if (expandedParent?.children?.length) {
+            setActivePanel('child');
+            setChildActiveIndex(0);
+          }
+        } else if (e.key === 'Enter' && activeIndex >= 0 && activeIndex < flatItems.length) {
+          e.preventDefault();
+          const s = flatItems[activeIndex];
+          if (!s.disabled) handleSelect(s);
+        } else if (e.key === 'Escape') {
+          setOpen(false);
+        }
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, activeIndex, activePanel, childActiveIndex, flatItems, expandedParent]);
+
   const handleSelect = (suggestion: Suggestion) => {
     if (multiple) {
       const key = `{{${suggestion.value}}}`;
@@ -171,19 +279,6 @@ const VariableSelect: FC<VariableSelectProps> = ({
     e.stopPropagation();
     onChange?.(multiple ? [] : '', multiple ? [] : undefined);
   };
-
-  const updateChildPos = (key: string) => {
-    const el = itemRefs.current.get(key);
-    if (el) {
-      const rect = el.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - rect.top - 10;
-      const top = spaceBelow >= CHILD_PANEL_HEIGHT
-        ? rect.top
-        : Math.max(10, window.innerHeight - CHILD_PANEL_HEIGHT - 10);
-      setChildPanelPos({ top, right: window.innerWidth - rect.left + 8 });
-    }
-  };
-
   const sep = <span className="rb:text-[#DFE4ED] rb:mx-0.5">/</span>;
   const isConversation = (parentOfSelected ?? selectedSuggestion)?.group === 'CONVERSATION' ||
     (selectedSuggestion ? filteredOptions.some(o => o.group === 'CONVERSATION' && o.children?.some(c => `{{${c.value}}}` === value)) : false);
@@ -197,7 +292,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
           'rb:w-full rb:flex rb:items-center rb:justify-between rb:cursor-pointer rb:rounded-lg rb:px-2 rb:transition-colors', {
             'rb:bg-[#F6F6F6] rb:border-none rb:shadow-none': variant === 'filled',
             'rb:border rb:border-[#d9d9d9] hover:rb:border-[#4096ff] rb:bg-white': variant === 'outlined',
-            'rb:border-[#4096ff] rb:shadow-[0_0_0_2px_rgba(5,145,255,0.1)]': variant === 'outlined' && open,
+            'rb:border-[#171719]!': variant === 'outlined' && open,
             'rb:border-none rb:shadow-none rb:bg-transparent': variant === 'borderless',
             'rb:text-[12px]': size === 'small',
             'rb:text-[14px]': size !== 'small',
@@ -244,7 +339,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
               })}
             </Flex>
           ) : (
-            <span className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1">{placeholder}</span>
+              <span className="rb:text-[rgba(23,23,25,0.25)] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1">{placeholder}</span>
           )
         ) : selectedSuggestion ? (
           <div className="rb:flex rb:flex-1 rb:min-w-0 rb:max-w-full">
@@ -260,7 +355,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
             </span>
           </div>
         ) : (
-          <span className="rb:text-[#bfbfbf] rb:flex-1">{placeholder}</span>
+            <span className="rb:text-[rgba(23,23,25,0.25)] rb:flex-1">{placeholder}</span>
         )}
         <Space size={4} className="rb:shrink-0 rb:ml-1">
           {allowClear && (
@@ -306,7 +401,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
                         key={s.key}
                         ref={(el) => { if (el) itemRefs.current.set(s.key, el); }}
                         className={clsx("rb:px-2! rb:py-0.75! rb:rounded-sm rb:leading-4.5 rb:text-[#5B6167] rb:hover:bg-[#F6F6F6]", {
-                          'rb:bg-[#F6F6F6]': isSelected || isExpanded,
+                          'rb:bg-[#F6F6F6]': isSelected || isExpanded || flatItems.indexOf(s) === activeIndex,
                           'rb:cursor-not-allowed rb:opacity-65': s.disabled,
                           'rb:cursor-pointer': !s.disabled,
                         })}
@@ -315,14 +410,14 @@ const VariableSelect: FC<VariableSelectProps> = ({
                         onClick={() => {
                           if (s.disabled) return;
                           if (hasChildren) {
-                            updateChildPos(s.key);
+                            calcChildPos(s.key);
                             setExpandedParentKey(prev => prev === s.key ? null : s.key);
                           }
                           handleSelect(s);
                         }}
                         onMouseEnter={() => {
                           if (hasChildren) {
-                            updateChildPos(s.key);
+                            calcChildPos(s.key);
                             setExpandedParentKey(s.key);
                           } else {
                             setExpandedParentKey(null);
@@ -370,15 +465,17 @@ const VariableSelect: FC<VariableSelectProps> = ({
               <span>{expandedParent.dataType}</span>
             </Flex>
           </div>
-          {expandedParent.children.map(child => {
+          {expandedParent.children.map((child, ci) => {
             const isSelected = multiple
               ? selectedValues.includes(`{{${child.value}}}`)
               : `{{${child.value}}}` === value;
+            const isChildActive = activePanel === 'child' && ci === childActiveIndex;
             return (
               <Flex
                 key={child.key}
+                ref={(el) => { if (el) childItemRefs.current.set(child.key, el); }}
                 className={clsx("rb:px-2! rb:py-0.75! rb:rounded-sm rb:leading-4.5 rb:text-[#5B6167] rb:hover:bg-[#F6F6F6]", {
-                  'rb:bg-[#F6F6F6]': isSelected,
+                  'rb:bg-[#F6F6F6]': isSelected || isChildActive,
                   'rb:cursor-not-allowed rb:opacity-65': child.disabled,
                   'rb:cursor-pointer': !child.disabled,
                 })}

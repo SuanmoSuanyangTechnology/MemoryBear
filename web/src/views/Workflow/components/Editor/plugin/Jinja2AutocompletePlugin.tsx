@@ -5,6 +5,7 @@
  * @Last Modified time: 2026-04-07 14:50:14
  */
 import { useEffect, useLayoutEffect, useState, useRef, type FC } from 'react';
+import { createPortal } from 'react-dom';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import {
   $getSelection, $isRangeSelection, $isTextNode,
@@ -12,6 +13,7 @@ import {
   KEY_ARROW_UP_COMMAND, KEY_ESCAPE_COMMAND,
 } from 'lexical';
 import { Space, Flex } from 'antd';
+import clsx from 'clsx';
 
 import { CLOSE_AUTOCOMPLETE_COMMAND } from '../commands';
 import type { Suggestion } from './AutocompletePlugin';
@@ -22,17 +24,22 @@ const Jinja2AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) =>
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [popupPosition, setPopupPosition] = useState({ top: 0, left: 0, anchorBottom: 0 });
   const [expandedParent, setExpandedParent] = useState<Suggestion | null>(null);
-  const [childPanelTop, setChildPanelTop] = useState(0);
+  const [childPanelPos, setChildPanelPos] = useState({ top: 0, right: 0 });
+  const [activePanel, setActivePanel] = useState<'main' | 'child'>('main');
+  const [childActiveIndex, setChildActiveIndex] = useState(-1);
   const popupRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const childItemRefs = useRef<Map<string, HTMLElement>>(new Map());
 
   const CHILD_PANEL_HEIGHT = 280;
 
   useLayoutEffect(() => {
     if (!popupRef.current || !showSuggestions) return;
-    const { top, anchorBottom } = popupPosition;
+    const { top, left, anchorBottom } = popupPosition;
     const popupHeight = popupRef.current.offsetHeight;
+    const popupWidth = popupRef.current.offsetWidth;
     const MARGIN = 10;
+
     let finalTop: number;
     if (top - popupHeight - MARGIN >= 0) {
       finalTop = top - popupHeight - MARGIN;
@@ -41,51 +48,57 @@ const Jinja2AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) =>
       if (finalTop + popupHeight > window.innerHeight - MARGIN)
         finalTop = window.innerHeight - popupHeight - MARGIN;
     }
-    if (finalTop !== top) setPopupPosition(prev => ({ ...prev, top: finalTop }));
+
+    let finalLeft = left;
+    if (finalLeft + popupWidth > window.innerWidth - MARGIN)
+      finalLeft = window.innerWidth - popupWidth - MARGIN;
+    if (finalLeft < MARGIN) finalLeft = MARGIN;
+
+    if (finalTop !== top || finalLeft !== left)
+      setPopupPosition(prev => ({ ...prev, top: finalTop, left: finalLeft }));
   }, [showSuggestions, popupPosition.anchorBottom]);
 
-  const calcChildPanelTop = (elRect: DOMRect, popupRect: DOMRect) => {
-    const relativeTop = elRect.top - popupRect.top;
-    const overflow = popupRect.top + relativeTop + CHILD_PANEL_HEIGHT - (window.innerHeight - 10);
-    return overflow > 0 ? relativeTop - overflow : relativeTop;
+  const calcChildPanelPos = (key: string) => {
+    const el = itemRefs.current.get(key);
+    if (!el || !popupRef.current) return;
+    const elRect = el.getBoundingClientRect();
+    const popupRect = popupRef.current.getBoundingClientRect();
+    const actualChildHeight = Math.min(CHILD_PANEL_HEIGHT, popupRect.height);
+    const top = Math.max(10, popupRect.bottom - actualChildHeight);
+    setChildPanelPos({ top, right: window.innerWidth - elRect.left + 8 });
   };
 
-  const scrollSelectedIntoView = () => {
-    if (!popupRef.current) return;
-    const selectedElement = popupRef.current.querySelector('[data-selected="true"]');
-    if (!selectedElement) return;
-    const container = popupRef.current;
-    const element = selectedElement as HTMLElement;
-    const containerRect = container.getBoundingClientRect();
-    const elementRect = element.getBoundingClientRect();
-    if (elementRect.bottom > containerRect.bottom) {
-      container.scrollTop += elementRect.bottom - containerRect.bottom;
-    } else if (elementRect.top < containerRect.top) {
-      container.scrollTop -= containerRect.top - elementRect.top;
-    }
+  const resetState = () => {
+    setShowSuggestions(false);
+    setExpandedParent(null);
+    setChildPanelPos({ top: 0, right: 0 });
+    setActivePanel('main');
+    setChildActiveIndex(-1);
   };
 
   useEffect(() => {
     return editor.registerUpdateListener(({ editorState }) => {
       editorState.read(() => {
         const selection = $getSelection();
-        if (!selection || !$isRangeSelection(selection)) {
-          setShowSuggestions(false);
-          return;
-        }
+        if (!selection || !$isRangeSelection(selection)) { setShowSuggestions(false); return; }
         const anchorNode = selection.anchor.getNode();
         const anchorOffset = selection.anchor.offset;
         const textBeforeCursor = anchorNode.getTextContent().substring(0, anchorOffset);
         const shouldShow = textBeforeCursor.endsWith('/');
         setShowSuggestions(shouldShow);
-        if (!shouldShow) { setSelectedIndex(0); setExpandedParent(null); setChildPanelTop(0); return; }
-
+        if (!shouldShow) {
+          setSelectedIndex(0);
+          setExpandedParent(null);
+          setChildPanelPos({ top: 0, right: 0 });
+          setActivePanel('main');
+          setChildActiveIndex(-1);
+          return;
+        }
         const domSelection = window.getSelection();
         if (domSelection && domSelection.rangeCount > 0) {
           const rect = domSelection.getRangeAt(0).getBoundingClientRect();
-          const popupWidth = 280;
           let left = rect.left;
-          if (left + popupWidth > window.innerWidth) left = window.innerWidth - popupWidth - 10;
+          if (left + 280 > window.innerWidth) left = window.innerWidth - 280 - 10;
           if (left < 10) left = 10;
           setPopupPosition({ top: rect.top, left, anchorBottom: rect.bottom });
         }
@@ -96,7 +109,7 @@ const Jinja2AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) =>
   useEffect(() => {
     return editor.registerCommand(
       CLOSE_AUTOCOMPLETE_COMMAND,
-      () => { setShowSuggestions(false); setExpandedParent(null); setChildPanelTop(0); return true; },
+      () => { resetState(); return true; },
       COMMAND_PRIORITY_HIGH,
     );
   }, [editor]);
@@ -119,9 +132,7 @@ const Jinja2AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) =>
       }
     });
     document.dispatchEvent(new CustomEvent('jinja2-variable-inserted', { detail: { value: suggestion.value } }));
-    setShowSuggestions(false);
-    setExpandedParent(null);
-    setChildPanelTop(0);
+    resetState();
   };
 
   const groupedSuggestions = options.reduce((groups: Record<string, Suggestion[]>, s) => {
@@ -131,152 +142,227 @@ const Jinja2AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) =>
     return groups;
   }, {});
 
-  const allOptions = Object.values(groupedSuggestions).flat().flatMap(o =>
-    o.key === expandedParent?.key && o.children?.length ? [o, ...o.children] : [o]
-  );
+  // Flat list of main-panel items for keyboard navigation
+  const flatOptions = Object.values(groupedSuggestions).flat();
+
+  // Sync child panel position when keyboard navigates to a parent with children
+  useEffect(() => {
+    if (selectedIndex < 0 || selectedIndex >= flatOptions.length) return;
+    const s = flatOptions[selectedIndex];
+    if (s.children?.length) {
+      calcChildPanelPos(s.key);
+      setExpandedParent(s);
+    } else {
+      setExpandedParent(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIndex]);
+
+  // Scroll child active item into view
+  useEffect(() => {
+    if (!expandedParent?.children?.length || childActiveIndex < 0) return;
+    const child = expandedParent.children[childActiveIndex];
+    if (child) childItemRefs.current.get(child.key)?.scrollIntoView({ block: 'nearest' });
+  }, [childActiveIndex, expandedParent]);
 
   useEffect(() => {
     if (!showSuggestions) return;
     return editor.registerCommand(
       KEY_ENTER_COMMAND,
       (event) => {
-        const opt = allOptions[selectedIndex];
-        if (opt && !opt.disabled) { event?.preventDefault(); insertMention(opt); return true; }
+        if (!showSuggestions) return false;
+        if (activePanel === 'child' && expandedParent?.children?.length) {
+          const child = expandedParent.children[childActiveIndex];
+          if (child && !child.disabled) { event?.preventDefault(); insertMention(child); return true; }
+        } else if (flatOptions.length > 0) {
+          const opt = flatOptions[selectedIndex];
+          if (opt && !opt.disabled) { event?.preventDefault(); insertMention(opt); return true; }
+        }
         return false;
       },
       COMMAND_PRIORITY_HIGH,
     );
-  }, [showSuggestions, selectedIndex, allOptions]);
+  }, [showSuggestions, selectedIndex, flatOptions, activePanel, childActiveIndex, expandedParent]);
 
   useEffect(() => {
     if (!showSuggestions) return;
     const down = editor.registerCommand(KEY_ARROW_DOWN_COMMAND, (e) => {
+      if (!showSuggestions) return false;
       e?.preventDefault();
-      setSelectedIndex(prev => {
-        let next = prev + 1;
-        while (next < allOptions.length && allOptions[next].disabled) next++;
-        setTimeout(scrollSelectedIntoView, 0);
-        return next >= allOptions.length ? prev : next;
-      });
+      if (activePanel === 'child' && expandedParent?.children) {
+        setChildActiveIndex(i => Math.min(i + 1, expandedParent.children!.length - 1));
+      } else {
+        setSelectedIndex(prev => {
+          let next = prev + 1;
+          while (next < flatOptions.length && flatOptions[next].disabled && !flatOptions[next].children?.length) next++;
+          const newIndex = next >= flatOptions.length ? prev : next;
+          setTimeout(() => itemRefs.current.get(flatOptions[newIndex]?.key)?.scrollIntoView({ block: 'nearest' }), 0);
+          return newIndex;
+        });
+      }
       return true;
     }, COMMAND_PRIORITY_HIGH);
+
     const up = editor.registerCommand(KEY_ARROW_UP_COMMAND, (e) => {
+      if (!showSuggestions) return false;
       e?.preventDefault();
-      setSelectedIndex(prev => {
-        let p = prev - 1;
-        while (p >= 0 && allOptions[p].disabled) p--;
-        setTimeout(scrollSelectedIntoView, 0);
-        return p < 0 ? prev : p;
-      });
+      if (activePanel === 'child' && expandedParent?.children) {
+        setChildActiveIndex(i => Math.max(i - 1, 0));
+      } else {
+        setSelectedIndex(prev => {
+          let p = prev - 1;
+          while (p >= 0 && flatOptions[p].disabled && !flatOptions[p].children?.length) p--;
+          const newIndex = p < 0 ? prev : p;
+          setTimeout(() => itemRefs.current.get(flatOptions[newIndex]?.key)?.scrollIntoView({ block: 'nearest' }), 0);
+          return newIndex;
+        });
+      }
       return true;
     }, COMMAND_PRIORITY_HIGH);
+
     const esc = editor.registerCommand(KEY_ESCAPE_COMMAND, (e) => {
       e?.preventDefault(); setShowSuggestions(false); return true;
     }, COMMAND_PRIORITY_HIGH);
+
     return () => { down(); up(); esc(); };
-  }, [showSuggestions, selectedIndex, allOptions, editor]);
+  }, [showSuggestions, selectedIndex, flatOptions, editor, activePanel, childActiveIndex, expandedParent]);
+
+  // ArrowLeft/Right for panel switching
+  useEffect(() => {
+    if (!showSuggestions) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') {
+        const current = flatOptions[selectedIndex];
+        if (activePanel === 'main' && current?.children?.length) {
+          e.preventDefault();
+          setActivePanel('child');
+          setChildActiveIndex(0);
+        }
+      } else if (e.key === 'ArrowRight') {
+        if (activePanel === 'child') {
+          e.preventDefault();
+          setActivePanel('main');
+          setChildActiveIndex(-1);
+        }
+      }
+    };
+    document.addEventListener('keydown', handler, true);
+    return () => document.removeEventListener('keydown', handler, true);
+  }, [showSuggestions, activePanel, selectedIndex, flatOptions]);
 
   if (!showSuggestions || Object.keys(groupedSuggestions).length === 0) return null;
 
   return (
-    <div
-      ref={popupRef}
-      data-autocomplete-popup="true"
-      onMouseDown={(e) => e.preventDefault()}
-      className="rb:fixed rb:z-1000 rb:bg-white rb:rounded-xl rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]"
-      style={{ top: popupPosition.top, left: popupPosition.left }}
-    >
-      <div className="rb:py-1 rb:min-w-70 rb:max-h-50 rb:overflow-y-auto">
-      <Flex vertical gap={12}>
-        {Object.entries(groupedSuggestions).map(([nodeId, nodeOptions]) => (
-          <div key={nodeId}>
-            <Flex align="center" gap={4} className="rb:px-3! rb:text-[12px] rb:py-1.25! rb:font-medium rb:text-[#5B6167]">
-              {nodeOptions[0]?.nodeData?.icon && <div className={`rb:size-3 rb:bg-cover ${nodeOptions[0].nodeData.icon}`} />}
-              {nodeOptions[0]?.nodeData?.name || nodeId}
-            </Flex>
-            {nodeOptions.map((option) => {
-              const globalIndex = allOptions.indexOf(option);
-              const hasChildren = !!option.children?.length;
-              const isExpanded = expandedParent?.key === option.key;
+    <>
+      <div
+        ref={popupRef}
+        data-autocomplete-popup="true"
+        onMouseDown={(e) => e.preventDefault()}
+        className="rb:fixed rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
+        style={{ top: popupPosition.top, left: popupPosition.left }}
+      >
+        <div className="rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto">
+          <Flex vertical gap={12}>
+            {Object.entries(groupedSuggestions).map(([nodeId, nodeOptions]) => {
+              const nodeName = nodeOptions[0]?.nodeData?.name || nodeId;
               return (
-                <Flex
-                  key={option.key}
-                  ref={(el) => { if (el) itemRefs.current.set(option.key, el); }}
-                  data-selected={selectedIndex === globalIndex}
-                  className="rb:pl-6! rb:pr-3! rb:py-2!"
-                  align="center"
-                  justify="space-between"
-                  style={{
-                    cursor: option.disabled ? 'not-allowed' : 'pointer',
-                    background: (selectedIndex === globalIndex || isExpanded) ? '#f0f8ff' : 'white',
-                    opacity: option.disabled ? 0.5 : 1,
-                  }}
-                  onClick={() => { if (option.disabled || hasChildren) return; insertMention(option); }}
-                  onMouseEnter={() => {
-                    setSelectedIndex(globalIndex);
-                    if (hasChildren) {
-                      const el = itemRefs.current.get(option.key);
-                      if (el && popupRef.current) {
-                        setChildPanelTop(calcChildPanelTop(el.getBoundingClientRect(), popupRef.current.getBoundingClientRect()));
-                      }
-                      setExpandedParent(option);
-                    } else {
-                      setExpandedParent(null);
-                    }
-                  }}
-                >
-                  <Space size={4}>
-                    <span className="rb:text-[#155EEF]">{option.isContext ? '📄' : '{x}'}</span>
-                    <span>{option.label}</span>
-                  </Space>
-                  <Space size={4}>
-                    {option.dataType && <span className="rb:text-[#5B6167]">{option.dataType}</span>}
-                    {hasChildren && <span className="rb:text-[#5B6167] rb:ml-1">›</span>}
-                  </Space>
-                </Flex>
+                <div key={nodeId} className="rb:text-[12px]">
+                  {nodeName !== 'undefined' &&
+                    <div className="rb:px-2 rb:leading-4.25 rb:mb-1.25 rb:font-medium rb:text-[#5B6167]">
+                      {nodeName}
+                    </div>
+                  }
+                  <Flex vertical gap={2}>
+                    {nodeOptions.map((option) => {
+                      const globalIndex = flatOptions.indexOf(option);
+                      const hasChildren = !!option.children?.length;
+                      const isExpanded = expandedParent?.key === option.key;
+                      const isActive = activePanel === 'main' && selectedIndex === globalIndex;
+                      return (
+                        <Flex
+                          key={option.key}
+                          ref={(el) => { if (el) itemRefs.current.set(option.key, el); }}
+                          className={clsx('rb:px-2! rb:py-0.75! rb:rounded-sm rb:leading-4.5 rb:text-[#5B6167] rb:hover:bg-[#F6F6F6]', {
+                            'rb:bg-[#F6F6F6]': isActive || isExpanded,
+                            'rb:cursor-not-allowed rb:opacity-65': option.disabled && !hasChildren,
+                            'rb:cursor-pointer': !option.disabled || hasChildren,
+                          })}
+                          align="center"
+                          justify="space-between"
+                          onClick={() => {
+                            if (option.disabled && !hasChildren) return;
+                            if (!option.disabled) insertMention(option);
+                            if (hasChildren) { calcChildPanelPos(option.key); setExpandedParent(option); }
+                          }}
+                          onMouseEnter={() => {
+                            setSelectedIndex(globalIndex);
+                            setActivePanel('main');
+                            setChildActiveIndex(-1);
+                            if (hasChildren) { calcChildPanelPos(option.key); setExpandedParent(option); }
+                            else setExpandedParent(null);
+                          }}
+                        >
+                          {option.label &&
+                            <div className="rb:font-medium">
+                              <span className="rb:text-[#155EEF]">{`{x}`}</span> {option.label}
+                            </div>
+                          }
+                          <Space size={2}>
+                            {option.dataType && <span>{option.dataType}</span>}
+                            {hasChildren && <div className="rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:rotate-90"></div>}
+                          </Space>
+                        </Flex>
+                      );
+                    })}
+                  </Flex>
+                </div>
               );
             })}
-          </div>
-        ))}
-      </Flex>
+          </Flex>
+        </div>
       </div>
-      {expandedParent?.children?.length && (
+
+      {expandedParent?.children?.length && createPortal(
         <div
-          className="rb:absolute rb:bg-white rb:rounded-xl rb:py-1 rb:min-w-60 rb:max-h-60 rb:overflow-y-auto rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]"
-          style={{ top: childPanelTop, right: 'calc(100% + 8px)', transform: 'translateY(-8px)' }}
-          onMouseEnter={() => setExpandedParent(expandedParent)}
+          onMouseDown={(e) => e.preventDefault()}
+          className="rb:min-w-70 rb:max-h-57.5 rb:overflow-y-auto rb:text-[12px] rb:fixed rb:z-1000 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
+          style={{ top: childPanelPos.top, right: childPanelPos.right }}
+          onMouseEnter={() => setActivePanel('child')}
+          onMouseLeave={() => { setActivePanel('main'); setChildActiveIndex(-1); }}
         >
-          <div className="rb:px-3 rb:py-2 rb:text-[12px] rb:font-medium rb:text-[#5B6167] rb:border-b rb:border-[#F0F0F0]">
-            <Flex justify="space-between" align="center">
+          <div className="rb:pb-2 rb:mb-1 rb:font-medium rb:text-[#5B6167] rb-border-b">
+            <Flex justify="space-between" align="center" gap={8}>
               <span>{expandedParent.nodeData.name}.{expandedParent.label}</span>
               <span>{expandedParent.dataType}</span>
             </Flex>
           </div>
-          {expandedParent.children.map((child) => {
-            const childIndex = allOptions.indexOf(child);
+          {expandedParent.children.map((child, ci) => {
+            const isChildActive = activePanel === 'child' && ci === childActiveIndex;
             return (
               <Flex
                 key={child.key}
-                data-selected={selectedIndex === childIndex}
-                className="rb:px-3! rb:py-2!"
+                ref={(el) => { if (el) childItemRefs.current.set(child.key, el); }}
+                className={clsx('rb:px-2! rb:py-0.75! rb:rounded-sm rb:leading-4.5 rb:text-[#5B6167] rb:hover:bg-[#F6F6F6]', {
+                  'rb:bg-[#F6F6F6]': isChildActive,
+                  'rb:cursor-not-allowed rb:opacity-65': child.disabled,
+                  'rb:cursor-pointer': !child.disabled,
+                })}
                 align="center"
                 justify="space-between"
-                style={{
-                  cursor: child.disabled ? 'not-allowed' : 'pointer',
-                  background: selectedIndex === childIndex ? '#f0f8ff' : 'white',
-                  opacity: child.disabled ? 0.5 : 1,
-                }}
                 onClick={() => !child.disabled && insertMention(child)}
-                onMouseEnter={() => setSelectedIndex(childIndex)}
+                onMouseEnter={() => { setActivePanel('child'); setChildActiveIndex(ci); }}
               >
-                <span>{child.label}</span>
-                {child.dataType && <span className="rb:text-[#5B6167]">{child.dataType}</span>}
+                <span className="rb:font-medium">
+                  <span className="rb:text-[#155EEF]">{`{x}`}</span> {child.label}
+                </span>
+                {child.dataType && <span>{child.dataType}</span>}
               </Flex>
             );
           })}
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   );
 };
 
