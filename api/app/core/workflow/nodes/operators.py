@@ -395,11 +395,71 @@ class NoneObjectComparisonOperator:
         return lambda *args, **kwargs: False
 
 
+class ArrayFileContainsOperator:
+    """Handles contains/not_contains on array[file] with sub_variable_condition.
+
+    Evaluates whether any (contains) or no (not_contains) file element
+    in the array satisfies all sub-conditions.
+    """
+
+    def __init__(self, left_value: list[dict], sub_variable_condition: Any):
+        self.left_value = left_value
+        self.sub_variable_condition = sub_variable_condition
+
+    def _match_item(self, file_item: dict) -> bool:
+        """Check if a single file dict satisfies all sub-conditions."""
+        results = []
+        for cond in self.sub_variable_condition.conditions:
+            field_val = file_item.get(cond.key)
+            result = self._eval_sub(field_val, cond)
+            results.append(result)
+        if self.sub_variable_condition.logical_operator.value == "and":
+            return all(results)
+        return any(results)
+
+    @staticmethod
+    def _eval_sub(field_val: Any, cond: Any) -> bool:
+        op = cond.operator.value
+        expected = cond.value
+        if field_val is None:
+            return op in ("empty", "not_empty") and op == "empty"
+        match op:
+            case "eq":         return str(field_val) == str(expected)
+            case "ne":         return str(field_val) != str(expected)
+            case "contains":   return isinstance(field_val, str) and str(expected) in field_val
+            case "not_contains": return isinstance(field_val, str) and str(expected) not in field_val
+            case "in":         return field_val in (expected if isinstance(expected, list) else [expected])
+            case "not_in":     return field_val not in (expected if isinstance(expected, list) else [expected])
+            case "gt":         return isinstance(field_val, (int, float)) and field_val > float(expected)
+            case "ge":         return isinstance(field_val, (int, float)) and field_val >= float(expected)
+            case "lt":         return isinstance(field_val, (int, float)) and field_val < float(expected)
+            case "le":         return isinstance(field_val, (int, float)) and field_val <= float(expected)
+            case "empty":      return field_val in (None, "", 0)
+            case "not_empty":  return field_val not in (None, "", 0)
+            case _:            return False
+
+    def contains(self) -> bool:
+        return any(self._match_item(f) for f in self.left_value if isinstance(f, dict))
+
+    def not_contains(self) -> bool:
+        return not self.contains()
+
+    def empty(self) -> bool:
+        return not self.left_value
+
+    def not_empty(self) -> bool:
+        return bool(self.left_value)
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: False
+
+
 CompareOperatorInstance = Union[
     StringComparisonOperator,
     NumberComparisonOperator,
     BooleanComparisonOperator,
     ArrayComparisonOperator,
+    ArrayFileContainsOperator,
     ObjectComparisonOperator
 ]
 CompareOperatorType = Type[CompareOperatorInstance]
