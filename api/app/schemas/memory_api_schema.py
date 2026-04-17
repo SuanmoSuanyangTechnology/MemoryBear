@@ -389,3 +389,57 @@ class ConfigUpdateForgettingRequest(BaseModel):
         if not v or not v.strip():
             raise ValueError("config_id is required and cannot be empty")
         return v.strip()
+
+class EmotionConfigUpdateRequest(BaseModel):
+    """Request schema for updating memory config emotion parameters.
+
+    Attributes:
+        config_id: Configuration UUID to update (required)
+        emotion_enabled: Whether to enable emotion extraction
+        emotion_model_id: Emotion analysis model ID
+        emotion_extract_keywords: Whether to extract emotion keywords
+        emotion_min_intensity: Minimum emotion intensity threshold (0.0-1.0)
+        emotion_enable_subject: Whether to enable subject classification for emotions
+    """
+    config_id: str = Field(..., description="Configuration ID (UUID)")
+    emotion_enabled: bool = Field(..., description="Whether to enable emotion extraction")
+    emotion_model_id: Optional[str] = Field(None, description="Emotion analysis model ID")
+    emotion_extract_keywords: bool = Field(..., description="Whether to extract emotion keywords")
+    emotion_min_intensity: float = Field(..., ge=0.0, le=1.0, description="Minimum emotion intensity threshold")
+    emotion_enable_subject: bool = Field(..., description="Whether to enable subject classification for emotions")
+
+    @field_validator("config_id")
+    @classmethod
+    def validate_config_id(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("config_id is required and cannot be empty")
+        return v.strip()
+
+class ReflectionConfigUpdateRequest(BaseModel):
+    """Request schema for updating memory config reflection parameters.
+
+    Attributes:
+        config_id: Configuration UUID to update (required)
+        reflection_enabled: Whether to enable self-reflection
+        reflection_period_in_hours: Reflection iteration period in hours
+        reflexion_range: Reflection range (partial or all)
+        baseline: Baseline for reflection (TIME/FACT/TIME-FACT)
+        reflection_model_id: Reflection model ID
+        memory_verify: Whether to enable memory verification
+        quality_assessment: Whether to enable quality assessment
+    """
+    config_id: str = Field(..., description="Configuration ID (UUID)")
+    reflection_enabled: bool = Field(..., description="Whether to enable self-reflection")
+    reflection_period_in_hours: str = Field(..., description="Reflection iteration period in hours")
+    reflexion_range: Literal["partial", "all"] = Field(..., description="Reflection range: partial/all")
+    baseline: Literal["TIME", "FACT", "TIME-FACT"] = Field(..., description="Baseline: TIME/FACT/TIME-FACT")
+    reflection_model_id: str = Field(..., description="Reflection model ID")
+    memory_verify: bool = Field(..., description="Whether to enable memory verification")
+    quality_assessment: bool = Field(..., description="Whether to enable quality assessment")
+
+    @field_validator("config_id")
+    @classmethod
+    def validate_config_id(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("config_id is required and cannot be empty")
+        return v.strip()

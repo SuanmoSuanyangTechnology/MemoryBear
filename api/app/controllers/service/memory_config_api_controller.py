@@ -10,7 +10,11 @@ from sqlalchemy.orm import Session
 from app.controllers import memory_storage_controller
 from app.controllers import memory_forget_controller
 from app.controllers import ontology_controller
+from app.controllers import emotion_config_controller
+from app.controllers import memory_reflection_controller
 from app.schemas.memory_storage_schema import ForgettingConfigUpdateRequest
+from app.controllers.emotion_config_controller import EmotionConfigUpdate
+from app.schemas.memory_reflection_schemas import Memory_Reflection
 from app.core.api_key_auth import require_api_key
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -25,6 +29,8 @@ from app.schemas.memory_api_schema import (
     ListConfigsResponse,
     ConfigCreateRequest,
     ConfigUpdateForgettingRequest,
+    EmotionConfigUpdateRequest,
+    ReflectionConfigUpdateRequest,
 )
 from app.schemas.memory_storage_schema import (
     ConfigUpdate, 
@@ -79,28 +85,28 @@ def _verify_config_ownership(config_id:str, workspace_id:uuid.UUID, db:Session):
             code=BizCode.MEMORY_CONFIG_NOT_FOUND,
         )
 
-@router.get("/configs")
-@require_api_key(scopes=["memory"])
-async def list_memory_configs(
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
-):
-    """
-    List all memory configs for the workspace.
+# @router.get("/configs")
+# @require_api_key(scopes=["memory"])
+# async def list_memory_configs(
+#     request: Request,
+#     api_key_auth: ApiKeyAuth = None,
+#     db: Session = Depends(get_db),
+# ):
+#     """
+#     List all memory configs for the workspace.
 
-    Returns all available memory configurations associated with the authorized workspace.
-    """
-    logger.info(f"List configs request - workspace_id: {api_key_auth.workspace_id}")
+#     Returns all available memory configurations associated with the authorized workspace.
+#     """
+#     logger.info(f"List configs request - workspace_id: {api_key_auth.workspace_id}")
 
-    memory_api_service = MemoryAPIService(db)
+#     memory_api_service = MemoryAPIService(db)
 
-    result = memory_api_service.list_memory_configs(
-        workspace_id=api_key_auth.workspace_id,
-    )
+#     result = memory_api_service.list_memory_configs(
+#         workspace_id=api_key_auth.workspace_id,
+#     )
 
-    logger.info(f"Listed {result['total']} configs for workspace: {api_key_auth.workspace_id}")
-    return success(data=ListConfigsResponse(**result).model_dump(), msg="Configs listed successfully")
+#     logger.info(f"Listed {result['total']} configs for workspace: {api_key_auth.workspace_id}")
+#     return success(data=ListConfigsResponse(**result).model_dump(), msg="Configs listed successfully")
 
 @router.get("/read_all_config")
 @require_api_key(scopes=["memory"])
@@ -170,6 +176,85 @@ async def read_config_extracted(
         current_user = current_user,
         db = db,
     )
+
+@router.get("/read_config_forgetting")
+@require_api_key(scopes=["memory"])
+async def read_config_forgetting(
+    request: Request,
+    config_id: str = Query(..., description="config_id"),
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Get forgetting settings for a specific memory config.
+
+    Only configs belonging to the authorized workspace can be queried.
+    """
+    logger.info(f"V1 read forgetting config - config_id: {config_id}, workspace: {api_key_auth.workspace_id}")
+
+    _verify_config_ownership(config_id, api_key_auth.workspace_id, db)
+
+    current_user = _get_current_user(api_key_auth, db)
+
+    result = await memory_forget_controller.read_forgetting_config(
+        config_id = config_id,
+        current_user = current_user,
+        db = db,
+    )
+    return jsonable_encoder(result)
+
+
+
+@router.get("/read_config_emotion")
+@require_api_key(scopes=["memory"])
+async def read_config_emotion(
+    request: Request,
+    config_id: str = Query(..., description="config_id"),
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Get emotion engine config details for a specific config.
+
+    Only configs belonging to the authorized workspace can be queried.
+    """
+    logger.info(f"V1 read emotion config - config_id: {config_id}, workspace: {api_key_auth.workspace_id}")
+
+    _verify_config_ownership(config_id, api_key_auth.workspace_id, db)
+
+    current_user = _get_current_user(api_key_auth, db)
+
+    return jsonable_encoder(emotion_config_controller.get_emotion_config(
+        config_id=config_id,
+        db=db,
+        current_user=current_user,
+    ))
+
+@router.get("/read_config_reflection")
+@require_api_key(scopes=["memory"])
+async def read_config_reflection(
+    request: Request,
+    config_id: str = Query(..., description="config_id"),
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Get reflection engine config details for a specific config.
+
+    Only configs belonging to the authorized workspace can be queried.
+    """
+    logger.info(f"V1 read reflection config - config_id: {config_id}, workspace: {api_key_auth.workspace_id}")
+
+    _verify_config_ownership(config_id, api_key_auth.workspace_id, db)
+
+    current_user = _get_current_user(api_key_auth, db)
+
+    return jsonable_encoder(await memory_reflection_controller.start_reflection_configs(
+        config_id=config_id,
+        current_user=current_user,
+        db=db,
+    ))
+
 
 @router.post("/create_config")
 @require_api_key(scopes=["memory"])
@@ -278,6 +363,7 @@ async def update_memory_config_extracted(
         current_user = current_user,
         db = db,
    )
+
 @router.put("/update_config_forgetting")
 @require_api_key(scopes=["memory"])
 async def update_memory_config_forgetting(
@@ -312,6 +398,66 @@ async def update_memory_config_forgetting(
    )
    return jsonable_encoder(result)
 
+@router.put("/update_config_emotion")
+@require_api_key(scopes=["memory"])
+async def update_config_emotion(
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+    message: str = Body(None, description="Request body"),
+):
+    """
+    Update emotion engine config (full update).
+
+    All fields except emotion_model_id are required.
+    Only configs belonging to the authorized workspace can be updated.
+    """
+    body = await request.json()
+    payload = EmotionConfigUpdateRequest(**body)
+
+    logger.info(f"V1 update emotion config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}")
+
+    _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, db)
+
+    current_user = _get_current_user(api_key_auth, db)
+    update_fields = payload.model_dump(exclude_unset=True)
+    mgmt_payload = EmotionConfigUpdate(**update_fields)
+    return jsonable_encoder(emotion_config_controller.update_emotion_config(
+        config=mgmt_payload,
+        db=db,
+        current_user=current_user,
+    ))
+
+@router.put("/update_config_reflection")
+@require_api_key(scopes=["memory"])
+async def update_config_reflection(
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+    message: str = Body(None, description="Request body"),
+):
+    """
+    Update reflection engine config (full update).
+
+    All fields are required.
+    Only configs belonging to the authorized workspace can be updated.
+    """
+    body = await request.json()
+    payload = ReflectionConfigUpdateRequest(**body)
+
+    logger.info(f"V1 update reflection config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}")
+
+    _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, db)
+
+    current_user = _get_current_user(api_key_auth, db)
+    update_fields = payload.model_dump(exclude_unset=True)
+    mgmt_payload = Memory_Reflection(**update_fields)
+
+    return jsonable_encoder(await memory_reflection_controller.save_reflection_config(
+        request=mgmt_payload,
+        current_user=current_user,
+        db=db,
+    ))
 
 @router.delete("/delete_config")
 @require_api_key(scopes=["memory"])
