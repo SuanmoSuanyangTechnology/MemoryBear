@@ -74,7 +74,7 @@ async def get_my_tenant_subscription(
                 "started_at": None,
                 "expired_at": None,
                 "status": "active",
-                "quota": free_plan.quotas or {},
+                "quotas": free_plan.quotas or {},
                 "created_at": int(datetime.datetime.utcnow().timestamp() * 1000),
                 "updated_at": int(datetime.datetime.utcnow().timestamp() * 1000),
             }, msg="免费套餐")
@@ -116,7 +116,7 @@ async def get_my_tenant_subscription(
             "started_at": None,
             "expired_at": None,
             "status": "active",
-            "quota": plan["quotas"],
+            "quotas": plan["quotas"],
             "created_at": int(datetime.datetime.utcnow().timestamp() * 1000),
             "updated_at": int(datetime.datetime.utcnow().timestamp() * 1000),
         }
@@ -166,7 +166,7 @@ async def list_package_plans_public(
             "page_customization_en": plan.get("page_customization_en"),
             "theme_color": plan.get("theme_color"),
             "status": plan.get("status", True),
-            "quota": plan["quotas"],
+            "quotas": plan["quotas"],
         }])
     except Exception as e:
         logger.error(f"获取套餐列表失败: {e}", exc_info=True)
