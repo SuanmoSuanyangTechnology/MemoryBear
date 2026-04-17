@@ -226,9 +226,12 @@ class LLMNode(BaseNode):
             self.messages = [{"role": "user", "content": rendered}]
 
         # ChatTongyi 要求 messages 含 'json' 字样才能使用 response_format，在 system prompt 中注入
-        if (self.typed_config.json_output
-                and model_info.provider.lower() == ModelProvider.DASHSCOPE
-                and not model_info.is_omni):
+        # VOLCANO 模型不支持 response_format，同样需要 system prompt 注入
+        need_json_prompt = self.typed_config.json_output and (
+            (model_info.provider.lower() == ModelProvider.DASHSCOPE and not model_info.is_omni)
+            or model_info.provider.lower() == ModelProvider.VOLCANO
+        )
+        if need_json_prompt:
             system_msg = next((m for m in self.messages if m["role"] == "system"), None)
             if system_msg:
                 system_msg["content"] += "\n请以JSON格式输出。"
