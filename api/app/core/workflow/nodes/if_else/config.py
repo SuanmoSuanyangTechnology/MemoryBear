@@ -1,9 +1,23 @@
 """Condition Configuration"""
 from typing import Any
-from pydantic import Field, BaseModel, field_validator
+from pydantic import Field, BaseModel, field_validator, model_validator
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig
 from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator, ValueInputType
+
+
+class SubVariableConditionItem(BaseModel):
+    """A single condition on a file object's field, used inside sub_variable_condition."""
+    key: str = Field(..., description="Field name of the file object, e.g. type, size, name")
+    operator: ComparisonOperator = Field(..., description="Comparison operator")
+    value: Any = Field(default=None, description="Value to compare with")
+    var_type: str = Field(default="string", description="Field value type: string or number")
+
+
+class SubVariableCondition(BaseModel):
+    """Sub-conditions applied to each file element in an array[file] variable."""
+    logical_operator: LogicOperator = Field(default=LogicOperator.AND)
+    conditions: list[SubVariableConditionItem] = Field(default_factory=list)
 
 
 class ConditionDetail(BaseModel):
@@ -14,17 +28,22 @@ class ConditionDetail(BaseModel):
 
     left: str = Field(
         ...,
-        description="Value to compare against"
+        description="Variable selector, e.g. {{sys.files}}"
     )
 
     right: Any = Field(
         default=None,
-        description="Value to compare with"
+        description="Value to compare with (unused when sub_variable_condition is set)"
     )
 
     input_type: ValueInputType = Field(
         default=ValueInputType.CONSTANT,
         description="Value input type for comparison"
+    )
+
+    sub_variable_condition: SubVariableCondition | None = Field(
+        default=None,
+        description="Sub-conditions for array[file] fields. When set, operator must be contains/not_contains."
     )
 
     @field_validator("input_type", mode="before")
@@ -38,18 +57,48 @@ class ConditionDetail(BaseModel):
         return v
 
 
+class ConditionGroup(BaseModel):
+    """A group of conditions combined by group_operator (AND/OR)"""
+
+    group_operator: LogicOperator = Field(
+        default=LogicOperator.AND,
+        description="Logical operator used to combine conditions within this group"
+    )
+
+    conditions: list[ConditionDetail] = Field(
+        ...,
+        description="List of conditions within this group"
+    )
+
+
 class ConditionBranchConfig(BaseModel):
-    """Configuration for a conditional branch"""
+    """Configuration for a conditional branch.
+
+    logical_operator controls how groups are combined.
+    Each group's group_operator controls how conditions within it are combined.
+    """
 
     logical_operator: LogicOperator = Field(
         default=LogicOperator.AND,
-        description="Logical operator used to combine multiple condition expressions"
+        description="Logical operator used to combine condition groups"
     )
 
-    expressions: list[ConditionDetail] = Field(
+    expressions: list[ConditionGroup] = Field(
         ...,
-        description="List of condition expressions within this branch"
+        description="List of condition groups within this branch"
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_flat_expressions(cls, data):
+        """Migrate legacy flat expressions (list[ConditionDetail]) to list[ConditionGroup]."""
+        exprs = data.get("expressions", [])
+        if exprs and isinstance(exprs[0], dict) and "left" in exprs[0]:
+            data["expressions"] = [{
+                "group_operator": data.get("logical_operator", "and"),
+                "conditions": exprs
+            }]
+        return data
 
 
 class IfElseNodeConfig(BaseNodeConfig):

@@ -201,12 +201,15 @@ class VariablePool:
 
     @staticmethod
     def _extract_field(struct: "VariableStruct", field: str | None) -> Any:
-        """If field is given, drill into a dict/object variable's value."""
+        """If field is given, drill into a dict/object/array[file] variable's value."""
         if field is None:
             return struct.instance.get_value()
         value = struct.instance.get_value()
+        # array[file]: extract the field from every element, return a list
+        if isinstance(value, list):
+            return [item.get(field) if isinstance(item, dict) else getattr(item, field, None) for item in value]
         if not isinstance(value, dict):
-            raise KeyError(f"Variable is not an object, cannot access field '{field}'")
+            raise KeyError(f"Variable is not an object or array, cannot access field '{field}'")
         return value.get(field)
 
     def get_instance(
