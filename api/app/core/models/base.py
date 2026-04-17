@@ -101,12 +101,10 @@ class RedBearModelFactory:
                         extra_body["enable_thinking"] = True
                     if config.thinking_budget_tokens:
                         extra_body["thinking_budget"] = config.thinking_budget_tokens
-                params["extra_body"] = extra_body
             # JSON 输出模式
             if config.json_output:
                 model_kwargs = params.setdefault("model_kwargs", {})
                 model_kwargs["response_format"] = {"type": "json_object"}
-                params["model_kwargs"] = model_kwargs
             return params
 
         if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.OLLAMA, ModelProvider.VOLCANO]:
@@ -148,11 +146,12 @@ class RedBearModelFactory:
                             extra_body["enable_thinking"] = True
                         if config.thinking_budget_tokens:
                             extra_body["thinking_budget"] = config.thinking_budget_tokens
-                    params["extra_body"] = extra_body
             # JSON 输出模式
             if config.json_output:
-                params.setdefault("model_kwargs", {})
-                params["model_kwargs"]["response_format"] = {"type": "json_object"}
+                model_kwargs = params.setdefault("model_kwargs", {})
+                # VOLCANO 模型不支持 response_format，JSON 输出由 system prompt 注入实现
+                if provider != ModelProvider.VOLCANO:
+                    model_kwargs["response_format"] = {"type": "json_object"}
             return params
         elif provider == ModelProvider.DASHSCOPE:
             params = {
@@ -172,11 +171,9 @@ class RedBearModelFactory:
                         model_kwargs["incremental_output"] = True
                     if config.thinking_budget_tokens:
                         model_kwargs["thinking_budget"] = config.thinking_budget_tokens
-                params["model_kwargs"] = model_kwargs
             if config.json_output:
                 model_kwargs = params.setdefault("model_kwargs", {})
                 model_kwargs["response_format"] = {"type": "json_object"}
-                params["model_kwargs"] = model_kwargs
             return params
         elif provider == ModelProvider.BEDROCK:
             # Bedrock 使用 AWS 凭证
@@ -225,8 +222,8 @@ class RedBearModelFactory:
                 }
             # JSON 输出模式
             if config.json_output:
-                params.setdefault("model_kwargs", {})
-                params["model_kwargs"]["response_format"] = {"type": "json_object"}
+                model_kwargs = params.setdefault("model_kwargs", {})
+                model_kwargs["response_format"] = {"type": "json_object"}
             return params
         else:
             raise BusinessException(f"不支持的提供商: {provider}", code=BizCode.PROVIDER_NOT_SUPPORTED)
@@ -261,12 +258,13 @@ def get_provider_llm_class(config: RedBearModelConfig, type: ModelType = ModelTy
     if provider == ModelProvider.VOLCANO:
         return CompatibleChatOpenAI
     if provider in [ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK]:
-        if type == ModelType.LLM:
-            return OpenAI
-        elif type == ModelType.CHAT:
-            return ChatOpenAI
-        else:
-            raise BusinessException(f"不支持的模型提供商及类型: {provider}-{type}", code=BizCode.PROVIDER_NOT_SUPPORTED)
+        return CompatibleChatOpenAI
+        # if type == ModelType.LLM:
+        #     return OpenAI
+        # elif type == ModelType.CHAT:
+        #     return CompatibleChatOpenAI
+        # else:
+        #     raise BusinessException(f"不支持的模型提供商及类型: {provider}-{type}", code=BizCode.PROVIDER_NOT_SUPPORTED)
     elif provider == ModelProvider.DASHSCOPE:
         return ChatTongyi
     elif provider == ModelProvider.OLLAMA:

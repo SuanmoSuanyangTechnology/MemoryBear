@@ -12,7 +12,7 @@ import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
 
 from langchain.agents import create_agent
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.errors import GraphRecursionError
 
@@ -83,7 +83,12 @@ class LangChainAgent:
         # ChatTongyi 要求 messages 含 'json' 字样才能使用 response_format
         # 在 system prompt 中注入 JSON 要求
         from app.models.models_model import ModelProvider
-        if json_output and provider.lower() == ModelProvider.DASHSCOPE and not is_omni:
+        if json_output and (
+            (provider.lower() == ModelProvider.DASHSCOPE and not is_omni)
+            or provider.lower() == ModelProvider.VOLCANO
+            # 有工具时 response_format 会被移除，所有 provider 都需要 system prompt 注入保证 JSON 输出
+            or bool(tools)
+        ):
             self.system_prompt += "\n请以JSON格式输出。"
 
         logger.debug(
@@ -240,9 +245,7 @@ class LangChainAgent:
         Returns:
             List[BaseMessage]: 消息列表
         """
-        messages:list = [SystemMessage(content=self.system_prompt)]
-
-        # 添加系统提示词
+        messages: list = []
 
         # 添加历史消息
         if history:
