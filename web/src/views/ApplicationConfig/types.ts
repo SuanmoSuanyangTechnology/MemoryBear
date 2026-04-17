@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 15:45:17
+ * @Last Modified time: 2026-04-07 15:46:19
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
@@ -12,6 +12,7 @@ import type { ChatVariable, GraphRef, WorkflowConfig } from '@/views/Workflow/ty
 import type { ApiKey } from '@/views/ApiKeyManagement/types'
 import type { SkillConfigForm } from './components/Skill/types'
 import type { Capability } from '@/views/ModelManagement/types'
+import { Node } from '@antv/x6';
 
 /**
  * Model configuration parameters
@@ -168,7 +169,9 @@ export interface WorkflowRef {
   chatVariables: ChatVariable[];
   config: WorkflowConfig | null;
   features: WorkflowConfig['features'];
+  handleFeaturesConfig?: () => void;
   handleSaveFeaturesConfig?: (value: FeaturesConfigForm) => void;
+  nodeClick: ({ node }: { node: Node }) => void;
 }
 
 /**

@@ -292,9 +292,10 @@ class MinerUParser(RAGPdfParser):
         self.page_from = page_from
         self.page_to = page_to
         try:
-            with pdfplumber.open(fnm) if isinstance(fnm, (str, PathLike)) else pdfplumber.open(BytesIO(fnm)) as pdf:
-                self.pdf = pdf
-                self.page_images = [p.to_image(resolution=72 * zoomin, antialias=True).original for _, p in enumerate(self.pdf.pages[page_from:page_to])]
+            with sys.modules[LOCK_KEY_pdfplumber]:  # ← 加这一行，获取全局锁
+                with pdfplumber.open(fnm) if isinstance(fnm, (str, PathLike)) else pdfplumber.open(BytesIO(fnm)) as pdf:
+                    self.pdf = pdf
+                    self.page_images = [p.to_image(resolution=72 * zoomin, antialias=True).original for _, p in enumerate(self.pdf.pages[page_from:page_to])]
         except Exception as e:
             self.page_images = None
             self.total_page = 0

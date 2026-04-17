@@ -116,6 +116,11 @@ class LLMNodeConfig(BaseNodeConfig):
         description="Top-p 采样参数"
     )
 
+    json_output: bool = Field(
+        default=False,
+        description="是否以 JSON 格式输出"
+    )
+
     frequency_penalty: float | None = Field(
         default=None,
         ge=-2.0,

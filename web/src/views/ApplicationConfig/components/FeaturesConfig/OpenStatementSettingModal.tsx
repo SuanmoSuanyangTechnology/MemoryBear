@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 14:38:28
+ * @Last Modified time: 2026-04-13 15:13:36
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Button, Form, Input, Flex, App } from 'antd';
@@ -12,6 +12,8 @@ import RbModal from '@/components/RbModal';
 import type { FeaturesConfigForm } from '../../types'
 import type { Variable } from '../VariableList/types'
 import Tag from '@/components/Tag'
+import type { Application } from '@/views/ApplicationManagement/types';
+import Editor from '@/views/Workflow/components/Editor';
 
 export interface OpenStatementSettingModalRef {
   handleOpen: (values?: FeaturesConfigForm['opening_statement']) => void;
@@ -21,11 +23,13 @@ export interface OpenStatementSettingModalRef {
 interface OpenStatementSettingModalProps {
   onSave: (values: FeaturesConfigForm['opening_statement']) => void;
   chatVariables?: Variable[];
+  source?: Application['type'];
 }
 
 const OpenStatementSettingModal = forwardRef<OpenStatementSettingModalRef, OpenStatementSettingModalProps>(({
   onSave,
-  chatVariables = []
+  chatVariables = [],
+  source
 }, ref) => {
   const { t } = useTranslation();
   const { modal } = App.useApp()
@@ -45,10 +49,11 @@ const OpenStatementSettingModal = forwardRef<OpenStatementSettingModalRef, OpenS
   const handleSave = async () => {
     form.validateFields().then(values => {
       const { suggested_questions, ...rest } = values
-      const filterSuggestedQuestions = suggested_questions.filter(vo => vo && vo.trim() !== '' && vo !== null)
+      const filterSuggestedQuestions = suggested_questions?.filter(vo => vo && vo.trim() !== '' && vo !== null)
       if (values?.enabled && values?.statement && values?.statement?.trim() !== '') {
         const usedVars = [...new Set([...values.statement?.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]))]
 
+        console.log('usedVars', usedVars, chatVariables)
         const validNames = new Set(chatVariables.map(v => v.name))
         const invalid = usedVars.filter(v => !validNames.has(v))
         if (invalid.length > 0) {
@@ -100,9 +105,12 @@ const OpenStatementSettingModal = forwardRef<OpenStatementSettingModalRef, OpenS
           label={t('application.opening_statement')}
           name="statement"
         >
-          <Input.TextArea
-            placeholder={t('common.pleaseEnter')}
-          />  
+          {source === 'workflow'
+            ? <Editor options={chatVariables as any} variant="outlined" />
+            : <Input.TextArea
+              placeholder={t('common.pleaseEnter')}
+            />  
+          }
         </Form.Item>
 
         <Form.List name="suggested_questions">

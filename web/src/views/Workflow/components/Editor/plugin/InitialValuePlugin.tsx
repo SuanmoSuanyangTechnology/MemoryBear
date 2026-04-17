@@ -1,6 +1,12 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2025-12-23 16:22:51 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-04-02 17:14:15
+ */
 import { useEffect, useRef } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { $getRoot, $createParagraphNode, $createTextNode } from 'lexical';
+import { $getRoot, $createParagraphNode, $createTextNode, $isParagraphNode } from 'lexical';
 
 import { $createVariableNode } from '../nodes/VariableNode';
 import { type Suggestion } from '../plugin/AutocompletePlugin'
@@ -8,44 +14,47 @@ import { type Suggestion } from '../plugin/AutocompletePlugin'
 interface InitialValuePluginProps {
   value: string;
   options?: Suggestion[];
-  enableLineNumbers?: boolean;
+  onChange?: (value: string) => void;
 }
 
-const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options = [], enableLineNumbers = false }) => {
+const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options = [], onChange }) => {
   const [editor] = useLexicalComposerContext();
   const prevValueRef = useRef<string>('');
-  const prevEnableLineNumbersRef = useRef<boolean>(enableLineNumbers);
   const isUserInputRef = useRef(false);
   const optionsRef = useRef(options);
   optionsRef.current = options;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   useEffect(() => {
-    const removeListener = editor.registerUpdateListener(({ editorState, tags }) => {
+    return editor.registerUpdateListener(({ editorState, tags }) => {
       if (tags.has('programmatic')) return;
       editorState.read(() => {
         const root = $getRoot();
-        const textContent = root.getTextContent();
-        if (textContent !== prevValueRef.current) {
+        const paragraphs: string[] = [];
+        root.getChildren().forEach(child => {
+          if ($isParagraphNode(child)) {
+            paragraphs.push(child.getChildren().map(n => n.getTextContent()).join(''));
+          }
+        });
+        const text = paragraphs.join('\n');
+        if (text !== prevValueRef.current) {
           isUserInputRef.current = true;
-          prevValueRef.current = textContent;
+          prevValueRef.current = text;
+          onChangeRef.current?.(text);
         }
       });
     });
-
-    return removeListener;
   }, [editor]);
 
   useEffect(() => {
-    if (value !== prevValueRef.current || enableLineNumbers !== prevEnableLineNumbersRef.current) {
-      // Skip reset if the change was triggered by user input (avoid cursor jump)
-      if (isUserInputRef.current && enableLineNumbers === prevEnableLineNumbersRef.current) {
+    if (value !== prevValueRef.current) {
+      if (isUserInputRef.current) {
         prevValueRef.current = value;
         isUserInputRef.current = false;
         return;
       }
-      // Update refs BEFORE editor.update to prevent re-entry
       prevValueRef.current = value;
-      prevEnableLineNumbersRef.current = enableLineNumbers;
       isUserInputRef.current = false;
 
       queueMicrotask(() => {
@@ -53,17 +62,8 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
           const root = $getRoot();
           root.clear();
 
-          const parts = value.split(/(\{\{[^}]+\}\}|\n)/);
-
-          if (enableLineNumbers) {
-            const lines = value.split('\n');
-            lines.forEach((line) => {
-              const paragraph = $createParagraphNode();
-              paragraph.append($createTextNode(line));
-              root.append(paragraph);
-            });
-          } else {
-            let paragraph = $createParagraphNode();
+          const parts = (value ?? '').split(/(\{\{[^}]+\}\}|\n)/);
+          let paragraph = $createParagraphNode();
 
             parts.forEach(part => {
               if (part === '\n') {
@@ -87,9 +87,20 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
 
               if (conversationMatch) {
                 const [_, variableName] = conversationMatch;
-                const conversationSuggestion = optionsRef.current.find(s =>
+                const fullValue = `conv.${variableName}`;
+                // First try direct match on top-level label
+                let conversationSuggestion = optionsRef.current.find(s =>
                   s.group === 'CONVERSATION' && s.label === variableName
                 );
+                // Then search children by value (e.g. conv.api_key.url)
+                if (!conversationSuggestion) {
+                  for (const s of optionsRef.current) {
+                    if (s.group === 'CONVERSATION' && s.children) {
+                      const child = s.children.find(c => c.value === fullValue);
+                      if (child) { conversationSuggestion = child; break; }
+                    }
+                  }
+                }
                 if (conversationSuggestion) {
                   paragraph.append($createVariableNode(conversationSuggestion));
                 } else {
@@ -99,14 +110,28 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
               }
 
               if (match) {
-                const [_, nodeId, label] = match;
+                const [_, nodeId, rest] = match;
+                const restParts = rest.split('.');
+                const isThreeLevel = restParts.length >= 2;
+                const parentLabel = isThreeLevel ? restParts.slice(0, -1).join('.') : undefined;
+                const label = restParts[restParts.length - 1];
 
-                const suggestion = optionsRef.current.find(s => {
+                let suggestion = optionsRef.current.find(s => {
                   if (nodeId === 'sys') {
-                    return s.nodeData.type === 'start' && s.label === `sys.${label}`
+                    return s.nodeData.type === 'start' && s.label === `sys.${rest}`
                   }
-                  return s.nodeData.id === nodeId && s.label === label
+                  return s.nodeData.id === nodeId && s.label === rest
                 });
+
+                // Search in children for three-level variables (e.g. nodeId.parentLabel.label)
+                if (!suggestion && isThreeLevel) {
+                  for (const s of optionsRef.current) {
+                    if (s.nodeData.id === nodeId && s.label === parentLabel && s.children) {
+                      const child = s.children.find(c => c.label === label);
+                      if (child) { suggestion = child; break; }
+                    }
+                  }
+                }
 
                 if (suggestion) {
                   paragraph.append($createVariableNode(suggestion));
@@ -118,15 +143,10 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
               }
             });
             root.append(paragraph);
-          }
         }, { tag: 'programmatic' });
       });
-    } else {
-      prevValueRef.current = value;
-      prevEnableLineNumbersRef.current = enableLineNumbers;
-      isUserInputRef.current = false;
     }
-  }, [value, editor, enableLineNumbers]);
+  }, [value, editor]);
 
   return null;
 };

@@ -22,7 +22,9 @@ def escape_lucene_query(query: str) -> str:
     s = s.replace("\r", " ").replace("\n", " ").strip()
 
     # Lucene reserved tokens/special characters
-    specials = ['&&', '||', '\\', '+', '-', '!', '(', ')', '{', '}', '[', ']', '^', '"', '~', '*', '?', ':']
+    # NOTE: '/' is the regex delimiter in Lucene — must be escaped to prevent
+    #       TokenMgrError when the query contains unmatched slashes.
+    specials = ['&&', '||', '\\', '+', '-', '!', '(', ')', '{', '}', '[', ']', '^', '"', '~', '*', '?', ':', '/']
     # Replace longer tokens first to avoid partial double-escaping
     for token in sorted(specials, key=len, reverse=True):
         s = s.replace(token, f"\\{token}")

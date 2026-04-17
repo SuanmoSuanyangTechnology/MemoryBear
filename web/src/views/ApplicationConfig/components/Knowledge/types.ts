@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:25:53 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:25:53 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-04-07 17:16:47
  */
 /**
  * Type definitions for knowledge base configuration in application settings
@@ -28,7 +28,7 @@ export interface RerankerConfig {
  * - semantic: Semantic similarity based retrieval
  * - hybrid: Combination of both methods
  */
-export type RetrieveType = 'participle' | 'semantic' | 'hybrid'
+export type RetrieveType = 'participle' | 'semantic' | 'hybrid' | 'graph'
 
 /**
  * Knowledge base configuration form data

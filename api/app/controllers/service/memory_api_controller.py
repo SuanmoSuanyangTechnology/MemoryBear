@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.api_key_auth import require_api_key
 from app.core.logging_config import get_business_logger
+from app.core.quota_stub import check_end_user_quota
 from app.core.response_utils import success
 from app.db import get_db
 from app.schemas.api_key_schema import ApiKeyAuth
@@ -167,6 +168,7 @@ async def get_read_task_status(
 
 @router.post("/write/sync")
 @require_api_key(scopes=["memory"])
+@check_end_user_quota
 async def write_memory_sync(
     request: Request,
     api_key_auth: ApiKeyAuth = None,

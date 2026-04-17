@@ -24,6 +24,8 @@ from app.core.workflow.nodes.start.config import StartNodeConfig
 from app.core.workflow.nodes.tool.config import ToolNodeConfig
 from app.core.workflow.nodes.variable_aggregator.config import VariableAggregatorNodeConfig
 from app.core.workflow.nodes.notes.config import NoteNodeConfig
+from app.core.workflow.nodes.list_operator.config import ListOperatorNodeConfig
+from app.core.workflow.nodes.document_extractor.config import DocExtractorNodeConfig
 
 __all__ = [
     # 基础类
@@ -49,5 +51,7 @@ __all__ = [
     "MemoryReadNodeConfig",
     "MemoryWriteNodeConfig",
     "CodeNodeConfig",
-    "NoteNodeConfig"
+    "NoteNodeConfig",
+    "ListOperatorNodeConfig",
+    "DocExtractorNodeConfig",
 ]

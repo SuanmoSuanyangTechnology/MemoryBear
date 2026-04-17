@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 16:50:10
+ * @Last Modified time: 2026-04-07 18:04:49
  */
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { useTranslation } from 'react-i18next'
@@ -229,7 +229,11 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
         ...knowledgeRest,
         knowledge_bases: knowledge_bases.map(item => ({
           kb_id: item.kb_id || item.id,
-          ...(item.config || {})
+          retrieve_type: item.retrieve_type,
+          top_k: item.top_k,
+          similarity_threshold: item.similarity_threshold,
+          vector_similarity_weight: item.vector_similarity_weight,
+          // ...(item.config || {})
         }))
       } as KnowledgeConfig : null,
       tools: tools.map(vo => {
@@ -354,6 +358,25 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
 
   const handleSaveFeaturesConfig = (value: FeaturesConfigForm) => {
     form.setFieldValue('features', value)
+    const { statement = '' } = value?.opening_statement || {}
+    onFeaturesLoad?.(value)
+
+    const usedVars = [...new Set([...(statement?.matchAll(/\{\{(\w+)\}\}/g) ?? [])].map(m => m[1]))]
+    const variables = values?.variables
+    const validNames = new Set(variables.map(v => v.name))
+    const invalid = usedVars.filter(v => !validNames.has(v))
+    if (invalid.length > 0) {
+      const newVars = invalid.map((name, i) => ({
+        index: variables.length + i,
+        name,
+        display_name: name,
+        type: 'text',
+        required: true,
+        max_length: 48,
+      }))
+
+      form.setFieldValue('variables', [...variables, ...newVars])
+    }
   }
   const modelLogo = useMemo(() => {
     return defaultModel?.name && getListLogoUrl(defaultModel.provider, defaultModel.logo as string)
@@ -385,7 +408,8 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
           if (vo.list?.length === 0) {
             return { ...vo, list: [assistantMsg] }
           } else if (vo.list && vo.list[0].role === 'assistant') {
-            return { ...vo, list: [assistantMsg, ...vo.list.slice(1)] }
+            vo.list[0] = assistantMsg
+            return { ...vo, list: [...vo.list] }
           } else {
             return { ...vo, list: [assistantMsg, ...(vo.list || [])] }
           }
@@ -405,7 +429,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
               <Flex align="center" justify="space-between" className="rb:p-3! rb:bg-white rb:rounded-xl">
                 <Button type="primary" ghost onClick={handleModelConfig} className="rb:group">
                   {modelLogo
-                    ? <img src={modelLogo} className="rb:size-4 rb:rounded-md" alt="" />
+                    ? <img src={modelLogo} className="rb:size-4 rb:rounded-md" alt={modelLogo} />
                     : defaultModel?.name
                     ? <div className="rb:size-4 rb:bg-[url('@/assets/images/application/model.svg')]"></div> : null}
                   {defaultModel?.name || t('application.chooseModel')}

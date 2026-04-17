@@ -5,7 +5,7 @@
 使用Neo4j的全文索引进行高效的文本匹配。
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 from app.core.logging_config import get_memory_logger
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.storage_services.search.search_strategy import SearchStrategy, SearchResult
@@ -74,7 +74,7 @@ class KeywordSearchStrategy(SearchStrategy):
             # 调用底层的关键词搜索函数
             results_dict = await search_graph(
                 connector=self.connector,
-                q=query_text,
+                query=query_text,
                 end_user_id=end_user_id,
                 limit=limit,
                 include=include_list

@@ -50,7 +50,9 @@ class OpenAIEmbed(Base):
     def encode(self, texts: list):
         # OpenAI requires batch size <=16
         batch_size = 16
-        texts = [truncate(t, 8191) for t in texts]
+        # Use 8000 instead of 8191 to leave safety margin for tokenizer differences
+        # between cl100k_base (used by truncate) and the actual embedding model
+        texts = [truncate(t, 8000) for t in texts]
         ress = []
         total_tokens = 0
         for i in range(0, len(texts), batch_size):
@@ -63,7 +65,7 @@ class OpenAIEmbed(Base):
         return np.array(ress), total_tokens
 
     def encode_queries(self, text):
-        res = self.client.embeddings.create(input=[truncate(text, 8191)], model=self.model_name, encoding_format="float",extra_body={"drop_params": True})
+        res = self.client.embeddings.create(input=[truncate(text, 8000)], model=self.model_name, encoding_format="float",extra_body={"drop_params": True})
         return np.array(res.data[0].embedding), self.total_token_count(res)
 
 
@@ -79,6 +81,7 @@ class LocalAIEmbed(Base):
 
     def encode(self, texts: list):
         batch_size = 16
+        texts = [truncate(t, 8000) for t in texts]
         ress = []
         for i in range(0, len(texts), batch_size):
             res = self.client.embeddings.create(input=texts[i : i + batch_size], model=self.model_name)
@@ -173,6 +176,7 @@ class XinferenceEmbed(Base):
 
     def encode(self, texts: list):
         batch_size = 16
+        texts = [truncate(t, 8000) for t in texts]
         ress = []
         total_tokens = 0
         for i in range(0, len(texts), batch_size):
@@ -188,7 +192,7 @@ class XinferenceEmbed(Base):
     def encode_queries(self, text):
         res = None
         try:
-            res = self.client.embeddings.create(input=[text], model=self.model_name)
+            res = self.client.embeddings.create(input=[truncate(text, 8000)], model=self.model_name)
             return np.array(res.data[0].embedding), self.total_token_count(res)
         except Exception as _e:
             log_exception(_e, res)

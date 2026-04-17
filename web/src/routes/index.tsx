@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 16:33:11 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-04 18:11:34
+ * @Last Modified time: 2026-04-13 16:53:15
  */
 /**
  * Route Configuration
@@ -76,13 +76,12 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   SpaceManagement: lazy(() => import('@/views/SpaceManagement')),
   ApiKeyManagement: lazy(() => import('@/views/ApiKeyManagement')),
   EmotionEngine: lazy(() => import('@/views/EmotionEngine')),
-  StatementDetail: lazy(() => import('@/views/UserMemoryDetail/pages/StatementDetail')),
   ForgetDetail: lazy(() => import('@/views/UserMemoryDetail/pages/ForgetDetail')),
   MemoryNodeDetail: lazy(() => import('@/views/UserMemoryDetail/pages/index')),
   SelfReflectionEngine: lazy(() => import('@/views/SelfReflectionEngine')),
   OrderPayment: lazy(() => import('@/views/OrderPayment')),
   OrderHistory: lazy(() => import('@/views/OrderHistory')),
-  Pricing: lazy(() => import('@/views/Pricing')),
+  Package: lazy(() => import('@/views/Package')),
   ToolManagement: lazy(() => import('@/views/ToolManagement')),
   SpaceConfig: lazy(() => import('@/views/SpaceConfig')),
   Ontology: lazy(() => import('@/views/Ontology')),

@@ -6,6 +6,7 @@ import VariableSelect from '../VariableSelect'
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import RadioGroupBtn from '../RadioGroupBtn'
 import { getChildNodeVariables } from '../hooks/useVariableList'
+import CodeMirrorEditor from '@/components/CodeMirrorEditor';
 
 interface CycleVar {
   name: string;
@@ -28,11 +29,17 @@ const types = [
   'string',
   'number',
   'boolean',
+  'object',
   'array[string]',
   'array[number]',
   'array[boolean]',
   'array[object]'
 ]
+const object_placeholder = `# example
+# {
+#   "name": "redbear",
+#   "age": 2
+# }`
 
 const CycleVarsList: FC<CycleVarsListProps> = ({
   value = [],
@@ -144,6 +151,13 @@ const CycleVarsList: FC<CycleVarsListProps> = ({
                             { value: true, label: 'True' },
                             { value: false, label: 'False' }]}
                         />
+                        : currentType === 'object'
+                          ? <CodeMirrorEditor
+                            language="json"
+                            placeholder={object_placeholder}
+                            variant="outlined"
+                            size="small"
+                          />
                         : (
                           <Input.TextArea
                             placeholder={t('common.pleaseEnter')}

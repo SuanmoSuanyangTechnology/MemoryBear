@@ -26,7 +26,7 @@ from app.services.memory_storage_service import (
     analytics_hot_memory_tags,
     analytics_recent_activity_stats,
     kb_type_distribution,
-    search_all,
+    search_all_batch,
     search_chunk,
     search_detials,
     search_dialogue,
@@ -34,6 +34,7 @@ from app.services.memory_storage_service import (
     search_entity,
     search_statement,
 )
+from app.core.quota_stub import check_memory_engine_quota
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -76,6 +77,7 @@ async def get_storage_info(
 
 
 @router.post("/create_config", response_model=ApiResponse)  # 创建配置文件，其他参数默认
+@check_memory_engine_quota
 def create_config(
         payload: ConfigParamsCreate,
         current_user: User = Depends(get_current_user),
@@ -409,7 +411,10 @@ async def search_all_num(
 ) -> dict:
     api_logger.info(f"Search all requested for end_user_id: {end_user_id}")
     try:
-        result = await search_all(end_user_id)
+        if not end_user_id:
+            return success(data={"total": 0}, msg="查询成功")
+        batch_result = await search_all_batch([end_user_id])
+        result = {"total": batch_result.get(end_user_id, 0)}
         return success(data=result, msg="查询成功")
     except Exception as e:
         api_logger.error(f"Search all failed: {str(e)}")

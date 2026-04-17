@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 16:35:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-06 10:39:00
+ * @Last Modified time: 2026-04-14 14:43:54
  */
 /**
  * HTTP Request Utility Module
@@ -23,6 +23,7 @@ import { clearAuthData } from './auth';
 import { message } from 'antd';
 import { refreshTokenUrl, refreshToken, loginUrl, logoutUrl } from '@/api/user'
 import i18n from '@/i18n'
+import { SYS_API_PREFIX } from '@/api/package'
 
 /**
  * Standard API response structure
@@ -74,6 +75,10 @@ let requests: RequestQueueItem[] = [];
 // Request interceptor
 service.interceptors.request.use(
   (config) => {
+    console.log('config', config, config.url?.startsWith(SYS_API_PREFIX))
+    if (config.url?.startsWith(SYS_API_PREFIX)) {
+      config.baseURL = '';
+    }
     if (!config.headers.Authorization) {
       const token = cookieUtils.get('authToken');
       if (token) {

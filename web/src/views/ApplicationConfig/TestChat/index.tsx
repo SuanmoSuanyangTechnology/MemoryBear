@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 16:04:15
+ * @Last Modified time: 2026-04-07 21:48:30
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -27,6 +27,7 @@ import type { TestChatProps } from './type'
 import type { SSEMessage } from '@/utils/stream'
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types'
 import { getFileStatusById } from '@/api/fileStorage'
+import { replaceVariables } from '@/views/ApplicationConfig/Agent'
 
 const formatParams = (message: string, conversation_id: string | null, files: any[] = [], variables: Record<string, any>) => {
   return {
@@ -63,6 +64,12 @@ interface NodeData {
   state: Record<string, any>;
   status?: 'completed' | 'failed';
   audio_url?: string;
+  citations?: {
+    document_id: string;
+    file_name: string;
+    knowledge_id: string;
+    score: string;
+  }[]
 }
 
 const TestChat: FC<TestChatProps> = ({
@@ -80,13 +87,15 @@ const TestChat: FC<TestChatProps> = ({
   const [message, setMessage] = useState<string | undefined>(undefined)
   const [fileList, setFileList] = useState<any[]>([])
   const [features, setFeatures] = useState<FeaturesConfigForm>({} as FeaturesConfigForm)
+  const [variables, setVariables] = useState<Variable[]>([])
   
   const audioPollingRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
+  const streamLoadingRef = useRef(false)
   const [audioStatusMap, setAudioStatusMap] = useState<Record<string, string>>({})
 
   useEffect(() => {
     getVariables()
-  }, [application, config])
+  }, [application, JSON.stringify(config)])
 
   useEffect(() => {
     return () => {
@@ -101,7 +110,7 @@ const TestChat: FC<TestChatProps> = ({
     setFeatures(config?.features || {} as FeaturesConfigForm)
 
 
-    if (config?.features?.opening_statement?.statement && config?.features?.opening_statement?.statement.trim() !== '') {
+    if (config?.features?.opening_statement?.enabled && config?.features?.opening_statement?.statement && config?.features?.opening_statement?.statement.trim() !== '') {
       setChatList(prev => [...prev, {
         role: 'assistant',
         created_at: Date.now(),
@@ -111,8 +120,7 @@ const TestChat: FC<TestChatProps> = ({
         }
       }])
     }
-    
-
+  
     let initVariables: Variable[] = []
 
     switch (application.type) {
@@ -139,6 +147,7 @@ const TestChat: FC<TestChatProps> = ({
     }
 
     toolbarRef.current?.setVariables([...initVariables])
+    setVariables([...initVariables])
   }
 
   const addUserMessage = (message: string, files: any[]) => {
@@ -162,7 +171,7 @@ const TestChat: FC<TestChatProps> = ({
     }])
   }
 
-  const updateAssistantMessage = (content: string, audio_url?: string, audio_status?: string, citations?: any[]) => {
+  const updateAssistantMessage = (content: string, audio_url?: string, audio_status?: string, citations?: NodeData['citations']) => {
     setChatList(prev => {
       const newList = [...prev]
       const lastMsg = newList[newList.length - 1]
@@ -183,7 +192,10 @@ const TestChat: FC<TestChatProps> = ({
   }
   const updateAssistantReasoningMessage = (content: string) => {
     if (!content) return
-    if (streamLoading) setStreamLoading(false)
+    if (streamLoadingRef.current) {
+      streamLoadingRef.current = false
+      setStreamLoading(false)
+    }
     setChatList(prev => {
       const newList = [...prev]
       const lastMsg = newList[newList.length - 1]
@@ -243,6 +255,7 @@ const TestChat: FC<TestChatProps> = ({
     toolbarRef.current?.setFiles([])
     setFileList([])
     addAssistantMessage()
+    streamLoadingRef.current = true
     setStreamLoading(true)
     setLoading(true)
 
@@ -257,6 +270,7 @@ const TestChat: FC<TestChatProps> = ({
       })
       .finally(() => {
         setLoading(false)
+        streamLoadingRef.current = false
         setStreamLoading(false)
       })
   }
@@ -281,12 +295,7 @@ const TestChat: FC<TestChatProps> = ({
     data.map(item => {
       const { conversation_id, content, message_length, audio_url, citations } = item.data as {
         conversation_id: string, content: string, message_length: number; audio_url?: string;
-        citations?: {
-          document_id: string;
-          file_name: string;
-          knowledge_id: string;
-          score: string;
-        }[]
+        citations?: NodeData['citations']
       };
       switch (item.event) {
         case 'start':
@@ -338,30 +347,32 @@ const TestChat: FC<TestChatProps> = ({
             updateAssistantMessage(content, audio_url, undefined, citations)
           }
           updateErrorAssistantMessage(message_length)
+          streamLoadingRef.current = false
           setStreamLoading(false)
           break
       }
     })
   }
 
-  const handleWorkflowSend = () => {
-    if (loading || !application || !message || !message?.trim()) return
+  const handleWorkflowSend = (msg?: string) => {
+    if (loading || !application || !((message && message?.trim() !== '') || (msg && msg?.trim() !== ''))) return
     const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
     const variables = toolbarRef.current?.getVariables() || []
     const { isCanSend, params } = buildVariableParams(variables)
     if (!isCanSend) return
 
     setLoading(true)
-    addUserMessage(message, files)
+    addUserMessage((msg || message) as string, files)
     addAssistantMessage()
     toolbarRef.current?.setFiles([])
     setFileList([])
     setMessage(undefined)
     setStreamLoading(true)
+    streamLoadingRef.current = true
 
     draftRun(
       application.id,
-      formatParams(message, conversationId, files, params),
+      formatParams((msg || message) as string, conversationId, files, params),
       handleWorkflowStreamMessage
     )
       .catch((error) => {
@@ -378,12 +389,13 @@ const TestChat: FC<TestChatProps> = ({
       .finally(() => {
         setLoading(false)
         setStreamLoading(false)
+        streamLoadingRef.current = false
       })
   }
 
   const handleWorkflowStreamMessage = (data: SSEMessage[]) => {
     data.forEach(item => {
-      const { content, conversation_id } = item.data as NodeData;
+      const { content, conversation_id, citations } = item.data as NodeData;
       switch (item.event) {
       // Append streaming text chunks to assistant message
         case 'message':
@@ -412,7 +424,11 @@ const TestChat: FC<TestChatProps> = ({
         // Mark workflow as complete
         case 'workflow_end':
           updateWorkflowEndMessage(item.data as NodeData)
+          if (citations && citations.length > 0) {
+            updateWorkflowEndMessage(item.data as NodeData, citations)
+          }
           setStreamLoading(false)
+          streamLoadingRef.current = false
           setLoading(false)
           break
       }
@@ -536,7 +552,7 @@ const TestChat: FC<TestChatProps> = ({
     })
   }
 
-  const updateWorkflowEndMessage = (data: NodeData) => {
+  const updateWorkflowEndMessage = (data: NodeData, citations?: NodeData['citations']) => {
     const { error, status } = data;
     setChatList(prev => {
       const newList = [...prev]
@@ -547,11 +563,33 @@ const TestChat: FC<TestChatProps> = ({
           status,
           error,
           content: newList[lastIndex].content === '' ? null : newList[lastIndex].content,
+          meta_data: {
+            ...newList[lastIndex].meta_data || {},
+            citations
+          }
         }
       }
       return newList
     })
   }
+
+  useEffect(() => {
+    const opening_statement = features?.opening_statement
+
+    if (opening_statement?.enabled && opening_statement?.statement && opening_statement?.statement.trim() !== '') {
+      const assistantMsg: ChatItem = {
+        role: 'assistant',
+        content: replaceVariables(opening_statement.statement, variables as any),
+        meta_data: {
+          suggested_questions: opening_statement?.suggested_questions
+        }
+      }
+      setChatList(prev => {
+        prev[0] = assistantMsg
+        return [...prev]
+      })
+    }
+  }, [chatList.length, features?.opening_statement, variables])
 
   return (
     <div className="rb:w-250 rb:mx-auto rb:h-full">
@@ -585,6 +623,7 @@ const TestChat: FC<TestChatProps> = ({
             ref={toolbarRef}
             features={features}
             onFilesChange={setFileList}
+            onVariablesChange={setVariables}
           />
         </Chat>
       </RbCard>

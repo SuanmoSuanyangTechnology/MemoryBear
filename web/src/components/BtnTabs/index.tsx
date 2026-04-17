@@ -24,10 +24,11 @@ interface BtnTabsProps {
   onChange: (key: string) => void;
   /** Optional extra class name for the container */
   className?: string;
+  variant?: 'outline' | 'borderless'
 }
 
 /** Button-style tab switcher — renders tabs as pill-shaped buttons with active highlight */
-const BtnTabs: FC<BtnTabsProps> = ({ items, activeKey, onChange, className }) => {
+const BtnTabs: FC<BtnTabsProps> = ({ items, activeKey, onChange, className, variant = 'borderless' }) => {
   return (
     <Flex align="center" gap={8} className={className || ''}>
       {items.map((tab) => (
@@ -35,8 +36,9 @@ const BtnTabs: FC<BtnTabsProps> = ({ items, activeKey, onChange, className }) =>
           key={tab.key}
           onClick={() => onChange(tab.key)}
           className={clsx('rb:px-2 rb:py-1 rb:rounded-[13px] rb:text-[12px] rb:leading-4.5 rb:cursor-pointer', {
-            'rb:bg-[#F6F6F6]': activeKey !== tab.key,
-            'rb:bg-[#171719] rb:text-white': activeKey === tab.key,
+            'rb:bg-[#F6F6F6]': activeKey !== tab.key && variant === 'borderless',
+            'rb-border rb:bg-white': activeKey !== tab.key && variant === 'outline',
+            'rb:bg-[#171719] rb:text-white rb:border-[#171719]': activeKey === tab.key,
           })}
         >
           {tab.label}

@@ -17,10 +17,6 @@ import { useNavigate } from 'react-router-dom';
 import { Flex } from 'antd';
 
 import Card from './Card';
-import applicationIcon from '@/assets/images/home/application.svg';
-import knowledgeIcon from '@/assets/images/home/knowledge.svg';
-import memoryConversationIcon from '@/assets/images/home/memoryConversation.svg';
-import helpCenterIcon from '@/assets/images/menu/helpCenter_active.svg'
 
 /** Quick operation items configuration */
 const quickOperations = [
@@ -37,12 +33,11 @@ const bgStyleList = [
   'rb:bg-[rgba(77,168,255,0.1)]'
 ]
 
-/** Icon mapping for quick operations */
-const quickOperationIcons: {[key: string]: string | undefined} = {
-  createNewApplication: applicationIcon,
-  createNewKnowledge: knowledgeIcon,
-  memoryConversation: memoryConversationIcon,
-  helpCenter: helpCenterIcon
+const quickOperationIconsClassNames: Record<string, string> = {
+  createNewApplication: 'rb:bg-[url("@/assets/images/home/application.svg")]',
+  createNewKnowledge: 'rb:bg-[url("@/assets/images/home/knowledge.svg")]',
+  memoryConversation: 'rb:bg-[url("@/assets/images/home/memoryConversation.svg")]',
+  helpCenter: 'rb:bg-[url("@/assets/images/menu/helpCenter_active.svg")]'
 }
 const QuickOperation:FC = () => {
   const { t, i18n } = useTranslation()
@@ -76,7 +71,7 @@ const QuickOperation:FC = () => {
         {quickOperations.map((item, index) => (
           <Flex key={item.key} align="center" gap={20} className={clsx("rb:relative rb:rounded-xl rb:py-2! rb:px-3! rb:cursor-pointer", bgStyleList[index])} onClick={() => handleJump(item.url)}>
             <div className="rb:size-8 rb:rounded-lg rb:p-1 rb:bg-[#FFFFFF]">
-              <img className="rb:size-6" src={quickOperationIcons[item.key]} />
+              <div className={`rb:size-6 rb:bg-cover ${quickOperationIconsClassNames[item.key]}`}></div>
             </div>
             <div>
               <div className="rb:text-[14px] rb:leading-5 rb:font-medium">{t(`dashboard.${item.key}`)}</div>

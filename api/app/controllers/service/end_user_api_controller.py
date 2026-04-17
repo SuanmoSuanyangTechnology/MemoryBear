@@ -10,6 +10,7 @@ from app.core.api_key_auth import require_api_key
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
+from app.core.quota_stub import check_end_user_quota
 from app.core.response_utils import success
 from app.db import get_db
 from app.repositories.end_user_repository import EndUserRepository
@@ -41,6 +42,7 @@ def _get_current_user(api_key_auth: ApiKeyAuth, db: Session):
 
 @router.post("/create")
 @require_api_key(scopes=["memory"])
+@check_end_user_quota
 async def create_end_user(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
@@ -62,7 +64,7 @@ async def create_end_user(
     payload = CreateEndUserRequest(**body)
     workspace_id = api_key_auth.workspace_id
 
-    logger.info(f"Create end user request - other_id: {payload.other_id}, workspace_id: {workspace_id}")
+    logger.info("Create end user request - other_id: %s, workspace_id: %s", payload.other_id, workspace_id)
 
     # Resolve memory_config_id: explicit > workspace default
     memory_config_id = None

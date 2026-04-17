@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -82,6 +81,7 @@ class StatementExtractor:
         logger.warning(f"Chunk {getattr(chunk, 'id', 'unknown')} has no speaker field or is empty")
         return None
 
+
     async def _extract_statements(self, chunk, end_user_id: Optional[str] = None, dialogue_content: str = None) -> List[Statement]:
         """Process a single chunk and return extracted statements
 
@@ -94,7 +94,8 @@ class StatementExtractor:
             List of ExtractedStatement objects extracted from the chunk
         """
         chunk_content = chunk.content
-        
+        chunk_speaker = self._get_speaker_from_chunk(chunk)
+
         if not chunk_content or len(chunk_content.strip()) < 5:
             logger.warning(f"Chunk {chunk.id} content too short or empty, skipping")
             return []
@@ -149,8 +150,6 @@ class StatementExtractor:
                     relevence_info = RelevenceInfo[relevence_str] if relevence_str in RelevenceInfo.__members__ else RelevenceInfo.RELEVANT
                 except (KeyError, ValueError):
                     relevence_info = RelevenceInfo.RELEVANT
-               
-                chunk_speaker = self._get_speaker_from_chunk(chunk)
             
                 chunk_statement = Statement(
                     statement=extracted_stmt.statement,

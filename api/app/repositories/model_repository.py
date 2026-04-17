@@ -263,16 +263,15 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
-    def get_by_type(db: Session, model_type: ModelType, tenant_id: uuid.UUID | None = None, is_active: bool = True) -> List[ModelConfig]:
-        """根据类型获取模型配置"""
-        db_logger.debug(f"根据类型查询模型配置: type={model_type}, tenant_id={tenant_id}, is_active={is_active}")
-        
+    def get_by_type(db: Session, model_types: List[ModelType], tenant_id: uuid.UUID | None = None, is_active: bool = True) -> List[ModelConfig]:
+        """根据类型获取模型配置，支持多类型查询"""
+        db_logger.debug(f"根据类型查询模型配置: types={[t.value for t in model_types]}, tenant_id={tenant_id}, is_active={is_active}")
+
         try:
             query = db.query(ModelConfig).options(
                 joinedload(ModelConfig.api_keys)
-            ).filter(ModelConfig.type == model_type)
-            
-            # 添加租户过滤
+            ).filter(ModelConfig.type.in_([t.value for t in model_types]))
+
             if tenant_id:
                 query = query.filter(
                     or_(
@@ -280,16 +279,18 @@ class ModelConfigRepository:
                         ModelConfig.is_public
                     )
                 )
-            
+
             if is_active:
                 query = query.filter(ModelConfig.is_active)
-            
-            models = query.order_by(ModelConfig.name).all()
+
+            query = query.filter(ModelConfig.is_composite == False)
+
+            models = query.order_by(ModelConfig.created_at.desc()).all()
             db_logger.debug(f"根据类型查询模型配置成功: 数量={len(models)}")
             return models
-            
+
         except Exception as e:
-            db_logger.error(f"根据类型查询模型配置失败: type={model_type} - {str(e)}")
+            db_logger.error(f"根据类型查询模型配置失败: types={model_types} - {str(e)}")
             raise
 
     @staticmethod

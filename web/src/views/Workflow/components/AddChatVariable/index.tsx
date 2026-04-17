@@ -57,6 +57,7 @@ const AddChatVariable = forwardRef<AddChatVariableRef, AddChatVariableProps>(({
       title={t('workflow.addvariable')}
       open={open}
       onClose={() => setOpen(false)}
+      width={480}
     >
       <div>
         <Button
@@ -103,6 +104,7 @@ const AddChatVariable = forwardRef<AddChatVariableRef, AddChatVariableProps>(({
       <ChatVariableModal
         ref={chatVariableRef}
         refresh={handleSave}
+        variables={variables}
       />
     </RbDrawer>
   );

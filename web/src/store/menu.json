@@ -6,7 +6,7 @@
       "code": "workbench",
       "label": "workbench",
       "i18nKey": "menu.workbench",
-      "path": "/",
+      "path": null,
       "enable": true,
       "display": true,
       "level": 1,
@@ -174,7 +174,7 @@
       "code": "workbench",
       "label": "workbench",
       "i18nKey": "menu.workbench",
-      "path": "/",
+      "path": null,
       "enable": true,
       "display": true,
       "level": 1,
@@ -425,15 +425,14 @@
                 {
                   "id": 2211,
                   "parent": 221,
-                  "code": "statementDetail",
+                  "code": "userMemoryDetail",
                   "label": "记忆详情",
-                  "i18nKey": "menu.statementDetail",
-                  "path": "/statement/:id",
+                  "i18nKey": "menu.userMemoryDetail",
+                  "path": "/user-memory/detail/:id/:type",
                   "enable": true,
                   "display": false,
-                  "level": 4,
-                  "sort": 0,
-                  "subs": null
+                  "level": 3,
+                  "sort": 0
                 }
               ]
             },

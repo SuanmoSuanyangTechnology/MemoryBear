@@ -18,6 +18,7 @@ const ModelConfig: FC = () => {
         name="model_id"
         label={t('workflow.config.llm.model_id')}
         className={model_id ? 'rb:mb-2!' : 'rb:mb-4!'}
+        required
       >
         <ModelSelect
           placeholder={t('common.pleaseSelect')}

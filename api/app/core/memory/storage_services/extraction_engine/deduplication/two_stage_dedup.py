@@ -15,6 +15,7 @@ from app.core.memory.models.message_models import DialogData
 from app.core.memory.models.variate_config import ExtractionPipelineConfig
 from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
     deduplicate_entities_and_edges,
+    clean_cross_role_aliases,
 )
 from app.core.memory.storage_services.extraction_engine.deduplication.second_layer_dedup import (
     second_layer_dedup_and_merge_with_neo4j,
@@ -99,6 +100,10 @@ async def dedup_layers_and_merge_and_return(
             print("Skip second-layer dedup: missing end_user_id")
     except Exception as e:
         print(f"Second-layer dedup failed: {e}")
+
+    # 第二层去重后，清洗用户/AI助手之间的别名交叉污染
+    # 第二层从 Neo4j 合并了旧实体，可能带入历史脏数据
+    clean_cross_role_aliases(fused_entity_nodes)
 
     return (
         dialogue_nodes,

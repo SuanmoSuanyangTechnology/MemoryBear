@@ -19,6 +19,7 @@
 
 import { Outlet } from 'react-router-dom';
 import { useEffect, type FC } from 'react';
+import { Layout } from 'antd';
 
 import { useUser } from '@/store/user';
 
@@ -35,10 +36,10 @@ const BasicAuthLayout: FC = () => {
   }, [getUserInfo]);
 
   return (
-    <div className="rb:relative rb:min-h-screen rb:w-screen">
+    <Layout className="rb:min-h-screen!">
       {/* Render child routes without additional UI */}
       <Outlet />
-    </div>
+    </Layout>
   )
 };
 

@@ -16,7 +16,7 @@ import {
   ConfigProvider,
   App as AntdApp
 } from 'antd';
-import { useTranslation } from 'react-i18next';
+import i18n from 'i18next';
 
 import { lightTheme } from './styles/antdThemeConfig.ts'
 import router from './routes';
@@ -29,11 +29,58 @@ import 'dayjs/plugin/utc'
 import { cookieUtils } from './utils/request';
 import { useUser } from '@/store/user';
 
+import menuJson from '@/store/menu.json';
+
+type MenuEntry = { path: string; i18nKey: string };
+
+function flattenMenuEntries(list: any[]): MenuEntry[] {
+  const result: MenuEntry[] = [];
+  for (const item of list) {
+    if (item.path && item.i18nKey && item.type !== 'group') result.push({ path: item.path, i18nKey: item.i18nKey });
+    if (item.subs?.length) result.push(...flattenMenuEntries(item.subs));
+  }
+  return result;
+}
+
+const menuEntries: MenuEntry[] = flattenMenuEntries([...menuJson.manage, ...menuJson.space]);
+
+function pathMatches(pattern: string, path: string): boolean {
+  if (pattern === path) return true;
+  if (pattern.includes(':')) {
+    return new RegExp('^' + pattern.replace(/:[\w-]+/g, '[^/]+') + '$').test(path);
+  }
+  return false;
+}
+
+function getPageTitle(pathname: string): string {
+  const appName = i18n.t('memoryBear');
+  const entry = menuEntries.find(e => pathMatches(e.path, pathname));
+  if (!entry) return appName;
+  return `${i18n.t(entry.i18nKey)} - ${appName}`;
+}
+
+const SKIP_TITLE_PATTERNS = [
+  '/user-memory/detail/:id/:type',
+  '/forgetting-engine/:id',
+  '/memory-extraction-engine/:id',
+  '/emotion-engine/:id',
+  '/reflection-engine/:id',
+];
+
+
+
 
 function App() {
-  const { t } = useTranslation();
   const { locale, language, timeZone } = useI18n()
   const { checkJump } = useUser();
+  useEffect(() => {
+    const unsubscribe = router.subscribe(({ location }) => {
+      if (SKIP_TITLE_PATTERNS.some(p => pathMatches(p, location.pathname))) return;
+      document.title = getPageTitle(location.pathname);
+    });
+    return () => unsubscribe();
+  }, [])
+
   useEffect(() => {
     const authToken = cookieUtils.get('authToken')
     if (!authToken && !window.location.hash.includes('#/login') && !window.location.hash.includes('#/conversation/') && !window.location.hash.includes('#/jump') && !window.location.hash.includes('#/invite-register')) {
@@ -44,7 +91,9 @@ function App() {
   }, [])
 
   useEffect(() => {
-    document.title = t('memoryBear')
+    if (!SKIP_TITLE_PATTERNS.some(p => pathMatches(p, router.state.location.pathname))) {
+      document.title = getPageTitle(router.state.location.pathname)
+    }
     dayjs.locale(language)
     localStorage.setItem('language', language)
   }, [language])

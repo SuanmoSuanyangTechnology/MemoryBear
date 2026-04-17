@@ -17,6 +17,9 @@ from app.core.memory.agent.langgraph_graph.nodes.problem_nodes import (
 from app.core.memory.agent.langgraph_graph.nodes.retrieve_nodes import (
     retrieve_nodes,
 )
+from app.core.memory.agent.langgraph_graph.nodes.perceptual_retrieve_node import (
+    perceptual_retrieve_node,
+)
 from app.core.memory.agent.langgraph_graph.nodes.summary_nodes import (
     Input_Summary,
     Retrieve_Summary,
@@ -48,13 +51,14 @@ async def make_read_graph():
     """
     try:
         # Build workflow graph
-        workflow = StateGraph(ReadState)
+        workflow = StateGraph(ReadState)    
         workflow.add_node("content_input", content_input_node)
         workflow.add_node("Split_The_Problem", Split_The_Problem)
         workflow.add_node("Problem_Extension", Problem_Extension)
         workflow.add_node("Input_Summary", Input_Summary)
         workflow.add_node("Retrieve", retrieve_nodes)
         # workflow.add_node("Retrieve", retrieve)
+        workflow.add_node("Perceptual_Retrieve", perceptual_retrieve_node)
         workflow.add_node("Verify", Verify)
         workflow.add_node("Retrieve_Summary", Retrieve_Summary)
         workflow.add_node("Summary", Summary)
@@ -65,14 +69,15 @@ async def make_read_graph():
         workflow.add_conditional_edges("content_input", Split_continue)
         workflow.add_edge("Input_Summary", END)
         workflow.add_edge("Split_The_Problem", "Problem_Extension")
-        workflow.add_edge("Problem_Extension", "Retrieve")
+        # After Problem_Extension, retrieve perceptual memory first, then main Retrieve
+        workflow.add_edge("Problem_Extension", "Perceptual_Retrieve")
+        workflow.add_edge("Perceptual_Retrieve", "Retrieve")
         workflow.add_conditional_edges("Retrieve", Retrieve_continue)
         workflow.add_edge("Retrieve_Summary", END)
         workflow.add_conditional_edges("Verify", Verify_continue)
         workflow.add_edge("Summary_fails", END)
         workflow.add_edge("Summary", END)
 
-        '''-----'''
         # workflow.add_edge("Retrieve", END)
 
         # Compile workflow
@@ -80,7 +85,5 @@ async def make_read_graph():
         yield graph
 
     except Exception as e:
-        print(f"创建工作流失败: {e}")
+        logger.error(f"创建工作流失败: {e}")
         raise
-    finally:
-        print("工作流创建完成")

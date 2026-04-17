@@ -30,7 +30,7 @@ class CustomTool(BaseTool):
         self.auth_config = config.get("auth_config", {})
         self.base_url = config.get("base_url", "")
         self.timeout = config.get("timeout", 30)
-        
+
         # 解析schema
         self._parsed_operations = self._parse_openapi_schema()
     

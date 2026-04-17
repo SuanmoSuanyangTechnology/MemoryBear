@@ -15,7 +15,7 @@ from app.core.workflow.adapters.errors import (
     ExceptionType
 )
 from app.core.workflow.nodes.assigner.config import AssignmentItem
-from app.core.workflow.nodes.base_config import VariableDefinition, BaseNodeConfig
+from app.core.workflow.nodes.base_config import VariableDefinition as NodeVariableDefinition, BaseNodeConfig
 from app.core.workflow.nodes.code.config import InputVariable, OutputVariable
 from app.core.workflow.nodes.configs import (
     StartNodeConfig,
@@ -32,13 +32,17 @@ from app.core.workflow.nodes.configs import (
     NoteNodeConfig,
     ParameterExtractorNodeConfig,
     QuestionClassifierNodeConfig,
-    VariableAggregatorNodeConfig
+    VariableAggregatorNodeConfig,
+    ListOperatorNodeConfig,
+    DocExtractorNodeConfig,
 )
+from app.schemas.workflow_schema import VariableDefinition as SchemaVariableDefinition
 from app.core.workflow.nodes.cycle_graph.config import (
     ConditionDetail as LoopConditionDetail,
     ConditionsConfig,
     CycleVariable
 )
+from app.core.workflow.nodes.list_operator.config import FilterCondition
 from app.core.workflow.nodes.enums import (
     ValueInputType,
     ComparisonOperator,
@@ -90,9 +94,12 @@ class DifyConverter(BaseConverter):
             NodeType.VAR_AGGREGATOR: self.convert_variable_aggregator_node_config,
             NodeType.TOOL: self.convert_tool_node_config,
             NodeType.NOTES: self.convert_notes_config,
+            NodeType.LIST_OPERATOR: self.convert_list_operator_node_config,
+            NodeType.DOCUMENT_EXTRACTOR: self.convert_document_extractor_node_config,
             NodeType.CYCLE_START: lambda x: {},
             NodeType.BREAK: lambda x: {},
         }
+        self._file_vars_to_conv: list[SchemaVariableDefinition] = []
 
     def get_node_convert(self, node_type):
         func = self.CONFIG_CONVERT_MAP.get(node_type, lambda x: {})
@@ -126,7 +133,7 @@ class DifyConverter(BaseConverter):
         selector = var_selector.split('.')
         if len(selector) not in [2, 3] and var_selector != "context":
             raise Exception(f"invalid variable selector: {var_selector}")
-        if len(selector) == 3:
+        if len(selector) == 3 and selector[0] in ("conversation", "sys"):
             selector = selector[1:]
         if selector[0] == "conversation":
             selector[0] = "conv"
@@ -213,7 +220,9 @@ class DifyConverter(BaseConverter):
             "end with": ComparisonOperator.END_WITH,
             "not contains": ComparisonOperator.NOT_CONTAINS,
             "exists": ComparisonOperator.NOT_EMPTY,
-            "not exists": ComparisonOperator.EMPTY
+            "not exists": ComparisonOperator.EMPTY,
+            "in": ComparisonOperator.IN,
+            "not in": ComparisonOperator.NOT_IN,
         }
         return operator_map.get(operator, operator)
 
@@ -279,19 +288,25 @@ class DifyConverter(BaseConverter):
                 )
                 continue
 
-            if var_type in ["file", "array[file]"]:
-                self.errors.append(
-                    ExceptionDefinition(
-                        type=ExceptionType.VARIABLE,
-                        node_id=node["id"],
-                        node_name=node_data["title"],
-                        name=var["variable"],
-                        detail=f"Unsupported Variable type for start node: {var_type}"
-                    )
-                )
+            if var_type in [VariableType.FILE, VariableType.ARRAY_FILE]:
+                # 开始节点不支持文件变量，转为会话变量
+                self._file_vars_to_conv.append(SchemaVariableDefinition(
+                    name=var["variable"],
+                    type=var_type.value,
+                    required=var.get("required", False),
+                    default=None,
+                    description=var.get("label", ""),
+                ))
+                self.warnings.append(ExceptionDefinition(
+                    type=ExceptionType.VARIABLE,
+                    node_id=node["id"],
+                    node_name=node_data["title"],
+                    name=var["variable"],
+                    detail=f"File variable '{var['variable']}' is not supported in start node, moved to conversation variables"
+                ))
                 continue
 
-            var_def = VariableDefinition(
+            var_def = NodeVariableDefinition(
                 name=var["variable"],
                 type=var_type,
                 required=var["required"],
@@ -476,11 +491,11 @@ class DifyConverter(BaseConverter):
         node_data = node["data"]
         result = IterationNodeConfig.model_construct(
             input=self._process_list_variable_literal(node_data["iterator_selector"]),
-            parallel=node_data["is_parallel"],
-            parallel_count=node_data["parallel_nums"],
+            parallel=node_data.get("is_parallel", False),
+            parallel_count=node_data.get("parallel_nums", 4),
             output=self._process_list_variable_literal(node_data["output_selector"]),
             output_type=self.variable_type_map(node_data.get("output_type")),
-            flatten=node_data["flatten_output"],
+            flatten=node_data.get("flatten_output", False),
         ).model_dump()
 
         self.config_validate(node["id"], node["data"]["title"], IterationNodeConfig, result)
@@ -489,7 +504,23 @@ class DifyConverter(BaseConverter):
     def convert_assigner_node_config(self, node: dict) -> dict:
         node_data = node["data"]
         assignments = []
-        for assignment in node_data["items"]:
+
+        # Support both formats:
+        # 1. New format: node_data["items"] list
+        # 2. Flat format: assigned_variable_selector + input_variable_selector + write_mode
+        if "items" in node_data:
+            raw_items = node_data["items"]
+        elif "assigned_variable_selector" in node_data and "input_variable_selector" in node_data:
+            raw_items = [{
+                "variable_selector": node_data["assigned_variable_selector"],
+                "value": node_data["input_variable_selector"],
+                "input_type": ValueInputType.VARIABLE,
+                "operation": node_data.get("write_mode", "over-write"),
+            }]
+        else:
+            raw_items = []
+
+        for assignment in raw_items:
             if assignment.get("operation") is None or assignment.get("value") is None:
                 continue
             assignments.append(
@@ -770,4 +801,120 @@ class DifyConverter(BaseConverter):
             theme=node_data.get("theme", "blue"),
             show_author=node_data.get("showAuthor", True)
         ).model_dump()
+        return result
+
+    def convert_list_operator_node_config(self, node: dict) -> dict:
+        """Dify list-operator — convert variable path array to {{ }} selector format."""
+        node_data = node["data"]
+        variable_path = node_data.get("variable", [])
+        input_list = self._process_list_variable_literal(variable_path) or ""
+        filter_by = node_data.get("filter_by", {"enabled": False, "conditions": []})
+        # Convert each condition's comparison_operator from Dify format to native
+        if filter_by.get("conditions"):
+            converted_conditions = []
+            for cond in filter_by["conditions"]:
+                converted_conditions.append({
+                    **cond,
+                    "comparison_operator": self.convert_compare_operator(
+                        cond.get("comparison_operator", "")
+                    )
+                })
+            filter_by = {**filter_by, "conditions": converted_conditions}
+        result = {
+            "input_list": input_list,
+            "filter_by": filter_by,
+            "order_by": node_data.get("order_by", {"enabled": False, "key": "", "value": "asc"}),
+            "limit": node_data.get("limit", {"enabled": False, "size": -1}),
+            "extract_by": node_data.get("extract_by", {"enabled": False, "serial": "1"}),
+        }
+        self.config_validate(node["id"], node["data"]["title"], ListOperatorNodeConfig, result)
+        return result
+
+    def convert_document_extractor_node_config(self, node: dict) -> dict:
+        """Convert Dify document-extractor node to MemoryBear DocExtractorNodeConfig.
+
+        Dify document-extractor data fields:
+          variable_selector: list[str]  - file variable path
+        """
+        node_data = node["data"]
+        file_selector = self._process_list_variable_literal(
+            node_data.get("variable_selector", [])
+        ) or ""
+        result = DocExtractorNodeConfig.model_construct(
+            file_selector=file_selector,
+        ).model_dump()
+        self.config_validate(node["id"], node["data"]["title"], DocExtractorNodeConfig, result)
+        return result
+
+    @staticmethod
+    def convert_features(features: dict) -> dict:
+        """Convert Dify features to MemoryBear FeaturesConfigForm format."""
+        if not features:
+            return {}
+
+        result: dict = {}
+
+        # opening_statement
+        opening = features.get("opening_statement", "")
+        suggested = features.get("suggested_questions", [])
+        result["opening_statement"] = {
+            "enabled": bool(opening),
+            "statement": opening or None,
+            "suggested_questions": suggested,
+        }
+
+        # citation (对应 Dify retriever_resource)
+        retriever = features.get("retriever_resource", {})
+        result["citation"] = {
+            "enabled": retriever.get("enabled", False) if isinstance(retriever, dict) else False,
+        }
+
+        # file_upload: Dify allowed_file_types 数组 -> 前端扁平字段
+        file_upload = features.get("file_upload", {})
+        allowed_types = file_upload.get("allowed_file_types", []) if file_upload else []
+        allowed_methods = file_upload.get("allowed_file_upload_methods", ["local_file", "remote_url"])
+        if isinstance(allowed_methods, list):
+            if len(allowed_methods) >= 2:
+                transfer_method = "both"
+            elif allowed_methods:
+                transfer_method = allowed_methods[0]
+            else:
+                transfer_method = "both"
+        else:
+            transfer_method = allowed_methods or "both"
+
+        file_config = file_upload.get("fileUploadConfig", {})
+        result["file_upload"] = {
+            "enabled": file_upload.get("enabled", False) if file_upload else False,
+            "image_enabled": "image" in allowed_types,
+            "image_max_size_mb": file_config.get("image_file_size_limit", 10) if file_config else 10,
+            "image_allowed_extensions": ["png", "jpg", "jpeg"],
+            "audio_enabled": "audio" in allowed_types,
+            "audio_max_size_mb": file_config.get("audio_file_size_limit", 50) if file_config else 50,
+            "audio_allowed_extensions": ["mp3", "wav", "m4a"],
+            "document_enabled": "document" in allowed_types,
+            "document_max_size_mb": file_config.get("file_size_limit", 100) if file_config else 100,
+            "document_allowed_extensions": ["pdf", "docx", "doc", "xlsx", "xls", "txt", "csv", "json", "md"],
+            "video_enabled": "video" in allowed_types,
+            "video_max_size_mb": file_config.get("video_file_size_limit", 100) if file_config else 100,
+            "video_allowed_extensions": ["mp4", "mov"],
+            "max_file_count": file_upload.get("number_limits", 1) if file_upload else 1,
+            "allowed_transfer_methods": transfer_method,
+        }
+
+        # text_to_speech
+        tts = features.get("text_to_speech", {})
+        result["text_to_speech"] = {
+            "enabled": tts.get("enabled", False) if isinstance(tts, dict) else False,
+            "voice": tts.get("voice") if isinstance(tts, dict) else None,
+            "language": tts.get("language") if isinstance(tts, dict) else None,
+            "autoplay": False,
+        }
+
+        # suggested_questions_after_answer
+        sqa = features.get("suggested_questions_after_answer", {})
+        result["suggested_questions_after_answer"] = {
+            "enabled": sqa.get("enabled", False) if isinstance(sqa, dict) else False,
+        }
+
         return result

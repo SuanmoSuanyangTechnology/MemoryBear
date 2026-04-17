@@ -4,7 +4,7 @@
  * @Last Modified by: ZhaoYing
  * @Last Modified time: 2026-03-25 15:23:45
  */
-import { type FC } from 'react'
+import { useMemo, type FC } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next';
 import { Form, Button, Select, Space, Divider, InputNumber, type SelectProps, Flex, Row, Col } from 'antd'
@@ -15,7 +15,7 @@ import Editor from '../../Editor'
 import { edgeAttrs, nodeWidth } from '../../../constant'
 import RbButton from '@/components/RbButton';
 import RadioGroupBtn from '../RadioGroupBtn'
-import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../../../utils'
+import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../../../utils';
 
 interface CaseListProps {
   value?: Array<{ logical_operator: 'and' | 'or'; expressions: { left: string; operator: string; right: string; input_type?: string; }[] }>;
@@ -49,6 +49,34 @@ const operatorsObj: { [key: string]: SelectProps['options'] } = {
   boolean: [
     { value: 'eq', label: 'workflow.config.if-else.boolean.eq' },
     { value: 'ne', label: 'workflow.config.if-else.boolean.ne' },
+  ],
+  object: [
+    { value: 'eq', label: 'workflow.config.if-else.boolean.eq' },
+    { value: 'ne', label: 'workflow.config.if-else.boolean.ne' },
+    { value: 'empty', label: 'workflow.config.if-else.empty' },
+    { value: 'not_empty', label: 'workflow.config.if-else.not_empty' },
+  ],
+  file: [
+    { value: 'empty', label: 'workflow.config.if-else.file.empty' },
+    { value: 'not_empty', label: 'workflow.config.if-else.file.not_empty' },
+  ],
+  // TODO：包含、不包含、全都是
+  'array[file]': [
+    { value: 'empty', label: 'workflow.config.if-else.empty' },
+    { value: 'not_empty', label: 'workflow.config.if-else.not_empty' },
+    // { value: 'eq', label: 'workflow.config.if-else.eq' },
+    // { value: 'contains', label: 'workflow.config.if-else.contains' },
+    // { value: 'not_contains', label: 'workflow.config.if-else.not_contains' },
+  ],
+  'array': [
+    { value: 'contains', label: 'workflow.config.if-else.contains' },
+    { value: 'not_contains', label: 'workflow.config.if-else.not_contains' },
+    { value: 'empty', label: 'workflow.config.if-else.empty' },
+    { value: 'not_empty', label: 'workflow.config.if-else.not_empty' },
+  ],
+  'array[object]': [
+    { value: 'empty', label: 'workflow.config.if-else.empty' },
+    { value: 'not_empty', label: 'workflow.config.if-else.not_empty' },
   ]
 }
 
@@ -60,6 +88,20 @@ const CaseList: FC<CaseListProps> = ({
 }) => {
   const { t } = useTranslation();
   const form = Form.useFormInstance();
+
+  const bringLoopChildrenToFront = (cell: any) => {
+    const type = cell?.getData()?.type;
+    if ((type !== 'loop' && type !== 'iteration') || !graphRef?.current) return;
+    const cycleId = cell.getData().id;
+    graphRef.current.getEdges().forEach((edge: any) => {
+      const src = graphRef.current?.getCellById(edge.getSourceCellId());
+      const tgt = graphRef.current?.getCellById(edge.getTargetCellId());
+      if (src?.getData()?.cycle === cycleId || tgt?.getData()?.cycle === cycleId) edge.toFront();
+    });
+    graphRef.current.getNodes().forEach((n: any) => {
+      if (n.getData()?.cycle === cycleId) n.toFront();
+    });
+  };
 
   // Recalculate node height and port Y positions without rebuilding ports
   const updateNodeLayout = (cases: any[]) => {
@@ -139,6 +181,10 @@ const CaseList: FC<CaseListProps> = ({
               ...edgeAttrs,
             });
           }
+          sourceCell.toFront()
+          selectedNode.toFront()
+          bringLoopChildrenToFront(sourceCell)
+          bringLoopChildrenToFront(selectedNode)
           graphRef.current?.removeCell(edge);
           return;
         }
@@ -183,6 +229,10 @@ const CaseList: FC<CaseListProps> = ({
               target: { cell: targetCellId, port: targetPortId },
               ...edgeAttrs
             });
+            selectedNode.toFront()
+            bringLoopChildrenToFront(selectedNode)
+            targetCell.toFront()
+            bringLoopChildrenToFront(targetCell)
           }
         }
         
@@ -225,6 +275,22 @@ const CaseList: FC<CaseListProps> = ({
     form.setFieldValue([name, caseIndex, 'expressions', conditionIndex, 'right'], undefined);
   };
 
+  const filterNumberOptions = useMemo(() => {
+    const filterList: Suggestion[] = []
+    options.forEach(vo => {
+      if (vo.children && vo.children?.length > 0) {
+        filterList.push({
+          ...vo,
+          children: vo.children.filter(child => child.dataType === 'number')
+        })
+      } else if (vo.dataType === 'number') {
+        filterList.push(vo)
+      }
+    })
+
+    return filterList
+  }, [options])
+
   return (
     <>
       <Form.List name={name}>
@@ -262,11 +328,17 @@ const CaseList: FC<CaseListProps> = ({
                               const currentCase = cases[caseIndex] || {};
                               const currentExpression = currentCase.expressions?.[conditionIndex] || {};
                               const currentOperator = currentExpression.operator;
-                              const hideRightField = currentOperator === 'empty' || currentOperator === 'not_empty';
                               const leftFieldValue = currentExpression.left;
-                              const leftFieldOption = options.find(option => `{{${option.value}}}` === leftFieldValue);
+                              const leftFieldOption = options.find(option => `{{${option.value}}}` === leftFieldValue)
+                                ?? options.flatMap(o => o.children ?? []).find(child => `{{${child.value}}}` === leftFieldValue)
+                                ?? options.flatMap(o => o.children ?? []).flatMap((c: any) => c.children ?? []).find((gc: any) => `{{${gc.value}}}` === leftFieldValue);
                               const leftFieldType = leftFieldOption?.dataType;
-                              const operatorList = operatorsObj[leftFieldType || 'default'] || operatorsObj.default || [];
+                              const hideRightField = currentOperator === 'empty' || currentOperator === 'not_empty' || leftFieldType === 'file' || leftFieldType === 'array[object]' || leftFieldType === 'array[file]';
+                              const operatorList = leftFieldType && operatorsObj[leftFieldType]
+                                ? operatorsObj[leftFieldType]
+                                : leftFieldType && leftFieldType?.includes('array')
+                                ? operatorsObj.array
+                                : operatorsObj.default;
                               const inputType = leftFieldType === 'number' ? currentExpression.input_type : undefined;
                               return (
                                 <Flex key={conditionField.key} gap={4} align="start" className="rb:mb-2!">
@@ -281,8 +353,7 @@ const CaseList: FC<CaseListProps> = ({
                                             options={options}
                                             size="small"
                                             allowClear={false}
-                                            popupMatchSelectWidth={false}
-                                            onChange={(val) => handleLeftFieldChange(caseIndex, conditionIndex, val)}
+                                            onChange={(val) => handleLeftFieldChange(caseIndex, conditionIndex, val as string)}
                                             variant="borderless"
                                             className="rb:w-36!"
                                           />
@@ -291,7 +362,7 @@ const CaseList: FC<CaseListProps> = ({
                                       <Col flex="1">
                                         <Form.Item name={[conditionField.name, 'operator']} noStyle>
                                           <Select
-                                            options={operatorList.map(vo => ({
+                                            options={(operatorList ?? []).map(vo => ({
                                               ...vo,
                                               label: t(String(vo?.label || ''))
                                             }))}
@@ -307,7 +378,9 @@ const CaseList: FC<CaseListProps> = ({
                                     
                                     {!hideRightField && (
                                       <div className="rb:py-1 rb:px-1.5">
-                                        {leftFieldType === 'number'
+                                        {leftFieldType === 'array[file]'
+                                          ? <>TODO</>
+                                          : leftFieldType === 'number'
                                           ? <Flex align="center">
                                             <Form.Item name={[conditionField.name, 'input_type']} noStyle>
                                               <Select
@@ -324,25 +397,24 @@ const CaseList: FC<CaseListProps> = ({
                                               {inputType === 'variable'
                                                 ? <VariableSelect
                                                   placeholder={t('common.pleaseSelect')}
-                                                  options={options.filter(vo => vo.dataType === 'number')}
+                                                  options={filterNumberOptions}
                                                   allowClear={false}
-                                                  popupMatchSelectWidth={false}
                                                   variant="borderless"
                                                   size="small"
                                                 />
                                                 : <InputNumber
-                                                    placeholder={t('common.pleaseEnter')}
-                                                    variant="borderless"
-                                                    className="rb:w-full!"
-                                                    onChange={(value) => form.setFieldValue([name, caseIndex, 'expressions', conditionIndex, 'right'], value)}
-                                                  />
+                                                  placeholder={t('common.pleaseEnter')}
+                                                  variant="borderless"
+                                                  className="rb:w-full!"
+                                                  onChange={(value) => form.setFieldValue([name, caseIndex, 'expressions', conditionIndex, 'right'], value)}
+                                                />
                                               }
                                             </Form.Item>
                                           </Flex>
                                           : (
                                             <Form.Item name={[conditionField.name, 'right']} noStyle>
-                                              {leftFieldType === 'boolean'
-                                                ? <RadioGroupBtn options={[ { value: true, label: 'True' }, { value: false, label: 'False' }]} type="inner" />
+                                              {['boolean', 'array[boolean]'].includes(leftFieldType as string)
+                                                ? <RadioGroupBtn options={[{ value: true, label: 'True' }, { value: false, label: 'False' }]} type="inner" />
                                                 : <Editor options={options} size="small" type="input" />
                                               }
                                             </Form.Item>

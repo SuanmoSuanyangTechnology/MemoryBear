@@ -12,6 +12,14 @@
   font-weight: 500;
   font-style: normal;
 }
+.breadcrumbTitle {
+  display: inline-block;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
 .header :global(.ant-breadcrumb) {
   line-height: 31px;
 }

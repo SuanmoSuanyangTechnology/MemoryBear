@@ -12,7 +12,7 @@
 
 import { type FC, useRef, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Space, Button, List } from 'antd'
+import { Space, Button, Flex } from 'antd'
 
 import Card from '@/views/ApplicationConfig/components/Card'
 import type {
@@ -22,6 +22,7 @@ import type {
 import Empty from '@/components/Empty'
 import ToolModal from './ToolModal'
 import { getToolMethods, getToolDetail } from '@/api/tools'
+import Tag from '@/components/Tag'
 
 /**
  * Tool List Component Props
@@ -61,6 +62,7 @@ const ToolList: FC<ToolListProps> = ({value, onChange}) => {
                 const mcpFilterItem = (methods as any[]).find(vo => vo.name === item.operation)
                 return {
                   ...item,
+                  is_active: (toolDetail as any).is_active,
                   label: mcpFilterItem?.description,
                   method_id: mcpFilterItem?.method_id,
                   value: mcpFilterItem?.name,
@@ -74,6 +76,7 @@ const ToolList: FC<ToolListProps> = ({value, onChange}) => {
                   const builtinFilterItem = (methods as any[]).find(vo => vo.name === item.operation)
                   return {
                     ...item,
+                    is_active: (toolDetail as any).is_active,
                     label: builtinFilterItem?.description,
                     method_id: builtinFilterItem?.method_id,
                     value: builtinFilterItem?.name,
@@ -84,6 +87,7 @@ const ToolList: FC<ToolListProps> = ({value, onChange}) => {
                 // Single method: Use first method
                 return {
                   ...item,
+                  is_active: (toolDetail as any).is_active,
                   label: (methods as any[])[0]?.description,
                   method_id: (methods as any[])[0]?.method_id,
                   value: (methods as any[])[0]?.name,
@@ -96,6 +100,7 @@ const ToolList: FC<ToolListProps> = ({value, onChange}) => {
                 const customFilterItem = (methods as any[]).find(vo => vo.method_id === item.operation)
                 return {
                   ...item,
+                  is_active: (toolDetail as any).is_active,
                   label: customFilterItem?.name,
                   method_id: customFilterItem?.method_id,
                   value: customFilterItem?.name,
@@ -129,7 +134,10 @@ const ToolList: FC<ToolListProps> = ({value, onChange}) => {
    * @param tool - Tool to add
    */
   const updateTools = (tool: ToolOption) => {
-    const list = [...toolList, tool]
+    const list = [...toolList, {
+      ...tool,
+      is_active: true,
+    }]
     setToolList(list)
     onChange && onChange(list)
   }
@@ -146,42 +154,35 @@ const ToolList: FC<ToolListProps> = ({value, onChange}) => {
   }
   
   return (
-    <Card 
+    <Card
       title={t('application.toolConfiguration')}
       extra={
-        <Button style={{ padding: '0 8px', height: '24px' }} onClick={handleAddTool}>
-          + {t('application.addTool')}
-        </Button>
+        <Button className="rb:h-6! rb:py-0! rb:px-2! rb:rounded-md! rb:text-[#21233" onClick={handleAddTool}>+ {t('application.addTool')}</Button>
       }
     >
-      {/* Show empty state or tool list */}
       {toolList.length === 0
-        ? <Empty size={88} />
-        : 
-          <List
-            grid={{ gutter: 12, column: 1 }}
-            dataSource={toolList}
-            renderItem={(item, index) => (
-              <List.Item>
-                {/* Tool card with delete button */}
-                <div key={index} className="rb:flex rb:items-center rb:justify-between rb:p-[12px_16px] rb:bg-[#FBFDFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg">
-                  {/* Tool label/description */}
-                  <div className="rb:font-medium rb:leading-4">
-                    {item.label}
-                  </div>
-                  <Space size={12}>
-                    {/* Delete button with hover effect */}
-                    <div 
-                      className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]" 
-                      onClick={() => handleDeleteTool(index)}
-                    ></div>
-                  </Space>
+        ? <div className="rb-border rb:rounded-xl rb:pt-4 rb:pb-6"><Empty size={88} /></div>
+        : <Flex vertical gap={12}>
+          {toolList.map((item, index) => (
+            <Flex key={index} align="center" justify="space-between" className="rb:py-2.5! rb:pl-4! rb:pr-3! rb-border rb:rounded-lg">
+              <div>
+                <div className="rb:font-medium rb:leading-4">
+                  {item.label}
                 </div>
-              </List.Item>
-            )}
-          />
+                <Tag color={item.is_active ? 'success' : 'error'} className="rb:mt-1">
+                  {item.is_active ? t('common.enable') : t('common.deleted')}
+                </Tag>
+              </div>
+              <Space size={12}>
+                <div
+                  className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]"
+                  onClick={() => handleDeleteTool(index)}
+                ></div>
+              </Space>
+            </Flex>
+          ))}
+        </Flex>
       }
-      {/* Tool selection modal */}
       <ToolModal
         ref={toolModalRef}
         refresh={updateTools}

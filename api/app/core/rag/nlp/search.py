@@ -28,6 +28,7 @@ from app.core.rag.common.float_utils import get_float
 from app.core.rag.common.constants import PAGERANK_FLD, TAG_FLD
 from app.core.rag.llm.chat_model import Base
 from app.core.rag.llm.embedding_model import OpenAIEmbed
+from app.services.model_service import ModelApiKeyService
 import logging
 
 logger = logging.getLogger(__name__)
@@ -114,9 +115,8 @@ def knowledge_retrieval(
         # Use the specified reranker for re-ranking
         if reranker_id:
             try:
-                return rerank(db=db, reranker_id=reranker_id, query=query, docs=all_results, top_k=reranker_top_k)
+                all_results = rerank(db=db, reranker_id=reranker_id, query=query, docs=all_results, top_k=reranker_top_k)
             except Exception as rerank_error:
-                # If reranker fails, log warning and continue with original results
                 logger.warning(
                     "Reranker failed, falling back to original results",
                     extra={
@@ -132,7 +132,10 @@ def knowledge_retrieval(
                 from app.core.rag.common.settings import kg_retriever
                 doc = kg_retriever.retrieval(question=query, workspace_ids=workspace_ids, kb_ids=kb_ids, emb_mdl=embedding_model, llm=chat_model)
                 if doc:
-                    all_results.insert(0, doc)
+                    all_results.insert(0, DocumentChunk(
+                        page_content=doc.get("page_content", ""),
+                        metadata=doc.get("metadata", {})
+                    ))
             except Exception as graph_error:
                 print(f"Failed to retrieve from knowledge graph: {str(graph_error)}")
         
@@ -198,16 +201,18 @@ def _retrieve_for_knowledge(
         workspace_ids.append(str(db_knowledge.workspace_id))
 
     if not chat_model:
+        llm_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.llm_id)
         chat_model = Base(
-            key=db_knowledge.llm.api_keys[0].api_key,
-            model_name=db_knowledge.llm.api_keys[0].model_name,
-            base_url=db_knowledge.llm.api_keys[0].api_base,
+            key=llm_key.api_key,
+            model_name=llm_key.model_name,
+            base_url=llm_key.api_base,
         )
     if not embedding_model:
+        emb_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.embedding_id)
         embedding_model = OpenAIEmbed(
-            key=db_knowledge.embedding.api_keys[0].api_key,
-            model_name=db_knowledge.embedding.api_keys[0].model_name,
-            base_url=db_knowledge.embedding.api_keys[0].api_base,
+            key=emb_key.api_key,
+            model_name=emb_key.model_name,
+            base_url=emb_key.api_base,
         )
 
     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
@@ -248,6 +253,29 @@ def _retrieve_for_knowledge(
                     seen_ids.add(doc.metadata["doc_id"])
                     unique_rs.append(doc)
             rs = unique_rs
+            if unique_rs:
+                rs = vector_service.rerank(
+                    query=kb_config["query"],
+                    docs=unique_rs,
+                    top_k=kb_config["top_k"]
+                )
+            if kb_config["retrieve_type"] == "graph":
+                try:
+                    from app.core.rag.common.settings import kg_retriever
+                    graph_doc = kg_retriever.retrieval(
+                        question=kb_config["query"],
+                        workspace_ids=[str(db_knowledge.workspace_id)],
+                        kb_ids=[str(db_knowledge.id)],
+                        emb_mdl=embedding_model,
+                        llm=chat_model,
+                    )
+                    if graph_doc:
+                        rs.insert(0, DocumentChunk(
+                            page_content=graph_doc.get("page_content", ""),
+                            metadata=graph_doc.get("metadata", {})
+                        ))
+                except Exception as graph_error:
+                    logger.warning(f"Graph retrieval failed for kb {db_knowledge.id}: {graph_error}")
 
     results.extend(rs)
     return results, chat_model, embedding_model

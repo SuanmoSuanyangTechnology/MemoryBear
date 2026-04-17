@@ -205,35 +205,33 @@ const OrderHistory: React.FC = () => {
   ];
 
   return (
-    <div className="rb:h-[calc(100vh-80px)] rb:overflow-hidden">
-      <Flex justify="space-between" className="rb:mb-4!">
-        <Space size={10}>
-          <Select
-            defaultValue={query.status}
-            placeholder={t('common.select')}
-            options={statusOptions}
-            className="rb:w-30"
-            onChange={handleChangeStatus}
-          />
-          <Select
-            defaultValue={query.product_type}
-            placeholder={t('common.select')}
-            options={productTypeOptions}
-            className="rb:w-30"
-            onChange={handleChangeType}
-          />
-          <Select
-            defaultValue={timeType}
-            placeholder={t('common.select')}
-            options={timeOptions}
-            className="rb:w-30"
-            onChange={handleChangeTime}
-          />
-        </Space>
+    <div className="rb:h-full rb:overflow-hidden rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
+      <Flex className="rb:mb-3!" gap={10}>
+        <Select
+          defaultValue={query.status}
+          placeholder={t('common.select')}
+          options={statusOptions}
+          className="rb:w-30"
+          onChange={handleChangeStatus}
+        />
+        <Select
+          defaultValue={query.product_type}
+          placeholder={t('common.select')}
+          options={productTypeOptions}
+          className="rb:w-30"
+          onChange={handleChangeType}
+        />
+        <Select
+          defaultValue={timeType}
+          placeholder={t('common.select')}
+          options={timeOptions}
+          className="rb:w-30"
+          onChange={handleChangeTime}
+        />
         <SearchInput
           placeholder={t('pricing.searchPlaceholder')}
           onSearch={(value) => setQuery(prev => ({ ...prev, search: value }))}
-          className="rb:w-70"
+          variant="outlined"
         />
       </Flex>
       <Table

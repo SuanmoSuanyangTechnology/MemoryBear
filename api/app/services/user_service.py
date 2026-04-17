@@ -285,7 +285,7 @@ def activate_user(db: Session, user_id_to_activate: uuid.UUID, current_user: Use
     try:
         # 查找用户
         business_logger.debug(f"查找待激活用户: {user_id_to_activate}")
-        db_user = user_repository.get_user_by_id(db, user_id=user_id_to_activate)
+        db_user = user_repository.get_user_by_id_regardless_active(db, user_id=user_id_to_activate)
         if not db_user:
             business_logger.warning(f"用户不存在: {user_id_to_activate}")
             raise BusinessException("用户不存在", code=BizCode.USER_NOT_FOUND)

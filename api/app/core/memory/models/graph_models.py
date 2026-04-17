@@ -364,12 +364,14 @@ class ChunkNode(Node):
     Attributes:
         dialog_id: ID of the parent dialog
         content: The text content of the chunk
+        speaker: Speaker identifier ('user' or 'assistant')
         chunk_embedding: Optional embedding vector for the chunk
         sequence_number: Order of this chunk within the dialog
         metadata: Additional chunk metadata as key-value pairs
     """
     dialog_id: str = Field(..., description="ID of the parent dialog")
     content: str = Field(..., description="The text content of the chunk")
+    speaker: Optional[str] = Field(None, description="Speaker identifier: 'user' for user messages, 'assistant' for AI responses")
     chunk_embedding: Optional[List[float]] = Field(None, description="Chunk embedding vector")
     sequence_number: int = Field(..., description="Order of this chunk within the dialog")
     metadata: dict = Field(default_factory=dict, description="Additional chunk metadata")

@@ -2,22 +2,22 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 11:13:23
+ * @Last Modified time: 2026-04-14 17:43:14
  */
-import { useRef, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
-import { App } from 'antd'
-import { Graph, Node, MiniMap, Snapline, Clipboard, Keyboard, type Edge } from '@antv/x6';
+import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, type Edge } from '@antv/x6';
 import { register } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
+import { App } from 'antd';
+import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useParams } from 'react-router-dom';
 
-import { nodeRegisterLibrary, graphNodeLibrary, nodeLibrary, portMarkup, portAttrs, edgeAttrs, edgeHoverTool, edge_color, edge_selected_color, portTextAttrs, defaultAbsolutePortGroups, nodeWidth, unknownNode, defaultPortItems, portItemArgsY, edge_width, conditionNodePortItemArgsY, conditionNodeItemHeight, conditionNodeHeight, notesConfig } from '../constant';
-import type { WorkflowConfig, NodeProperties, ChatVariable } from '../types';
-import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application'
+import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application';
 import { useUser } from '@/store/user';
-import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types'
-import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils'
+import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
+import { conditionNodeHeight, conditionNodeItemHeight, conditionNodePortItemArgsY, defaultAbsolutePortGroups, defaultPortItems, edgeAttrs, edgeHoverTool, edge_color, edge_selected_color, edge_width, graphNodeLibrary, nodeLibrary, nodeRegisterLibrary, nodeWidth, notesConfig, portAttrs, portItemArgsY, portMarkup, portTextAttrs, unknownNode } from '../constant';
+import type { ChatVariable, NodeProperties, WorkflowConfig } from '../types';
+import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils';
 
 /**
  * Props for useWorkflowGraph hook
@@ -73,6 +73,9 @@ export interface UseWorkflowGraphReturn {
   handleAddNotes: () => void;
   handleSaveFeaturesConfig: (value: FeaturesConfigForm) => void;
   features?: FeaturesConfigForm;
+  /** Get start node output variable list (user-defined + system variables) */
+  getStartNodeVariables: () => Array<{ name: string; type: string; readonly?: boolean }>;
+  nodeClick: ({ node }: { node: Node }) => void;
 }
 
 /**
@@ -91,10 +94,10 @@ export const useWorkflowGraph = ({
   const { message } = App.useApp();
   const { t } = useTranslation()
   const { user } = useUser();
-  
+
   // Refs
   const graphRef = useRef<Graph>();
-  
+
   // State
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -102,6 +105,17 @@ export const useWorkflowGraph = ({
   const [config, setConfig] = useState<WorkflowConfig | null>(null);
   const [chatVariables, setChatVariables] = useState<ChatVariable[]>([])
   const featuresRef = useRef<FeaturesConfigForm | undefined>(undefined)
+
+  useEffect(() => {
+    if (!graphRef.current) return
+    graphRef.current.getNodes().forEach(node => {
+      const data = node.getData()
+      if (data?.type === 'if-else' || data?.type === 'question-classifier') {
+        console.log('chatVariables', chatVariables)
+        node.setData({ ...data, chatVariables }, { silent: true })
+      }
+    })
+  }, [chatVariables])
 
   useEffect(() => {
     getConfig()
@@ -131,7 +145,7 @@ export const useWorkflowGraph = ({
   useEffect(() => {
     initWorkflow()
   }, [config, graphRef.current])
-  
+
   /**
    * Initialize workflow graph with nodes and edges from configuration
    */
@@ -144,7 +158,7 @@ export const useWorkflowGraph = ({
         const { id, type, name, position, config = {} } = node
         let nodeLibraryConfig: NodeProperties | undefined = [...nodeLibrary, { nodes: [unknownNode, notesConfig] }]
           .flatMap(category => category.nodes)
-          .find(n => n.type === type) as NodeProperties
+          .find(n => n.type === type) as NodeProperties || unknownNode
         nodeLibraryConfig = JSON.parse(JSON.stringify({ ...nodeLibraryConfig, config: nodeLibraryConfig.config || {} }))
 
         if (nodeLibraryConfig?.config) {
@@ -190,7 +204,7 @@ export const useWorkflowGraph = ({
                 ? Object.entries(group_variables as Record<string, any>).map(([key, value]) => ({ key, value }))
                 : group_variables
             } else if (type === 'http-request' && (key === 'headers' || key === 'params') && config[key] && typeof config[key] === 'object' && !Array.isArray(config[key]) && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
-              nodeLibraryConfig.config[key].defaultValue = Object.entries(config[key]).map(([name, value]) => ({ name, value }))
+              nodeLibraryConfig.config[key].defaultValue = Object.entries(config[key]).map(([key, value]) => ({ key, value }))
             } else if (type === 'code' && key === 'code' && config[key] && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
               try {
                 nodeLibraryConfig.config[key].defaultValue = decodeURIComponent(atob(config[key] as string))
@@ -208,7 +222,7 @@ export const useWorkflowGraph = ({
           id,
           type,
           name,
-          data: { ...node, ...nodeLibraryConfig},
+          data: { ...node, ...nodeLibraryConfig, ...((type === 'if-else' || type === 'question-classifier') ? { chatVariables } : {}) },
           ...position,
         }
 
@@ -218,11 +232,11 @@ export const useWorkflowGraph = ({
           if (w) nodeConfig.width = w as number;
           if (h) nodeConfig.height = h as number;
         }
-        
+
         // Generate ports dynamically for if-else node based on cases
         if (type === 'if-else' && config.cases && Array.isArray(config.cases)) {
           const totalPorts = config.cases.length + 1; // IF/ELIF + ELSE
-          
+
           const portItems: PortMetadata[] = [
             defaultPortItems[0],
           ];
@@ -237,24 +251,24 @@ export const useWorkflowGraph = ({
               },
             });
           }
-          
+
           nodeConfig.ports = {
             groups: defaultAbsolutePortGroups,
             items: portItems
           };
-          
+
           nodeConfig.height = calcConditionNodeTotalHeight(config.cases);
         }
-        
+
         // Generate ports dynamically for question-classifier node based on categories
         if (type === 'question-classifier' && config.categories && Array.isArray(config.categories)) {
           const categoryCount = config.categories.length;
           const newHeight = conditionNodeHeight + (categoryCount - 2) * conditionNodeItemHeight;
-          
+
           const portItems: PortMetadata[] = [
             defaultPortItems[0]
           ];
-          
+
           // Add category ports
           config.categories.forEach((_category: any, index: number) => {
             portItems.push({
@@ -266,15 +280,15 @@ export const useWorkflowGraph = ({
               },
             });
           });
-          
+
           nodeConfig.ports = {
             groups: defaultAbsolutePortGroups,
             items: portItems
           };
-          
+
           nodeConfig.height = newHeight;
         }
-        
+
         // Check error_handle.method config for http-request node
         if (type === 'http-request' && (nodeConfig as any).error_handle?.method === 'branch') {
           nodeConfig.ports = {
@@ -291,21 +305,22 @@ export const useWorkflowGraph = ({
                   x: nodeWidth,
                   y: portItemArgsY + portItemArgsY,
                 },
-                id: 'ERROR', attrs: { text: { text: t('workflow.config.http-request.errorBranch'), ...portTextAttrs }}}
+                id: 'ERROR', attrs: { text: { text: t('workflow.config.http-request.errorBranch'), ...portTextAttrs } }
+              }
             ]
           };
         }
-        
+
         return nodeConfig
       })
-      
+
       // Separate parent nodes and child nodes
       const parentNodes = nodeList.filter(node => !node.data.cycle)
       const childNodes = nodeList.filter(node => node.data.cycle)
-      
+
       // Add parent nodes first
       graphRef.current?.addNodes(parentNodes)
-      
+
       // Then process child nodes, use addChild to add to corresponding parent node
       childNodes.forEach(childNode => {
         const cycleId = childNode.data.cycle
@@ -319,14 +334,14 @@ export const useWorkflowGraph = ({
           }
         }
       })
-      
+
       // Adjust parent node size to fit child nodes
       setTimeout(() => {
         const parentNodesWithChildren = parentNodes.filter(parentNode => {
           const parentId = parentNode.data.id
           return childNodes.some(child => child.data.cycle === parentId)
         })
-        
+
         parentNodesWithChildren.forEach(parentNodeConfig => {
           const parentNode = graphRef.current?.getCellById(parentNodeConfig.data.id)
           if (parentNode) {
@@ -337,18 +352,18 @@ export const useWorkflowGraph = ({
               const minY = Math.min(...childBounds.map(b => b.y))
               const maxX = Math.max(...childBounds.map(b => b.x + b.width))
               const maxY = Math.max(...childBounds.map(b => b.y + b.height))
-              
+
               const padding = 24
               const headerHeight = 50
               const parentBBox = parentNode.getBBox()
-              
+
               const newWidth = Math.max(parentBBox.width, maxX - minX + padding * 2)
               const newHeight = Math.max(parentBBox.height, maxY - minY + padding * 2 + headerHeight)
 
               console.log('newWidth', newHeight, newWidth)
-              
+
               parentNode.prop('size', { width: newWidth, height: newHeight })
-              
+
               // Update x position of right group ports
               const ports = (parentNode as Node).getPorts()
               ports.forEach(port => {
@@ -368,7 +383,7 @@ export const useWorkflowGraph = ({
           const sourceCell = graphRef.current?.getCellById(e.source);
           const sourceType = sourceCell?.getData()?.type;
           const isMultiPortNode = sourceType === 'question-classifier' || sourceType === 'if-else';
-          
+
           if (isMultiPortNode) {
             // Multi-port nodes need to compare source, target and label
             return e.source === edge.source && e.target === edge.target && e.label === edge.label;
@@ -378,18 +393,18 @@ export const useWorkflowGraph = ({
           }
         }) === index;
       });
-      
+
       const edgeList = uniqueEdges.map(edge => {
         const { source, target, label } = edge
         const sourceCell = graphRef.current?.getCellById(source)
         const targetCell = graphRef.current?.getCellById(target)
-        
+
         if (sourceCell && targetCell) {
           const sourcePorts = (sourceCell as Node).getPorts()
           const targetPorts = (targetCell as Node).getPorts()
-          
+
           let sourcePort = sourcePorts.find((port: any) => port.group === 'right')?.id || 'right';
-          
+
           // If if-else node has label, match corresponding port by label
           if (sourceCell.getData()?.type === 'if-else' && label) {
             // Find matching port ID
@@ -398,7 +413,7 @@ export const useWorkflowGraph = ({
               sourcePort = label;
             }
           }
-          
+
           // If question-classifier node has label, match corresponding port by label
           if (sourceCell.getData()?.type === 'question-classifier' && label) {
             const matchingPort = sourcePorts.find((port: any) => port.id === label);
@@ -406,7 +421,7 @@ export const useWorkflowGraph = ({
               sourcePort = label;
             }
           }
-          
+
           // If http-request node has label, match corresponding port by label
           if (sourceCell.getData()?.type === 'http-request' && label) {
             const matchingPort = sourcePorts.find((port: any) => port.id === label);
@@ -414,7 +429,7 @@ export const useWorkflowGraph = ({
               sourcePort = label;
             }
           }
-          
+
           const edgeConfig = {
             source: {
               cell: sourceCell.id,
@@ -435,13 +450,26 @@ export const useWorkflowGraph = ({
       })
       graphRef.current.addEdges(edgeList.filter(vo => vo !== null))
     }
-    
+
     // Initialize after completion, display nodes in visible area
     if (nodes.length > 0 || edges.length > 0) {
       setTimeout(() => {
         if (graphRef.current) {
           graphRef.current.centerContent()
-          graphRef.current.getNodes().forEach(node => node.toFront());
+          graphRef.current.getNodes().forEach(node => {
+            if (!node.getData()?.cycle) node.toFront();
+          });
+          // Bring edges to front first, then child nodes above edges; parent nodes stay behind
+          graphRef.current.getEdges().forEach(edge => {
+            const sourceCell = graphRef.current?.getCellById(edge.getSourceCellId());
+            const targetCell = graphRef.current?.getCellById(edge.getTargetCellId());
+            if (sourceCell?.getData()?.cycle || targetCell?.getData()?.cycle) {
+              edge.toFront();
+            }
+          });
+          graphRef.current.getNodes().forEach(node => {
+            if (node.getData()?.cycle) node.toFront();
+          });
         }
       }, 200)
     }
@@ -491,32 +519,36 @@ export const useWorkflowGraph = ({
    * @param node - Clicked node
    */
   const nodeClick = ({ node }: { node: Node }) => {
-    // Ignore add-node type node clicks
-    const nodeData = node.getData()
-    if (nodeData?.type === 'add-node' || nodeData.type === 'break' || nodeData.type === 'cycle-start') {
-      setSelectedNode(null)
-      return;
-    }
+    blankClick()
 
-    const nodes = graphRef.current?.getNodes();
-
-    nodes?.forEach(vo => {
-      const data = vo.getData();
-      if (data.isSelected) {
-        vo.setData({
-          ...data,
-          isSelected: false,
-        });
+    setTimeout(() => {
+      // Ignore add-node type node clicks
+      const nodeData = node.getData()
+      if (nodeData?.type === 'add-node' || nodeData.type === 'break' || nodeData.type === 'cycle-start') {
+        setSelectedNode(null)
+        return;
       }
-    });
-    node.setData({
-      ...nodeData,
-      isSelected: true,
-    });
-    clearEdgeSelect()
-    if (nodeData.type !== 'notes') {
-      setSelectedNode(node);
-    }
+
+      const nodes = graphRef.current?.getNodes();
+
+      nodes?.forEach(vo => {
+        const data = vo.getData();
+        if (data.isSelected) {
+          vo.setData({
+            ...data,
+            isSelected: false,
+          });
+        }
+      });
+      node.setData({
+        ...nodeData,
+        isSelected: true,
+      });
+      clearEdgeSelect()
+      if (nodeData.type !== 'notes') {
+        setSelectedNode(node);
+      }
+    }, 0)
   };
   /**
    * Handle edge click event
@@ -563,6 +595,7 @@ export const useWorkflowGraph = ({
     clearEdgeSelect();
     graphRef.current?.cleanSelection();
     setSelectedNode(null);
+    window.dispatchEvent(new CustomEvent('blank:click'));
   };
   /**
    * Handle canvas scale/zoom event
@@ -583,26 +616,26 @@ export const useWorkflowGraph = ({
         // Get parent node and child node bounding boxes
         const parentBBox = parentNode.getBBox();
         const childBBox = node.getBBox();
-        
+
         // Calculate parent node padding
         const padding = 24;
         const headerHeight = 50;
-        
+
         // Calculate minimum and maximum positions allowed for child node
         const minX = parentBBox.x + padding;
         const minY = parentBBox.y + padding + headerHeight;
         const maxX = parentBBox.x + parentBBox.width - padding - childBBox.width;
         const maxY = parentBBox.y + parentBBox.height - padding - childBBox.height;
-        
+
         // Restrict child node movement within parent node
         let newX = childBBox.x;
         let newY = childBBox.y;
-        
+
         if (newX < minX) newX = minX;
         if (newY < minY) newY = minY;
         if (newX > maxX) newX = maxX;
         if (newY > maxY) newY = maxY;
-        
+
         // If child node position is restricted, update its position
         if (newX !== childBBox.x || newY !== childBBox.y) {
           node.setPosition(newX, newY);
@@ -694,7 +727,7 @@ export const useWorkflowGraph = ({
           }
           // Add child node to deletion list
           cells.push(nodeToDelete);
-        } 
+        }
         // Check if it's LoopNode, IterationNode or SubGraphNode
         else if (nodeToDelete.shape === 'loop-node' || nodeToDelete.shape === 'iteration-node' || nodeToDelete.shape === 'subgraph-node') {
           // Find all child nodes with cycle equal to current node id
@@ -706,7 +739,7 @@ export const useWorkflowGraph = ({
           });
           // Add parent node to deletion list
           cells.push(nodeToDelete);
-        } 
+        }
         // Normal node
         else {
           cells.push(nodeToDelete);
@@ -714,10 +747,45 @@ export const useWorkflowGraph = ({
       });
       blankClick();
     }
-      
+
     // Delete all collected nodes and edges
     if (cells.length > 0) {
       graphRef.current?.removeCells(cells);
+
+      // If parent is iteration/loop and only cycle-start remains, add add-node connected to it
+      parentNodesToUpdate.forEach(parentNode => {
+        const parentShape = parentNode.shape;
+        if (parentShape !== 'loop-node' && parentShape !== 'iteration-node') return;
+        const parentData = parentNode.getData();
+        const remainingChildren = graphRef.current!.getNodes().filter(
+          n => n.getData()?.cycle === parentData.id
+        );
+        const cycleStartNodes = remainingChildren.filter(n => n.getData()?.type === 'cycle-start');
+        if (cycleStartNodes.length === 1 && remainingChildren.length === 1) {
+          const cycleStartNode = cycleStartNodes[0];
+          const bbox = cycleStartNode.getBBox();
+          const addNode = graphRef.current!.addNode({
+            ...graphNodeLibrary.addStart,
+            x: bbox.x + 84,
+            y: bbox.y + 4,
+            data: {
+              type: 'add-node',
+              parentId: parentNode.id,
+              cycle: parentData.id,
+              label: t('workflow.addNode'),
+              icon: '+',
+            },
+          });
+          parentNode.addChild(addNode);
+          const sourcePort = cycleStartNode.getPorts().find(p => p.group === 'right')?.id || 'right';
+          const targetPort = addNode.getPorts().find(p => p.group === 'left')?.id || 'left';
+          graphRef.current!.addEdge({
+            source: { cell: cycleStartNode.id, port: sourcePort },
+            target: { cell: addNode.id, port: targetPort },
+            ...edgeAttrs,
+          });
+        }
+      });
     }
     return false;
   };
@@ -826,19 +894,19 @@ export const useWorkflowGraph = ({
           const targetGroup = targetMagnet ? getPortGroup(targetMagnet) : null;
 
           if (sourceGroup === 'left' || targetGroup === 'right') return false;
-          
+
           // Node cannot connect to itself
           if (sourceCell?.id === targetCell?.id) return false;
 
           const targetType = targetCell?.getData()?.type;
-          
+
           // Start node cannot be connection target
           if (targetType === 'start') return false;
-          
+
           // Get source node and target node parent IDs
           const sourceParentId = sourceCell?.getData()?.cycle;
           const targetParentId = targetCell?.getData()?.cycle;
-          
+
           // Validate parent-child relationship:
           // 1. If both nodes have parent IDs, they must be same to connect
           // 2. If both have no parent ID, can connect normally
@@ -873,12 +941,13 @@ export const useWorkflowGraph = ({
           if (!view) return null
           const cell = view.cell
           if (cell.isNode()) {
+            // Parent (iteration/loop) nodes are not restricted
+            if (cell.getData()?.type === 'iteration' || cell.getData()?.type === 'loop') return null
             const parent = cell.getParent()
             if (parent) {
               return parent.getBBox()
             }
           }
-
           return null
         },
       },
@@ -921,25 +990,6 @@ export const useWorkflowGraph = ({
     graphRef.current.on('edge:click', edgeClick);
     // Listen to port click event
     graphRef.current.on('node:port:click', nodePortClickEvent);
-    // Port hover: show circle style on right ports
-    graphRef.current.on('node:port:mouseenter', ({ node, port }) => {
-      console.log('node:port:mouseenter', port)
-      if (!port) return;
-      const portData = node.getPort(port);
-      if (portData?.group !== 'right') return;
-      node.toFront();
-      node.setPortProp(port, 'attrs/body/opacity', 0);
-      node.setPortProp(port, 'attrs/hoverBody/opacity', 1);
-      node.setPortProp(port, 'attrs/label/opacity', 1);
-    });
-    graphRef.current.on('node:port:mouseleave', ({ node, port }) => {
-      if (!port) return;
-      const portData = node.getPort(port);
-      if (portData?.group !== 'right') return;
-      node.setPortProp(port, 'attrs/body/opacity', 1);
-      node.setPortProp(port, 'attrs/hoverBody/opacity', 0);
-      node.setPortProp(port, 'attrs/label/opacity', 0);
-    });
     // Listen to canvas click event, cancel selection
     graphRef.current.on('blank:click', blankClick);
     // Node hover: highlight connected edges
@@ -957,11 +1007,6 @@ export const useWorkflowGraph = ({
           edge.setData({ ...edge.getData(), isNodeHover: true });
         }
       });
-      node.getPorts().filter(p => p.group === 'right').forEach(p => {
-        node.setPortProp(p.id!, 'attrs/body/opacity', 0);
-        node.setPortProp(p.id!, 'attrs/hoverBody/opacity', 1);
-        node.setPortProp(p.id!, 'attrs/label/opacity', 1);
-      });
     });
     graphRef.current.on('node:mouseleave', ({ node }) => {
       graphRef.current?.getConnectedEdges(node).forEach(edge => {
@@ -970,29 +1015,47 @@ export const useWorkflowGraph = ({
           edge.setData({ ...edge.getData(), isNodeHover: false });
         }
       });
-      node.getPorts().filter(p => p.group === 'right').forEach(p => {
-        node.setPortProp(p.id!, 'attrs/body/opacity', 1);
-        node.setPortProp(p.id!, 'attrs/hoverBody/opacity', 0);
-        node.setPortProp(p.id!, 'attrs/label/opacity', 0);
-      });
     });
     // Listen to zoom event
     graphRef.current.on('scale', scaleEvent);
     // Listen to node move event
     graphRef.current.on('node:moved', nodeMoved);
+
     graphRef.current.on('node:removed', blankClick)
     // When edge connected, bring connected nodes' ports to front
-    graphRef.current.on('edge:connected', ({ isNew }) => {
-      graphRef.current?.getNodes().forEach(node => node.toFront());
-      // Reset any port hover state left from dragging
+    graphRef.current.on('edge:connected', ({ isNew, edge }) => {
       if (isNew) {
-        graphRef.current?.getNodes().forEach(node => {
-          node.getPorts().filter(p => p.group === 'right').forEach(p => {
-            node.setPortProp(p.id!, 'attrs/body/opacity', 1);
-            node.setPortProp(p.id!, 'attrs/hoverBody/opacity', 0);
-            node.setPortProp(p.id!, 'attrs/label/opacity', 0);
+        const sourceCellId = edge.getSourceCellId()
+        const targetCellId = edge.getTargetCellId()
+        const sourceCell = graphRef.current?.getCellById(sourceCellId);
+        const targetCell = graphRef.current?.getCellById(targetCellId);
+
+        sourceCell?.toFront();
+        targetCell?.toFront()
+        if (['loop', 'iteration'].includes(sourceCell?.getData()?.type)) {
+          graphRef.current?.getEdges().forEach(edge => {
+            const edgeSourceCell = graphRef.current?.getCellById(edge.getSourceCellId());
+            const edgeTargetCell = graphRef.current?.getCellById(edge.getTargetCellId());
+            if (edgeSourceCell?.getData()?.cycle === sourceCellId || edgeTargetCell?.getData()?.cycle === sourceCellId) {
+              edge.toFront();
+            }
           });
-        });
+          graphRef.current?.getNodes().forEach(node => {
+            if (node.getData()?.cycle === sourceCellId) node.toFront();
+          });
+        }
+        if (['loop', 'iteration'].includes(targetCell?.getData()?.type)) {
+          graphRef.current?.getEdges().forEach(edge => {
+            const edgeSourceCell = graphRef.current?.getCellById(edge.getSourceCellId());
+            const edgeTargetCell = graphRef.current?.getCellById(edge.getTargetCellId());
+            if (edgeSourceCell?.getData()?.cycle === targetCellId || edgeTargetCell?.getData()?.cycle === targetCellId) {
+              edge.toFront();
+            }
+          });
+          graphRef.current?.getNodes().forEach(node => {
+            if (node.getData()?.cycle === targetCellId) node.toFront();
+          });
+        }
       }
     });
 
@@ -1021,34 +1084,9 @@ export const useWorkflowGraph = ({
         if (found) break;
       }
 
-      if (found?.node.id !== lastHoveredPort?.node.id || found?.portId !== lastHoveredPort?.portId) {
-        // Leave previous
-        if (lastHoveredPort) {
-          const { node, portId } = lastHoveredPort;
-          node.setPortProp(portId, 'attrs/body/opacity', 1);
-          node.setPortProp(portId, 'attrs/hoverBody/opacity', 0);
-          node.setPortProp(portId, 'attrs/label/opacity', 0);
-        }
-        // Enter new
-        if (found) {
-          const { node, portId } = found;
-          node.toFront();
-          node.setPortProp(portId, 'attrs/body/opacity', 0);
-          node.setPortProp(portId, 'attrs/hoverBody/opacity', 1);
-          node.setPortProp(portId, 'attrs/label/opacity', 1);
-        }
-        lastHoveredPort = found;
-      }
+      lastHoveredPort = found;
     });
-    graphRef.current.on('edge:mouseup', () => {
-      if (lastHoveredPort) {
-        const { node, portId } = lastHoveredPort;
-        node.setPortProp(portId, 'attrs/body/opacity', 1);
-        node.setPortProp(portId, 'attrs/hoverBody/opacity', 0);
-        node.setPortProp(portId, 'attrs/label/opacity', 0);
-        lastHoveredPort = null;
-      }
-    });
+    graphRef.current.on('edge:mouseup', () => { lastHoveredPort = null; });
     // Listen to copy keyboard event
     graphRef.current.bindKey(['ctrl+c', 'cmd+c'], copyEvent);
     // Listen to paste keyboard event
@@ -1105,7 +1143,7 @@ export const useWorkflowGraph = ({
     if (!graph) return;
 
     const point = graphRef.current.clientToLocal(event.clientX, event.clientY);
-    
+
     // Get original config from node library to avoid config data chaining
     let nodeLibraryConfig = [...nodeLibrary]
       .flatMap(category => category.nodes)
@@ -1161,9 +1199,6 @@ export const useWorkflowGraph = ({
         return nodeData?.type !== 'add-node';
       }) || [];
       const edges = graphRef.current?.getEdges() || []
-
-
-      console.log('config', config)
 
       const params = {
         ...config,
@@ -1221,8 +1256,16 @@ export const useWorkflowGraph = ({
                 itemConfig[key] = {}
                 if (value.length > 0) {
                   value.forEach((vo: any) => {
-                    itemConfig[key][vo.name] = vo.value
+                    itemConfig[key][vo.key] = vo.value
                   })
+                }
+              } else if (data.type === 'http-request' && key === 'body' && data.config[key] && 'defaultValue' in data.config[key]) {
+                const value = data.config[key].defaultValue
+                itemConfig[key] = value
+                if (value.content_type === 'json' && value.data && value.data !== '') {
+                  itemConfig[key].data = value.data.replace(/\u00a0/g, ' ')
+                } else {
+                  itemConfig[key].data = value.data
                 }
               } else if (data.config[key] && 'defaultValue' in data.config[key] && key !== 'knowledge_retrieval') {
                 itemConfig[key] = data.config[key].defaultValue
@@ -1258,11 +1301,11 @@ export const useWorkflowGraph = ({
           const sourcePortId = edge.getSourcePortId();
 
           // Filter invalid edges: source or target node doesn't exist, or is add-node type
-          if (!sourceCell?.getData()?.id || !targetCell?.getData()?.id || 
-              sourceCell?.getData()?.type === 'add-node' || targetCell?.getData()?.type === 'add-node') {
+          if (!sourceCell?.getData()?.id || !targetCell?.getData()?.id ||
+            sourceCell?.getData()?.type === 'add-node' || targetCell?.getData()?.type === 'add-node') {
             return null;
           }
-          
+
           // If if-else node right port connection, add label
           if (sourceCell?.getData()?.type === 'if-else' && sourcePortId?.startsWith('CASE')) {
             return {
@@ -1271,7 +1314,7 @@ export const useWorkflowGraph = ({
               label: sourcePortId,
             };
           }
-          
+
           // If question-classifier node right port connection, add label
           if (sourceCell?.getData()?.type === 'question-classifier' && sourcePortId?.startsWith('CASE')) {
             return {
@@ -1280,7 +1323,7 @@ export const useWorkflowGraph = ({
               label: sourcePortId,
             };
           }
-          
+
           // If http-request node right port connection, add label
           if (sourceCell?.getData()?.type === 'http-request') {
             if (sourcePortId === 'ERROR') {
@@ -1297,40 +1340,40 @@ export const useWorkflowGraph = ({
               };
             }
           }
-          
+
           return {
             source: sourceCell?.getData().id,
             target: targetCell?.getData().id,
           };
         })
-        .filter(edge => edge !== null)
-        .filter((edge, index, arr) => {
-          // Deduplication: For if-else and question-classifier nodes, different ports can connect to same node
-          return arr.findIndex(e => {
-            if (!e || !edge) return false;
-            const sourceCell = graphRef.current?.getCellById(e.source);
-            const sourceType = sourceCell?.getData()?.type;
-            const isMultiPortNode = sourceType === 'question-classifier' || sourceType === 'if-else';
-            
-            if (isMultiPortNode) {
-              // Multi-port nodes need to compare source, target and label
-              return e.source === edge.source && e.target === edge.target && e.label === edge.label;
-            } else {
-              // Other nodes only compare source and target
-              return e.source === edge.source && e.target === edge.target;
-            }
-          }) === index;
-        }),
+          .filter(edge => edge !== null)
+          .filter((edge, index, arr) => {
+            // Deduplication: For if-else and question-classifier nodes, different ports can connect to same node
+            return arr.findIndex(e => {
+              if (!e || !edge) return false;
+              const sourceCell = graphRef.current?.getCellById(e.source);
+              const sourceType = sourceCell?.getData()?.type;
+              const isMultiPortNode = sourceType === 'question-classifier' || sourceType === 'if-else';
+
+              if (isMultiPortNode) {
+                // Multi-port nodes need to compare source, target and label
+                return e.source === edge.source && e.target === edge.target && e.label === edge.label;
+              } else {
+                // Other nodes only compare source and target
+                return e.source === edge.source && e.target === edge.target;
+              }
+            }) === index;
+          }),
       }
       saveWorkflowConfig(config.app_id, params as WorkflowConfig)
-      .then((res) => {
-        if (flag) {
-          message.success({ content: t('common.saveSuccess'), duration: 1 })
-        }
-        resolve(res)
-      }).catch(error => {
-        reject(error)
-      })
+        .then((res) => {
+          if (flag) {
+            message.success({ content: t('common.saveSuccess'), duration: 1 })
+          }
+          resolve(res)
+        }).catch(error => {
+          reject(error)
+        })
     })
   }
 
@@ -1359,9 +1402,49 @@ export const useWorkflowGraph = ({
       data: { ...cleanNodeData },
     });
   }
+  const getStartNodeVariables = (): Array<{ name: string; type: string; readonly?: boolean }> => {
+    const startNode = graphRef.current?.getNodes().find(n => n.getData()?.type === 'start')
+    if (!startNode) return []
+    const data = startNode.getData()
+    const userVars: Array<{ name: string; type: string; readonly?: boolean }> =
+      (data?.config?.variables?.defaultValue ?? []).map((v: any) => ({ name: v.name, type: v.type }))
+    return userVars
+  }
+
   const handleSaveFeaturesConfig = (value?: FeaturesConfigForm) => {
+    const { statement = '' } = value?.opening_statement || {}
     featuresRef.current = value
     onFeaturesLoad?.(value)
+
+    const usedVars = [...new Set([...(statement?.matchAll(/\{\{(\w+)\}\}/g) ?? [])].map(m => m[1]))]
+    const startVars = getStartNodeVariables()
+    const validNames = new Set(startVars.map(v => v.name))
+    const invalid = usedVars.filter(v => !validNames.has(v))
+    if (invalid.length > 0) {
+      const newVars = invalid.map(name => ({
+        name,
+        description: name,
+        type: 'string',
+        required: true,
+        defaultValue: '',
+      }))
+
+      const startNode = graphRef.current?.getNodes().find(n => n.getData()?.type === 'start')
+      if (startNode) {
+        const data = startNode.getData()
+        console.log('startNode', [...startVars, ...newVars])
+        startNode.setData({
+          ...data,
+          config: {
+            ...data.config,
+            variables: {
+              ...data.config.variables,
+              defaultValue: [...startVars, ...newVars],
+            },
+          },
+        })
+      }
+    }
   }
 
   return {
@@ -1376,6 +1459,7 @@ export const useWorkflowGraph = ({
     setIsHandMode,
     onDrop,
     blankClick,
+    nodeClick,
     deleteEvent,
     copyEvent,
     parseEvent,
@@ -1385,5 +1469,6 @@ export const useWorkflowGraph = ({
     handleAddNotes,
     handleSaveFeaturesConfig,
     features: featuresRef.current,
+    getStartNodeVariables,
   };
 };

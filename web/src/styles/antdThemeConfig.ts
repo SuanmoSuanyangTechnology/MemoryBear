@@ -149,6 +149,9 @@ export const lightTheme: ThemeConfig = {
     },
     Segmented: {
       trackBg: '#E1E2E7',
+    },
+    Pagination: {
+      itemSizeSM: 28,
     }
   }
 };

@@ -453,6 +453,9 @@ async def chat(
         # 流式返回
         agent_config = agent_config_4_app_release(release)
 
+        if not (agent_config.model_parameters.get("deep_thinking", False) and payload.thinking):
+            agent_config.model_parameters["deep_thinking"] = False
+
         if payload.stream:
             async def event_generator():
                 async for event in app_chat_service.agnet_chat_stream(
@@ -634,7 +637,8 @@ async def config_query(
             "app_type": release.app.type,
             "variables": release.config.get("variables"),
             "memory": release.config.get("memory", {}).get("enabled"),
-            "features": release.config.get("features")
+            "features": release.config.get("features"),
+            "model_parameters": release.config.get("model_parameters")
         }
     elif release.app.type == AppType.MULTI_AGENT:
         content = {

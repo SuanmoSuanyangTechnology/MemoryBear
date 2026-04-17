@@ -22,6 +22,7 @@ from app.db import get_db_context
 from app.models import ModelType
 from app.schemas.model_schema import ModelInfo
 from app.services.model_service import ModelConfigService
+from app.models.models_model import ModelProvider
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +127,11 @@ class LLMNode(BaseNode):
 
         # 4. 创建 LLM 实例（使用已提取的数据）
         # 注意：对于流式输出，需要在模型初始化时设置 streaming=True
-        extra_params = {"streaming": stream} if stream else {}
+        extra_params: dict[str, Any] = {"streaming": stream} if stream else {}
+        if self.typed_config.temperature is not None:
+            extra_params["temperature"] = self.typed_config.temperature
+        if self.typed_config.max_tokens is not None:
+            extra_params["max_tokens"] = self.typed_config.max_tokens
 
         llm = RedBearLLM(
             RedBearModelConfig(
@@ -135,7 +140,9 @@ class LLMNode(BaseNode):
                 api_key=model_info.api_key,
                 base_url=model_info.api_base,
                 extra_params=extra_params,
-                is_omni=model_info.is_omni
+                is_omni=model_info.is_omni,
+                capability=model_info.capability,
+                json_output=self.typed_config.json_output,
             ),
             type=model_info.model_type
         )
@@ -213,9 +220,20 @@ class LLMNode(BaseNode):
                 messages = messages[:-1] + history_message + messages[-1:]
             self.messages = messages
         else:
-            # 使用简单的 prompt 格式（向后兼容）
+            # 使用简单的 prompt 格式（向后兼容）——包装为标准消息列表以兼容所有 provider
             prompt_template = self.config.get("prompt", "")
-            self.messages = self._render_template(prompt_template, variable_pool)
+            rendered = self._render_template(prompt_template, variable_pool)
+            self.messages = [{"role": "user", "content": rendered}]
+
+        # ChatTongyi 要求 messages 含 'json' 字样才能使用 response_format，在 system prompt 中注入
+        if (self.typed_config.json_output
+                and model_info.provider.lower() == ModelProvider.DASHSCOPE
+                and not model_info.is_omni):
+            system_msg = next((m for m in self.messages if m["role"] == "system"), None)
+            if system_msg:
+                system_msg["content"] += "\n请以JSON格式输出。"
+            else:
+                self.messages.insert(0, {"role": "system", "content": "请以JSON格式输出。"})
 
         return llm
 
@@ -245,7 +263,10 @@ class LLMNode(BaseNode):
         logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(content)}")
 
         # 返回 AIMessage（包含响应元数据）
-        return AIMessage(content=content, response_metadata=response.response_metadata)
+        return AIMessage(content=content, response_metadata={
+            **response.response_metadata,
+            "token_usage": getattr(response, 'usage_metadata', None) or response.response_metadata.get('token_usage')
+        })
 
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """提取输入数据（用于记录）"""
@@ -304,15 +325,16 @@ class LLMNode(BaseNode):
 
         # 调用 LLM（流式，支持字符串或消息列表）
         last_meta_data = {}
+        last_usage_metadata = {}
         async for chunk in llm.astream(self.messages):
-            # 提取内容
             if hasattr(chunk, 'content'):
                 content = self.process_model_output(chunk.content)
             else:
                 content = str(chunk)
-            if hasattr(chunk, 'response_metadata'):
-                if chunk.response_metadata:
-                    last_meta_data = chunk.response_metadata
+            if hasattr(chunk, 'response_metadata') and chunk.response_metadata:
+                last_meta_data = chunk.response_metadata
+            if hasattr(chunk, 'usage_metadata') and chunk.usage_metadata:
+                last_usage_metadata = chunk.usage_metadata
 
             # 只有当内容不为空时才处理
             if content:
@@ -335,7 +357,10 @@ class LLMNode(BaseNode):
         # 构建完整的 AIMessage（包含元数据）
         final_message = AIMessage(
             content=full_response,
-            response_metadata=last_meta_data
+            response_metadata={
+                **last_meta_data,
+                "token_usage": last_usage_metadata or last_meta_data.get('token_usage')
+            }
         )
 
         # yield 完成标记

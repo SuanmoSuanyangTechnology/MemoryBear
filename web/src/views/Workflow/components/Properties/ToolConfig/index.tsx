@@ -1,6 +1,6 @@
-import { type FC, useEffect, useState } from "react";
+import { type FC, useEffect, useState, useMemo } from "react";
 import { useTranslation } from 'react-i18next'
-import { Form, Select, InputNumber, Switch, Cascader, type CascaderProps, Tooltip } from 'antd'
+import { Form, Select, Switch, Cascader, type CascaderProps, Tooltip } from 'antd'
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
 import { getToolMethods, getToolDetail, getTools } from '@/api/tools'
 import type { ToolType, ToolItem } from '@/views/ToolManagement/types'
@@ -164,6 +164,45 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
     form.setFieldsValue(inititalValue)
   }
 
+  // string -> string
+  // integer -> number
+  // number -> number
+  // boolean -> boolean【只能选true/false】
+  // array -> array[file]/array[object]/array[string]/array[number]/array[boolean]
+  // object -> object/file
+  const getFilterOptions = (type: string) => {
+    const filterList: Suggestion[] = [];
+    options.forEach(vo => {
+      if (vo.children && vo.children?.length > 0) {
+        const childOptions = vo.children?.filter(child => child.dataType === type || (type === 'integer' && child.dataType === 'number'))
+
+        if (vo.dataType === type
+          || (type === 'integer' && vo.dataType === 'number')
+          || (type === 'array' && vo.dataType.includes(type))
+          || (type === 'object' && vo.dataType === 'object')
+        ) {
+          filterList.push({
+            ...vo,
+            children: childOptions
+          })
+        } else if (childOptions.length > 0) {
+          filterList.push({
+            ...vo,
+            disabled: true,
+            children: childOptions
+          })
+        }
+      } else if (vo.dataType === type
+        || (type === 'integer' && vo.dataType === 'number')
+        || (type === 'array' && vo.dataType.includes(type))
+        || (type === 'object' && vo.dataType === 'object')) {
+        filterList.push(vo)
+      }
+    })
+
+    return filterList
+  }
+
   return (
     <>
       <Form.Item
@@ -186,7 +225,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
             <Form.Item
               name={['tool_parameters', parameter.name]}
               label={<>
-                {parameter.name}
+                {parameter.name} <span className="rb:text-[#5B6167] rb:mx-1">({parameter.type})</span>
                 <Tooltip title={parameter.description} placement="right">
                   <div className="rb:size-3 rb:ml-0.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/question.svg')]"></div>
                 </Tooltip>
@@ -201,22 +240,12 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
                 ? <Select size="small" options={parameter.enum.map(vo => ({ value: vo, label: vo }))} placeholder={t('common.pleaseSelect')} />
                 : parameter.type === 'boolean'
                 ? <Switch size="small" />
-                : parameter.type === 'integer' || parameter.type === 'number'
-                ? <InputNumber
-                    min={parameter.minimum}
-                    max={parameter.maximum}
-                    step={parameter.type === 'integer' ? 1 : 0.01}
-                    placeholder={t('common.pleaseEnter')}
-                      className="rb:w-full!"
-                      size="small"
-                    onChange={(value) => form.setFieldValue(['tool_parameters', parameter.name], value)}
-                  />
                 : <Editor
                     variant="outlined"
                     type="input"
                     size="small"
                     height={28}
-                    options={options}
+                    options={getFilterOptions(parameter.type)}
                     placeholder={t('common.pleaseEnter')}
                   />
               }

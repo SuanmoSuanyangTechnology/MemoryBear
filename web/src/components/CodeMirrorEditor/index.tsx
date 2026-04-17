@@ -6,12 +6,14 @@
  */
 import { useEffect, useRef, useMemo } from 'react';
 import { EditorView, basicSetup } from 'codemirror';
+import { placeholder as cmPlaceholder } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
 import { python } from '@codemirror/lang-python';
 import { javascript } from '@codemirror/lang-javascript';
 import { java } from '@codemirror/lang-java';
 import { cpp } from '@codemirror/lang-cpp';
 import { rust } from '@codemirror/lang-rust';
+import { json } from '@codemirror/lang-json';
 import { oneDark } from '@codemirror/theme-one-dark';
 
 /**
@@ -26,12 +28,14 @@ import { oneDark } from '@codemirror/theme-one-dark';
  */
 interface CodeMirrorEditorProps {
   value?: string;
-  language?: 'python' | 'python3' | 'javascript' | 'typescript' | 'java' | 'cpp' | 'c' | 'rust';
+  language?: 'python' | 'python3' | 'javascript' | 'typescript' | 'java' | 'cpp' | 'c' | 'rust' | 'json';
   onChange?: (value: string) => void;
   theme?: 'light' | 'dark';
   readOnly?: boolean;
   height?: string;
   size?: 'default' | 'small';
+  placeholder?: string;
+  variant?: 'outlined' | 'borderless';
 }
 
 /**
@@ -47,6 +51,7 @@ const languageExtensions: Record<string, any> = {
   cpp: cpp(),
   c: cpp(),
   rust: rust(),
+  json: json(),
 };
 
 /**
@@ -61,6 +66,8 @@ const CodeMirrorEditor = ({
   theme = 'light',
   readOnly = false,
   size,
+  placeholder,
+  variant = 'borderless',
 }: CodeMirrorEditorProps) => {
   // Reference to the DOM element that will contain the editor
   const editorRef = useRef<HTMLDivElement>(null);
@@ -88,6 +95,7 @@ const CodeMirrorEditor = ({
         }
       }),
       EditorState.readOnly.of(readOnly), // Set read-only mode
+      ...(placeholder ? [cmPlaceholder(placeholder)] : []),
     ];
 
     // Apply dark theme if specified
@@ -111,7 +119,7 @@ const CodeMirrorEditor = ({
     return () => {
       viewRef.current?.destroy();
     };
-  }, [language, theme, readOnly]);
+  }, [language, theme, readOnly, placeholder]);
 
   /**
    * Update editor content when the value prop changes externally
@@ -144,7 +152,13 @@ const CodeMirrorEditor = ({
     return `${size === 'small' ? 16 : 20}px`
   }, [size])
 
-  return <div ref={editorRef} style={{ minHeight, fontSize, lineHeight }} />;
+  return (
+    <div
+      ref={editorRef}
+      style={{ minHeight, fontSize, lineHeight }}
+      className={variant === 'borderless' ? '' : 'rb-border rb:rounded-[8px]'}
+    />
+  );
 };
 
 export default CodeMirrorEditor;

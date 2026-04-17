@@ -197,7 +197,7 @@ const WorkingDetail: FC = () => {
               </RbCard>
             </Col>
             {selected && <>
-              <Col flex="auto" className="rb:h-full!">
+              <Col flex="1" className="rb:h-full!">
                 <RbCard
                   title={selected.title}
                   headerType="borderless"

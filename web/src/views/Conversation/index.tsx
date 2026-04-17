@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 16:24:47
+ * @Last Modified time: 2026-04-13 18:32:58
  */
 /**
  * Conversation Page
@@ -178,10 +178,11 @@ const Conversation: FC = () => {
           }))
         })
     } else {
-      if (features?.opening_statement?.statement) {
+      if (features?.opening_statement?.enabled && features?.opening_statement?.statement) {
+        const variables = toolbarRef.current?.getVariables() || []
         setChatList([{
           role: 'assistant',
-          content: features.opening_statement.statement,
+          content: replaceVariables(features?.opening_statement.statement, variables as unknown as AppVariable[]),
           created_at: Date.now(),
           meta_data: {
             suggested_questions: features.opening_statement?.suggested_questions
@@ -396,7 +397,10 @@ const Conversation: FC = () => {
           return {
             type: file.type,
             transfer_method: 'local_file',
-            upload_file_id: file.response.data.file_id
+            upload_file_id: file.response.data.file_id,
+            file_type: file.response.data.file_type,
+            size: file.response.data.file_size,
+            name: file.response.data.file_name
           }
         }
       }),
@@ -435,15 +439,15 @@ const Conversation: FC = () => {
   const handleChangeVariables = (variables: Variable[]) => {
     setChatList(prev => {
       const firstMsg = prev[0]
-      console.log('firstMsg', firstMsg)
-      if (firstMsg && firstMsg.role === 'assistant' && firstMsg.content && features?.opening_statement.enabled && features?.opening_statement.statement && variables.length > 0) {
+      if (firstMsg && firstMsg.role === 'assistant' && firstMsg.content && features?.opening_statement?.enabled && features?.opening_statement.statement && variables.length > 0) {
         firstMsg.content = replaceVariables(features?.opening_statement.statement, variables as unknown as AppVariable[])
+        return [firstMsg, ...prev.slice(1)]
       }
-      return [firstMsg, ...prev.slice(1)]
+      return prev
     })
   }
 
-  console.log('chatList', chatList, streamLoadingRef.current)
+  console.log('chatList', fileList, streamLoadingRef.current)
 
   return (
     <Flex className="rb:w-full rb:p-[-16px]!">

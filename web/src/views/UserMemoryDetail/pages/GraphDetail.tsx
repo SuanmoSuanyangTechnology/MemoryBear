@@ -104,7 +104,7 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
           <Space size={12}>
             <Button
               className="rb:px-2! rb:gap-0.5!"
-              icon={<div className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/return.svg')]"></div>}
+              icon={<div className="rb:bg-[url('@/assets/images/workflow/return.svg')] rb:size-4 rb:bg-cover"></div>}
               onClick={() => navigate(-1)}
             >
               {t('common.return')}

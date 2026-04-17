@@ -43,8 +43,9 @@ Each statement must be labeled as per the criteria mentioned below.
 
 对话上下文和共指消解：
 - 将每个陈述句归属于说出它的参与者。
-- 如果参与者列表为说话者提供了名称（例如，"李雪（用户）"），请在提取的陈述句中使用具体名称（"李雪"），而不是通用角色（"用户"）。
-- 将所有代词解析为对话上下文中的具体人物或实体。
+- **对于用户的发言：必须使用"用户"作为主语**，禁止将"用户"或"我"替换为用户的真实姓名或别名。例如，用户说"我叫张三"应提取为"用户叫张三"，而不是"张三叫张三"。
+- 对于 AI 助手的发言：使用"助手"或"AI助手"作为主语。
+- 将所有代词解析为对话上下文中的具体人物或实体，但"我"必须解析为"用户"。
 - 识别并将抽象引用解析为其具体名称（如果提到）。
 - 将缩写和首字母缩略词扩展为其完整形式。
 {% else %}
@@ -68,8 +69,9 @@ Context Resolution Requirements:
 
 Conversational Context & Co-reference Resolution:
 - Attribute every statement to the participant who uttered it.
-- If the participant list provides a name for a speaker (e.g., "李雪 (用户)"), use the specific name ("李雪") in the extracted statement, not the generic role ("用户").
-- Resolve all pronouns to the specific person or entity from the conversation's context.
+- **For user's statements: always use "用户" (User) as the subject**. Do NOT replace "用户" or "I" with the user's real name or alias. For example, if the user says "I'm John", extract as "用户 is John", not "John is John".
+- For AI assistant's statements: use "助手" or "AI助手" as the subject.
+- Resolve all pronouns to the specific person or entity from the conversation's context, but "I"/"我" must always resolve to "用户".
 - Identify and resolve abstract references to their specific names if mentioned.
 - Expand abbreviations and acronyms to their full form.
 {% endif %}
@@ -139,13 +141,13 @@ AI: "水彩画很有趣！水彩颜料通常由颜料与阿拉伯树胶等粘合
 示例输出: {
   "statements": [
     {
-      "statement": "Sarah Chen 最近一直在尝试水彩画。",
+      "statement": "用户最近一直在尝试水彩画。",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
       "relevance": "RELEVANT"
     },
     {
-      "statement": "Sarah Chen 画了一些花朵。",
+      "statement": "用户画了一些花朵。",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
       "relevance": "RELEVANT"
@@ -157,13 +159,13 @@ AI: "水彩画很有趣！水彩颜料通常由颜料与阿拉伯树胶等粘合
       "relevance": "IRRELEVANT"
     },
     {
-      "statement": "Sarah Chen 认为她的水彩画中的色彩组合可以改进。",
+      "statement": "用户认为她的水彩画中的色彩组合可以改进。",
       "statement_type": "OPINION",
       "temporal_type": "STATIC",
       "relevance": "RELEVANT"
     },
     {
-      "statement": "Sarah Chen 真的很喜欢玫瑰和百合。",
+      "statement": "用户真的很喜欢玫瑰和百合。",
       "statement_type": "FACT",
       "temporal_type": "STATIC",
       "relevance": "RELEVANT"
@@ -186,13 +188,13 @@ AI: "水彩画很有趣！水彩颜料通常由颜料和阿拉伯树胶等粘合
 示例输出: {
   "statements": [
     {
-      "statement": "张曼婷最近在尝试水彩画。",
+      "statement": "用户最近在尝试水彩画。",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
       "relevance": "RELEVANT"
     },
     {
-      "statement": "张曼婷画了一些花朵。",
+      "statement": "用户画了一些花朵。",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
       "relevance": "RELEVANT"
@@ -204,13 +206,13 @@ AI: "水彩画很有趣！水彩颜料通常由颜料和阿拉伯树胶等粘合
       "relevance": "IRRELEVANT"
     },
     {
-      "statement": "张曼婷觉得水彩画的色彩搭配还有提升的空间。",
+      "statement": "用户觉得水彩画的色彩搭配还有提升的空间。",
       "statement_type": "OPINION",
       "temporal_type": "STATIC",
       "relevance": "RELEVANT"
     },
     {
-      "statement": "张曼婷很喜欢玫瑰和百合。",
+      "statement": "用户很喜欢玫瑰和百合。",
       "statement_type": "FACT",
       "temporal_type": "STATIC",
       "relevance": "RELEVANT"
@@ -233,13 +235,13 @@ User: "I think the color combinations could use some improvement, but I really l
 Example Output: {
   "statements": [
     {
-      "statement": "Sarah Chen has been trying watercolor painting recently.",
+      "statement": "用户 has been trying watercolor painting recently.",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
       "relevance": "RELEVANT"
     },
     {
-      "statement": "Sarah Chen painted some flowers.",
+      "statement": "用户 painted some flowers.",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
       "relevance": "RELEVANT"
@@ -251,13 +253,13 @@ Example Output: {
       "relevance": "IRRELEVANT"
     },
     {
-      "statement": "Sarah Chen thinks the color combinations in her watercolor paintings could use some improvement.",
+      "statement": "用户 thinks the color combinations in her watercolor paintings could use some improvement.",
       "statement_type": "OPINION",
       "temporal_type": "STATIC",
       "relevance": "RELEVANT"
     },
     {
-      "statement": "Sarah Chen really likes roses and lilies.",
+      "statement": "用户 really likes roses and lilies.",
       "statement_type": "FACT",
       "temporal_type": "STATIC",
       "relevance": "RELEVANT"
@@ -280,13 +282,13 @@ AI: "水彩画很有趣！水彩颜料通常由颜料和阿拉伯树胶等粘合
 Example Output: {
   "statements": [
     {
-      "statement": "张曼婷最近在尝试水彩画。",
+      "statement": "用户最近在尝试水彩画。",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
       "relevance": "RELEVANT"
     },
     {
-      "statement": "张曼婷画了一些花朵。",
+      "statement": "用户画了一些花朵。",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
       "relevance": "RELEVANT"
@@ -298,13 +300,13 @@ Example Output: {
       "relevance": "IRRELEVANT"
     },
     {
-      "statement": "张曼婷觉得水彩画的色彩搭配还有提升的空间。",
+      "statement": "用户觉得水彩画的色彩搭配还有提升的空间。",
       "statement_type": "OPINION",
       "temporal_type": "STATIC",
       "relevance": "RELEVANT"
     },
     {
-      "statement": "张曼婷很喜欢玫瑰和百合。",
+      "statement": "用户很喜欢玫瑰和百合。",
       "statement_type": "FACT",
       "temporal_type": "STATIC",
       "relevance": "RELEVANT"

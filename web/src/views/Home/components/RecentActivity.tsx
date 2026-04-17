@@ -15,10 +15,6 @@ import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { Skeleton, Flex } from 'antd';
 
-import chunkCountIcon from '@/assets/images/home/chunk_count.svg';
-import statementsCountIcon from '@/assets/images/home/statements_count.svg';
-import tripletCountIcon from '@/assets/images/home/triplet_count.svg';
-import temporalCountIcon from '@/assets/images/home/temporal_count.svg';
 import activityEmpty from '@/assets/images/home/ActivityEmpty.svg'
 import Empty from '@/components/Empty';
 import Card from './Card';
@@ -49,10 +45,10 @@ interface RecentActivities {
 
 /** Activity list configuration */
 const activityList = [
-  { key: 'chunk_count', icon: chunkCountIcon },
-  { key: 'statements_count', icon: statementsCountIcon },
-  { key: 'triplet_count', icon: tripletCountIcon },
-  { key: 'temporal_count', icon: temporalCountIcon },
+  { key: 'chunk_count', iconClass: "rb:bg-[url('@/assets/images/home/chunk_count.svg')]" },
+  { key: 'statements_count', iconClass: "rb:bg-[url('@/assets/images/home/statements_count.svg')]" },
+  { key: 'triplet_count', iconClass: "rb:bg-[url('@/assets/images/home/triplet_count.svg')]" },
+  { key: 'temporal_count', iconClass: "rb:bg-[url('@/assets/images/home/temporal_count.svg')]" },
 ]
 
 const RecentActivity:FC = () => {
@@ -89,7 +85,7 @@ const RecentActivity:FC = () => {
           {activityList.map((item) => (
             <Flex key={item.key} align="center" justify="space-between" className={clsx("rb:not-italic")}>
               <Flex align="center" gap={20}>
-                <img className="rb:size-10" src={item.icon} />
+                <div className={clsx("rb:size-6 rb:bg-cover", item.iconClass)}></div>
                 <div>
                   <div className="rb:text-[16px] rb:leading-5.5 rb:font-medium">{t(`dashboard.${item.key}`)}</div>
                   <div className="rb:text-[#7B8085] rb:text-[14px] rb:font-regular rb:mt-1 rb:leading-4.5">

@@ -5,7 +5,7 @@
  * @Last Modified time: 2026-03-30 15:14:02
  */
 import { useEffect, useState } from 'react';
-import { Popover } from 'antd';
+import { Flex, Popover } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { nodeLibrary, graphNodeLibrary, edgeAttrs, nodeWidth } from '../constant';
 
@@ -34,9 +34,12 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
     };
 
     window.addEventListener('port:click', handlePortClick as EventListener);
+    const handleBlankClick = () => handlePopoverClose();
+    window.addEventListener('blank:click', handleBlankClick);
     
     return () => {
       window.removeEventListener('port:click', handlePortClick as EventListener);
+      window.removeEventListener('blank:click', handleBlankClick);
     };
   }, []);
 
@@ -188,38 +191,39 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
     setTimeout(() => {
       const newPorts = newNode.getPorts();
 
+      const addedEdges: any[] = [];
       if (edgeInsertion) {
         // Edge insertion: create source→new and new→target edges
         const { targetCell, targetPort: origTargetPort } = edgeInsertion;
         const newLeftPort = newPorts.find((p: any) => p.group === 'left')?.id || 'left';
         const newRightPort = newPorts.find((p: any) => p.group === 'right')?.id || 'right';
-        graph.addEdge({
+        addedEdges.push(graph.addEdge({
           source: { cell: sourceNode.id, port: sourcePort },
           target: { cell: newNode.id, port: newLeftPort },
           ...edgeAttrs
-        });
-        graph.addEdge({
+        }));
+        addedEdges.push(graph.addEdge({
           source: { cell: newNode.id, port: newRightPort },
           target: { cell: targetCell.id, port: origTargetPort },
           ...edgeAttrs
-        });
+        }));
         setEdgeInsertion(null);
       } else if (sourcePortGroup === 'left') {
         // Connect from left port to new node's right side
         const targetPort = newPorts.find((port: any) => port.group === 'right')?.id || 'right';
-        graph.addEdge({
+        addedEdges.push(graph.addEdge({
           source: { cell: newNode.id, port: targetPort },
           target: { cell: sourceNode.id, port: sourcePort },
           ...edgeAttrs
-        });
+        }));
       } else {
         // Connect from right port to new node's left side
         const targetPort = newPorts.find((port: any) => port.group === 'left')?.id || 'left';
-        graph.addEdge({
+        addedEdges.push(graph.addEdge({
           source: { cell: sourceNode.id, port: sourcePort },
           target: { cell: newNode.id, port: targetPort },
           ...edgeAttrs
-        });
+        }));
       }
       
       // Adjust loop node size when child node is added via port within loop node
@@ -266,6 +270,44 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
           });
         }
       }
+
+      const isCycleContainer = (type: string) => type === 'loop' || type === 'iteration';
+      const newNodeType = selectedNodeType.type;
+
+      // Helper: bring all child nodes and their edges of a cycle container to front
+      const bringCycleChildrenToFront = (cycleContainerId: string) => {
+        
+        graph.getEdges().forEach((e: any) => {
+          const src = graph.getCellById(e.getSourceCellId());
+          const tgt = graph.getCellById(e.getTargetCellId());
+          if (src?.getData()?.cycle === cycleContainerId || tgt?.getData()?.cycle === cycleContainerId) e.toFront();
+        });
+        graph.getNodes().forEach((n: any) => {
+          if (n.getData()?.cycle === cycleContainerId) n.toFront();
+        });
+      };
+
+      if (isCycleContainer(sourceNodeType)) {
+        console.log('isCycleContainer(sourceNodeType)')
+        // Case 4: source is a loop/iteration node — bring new node to front, then its children
+        newNode.toFront();
+        sourceNode.toFront();
+        bringCycleChildrenToFront(sourceNodeData.id);
+      } else if (isCycleContainer(newNodeType)) {
+        console.log('isCycleContainer(newNodeType)')
+        // Case 3: adding a loop/iteration node from a normal node — bring new node to front, then its children
+        newNode.toFront();
+        sourceNode.toFront()
+        bringCycleChildrenToFront(id);
+      } else {
+        // Case 2: normal node → normal node
+        addedEdges.forEach(e => {
+          const src = graph.getCellById(e.getSourceCellId());
+          const tgt = graph.getCellById(e.getTargetCellId());
+          if (src?.isNode()) src.toFront();
+          if (tgt?.isNode()) tgt.toFront();
+        });
+      }
     }, 50);
 
     // Clean up temporary element
@@ -286,21 +328,16 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
   };
 
   const content = (
-    <div style={{ maxHeight: '300px', overflowY: 'auto', minWidth: `${nodeWidth}px` }}>
-      {nodeLibrary.map((category, categoryIndex) => {
+    <Flex vertical gap={16} className="rb:max-h-75 rb:overflow-y-auto rb:p-3" style={{ minWidth: `${nodeWidth}px` }}>
+      {nodeLibrary.map((category) => {
         const sourceNodeData = sourceNode?.getData();
         const isChildOfLoop = sourceNodeData?.cycle && graph?.getNodes().find((n: any) => n.getData()?.id === sourceNodeData.cycle && n.getData()?.type === 'loop');
         const isChildOfIteration = sourceNodeData?.cycle && graph?.getNodes().find((n: any) => n.getData()?.id === sourceNodeData.cycle && n.getData()?.type === 'iteration');
 
         let filteredNodes;
-        if (isChildOfLoop) {
-        // Use same filtering as AddNode for child nodes of loop, but allow break
-          filteredNodes = category.nodes.filter(nodeType => !['start', 'end', 'loop', 'cycle-start', 'iteration'].includes(nodeType.type));
-        } else if (isChildOfIteration) {
-          // Filter out loop and iteration nodes for children of iteration nodes, but allow break
+        if (isChildOfLoop || isChildOfIteration) {
           filteredNodes = category.nodes.filter(nodeType => !['start', 'end', 'loop', 'cycle-start', 'iteration'].includes(nodeType.type));
         } else {
-          // Original filtering for non-loop child nodes
           filteredNodes = category.nodes.filter(nodeType =>
             nodeType.type !== 'start' && nodeType.type !== 'cycle-start' && nodeType.type !== 'break'
           );
@@ -310,36 +347,27 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
         
         return (
           <div key={category.category}>
-            {categoryIndex > 0 && <div style={{ height: '1px', background: '#f0f0f0', margin: '4px 0' }} />}
-            <div style={{ padding: '4px 12px', fontSize: '12px', color: '#999', fontWeight: 'bold' }}>
+            <div className="rb:font-semibold rb:mb-2 rb:text-[12px] rb:leading-4.5 rb:pl-1">
               {t(`workflow.${category.category}`)}
             </div>
-            {filteredNodes.map((nodeType) => (
-              <div
-                key={nodeType.type}
-                style={{
-                  padding: '8px 12px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                }}
-                onClick={() => handleNodeSelect(nodeType)}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#f0f8ff';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'white';
-                }}
-              >
-                <img src={nodeType.icon} className="rb:w-4 rb:h-4" />
-                <span style={{ fontSize: '14px' }}>{t(`workflow.${nodeType.type}`)}</span>
-              </div>
-            ))}
+            <Flex gap={6} vertical>
+              {filteredNodes.map((nodeType) => (
+                <Flex
+                  key={nodeType.type}
+                  align="center"
+                  gap={8}
+                  className="rb:rounded-xl rb:p-2! rb:border rb:border-[#EBEBEB] rb:cursor-pointer rb:hover:border rb:hover:border-[#171719]!"
+                  onClick={() => handleNodeSelect(nodeType)}
+                >
+                  <div className={`rb:size-6 rb:bg-cover ${nodeType.icon}`} />
+                  <span className="rb:font-medium rb:text-[12px] rb:leading-4">{t(`workflow.${nodeType.type}`)}</span>
+                </Flex>
+              ))}
+            </Flex>
           </div>
         );
       })}
-    </div>
+    </Flex>
   );
 
   if (!tempElement) return null;

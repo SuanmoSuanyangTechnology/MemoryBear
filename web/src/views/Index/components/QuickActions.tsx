@@ -2,13 +2,9 @@ import { type FC } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Flex } from 'antd'
 
-import modelIcon from '@/assets/images/index/model_mgt.svg'
-import spaceIcon from '@/assets/images/index/space_mgt.svg'
-import userIcon from '@/assets/images/index/user_mgt.svg'
-import helpCenterIcon from '@/assets/images/index/help_center.svg'
 interface QuickAction {
   key: string;
-  icon: string;
+  iconClass: string;
   title: string;
   onClick?: () => void;
 }
@@ -40,50 +36,25 @@ const QuickActions: FC<QuickActionsProps> = ({ onNavigate }) => {
   const quickActions: QuickAction[] = [
     {
       key: 'model-management',
-      icon: modelIcon,
+      iconClass: "rb:bg-[url('@/assets/images/index/model_mgt.svg')]",
       title: t('quickActions.modelManagement'),
       onClick: () => onNavigate?.('/model')
     },
     {
       key: 'space-management',
-      icon: spaceIcon,
+      iconClass: "rb:bg-[url('@/assets/images/index/space_mgt.svg')]",
       title: t('quickActions.spaceManagement'),
       onClick: () => onNavigate?.('/space')
     },
-    // {
-    //   key: 'workflow-orchestration', 
-    //   icon: workflowIcon,
-    //   title: t('quickActions.workflowOrchestration'),
-    //   onClick: () => onNavigate?.('/workflow')
-    // },
     {
       key: 'user-management',
-      icon: userIcon,
+      iconClass: "rb:bg-[url('@/assets/images/index/user_mgt.svg')]",
       title: t('quickActions.userManagement'),
       onClick: () => onNavigate?.('/user-management')
     },
-    // {
-    //   key: 'data-export',
-    //   icon: dataExportIcon,
-    //   title: t('quickActions.dataExport'),
-    //   onClick: () => onNavigate?.('/')
-    // },
-    // {
-    //   key: 'log-query',
-    //   icon: logIcon,
-    //   title: t('quickActions.logQuery'),
-    //   onClick: () => onNavigate?.('/log')
-    // },
-    // {
-    //   key: 'notification-reminder', 
-    //   icon: noteIcon,
-    //   title: t('quickActions.notificationReminder'),
-    //   onClick: () => onNavigate?.('/notification-reminder')
-    // },
-
     {
       key: 'help-center',
-      icon: helpCenterIcon,
+      iconClass: "rb:bg-[url('@/assets/images/index/help_center.svg')]",
       title: t('quickActions.helpCenter'),
       onClick: openHelpCenter
     }
@@ -105,7 +76,7 @@ const QuickActions: FC<QuickActionsProps> = ({ onNavigate }) => {
             className="rb:cursor-pointer"
             onClick={action.onClick}
           >
-            <img src={action.icon} className='rb:size-10 rb:mx-auto' />
+            <div className={`rb:size-10 rb:mx-auto ${action.iconClass}`}></div>
             <div className="rb:text-[12px] rb:max-w-18.25 rb:text-[#5B6167] rb:text-center rb:leading-3.5">
               {action.title}
             </div>

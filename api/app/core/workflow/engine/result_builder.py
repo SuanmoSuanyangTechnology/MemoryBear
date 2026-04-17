@@ -59,6 +59,9 @@ class WorkflowResultBuilder:
             conversation_vars = variable_pool.get_all_conversation_vars()
             sys_vars = variable_pool.get_all_system_vars()
 
+        # 汇总所有 knowledge 节点的 citations
+        citations = self.aggregate_citations(node_outputs)
+
         return {
             "status": "completed" if success else "failed",
             "output": final_output,
@@ -71,8 +74,24 @@ class WorkflowResultBuilder:
             "conversation_id": execution_context.conversation_id,
             "elapsed_time": elapsed_time,
             "token_usage": token_usage,
+            "citations": citations,
             "error": result.get("error"),
         }
+
+    @staticmethod
+    def aggregate_citations(node_outputs: dict) -> list:
+        """从所有 knowledge 节点的输出中汇总 citations，去重"""
+        seen = set()
+        citations = []
+        for node_output in node_outputs.values():
+            if not isinstance(node_output, dict):
+                continue
+            for c in node_output.get("citations", []):
+                key = c.get("document_id")
+                if key and key not in seen:
+                    seen.add(key)
+                    citations.append(c)
+        return citations
 
     @staticmethod
     def aggregate_token_usage(node_outputs: dict) -> dict[str, int] | None:

@@ -14,7 +14,7 @@ const caculateIsSet = (item: any, type: string) => {
     case 'cases': {
       if (!item.left) return false
       if (['not_empty', 'empty'].includes(item.operator)) return true
-      return !!item.left && (!!item.right || typeof item.right === 'boolean')
+      return !!item.left && (!!item.right || typeof item.right === 'boolean' || typeof item.right === 'number')
     }
   }
 }
@@ -22,7 +22,7 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
   const data = node?.getData() || {};
   const { t } = useTranslation()
   const graphRef = useRef(node?.model?.graph)
-  const variableList = useVariableList(node ?? null, graphRef, [])
+  const variableList = useVariableList(node ?? null, graphRef, data.chatVariables ?? [])
 
   const getLocaleField = (field: string, filedType: string) => {
     const key = filedType === 'boolean' ? `workflow.config.if-else..boolean.${field}` : filedType === 'number' ? `workflow.config.if-else.num.${field}` : `workflow.config.if-else.${field}`
@@ -31,6 +31,8 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
   };
   const labelRender = (value: string) => {
     const filterOption = variableList.find(vo => `{{${vo.value}}}` === value)
+      ?? variableList.flatMap(vo => vo.children ?? []).find(child => `{{${child.value}}}` === value)
+      ?? variableList.flatMap(vo => vo.children ?? []).flatMap((child: any) => child.children ?? []).find((grandchild: any) => `{{${grandchild.value}}}` === value)
 
     if (filterOption) {
       return (
@@ -52,7 +54,7 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
     })}>
       <NodeTools node={node} />
       <Flex align="center" gap={8} className="rb:flex-1">
-        <img src={data.icon} className="rb:size-6" />
+        <div className={`rb:size-6 rb:bg-cover ${data.icon}`} />
         <div className="rb:wrap-break-word rb:line-clamp-1">{data.name ?? t(`workflow.${data.type}`)}</div>
       </Flex>
 

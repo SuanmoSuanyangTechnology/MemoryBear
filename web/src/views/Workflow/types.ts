@@ -31,6 +31,7 @@ export interface NodeConfig {
   group_variables?: Array<{ key: string, value: string[] }>
   cycle?: string;
   cycle_vars?: Array<{ name: string; type: string; value: string; input_type: string; }>
+  required?: boolean;
   [key: string]: unknown;
 }
 
@@ -108,7 +109,7 @@ export interface ChatVariable {
   required: boolean;
   description: string;
   default?: string;
-  defaultValue: string;
+  defaultValue: string | any[];
 }
 export interface AddChatVariableRef {
   handleOpen: (value?: ChatVariable) => void;

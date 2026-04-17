@@ -81,7 +81,7 @@ class ModelConfig(BaseModel):
     
     # 模型配置参数
     capability = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
-                        comment="模型能力列表（如['vision', 'audio', 'video']）")
+                        comment="模型能力列表（如['vision', 'audio', 'video', 'thinking']）")
     is_omni = Column(Boolean, default=False, nullable=False, server_default="false", comment="是否为Omni模型（使用特殊API调用）")
     config = Column(JSON, comment="模型配置参数")
     # - temperature : 控制生成文本的随机性。值越高，输出越随机、越有创造性；值越低，输出越确定、越保守。

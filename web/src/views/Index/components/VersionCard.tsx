@@ -3,8 +3,8 @@
  * @Version: 0.0.1
  * @Author: yujiangping
  * @Date: 2026-01-12 16:34:59
- * @LastEditors: yujiangping
- * @LastEditTime: 2026-01-23 19:07:36
+ * @LastEditors: ZhaoYing
+ * @LastEditTime: 2026-04-02 10:36:37 
  */
 import React, { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +13,7 @@ import { Flex } from 'antd';
 import { getVersion, type versionResponse } from '@/api/common'
 import Empty from '@/components/Empty';
 import { useI18n } from '@/store/locale';
+import { formatDateTime } from '@/utils/format'
 
 const VersionCard: React.FC = () => {
   const { t } = useTranslation();
@@ -51,18 +52,18 @@ const VersionCard: React.FC = () => {
       {introduction
         ? (<>  
           <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:mt-1 rb:mb-2">
-            {t('version.releaseDate')}: {introduction.releaseDate} | {t('version.name')}: {introduction.codeName}
+            {t('version.releaseDate')}: {formatDateTime(introduction.releaseDate, 'YYYY-MM-DD')} | {t('version.name')}: {introduction.codeName}
           </div>
           <div className="rb:max-h-76 rb:overflow-y-auto">
             <p
               className='rb:text-[12px] rb:leading-4.5'
-              dangerouslySetInnerHTML={{ __html: introduction.upgradePosition }}
+              dangerouslySetInnerHTML={{ __html: introduction.upgradePosition?.replace(/\n/g, '<br>') }}
             />
             {introduction.coreUpgrades?.map((item: string, index: number) => (
               <p
                 key={index}
                 className='rb:text-[12px] rb:leading-4.5 rb:mt-2'
-                dangerouslySetInnerHTML={{ __html: item }}
+                dangerouslySetInnerHTML={{ __html: item?.replace(/\n/g, '<br>') }}
               />
             ))}
           </div>

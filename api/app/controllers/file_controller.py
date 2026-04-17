@@ -19,6 +19,7 @@ from app.models.user_model import User
 from app.schemas import file_schema, document_schema
 from app.schemas.response_schema import ApiResponse
 from app.services import file_service, document_service
+from app.core.quota_stub import check_knowledge_capacity_quota
 
 
 # Obtain a dedicated API logger
@@ -131,6 +132,7 @@ async def create_folder(
 
 
 @router.post("/file", response_model=ApiResponse)
+@check_knowledge_capacity_quota
 async def upload_file(
         kb_id: uuid.UUID,
         parent_id: uuid.UUID,

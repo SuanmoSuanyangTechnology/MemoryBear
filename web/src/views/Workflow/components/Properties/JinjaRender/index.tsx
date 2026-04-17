@@ -34,15 +34,23 @@ const JinjaRender: FC<JinjaRenderProps> = ({ selectedNode, options, templateOpti
   const prevMappingNamesRef = useRef<string[]>([])
   const prevTemplateVarsRef = useRef<string[]>([])
   const isSyncingRef = useRef(false)
-  const lastSyncSourceRef = useRef<'mapping' | 'template' | null>(null)
   const editorKeyRef = useRef(0)
+  const insertedVarsRef = useRef<Set<string>>(new Set())
+
+  // Collect variables inserted via autocomplete
+  useEffect(() => {
+    const handler = (e: Event) => {
+      insertedVarsRef.current.add((e as CustomEvent).detail.value)
+    }
+    document.addEventListener('jinja2-variable-inserted', handler)
+    return () => document.removeEventListener('jinja2-variable-inserted', handler)
+  }, [])
 
   // Reset refs when node changes
   useEffect(() => {
     if (selectedNode?.getData()?.id) {
       prevMappingNamesRef.current = []
       prevTemplateVarsRef.current = []
-      lastSyncSourceRef.current = null
     }
   }, [selectedNode?.getData()?.id])
 
@@ -50,7 +58,6 @@ const JinjaRender: FC<JinjaRenderProps> = ({ selectedNode, options, templateOpti
   useEffect(() => {
     if (
       isSyncingRef.current ||
-      lastSyncSourceRef.current === 'mapping' ||
       selectedNode?.data?.type !== 'jinja-render' ||
       !values?.mapping ||
       !values?.template
@@ -81,95 +88,63 @@ const JinjaRender: FC<JinjaRenderProps> = ({ selectedNode, options, templateOpti
 
     if (updatedTemplate !== form.getFieldValue('template')) {
       isSyncingRef.current = true
-      lastSyncSourceRef.current = 'mapping'
-      
       prevTemplateVarsRef.current = extractTemplateVars(updatedTemplate)
       prevMappingNamesRef.current = currentMappingNames
       form.setFieldValue('template', updatedTemplate)
       editorKeyRef.current++
 
-      setTimeout(() => {
-        isSyncingRef.current = false
-        lastSyncSourceRef.current = null
-      }, 0)
+      setTimeout(() => { isSyncingRef.current = false }, 0)
     } else {
       prevMappingNamesRef.current = currentMappingNames
     }
   }, [values?.mapping, selectedNode?.data?.type, form])
 
-  // Sync mapping when template variables change
+  // Track template vars; add mapping only for autocomplete-inserted variables
   useEffect(() => {
-    if (
-      isSyncingRef.current ||
-      lastSyncSourceRef.current === 'template' ||
-      selectedNode?.data?.type !== 'jinja-render' ||
-      !values?.template ||
-      !values?.mapping
-    ) return
+    if (isSyncingRef.current || selectedNode?.data?.type !== 'jinja-render' || !values?.template) return
 
     const templateVars = extractTemplateVars(String(values.template))
-    if (JSON.stringify(prevTemplateVarsRef.current) === JSON.stringify(templateVars)) return
+    const prevVars = prevTemplateVarsRef.current
 
-    const isTemplateEditor = document.activeElement?.closest('[data-editor-type="template"]')
-    if (!isTemplateEditor) {
-      prevTemplateVarsRef.current = templateVars
-      return
-    }
+    if (JSON.stringify(prevVars) === JSON.stringify(templateVars)) return
+
+    const newVars = templateVars.filter(v => !prevVars.includes(v))
+    const insertedNew = newVars.filter(v => insertedVarsRef.current.has(v))
+    insertedVarsRef.current.clear()
+
+    prevTemplateVarsRef.current = templateVars
+
+    if (insertedNew.length === 0 || !values?.mapping) return
 
     const updatedMapping: MappingItem[] = Array.isArray(values.mapping)
       ? [...values.mapping.filter((item: MappingItem) => item)]
       : []
-    const existingNames = getMappingNames(updatedMapping)
     let updatedTemplate = String(values.template)
 
-    // Update existing mapping names based on position
-    if (prevTemplateVarsRef.current.length > 0) {
-      prevTemplateVarsRef.current.forEach((oldVar, index) => {
-        const newVar = templateVars[index]
-        if (newVar && oldVar !== newVar && updatedMapping[index]) {
-          updatedMapping[index] = { ...updatedMapping[index], name: newVar }
-        }
-      })
-    }
-
-    // Add new mappings and normalize template
-    templateVars.forEach(varName => {
-      const existingMapping = updatedMapping.find(item => item.value === `{{${varName}}}`)
-      const regex = new RegExp(`{{\\s*${varName.replace(/\./g, '\\.')}\\s*}}`, 'g')
-
-      if (existingMapping) {
-        updatedTemplate = updatedTemplate.replace(regex, `{{${existingMapping.name}}}`)
-      } else if (!existingNames.includes(varName)) {
-        const mappingName = varName.includes('.') ? varName.split('.').pop() || varName : varName
-        updatedMapping.push({ name: mappingName, value: `{{${varName}}}` })
-        updatedTemplate = updatedTemplate.replace(regex, `{{${mappingName}}}`)
+    insertedNew.forEach(varName => {
+      const alreadyExists = updatedMapping.some(item => item.value === `{{${varName}}}`)
+      const baseName = varName.includes('.') ? varName.split('.').pop()! : varName
+      const regex = new RegExp(`{{\\s*${varName.replace(/\./, '\\.')}\\s*}}`, 'g')
+      if (alreadyExists) {
+        const existing = updatedMapping.find(item => item.value === `{{${varName}}}`)!
+        updatedTemplate = updatedTemplate.replace(regex, `{{${existing.name}}}`)
+        return
       }
-    })
-
-    // Remove duplicates only
-    const seenNames = new Set<string>()
-    const finalMapping = updatedMapping.filter(item => {
-      if (!item.name || seenNames.has(item.name)) return false
-      seenNames.add(item.name)
-      return true
+      const usedNames = getMappingNames(updatedMapping)
+      let mappingName = baseName
+      let counter = 1
+      while (usedNames.includes(mappingName)) mappingName = `${baseName}_${counter++}`
+      updatedMapping.push({ name: mappingName, value: `{{${varName}}}` })
+      updatedTemplate = updatedTemplate.replace(regex, `{{${mappingName}}}`)
     })
 
     isSyncingRef.current = true
-    lastSyncSourceRef.current = 'template'
-    prevMappingNamesRef.current = getMappingNames(finalMapping)
-    prevTemplateVarsRef.current = templateVars
-
-    if (JSON.stringify(finalMapping) !== JSON.stringify(values.mapping)) {
-      form.setFieldValue('mapping', finalMapping)
-    }
-    if (updatedTemplate !== String(values.template)) {
-      form.setFieldValue('template', updatedTemplate)
-    }
-
-    setTimeout(() => {
-      isSyncingRef.current = false
-      lastSyncSourceRef.current = null
-    }, 50)
+    prevMappingNamesRef.current = getMappingNames(updatedMapping)
+    prevTemplateVarsRef.current = extractTemplateVars(updatedTemplate)
+    form.setFieldValue('mapping', updatedMapping)
+    form.setFieldValue('template', updatedTemplate)
+    editorKeyRef.current++
+    setTimeout(() => { isSyncingRef.current = false }, 0)
   }, [values?.template, selectedNode?.data?.type, form])
 
   return (

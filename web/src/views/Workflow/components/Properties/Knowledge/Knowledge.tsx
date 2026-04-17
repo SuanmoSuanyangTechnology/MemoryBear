@@ -114,7 +114,7 @@ const Knowledge: FC<{value?: KnowledgeConfig; onChange?: (config: KnowledgeConfi
     <div>
       <Flex align="center" justify="space-between" className="rb:mb-2!">
         <div className="rb:text-[12px] rb:font-medium rb:leading-4.5">
-          {t('application.knowledgeBaseAssociation')}
+          <span className="rb:text-[#ff5d34] rb:text-[14px] rb:font-[SimSun,sans-serif] rb:mr-1">*</span>{t('application.knowledgeBaseAssociation')}
         </div>
 
         <Button

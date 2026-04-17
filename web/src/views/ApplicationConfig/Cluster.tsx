@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:33 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 18:14:25
+ * @Last Modified time: 2026-04-07 20:37:43
  */
 import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -115,7 +115,8 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
         console.log({ ids: sub_agents?.map(item => item.agent_id) })
         getApplicationList({ ids: sub_agents?.map(item => item.agent_id).join(',')})
           .then(res => {
-            const applicationList = (res as Application[]) || []
+            const applicationList = ((res as { items: Application[] }).items) || []
+
             setSubAgents(sub_agents.map(vo => {
               const filterVO = applicationList.find(item => item.id === vo.agent_id)
               if (filterVO) {
@@ -193,6 +194,9 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
   // const handleSaveFeaturesConfig = (value: FeaturesConfigForm) => {
   //   form.setFieldValue('features', value)
   // }
+
+
+  console.log('subAgents', subAgents)
 
   return (
     <>

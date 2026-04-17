@@ -1,0 +1,164 @@
+name: Release Notify Workflow
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  notify:
+    if: >
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.base.ref, 'release')
+    runs-on: ubuntu-latest
+
+    steps:
+      # 防止 GitHub HEAD 未同步
+      - run: sleep 3
+
+      # 1️⃣ 获取分支 HEAD
+      - name: Get HEAD
+        id: head
+        run: |
+          HEAD_SHA=$(curl -s \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/git/ref/heads/${{ github.event.pull_request.base.ref }} \
+            | jq -r '.object.sha')
+          echo "head_sha=$HEAD_SHA" >> $GITHUB_OUTPUT
+
+      # 2️⃣ 判断是否最终PR
+      - name: Check Latest
+        id: check
+        run: |
+          if [ "${{ github.event.pull_request.merge_commit_sha }}" = "${{ steps.head.outputs.head_sha }}" ]; then
+            echo "ok=true" >> $GITHUB_OUTPUT
+          else
+            echo "ok=false" >> $GITHUB_OUTPUT
+          fi
+
+      # 3️⃣ 尝试从 PR body 提取 Sourcery 摘要
+      - name: Extract Sourcery Summary
+        if: steps.check.outputs.ok == 'true'
+        id: sourcery
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          python3 << 'PYEOF'
+          import os, re
+
+          body = os.environ.get("PR_BODY", "") or ""
+          match = re.search(
+              r"## Summary by Sourcery\s*\n(.*?)(?=\n## |\Z)",
+              body,
+              re.DOTALL
+          )
+
+          if match:
+              summary = match.group(1).strip()
+              found = "true"
+          else:
+              summary = ""
+              found = "false"
+
+          with open("sourcery_summary.txt", "w", encoding="utf-8") as f:
+              f.write(summary)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as gh:
+              gh.write(f"found={found}\n")
+              gh.write("summary<<EOF\n")
+              gh.write(summary + "\n")
+              gh.write("EOF\n")
+          PYEOF
+
+      # 4️⃣ Fallback: 获取 commits + 通义千问总结
+      - name: Get Commits
+        if: steps.check.outputs.ok == 'true' && steps.sourcery.outputs.found == 'false'
+        run: |
+          curl -s \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            ${{ github.event.pull_request.commits_url }} \
+            | jq -r '.[].commit.message' | head -n 20 > commits.txt
+
+      - name: AI Summary (Qwen Fallback)
+        if: steps.check.outputs.ok == 'true' && steps.sourcery.outputs.found == 'false'
+        id: qwen
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+        run: |
+          python3 << 'PYEOF'
+          import json, os, urllib.request
+
+          with open("commits.txt", "r") as f:
+              commits = f.read().strip()
+
+          prompt = "请用中文总结以下代码提交，输出3-5条要点，面向测试人员。直接输出编号列表，不要输出标题或前言：\n" + commits
+          payload = {"model": "qwen-plus", "input": {"prompt": prompt}}
+          data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+          req = urllib.request.Request(
+              "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
+              data=data,
+              headers={
+                  "Authorization": "Bearer " + os.environ["DASHSCOPE_API_KEY"],
+                  "Content-Type": "application/json"
+              }
+          )
+          resp = urllib.request.urlopen(req)
+          result = json.loads(resp.read().decode())
+          summary = result.get("output", {}).get("text", "AI 摘要生成失败")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as gh:
+              gh.write("summary<<EOF\n")
+              gh.write(summary + "\n")
+              gh.write("EOF\n")
+          PYEOF
+
+      # 5️⃣ 企业微信通知（Markdown）
+      - name: Notify WeChat
+        if: steps.check.outputs.ok == 'true'
+        env:
+          WECHAT_WEBHOOK: ${{ secrets.WECHAT_WEBHOOK }}
+          BRANCH: ${{ github.event.pull_request.base.ref }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          SOURCERY_FOUND: ${{ steps.sourcery.outputs.found }}
+          SOURCERY_SUMMARY: ${{ steps.sourcery.outputs.summary }}
+          QWEN_SUMMARY: ${{ steps.qwen.outputs.summary }}
+        run: |
+          python3 << 'PYEOF'
+          import json, os, urllib.request
+
+          if os.environ.get("SOURCERY_FOUND") == "true":
+              label = "Summary by Sourcery"
+              summary = os.environ.get("SOURCERY_SUMMARY", "")
+          else:
+              label = "AI变更摘要"
+              summary = os.environ.get("QWEN_SUMMARY", "AI 摘要生成失败")
+
+          pr_number = os.environ.get("PR_NUMBER", "")
+          short_sha = os.environ.get("MERGE_SHA", "")[:7]
+
+          content = (
+            "## 🚀 Release 发布通知\n"
+            "> � **分支**: " + os.environ["BRANCH"] + "\n"
+            "> 👤 **提交人**: " + os.environ["AUTHOR"] + "\n"
+            "> 📝 **标题**: " + os.environ["PR_TITLE"] + "\n"
+            "> 🔢 **PR编号**: #" + pr_number + "\n"
+            "> 🔖 **Commit**: " + short_sha + "\n\n"
+            "### 🧠 " + label + "\n" +
+            summary + "\n\n"
+            "---\n"
+            "🔗 [查看PR详情](" + os.environ["PR_URL"] + ")"
+          )
+          payload = {"msgtype": "markdown", "markdown": {"content": content}}
+          data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+          req = urllib.request.Request(
+            os.environ["WECHAT_WEBHOOK"],
+            data=data,
+            headers={"Content-Type": "application/json"}
+          )
+          resp = urllib.request.urlopen(req)
+          print(resp.read().decode())
+          PYEOF

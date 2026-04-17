@@ -32,32 +32,44 @@ const VariableComponent: React.FC<{ nodeKey: NodeKey; data: Suggestion }> = ({
     e.stopPropagation();
     setSelected(!isSelected);
   };
+  
+  if (!data.nodeData?.name) {
+    return (
+      <span
+        onClick={handleClick}
+        className="rb:inline rb:cursor-pointer rb:text-[#171719]"
+        contentEditable={false}
+      >
+        {data.value}
+      </span>
+    );
+  }
 
   return (
     <span
       onClick={handleClick}
-      className={clsx('rb:border rb:rounded-md rb:bg-white rb:text-[10px] rb:inline-flex rb:items-center rb:py-0 rb:px-1.5 rb:mx-0.5 rb:cursor-pointer', {
-        'rb:border-[#171719]': isSelected,
-        'rb:border-[#DFE4ED]': !isSelected
-      })}
+      className="rb-border rb:rounded-md rb:bg-white rb:text-[10px] rb:text-[#212332] rb:h-5! rb:inline-flex rb:items-center rb:p-1 rb:mx-px rb:cursor-pointer"
       contentEditable={false}
     >
-      {data.isContext ? (
-        <span style={{ fontSize: '12px', marginRight: '4px' }}>📄</span>
-      ) : data.group !== 'CONVERSATION' ? (
-        <img 
-          src={data.nodeData?.icon} 
-          style={{ width: '12px', height: '12px', marginRight: '4px' }} 
-          alt=""
-        />
-      ) : null}
+      {!data.isContext && data.group !== 'CONVERSATION' && !data.value.includes('conv')
+        ? <div className={`rb:size-3 rb:mr-1 rb:bg-cover ${data.nodeData?.icon}`} />
+        : null
+      }
       {!data.isContext && data.group !== 'CONVERSATION' && (
         <>
-          <span className="rb:wrap-break-word rb:line-clamp-1">{data.nodeData?.name}</span>
-          <span style={{ color: '#DFE4ED', margin: '0 2px' }}>/</span>
+          {!data.value.includes('conv') && <>
+            <span className="rb:wrap-break-word rb:line-clamp-1">{data.nodeData?.name}</span>
+            <span style={{ color: '#DFE4ED', margin: '0 2px' }}>/</span>
+          </>}
+          {data.parentLabel && (
+            <>
+              <span className="rb:wrap-break-word rb:line-clamp-1">{data.parentLabel}</span>
+              <span style={{ color: '#DFE4ED', margin: '0 2px' }}>/</span>
+            </>
+          )}
         </>
       )}
-      <span className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1 rb:text-[#171719]">{data.label}</span>
+      <span className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1">{data.label}</span>
     </span>
   );
 };
@@ -66,7 +78,7 @@ export class VariableNode extends DecoratorNode<React.JSX.Element> {
   __data: Suggestion;
 
   static getType(): string {
-    return 'tag';
+    return 'variable';
   }
 
   static clone(node: VariableNode): VariableNode {
@@ -104,7 +116,7 @@ export class VariableNode extends DecoratorNode<React.JSX.Element> {
   exportJSON(): SerializedVariableNode {
     return {
       data: this.__data,
-      type: 'tag',
+      type: 'variable',
       version: 1,
     };
   }

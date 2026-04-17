@@ -27,7 +27,8 @@ const OutputList: FC<OutputListProps> = ({ label, name, extra }) => {
           <>
             <Flex align="center" justify="space-between" className="rb:mb-2!">
               <div className="rb:text-[12px] rb:font-medium rb:leading-4.5">
-                {label}
+
+                <span className="rb:text-[#ff5d34] rb:text-[14px] rb:font-[SimSun,sans-serif] rb:mr-1">*</span>{label}
               </div>
 
               <Space size={8}>

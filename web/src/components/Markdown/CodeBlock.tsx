@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:15:11 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 15:15:11 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-04-07 14:04:33
  */
 /**
  * CodeBlock Component
@@ -27,6 +27,7 @@ type ICodeBlockProps = {
   needCopy?: boolean;
   size?: 'small' | 'default';
   showLineNumbers?: boolean;
+  background?: string;
 }
 
 /** Code block component for displaying formatted code with optional copy functionality */
@@ -34,7 +35,8 @@ const CodeBlock: FC<ICodeBlockProps> = ({
   value,
   needCopy = true,
   size = 'default',
-  showLineNumbers = false
+  showLineNumbers = false,
+  background = '#F0F3F8'
 }) => {
 
   return (
@@ -43,7 +45,7 @@ const CodeBlock: FC<ICodeBlockProps> = ({
         style={atelierHeathLight}
         customStyle={{
           padding: '8px 12px 8px 12px',
-          backgroundColor: '#F0F3F8',
+          backgroundColor: background,
           borderRadius: 8,
           fontSize: size === 'small' ? 12 : 14,
           wordBreak: 'break-all'

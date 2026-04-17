@@ -22,6 +22,8 @@ from app.core.workflow.nodes.configs import (
     MemoryReadNodeConfig,
     MemoryWriteNodeConfig,
     NoteNodeConfig,
+    ListOperatorNodeConfig,
+    DocExtractorNodeConfig,
 )
 from app.core.workflow.nodes.enums import NodeType
 
@@ -51,6 +53,8 @@ class MemoryBearConverter(BaseConverter):
         NodeType.MEMORY_READ: MemoryReadNodeConfig,
         NodeType.MEMORY_WRITE: MemoryWriteNodeConfig,
         NodeType.NOTES: NoteNodeConfig,
+        NodeType.LIST_OPERATOR: ListOperatorNodeConfig,
+        NodeType.DOCUMENT_EXTRACTOR: DocExtractorNodeConfig,
     }
 
     @staticmethod

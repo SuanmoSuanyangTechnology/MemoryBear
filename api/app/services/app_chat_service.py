@@ -26,6 +26,7 @@ from app.services.model_service import ModelApiKeyService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
 from app.services.multimodal_service import MultimodalService
 from app.services.workflow_service import WorkflowService
+from app.models.file_metadata_model import FileMetadata
 
 logger = get_business_logger()
 
@@ -117,7 +118,10 @@ class AppChatService:
             max_tokens=model_parameters.get("max_tokens", 2000),
             system_prompt=system_prompt,
             tools=tools,
-
+            deep_thinking=model_parameters.get("deep_thinking", False),
+            thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
+            json_output=model_parameters.get("json_output", False),
+            capability=api_key_obj.capability or [],
         )
 
         model_info = ModelInfo(
@@ -163,7 +167,14 @@ class AppChatService:
             multimodal_service = MultimodalService(self.db, model_info)
             processed_files = await multimodal_service.process_files(files)
             logger.info(f"处理了 {len(processed_files)} 个文件")
-
+        # 为需要运行时上下文的工具注入上下文
+        for t in tools:
+            if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
+                t.tool_instance.set_runtime_context(
+                    user_id=user_id or "anonymous",
+                    conversation_id=str(conversation_id) if conversation_id else None,
+                    uploaded_files=processed_files or []
+                )
         # 调用 Agent（支持多模态）
         result = await agent.chat(
             message=message,
@@ -205,14 +216,33 @@ class AppChatService:
             "model": api_key_obj.model_name,
             "usage": result.get("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}),
             "audio_url": None,
-            "citations": filtered_citations
+            "citations": filtered_citations,
+            "reasoning_content": result.get("reasoning_content")
         }
         if files:
+            local_ids = [f.upload_file_id for f in files
+                         if f.transfer_method.value == "local_file" and f.upload_file_id
+                         and (not f.name or not f.size)]
+            meta_map = {}
+            if local_ids:
+                rows = self.db.query(FileMetadata).filter(
+                    FileMetadata.id.in_(local_ids),
+                    FileMetadata.status == "completed"
+                ).all()
+                meta_map = {str(r.id): r for r in rows}
             for f in files:
-                # url = await MultimodalService(self.db).get_file_url(f)
+                name, size = f.name, f.size
+                if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
+                    meta = meta_map.get(str(f.upload_file_id))
+                    if meta:
+                        name = name or meta.file_name
+                        size = size or meta.file_size
                 human_meta["files"].append({
                     "type": f.type,
-                    "url": f.url
+                    "url": f.url,
+                    "name": name,
+                    "size": size,
+                    "file_type": f.file_type,
                 })
 
         if processed_files:
@@ -228,8 +258,13 @@ class AppChatService:
         if memory_flag:
             connected_config = get_end_user_connected_config(user_id, self.db)
             memory_config_id: str = connected_config.get("memory_config_id")
+            file_list = []
+            for file in files:
+                file_dict = file.model_dump()
+                file_dict["upload_file_id"] = str(file_dict["upload_file_id"]) if file_dict["upload_file_id"] else None
+                file_list.append(file_dict)
             messages = [
-                {"role": "user", "content": message, "files": [file.model_dump() for file in files]},
+                {"role": "user", "content": message, "files": file_list},
                 {"role": "assistant", "content": result["content"]}
             ]
             if memory_config_id:
@@ -258,6 +293,7 @@ class AppChatService:
             "conversation_id": conversation_id,
             "message_id": str(message_id),
             "message": result["content"],
+            "reasoning_content": result.get("reasoning_content"),
             "usage": result.get("usage", {
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
@@ -354,7 +390,11 @@ class AppChatService:
                 max_tokens=model_parameters.get("max_tokens", 2000),
                 system_prompt=system_prompt,
                 tools=tools,
-                streaming=True
+                streaming=True,
+                deep_thinking=model_parameters.get("deep_thinking", False),
+                thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
+                json_output=model_parameters.get("json_output", False),
+                capability=api_key_obj.capability or [],
             )
 
             model_info = ModelInfo(
@@ -401,8 +441,18 @@ class AppChatService:
                 processed_files = await multimodal_service.process_files(files)
                 logger.info(f"处理了 {len(processed_files)} 个文件")
 
+            # 为需要运行时上下文的工具注入上下文
+            for t in tools:
+                if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
+                    t.tool_instance.set_runtime_context(
+                        user_id=user_id or "anonymous",
+                        conversation_id=str(conversation_id) if conversation_id else None,
+                        uploaded_files=processed_files or []
+                    )
+
             # 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
+            full_reasoning = ""
             total_tokens = 0
 
             text_queue: asyncio.Queue = asyncio.Queue()
@@ -426,6 +476,9 @@ class AppChatService:
             ):
                 if isinstance(chunk, int):
                     total_tokens = chunk
+                elif isinstance(chunk, dict) and chunk.get("type") == "reasoning":
+                    full_reasoning += chunk['content']
+                    yield f"event: reasoning\ndata: {json.dumps({'content': chunk['content']}, ensure_ascii=False)}\n\n"
                 else:
                     full_content += chunk
                     yield f"event: message\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
@@ -472,14 +525,34 @@ class AppChatService:
                 "model": api_key_obj.model_name,
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                 "audio_url": None,
-                "citations": filtered_citations
+                "citations": filtered_citations,
+                "reasoning_content": full_reasoning or None
             }
 
             if files:
+                local_ids = [f.upload_file_id for f in files
+                             if f.transfer_method.value == "local_file" and f.upload_file_id
+                             and (not f.name or not f.size)]
+                meta_map = {}
+                if local_ids:
+                    rows = self.db.query(FileMetadata).filter(
+                        FileMetadata.id.in_(local_ids),
+                        FileMetadata.status == "completed"
+                    ).all()
+                    meta_map = {str(r.id): r for r in rows}
                 for f in files:
+                    name, size = f.name, f.size
+                    if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
+                        meta = meta_map.get(str(f.upload_file_id))
+                        if meta:
+                            name = name or meta.file_name
+                            size = size or meta.file_size
                     human_meta["files"].append({
                         "type": f.type,
-                        "url": f.url
+                        "url": f.url,
+                        "name": name,
+                        "size": size,
+                        "file_type": f.file_type,
                     })
             if processed_files:
                 human_meta["history_files"] = {
@@ -494,8 +567,13 @@ class AppChatService:
             if memory_flag:
                 connected_config = get_end_user_connected_config(user_id, self.db)
                 memory_config_id: str = connected_config.get("memory_config_id")
+                file_list = []
+                for file in files:
+                    file_dict = file.model_dump()
+                    file_dict["upload_file_id"] = str(file_dict["upload_file_id"]) if file_dict["upload_file_id"] else None
+                    file_list.append(file_dict)
                 messages = [
-                    {"role": "user", "content": message, "files": [file.model_dump() for file in files]},
+                    {"role": "user", "content": message, "files": file_list},
                     {"role": "assistant", "content": full_content}
                 ]
                 if memory_config_id:
@@ -652,13 +730,13 @@ class AppChatService:
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id
             ):
-                if "sub_usage" in event:
+                # 拦截 sub_usage 事件，累加 token
+                if "event: sub_usage" in event:
                     if "data:" in event:
                         try:
                             data_line = event.split("data: ", 1)[1].strip()
                             data = json.loads(data_line)
-                            if "total_tokens" in data:
-                                total_tokens += data["total_tokens"]
+                            total_tokens += data.get("total_tokens", 0)
                         except:
                             pass
                 else:

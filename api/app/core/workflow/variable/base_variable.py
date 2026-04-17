@@ -91,7 +91,7 @@ def DEFAULT_VALUE(var_type: VariableType) -> Any:
         case VariableType.OBJECT:
             return {}
         case VariableType.FILE:
-            return None
+            return {}
         case VariableType.ARRAY_STRING:
             return []
         case VariableType.ARRAY_NUMBER:
@@ -112,6 +112,12 @@ class FileObject(BaseModel):
     transfer_method: str
     origin_file_type: str
     file_id: str | None
+
+    # Extended file metadata
+    name: str | None = None
+    size: int | None = None
+    extension: str | None = None
+    mime_type: str | None = None
 
     content_cache: dict = Field(default_factory=dict)
     is_file: bool

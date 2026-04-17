@@ -6,10 +6,11 @@ import Properties from './components/Properties';
 import CanvasToolbar from './components/CanvasToolbar';
 import PortClickHandler from './components/PortClickHandler';
 import { useWorkflowGraph } from './hooks/useWorkflowGraph';
-import type { WorkflowRef, FeaturesConfigForm } from '@/views/ApplicationConfig/types'
+import type { WorkflowRef, FeaturesConfigForm, FeaturesConfigModalRef } from '@/views/ApplicationConfig/types'
 import Chat from './components/Chat/Chat';
 import type { ChatRef, AddChatVariableRef } from './types'
 import AddChatVariable from './components/AddChatVariable';
+import FeaturesConfigModal from '@/views/ApplicationConfig/components/FeaturesConfig/FeaturesConfigModal'
 
 const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void }>(({ onFeaturesLoad }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -27,6 +28,7 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
     setIsHandMode,
     onDrop,
     blankClick,
+    nodeClick,
     deleteEvent,
     copyEvent,
     parseEvent,
@@ -35,7 +37,8 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
     setChatVariables,
     handleAddNotes,
     handleSaveFeaturesConfig,
-    features
+    features,
+    getStartNodeVariables,
   } = useWorkflowGraph({ containerRef, miniMapRef, onFeaturesLoad });
 
   const onDragOver = (event: React.DragEvent) => {
@@ -51,6 +54,15 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
     addChatVariableRef.current?.handleOpen()
   }
 
+  // Ref used to imperatively open the config modal
+  const funConfigModalRef = useRef<FeaturesConfigModalRef>(null)
+
+  /** Open the feature config modal pre-populated with the current values */
+  const handleFeaturesConfig = () => {
+    blankClick()
+    funConfigModalRef.current?.handleOpen(features as FeaturesConfigForm)
+  }
+
   useImperativeHandle(ref, () => ({
     handleSave,
     handleRun,
@@ -59,7 +71,9 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
     chatVariables,
     config,
     features: features,
-    handleSaveFeaturesConfig
+    handleFeaturesConfig,
+    handleSaveFeaturesConfig,
+    nodeClick
   }))
   return (
     <div className="rb:h-full rb:relative">
@@ -68,7 +82,7 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
       
       {/* 右侧画布区域 */}
       <div 
-        className={clsx(`rb:fixed rb:top-18.5 rb:bottom-2.5 rb:left-0 rb:right-0 rb:transition-all`)}
+        className={clsx(`rb:fixed rb:top-16 rb:bottom-0 rb:left-0 rb:right-0 rb:transition-all`)}
         onDrop={onDrop}
         onDragOver={onDragOver}
       >
@@ -111,6 +125,13 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
         ref={addChatVariableRef}
         variables={chatVariables}
         onChange={setChatVariables}
+      />
+      {/* Modal for editing feature settings; calls refresh on save */}
+      <FeaturesConfigModal
+        ref={funConfigModalRef}
+        refresh={handleSaveFeaturesConfig}
+        source="workflow"
+        chatVariables={getStartNodeVariables().map(v => ({ name: v.name, key: `start_${v.name}`, label: v.name, type: 'variable', dataType: v.type, value:`{{${v.name}}}` })) as any}
       />
     </div>
   );

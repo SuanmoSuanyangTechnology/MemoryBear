@@ -301,7 +301,7 @@ class WorkflowValidator:
         for node in nodes:
             if node.get("type") not in [NodeType.START, NodeType.CYCLE_START, NodeType.END] and not node.get("name"):
                 errors.append(
-                    f"节点 {node.get('id')} 缺少名称（发布时必须提供）"
+                    f"节点 {node.get('name')} 缺少名称（发布时必须提供）"
                 )
 
         # 2. 验证所有非 start/end 节点都有配置
@@ -311,7 +311,7 @@ class WorkflowValidator:
                 config = node.get("config")
                 if not config or not isinstance(config, dict):
                     errors.append(
-                        f"节点 {node.get('id')} 缺少配置（发布时必须提供）"
+                        f"节点 {node.get('name')} 缺少配置（发布时必须提供）"
                     )
 
         # 3. 验证必填变量

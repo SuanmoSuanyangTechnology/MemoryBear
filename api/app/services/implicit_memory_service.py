@@ -34,6 +34,7 @@ from app.schemas.implicit_memory_schema import (
     UserMemorySummary,
 )
 from app.schemas.memory_config_schema import MemoryConfig
+from app.services.memory_base_service import MIN_MEMORY_SUMMARY_COUNT
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -379,11 +380,58 @@ class ImplicitMemoryService:
             raise
     
 
+    def _build_empty_profile(self) -> dict:
+        """构建 MemorySummary 不足时返回的固定空白画像数据"""
+        now_ms = int(datetime.utcnow().timestamp() * 1000)
+        insufficient = "Insufficient data for analysis"
+
+        def _empty_dimension(name: str) -> dict:
+            return {
+                "evidence": [insufficient],
+                "reasoning": f"No clear evidence found for {name} dimension",
+                "percentage": 0.0,
+                "dimension_name": name,
+                "confidence_level": 20,
+            }
+
+        def _empty_category(name: str) -> dict:
+            return {
+                "evidence": [insufficient],
+                "percentage": 25.0,
+                "category_name": name,
+                "trending_direction": None,
+            }
+
+        return {
+            "habits": [],
+            "portrait": {
+                "aesthetic": _empty_dimension("aesthetic"),
+                "creativity": _empty_dimension("creativity"),
+                "literature": _empty_dimension("literature"),
+                "technology": _empty_dimension("technology"),
+                "historical_trends": None,
+                "analysis_timestamp": now_ms,
+                "total_summaries_analyzed": 0,
+            },
+            "preferences": [],
+            "interest_areas": {
+                "art": _empty_category("art"),
+                "tech": _empty_category("tech"),
+                "music": _empty_category("music"),
+                "lifestyle": _empty_category("lifestyle"),
+                "analysis_timestamp": now_ms,
+                "total_summaries_analyzed": 0,
+            },
+        }
+
     async def generate_complete_profile(
         self,
         user_id: str
     ) -> dict:
         """生成完整的用户画像（包含所有4个模块）
+        
+        需要该用户的 MemorySummary 节点数量 >= 5 才会真正调用 LLM 生成画像，
+        否则返回固定的空白画像数据。
         
         Args:
             user_id: 用户ID
@@ -394,6 +442,16 @@ class ImplicitMemoryService:
         logger.info(f"生成完整用户画像: user={user_id}")
         
         try:
+            # 前置检查：查询该用户有效的 MemorySummary 节点数量（排除孤立节点）
+            from app.services.memory_base_service import MemoryBaseService
+            base_service = MemoryBaseService()
+            memory_summary_count = await base_service.get_valid_memory_summary_count(user_id)
+            logger.info(f"用户 MemorySummary 节点数量: {memory_summary_count} (user={user_id})")
+
+            if memory_summary_count < MIN_MEMORY_SUMMARY_COUNT:
+                logger.info(f"MemorySummary 数量不足 {MIN_MEMORY_SUMMARY_COUNT}（当前 {memory_summary_count}），返回空白画像: user={user_id}")
+                return self._build_empty_profile()
+
             # 并行调用4个分析方法
             preferences, portrait, interest_areas, habits = await asyncio.gather(
                 self.get_preference_tags(user_id=user_id),

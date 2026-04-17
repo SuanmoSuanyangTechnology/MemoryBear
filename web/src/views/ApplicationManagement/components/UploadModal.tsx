@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-28 14:08:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-12 17:19:46
+ * @Last Modified time: 2026-04-13 18:17:32
  */
 /**
  * UploadModal Component
@@ -28,6 +28,7 @@ import { appImport } from '@/api/application'
 interface UploadModalProps {
   /** Function to refresh the parent component after workflow import */
   refresh: () => void;
+  id?: string;
 }
 
 
@@ -46,10 +47,11 @@ const steps = [
  * @param {React.Ref<UploadModalRef>} ref - Ref for imperative methods
  */
 const UploadModal = forwardRef<UploadModalRef, UploadModalProps>(({
-  refresh
+  refresh,
+  id
 }, ref) => {
   const { t } = useTranslation();
-  
+
   // State management
   const [visible, setVisible] = useState(false);           // Modal visibility
   const [form] = Form.useForm<{ file: File[] }>();  // Form instance
@@ -87,8 +89,8 @@ const UploadModal = forwardRef<UploadModalRef, UploadModalProps>(({
    */
   const handleSave = () => {
     const values = form.getFieldsValue();
-    
-    switch(current) {
+
+    switch (current) {
       case 0: // Step 1: Upload file
         if (!values.file || values.file.length === 0) {
           message.warning(t('application.pleaseUploadFile'));
@@ -96,6 +98,9 @@ const UploadModal = forwardRef<UploadModalRef, UploadModalProps>(({
         }
         const formData = new FormData();
         formData.append('file', values.file[0]);
+        if (id) {
+          formData.append('app_id', id)
+        }
 
         setLoading(true)
         // Call import API
@@ -134,8 +139,12 @@ const UploadModal = forwardRef<UploadModalRef, UploadModalProps>(({
     setTimeout(() => {
       switch (type) {
         case 'detail':
-          // Open application detail page in new tab
-          window.open(`/#/application/config/${appId}`, '_blank');
+          if (id) {
+            window.location.reload();
+          } else {
+            // Open application detail page in new tab
+            window.open(`/#/application/config/${appId}`, '_blank');
+          }
           break;
       }
     }, 100)
@@ -171,7 +180,7 @@ const UploadModal = forwardRef<UploadModalRef, UploadModalProps>(({
             loading={loading}
             onClick={() => handleJump('detail')}
           >
-            {t('application.gotoDetail')}
+            {id ? t('application.refresh') : t('application.gotoDetail')}
           </Button>
         ]
       default:
@@ -244,7 +253,7 @@ const UploadModal = forwardRef<UploadModalRef, UploadModalProps>(({
               loading={loading}
               onClick={() => handleJump('detail')}
             >
-              {t('application.gotoDetail')}
+              {id ? t('application.refresh') : t('application.gotoDetail')}
             </Button>
           ]}
         />

@@ -62,6 +62,7 @@ class QuestionClassifierNode(BaseNode):
             api_key = api_config.api_key
             base_url = api_config.api_base
             is_omni = api_config.is_omni
+            capability = api_config.capability
             model_type = config.type
 
         return RedBearLLM(
@@ -135,7 +136,10 @@ class QuestionClassifierNode(BaseNode):
 
             response = await llm.ainvoke(messages)
             result = self.process_model_output(response.content)
-            self.response_metadata = response.response_metadata
+            self.response_metadata = {
+                **response.response_metadata,
+                "token_usage": getattr(response, 'usage_metadata', None) or response.response_metadata.get('token_usage')
+            }
 
             if result in category_names:
                 category = result

@@ -111,10 +111,16 @@ celery_app.conf.update(
         # Clustering tasks → memory_tasks queue (使用相同的 worker，避免 macOS fork 问题)
         'app.tasks.run_incremental_clustering': {'queue': 'memory_tasks'},
 
+        # Metadata extraction → memory_tasks queue
+        'app.tasks.extract_user_metadata': {'queue': 'memory_tasks'},
+
         # Document tasks → document_tasks queue (prefork worker)
         'app.core.rag.tasks.parse_document': {'queue': 'document_tasks'},
-        'app.core.rag.tasks.build_graphrag_for_kb': {'queue': 'document_tasks'},
         'app.core.rag.tasks.sync_knowledge_for_kb': {'queue': 'document_tasks'},
+
+        # GraphRAG tasks → graphrag_tasks queue (独立队列，避免阻塞文档解析)
+        'app.core.rag.tasks.build_graphrag_for_kb': {'queue': 'graphrag_tasks'},
+        'app.core.rag.tasks.build_graphrag_for_document': {'queue': 'graphrag_tasks'},
 
         # Beat/periodic tasks → periodic_tasks queue (dedicated periodic worker)
         'app.tasks.workspace_reflection_task': {'queue': 'periodic_tasks'},

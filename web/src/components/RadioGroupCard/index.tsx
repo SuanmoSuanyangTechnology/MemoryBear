@@ -106,7 +106,7 @@ const RadioGroupCard: FC<RadioCardProps> = ({
           {/* Use custom render or default card layout */}
           {itemRender ? itemRender(option) : (
             <>
-              {option.icon && <img src={option.icon} className={clsx("rb:size-10", {
+              {option.icon && <img src={option.icon} alt={option.icon} className={clsx("rb:size-10", {
                 'rb:m-[0_auto] rb:mb-3': !block,
               })} />}
               <div>

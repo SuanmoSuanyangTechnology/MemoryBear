@@ -153,7 +153,8 @@ def workflow_config_4_app_release(release: AppRelease) -> WorkflowConfig:
         edges=config_dict.get("edges", []),
         variables=config_dict.get("variables", []),
         execution_config=config_dict.get("execution_config", {}),
-        triggers=config_dict.get("triggers", [])
+        triggers=config_dict.get("triggers", []),
+        features=config_dict.get("features", {})
     )
 
     return config

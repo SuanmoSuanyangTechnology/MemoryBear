@@ -57,7 +57,6 @@ const MappingList: FC<MappingListProps> = ({ label, name, options, extra, valueK
                     <VariableSelect
                       placeholder={t('common.pleaseSelect')}
                       options={options}
-                      popupMatchSelectWidth={false}
                       size="small"
                       className="rb:w-51!"
                     />

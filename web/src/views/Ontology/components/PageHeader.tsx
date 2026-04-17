@@ -54,7 +54,7 @@ const PageHeader: FC<ConfigHeaderProps> = ({
 
       <div className="rb:flex rb:items-center rb:gap-3">
         <Button type="primary" ghost className="rb:h-6! rb:px-2! rb:leading-5.5!" onClick={goBack}>
-          <img src={logoutIcon} className="rb:w-4 rb:h-4" />
+          <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/logout_hover.svg')]" />
           {t('common.return')}
         </Button>
         {extra}

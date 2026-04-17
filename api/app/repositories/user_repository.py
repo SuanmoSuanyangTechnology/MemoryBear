@@ -23,7 +23,7 @@ class UserRepository:
         db_logger.debug(f"根据 ID 查询用户：user_id={user_id}")
         
         try:
-            user = self.db.query(User).options(joinedload(User.tenant)).filter(User.id == user_id).first()
+            user = self.db.query(User).options(joinedload(User.tenant)).filter(User.id == user_id, User.is_active.is_(True)).first()
             if user:
                 # 检查租户状态，租户禁用时返回 None
                 if user.tenant and not user.tenant.is_active:
@@ -296,6 +296,10 @@ class UserRepository:
 def get_user_by_id(db: Session, user_id: uuid.UUID) -> Optional[User]:
     """根据ID获取用户"""
     return UserRepository(db).get_user_by_id(user_id)
+
+def get_user_by_id_regardless_active(db: Session, user_id: uuid.UUID) -> Optional[User]:
+    """根据ID获取用户（不过滤 is_active，用于启用/禁用场景）"""
+    return db.query(User).filter(User.id == user_id).first()
 
 def get_user_by_email(db: Session, email: str) -> Optional[User]:
     """根据邮箱获取用户"""

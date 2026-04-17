@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
+from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import _USER_PLACEHOLDER_NAMES
 from app.core.memory.storage_services.extraction_engine.extraction_orchestrator import ExtractionOrchestrator
 from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import \
     memory_summary_generation
@@ -152,6 +153,24 @@ async def write(
     # Step 3: Save all data to Neo4j database
     step_start = time.time()
 
+    # Neo4j 写入前：清洗用户/AI助手实体之间的别名交叉污染
+    # 从 Neo4j 查询已有的 AI 助手别名，与本轮实体中的 AI 助手别名合并，
+    # 确保用户实体的 aliases 不包含 AI 助手的名字
+    try:
+        from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
+            clean_cross_role_aliases,
+            fetch_neo4j_assistant_aliases,
+        )
+        neo4j_assistant_aliases = set()
+        if all_entity_nodes:
+            _eu_id = all_entity_nodes[0].end_user_id
+            if _eu_id:
+                neo4j_assistant_aliases = await fetch_neo4j_assistant_aliases(neo4j_connector, _eu_id)
+        clean_cross_role_aliases(all_entity_nodes, external_assistant_aliases=neo4j_assistant_aliases)
+        logger.info(f"Neo4j 写入前别名清洗完成，AI助手别名排除集大小: {len(neo4j_assistant_aliases)}")
+    except Exception as e:
+        logger.warning(f"Neo4j 写入前别名清洗失败（不影响主流程）: {e}")
+
     # 添加死锁重试机制
     max_retries = 3
     retry_delay = 1  # 秒
@@ -173,15 +192,37 @@ async def write(
             if success:
                 logger.info("Successfully saved all data to Neo4j")
                 
-                # 使用 Celery 异步任务触发聚类（不阻塞主流程）
                 if all_entity_nodes:
+                    end_user_id = all_entity_nodes[0].end_user_id
+
+                    # Neo4j 写入完成后，用 PgSQL 权威 aliases 覆盖 Neo4j 用户实体
+                    try:
+                        from app.repositories.end_user_info_repository import EndUserInfoRepository
+                        if end_user_id:
+                            with get_db_context() as db_session:
+                                info = EndUserInfoRepository(db_session).get_by_end_user_id(uuid.UUID(end_user_id))
+                                pg_aliases = info.aliases if info and info.aliases else []
+                            if info is not None:
+                                # 将 Python 侧占位名集合作为参数传入，避免 Cypher 硬编码
+                                placeholder_names = list(_USER_PLACEHOLDER_NAMES)
+                                await neo4j_connector.execute_query(
+                                    """
+                                    MATCH (e:ExtractedEntity)
+                                    WHERE e.end_user_id = $end_user_id AND toLower(e.name) IN $placeholder_names
+                                    SET e.aliases = $aliases
+                                    """,
+                                    end_user_id=end_user_id, aliases=pg_aliases,
+                                    placeholder_names=placeholder_names,
+                                )
+                                logger.info(f"[AliasSync] Neo4j 用户实体 aliases 已用 PgSQL 权威源覆盖: {pg_aliases}")
+                    except Exception as sync_err:
+                        logger.warning(f"[AliasSync] PgSQL→Neo4j aliases 同步失败（不影响主流程）: {sync_err}")
+
+                    # 使用 Celery 异步任务触发聚类（不阻塞主流程）
                     try:
                         from app.tasks import run_incremental_clustering
                         
-                        end_user_id = all_entity_nodes[0].end_user_id
                         new_entity_ids = [e.id for e in all_entity_nodes]
-                        
-                        # 异步提交 Celery 任务
                         task = run_incremental_clustering.apply_async(
                             kwargs={
                                 "end_user_id": end_user_id,
@@ -189,7 +230,6 @@ async def write(
                                 "llm_model_id": str(memory_config.llm_model_id) if memory_config.llm_model_id else None,
                                 "embedding_model_id": str(memory_config.embedding_model_id) if memory_config.embedding_model_id else None,
                             },
-                            # 设置任务优先级（低优先级，不影响主业务）
                             priority=3,
                         )
                         logger.info(
@@ -197,7 +237,6 @@ async def write(
                             f"task_id={task.id}, end_user_id={end_user_id}, entity_count={len(new_entity_ids)}"
                         )
                     except Exception as e:
-                        # 聚类任务提交失败不影响主流程
                         logger.error(f"[Clustering] 提交聚类任务失败（不影响主流程）: {e}", exc_info=True)
                 
                 break

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import re
 import shutil
@@ -44,6 +45,23 @@ from app.utils.redis_lock import RedisFairLock
 
 logger = get_logger(__name__)
 
+# ── 预编译文件类型正则 & 常量 ──────────────────────────────────
+AUDIO_PATTERN = re.compile(
+    r"\.(da|wave|wav|mp3|aac|flac|ogg|aiff|au|midi|wma|realaudio|vqf|oggvorbis|ape?)$",
+    re.IGNORECASE,
+)
+VIDEO_IMAGE_PATTERN = re.compile(
+    r"\.(png|jpeg|jpg|gif|bmp|svg|mp4|mov|avi|flv|mpeg|mpg|webm|wmv|3gp|3gpp|mkv?)$",
+    re.IGNORECASE,
+)
+DEFAULT_PARSE_LANGUAGE = "Chinese"
+DEFAULT_PARSE_TO_PAGE = 100_000
+EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
+# Embedding 并发写入的最大线程数，需根据模型 API rate limit 调整
+EMBEDDING_MAX_WORKERS = int(os.getenv("EMBEDDING_MAX_WORKERS", "3"))
+# auto_questions LLM 并发调用的最大线程数
+AUTO_QUESTIONS_MAX_WORKERS = int(os.getenv("AUTO_QUESTIONS_MAX_WORKERS", "5"))
+
 # 模块级同步 Redis 连接池，供 Celery 任务共享使用
 # 连接 CELERY_BACKEND DB，与 write_message:last_done 时间戳写入保持一致
 # 使用连接池而非单例客户端，提供更好的并发性能和自动重连
@@ -61,9 +79,9 @@ def _get_or_create_redis_pool() -> redis.ConnectionPool | None:
                 db=settings.REDIS_DB_CELERY_BACKEND,
                 password=settings.REDIS_PASSWORD,
                 decode_responses=True,
-                max_connections=10,
+                max_connections=100,
                 socket_connect_timeout=5,
-                socket_timeout=5,
+                socket_timeout=10,
                 retry_on_timeout=True,
                 health_check_interval=30,
             )
@@ -160,28 +178,67 @@ def process_item(item: dict):
     return result
 
 
+def _build_vision_model(file_path: str, db_knowledge):
+    """根据文件类型选择合适的视觉/音频模型，避免冗余初始化。"""
+    if AUDIO_PATTERN.search(file_path):
+        omni_key = os.getenv("QWEN3_OMNI_API_KEY", "")
+        omni_model = os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash")
+        omni_base = os.getenv("QWEN3_OMNI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        return QWenSeq2txt(
+            key=omni_key,
+            model_name=omni_model,
+            lang=DEFAULT_PARSE_LANGUAGE,
+            base_url=omni_base,
+        )
+    if VIDEO_IMAGE_PATTERN.search(file_path):
+        omni_key = os.getenv("QWEN3_OMNI_API_KEY", "")
+        omni_model = os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash")
+        omni_base = os.getenv("QWEN3_OMNI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        return QWenCV(
+            key=omni_key,
+            model_name=omni_model,
+            lang=DEFAULT_PARSE_LANGUAGE,
+            base_url=omni_base,
+        )
+    # 默认：使用知识库配置的 image2text 模型
+    return QWenCV(
+        key=db_knowledge.image2text.api_keys[0].api_key,
+        model_name=db_knowledge.image2text.api_keys[0].model_name,
+        lang=DEFAULT_PARSE_LANGUAGE,
+        base_url=db_knowledge.image2text.api_keys[0].api_base,
+    )
+
+
 @celery_app.task(name="app.core.rag.tasks.parse_document")
 def parse_document(file_path: str, document_id: uuid.UUID):
     """
     Document parsing, vectorization, and storage
     """
-    # Force re-importing Trio in child processes (to avoid inheriting the state of the parent process)
-    import importlib
 
-    import trio
-    importlib.reload(trio)
-    db = next(get_db())  # Manually call the generator
     db_document = None
-    db_knowledge = None
-    progress_msg = f"{datetime.now().strftime('%H:%M:%S')} Task has been received.\n"
-    try:
+    progress_lines: list[str] = [f"{datetime.now().strftime('%H:%M:%S')} Task has been received."]
+
+    def _progress_msg() -> str:
+        return "\n".join(progress_lines) + "\n"
+
+    with get_db_context() as db:
+      try:
+        # Celery JSON 序列化会将 UUID 转为字符串，需要确保类型正确
+        if not isinstance(document_id, uuid.UUID):
+            document_id = uuid.UUID(str(document_id))
+
         db_document = db.query(Document).filter(Document.id == document_id).first()
+        if db_document is None:
+            raise ValueError(f"Document {document_id} not found")
         db_knowledge = db.query(Knowledge).filter(Knowledge.id == db_document.kb_id).first()
+        if db_knowledge is None:
+            raise ValueError(f"Knowledge {db_document.kb_id} not found")
+
         # 1. Document parsing & segmentation
-        progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Start to parse.\n"
+        progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Start to parse.")
         start_time = time.time()
         db_document.progress = 0.0
-        db_document.progress_msg = progress_msg
+        db_document.progress_msg = _progress_msg()
         db_document.process_begin_at = datetime.now(tz=timezone.utc)
         db_document.process_duration = 0.0
         db_document.run = 1
@@ -189,220 +246,195 @@ def parse_document(file_path: str, document_id: uuid.UUID):
         db.refresh(db_document)
 
         def progress_callback(prog=None, msg=None):
-            nonlocal progress_msg  # Declare the use of an external progress_msg variable
-            progress_msg += f"{datetime.now().strftime('%H:%M:%S')} parse progress: {prog} msg: {msg}.\n"
+            progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} parse progress: {prog} msg: {msg}.")
 
-        # Prepare to configure chat_mdl、embedding_model、vision_model information
-        chat_model = Base(
-            key=db_knowledge.llm.api_keys[0].api_key,
-            model_name=db_knowledge.llm.api_keys[0].model_name,
-            base_url=db_knowledge.llm.api_keys[0].api_base
-        )
-        embedding_model = OpenAIEmbed(
-            key=db_knowledge.embedding.api_keys[0].api_key,
-            model_name=db_knowledge.embedding.api_keys[0].model_name,
-            base_url=db_knowledge.embedding.api_keys[0].api_base
-        )
-        vision_model = QWenCV(
-            key=db_knowledge.image2text.api_keys[0].api_key,
-            model_name=db_knowledge.image2text.api_keys[0].model_name,
-            lang="Chinese",
-            base_url=db_knowledge.image2text.api_keys[0].api_base
-        )
-        if re.search(r"\.(da|wave|wav|mp3|aac|flac|ogg|aiff|au|midi|wma|realaudio|vqf|oggvorbis|ape?)$", file_path,
-                     re.IGNORECASE):
-            vision_model = QWenSeq2txt(
-                key=os.getenv("QWEN3_OMNI_API_KEY", ""),
-                model_name=os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash"),
-                lang="Chinese",
-                base_url=os.getenv("QWEN3_OMNI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-            )
-        elif re.search(r"\.(png|jpeg|jpg|gif|bmp|svg|mp4|mov|avi|flv|mpeg|mpg|webm|wmv|3gp|3gpp|mkv?)$", file_path,
-                       re.IGNORECASE):
-            vision_model = QWenCV(
-                key=os.getenv("QWEN3_OMNI_API_KEY", ""),
-                model_name=os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash"),
-                lang="Chinese",
-                base_url=os.getenv("QWEN3_OMNI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-            )
-        else:
-            print(file_path)
+        # Prepare vision_model for parsing
+        vision_model = _build_vision_model(file_path, db_knowledge)
 
         from app.core.rag.app.naive import chunk
         res = chunk(filename=file_path,
                     from_page=0,
-                    to_page=100000,
+                    to_page=DEFAULT_PARSE_TO_PAGE,
                     callback=progress_callback,
                     vision_model=vision_model,
                     parser_config=db_document.parser_config,
                     is_root=False)
 
-        progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Finish parsing.\n"
+        progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Finish parsing.")
         db_document.progress = 0.8
-        db_document.progress_msg = progress_msg
+        db_document.progress_msg = _progress_msg()
         db.commit()
         db.refresh(db_document)
 
         # 2. Document vectorization and storage
         total_chunks = len(res)
-        progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Generate {total_chunks} chunks.\n"
-        batch_size = 100
-        total_batches = ceil(total_chunks / batch_size)
-        progress_per_batch = 0.2 / total_batches  # Progress of each batch
-        vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
-        # 2.1 Delete document vector index
-        vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
-        # 2.2 Vectorize and import batch documents
-        for batch_start in range(0, total_chunks, batch_size):
-            batch_end = min(batch_start + batch_size, total_chunks)  # prevent out-of-bounds
-            batch = res[batch_start: batch_end]  # Retrieve the current batch
-            chunks = []
+        progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Generate {total_chunks} chunks.")
 
-            # Process the current batch
-            for idx_in_batch, item in enumerate(batch):
-                global_idx = batch_start + idx_in_batch  # Calculate global index
-                metadata = {
-                    "doc_id": uuid.uuid4().hex,
-                    "file_id": str(db_document.file_id),
-                    "file_name": db_document.file_name,
-                    "file_created_at": int(db_document.created_at.timestamp() * 1000),
-                    "document_id": str(db_document.id),
-                    "knowledge_id": str(db_document.kb_id),
-                    "sort_id": global_idx,
-                    "status": 1,
-                }
-                if db_document.parser_config.get("auto_questions", 0):
-                    topn = db_document.parser_config["auto_questions"]
-                    cached = get_llm_cache(chat_model.model_name, item["content_with_weight"], "question",
-                                           {"topn": topn})
+        if total_chunks == 0:
+            progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} No chunks generated, skipping vectorization.")
+        else:
+            total_batches = ceil(total_chunks / EMBEDDING_BATCH_SIZE)
+            progress_per_batch = 0.2 / total_batches
+            vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+            # 2.1 Delete document vector index
+            vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
+            # 2.2 Vectorize and import batch documents
+            auto_questions_topn = db_document.parser_config.get("auto_questions", 0)
+            chat_model = None
+            if auto_questions_topn:
+                chat_model = Base(
+                    key=db_knowledge.llm.api_keys[0].api_key,
+                    model_name=db_knowledge.llm.api_keys[0].model_name,
+                    base_url=db_knowledge.llm.api_keys[0].api_base,
+                )
+
+            # 预先构建所有 batch 的 chunks，保证 sort_id 全局有序
+            all_batch_chunks: list[list[DocumentChunk]] = []
+
+            if auto_questions_topn:
+                # auto_questions 开启：先并发生成所有 chunk 的问题，再按 batch 分组
+                # 构建 (global_idx, item) 列表
+                indexed_items = list(enumerate(res))
+
+                def _generate_question(idx_item: tuple[int, dict]) -> tuple[int, str]:
+                    """为单个 chunk 生成问题（带缓存），返回 (global_idx, question_text)"""
+                    global_idx, item = idx_item
+                    content = item["content_with_weight"]
+                    cached = get_llm_cache(chat_model.model_name, content, "question",
+                                           {"topn": auto_questions_topn})
                     if not cached:
-                        cached = question_proposal(chat_model, item["content_with_weight"], topn)
-                        set_llm_cache(chat_model.model_name, item["content_with_weight"], cached, "question",
-                                      {"topn": topn})
-                    chunks.append(
-                        DocumentChunk(page_content=f"question: {cached} answer: {item['content_with_weight']}",
-                                      metadata=metadata))
-                else:
-                    chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=metadata))
+                        cached = question_proposal(chat_model, content, auto_questions_topn)
+                        set_llm_cache(chat_model.model_name, content, cached, "question",
+                                      {"topn": auto_questions_topn})
+                    return global_idx, cached
 
-            # Bulk segmented vector import
-            vector_service.add_chunks(chunks)
+                # 并发调用 LLM 生成问题
+                question_map: dict[int, str] = {}
+                with ThreadPoolExecutor(max_workers=AUTO_QUESTIONS_MAX_WORKERS) as q_executor:
+                    futures = {q_executor.submit(_generate_question, item): item[0]
+                               for item in indexed_items}
+                    for future in futures:
+                        global_idx, cached = future.result()
+                        question_map[global_idx] = cached
 
-            # Update progress
-            db_document.progress += progress_per_batch
-            progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Embedding progress  ({db_document.progress}).\n"
-            db_document.progress_msg = progress_msg
+                progress_lines.append(
+                    f"{datetime.now().strftime('%H:%M:%S')} Auto questions generated for {total_chunks} chunks "
+                    f"(workers={AUTO_QUESTIONS_MAX_WORKERS}).")
+
+                # 按 batch 分组组装 DocumentChunk
+                for batch_start in range(0, total_chunks, EMBEDDING_BATCH_SIZE):
+                    batch_end = min(batch_start + EMBEDDING_BATCH_SIZE, total_chunks)
+                    chunks = []
+                    for global_idx in range(batch_start, batch_end):
+                        item = res[global_idx]
+                        metadata = {
+                            "doc_id": uuid.uuid4().hex,
+                            "file_id": str(db_document.file_id),
+                            "file_name": db_document.file_name,
+                            "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                            "document_id": str(db_document.id),
+                            "knowledge_id": str(db_document.kb_id),
+                            "sort_id": global_idx,
+                            "status": 1,
+                        }
+                        cached = question_map[global_idx]
+                        chunks.append(
+                            DocumentChunk(
+                                page_content=f"question: {cached} answer: {item['content_with_weight']}",
+                                metadata=metadata))
+                    all_batch_chunks.append(chunks)
+            else:
+                # 无 auto_questions：直接构建 chunks
+                for batch_start in range(0, total_chunks, EMBEDDING_BATCH_SIZE):
+                    batch_end = min(batch_start + EMBEDDING_BATCH_SIZE, total_chunks)
+                    chunks = []
+                    for global_idx in range(batch_start, batch_end):
+                        item = res[global_idx]
+                        metadata = {
+                            "doc_id": uuid.uuid4().hex,
+                            "file_id": str(db_document.file_id),
+                            "file_name": db_document.file_name,
+                            "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                            "document_id": str(db_document.id),
+                            "knowledge_id": str(db_document.kb_id),
+                            "sort_id": global_idx,
+                            "status": 1,
+                        }
+                        chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=metadata))
+                    all_batch_chunks.append(chunks)
+
+            # 并发提交 embedding + ES 写入，max_workers 控制模型 API 并发压力
+            batch_errors: dict[int, Exception] = {}
+
+            def _embed_and_store(batch_idx: int, batch_chunks: list[DocumentChunk]):
+                try:
+                    vector_service.add_chunks(batch_chunks)
+                except Exception as exc:
+                    logger.warning(f"[ParseDoc] batch {batch_idx} failed, retrying: {exc}")
+                    try:
+                        vector_service.add_chunks(batch_chunks)
+                    except Exception as retry_exc:
+                        logger.error(f"[ParseDoc] batch {batch_idx} retry failed: {retry_exc}", exc_info=True)
+                        batch_errors[batch_idx] = retry_exc
+
+            with ThreadPoolExecutor(max_workers=EMBEDDING_MAX_WORKERS) as executor:
+                futures = {
+                    executor.submit(_embed_and_store, i, batch_chunks): i
+                    for i, batch_chunks in enumerate(all_batch_chunks)
+                }
+                for future in futures:
+                    future.result()
+
+            # 如果有 batch 失败，汇总抛出
+            if batch_errors:
+                failed_detail = "; ".join(
+                    f"batch {i}: {type(err).__name__}: {err}"
+                    for i, err in sorted(batch_errors.items())
+                )
+                raise RuntimeError(f"Embedding failed for {len(batch_errors)}/{total_batches} batch(es). {failed_detail}")
+
+            # 所有 batch 完成后一次性更新进度
+            db_document.progress = 0.8 + 0.2  # 直接到 1.0 前的状态
+            progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} All {total_batches} batches embedded (workers={EMBEDDING_MAX_WORKERS}).")
+            db_document.progress_msg = _progress_msg()
             db_document.process_duration = time.time() - start_time
             db_document.run = 0
             db.commit()
             db.refresh(db_document)
 
         # Vectorization and data entry completed
-        progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Indexing done.\n"
+        progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Indexing done.")
         db_document.chunk_num = total_chunks
         db_document.progress = 1.0
         db_document.process_duration = time.time() - start_time
-        progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Task done ({db_document.process_duration}s).\n"
-        db_document.progress_msg = progress_msg
+        progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Task done ({db_document.process_duration}s).")
+        db_document.progress_msg = _progress_msg()
         db_document.run = 0
         db.commit()
 
-        # using graphrag
+        # GraphRAG: 异步派发到独立队列，不阻塞文档解析流程
         if db_knowledge.parser_config and db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False):
-            graphrag_conf = db_knowledge.parser_config.get("graphrag", {})
-            with_resolution = graphrag_conf.get("resolution", False)
-            with_community = graphrag_conf.get("community", False)
-
-            def callback(*args, msg=None, **kwargs):
-                nonlocal progress_msg
-                message = msg or (args[0] if args else "No message")
-                progress_msg += f"{datetime.now().strftime('%H:%M:%S')} run graphrag msg: {message}.\n"
-
-            progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Start to run graphrag.\n"
-            start_time = time.time()
-            db_document.progress_msg = progress_msg
+            progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} GraphRAG enabled, dispatching async task.")
+            db_document.progress_msg = _progress_msg()
             db.commit()
-            db.refresh(db_document)
-
-            task = {
-                "id": str(db_document.id),
-                "workspace_id": str(db_knowledge.workspace_id),
-                "kb_id": str(db_knowledge.id),
-                "parser_config": db_knowledge.parser_config,
-            }
-
-            # init_graphrag
-            vts, _ = embedding_model.encode(["ok"])
-            vector_size = len(vts[0])
-            init_graphrag(task, vector_size)
-
-            async def _run(
-                    row: dict,
-                    document_ids: list[str],
-                    language: str,
-                    parser_config: dict,
-                    vector_service,
-                    chat_model,
-                    embedding_model,
-                    callback,
-                    with_resolution: bool = True,
-                    with_community: bool = True
-            ) -> dict:
-                await trio.sleep(5)  # Delay for 10 seconds
-                nonlocal progress_msg  # Declare the use of an external progress_msg variable
-                result = await run_graphrag_for_kb(
-                    row=row,
-                    document_ids=document_ids,
-                    language=language,
-                    parser_config=parser_config,
-                    vector_service=vector_service,
-                    chat_model=chat_model,
-                    embedding_model=embedding_model,
-                    callback=callback,
-                    with_resolution=with_resolution,
-                    with_community=with_community,
-                )
-                progress_msg += f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task result for task {task}:\n{result}\n"
-                return result
-
-            def sync_task():
-                trio.run(
-                    lambda: _run(
-                        row=task,
-                        document_ids=[str(db_document.id)],
-                        language="Chinese",
-                        parser_config=db_knowledge.parser_config,
-                        vector_service=vector_service,
-                        chat_model=chat_model,
-                        embedding_model=embedding_model,
-                        callback=callback,
-                        with_resolution=with_resolution,
-                        with_community=with_community,
-                    )
-                )
-
-            try:
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(sync_task)
-                    future.result()  # Blocks until the task completes
-            except Exception as e:
-                progress_msg += f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task failed for task {task}:\n{str(e)}\n"
-            progress_msg += f"{datetime.now().strftime('%H:%M:%S')} Knowledge Graph done ({time.time() - start_time}s)"
-            db_document.progress_msg = progress_msg
-            db.commit()
-            db.refresh(db_document)
+            build_graphrag_for_document.delay(str(document_id), str(db_knowledge.id))
 
         result = f"parse document '{db_document.file_name}' processed successfully."
+        logger.info(f"[ParseDoc] document={document_id} file='{db_document.file_name}' done in {db_document.process_duration:.1f}s, chunks={total_chunks}")
         return result
-    except Exception as e:
-        if 'db_document' in locals():
-            db_document.progress_msg += f"Failed to vectorize and import the parsed document:{str(e)}\n"
-            db_document.run = 0
-            db.commit()
-        result = f"parse document '{db_document.file_name}' failed."
-        return result
-    finally:
-        db.close()
+      except Exception as e:
+        logger.error(f"[ParseDoc] document={document_id} failed: {e}", exc_info=True)
+        if db_document is not None:
+            try:
+                db.rollback()
+                db_document.progress_msg = _progress_msg() + f"Failed to vectorize and import the parsed document:{str(e)}\n"
+                db_document.run = 0
+                db.commit()
+            except Exception:
+                logger.warning(f"[ParseDoc] document={document_id} failed to update error status in DB", exc_info=True)
+        # db_document 可能处于 detached/expired 状态，用之前缓存的值或 document_id 兜底
+        file_name = getattr(db_document, 'file_name', None) if db_document else None
+        return f"parse document '{file_name or document_id}' failed."
 
 
 @celery_app.task(name="app.core.rag.tasks.build_graphrag_for_kb")
@@ -410,51 +442,44 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
     """
     build knowledge graph
     """
-    # Force re-importing Trio in child processes (to avoid inheriting the state of the parent process)
     import importlib
 
     import trio
     importlib.reload(trio)
-    db = next(get_db())  # Manually call the generator
-    db_documents = None
-    db_knowledge = None
-    try:
-        db_documents = db.query(Document).filter(Document.kb_id == kb_id).all()
-        db_knowledge = db.query(Knowledge).filter(Knowledge.id == kb_id).first()
-        # 1. Prepare to configure chat_mdl、embedding_model、vision_model information
-        chat_model = Base(
-            key=db_knowledge.llm.api_keys[0].api_key,
-            model_name=db_knowledge.llm.api_keys[0].model_name,
-            base_url=db_knowledge.llm.api_keys[0].api_base
-        )
-        embedding_model = OpenAIEmbed(
-            key=db_knowledge.embedding.api_keys[0].api_key,
-            model_name=db_knowledge.embedding.api_keys[0].model_name,
-            base_url=db_knowledge.embedding.api_keys[0].api_base
-        )
-        vision_model = QWenCV(
-            key=db_knowledge.image2text.api_keys[0].api_key,
-            model_name=db_knowledge.image2text.api_keys[0].model_name,
-            lang="Chinese",
-            base_url=db_knowledge.image2text.api_keys[0].api_base
-        )
 
-        # 2. get all document_ids from knowledge base
-        vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
-        total, items = vector_service.search_by_segment(document_id=None, query=None, pagesize=9999, page=1, asc=True)
-        document_ids = [str(item.id) for item in db_documents]
+    with get_db_context() as db:
+        try:
+            if not isinstance(kb_id, uuid.UUID):
+                kb_id = uuid.UUID(str(kb_id))
 
-        # 2. using graphrag
-        if db_knowledge.parser_config and db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False):
+            db_knowledge = db.query(Knowledge).filter(Knowledge.id == kb_id).first()
+            if db_knowledge is None:
+                logger.error(f"[GraphRAG-KB] knowledge={kb_id} not found")
+                return f"build knowledge graph failed: knowledge not found"
+
+            if not (db_knowledge.parser_config and
+                    db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False)):
+                return f"build knowledge graph '{db_knowledge.name}' skipped: graphrag not enabled"
+
+            db_documents = db.query(Document).filter(Document.kb_id == kb_id).all()
+            document_ids = [str(doc.id) for doc in db_documents]
+
+            chat_model = Base(
+                key=db_knowledge.llm.api_keys[0].api_key,
+                model_name=db_knowledge.llm.api_keys[0].model_name,
+                base_url=db_knowledge.llm.api_keys[0].api_base,
+            )
+            embedding_model = OpenAIEmbed(
+                key=db_knowledge.embedding.api_keys[0].api_key,
+                model_name=db_knowledge.embedding.api_keys[0].model_name,
+                base_url=db_knowledge.embedding.api_keys[0].api_base,
+            )
+            vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+
             graphrag_conf = db_knowledge.parser_config.get("graphrag", {})
             with_resolution = graphrag_conf.get("resolution", False)
             with_community = graphrag_conf.get("community", False)
 
-            def callback(*args, msg=None, **kwargs):
-                message = msg or (args[0] if args else "No message")
-                print(f"{datetime.now().strftime('%H:%M:%S')} run graphrag msg: {message}.\n")
-
-            start_time = time.time()
             task = {
                 "id": str(db_knowledge.id),
                 "workspace_id": str(db_knowledge.workspace_id),
@@ -467,14 +492,18 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
             vector_size = len(vts[0])
             init_graphrag(task, vector_size)
 
-            async def _run(row: dict, document_ids: list[str], language: str, parser_config: dict, vector_service,
-                           chat_model, embedding_model, callback, with_resolution: bool = True,
-                           with_community: bool = True, ) -> dict:
-                result = await run_graphrag_for_kb(
-                    row=row,
+            def callback(*args, msg=None, **kwargs):
+                message = msg or (args[0] if args else "No message")
+                logger.info(f"[GraphRAG-KB] kb={kb_id} msg: {message}")
+
+            start_time = time.time()
+
+            async def _run() -> dict:
+                return await run_graphrag_for_kb(
+                    row=task,
                     document_ids=document_ids,
-                    language=language,
-                    parser_config=parser_config,
+                    language=DEFAULT_PARSE_LANGUAGE,
+                    parser_config=db_knowledge.parser_config,
                     vector_service=vector_service,
                     chat_model=chat_model,
                     embedding_model=embedding_model,
@@ -482,46 +511,97 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
                     with_resolution=with_resolution,
                     with_community=with_community,
                 )
-                print(f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task result for task {task}:\n{result}\n")
-                return result
 
-            def sync_task():
-                trio.run(
-                    lambda: _run(
-                        row=task,
-                        document_ids=document_ids,
-                        language="Chinese",
-                        parser_config=db_knowledge.parser_config,
-                        vector_service=vector_service,
-                        chat_model=chat_model,
-                        embedding_model=embedding_model,
-                        callback=callback,
-                        with_resolution=with_resolution,
-                        with_community=with_community,
-                    )
+            result = trio.run(_run)
+            duration = time.time() - start_time
+            logger.info(f"[GraphRAG-KB] kb={kb_id} done in {duration:.1f}s, result: {result}")
+
+            return f"build knowledge graph '{db_knowledge.name}' processed successfully."
+        except Exception as e:
+            logger.error(f"[GraphRAG-KB] kb={kb_id} failed: {e}", exc_info=True)
+            return f"build knowledge graph failed: {e}"
+
+
+@celery_app.task(name="app.core.rag.tasks.build_graphrag_for_document")
+def build_graphrag_for_document(document_id: str, knowledge_id: str):
+    """
+    为单个文档构建 GraphRAG，由 parse_document 异步派发。
+    """
+    import importlib
+
+    import trio
+    importlib.reload(trio)
+
+    with get_db_context() as db:
+        try:
+            db_document = db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
+            db_knowledge = db.query(Knowledge).filter(Knowledge.id == uuid.UUID(knowledge_id)).first()
+            if db_document is None or db_knowledge is None:
+                logger.error(f"[GraphRAG] document={document_id} or knowledge={knowledge_id} not found")
+                return f"build_graphrag_for_document failed: record not found"
+
+            graphrag_conf = db_knowledge.parser_config.get("graphrag", {})
+            with_resolution = graphrag_conf.get("resolution", False)
+            with_community = graphrag_conf.get("community", False)
+
+            chat_model = Base(
+                key=db_knowledge.llm.api_keys[0].api_key,
+                model_name=db_knowledge.llm.api_keys[0].model_name,
+                base_url=db_knowledge.llm.api_keys[0].api_base,
+            )
+            embedding_model = OpenAIEmbed(
+                key=db_knowledge.embedding.api_keys[0].api_key,
+                model_name=db_knowledge.embedding.api_keys[0].model_name,
+                base_url=db_knowledge.embedding.api_keys[0].api_base,
+            )
+            vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+
+            task = {
+                "id": document_id,
+                "workspace_id": str(db_knowledge.workspace_id),
+                "kb_id": str(db_knowledge.id),
+                "parser_config": db_knowledge.parser_config,
+            }
+
+            # init_graphrag
+            vts, _ = embedding_model.encode(["ok"])
+            vector_size = len(vts[0])
+            init_graphrag(task, vector_size)
+
+            def callback(*args, msg=None, **kwargs):
+                message = msg or (args[0] if args else "No message")
+                logger.info(f"[GraphRAG] doc={document_id} msg: {message}")
+
+            start_time = time.time()
+
+            async def _run() -> dict:
+                await trio.sleep(5)
+                return await run_graphrag_for_kb(
+                    row=task,
+                    document_ids=[document_id],
+                    language=DEFAULT_PARSE_LANGUAGE,
+                    parser_config=db_knowledge.parser_config,
+                    vector_service=vector_service,
+                    chat_model=chat_model,
+                    embedding_model=embedding_model,
+                    callback=callback,
+                    with_resolution=with_resolution,
+                    with_community=with_community,
                 )
 
-            try:
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(sync_task)
-                    future.result()  # Blocks until the task completes
-            except Exception as e:
-                print(f"{datetime.now().strftime('%H:%M:%S')} GraphRAG task failed for task {task}:\n{str(e)}\n")
-            finally:
-                if db:
-                    db.close()
-            print(f"{datetime.now().strftime('%H:%M:%S')} Knowledge Graph done ({time.time() - start_time}s)")
+            result = trio.run(_run)
+            duration = time.time() - start_time
+            logger.info(f"[GraphRAG] doc={document_id} done in {duration:.1f}s")
 
-        result = f"build knowledge graph '{db_knowledge.name}' processed successfully."
-        return result
-    except Exception as e:
-        if 'db_knowledge' in locals():
-            print(f"Failed to build knowledge grap:{str(e)}\n")
-        result = f"build knowledge grap '{db_knowledge.name}' failed."
-        return result
-    finally:
-        if db:
-            db.close()
+            # 更新文档进度信息
+            db_document.progress_msg = (db_document.progress_msg or "") + \
+                f"{datetime.now().strftime('%H:%M:%S')} Knowledge Graph done ({duration:.1f}s)\n"
+            db.commit()
+
+            return f"build_graphrag_for_document '{document_id}' processed successfully."
+        except Exception as e:
+            logger.error(f"[GraphRAG] doc={document_id} failed: {e}", exc_info=True)
+            return f"build_graphrag_for_document '{document_id}' failed: {e}"
 
 
 @celery_app.task(name="app.core.rag.tasks.sync_knowledge_for_kb")
@@ -529,10 +609,16 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
     """
     sync knowledge document and Document parsing, vectorization, and storage
     """
-    db = next(get_db())  # Manually call the generator
-    db_knowledge = None
-    try:
+    with get_db_context() as db:
+      try:
+        if not isinstance(kb_id, uuid.UUID):
+            kb_id = uuid.UUID(str(kb_id))
+
         db_knowledge = db.query(Knowledge).filter(Knowledge.id == kb_id).first()
+        if db_knowledge is None:
+            logger.error(f"[SyncKB] knowledge={kb_id} not found")
+            return f"sync knowledge failed: knowledge not found"
+
         # 1. get vector_service
         vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
@@ -667,7 +753,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                         db.commit()
 
                 except Exception as e:
-                    print(f"\n\nError during crawl: {e}")
+                    logger.error(f"[SyncKB] Error during crawl: {e}", exc_info=True)
             case "Third-party":  # Integration of knowledge bases from three parties
                 yuque_user_id = db_knowledge.parser_config.get("yuque_user_id", "")
                 feishu_app_id = db_knowledge.parser_config.get("feishu_app_id", "")
@@ -685,13 +771,9 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                         # Get all files from all repos
                         async def async_get_files(api_client: YuqueAPIClient):
                             async with api_client as client:
-                                print("\n=== Fetching repositories ===")
                                 repos = await client.get_user_repos()
-                                print(f"Found {len(repos)} repositories:")
                                 all_files = []
                                 for repo in repos:
-                                    # Get documents from repository
-                                    print(f"\n=== Fetching documents from '{repo.name}' ===")
                                     docs = await client.get_repo_docs(repo.id)
                                     all_files.extend(docs)
                                 return all_files
@@ -837,7 +919,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                             db.commit()
 
                     except Exception as e:
-                        print(f"\n\nError during fetch feishu: {e}")
+                        logger.error(f"[SyncKB] Error during fetch yuque: {e}", exc_info=True)
                 if feishu_app_id:  # Feishu Knowledge Base
                     feishu_app_secret = db_knowledge.parser_config.get("feishu_app_secret", "")
                     feishu_folder_token = db_knowledge.parser_config.get("feishu_folder_token", "")
@@ -999,19 +1081,16 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                             db.commit()
 
                     except Exception as e:
-                        print(f"\n\nError during fetch feishu: {e}")
+                        logger.error(f"[SyncKB] Error during fetch feishu: {e}", exc_info=True)
             case _:  # General
-                print(f"General: No synchronization needed\n")
+                logger.info(f"[SyncKB] kb={kb_id} type={db_knowledge.type}: no synchronization needed")
 
         result = f"sync knowledge '{db_knowledge.name}' processed successfully."
         return result
-    except Exception as e:
-        if 'db_knowledge' in locals():
-            print(f"Failed to sync knowledge:{str(e)}\n")
-        result = f"sync knowledge '{db_knowledge.name}' failed."
-        return result
-    finally:
-        db.close()
+      except Exception as e:
+        logger.error(f"[SyncKB] kb={kb_id} failed: {e}", exc_info=True)
+        kb_name = db_knowledge.name if db_knowledge else kb_id
+        return f"sync knowledge '{kb_name}' failed: {e}"
 
 
 @celery_app.task(name="app.core.memory.agent.read_message", bind=True)
@@ -1100,7 +1179,7 @@ def read_message_task(self, end_user_id: str, message: str, history: List[Dict[s
         }
 
 
-@celery_app.task(name="app.core.memory.agent.write_message", bind=True)
+@celery_app.task(name="app.core.memory.agent.write_message", bind=True, acks_late=False)
 def write_message_task(
         self,
         end_user_id: str,
@@ -1176,6 +1255,7 @@ def write_message_task(
 
     redis_client = get_sync_redis_client()
     lock = None
+    loop = None
     if redis_client is not None:
         lock = RedisFairLock(
             key=f"memory_write:{end_user_id}",
@@ -1196,6 +1276,7 @@ def write_message_task(
             }
 
     try:
+        task_start_time = int(time.time())
         loop = set_asyncio_event_loop()
 
         result = loop.run_until_complete(_run())
@@ -1205,7 +1286,7 @@ def write_message_task(
                     f"- elapsed_time={elapsed_time:.2f}s, task_id={self.request.id}")
 
         try:
-            _r = get_sync_redis_client()
+            _r = redis_client
             if _r is not None:
                 from datetime import timezone as _tz
                 _now_utc = datetime.now(_tz.utc).isoformat()
@@ -1219,6 +1300,7 @@ def write_message_task(
         return {
             "status": "SUCCESS",
             "result": result,
+            "start_at": task_start_time,
             "end_user_id": end_user_id,
             "config_id": config_id,
             "elapsed_time": elapsed_time,
@@ -1252,7 +1334,8 @@ def write_message_task(
                 logger.warning(f"[CELERY WRITE] 释放锁失败: {e}")
         # Gracefully shutdown the event loop to prevent
         # 'RuntimeError: Event loop is closed' from httpx.AsyncClient.__del__
-        _shutdown_loop_gracefully(loop)
+        if loop:
+            _shutdown_loop_gracefully(loop)
 
 
 # unused task
@@ -1320,7 +1403,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
         from app.models.app_model import App
         from app.models.end_user_model import EndUser
         from app.repositories.memory_increment_repository import write_memory_increment
-        from app.services.memory_storage_service import search_all
+        from app.services.memory_storage_service import search_all_batch
 
         with get_db_context() as db:
             try:
@@ -1354,27 +1437,15 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                     EndUser.workspace_id == workspace_id
                 ).distinct().all()
 
-                # 3. 遍历所有end_user，查询每个宿主的记忆总量并累加
-                total_num = 0
-                end_user_details = []
+                # 3. 批量查询所有宿主的记忆总量
+                end_user_id_list = [str(eid) for (eid,) in end_users]
+                batch_result = await search_all_batch(end_user_id_list)
 
-                for (end_user_id,) in end_users:
-                    try:
-                        # 调用 search_all 接口查询该宿主的总量
-                        result = await search_all(str(end_user_id))
-                        user_total = result.get("total", 0)
-                        total_num += user_total
-                        end_user_details.append({
-                            "end_user_id": str(end_user_id),
-                            "total": user_total
-                        })
-                    except Exception as e:
-                        # 记录单个用户查询失败，但继续处理其他用户
-                        end_user_details.append({
-                            "end_user_id": str(end_user_id),
-                            "total": 0,
-                            "error": str(e)
-                        })
+                total_num = sum(batch_result.values())
+                end_user_details = [
+                    {"end_user_id": uid, "total": batch_result.get(uid, 0)}
+                    for uid in end_user_id_list
+                ]
 
                 # 4. 写入数据库
                 memory_increment = write_memory_increment(
@@ -1437,7 +1508,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
         from app.models.end_user_model import EndUser
         from app.models.workspace_model import Workspace
         from app.repositories.memory_increment_repository import write_memory_increment
-        from app.services.memory_storage_service import search_all
+        from app.services.memory_storage_service import search_all_batch
 
         with get_db_context() as db:
             try:
@@ -1495,28 +1566,15 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
                             EndUser.workspace_id == workspace_id
                         ).distinct().all()
 
-                        # 3. 遍历所有end_user，查询每个宿主的记忆总量并累加
-                        total_num = 0
-                        end_user_details = []
+                        # 3. 批量查询所有宿主的记忆总量
+                        end_user_id_list = [str(eid) for (eid,) in end_users]
+                        batch_result = await search_all_batch(end_user_id_list)
 
-                        for (end_user_id,) in end_users:
-                            try:
-                                # 调用 search_all 接口查询该宿主的总量
-                                result = await search_all(str(end_user_id))
-                                user_total = result.get("total", 0)
-                                total_num += user_total
-                                end_user_details.append({
-                                    "end_user_id": str(end_user_id),
-                                    "total": user_total
-                                })
-                            except Exception as e:
-                                # 记录单个用户查询失败，但继续处理其他用户
-                                logger.warning(f"查询用户 {end_user_id} 记忆失败: {str(e)}")
-                                end_user_details.append({
-                                    "end_user_id": str(end_user_id),
-                                    "total": 0,
-                                    "error": str(e)
-                                })
+                        total_num = sum(batch_result.values())
+                        end_user_details = [
+                            {"end_user_id": uid, "total": batch_result.get(uid, 0)}
+                            for uid in end_user_id_list
+                        ]
 
                         # 4. 写入数据库
                         memory_increment = write_memory_increment(
@@ -1531,6 +1589,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
                             "status": "SUCCESS",
                             "total_num": total_num,
                             "end_user_count": len(end_users),
+                            "end_user_details": end_user_details,
                             "memory_increment_id": str(memory_increment.id),
                             "created_at": memory_increment.created_at.isoformat(),
                         })
@@ -2623,35 +2682,34 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
 
         service = MemoryAgentService()
 
-        with get_db_context() as db:
-            for end_user_id in end_user_ids:
-                # 存在性检查：缓存有数据则跳过
-                cached = await InterestMemoryCache.get_interest_distribution(
+        for end_user_id in end_user_ids:
+            # 存在性检查：缓存有数据则跳过
+            cached = await InterestMemoryCache.get_interest_distribution(
+                end_user_id=end_user_id,
+                language=language,
+            )
+            if cached is not None:
+                skipped += 1
+                continue
+
+            logger.info(f"用户 {end_user_id} 无兴趣分布缓存，开始生成")
+            try:
+                result = await service.get_interest_distribution_by_user(
                     end_user_id=end_user_id,
+                    limit=5,
                     language=language,
                 )
-                if cached is not None:
-                    skipped += 1
-                    continue
-
-                logger.info(f"用户 {end_user_id} 无兴趣分布缓存，开始生成")
-                try:
-                    result = await service.get_interest_distribution_by_user(
-                        end_user_id=end_user_id,
-                        limit=5,
-                        language=language,
-                    )
-                    await InterestMemoryCache.set_interest_distribution(
-                        end_user_id=end_user_id,
-                        language=language,
-                        data=result,
-                        expire=INTEREST_CACHE_EXPIRE,
-                    )
-                    initialized += 1
-                    logger.info(f"用户 {end_user_id} 兴趣分布缓存生成成功")
-                except Exception as e:
-                    failed += 1
-                    logger.error(f"用户 {end_user_id} 兴趣分布缓存生成失败: {e}")
+                await InterestMemoryCache.set_interest_distribution(
+                    end_user_id=end_user_id,
+                    language=language,
+                    data=result,
+                    expire=INTEREST_CACHE_EXPIRE,
+                )
+                initialized += 1
+                logger.info(f"用户 {end_user_id} 兴趣分布缓存生成成功")
+            except Exception as e:
+                failed += 1
+                logger.error(f"用户 {end_user_id} 兴趣分布缓存生成失败: {e}")
 
         logger.info(f"兴趣分布按需初始化完成: 初始化={initialized}, 跳过={skipped}, 失败={failed}")
         return {
@@ -2933,6 +2991,272 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
             "elapsed_time": time.time() - start_time,
             "task_id": self.request.id,
         }
+
+
+# ─── User Metadata Extraction Task ───────────────────────────────────────────
+
+
+def _update_timestamps(existing: dict, new: dict, updated_at: dict, now: str, prefix: str = "") -> None:
+    """对比新旧元数据，更新变更字段的 _updated_at 时间戳。"""
+    for key, new_val in new.items():
+        if key == "_updated_at":
+            continue
+        path = f"{prefix}.{key}" if prefix else key
+        old_val = existing.get(key)
+
+        if isinstance(new_val, dict) and isinstance(old_val, dict):
+            _update_timestamps(old_val, new_val, updated_at, now, prefix=path)
+        elif old_val != new_val:
+            updated_at[path] = now
+
+@celery_app.task(
+    bind=True,
+    name='app.tasks.extract_user_metadata',
+    ignore_result=False,
+    max_retries=0,
+    acks_late=True,
+    time_limit=300,
+    soft_time_limit=240,
+)
+def extract_user_metadata_task(
+    self,
+    end_user_id: str,
+    statements: List[str],
+    config_id: Optional[str] = None,
+    language: str = "zh",
+) -> Dict[str, Any]:
+    """异步提取用户元数据并写入数据库。
+
+    在去重消歧完成后由编排器触发，使用独立 LLM 调用提取元数据。
+    LLM 配置优先使用 config_id 对应的应用配置，失败时回退到工作空间默认配置。
+
+    Args:
+        end_user_id: 终端用户 ID
+        statements: 用户相关的 statement 文本列表
+        config_id: 应用配置 ID（可选）
+        language: 语言类型 ("zh" 中文, "en" 英文)
+
+    Returns:
+        包含任务执行结果的字典
+    """
+    start_time = time.time()
+    logger.info(
+        f"[CELERY METADATA] Starting metadata extraction - end_user_id={end_user_id}, "
+        f"statements_count={len(statements)}, config_id={config_id}, language={language}"
+    )
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.memory.storage_services.extraction_engine.knowledge_extraction.metadata_extractor import MetadataExtractor
+        from app.repositories.end_user_info_repository import EndUserInfoRepository
+        from app.repositories.end_user_repository import EndUserRepository
+        from app.services.memory_config_service import MemoryConfigService
+
+        # 1. 获取 LLM 配置（应用配置 → 工作空间配置兜底）并创建 LLM client
+        with get_db_context() as db:
+            end_user_uuid = uuid.UUID(end_user_id)
+
+            # 获取 workspace_id from end_user
+            end_user = EndUserRepository(db).get_by_id(end_user_uuid)
+            if not end_user:
+                return {"status": "FAILURE", "error": f"End user not found: {end_user_id}"}
+
+            workspace_id = end_user.workspace_id
+
+            config_service = MemoryConfigService(db)
+            memory_config = config_service.get_config_with_fallback(
+                memory_config_id=uuid.UUID(config_id) if config_id else None,
+                workspace_id=workspace_id,
+            )
+            if not memory_config:
+                return {"status": "FAILURE", "error": "No LLM config available (app + workspace fallback failed)"}
+
+            # 2. 创建 LLM client
+            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+            factory = MemoryClientFactory(db)
+            if not memory_config.llm_id:
+                return {"status": "FAILURE", "error": "Memory config has no LLM model configured"}
+            llm_client = factory.get_llm_client(memory_config.llm_id)
+
+            # 2.5 读取已有元数据和别名，传给 extractor 作为上下文
+            existing_metadata = None
+            existing_aliases = None
+            try:
+                info = EndUserInfoRepository(db).get_by_end_user_id(end_user_uuid)
+                if info:
+                    if info.meta_data:
+                        existing_metadata = info.meta_data
+                    existing_aliases = info.aliases if info.aliases else []
+                    logger.info(f"[CELERY METADATA] 已读取已有元数据和别名（aliases={existing_aliases}）")
+            except Exception as e:
+                logger.warning(f"[CELERY METADATA] 读取已有数据失败（继续无上下文提取）: {e}")
+
+        # 3. 提取元数据和别名（传入已有数据作为上下文）
+        extractor = MetadataExtractor(llm_client=llm_client, language=language)
+        extract_result = await extractor.extract_metadata(
+            statements,
+            existing_metadata=existing_metadata,
+            existing_aliases=existing_aliases,
+        )
+
+        if not extract_result:
+            logger.info(f"[CELERY METADATA] No metadata extracted for end_user_id={end_user_id}")
+            return {"status": "SUCCESS", "result": "no_metadata_extracted"}
+
+        user_metadata, aliases_to_add, aliases_to_remove = extract_result
+        logger.info(f"[CELERY METADATA] LLM 别名新增: {aliases_to_add}, 移除: {aliases_to_remove}")
+
+        # 4. 清洗元数据、覆盖写入元数据和别名
+        def clean_metadata(raw: dict) -> dict:
+            """递归移除空字符串、空列表、空字典。"""
+            result = {}
+            for k, v in raw.items():
+                if v == "" or v == []:
+                    continue
+                if isinstance(v, dict):
+                    cleaned = clean_metadata(v)
+                    if cleaned:
+                        result[k] = cleaned
+                else:
+                    result[k] = v
+            return result
+
+        raw_dict = user_metadata.model_dump(exclude_none=True) if user_metadata else {}
+        logger.info(f"[CELERY METADATA] LLM 输出完整元数据: {json.dumps(raw_dict, ensure_ascii=False)}")
+
+        cleaned = clean_metadata(raw_dict) if raw_dict else {}
+        logger.info(f"[CELERY METADATA] 清洗后元数据: {json.dumps(cleaned, ensure_ascii=False)}")
+
+        from datetime import datetime as dt, timezone as tz
+        now = dt.now(tz.utc).isoformat()
+
+        # 过滤别名中的占位名称，执行增量增删
+        _PLACEHOLDER_NAMES = {"用户", "我", "user", "i"}
+
+        def _filter_aliases(aliases_list):
+            seen = set()
+            result = []
+            for a in aliases_list:
+                a_stripped = a.strip()
+                if a_stripped and a_stripped.lower() not in _PLACEHOLDER_NAMES and a_stripped.lower() not in seen:
+                    result.append(a_stripped)
+                    seen.add(a_stripped.lower())
+            return result
+
+        filtered_add = _filter_aliases(aliases_to_add)
+        filtered_remove = _filter_aliases(aliases_to_remove)
+        remove_lower = {a.lower() for a in filtered_remove}
+
+        with get_db_context() as db:
+            end_user_uuid = uuid.UUID(end_user_id)
+            info = EndUserInfoRepository(db).get_by_end_user_id(end_user_uuid)
+            end_user = EndUserRepository(db).get_by_id(end_user_uuid)
+
+            if info:
+                # 元数据覆盖写入
+                if cleaned:
+                    existing_meta = info.meta_data if info.meta_data else {}
+                    updated_at = dict(existing_meta.get("_updated_at", {}))
+                    _update_timestamps(existing_meta, cleaned, updated_at, now)
+                    final = dict(cleaned)
+                    final["_updated_at"] = updated_at
+                    info.meta_data = final
+                    logger.info("[CELERY METADATA] 覆盖写入元数据")
+
+                # 别名增量增删：(已有 - remove) + add
+                old_aliases = info.aliases if info.aliases else []
+                # 先移除
+                merged = [a for a in old_aliases if a.strip().lower() not in remove_lower]
+                # 再追加（去重）
+                existing_lower = {a.strip().lower() for a in merged}
+                for a in filtered_add:
+                    if a.lower() not in existing_lower:
+                        merged.append(a)
+                        existing_lower.add(a.lower())
+
+                if merged != old_aliases:
+                    info.aliases = merged
+                    # other_name 更新逻辑
+                    if merged and (
+                        not info.other_name
+                        or info.other_name.strip().lower() in _PLACEHOLDER_NAMES
+                        or info.other_name.strip().lower() in remove_lower
+                    ):
+                        info.other_name = merged[0]
+                    if end_user and merged and (
+                        not end_user.other_name
+                        or end_user.other_name.strip().lower() in _PLACEHOLDER_NAMES
+                        or end_user.other_name.strip().lower() in remove_lower
+                    ):
+                        end_user.other_name = merged[0]
+                    logger.info(
+                        f"[CELERY METADATA] 别名增量更新: {old_aliases} - {filtered_remove} + {filtered_add} → {merged}"
+                    )
+            else:
+                # 没有 end_user_info 记录，创建一条
+                from app.models.end_user_info_model import EndUserInfo
+                initial_aliases = filtered_add  # 新记录只有 add，没有 remove
+                first_alias = initial_aliases[0] if initial_aliases else ""
+                if first_alias or cleaned:
+                    new_info = EndUserInfo(
+                        end_user_id=end_user_uuid,
+                        other_name=first_alias or "",
+                        aliases=initial_aliases,
+                        meta_data=cleaned if cleaned else None,
+                    )
+                    db.add(new_info)
+                    if end_user and first_alias and (
+                        not end_user.other_name or end_user.other_name.strip().lower() in _PLACEHOLDER_NAMES
+                    ):
+                        end_user.other_name = first_alias
+                    logger.info(f"[CELERY METADATA] 创建 end_user_info: other_name={first_alias}, aliases={initial_aliases}")
+                else:
+                    return {"status": "SUCCESS", "result": "no_data_to_write"}
+
+            db.commit()
+
+            # 同步 PgSQL aliases 到 Neo4j 用户实体（PgSQL 为权威源）
+            final_aliases = info.aliases if info else initial_aliases
+            if final_aliases:
+                try:
+                    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+                    neo4j_connector = Neo4jConnector()
+                    cypher = """
+                    MATCH (e:ExtractedEntity)
+                    WHERE e.end_user_id = $end_user_id AND e.name IN ['用户', '我', 'User', 'I']
+                    SET e.aliases = $aliases
+                    """
+                    await neo4j_connector.execute_query(
+                        cypher, end_user_id=end_user_id, aliases=final_aliases
+                    )
+                    await neo4j_connector.close()
+                    logger.info(f"[CELERY METADATA] Neo4j 用户实体 aliases 已同步: {final_aliases}")
+                except Exception as neo4j_err:
+                    logger.warning(f"[CELERY METADATA] Neo4j aliases 同步失败（不影响主流程）: {neo4j_err}")
+
+        return {"status": "SUCCESS", "result": "metadata_and_aliases_written"}
+
+    loop = None
+    try:
+        loop = set_asyncio_event_loop()
+        result = loop.run_until_complete(_run())
+        elapsed = time.time() - start_time
+        result["elapsed_time"] = elapsed
+        result["task_id"] = self.request.id
+        logger.info(f"[CELERY METADATA] Task completed - elapsed={elapsed:.2f}s, result={result.get('result')}")
+        return result
+
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.error(f"[CELERY METADATA] Task failed - elapsed={elapsed:.2f}s, error={e}", exc_info=True)
+        return {
+            "status": "FAILURE",
+            "error": str(e),
+            "elapsed_time": elapsed,
+            "task_id": self.request.id,
+        }
+    finally:
+        if loop:
+            _shutdown_loop_gracefully(loop)
 
 
 # unused task

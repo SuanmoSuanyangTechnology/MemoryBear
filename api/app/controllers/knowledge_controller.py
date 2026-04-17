@@ -27,6 +27,7 @@ from app.schemas import knowledge_schema
 from app.schemas.response_schema import ApiResponse
 from app.services import knowledge_service, document_service
 from app.services.model_service import ModelConfigService
+from app.core.quota_stub import check_knowledge_capacity_quota
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
@@ -179,6 +180,7 @@ async def get_knowledges(
 
 
 @router.post("/knowledge", response_model=ApiResponse)
+@check_knowledge_capacity_quota
 async def create_knowledge(
         create_data: knowledge_schema.KnowledgeCreate,
         db: Session = Depends(get_db),
@@ -352,6 +354,7 @@ async def delete_knowledge(
         # 2. Soft-delete knowledge base
         api_logger.debug(f"Perform a soft delete: {db_knowledge.name} (ID: {knowledge_id})")
         db_knowledge.status = 2
+        db_knowledge.updated_at = datetime.datetime.now()
         db.commit()
         api_logger.info(f"The knowledge base has been successfully deleted: {db_knowledge.name} (ID: {knowledge_id})")
         return success(msg="The knowledge base has been successfully deleted")

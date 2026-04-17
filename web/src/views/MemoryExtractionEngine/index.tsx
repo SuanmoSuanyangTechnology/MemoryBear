@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 15:45:42
+ * @Last Modified time: 2026-04-14 16:54:40
  */
 /**
  * Memory Extraction Engine Configuration Page
@@ -27,6 +27,7 @@ import ModelSelect from '@/components/ModelSelect'
 import RbSlider from '@/components/RbSlider';
 import DescWrapper from '@/components/FormItem/DescWrapper'
 import LabelWrapper from '@/components/FormItem/LabelWrapper'
+import { useI18n } from '@/store/locale'
 
 /** Available configuration section keys */
 const keys = [
@@ -54,11 +55,16 @@ const MemoryExtractionEngine: FC = () => {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const { id } = useParams()
+  const { language } = useI18n()
   const [expandedKeys, setExpandedKeys] = useState<string[]>(keys)
   const [form] = Form.useForm<ConfigForm>()
   const values = Form.useWatch<ConfigForm>([], form)
   const [loading, setLoading] = useState(false)
   const [iterationPeriodDisabled, setIterationPeriodDisabled] = useState(false)
+
+  useEffect(() => {
+    document.title = [document.title.split(' - ')[0], t('memoryBear')].join(' - ')
+  }, [language])
 
   useEffect(() => {
     if (values?.reflexion_range === 'database') {

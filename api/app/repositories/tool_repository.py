@@ -161,6 +161,17 @@ class BuiltinToolRepository:
             BuiltinToolConfig.id == tool_id
         ).first()
 
+    @staticmethod
+    def get_existing_tool_classes(db: Session, tenant_id: uuid.UUID) -> set:
+        """获取该租户已有的内置工具 tool_class 集合"""
+        rows = db.query(BuiltinToolConfig.tool_class).join(
+            ToolConfig, BuiltinToolConfig.id == ToolConfig.id
+        ).filter(
+            ToolConfig.tenant_id == tenant_id,
+            ToolConfig.tool_type == ToolType.BUILTIN.value
+        ).all()
+        return {row[0] for row in rows}
+
 
 class CustomToolRepository:
     """自定义工具仓储类"""

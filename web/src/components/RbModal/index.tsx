@@ -44,7 +44,7 @@ const RbModal: FC<ModalProps> = ({
       {...props}
     >
       {/* Scrollable content container */}
-      <div className='rb:max-h-137.5 rb:overflow-y-auto rb:overflow-x-hidden'>
+      <div className='rb:max-h-[calc(100vh-202px)] rb:overflow-y-auto rb:overflow-x-hidden'>
         {children}
       </div>
     </Modal>

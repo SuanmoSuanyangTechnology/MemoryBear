@@ -1,7 +1,11 @@
+import asyncio
 import os
 import time
 
 from app.core.logging_config import get_agent_logger, log_time
+from app.core.memory.agent.langgraph_graph.nodes.perceptual_retrieve_node import (
+    PerceptualSearchService,
+)
 from app.core.memory.agent.models.summary_models import (
     RetrieveSummaryResponse,
     SummaryResponse,
@@ -339,11 +343,45 @@ async def Input_Summary(state: ReadState) -> ReadState:
 
     try:
         if storage_type != "rag":
-            retrieve_info, question, raw_results = await SearchService().execute_hybrid_search(
+
+            async def _perceptual_search():
+                service = PerceptualSearchService(
+                    end_user_id=end_user_id,
+                    memory_config=memory_config,
+                )
+                return await service.search(query=data, limit=5)
+
+            hybrid_task = SearchService().execute_hybrid_search(
                 **search_params,
                 memory_config=memory_config,
-                expand_communities=False,  # 路径 "2" 只需要 community 的 summary 文本，不展开到 Statement
+                expand_communities=False,
             )
+            perceptual_task = _perceptual_search()
+
+            gather_results = await asyncio.gather(
+                hybrid_task, perceptual_task, return_exceptions=True
+            )
+            hybrid_result = gather_results[0]
+            perceptual_results = gather_results[1]
+
+            # 处理 hybrid search 异常
+            if isinstance(hybrid_result, Exception):
+                raise hybrid_result
+            retrieve_info, question, raw_results = hybrid_result
+
+            # 处理感知记忆结果
+            if isinstance(perceptual_results, Exception):
+                logger.warning(f"[Input_Summary] perceptual search failed: {perceptual_results}")
+                perceptual_results = []
+
+            # 拼接感知记忆内容到 retrieve_info
+            if perceptual_results and isinstance(perceptual_results, dict):
+                perceptual_content = perceptual_results.get("content", "")
+                if perceptual_content:
+                    retrieve_info = f"{retrieve_info}\n\n<history-files>\n{perceptual_content}"
+                    count = len(perceptual_results.get("memories", []))
+                    logger.info(f"[Input_Summary] appended {count} perceptual memories (reranked)")
+
             # 调试：打印 community 检索结果数量
             if raw_results and isinstance(raw_results, dict):
                 reranked = raw_results.get('reranked_results', {})
@@ -371,10 +409,7 @@ async def Input_Summary(state: ReadState) -> ReadState:
             "error": str(e)
         }
     end = time.time()
-    try:
-        duration = end - start
-    except Exception:
-        duration = 0.0
+    duration = end - start
     log_time('检索', duration)
     return {"summary": summary}
 
@@ -412,8 +447,20 @@ async def Retrieve_Summary(state: ReadState) -> ReadState:
     retrieve_info_str = list(set(retrieve_info_str))
     retrieve_info_str = '\n'.join(retrieve_info_str)
 
-    aimessages = await  summary_llm(state, history, retrieve_info_str,
-                                    'direct_summary_prompt.jinja2', 'retrieve_summary', RetrieveSummaryResponse, "1")
+    # Merge perceptual memory content
+    perceptual_data = state.get("perceptual_data", {})
+    perceptual_content = perceptual_data.get("content", "") if isinstance(perceptual_data, dict) else ""
+    if perceptual_content:
+        retrieve_info_str = f"{retrieve_info_str}\n\n<history-file-input>\n{perceptual_content}</history-file-input>"
+
+    aimessages = await summary_llm(
+        state,
+        history,
+        retrieve_info_str,
+        'direct_summary_prompt.jinja2',
+        'retrieve_summary', RetrieveSummaryResponse,
+        "1"
+    )
     if '信息不足，无法回答' not in str(aimessages) or str(aimessages) != "":
         await summary_redis_save(state, aimessages)
     if aimessages == '':
@@ -457,6 +504,12 @@ async def Summary(state: ReadState) -> ReadState:
                 for i in value:
                     retrieve_info_str += i + '\n'
     history = await summary_history(state)
+
+    # Merge perceptual memory content
+    perceptual_data = state.get("perceptual_data", {})
+    perceptual_content = perceptual_data.get("content", "") if isinstance(perceptual_data, dict) else ""
+    if perceptual_content:
+        retrieve_info_str = f"{retrieve_info_str}\n\n<history-file-input>\n{perceptual_content}</history-file-input>"
 
     data = {
         "query": query,
@@ -508,6 +561,13 @@ async def Summary_fails(state: ReadState) -> ReadState:
             if key == 'answer_small':
                 for i in value:
                     retrieve_info_str += i + '\n'
+
+    # Merge perceptual memory content
+    perceptual_data = state.get("perceptual_data", {})
+    perceptual_content = perceptual_data.get("content", "") if isinstance(perceptual_data, dict) else ""
+    if perceptual_content:
+        retrieve_info_str = f"{retrieve_info_str}\n\n<history-file-input>\n{perceptual_content}</history-file-input>"
+
     data = {
         "query": query,
         "history": history,

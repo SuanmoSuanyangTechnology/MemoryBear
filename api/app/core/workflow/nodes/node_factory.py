@@ -27,6 +27,7 @@ from app.core.workflow.nodes.question_classifier import QuestionClassifierNode
 from app.core.workflow.nodes.breaker import BreakNode
 from app.core.workflow.nodes.tool import ToolNode
 from app.core.workflow.nodes.document_extractor import DocExtractorNode
+from app.core.workflow.nodes.list_operator import ListOperatorNode
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,8 @@ WorkflowNode = Union[
     MemoryReadNode,
     MemoryWriteNode,
     CodeNode,
-    DocExtractorNode
+    DocExtractorNode,
+    ListOperatorNode
 ]
 
 
@@ -83,7 +85,8 @@ class NodeFactory:
         NodeType.MEMORY_READ: MemoryReadNode,
         NodeType.MEMORY_WRITE: MemoryWriteNode,
         NodeType.CODE: CodeNode,
-        NodeType.DOCUMENT_EXTRACTOR: DocExtractorNode
+        NodeType.DOCUMENT_EXTRACTOR: DocExtractorNode,
+        NodeType.LIST_OPERATOR: ListOperatorNode
     }
 
     @classmethod

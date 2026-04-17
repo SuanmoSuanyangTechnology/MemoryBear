@@ -28,6 +28,7 @@ from app.services.app_statistics_service import AppStatisticsService
 from app.services.workflow_import_service import WorkflowImportService
 from app.services.workflow_service import WorkflowService, get_workflow_service
 from app.services.app_dsl_service import AppDslService
+from app.core.quota_stub import check_app_quota
 
 router = APIRouter(prefix="/apps", tags=["Apps"])
 logger = get_business_logger()
@@ -35,6 +36,7 @@ logger = get_business_logger()
 
 @router.post("", summary="创建应用（可选创建 Agent 配置）")
 @cur_workspace_access_guard()
+@check_app_quota
 def create_app(
         payload: app_schema.AppCreate,
         db: Session = Depends(get_db),
@@ -292,10 +294,19 @@ def get_opening(
 ):
     """返回开场白文本和预设问题，供前端对话界面初始化时展示"""
     workspace_id = current_user.current_workspace_id
-    cfg = app_service.get_agent_config(db, app_id=app_id, workspace_id=workspace_id)
-    features = cfg.features or {}
-    if hasattr(features, "model_dump"):
-        features = features.model_dump()
+
+    # 根据应用类型获取 features
+    from app.models.app_model import App as AppModel
+    app = db.get(AppModel, app_id)
+    if app and app.type == "workflow":
+        cfg = app_service.get_workflow_config(db=db, app_id=app_id, workspace_id=workspace_id)
+        features = cfg.features or {}
+    else:
+        cfg = app_service.get_agent_config(db, app_id=app_id, workspace_id=workspace_id)
+        features = cfg.features or {}
+        if hasattr(features, "model_dump"):
+            features = features.model_dump()
+
     opening = features.get("opening_statement", {})
     return success(data=app_schema.OpeningResponse(
         enabled=opening.get("enabled", False),
@@ -1070,6 +1081,14 @@ async def update_workflow_config(
         current_user: Annotated[User, Depends(get_current_user)]
 ):
     workspace_id = current_user.current_workspace_id
+    if payload.variables:
+        from app.services.workflow_service import WorkflowService
+        resolved = await WorkflowService(db)._resolve_variables_file_defaults(
+            [v.model_dump() for v in payload.variables]
+        )
+        # Patch default values back into VariableDefinition objects
+        for var_def, resolved_def in zip(payload.variables, resolved):
+            var_def.default = resolved_def.get("default", var_def.default)
     cfg = app_service.update_workflow_config(db, app_id=app_id, data=payload, workspace_id=workspace_id)
     return success(data=WorkflowConfigSchema.model_validate(cfg))
 
@@ -1233,9 +1252,11 @@ async def export_app(
 async def import_app(
         file: UploadFile = File(...),
         db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        current_user: User = Depends(get_current_user),
+        app_id: Optional[str] = Form(None),
 ):
     """从 YAML 文件导入 agent / multi_agent / workflow 应用。
+    传入 app_id 时覆盖该应用的配置（类型必须一致），否则创建新应用。
     跨空间/跨租户导入时，模型/工具/知识库会按名称匹配，匹配不到则置空并返回 warnings。
     """
     if not file.filename.lower().endswith((".yaml", ".yml")):
@@ -1246,13 +1267,15 @@ async def import_app(
     if not dsl or "app" not in dsl:
         return fail(msg="YAML 格式无效，缺少 app 字段", code=BizCode.BAD_REQUEST)
 
-    new_app, warnings = AppDslService(db).import_dsl(
+    target_app_id = uuid.UUID(app_id) if app_id else None
+    result_app, warnings = AppDslService(db).import_dsl(
         dsl=dsl,
         workspace_id=current_user.current_workspace_id,
         tenant_id=current_user.tenant_id,
         user_id=current_user.id,
+        app_id=target_app_id,
     )
     return success(
-        data={"app": app_schema.App.model_validate(new_app), "warnings": warnings},
+        data={"app": app_schema.App.model_validate(result_app), "warnings": warnings},
         msg="应用导入成功" + ("，但部分资源需手动配置" if warnings else "")
     )
