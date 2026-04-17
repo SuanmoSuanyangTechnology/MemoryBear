@@ -26,20 +26,22 @@ class IfElseNode(BaseNode):
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         result = []
         for case in self.typed_config.cases:
-            conditions = []
-            for condition in case.expressions:
-                conditions.append({
-                    "left": self.get_variable(condition.left, variable_pool, strict=False),
-                    "right": condition.right
-                    if condition.input_type == ValueInputType.CONSTANT or condition.right is None
-                    else self.get_variable(condition.right, variable_pool, strict=False),
-                    "operator": str(condition.operator),
+            expressions = []
+            for expression in case.expressions:
+                expressions.append({
+                    "left": self.get_variable(expression.left, variable_pool, strict=False),
+                    "right": expression.right
+                    if expression.input_type == ValueInputType.CONSTANT or expression.right is None
+                    else self.get_variable(expression.right, variable_pool, strict=False),
+                    "operator": str(expression.operator),
                 })
             result.append({
-                "expressions": conditions,
+                "expressions": expressions,
                 "logical_operator": str(case.logical_operator),
             })
-        return {"cases": result}
+        return {
+            "cases": result
+        }
 
     @staticmethod
     def _evaluate(operator, instance: CompareOperatorInstance) -> Any:
@@ -91,30 +93,30 @@ class IfElseNode(BaseNode):
         conditions = []
 
         for case_branch in self.typed_config.cases:
-            condition_results = []
-            for condition in case_branch.expressions:
+            branch_result = []
+            for expression in case_branch.expressions:
                 pattern = r"\{\{\s*(.*?)\s*\}\}"
-                left_string = re.sub(pattern, r"\1", condition.left).strip()
+                left_string = re.sub(pattern, r"\1", expression.left).strip()
                 try:
                     left_value = self.get_variable(left_string, variable_pool)
                 except KeyError:
                     left_value = None
 
-                if condition.sub_variable_condition is not None and isinstance(left_value, list):
-                    evaluator = ArrayFileContainsOperator(left_value, condition.sub_variable_condition)
+                if expression.sub_variable_condition is not None and isinstance(left_value, list):
+                    evaluator = ArrayFileContainsOperator(left_value, expression.sub_variable_condition)
                 else:
                     evaluator = ConditionExpressionResolver.resolve_by_value(left_value)(
                         variable_pool,
-                        condition.left,
-                        condition.right,
-                        condition.input_type
+                        expression.left,
+                        expression.right,
+                        expression.input_type
                     )
-                condition_results.append(self._evaluate(condition.operator, evaluator))
+                branch_result.append(self._evaluate(expression.operator, evaluator))
 
             if case_branch.logical_operator == LogicOperator.AND:
-                conditions.append(all(condition_results))
+                conditions.append(all(branch_result))
             else:
-                condition_res = any(condition_results)
+                condition_res = any(branch_result)
                 conditions.append(condition_res)
                 if condition_res:
                     return conditions
