@@ -253,7 +253,7 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
           : <Flex justify="flex-end">
             <Flex align="center" gap={8} className="rb:leading-5 rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={goToApplication}>
               <div
-                className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/logout.svg')]"
+                className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/logout_grey.svg')]"
               ></div>
               {t('common.return')}
             </Flex>

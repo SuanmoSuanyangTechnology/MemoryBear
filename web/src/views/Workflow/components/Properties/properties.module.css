@@ -23,6 +23,11 @@
 }
 .properties :global(.select.ant-select-single.ant-select-sm.ant-select-borderless) {
   height: 28px;
+  border: 1px solid #F6F6F6;
+  border-radius: 8px;
+}
+.properties :global(.select.ant-select-single.ant-select-sm.ant-select-borderless.ant-select-focused) {
+  border: 1px solid #171719;
 }
 .properties :global(.ant-table-wrapper .ant-table-thead>tr>th),
 .properties :global(.ant-table-wrapper .ant-table-thead>tr>td),

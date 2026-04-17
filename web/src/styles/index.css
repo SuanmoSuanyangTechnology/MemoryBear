@@ -353,6 +353,26 @@ body {
   background-color: transparent;
   border: none;
 }
+.cm-editor-filled {
+  background: #F6F6F6;
+  border-radius: 8px;
+}
+.cm-editor-filled .ͼ1 .cm-lineNumbers .cm-gutterElement {
+  border-radius: 8px 0 0 8px;
+}
+.cm-editor-filled .ͼ4 .cm-line {
+  border-radius: 0 8px 8px 0;
+}
+.cm-editor-filled .ͼ2 .cm-activeLineGutter,
+.cm-editor-filled .ͼ2 .cm-activeLine {
+  background: transparent;
+}
+.cm-editor-filled .ͼ1 .cm-placeholder {
+  color: rgba(23, 23, 25, 0.25);
+}
+.cm-editor-filled .ͼ1 .cm-lineNumbers .cm-gutterElement {
+  color: #212332;
+}
 ::-webkit-scrollbar {
   width: 6px;
   height: 8px;

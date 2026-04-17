@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:24:53 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 15:23:45
+ * @Last Modified time: 2026-04-16 12:06:16
  */
 import { useMemo, type FC } from 'react'
 import clsx from 'clsx'
@@ -343,7 +343,7 @@ const CaseList: FC<CaseListProps> = ({
                               return (
                                 <Flex key={conditionField.key} gap={4} align="start" className="rb:mb-2!">
                                   <div className="rb:flex-1 rb:bg-[#F6F6F6] rb:rounded-lg">
-                                    <Row className={clsx("rb:p-1!", {
+                                    <Row className={clsx("rb:px-1!", {
                                       'rb-border-b': !hideRightField
                                     })}>
                                       <Col flex="144px">
@@ -377,7 +377,7 @@ const CaseList: FC<CaseListProps> = ({
                                     </Row>
                                     
                                     {!hideRightField && (
-                                      <div className="rb:py-1 rb:px-1.5">
+                                      <div className={['boolean', 'array[boolean]'].includes(leftFieldType as string) ? "rb:py-1 rb:px-1.5" : ''}>
                                         {leftFieldType === 'array[file]'
                                           ? <>TODO</>
                                           : leftFieldType === 'number'
@@ -415,7 +415,7 @@ const CaseList: FC<CaseListProps> = ({
                                             <Form.Item name={[conditionField.name, 'right']} noStyle>
                                               {['boolean', 'array[boolean]'].includes(leftFieldType as string)
                                                 ? <RadioGroupBtn options={[{ value: true, label: 'True' }, { value: false, label: 'False' }]} type="inner" />
-                                                : <Editor options={options} size="small" type="input" />
+                                                  : <Editor options={options} size="small" type="input" variant='borderless' height={28} />
                                               }
                                             </Form.Item>
                                           )

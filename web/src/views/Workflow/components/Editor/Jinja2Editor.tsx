@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-04-02 15:15:36 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 14:48:00
+ * @Last Modified time: 2026-04-16 11:34:41
  */
 import { type FC, useEffect, useMemo } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
@@ -81,7 +81,7 @@ export interface Jinja2EditorProps {
   value?: string;
   onChange?: (value: string) => void;
   options?: Suggestion[];
-  variant?: 'outlined' | 'borderless';
+  variant?: 'outlined' | 'borderless' | 'filled';
   height?: number;
   size?: 'default' | 'small';
   className?: string;

@@ -1,5 +1,6 @@
 .page-tabs:global(.ant-segmented) {
   padding: 4px;
+  margin-left: 4px;
 }
 .page-tabs:global(.ant-segmented .ant-segmented-item-label) {
   line-height: 24px;

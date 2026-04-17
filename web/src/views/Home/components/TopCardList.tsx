@@ -61,6 +61,7 @@ const TopCardList: FC<{data?: DashboardData}> = ({ data }) => {
             <Flex align="center" className={clsx('rb:font-medium rb:mt-7.5!', {
               'rb:text-[#FF5D34]': data?.[`${item.key}_change` as keyof DashboardData] && data?.[`${item.key}_change` as keyof DashboardData] < 0,
               'rb:text-[#369F21]': !data?.[`${item.key}_change` as keyof DashboardData] || data?.[`${item.key}_change` as keyof DashboardData] >= 0,
+              'rb:text-[#FFFFFF]': item.key === 'total_memory'
             })}>
               {data?.[`${item.key}_change` as keyof DashboardData] && typeof data?.[item.key as keyof DashboardData] === 'number'
                 ? (100 * data?.[`${item.key}_change` as keyof DashboardData]).toFixed(2)

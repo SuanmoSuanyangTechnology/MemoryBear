@@ -178,7 +178,7 @@ const ConditionList: FC<CaseListProps> = ({
                         className="rb:mb-2!"
                       >
                         <div className="rb:flex-1 rb:bg-[#F6F6F6] rb:rounded-lg">
-                          <Row className={clsx("rb:p-1!", {
+                          <Row className={clsx("rb:px-1!", {
                             'rb-border-b': !hideRightField
                           })}>
                             <Col flex="1">
@@ -218,7 +218,7 @@ const ConditionList: FC<CaseListProps> = ({
                           </Row>
                           
                           {!hideRightField && (
-                            <div className="rb:py-1 rb:px-1.5">
+                            <div className={leftFieldType === 'boolean' ? "rb:py-1 rb:px-1.5" : ''}>
                               {leftFieldType === 'number'
                                 ? (
                                   <Flex align="center">

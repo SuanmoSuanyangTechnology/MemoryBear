@@ -337,7 +337,7 @@ const Menu: FC<{
           onClick={goToSpace}
           className="rb-border-t rb:pt-5! rb:pb-2.5! rb:absolute rb:bottom-2.5 rb:right-5 rb:left-5 rb:text-[13px] rb:text-[#5B6167] rb:hover:text-[#212332] rb:leading-4.5 rb:font-regular rb:text-center rb:mt-2.25 rb:cursor-pointer"
         >
-          <div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/logout.svg')]"></div>
+          <div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/logout_grey.svg')]"></div>
           {collapsed ? null : t('common.returnToSpace')}
         </Flex>
       }

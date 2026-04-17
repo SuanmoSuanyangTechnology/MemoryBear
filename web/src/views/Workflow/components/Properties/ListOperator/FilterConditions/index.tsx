@@ -101,24 +101,20 @@ const FilterConditions: FC<FilterConditionsProps> = ({
                       align="start"
                       className="rb:mb-2!"
                     >
-                      <div className="rb:flex-1 rb:bg-[#F6F6F6] rb:rounded-lg">
+                      <div className="rb:flex-1">
                         {variableType === 'array[file]' &&
-                          <Row className="rb:p-1! rb-border-b">
-                            <Col span={24}>
-                              <Form.Item name={[field.name, 'key']} noStyle>
-                                <Select
-                                  placeholder={t('common.pleaseSelect')}
-                                  options={fileSubVariable}
-                                  fieldNames={{ value: 'filed', label: 'label' }}
-                                  onChange={(value) => handleKeyFieldChange(index, value)}
-                                  variant="borderless"
-                                  className="rb:w-full! rb:h-7!"
-                                />
-                              </Form.Item>
-                            </Col>
-                          </Row>
+                          <Form.Item name={[field.name, 'key']} noStyle>
+                            <Select
+                              placeholder={t('common.pleaseSelect')}
+                              options={fileSubVariable}
+                              fieldNames={{ value: 'filed', label: 'label' }}
+                              onChange={(value) => handleKeyFieldChange(index, value)}
+                              className="rb:w-full! select rb:mb-1!"
+                              variant="borderless"
+                            />
+                          </Form.Item>
                         }
-                        <Row>
+                        <Row gutter={8}>
                           <Col flex={hideValueField ? '1' : "96px"}>
                             <Form.Item name={[field.name, 'comparison_operator']} noStyle>
                               <Select
@@ -129,28 +125,27 @@ const FilterConditions: FC<FilterConditionsProps> = ({
                                 size="small"
                                 popupMatchSelectWidth={false}
                                 placeholder={t('common.pleaseSelect')}
+                                className="rb:w-full! select"
                                 variant="borderless"
-                                className="rb:w-full! rb:h-7!"
                               />
                             </Form.Item>
                           </Col>
                           {!hideValueField && (
                             <Col flex="1">
-                              <Form.Item name={[field.name, 'value']} className="rb:pt-0.5! rb:mb-0! rb:pl-2!">
+                              <Form.Item name={[field.name, 'value']} noStyle>
                                 {innerType === 'boolean'
                                   ? <RadioGroupBtn options={[{ value: true, label: 'True' }, { value: false, label: 'False' }]} type="inner" />
                                   : keyFieldValue === 'type'
                                   ? <Select
                                     placeholder={t('common.pleaseSelect')}
                                     options={typeOptions.map(vo => ({ value: vo, label: t(`application.${vo}`) } ))}
-                                    variant="borderless"
-                                    className="rb:w-full!"
+                                    variant="filled"
                                   />
                                   : <Editor
-                                    variant="borderless"
+                                    variant="filled"
                                     type="input"
                                     size="small"
-                                    height={24}
+                                    height={28}
                                     options={keyFieldType ? options.flatMap(vo => {
                                         if (vo.dataType === keyFieldType) return [vo];
                                         const filteredChildren = vo.children?.filter(sub => sub.dataType === keyFieldType);
@@ -167,7 +162,7 @@ const FilterConditions: FC<FilterConditionsProps> = ({
                         </Row>
                       </div>
                       <div
-                        className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
+                        className="rb:size-4 rb:mt-1.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
                         onClick={() => remove(field.name)}
                       ></div>
                     </Flex>
