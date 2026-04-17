@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:24:53 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-17 19:58:13
+ * @Last Modified time: 2026-04-17 20:45:31
  */
 import { useEffect, useMemo, type FC } from 'react'
 import clsx from 'clsx'
@@ -23,7 +23,7 @@ interface SubCondition {
   key: string;
   operator: string;
   value: string | number;
-  var_type: string;
+  input_type: string;
 }
 
 interface SubVariableCondition {
@@ -303,7 +303,7 @@ const ArrayFileSubConditions: FC<ArrayFileSubConditionsProps> = ({ conditionFiel
                 })}
               </div>
               <Button
-                onClick={() => { addSub({ key: undefined, operator: undefined, value: undefined, var_type: undefined }); }}
+                onClick={() => { addSub({ key: undefined, operator: undefined, value: undefined, input_type: undefined }); }}
                 className="rb:py-0! rb:px-1! rb:h-4.5! rb:rounded-sm! rb:text-[12px]!"
                 size="small"
               >
