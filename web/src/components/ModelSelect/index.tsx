@@ -2,9 +2,9 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-07 16:49:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 11:21:59
+ * @Last Modified time: 2026-04-17 10:11:54
  */
-import { useEffect, useState, type FC } from 'react';
+import { type FC, useEffect, useState } from 'react';
 import { Select, Flex, Space } from 'antd';
 import type { SelectProps } from 'antd/es/select';
 import { useTranslation } from 'react-i18next';
@@ -22,16 +22,10 @@ interface ModelSelectProps extends SelectProps {
   fontClassName?: string;
   isAutoFetch?: boolean;
   initialData?: Model[];
+  updateOptions?: (options: Model[]) => void;
 }
 
-const ModelSelect: FC<ModelSelectProps> = ({
-  params,
-  placeholder,
-  fontClassName,
-  isAutoFetch = true,
-  initialData = [],
-  ...props
-}) => {
+const ModelSelect: FC<ModelSelectProps> = ({ params, placeholder, fontClassName, isAutoFetch = true, initialData = [], updateOptions, ...props }) => {
   const { t } = useTranslation();
   const [options, setOptions] = useState<Model[]>([]);
 
@@ -59,6 +53,10 @@ const ModelSelect: FC<ModelSelectProps> = ({
       </Flex>
     );
   };
+
+  useEffect(() => {
+    if (updateOptions) updateOptions([...options, ...initialData]);
+  }, [options, initialData])
 
   return (
     <Select
