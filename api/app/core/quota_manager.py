@@ -55,6 +55,18 @@ def _get_tenant_id_from_kwargs(db: Session, kwargs: dict):
         if workspace:
             return workspace.tenant_id
 
+    share_data = kwargs.get("share_data")
+    if share_data and hasattr(share_data, 'share_token'):
+        from app.models.workspace_model import Workspace
+        from app.models.app_model import App
+        share_token = share_data.share_token
+        from app.models.release_share_model import ReleaseShare
+        share_record = db.query(ReleaseShare).filter(ReleaseShare.share_token == share_token).first()
+        if share_record:
+            app = db.query(App).filter(App.id == share_record.app_id, App.is_active.is_(True)).first()
+            if app:
+                return app.workspace.tenant_id
+
     return None
 
 

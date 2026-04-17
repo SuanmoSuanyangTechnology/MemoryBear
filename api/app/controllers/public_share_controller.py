@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
+from app.core.quota_manager import check_end_user_quota
 from app.core.response_utils import success, fail
 from app.db import get_db, get_db_read
 from app.dependencies import get_share_user_id, ShareTokenData
@@ -308,6 +309,7 @@ def get_conversation(
     "/chat",
     summary="发送消息（支持流式和非流式）"
 )
+@check_end_user_quota
 async def chat(
         payload: conversation_schema.ChatRequest,
         share_data: ShareTokenData = Depends(get_share_user_id),
