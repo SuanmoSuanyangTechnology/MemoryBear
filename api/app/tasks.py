@@ -3160,7 +3160,8 @@ def extract_user_metadata_task(
 
                         if action == "set":
                             if value not in current_list:
-                                current_list.append(value)
+                                # 新值插入列表头部，保证按时间从新到旧排序
+                                current_list.insert(0, value)
                                 target[leaf] = current_list
                             logger.info(f"[CELERY METADATA] set {field_path} = {value}")
 
@@ -3223,7 +3224,8 @@ def extract_user_metadata_task(
                         leaf = parts[-1]
                         current_list = target.get(leaf, [])
                         if change.value not in current_list:
-                            current_list.append(change.value)
+                            # 新值插入列表头部，保证按时间从新到旧排序
+                            current_list.insert(0, change.value)
                         target[leaf] = current_list
 
                 if first_alias or initial_meta:
