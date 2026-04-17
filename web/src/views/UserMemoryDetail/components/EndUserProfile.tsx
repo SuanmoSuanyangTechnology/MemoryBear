@@ -9,7 +9,7 @@
  * Displays and manages end user profile information
  */
 
-import { forwardRef, useImperativeHandle, useEffect, useState, useRef, useCallback } from 'react'
+import { forwardRef, useImperativeHandle, useEffect, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Skeleton, Flex } from 'antd';
@@ -22,7 +22,6 @@ import {
 } from '@/api/memory'
 import EndUserProfileModal from './EndUserProfileModal'
 import type { EndUser, EndUserProfileModalRef, EndUserProfileRef } from '../types'
-import Tag from '@/components/Tag';
 
 /**
  * Component props
