@@ -1597,7 +1597,6 @@ export const en = {
       domain: 'Domain',
       expertise: 'Expertise',
       interests: 'Interests',
-      knowledge_tags: 'Knowledge Tags',
 
       memoryWindow: "{{name}}'s Memory Overview",
       memory_insight: 'Overall Overview',

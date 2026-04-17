@@ -1558,7 +1558,6 @@ export const zh = {
       domain: '领域',
       expertise: '专业擅长',
       interests: '兴趣爱好',
-      knowledge_tags: '知识标签',
 
       memoryWindow: "{{name}} 的记忆之窗",
       memory_insight: '总体概述',
