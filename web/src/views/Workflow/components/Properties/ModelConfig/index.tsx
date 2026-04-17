@@ -1,29 +1,38 @@
-import { type FC, useEffect, useRef, useState } from "react";
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-03-07 14:55:04 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-04-17 10:05:32 
+ */
+import { type FC, useEffect, useState } from "react";
 import { useTranslation } from 'react-i18next'
 import { Form, Switch } from 'antd'
 
 import RbSlider from '@/components/RbSlider'
 import RbCard from '@/components/RbCard/Card'
-import ModelSelect, { type ModelSelectRef } from '@/components/ModelSelect'
+import ModelSelect from '@/components/ModelSelect'
 import type { Model } from '@/views/ModelManagement/types';
 
 const ModelConfig: FC = () => {
   const { t } = useTranslation()
   const form = Form.useFormInstance()
   const model_id = Form.useWatch(['model_id'], form)
-  const modelSelectRef = useRef<ModelSelectRef>(null)
   const [selectedModel, setSelectedModel] = useState<Model | null>(null)
+  const [options, setOptions] = useState<Model[]>([])
+
+  const updateOptions = (options: Model[]) => {
+    setOptions(options)
+  }
 
   useEffect(() => {
-    if (model_id && modelSelectRef.current?.options) {
-      const model = modelSelectRef.current?.options.find(item => item.id === model_id)
+    if (model_id && options) {
+      const model = options.find(item => item.id === model_id)
       setSelectedModel(model || null)
       form.setFieldValue('json_output', false)
     } else {
       setSelectedModel(null)
     }
-  }, [model_id, modelSelectRef.current?.options])
-  console.log('ModelConfig', model_id)
+  }, [model_id, options])
 
   return (
     <>
@@ -34,11 +43,11 @@ const ModelConfig: FC = () => {
         required
       >
         <ModelSelect
-          ref={modelSelectRef}
           placeholder={t('common.pleaseSelect')}
           params={{ type: 'llm,chat' }}
           className="rb:w-full!"
           size="small"
+          updateOptions={updateOptions}
         />
       </Form.Item>
       {model_id && (
