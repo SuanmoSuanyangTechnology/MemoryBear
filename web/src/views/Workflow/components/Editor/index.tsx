@@ -103,8 +103,8 @@ const Editor: FC<LexicalEditorProps> =({
 
   // Calculate line height based on size prop
   const lineHeight = useMemo(() => {
-    return `${height ? height - 10 : size === 'small' && ['borderless', 'filled'].includes(variant) ? 18 : size === 'small' ? 16 : 20}px`
-  }, [size])
+    return `${height ? height - 10 : size === 'small' && variant === 'borderless' ? 18 : size === 'small' ? 16 : 20}px`
+  }, [size, height, variant])
 
   // Calculate placeholder minimum height
   const placeHolderMinheight = useMemo(() => {

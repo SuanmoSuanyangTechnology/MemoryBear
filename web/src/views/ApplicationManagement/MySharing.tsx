@@ -102,7 +102,7 @@ const MySharing: React.FC = () => {
       setSelectedWorkspace(grouped[0].workspace.target_workspace_id)
       setAppList(grouped[0].items)
     }
-  }, [grouped])
+  }, [grouped, selectedWorkspace])
 
   const handleSelectWorkspace = async (target_workspace_id: string) => {
     if (target_workspace_id === selectedWorkspace) return
