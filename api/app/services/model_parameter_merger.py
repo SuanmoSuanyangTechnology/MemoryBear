@@ -47,7 +47,8 @@ class ModelParameterMerger:
             "n": 1,
             "stop": None,
             "deep_thinking": False,
-            "thinking_budget_tokens": None
+            "thinking_budget_tokens": None,
+            "json_output": False
         }
         
         # 合并参数：默认值 -> 模型配置 -> Agent 配置

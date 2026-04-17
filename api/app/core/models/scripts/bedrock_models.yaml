@@ -6,7 +6,8 @@ models:
   description: AI21 Labs大语言模型，completion生成模式，256000上下文窗口
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -20,6 +21,7 @@ models:
   is_official: true
   capability:
     - vision
+    - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -38,6 +40,7 @@ models:
   capability:
     - vision
     - thinking
+    - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -54,7 +57,8 @@ models:
   description: Cohere大语言模型，支持智能体思考、工具调用、流式工具调用，128000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -72,6 +76,7 @@ models:
   capability:
     - vision
     - thinking
+    - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -87,7 +92,8 @@ models:
   description: Meta Llama大语言模型，支持智能体思考、工具调用，128000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -101,7 +107,8 @@ models:
   description: Mistral AI大语言模型，支持智能体思考、工具调用，32000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -115,7 +122,8 @@ models:
   description: OpenAI大语言模型，支持智能体思考、工具调用、流式工具调用，32768上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -130,7 +138,8 @@ models:
   description: Qwen大语言模型，支持智能体思考、工具调用、流式工具调用，32768上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - json_output
   is_omni: false
   tags:
   - 大语言模型

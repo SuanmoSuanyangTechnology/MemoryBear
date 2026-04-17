@@ -125,9 +125,11 @@ class ModelConfigService:
                 api_key=api_key,
                 base_url=api_base,
                 is_omni=is_omni,
-                support_thinking="thinking" in (capability or []),
-                temperature=0.7,
-                max_tokens=100
+                capability=capability,
+                extra_params={
+                    "temperature": 0.7,
+                    "max_tokens": 100
+                }
             )
 
             # 根据模型类型选择不同的验证方式

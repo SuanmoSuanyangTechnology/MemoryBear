@@ -10,6 +10,7 @@ models:
     - vision
     - audio
     - video
+    - json_output
   is_omni: true
   tags:
   - 大语言模型
@@ -27,7 +28,8 @@ models:
   description: gpt-3.5-turbo-0125大语言模型，支持多工具调用、智能体思考、流式工具调用，16385上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -42,7 +44,8 @@ models:
   description: gpt-3.5-turbo-1106大语言模型，支持多工具调用、智能体思考、流式工具调用，16385上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -57,7 +60,8 @@ models:
   description: gpt-3.5-turbo-16k大语言模型，支持多工具调用、智能体思考、流式工具调用，16385上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -84,7 +88,8 @@ models:
   description: gpt-3.5-turbo大语言模型，支持多工具调用、智能体思考、流式工具调用，16385上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -99,7 +104,8 @@ models:
   description: gpt-4-0125-preview大语言模型，支持多工具调用、智能体思考、流式工具调用，128000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -114,7 +120,8 @@ models:
   description: gpt-4-1106-preview大语言模型，支持多工具调用、智能体思考、流式工具调用，128000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -131,6 +138,7 @@ models:
   is_official: true
   capability:
     - vision
+    - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -146,7 +154,8 @@ models:
   description: gpt-4-turbo-preview大语言模型，支持多工具调用、智能体思考、流式工具调用，128000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability: []
+  capability:
+  - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -163,6 +172,7 @@ models:
   is_official: true
   capability:
     - vision
+    - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -194,6 +204,7 @@ models:
   capability:
     - vision
     - thinking
+    - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -213,6 +224,7 @@ models:
   capability:
     - vision
     - thinking
+    - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -231,6 +243,7 @@ models:
   is_official: true
   capability:
     - thinking
+    - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -248,6 +261,7 @@ models:
   is_official: true
   capability:
     - thinking
+    - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -266,6 +280,7 @@ models:
   capability:
     - vision
     - thinking
+    - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -284,6 +299,7 @@ models:
   capability:
     - vision
     - thinking
+    - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -302,6 +318,7 @@ models:
   capability:
     - vision
     - thinking
+    - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -321,6 +338,7 @@ models:
   capability:
     - vision
     - thinking
+    - json_output
   is_omni: false
   tags:
   - 大语言模型
@@ -340,6 +358,7 @@ models:
   capability:
     - vision
     - thinking
+    - json_output
   is_omni: false
   tags:
   - 大语言模型

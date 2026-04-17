@@ -415,9 +415,11 @@ class LLMRouter:
                 api_key=api_key_config.api_key,
                 base_url=api_key_config.api_base,
                 is_omni=api_key_config.is_omni,
-                support_thinking="thinking" in (api_key_config.capability or []),
-                temperature=0.3,
-                max_tokens=500
+                capability=api_key_config.capability,
+                extra_params={
+                    "temperature": 0.3,
+                    "max_tokens": 500
+                }
             )
             
             logger.debug(f"创建 LLM 实例 - Provider: {api_key_config.provider}, Model: {api_key_config.model_name}")

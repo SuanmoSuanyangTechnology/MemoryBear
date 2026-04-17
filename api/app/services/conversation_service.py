@@ -544,7 +544,7 @@ class ConversationService:
                 api_key=api_key,
                 base_url=api_base,
                 is_omni=is_omni,
-                support_thinking="thinking" in (capability or []),
+                capability=capability,
             ),
             type=ModelType(model_type)
         )

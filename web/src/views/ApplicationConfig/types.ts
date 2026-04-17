@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 15:46:19
+ * @Last Modified time: 2026-04-16 18:20:14
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
@@ -24,20 +24,21 @@ export interface ModelConfig {
   default_model_config_id?: string;
   capability?: Capability[];
   /** Temperature for response randomness (0-2) */
-  temperature: number;
+  temperature?: number;
   /** Maximum tokens in response */
-  max_tokens: number;
+  max_tokens?: number;
   /** Top-p sampling parameter */
-  top_p: number;
+  top_p?: number;
   /** Frequency penalty */
-  frequency_penalty: number;
+  frequency_penalty?: number;
   /** Presence penalty */
-  presence_penalty: number;
+  presence_penalty?: number;
   /** Number of completions to generate */
-  n: number;
+  n?: number;
   /** Stop sequences */
   stop?: string;
   deep_thinking?: boolean;
+  json_output?: boolean;
 }
 
 /**
