@@ -11,14 +11,16 @@
  */
 
 import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
-import { Form, type SelectProps, Checkbox } from 'antd';
+import { Form, type SelectProps, Checkbox, Button } from 'antd';
 import { useTranslation } from 'react-i18next';
+import { useParams } from 'react-router-dom';
 
 import type { ModelConfig, ModelConfigModalRef, Config, Source } from '../types'
 import type { Model } from '@/views/ModelManagement/types'
 import RbModal from '@/components/RbModal'
 import RbSlider from '@/components/RbSlider'
 import ModelSelect from '@/components/ModelSelect'
+import { resetAppModelConfig } from '@/api/application';
 
 const FormItem = Form.Item;
 
@@ -52,6 +54,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
   data,
 }, ref) => {
   const { t } = useTranslation();
+  const { id } = useParams();
   const [visible, setVisible] = useState(false);
   const [form] = Form.useForm<ModelConfig>();
   const [source, setSource] = useState<Source>('model')
@@ -124,14 +127,23 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
     form.setFieldsValue(rest)
   }, [values?.default_model_config_id])
 
+  const handleReset = () => {
+    if (!id) return
+    resetAppModelConfig(id).then((res) => {
+      const { deep_thinking: _, json_output: __, ...rest } = (res || {}) as Config['model_parameters']
+      form.setFieldsValue(rest)
+    })
+  }
+
   return (
     <RbModal
       title={t('application.modelConfig')}
       open={visible}
       onCancel={handleClose}
-      cancelText={t('application.resetDefault')}
-      okText={t('application.apply')}
-      onOk={handleSave}
+      footer={[
+        <Button onClick={handleReset}>{t('application.resetDefault')}</Button>,
+        <Button type="primary" onClick={handleSave}>{t('application.apply')}</Button>,
+      ]}
     >
       <Form
         form={form}
