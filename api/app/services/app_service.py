@@ -1452,20 +1452,46 @@ class AppService:
         logger.debug("配置不存在，返回默认模板", extra={"app_id": str(app_id)})
         return self._create_default_agent_config(app_id)
 
+    def get_default_model_parameters(
+            self,
+            *,
+            app_id: uuid.UUID,
+    ) -> "ModelParameters":
+        """获取 Agent 默认模型参数（不修改数据库）
+
+        Args:
+            app_id: 应用ID
+
+        Returns:
+            ModelParameters: 默认模型参数
+        """
+        logger.info("获取 Agent 默认模型参数", extra={"app_id": str(app_id)})
+
+        app = self._get_app_or_404(app_id)
+
+        if app.type != "agent":
+            raise BusinessException("只有 Agent 类型应用支持 Agent 配置", BizCode.APP_TYPE_NOT_SUPPORTED)
+
+        from app.schemas.app_schema import ModelParameters
+        default_model_parameters = ModelParameters()
+
+        logger.info("获取 Agent 默认模型参数成功", extra={"app_id": str(app_id)})
+        return default_model_parameters
+
     def reset_agent_config(
             self,
             *,
             app_id: uuid.UUID,
             workspace_id: Optional[uuid.UUID] = None
-    ) -> AgentConfig:
-        """仅将 Agent 模型参数重置为默认值（不影响其他配置）
+    ) -> "ModelParameters":
+        """将 Agent 模型参数重置为默认值（不影响其他配置）
 
         Args:
             app_id: 应用ID
             workspace_id: 工作空间ID（用于权限验证）
 
         Returns:
-            AgentConfig: 重置后的配置对象
+            ModelParameters: 重置后的模型参数
         """
         logger.info("重置 Agent 模型参数为默认值", extra={"app_id": str(app_id)})
 
@@ -1476,20 +1502,13 @@ class AppService:
 
         self._validate_app_writable(app, workspace_id)
 
+        from app.schemas.app_schema import ModelParameters
+        default_model_parameters = ModelParameters()
+
         stmt = select(AgentConfig).where(AgentConfig.app_id == app_id, AgentConfig.is_active.is_(True)).order_by(
             AgentConfig.updated_at.desc())
         agent_cfg: Optional[AgentConfig] = self.db.scalars(stmt).first()
         now = datetime.datetime.now()
-
-        default_model_parameters = {
-            "temperature": 0.7,
-            "max_tokens": 2000,
-            "top_p": 1.0,
-            "frequency_penalty": 0.0,
-            "presence_penalty": 0.0,
-            "n": 1,
-            "stop": None
-        }
 
         if agent_cfg:
             agent_cfg.default_model_config_id = None
@@ -1508,10 +1527,9 @@ class AppService:
             self.db.add(agent_cfg)
 
         self.db.commit()
-        self.db.refresh(agent_cfg)
 
         logger.info("Agent 模型参数重置成功", extra={"app_id": str(app_id)})
-        return agent_cfg
+        return default_model_parameters
 
     def _create_default_agent_config(self, app_id: uuid.UUID) -> AgentConfig:
         """创建默认的 Agent 配置模板（不保存到数据库）
