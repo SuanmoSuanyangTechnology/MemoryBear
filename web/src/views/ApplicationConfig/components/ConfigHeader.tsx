@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-13 18:19:27
+ * @Last Modified time: 2026-04-17 14:53:21
  */
 import { type FC, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -37,7 +37,8 @@ const sharingTabKeys = [
 const menuIcons: Record<string, string> = {
   edit: "rb:bg-[url('@/assets/images/common/edit_bold.svg')]",
   copy: "rb:bg-[url('@/assets/images/copy_hover.svg')]",
-  export: "rb:bg-[url('@/assets/images/export_hover.svg')]",
+  export: "rb:bg-[url('@/assets/images/application/export.svg')]",
+  uploadCover: "rb:bg-[url('@/assets/images/application/import.svg')]",
   delete: "rb:bg-[url('@/assets/images/common/delete_red_big.svg')]"
 }
 

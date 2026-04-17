@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>导出</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round">
+        <g id="记忆库-个人记忆-感知记忆-文本" transform="translate(-573, -158)" stroke="#171719">
+            <g id="导出" transform="translate(573, 158)">
+                <g id="编组-54" transform="translate(3, 3)">
+                    <path d="M10,6 L10,7.5 C10,8.88071187 8.88071187,10 7.5,10 L2.5,10 C1.11928813,10 0,8.88071187 0,7.5 L0,6 L0,6" id="路径"></path>
+                    <g id="编组-11" transform="translate(2, 0)">
+                        <line x1="3" y1="0.08499952" x2="3" y2="6.99635859" id="路径-24"></line>
+                        <polyline id="路径-25" stroke-linejoin="round" points="0 3 2.98005548 6.08298138e-18 6 3"></polyline>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>
