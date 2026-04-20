@@ -96,40 +96,8 @@ def require_api_key(
                 resource_id=api_key_obj.resource_id,
             )
 
-            # ── Tenant 级别限速（来自套餐配额 api_ops_rate_limit）──────────
-            try:
-                from app.models.workspace_model import Workspace
-                from premium.platform_admin.package_plan_service import TenantSubscriptionService
-
-                workspace = db.query(Workspace).filter(
-                    Workspace.id == api_key_obj.workspace_id
-                ).first()
-                if workspace:
-                    quota = TenantSubscriptionService(db).get_effective_quota(workspace.tenant_id)
-                    tenant_qps_limit = quota.get("api_ops_rate_limit") if quota else None
-                    if tenant_qps_limit:
-                        rate_limiter = RateLimiterService()
-                        tenant_ok, tenant_info = await rate_limiter.check_tenant_rate_limit(
-                            workspace.tenant_id, tenant_qps_limit
-                        )
-                        if not tenant_ok:
-                            raise RateLimitException(
-                                "租户 API 调用速率超限",
-                                BizCode.API_KEY_QPS_LIMIT_EXCEEDED,
-                                rate_headers={
-                                    "X-RateLimit-Tenant-Limit": str(tenant_info["limit"]),
-                                    "X-RateLimit-Tenant-Remaining": str(tenant_info["remaining"]),
-                                    "X-RateLimit-Tenant-Reset": str(tenant_info["reset"]),
-                                }
-                            )
-            except RateLimitException:
-                raise
-            except Exception as e:
-                logger.warning(f"Tenant 限速检查异常，跳过: {e}")
-            # ─────────────────────────────────────────────────────────────
-
             rate_limiter = RateLimiterService()
-            is_allowed, error_msg, rate_headers = await rate_limiter.check_all_limits(api_key_obj)
+            is_allowed, error_msg, rate_headers = await rate_limiter.check_all_limits(api_key_obj, db=db)
             if not is_allowed:
                 logger.warning("API Key 限流触发", extra={
                     "api_key_id": str(api_key_obj.id),
@@ -138,10 +106,12 @@ def require_api_key(
                     "error_msg": error_msg
                 })
                 # 根据错误消息判断限流类型
-                if "QPS" in error_msg:
-                    code = BizCode.API_KEY_QPS_LIMIT_EXCEEDED
-                elif "Daily" in error_msg:
+                if "Daily" in error_msg:
                     code = BizCode.API_KEY_DAILY_LIMIT_EXCEEDED
+                elif "Tenant" in error_msg:
+                    code = BizCode.API_KEY_QPS_LIMIT_EXCEEDED  # 租户套餐速率超限，同属 QPS 类
+                elif "QPS" in error_msg:
+                    code = BizCode.API_KEY_QPS_LIMIT_EXCEEDED
                 else:
                     code = BizCode.API_KEY_QUOTA_EXCEEDED
 
