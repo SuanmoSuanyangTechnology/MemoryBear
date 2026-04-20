@@ -18,7 +18,7 @@ from app.core.quota_manager import (
     get_quota_usage,
     _check_quota,
     QuotaUsageRepository,
-    TENANT_QPS_REDIS_KEY,
+    API_KEY_QPS_REDIS_KEY,
 )
 
 __all__ = [
@@ -34,5 +34,5 @@ __all__ = [
     "get_quota_usage",
     "_check_quota",
     "QuotaUsageRepository",
-    "TENANT_QPS_REDIS_KEY",
+    "API_KEY_QPS_REDIS_KEY",
 ]
