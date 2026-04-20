@@ -2479,6 +2479,7 @@ export const zh = {
       arrange: '整理',
       redo: '重做',
       undo: '撤销',
+      fit: '自适应',
 
       input: '输入',
       output: '输出',

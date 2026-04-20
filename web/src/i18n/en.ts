@@ -2515,6 +2515,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       arrange: 'Arrange',
       redo: 'Redo',
       undo: 'Undo',
+      fit: 'Fit View',
 
       input: 'Input',
       output: 'Output',
