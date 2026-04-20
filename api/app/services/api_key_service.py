@@ -284,8 +284,8 @@ class RateLimiterService:
 
     async def check_tenant_rate_limit(self, window_id: uuid.UUID, limit: int) -> Tuple[bool, dict]:
         """
-        按 window_id（workspace_id）做 1 秒滑动窗口限速。
-        限制值来自套餐配额 api_ops_rate_limit。
+        按 window_id（api_key_id）做 1 秒滑动窗口限速。
+        限制值来自套餐配额 api_ops_rate_limit，每个 API Key 独立受此上限约束。
         只有请求被允许时才计入窗口，超限请求不污染计数。
         """
         now = time.time()

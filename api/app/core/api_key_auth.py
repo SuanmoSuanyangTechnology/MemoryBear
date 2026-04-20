@@ -106,12 +106,11 @@ def require_api_key(
                     "error_msg": error_msg
                 })
                 # 根据错误消息判断限流类型
-                if "QPS" in error_msg:
-                    code = BizCode.API_KEY_QPS_LIMIT_EXCEEDED
-                elif "Daily" in error_msg:
+                if "Daily" in error_msg:
                     code = BizCode.API_KEY_DAILY_LIMIT_EXCEEDED
-                elif "Tenant" in error_msg:
-                    code = BizCode.API_KEY_QPS_LIMIT_EXCEEDED  # 租户套餐速率超限，同属 QPS 类
+                elif "QPS" in error_msg or "ops rate limit" in error_msg:
+                    # "QPS limit exceeded" 和 "API ops rate limit exceeded" 同属 QPS 类
+                    code = BizCode.API_KEY_QPS_LIMIT_EXCEEDED
                 else:
                     code = BizCode.API_KEY_QUOTA_EXCEEDED
 

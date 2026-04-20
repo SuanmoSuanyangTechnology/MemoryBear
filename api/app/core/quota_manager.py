@@ -19,8 +19,8 @@ from app.i18n.exceptions import QuotaExceededError, InternalServerError
 
 logger = get_auth_logger()
 
-# Redis key 格式常量，与 RateLimiterService.check_tenant_rate_limit 保持一致
-TENANT_QPS_REDIS_KEY = "rate_limit:tenant_qps:{tenant_id}"
+# Redis key 格式常量，与 RateLimiterService.check_qps 保持一致（per api_key 独立计数）
+API_KEY_QPS_REDIS_KEY = "rate_limit:qps:{api_key_id}"
 
 
 def _get_user_from_kwargs(kwargs: dict):
@@ -595,9 +595,22 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
     api_ops_current = 0
     try:
         from app.aioRedis import aio_redis as _aio_redis
+        from app.models.api_key_model import ApiKey
+        from app.models.workspace_model import Workspace
         _now = time.time()
-        _rk = TENANT_QPS_REDIS_KEY.format(tenant_id=tenant_id)
-        api_ops_current = int(await _aio_redis.zcount(_rk, _now - 1, "+inf") or 0)
+        # api_ops_rate_limit 限的是每个 api_key 每秒最高限额
+        # 展示当前最接近触发限流的 key 的 QPS（取最大值）
+        api_key_ids = db.query(ApiKey.id).join(
+            Workspace, ApiKey.workspace_id == Workspace.id
+        ).filter(
+            Workspace.tenant_id == tenant_id,
+            ApiKey.is_active.is_(True)
+        ).all()
+        for (key_id,) in api_key_ids:
+            _rk = API_KEY_QPS_REDIS_KEY.format(api_key_id=key_id)
+            count = int(await _aio_redis.zcount(_rk, _now - 1, "+inf") or 0)
+            if count > api_ops_current:
+                api_ops_current = count
     except Exception as e:
         logger.warning(f"获取 api_ops_current 失败，返回 0: {type(e).__name__}: {e}")
 
