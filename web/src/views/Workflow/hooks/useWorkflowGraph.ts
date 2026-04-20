@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 17:43:14
+ * @Last Modified time: 2026-04-15 16:02:49
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, type Edge } from '@antv/x6';
 import { register } from '@antv/x6-react-shape';
@@ -18,6 +18,7 @@ import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
 import { conditionNodeHeight, conditionNodeItemHeight, conditionNodePortItemArgsY, defaultAbsolutePortGroups, defaultPortItems, edgeAttrs, edgeHoverTool, edge_color, edge_selected_color, edge_width, graphNodeLibrary, nodeLibrary, nodeRegisterLibrary, nodeWidth, notesConfig, portAttrs, portItemArgsY, portMarkup, portTextAttrs, unknownNode } from '../constant';
 import type { ChatVariable, NodeProperties, WorkflowConfig } from '../types';
 import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils';
+import { useWorkflowStore } from '@/store/workflow';
 
 /**
  * Props for useWorkflowGraph hook
@@ -94,6 +95,8 @@ export const useWorkflowGraph = ({
   const { message } = App.useApp();
   const { t } = useTranslation()
   const { user } = useUser();
+  const { chatHistoryMap } = useWorkflowStore()
+  const chatHistory = Object.values(chatHistoryMap).at(-1) ?? []
 
   // Refs
   const graphRef = useRef<Graph>();
@@ -1446,6 +1449,31 @@ export const useWorkflowGraph = ({
       }
     }
   }
+  useEffect(() => {
+    if (!graphRef.current) return;
+    const nodes = graphRef.current.getNodes();
+
+    const lastWithSub = [...chatHistory].reverse().find(item => item.subContent?.length);
+    // Reset all node execution status first
+    nodes.forEach(node => {
+      const data = node.getData();
+      if (typeof data.status === 'string') {
+        node.setData({ ...data, executionStatus: undefined });
+      }
+    });
+    if (!lastWithSub?.subContent) return;
+    // Build a nodeId -> status map first
+    const statusMap: Record<string, string> = {};
+    lastWithSub.subContent.forEach(sub => {
+      if (typeof sub.status === 'string') {
+        statusMap[sub.node_id] = sub.status;
+        const node = nodes.find(n => n.getData()?.id === sub.node_id);
+        if (node) {
+          node.setData({ ...node.getData(), executionStatus: sub.status });
+        }
+      }
+    });
+  }, [chatHistory, graphRef.current]);
 
   return {
     config,

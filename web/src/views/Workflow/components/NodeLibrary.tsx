@@ -34,29 +34,24 @@ const NodeLibrary: FC<{ collapsed: boolean; handleToggle: () => void }> = ({ col
       >
         <Flex vertical align={collapsed ? 'center' : undefined} gap={collapsed ? 8 : 16}>
           {collapsed
-            ? <>
-              {nodeLibrary.map(category => (
-                <>
-                  {category.nodes
-                    .filter(node => node.type !== 'cycle-start' && node.type !== 'break')
-                    .map((node, nodeIndex) => (
-                      <Tooltip key={nodeIndex} title={t(`workflow.${node.type}`)} placement="right">
-                        <div
-                          className="rb:p-2 rb:rounded-lg rb:hover:bg-[rgba(33,35,50,0.08)]"
-                          draggable
-                          onDragStart={(e) => {
-                            e.dataTransfer.setData('application/reactflow', node.type);
-                            e.dataTransfer.setData('application/json', JSON.stringify(node));
-                          }}
-                        >
-                          <div className={`rb:size-6 rb:cursor-pointer rb:bg-cover ${node.icon}`} />
-                        </div>
-                      </Tooltip>
-                    ))
-                  }
-                </>
-              ))}
-            </>
+            ? nodeLibrary.flatMap(category =>
+                category.nodes
+                  .filter(node => node.type !== 'cycle-start' && node.type !== 'break')
+                  .map(node => (
+                    <Tooltip key={node.type} title={t(`workflow.${node.type}`)} placement="right">
+                      <div
+                        className="rb:p-2 rb:rounded-lg rb:hover:bg-[rgba(33,35,50,0.08)]"
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('application/reactflow', node.type);
+                          e.dataTransfer.setData('application/json', JSON.stringify(node));
+                        }}
+                      >
+                        <div className={`rb:size-6 rb:cursor-pointer rb:bg-cover ${node.icon}`} />
+                      </div>
+                    </Tooltip>
+                  ))
+              )
             : nodeLibrary.map(category => (
               <div
                 key={category.category}
@@ -65,9 +60,9 @@ const NodeLibrary: FC<{ collapsed: boolean; handleToggle: () => void }> = ({ col
                 <Flex gap={6} vertical>
                   {category.nodes
                     .filter(node => node.type !== 'cycle-start' && node.type !== 'break')
-                    .map((node, nodeIndex) => (
+                    .map((node) => (
                       <Flex
-                        key={nodeIndex}
+                        key={node.type}
                         align="center"
                         gap={8}
                         className="rb:rounded-xl rb:p-2! rb:border rb:border-[#EBEBEB] rb:cursor-pointer rb:hover:border rb:hover:border-[#171719]!"
