@@ -2537,6 +2537,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       checkListErrors: {
         'llm.model_id': 'Model',
         'llm.messages': 'Messages',
+        'llm.vision_input': 'Vision Variable',
         'end.output': 'Output',
         'knowledge-retrieval.knowledge_retrieval': 'Knowledge bases',
         'parameter-extractor.model_id': 'Model',

@@ -106,6 +106,18 @@ function validateNode(type: string, config: Record<string, any>): CheckError[] {
     if (isInvalid) errors.push({ key: specialKey, message: '' })
   })
 
+  // llm: vision_input required when vision is enabled
+  if (type === 'llm') {
+    const vision = get('vision')
+    if (vision === true || vision === 'true') {
+      const visionInput = get('vision_input')
+      console.log('vision', vision, isEmpty(visionInput))
+      if (isEmpty(visionInput)) {
+        errors.push({ key: 'llm.vision_input', message: '' })
+      }
+    }
+  }
+
   // http-request body.data (binary) — not a top-level required field, check separately
   if (type === 'http-request') {
     const body = get('body')

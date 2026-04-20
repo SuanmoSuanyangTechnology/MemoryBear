@@ -2501,6 +2501,7 @@ export const zh = {
       checkListErrors: {
         'llm.model_id': '模型',
         'llm.messages': '提示词',
+        'llm.vision_input': '视觉变量',
         'end.output': '回复',
         'knowledge-retrieval.knowledge_retrieval': '知识库',
         'parameter-extractor.model_id': '模型',
