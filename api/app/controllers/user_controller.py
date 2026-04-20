@@ -114,11 +114,14 @@ def get_current_user_info(
 
     # 设置权限：如果用户来自 SSO Source，则使用该 Source 的 permissions；否则返回 "all" 表示拥有所有权限
     if current_user.external_source:
-        from premium.sso.models import SSOSource
-        source = db.query(SSOSource).filter(SSOSource.source_code == current_user.external_source).first()
-        if source and source.permissions:
-            result_schema.permissions = source.permissions
-        else:
+        try:
+            from premium.sso.models import SSOSource
+            source = db.query(SSOSource).filter(SSOSource.source_code == current_user.external_source).first()
+            if source and source.permissions:
+                result_schema.permissions = source.permissions
+            else:
+                result_schema.permissions = []
+        except ModuleNotFoundError:
             result_schema.permissions = []
     else:
         result_schema.permissions = ["all"]

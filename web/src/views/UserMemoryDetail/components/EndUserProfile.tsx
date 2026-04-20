@@ -2,14 +2,14 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:33:30 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-10 18:40:52
+ * @Last Modified time: 2026-04-17 17:57:15
  */
 /**
  * End User Profile Component
  * Displays and manages end user profile information
  */
 
-import { forwardRef, useImperativeHandle, useEffect, useState, useRef, useCallback } from 'react'
+import { forwardRef, useImperativeHandle, useEffect, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Skeleton, Flex } from 'antd';
@@ -22,17 +22,16 @@ import {
 } from '@/api/memory'
 import EndUserProfileModal from './EndUserProfileModal'
 import type { EndUser, EndUserProfileModalRef, EndUserProfileRef } from '../types'
-import Tag from '@/components/Tag';
 
 /**
  * Component props
  */
 interface EndUserProfileProps {
-  onDataLoaded?: (data: { other_name?: string; id: string }) => void;
+  onDataLoaded?: (data?: EndUser) => void;
   className?: string;
 }
 
-const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ className }, ref) => {
+const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ className, onDataLoaded }, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const endUserProfileModalRef = useRef<EndUserProfileModalRef>(null)
@@ -52,6 +51,7 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
       const userData = res as EndUser
       setData(userData)
       setLoading(false) 
+      onDataLoaded?.(userData as EndUser)
     })
     .finally(() => {
       setLoading(false)
@@ -89,11 +89,11 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
           </div>
           <div>
             <div className="rb:text-[#7B8085]">{t('userMemory.role')}</div>
-            <div className="rb:mt-0.5">{data?.profile?.role || '-'}</div>
+            <div className="rb:mt-0.5">{data?.profile?.role?.join(' | ') || '-'}</div>
           </div>
           <div>
             <div className="rb:text-[#7B8085]">{t('userMemory.domain')}</div>
-            <div className="rb:mt-0.5">{data?.profile?.domain || '-'}</div>
+            <div className="rb:mt-0.5">{data?.profile?.domain?.join(' | ') || '-'}</div>
           </div>
           <div>
             <div className="rb:text-[#7B8085]">{t('userMemory.expertise')}</div>
@@ -103,14 +103,10 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
             <div className="rb:text-[#7B8085]">{t('userMemory.interests')}</div>
             <div className="rb:mt-0.5">{data?.profile?.interests?.join(' | ') || '-'}</div>
           </div>
-          <div>
-            <div className="rb:text-[#7B8085]">{t('userMemory.knowledge_tags')}</div>
-            <Flex wrap gap={4} className="rb:mt-0.5!">{data?.knowledge_tags?.map((tag: string) => <Tag>{tag}</Tag>) || '-'}</Flex>
-          </div>
 
-            <div className="rb:text-[#7B8085] rb:text-[12px] rb:leading-4.5">
+          <div className="rb:text-[#7B8085] rb:text-[12px] rb:leading-4.5">
             {t('userMemory.updated_at')}: {data?.updated_at ? dayjs(data?.updated_at).format('YYYY/MM/DD HH:mm:ss') : ''}
-            </div>
+          </div>
         </Flex>
       }
       <EndUserProfileModal

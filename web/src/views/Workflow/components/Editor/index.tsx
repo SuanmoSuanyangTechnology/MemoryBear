@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 16:29:36
+ * @Last Modified time: 2026-04-16 12:04:37
  */
 import { type FC, useState, useMemo } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
@@ -25,7 +25,7 @@ export interface LexicalEditorProps {
   value?: string;
   onChange?: (value: string) => void;
   options?: Suggestion[];
-  variant?: 'outlined' | 'borderless';
+  variant?: 'outlined' | 'borderless' | 'filled';
   height?: number;
   fontSize?: number;
   lineHeight?: number;
@@ -60,6 +60,7 @@ const Editor: FC<LexicalEditorProps> =({
 }) => {
   console.log('Editor value', value)
   const [_count, setCount] = useState(0);
+  const [focused, setFocused] = useState(false);
 
   if (language === 'jinja2') {
     return (
@@ -90,7 +91,7 @@ const Editor: FC<LexicalEditorProps> =({
   // Calculate minimum height based on type and size
   const minheight = useMemo(() => {
     if (type === 'input') {
-      return `${height ? height : size === 'small' && variant === 'borderless' ? 18 : size === 'small' ? 26 : 30}px`
+      return `${height ? height : size === 'small' && ['borderless', 'filled'].includes(variant) ? 18 : size === 'small' ? 26 : 30}px`
     }
     return `${height ? height : size === 'small' ? 60 : 120}px`
   }, [type, size, height, variant])
@@ -103,7 +104,7 @@ const Editor: FC<LexicalEditorProps> =({
   // Calculate line height based on size prop
   const lineHeight = useMemo(() => {
     return `${height ? height - 10 : size === 'small' && variant === 'borderless' ? 18 : size === 'small' ? 16 : 20}px`
-  }, [size])
+  }, [size, height, variant])
 
   // Calculate placeholder minimum height
   const placeHolderMinheight = useMemo(() => {
@@ -112,20 +113,24 @@ const Editor: FC<LexicalEditorProps> =({
 
   return (
     <LexicalComposer initialConfig={initialConfig}>
-      <div style={{ position: 'relative' }} className={className}>
+      <div style={{ position: 'relative', borderRadius: '8px', background: variant === 'filled' ? '#F6F6F6': 'transparent' }} className={className}>
         <RichTextPlugin
           contentEditable={
             <ContentEditable
               style={{
                 minHeight: minheight,
-                padding: height ? '4px 6px' : variant === 'borderless' ? '0' : '6px 8px',
-                border: variant === 'borderless' ? 'none' : '1px solid #EBEBEB',
+                padding: height ? '4px 6px' : variant === 'outlined' ? '6px 8px': '0',
+                border: type === 'input' && focused
+                  ? '1px solid #171719'
+                  : variant === 'outlined' ? '1px solid #EBEBEB' : 'none',
                 borderRadius: '8px',
                 outline: 'none',
                 resize: 'none',
                 fontSize: fontSize,
                 lineHeight: lineHeight,
               }}
+              onFocus={() => type === 'input' && setFocused(true)}
+              onBlur={() => type === 'input' && setFocused(false)}
             />
           }
           placeholder={
@@ -133,12 +138,13 @@ const Editor: FC<LexicalEditorProps> =({
               style={{
                 minHeight: placeHolderMinheight,
                 position: 'absolute',
-                top: variant === 'borderless' ? '2px' : '6px',
-                left: variant === 'borderless' ? '0' : '11px',
-                color: '#A8A9AA',
+                top: variant === 'outlined' ? '6px' : type === 'input' ? '6px' : '2px',
+                left: variant === 'outlined' ? '11px' : type === 'input' ? '8px' : '0',
+                color: 'rgba(23,23,25,0.25)',
                 fontSize: fontSize,
                 lineHeight: placeHolderMinheight,
                 pointerEvents: 'none',
+                borderRadius: '8px',
               }}
             >
               {placeholder}

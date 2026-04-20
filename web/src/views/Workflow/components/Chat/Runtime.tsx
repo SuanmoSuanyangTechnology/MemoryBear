@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-24 17:57:08 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 14:05:50
+ * @Last Modified time: 2026-04-14 16:33:33
  */
 /*
  * Runtime Component
@@ -161,8 +161,7 @@ const Runtime: FC<{ item: ChatItem; index: number;}> = ({
                 children: (
                   <Flex gap={8} vertical>
                     {/* Display error message for failed nodes */}
-
-                    {item.error &&
+                    {vo.content?.error && vo.content?.error !== '' &&
                       <RbAlert color="orange" className="rb:pb-0!">
                         <Flex vertical className="rb:w-full!">
                           <Flex align="center" justify="space-between">
@@ -219,11 +218,11 @@ const Runtime: FC<{ item: ChatItem; index: number;}> = ({
     </div>
   }
 
-    /** Copy value to clipboard and show success message */
-    const handleCopy = (value: string) => {
-      copy(value)
-      message.success(t('common.copySuccess'))
-    }
+  /** Copy value to clipboard and show success message */
+  const handleCopy = (value: string) => {
+    copy(value)
+    message.success(t('common.copySuccess'))
+  }
 
   return (
     <div
@@ -269,7 +268,7 @@ const Runtime: FC<{ item: ChatItem; index: number;}> = ({
             </div>
           )
           : <div className="rb:mb-4">
-            {item.error &&
+            {item.error && item.error !== '' &&
               <RbAlert color="orange" className="rb:pb-0! rb:mb-2!"><Markdown content={item.error} /></RbAlert>
             }
             {renderChild(item.subContent)}

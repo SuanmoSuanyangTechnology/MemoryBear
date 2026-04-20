@@ -6,6 +6,7 @@ import { Node } from '@antv/x6';
 
 import type { WorkflowRef } from '@/views/ApplicationConfig/types'
 import { nodeLibrary } from '../../constant'
+import { isSubExprSet } from '../../utils'
 import { getToolMethods } from '@/api/tools'
 import RbDrawer from '@/components/RbDrawer'
 import { useWorkflowStore } from '@/store/workflow'
@@ -44,14 +45,13 @@ const specialValidators: Record<string, (val: any) => boolean> = {
   // if-else.cases: every case must have at least one expression, and every expression must be fully set
   'if-else.cases': (val: any[]) => {
     if (!Array.isArray(val) || !val.length) return true
-    return val.some(c => {
-      if (!c?.expressions?.length) return true
-      return c.expressions.some((expr: any) => {
-        if (!expr?.left) return true
-        if (['not_empty', 'empty'].includes(expr.operator)) return false
-        return !(!!expr.left && (!!expr.right || typeof expr.right === 'boolean' || typeof expr.right === 'number'))
-      })
-    })
+    const isExprSet = (expr: any) => {
+      if (expr?.sub_variable_condition?.conditions?.length > 0) return expr.sub_variable_condition?.conditions.every(isSubExprSet)
+      if (!expr.left) return false
+      if (['not_empty', 'empty'].includes(expr.operator)) return true
+      return !!expr.left && (!!expr.right || typeof expr.right === 'boolean' || typeof expr.right === 'number')
+    }
+    return val.some(c => !c?.expressions?.length || c.expressions.some((expr: any) => !isExprSet(expr)))
   },
   // question-classifier.categories: every category must have a value
   'question-classifier.categories': (val: any[]) => !Array.isArray(val) || !val.some(c => c?.class_name && String(c.class_name).trim()),
@@ -79,7 +79,6 @@ const specialValidators: Record<string, (val: any) => boolean> = {
 }
 
 function isEmpty(val: any): boolean {
-  console.log('validateNode isEmpty', val, val === undefined || val === null || val === '')
   if (val === undefined || val === null || val === '') return true
   if (Array.isArray(val)) return val.length === 0
   return false
@@ -98,7 +97,6 @@ function validateNode(type: string, config: Record<string, any>): CheckError[] {
     const specialKey = `${type}.${field}`
     const specialValidator = specialValidators[specialKey]
     const isInvalid = specialValidator ? specialValidator(val) : isEmpty(val)
-    console.log('validateNode', val, specialKey, specialValidator, isEmpty(val))
     if (isInvalid) errors.push({ key: specialKey, message: '' })
   })
 
@@ -114,68 +112,13 @@ function validateNode(type: string, config: Record<string, any>): CheckError[] {
   return errors
 }
 
-export async function runCheckOnGraph(
-  graph: import('@antv/x6').Graph,
-  t: (key: string) => string
-): Promise<NodeCheckResult[]> {
-  const nodes = graph.getNodes()
-  const edges = graph.getEdges()
-  const targetIds = new Set<string>()
-  const childTargetIds = new Set<string>()
-  edges.forEach(e => {
-    targetIds.add(e.getTargetCellId())
-    const srcData = graph.getCellById(e.getSourceCellId())?.getData()
-    const tgtData = graph.getCellById(e.getTargetCellId())?.getData()
-    if (srcData?.cycle && tgtData?.cycle && srcData.cycle === tgtData.cycle) {
-      childTargetIds.add(e.getTargetCellId())
-    }
-  })
-
-  const checked: NodeCheckResult[] = []
-  for (const node of nodes) {
-    const data = node.getData()
-    if (!data || ['add-node', 'notes', 'cycle-start', 'break'].includes(data.type)) continue
-
-    const errors: CheckError[] = []
-    const isChildNode = !!data.cycle
-    const hasIncoming = isChildNode ? childTargetIds.has(node.id) : !['start', 'cycle-start'].includes(data.type) ? targetIds.has(node.id) : true
-    if (!hasIncoming) errors.push({ key: 'notConnected', message: t('workflow.notConnected') })
-
-    const configErrors = validateNode(data.type, data.config ?? {})
-    configErrors.forEach(e => {
-      errors.push({ key: e.key, message: `${t(`workflow.checkListErrors.${e.key}`)} ${t('workflow.cannotBeEmpty')}`.trim() })
-    })
-
-    if (data.type === 'tool') {
-      const toolId = data.config?.tool_id?.defaultValue ?? data.config?.tool_id
-      const toolParameters = data.config?.tool_parameters?.defaultValue ?? data.config?.tool_parameters ?? {}
-      if (toolId) {
-        try {
-          const methods = await getToolMethods(toolId) as Array<{ name: string; parameters: Array<{ name: string; required: boolean }> }>
-          const operation = toolParameters?.operation
-          const method = operation ? methods.find(m => m.name === operation) : methods[0]
-          if (method) {
-            method.parameters
-              .filter(p => p.required && (toolParameters[p.name] === undefined || toolParameters[p.name] === null || toolParameters[p.name] === ''))
-              .forEach(p => errors.push({ key: 'tool.tool_parameters', message: `${p.name} ${t('workflow.cannotBeEmpty')}` }))
-          }
-        } catch { /* ignore */ }
-      }
-    }
-
-    if (errors.length) {
-      checked.push({ id: node.id, name: data.name || t(`workflow.${data.type}`), type: data.type, icon: nodeIconMap[data.type] ?? '', errors })
-    }
-  }
-  return checked
-}
-
 const CheckList: FC<CheckListProps> = ({ workflowRef, appId }) => {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const { setCheckResults, getCheckResults } = useWorkflowStore()
   const results = getCheckResults(appId)
   const timerRef = useRef<ReturnType<typeof setTimeout>>()
+  const toolMethodsCacheRef = useRef<Record<string, Array<{ name: string; parameters: Array<{ name: string; required: boolean }> }>>>({})
 
   const runCheck = useCallback(async () => {
     const graph = workflowRef.current?.graphRef?.current
@@ -222,9 +165,13 @@ const CheckList: FC<CheckListProps> = ({ workflowRef, appId }) => {
       if (data.type === 'tool') {
         const toolId = data.config?.tool_id?.defaultValue ?? data.config?.tool_id
         const toolParameters = data.config?.tool_parameters?.defaultValue ?? data.config?.tool_parameters ?? {}
-        if (toolId) {
+
+        if (typeof toolId === 'string') {
           try {
-            const methods = await getToolMethods(toolId) as Array<{ name: string; parameters: Array<{ name: string; required: boolean }> }>
+            if (!toolMethodsCacheRef.current[toolId]) {
+              toolMethodsCacheRef.current[toolId] = await getToolMethods(toolId) as Array<{ name: string; parameters: Array<{ name: string; required: boolean }> }>
+            }
+            const methods = toolMethodsCacheRef.current[toolId]
             const operation = toolParameters?.operation
             const method = operation ? methods.find(m => m.name === operation) : methods[0]
             if (method) {
@@ -251,21 +198,27 @@ const CheckList: FC<CheckListProps> = ({ workflowRef, appId }) => {
     return checked
   }, [workflowRef.current?.graphRef?.current, t])
 
+  const scheduleCheckRef = useRef<() => void>()
+
   const scheduleCheck = useCallback(() => {
     clearTimeout(timerRef.current)
     timerRef.current = setTimeout(async () => {
       setCheckResults(appId, await runCheck())
-    }, 500)
+    }, 300)
   }, [runCheck])
+
+  scheduleCheckRef.current = scheduleCheck
 
   useEffect(() => {
     const graph = workflowRef.current?.graphRef?.current
+    console.log('graph')
     if (!graph) return
-    const events = ['node:added', 'node:removed', 'node:change:data', 'edge:added', 'edge:removed']
-    events.forEach(e => graph.on(e, scheduleCheck))
-    scheduleCheck()
+    const handler = () => scheduleCheckRef.current?.()
+    const events = ['node:added', 'node:removed', 'node:change:data', 'edge:added', 'edge:removed', 'edge:connected', 'edge:changed']
+    events.forEach(e => graph.on(e, handler))
+    scheduleCheckRef.current?.()
     return () => {
-      events.forEach(e => graph.off(e, scheduleCheck))
+      events.forEach(e => graph.off(e, handler))
       clearTimeout(timerRef.current)
     }
   }, [workflowRef.current?.graphRef?.current])

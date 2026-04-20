@@ -155,7 +155,9 @@ const ConditionList: FC<CaseListProps> = ({
                     const currentExpression = expressions[index] || {};
                     const currentOperator = currentExpression.operator;
                     const leftFieldValue = currentExpression.left;
-                    const leftFieldOption = options.find(option => `{{${option.value}}}` === leftFieldValue);
+                    const leftFieldOption = options.find(option => `{{${option.value}}}` === leftFieldValue)
+                      ?? options.flatMap(o => o.children ?? []).find(child => `{{${child.value}}}` === leftFieldValue)
+                      ?? options.flatMap(o => o.children ?? []).flatMap((c: any) => c.children ?? []).find((gc: any) => `{{${gc.value}}}` === leftFieldValue);
                     const leftFieldType = leftFieldOption?.dataType;
                     const hideRightField = currentOperator === 'empty' || currentOperator === 'not_empty' || ['array[object]', 'object'].includes(leftFieldType as string);
                     const operatorList = leftFieldType && ['array[object]', 'object'].includes(leftFieldType)
@@ -176,7 +178,7 @@ const ConditionList: FC<CaseListProps> = ({
                         className="rb:mb-2!"
                       >
                         <div className="rb:flex-1 rb:bg-[#F6F6F6] rb:rounded-lg">
-                          <Row className={clsx("rb:p-1!", {
+                          <Row className={clsx("rb:px-1!", {
                             'rb-border-b': !hideRightField
                           })}>
                             <Col flex="1">
@@ -216,7 +218,7 @@ const ConditionList: FC<CaseListProps> = ({
                           </Row>
                           
                           {!hideRightField && (
-                            <div className="rb:py-1 rb:px-1.5">
+                            <div className={leftFieldType === 'boolean' ? "rb:py-1 rb:px-1.5" : ''}>
                               {leftFieldType === 'number'
                                 ? (
                                   <Flex align="center">

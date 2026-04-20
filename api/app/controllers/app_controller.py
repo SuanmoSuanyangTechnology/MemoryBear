@@ -28,6 +28,7 @@ from app.services.app_statistics_service import AppStatisticsService
 from app.services.workflow_import_service import WorkflowImportService
 from app.services.workflow_service import WorkflowService, get_workflow_service
 from app.services.app_dsl_service import AppDslService
+from app.core.quota_stub import check_app_quota
 
 router = APIRouter(prefix="/apps", tags=["Apps"])
 logger = get_business_logger()
@@ -35,6 +36,7 @@ logger = get_business_logger()
 
 @router.post("", summary="创建应用（可选创建 Agent 配置）")
 @cur_workspace_access_guard()
+@check_app_quota
 def create_app(
         payload: app_schema.AppCreate,
         db: Session = Depends(get_db),
@@ -267,6 +269,19 @@ def update_agent_config(
     cfg = app_service.update_agent_config(db, app_id=app_id, data=payload, workspace_id=workspace_id)
     cfg = enrich_agent_config(cfg)
     return success(data=app_schema.AgentConfig.model_validate(cfg))
+
+
+@router.get("/{app_id}/model/parameters/default", summary="获取 Agent 模型参数默认配置")
+@cur_workspace_access_guard()
+def get_agent_model_parameters(
+        app_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    workspace_id = current_user.current_workspace_id
+    service = AppService(db)
+    model_parameters = service.get_default_model_parameters(app_id=app_id)
+    return success(data=model_parameters, msg="获取 Agent 模型参数默认配置")
 
 
 @router.get("/{app_id}/config", summary="获取 Agent 配置")

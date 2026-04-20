@@ -393,7 +393,7 @@ class MasterAgentRouter:
                 api_key=api_key_config.api_key,
                 base_url=api_key_config.api_base,
                 is_omni=api_key_config.is_omni,
-                support_thinking="thinking" in (api_key_config.capability or []),
+                capability=api_key_config.capability,
                 extra_params = extra_params
             )
 

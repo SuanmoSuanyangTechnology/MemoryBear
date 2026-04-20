@@ -12,7 +12,7 @@ import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
 
 from langchain.agents import create_agent
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.errors import GraphRecursionError
 
@@ -41,6 +41,7 @@ class LangChainAgent:
             max_tool_consecutive_calls: int = 3,  # 单个工具最大连续调用次数
             deep_thinking: bool = False,  # 是否启用深度思考模式
             thinking_budget_tokens: Optional[int] = None,  # 深度思考 token 预算
+            json_output: bool = False,  # 是否强制 JSON 输出
             capability: Optional[List[str]] = None  # 模型能力列表，用于校验是否支持深度思考
     ):
         """初始化 LangChain Agent
@@ -64,7 +65,6 @@ class LangChainAgent:
         self.streaming = streaming
         self.is_omni = is_omni
         self.max_tool_consecutive_calls = max_tool_consecutive_calls
-        self.deep_thinking = deep_thinking and ("thinking" in (capability or []))
 
         # 工具调用计数器：记录每个工具的连续调用次数
         self.tool_call_counter: Dict[str, int] = {}
@@ -80,6 +80,17 @@ class LangChainAgent:
 
         self.system_prompt = system_prompt or "你是一个专业的AI助手"
 
+        # ChatTongyi 要求 messages 含 'json' 字样才能使用 response_format
+        # 在 system prompt 中注入 JSON 要求
+        from app.models.models_model import ModelProvider
+        if json_output and (
+            (provider.lower() == ModelProvider.DASHSCOPE and not is_omni)
+            or provider.lower() == ModelProvider.VOLCANO
+            # 有工具时 response_format 会被移除，所有 provider 都需要 system prompt 注入保证 JSON 输出
+            or bool(tools)
+        ):
+            self.system_prompt += "\n请以JSON格式输出。"
+
         logger.debug(
             f"Agent 迭代次数配置: max_iterations={self.max_iterations}, "
             f"tool_count={len(self.tools)}, "
@@ -87,23 +98,17 @@ class LangChainAgent:
             f"auto_calculated={max_iterations is None}"
         )
 
-        # 根据 capability 校验是否真正支持深度思考
-        actual_deep_thinking = self.deep_thinking
-        if deep_thinking and not actual_deep_thinking:
-            logger.warning(
-                f"模型 {model_name} 不支持深度思考（capability 中无 'thinking'），已自动关闭 deep_thinking"
-            )
-
-        # 创建 RedBearLLM（支持多提供商）
+        # 创建 RedBearLLM，capability 校验由 RedBearModelConfig 统一处理
         model_config = RedBearModelConfig(
             model_name=model_name,
             provider=provider,
             api_key=api_key,
             base_url=api_base,
             is_omni=is_omni,
-            deep_thinking=actual_deep_thinking,
-            thinking_budget_tokens=thinking_budget_tokens if actual_deep_thinking else None,
-            support_thinking="thinking" in (capability or []),
+            capability=capability,
+            deep_thinking=deep_thinking,
+            thinking_budget_tokens=thinking_budget_tokens,
+            json_output=json_output,
             extra_params={
                 "temperature": temperature,
                 "max_tokens": max_tokens,
@@ -112,6 +117,9 @@ class LangChainAgent:
         )
 
         self.llm = RedBearLLM(model_config, type=ModelType.CHAT)
+        # 从经过校验的 config 读取实际生效的能力开关
+        self.deep_thinking = model_config.deep_thinking
+        self.json_output = model_config.json_output
 
         # 获取底层模型用于真正的流式调用
         self._underlying_llm = self.llm._model if hasattr(self.llm, '_model') else self.llm
@@ -237,9 +245,7 @@ class LangChainAgent:
         Returns:
             List[BaseMessage]: 消息列表
         """
-        messages:list = [SystemMessage(content=self.system_prompt)]
-
-        # 添加系统提示词
+        messages: list = []
 
         # 添加历史消息
         if history:

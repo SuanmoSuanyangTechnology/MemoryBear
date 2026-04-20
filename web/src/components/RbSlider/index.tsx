@@ -44,6 +44,7 @@ const RbSlider: FC<RbSliderProps> = ({
   className = '',
   prefix,
   inputClassName,
+  disabled,
   ...rest
 }) => {
   const [curValue, setCurValue] = useState<SliderSingleProps['value']>(0)
@@ -83,6 +84,7 @@ const RbSlider: FC<RbSliderProps> = ({
         max={max}
         step={step}
         value={curValue}
+        disabled={disabled}
         onChange={handleSliderChange}
         classNames={size === 'small' ? {
           rail: 'rb:w-[calc(100%-6px)]!'
@@ -96,6 +98,7 @@ const RbSlider: FC<RbSliderProps> = ({
           max={max}
           step={step as number}
           value={curValue}
+          disabled={disabled}
           onChange={handleInputChange}
           prefix={prefix}
           className={`${inputClassName || '' } rb:w-20!`}

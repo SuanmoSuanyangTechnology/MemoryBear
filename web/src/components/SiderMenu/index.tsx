@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:25:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 19:11:43
+ * @Last Modified time: 2026-04-16 17:35:38
  */
 /**
  * SiderMenu Component
@@ -18,7 +18,7 @@
  * @component
  */
 
-import { useState, useEffect, type FC } from 'react';
+import { useState, useEffect, useRef, type FC } from 'react';
 import { Menu as AntMenu, Layout, Flex } from 'antd';
 import { UserOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
@@ -30,6 +30,9 @@ import { useMenu, type MenuItem } from '@/store/menu';
 import styles from './index.module.css'
 import logo from '@/assets/images/logo.png'
 import { useUser } from '@/store/user';
+import { getTenantSubscription } from '@/api/user';
+import { useI18n } from '@/store/locale'
+import SubscriptionDetailModal, { type SubscriptionDetailModalRef } from './SubscriptionDetailModal'
 
 // Import SVG files
 // space
@@ -70,7 +73,51 @@ import pricingActiveIcon from '@/assets/images/menuNew/pricing_active.svg'
 import skillsIcon from '@/assets/images/menuNew/skills.svg'
 import skillsActiveIcon from '@/assets/images/menuNew/skills_active.svg'
 
+export interface PackagePlan {
+  id: string
+  name: string
+  name_en?: string
+  version: string
+  category: string
+  tier_level: number
+  price: number
+  billing_cycle: string
+  core_value?: string
+  core_value_en?: string
+  tech_support?: string
+  tech_support_en?: string
+  sla_compliance?: string
+  sla_compliance_en?: string
+  page_customization?: string
+  page_customization_en?: string
+  theme_color?: string
+}
 
+export interface SubscriptionQuota {
+  app_quota: number
+  model_quota: number
+  skill_quota: number
+  end_user_quota: number
+  workspace_quota: number
+  api_ops_rate_limit: number
+  memory_engine_quota: number
+  ontology_project_quota: number
+  knowledge_capacity_quota: number
+}
+
+export interface Subscription {
+  subscription_id: string | null
+  tenant_id: string
+  package_plan_id: string
+  package_version: string
+  package_plan: PackagePlan
+  started_at: number | null
+  expired_at: number | null
+  status: string
+  quota: SubscriptionQuota
+  created_at: number
+  updated_at: number
+}
 /** Icon path mapping table for menu items (normal and active states) */
 const iconPathMap: Record<string, string> = {
   'dashboard': dashboardIcon,
@@ -121,10 +168,12 @@ const Menu: FC<{
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
+  const { language } = useI18n()
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const { allMenus, collapsed, loadMenus, toggleSider } = useMenu()
   const [menus, setMenus] = useState<MenuItem[]>([])
   const { user, storageType } = useUser()
+  const subscriptionDetailRef = useRef<SubscriptionDetailModalRef>(null)
 
   /** Filter menus based on user role and source */
   useEffect(() => {
@@ -279,6 +328,25 @@ const Menu: FC<{
     localStorage.removeItem('user')
   }
 
+  const [subscription, setSubscription] = useState<Subscription | null>(null)
+  useEffect(() => {
+    if (source === 'manage') {
+      getTenantSubscription()
+        .then(res => {
+          setSubscription(res as Subscription)
+        })
+    } else {
+      setSubscription(null)
+    }
+  }, [source])
+
+  const getKeyWithLanguage = (key: string) => {
+    return (language === 'en' ? `${key}_en` : key) as keyof Subscription['package_plan']
+  }
+  const handleViewDetail = () => {
+    subscriptionDetailRef.current?.handleOpen(subscription)
+  }
+
   return (
     <Sider
       width={240}
@@ -325,7 +393,8 @@ const Menu: FC<{
         inlineIndent={10}
         className={clsx("rb:overflow-y-auto", {
           'rb:max-h-[calc(100vh-136px)]': user?.is_superuser && source === 'space',
-          'rb:max-h-[calc(100vh-76px)]': !(user?.is_superuser && source === 'space')
+          'rb:max-h-[calc(100vh-76px)]': !(user?.is_superuser && source === 'space') && !(source === 'manage' && subscription && !collapsed),
+          'rb:max-h-[calc(100vh-228px)]': source === 'manage' && subscription && !collapsed,
         })}
       />
       {/* Return to space button for superusers */}
@@ -337,10 +406,34 @@ const Menu: FC<{
           onClick={goToSpace}
           className="rb-border-t rb:pt-5! rb:pb-2.5! rb:absolute rb:bottom-2.5 rb:right-5 rb:left-5 rb:text-[13px] rb:text-[#5B6167] rb:hover:text-[#212332] rb:leading-4.5 rb:font-regular rb:text-center rb:mt-2.25 rb:cursor-pointer"
         >
-          <div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/logout.svg')]"></div>
+          <div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/logout_grey.svg')]"></div>
           {collapsed ? null : t('common.returnToSpace')}
         </Flex>
       }
+      {source === 'manage' && subscription && !collapsed &&
+        <div className="rb:absolute rb:bottom-3 rb:left-3 rb:right-3 rb:py-3 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/package_bg.png')] rb:overflow-hidden rb:rounded-xl">
+          <div className="rb:h-4.5 rb:flex-1 rb:truncate rb:px-3 rb:text-[13px] rb:font-medium rb:leading-4.5">{subscription.package_plan?.[getKeyWithLanguage('name')]}</div>
+
+          <div className="rb:grid rb:grid-cols-4 rb:mt-4">
+            {['workspace_quota', 'skill_quota', 'app_quota', 'model_quota'].map(key => (
+              <div key={key} className="rb:text-center">
+                <div className="rb:text-[13px] rb:font-[MiSans-Semibold] rb:font-semibold">{subscription.quota?.[key as keyof typeof subscription.quota]}</div>
+                <div className="rb:mt-1 rb:text-[#5B6167] rb:text-[10px] rb:leading-3.5">{t(`index.${key}`)}</div>
+              </div>
+            ))}
+          </div>
+          <Flex align="center" justify="center" className="rb:mt-4! rb:border rb:p-2! rb:text-[12px] rb:leading-4 rb:mx-3! rb:rounded-lg rb:cursor-pointer"
+            onClick={handleViewDetail}
+          >
+            {t('package.viewDetail')}
+            <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/index/arrow_right_dark.svg')]"></div>
+          </Flex>
+        </div>
+      }
+
+      <SubscriptionDetailModal
+        ref={subscriptionDetailRef}
+      />
     </Sider>
   );
 };

@@ -260,17 +260,22 @@ class HttpRequestNode(BaseNode):
                 ))
             case HttpContentType.FROM_DATA:
                 data = {}
-                content["files"] = {}
+                files = []
                 for item in self.typed_config.body.data:
+                    key = self._render_template(item.key, variable_pool)
                     if item.type == "text":
-                        data[self._render_template(item.key, variable_pool)] = self._render_template(item.value,
-                                                                                                     variable_pool)
+                        data[key] = self._render_template(item.value, variable_pool)
                     elif item.type == "file":
-                        content["files"][self._render_template(item.key, variable_pool)] = (
-                            uuid.uuid4().hex,
-                            await variable_pool.get_instance(item.value).get_content()
-                        )
+                        file_instance = variable_pool.get_instance(item.value)
+                        if isinstance(file_instance, ArrayVariable):
+                            for v in file_instance.value:
+                                if isinstance(v, FileVariable):
+                                    files.append((key, (uuid.uuid4().hex, await v.get_content())))
+                        elif isinstance(file_instance, FileVariable):
+                            files.append((key, (uuid.uuid4().hex, await file_instance.get_content())))
                 content["data"] = data
+                if files:
+                    content["files"] = files
             case HttpContentType.BINARY:
                 content["files"] = []
                 file_instence = variable_pool.get_instance(self.typed_config.body.data)

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-19 17:00:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-08 10:12:27
+ * @Last Modified time: 2026-04-13 10:44:17
  */
 /**
  * useVariableList Hook
@@ -414,7 +414,7 @@ export const useVariableList = (
       const pd = parentLoop.getData();
       const pid = pd.id;
       if (pd.type === 'loop') {
-        (pd.cycle_vars || []).forEach((cv: any) => addVariable(list, keys, `${pid}_cycle_${cv.name}`, cv.name, cv.type || 'String', `${pid}.${cv.name}`, pd));
+        (pd.cycle_vars || []).forEach((cv: any) => addVariable(list, keys, `${pid}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${pid}.${cv.name}`, pd));
       } else if (pd.type === 'iteration' && pd.config.input.defaultValue) {
         let itemType = 'object';
         const iv = list.find(v => `{{${v.value}}}` === pd.config.input.defaultValue);

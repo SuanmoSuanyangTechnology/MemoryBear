@@ -597,6 +597,7 @@ class AgentRunService:
                 tools=tools,
                 deep_thinking=effective_params.get("deep_thinking", False),
                 thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
+                json_output=effective_params.get("json_output", False),
                 capability=api_key_config.get("capability", []),
             )
 
@@ -853,6 +854,7 @@ class AgentRunService:
                 streaming=True,
                 deep_thinking=effective_params.get("deep_thinking", False),
                 thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
+                json_output=effective_params.get("json_output", False),
                 capability=api_key_config.get("capability", []),
             )
 

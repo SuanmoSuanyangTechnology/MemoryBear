@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 19:56:56
+ * @Last Modified time: 2026-04-16 17:52:30
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -100,6 +100,10 @@ export const nodeLibrary: NodeLibrary[] = [
             min: 256, 
             step: 1, 
             defaultValue: 2000 
+          },
+          json_output: {
+            type: 'define',
+            defaultValue: false
           },
           context: {
             type: 'variableList',

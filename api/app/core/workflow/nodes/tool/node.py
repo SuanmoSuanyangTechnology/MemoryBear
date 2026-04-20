@@ -15,6 +15,7 @@ from app.services.tool_service import ToolService
 logger = logging.getLogger(__name__)
 
 TEMPLATE_PATTERN = re.compile(r"\{\{.*?}}")
+PURE_VARIABLE_PATTERN = re.compile(r"^\{\{\s*([\w.]+)\s*}}$")
 
 
 class ToolNode(BaseNode):
@@ -52,13 +53,21 @@ class ToolNode(BaseNode):
         # 渲染工具参数
         rendered_parameters = {}
         for param_name, param_template in self.typed_config.tool_parameters.items():
-            if isinstance(param_template, str) and TEMPLATE_PATTERN.search(param_template):
-                try:
-                    rendered_value = self._render_template(param_template, variable_pool)
-                except Exception as e:
-                    raise ValueError(f"模板渲染失败：参数 {param_name} 的模板 {param_template} 解析错误") from e
+            if isinstance(param_template, str):
+                pure_match = PURE_VARIABLE_PATTERN.match(param_template)
+                if pure_match:
+                    # 纯单变量引用直接取原始值，保留 int/bool/float 等类型
+                    rendered_value = self.get_variable(pure_match.group(1), variable_pool, strict=False)
+                    if rendered_value is None:
+                        rendered_value = self._render_template(param_template, variable_pool)
+                elif TEMPLATE_PATTERN.search(param_template):
+                    try:
+                        rendered_value = self._render_template(param_template, variable_pool)
+                    except Exception as e:
+                        raise ValueError(f"模板渲染失败：参数 {param_name} 的模板 {param_template} 解析错误") from e
+                else:
+                    rendered_value = param_template
             else:
-                # 非模板参数（数字/布尔/普通字符串）直接保留原值
                 rendered_value = param_template
             rendered_parameters[param_name] = rendered_value
 

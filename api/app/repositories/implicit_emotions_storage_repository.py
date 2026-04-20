@@ -5,15 +5,8 @@ Implicit Emotions Storage Repository
 事务由调用方控制，仓储层只使用 flush/refresh
 """
 import logging
-from datetime import date, datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Generator, Optional
-
-
-class TimeFilterUnavailableError(Exception):
-    """redis_client 不可用，无法执行时间轴筛选。
-    
-    调用方捕获此异常后可选择回退到 get_all_user_ids 进行全量处理。
-    """
 
 import redis
 from sqlalchemy import exists, not_, select
@@ -23,6 +16,13 @@ from app.models.end_user_model import EndUser
 from app.models.implicit_emotions_storage_model import ImplicitEmotionsStorage
 
 logger = logging.getLogger(__name__)
+
+
+class TimeFilterUnavailableError(Exception):
+    """redis_client 不可用，无法执行时间轴筛选。
+    
+    调用方捕获此异常后可选择回退到 get_all_user_ids 进行全量处理。
+    """
 
 
 class ImplicitEmotionsStorageRepository:
@@ -216,9 +216,7 @@ class ImplicitEmotionsStorageRepository:
         """
         from sqlalchemy import String as SAString
         from sqlalchemy import cast
-        CST = timezone(timedelta(hours=8))
-        now_cst = datetime.now(CST)
-        today_start = now_cst.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).replace(tzinfo=None)
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         tomorrow_start = today_start + timedelta(days=1)
         offset = 0
         while True:

@@ -2616,9 +2616,11 @@ class MultiAgentOrchestrator:
                 api_key=api_key_config.api_key,
                 base_url=api_key_config.api_base,
                 is_omni=api_key_config.is_omni,
-                support_thinking="thinking" in (api_key_config.capability or []),
-                temperature=0.7,  # 整合任务使用中等温度
-                max_tokens=2000
+                capability=api_key_config.capability,
+                extra_params={
+                    "temperature": 0.7,   # 整合任务使用中等温度
+                    "max_tokens": 2000
+                }
             )
 
             # 创建 LLM 实例
@@ -2795,10 +2797,12 @@ class MultiAgentOrchestrator:
                 api_key=api_key_config.api_key,
                 base_url=api_key_config.api_base,
                 is_omni=api_key_config.is_omni,
-                support_thinking="thinking" in (api_key_config.capability or []),
-                temperature=0.7,
-                max_tokens=2000,
-                extra_params={"streaming": True}  # 启用流式输出
+                capability=api_key_config.capability,
+                extra_params={
+                    "temperature": 0.7,
+                    "max_tokens": 2000,
+                    "streaming": True   # 启用流式输出
+                }
             )
 
             # 创建 LLM 实例

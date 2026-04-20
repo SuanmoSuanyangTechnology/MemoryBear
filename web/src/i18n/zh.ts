@@ -15,6 +15,10 @@ export const zh = {
       startedDesc: '了解该平台的核心功能，并通过图形指引和视频教程快速上手。包含从创建空间到发布应用程序的整个操作流程演示。',
       spaceTitle:'记忆熊智能空间管理平台',
       spaceSubTitle: '使智能模型的实施变得更加容易——一个集模型管理、知识构建、工作流程编排以及空间操作于一体的综合性平台',
+      workspace_quota: '空间',
+      skill_quota: '技能',
+      app_quota: '应用',
+      model_quota: '模型',
     },
     version:{
       releaseDate: '发布日',
@@ -116,7 +120,7 @@ export const zh = {
       prompt: '提示词工程',
       skills: '技能库',
       workbench: '工作台',
-      memoryRelated: '记忆相关',
+      memoryRelated: '记忆中枢',
       advancedSettings: '高级设置',
       promptHistory: '我的历史',
       platformManagement: '平台管理',
@@ -859,6 +863,7 @@ export const zh = {
 }`,
       uploadCover: '导入并覆盖',
       refresh: '刷新当前页',
+      json_output: '支持JSON格式化输出',
     },
     table: {
       totalRecords: '共 {{total}} 条记录'
@@ -1307,6 +1312,7 @@ export const zh = {
       video: '视频',
       thinking: '深度思考',
       is_thinking: '支持深度思考',
+      json_output: '支持JSON格式化输出',
     },
     timezones: {
       'Asia/Shanghai': '中国标准时间 (UTC+8)',
@@ -1556,7 +1562,6 @@ export const zh = {
       domain: '领域',
       expertise: '专业擅长',
       interests: '兴趣爱好',
-      knowledge_tags: '知识标签',
 
       memoryWindow: "{{name}} 的记忆之窗",
       memory_insight: '总体概述',
@@ -2248,6 +2253,7 @@ export const zh = {
           messagesPlaceholder: '在此处编写提示，输入“{”插入变量，输入“insert”插入',
           vision: '视觉',
           parameterSettings: '参数设置',
+          json_output: '支持JSON格式化输出',
         },
         start: {
           variables: '输入字段',
@@ -2344,6 +2350,7 @@ export const zh = {
           else_desc: '用于定义当 if 条件不满足时应执行的逻辑。',
           unset: '条件未设置',
           set: '已设置',
+          addSubVariable: '添加子变量',
         },
         'http-request': {
           auth: '鉴权',
@@ -2524,6 +2531,9 @@ export const zh = {
         'list-operator.input_list': '输入变量',
       },
       checkListHasErrors: '发布前确认检查清单中所有问题均已解决',
+      variableSelect: {
+        empty: '暂无变量',
+      },
     },
     emotionEngine: {
       emotionEngineConfig: '情感引擎配置',
@@ -3044,6 +3054,8 @@ export const zh = {
       ontology_project_quota: '本体工程',
       model_quota: '可负载模型数量',
       editPackage: '编辑套餐',
+
+      viewDetail: '查看完整套餐详情',
     },
   },
 }

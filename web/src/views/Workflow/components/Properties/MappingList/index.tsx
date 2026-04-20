@@ -58,7 +58,7 @@ const MappingList: FC<MappingListProps> = ({ label, name, options, extra, valueK
                       placeholder={t('common.pleaseSelect')}
                       options={options}
                       size="small"
-                      className="rb:w-51!"
+                      className="rb:flex-1!"
                     />
                   </Form.Item>
                   <div

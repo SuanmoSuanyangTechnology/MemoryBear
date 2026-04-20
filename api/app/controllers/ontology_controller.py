@@ -28,6 +28,8 @@ from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, H
 from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session
 
+from app.core.quota_stub import check_ontology_project_quota
+
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.language_utils import get_language_from_header
@@ -163,7 +165,7 @@ def _get_ontology_service(
             api_key=api_key_config.api_key,
             base_url=api_key_config.api_base,
             is_omni=api_key_config.is_omni,
-            support_thinking="thinking" in (api_key_config.capability or []),
+            capability=api_key_config.capability,
             max_retries=3,
             timeout=60.0
         )
@@ -287,6 +289,7 @@ async def extract_ontology(
 # ==================== 本体场景管理接口 ====================
 
 @router.post("/scene", response_model=ApiResponse)
+@check_ontology_project_quota
 async def create_scene(
     request: SceneCreateRequest,
     db: Session = Depends(get_db),

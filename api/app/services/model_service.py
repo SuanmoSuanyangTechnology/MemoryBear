@@ -125,9 +125,11 @@ class ModelConfigService:
                 api_key=api_key,
                 base_url=api_base,
                 is_omni=is_omni,
-                support_thinking="thinking" in (capability or []),
-                temperature=0.7,
-                max_tokens=100
+                capability=capability,
+                extra_params={
+                    "temperature": 0.7,
+                    "max_tokens": 100
+                }
             )
 
             # 根据模型类型选择不同的验证方式
@@ -729,10 +731,21 @@ class ModelApiKeyService:
     @staticmethod
     def delete_api_key(db: Session, api_key_id: uuid.UUID) -> bool:
         """删除API Key"""
-        if not ModelApiKeyRepository.get_by_id(db, api_key_id):
+        api_key = ModelApiKeyRepository.get_by_id(db, api_key_id)
+        if not api_key:
             raise BusinessException("API Key不存在", BizCode.NOT_FOUND)
 
+        model_config_ids = [mc.id for mc in api_key.model_configs]
+
         success = ModelApiKeyRepository.delete(db, api_key_id)
+
+        for model_config_id in model_config_ids:
+            model_config = ModelConfigRepository.get_by_id(db, model_config_id)
+            if model_config:
+                has_active_key = any(key.is_active for key in model_config.api_keys)
+                if not has_active_key and model_config.is_active:
+                    model_config.is_active = False
+
         db.commit()
         return success
 

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:23 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-25 11:17:44
+ * @Last Modified time: 2026-04-14 18:36:01
  */
 import { request } from '@/utils/request'
 import type { CreateModalData, ChangeEmailModalForm } from '@/views/UserManagement/types'
@@ -56,4 +56,9 @@ export const sendEmailCode = (data: { email: string }) => {
 // Verify code and change email
 export const changeEmail = (data: ChangeEmailModalForm) => {
   return request.put('/users/change-email', data)
+}
+
+// 获取租户套餐信息
+export const getTenantSubscription = () => {
+  return request.get('/tenant/subscription')
 }

@@ -122,7 +122,7 @@ const Detail: FC = () => {
             </Space>)}
             <Flex align="center" className="rb:leading-5 rb:text-[14px] rb:text-[#5B6167] rb:font-regular rb:cursor-pointer" onClick={() => navigate(-1)}>
               <div
-                className="rb:mr-2 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/logout.svg')]"
+                className="rb:mr-2 rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/logout_grey.svg')]"
               ></div>
               {t('common.return')}
             </Flex>

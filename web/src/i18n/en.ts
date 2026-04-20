@@ -15,6 +15,10 @@ export const en = {
       startedDesc: 'Understand the core functions of the platform and quickly get started through graphic guidance and video tutorials. Includes a full process demonstration from creating a space to publishing an application.',
       spaceTitle:'Memory Bear Intelligent Space Management Platform',
       spaceSubTitle: 'Making it easier to implement intelligent models - a one-stop platform for model management, knowledge building, workflow orchestration, and spatial operations',
+      workspace_quota: 'Spaces',
+      skill_quota: 'Skills',
+      app_quota: 'Apps',
+      model_quota: 'Models',
     },
     version:{
       releaseDate: 'Release Date',
@@ -116,7 +120,7 @@ export const en = {
       prompt: 'Prompt Engineering',
       skills: 'Skill Library',
       workbench: 'Workbench',
-      memoryRelated: 'Memory-Related',
+      memoryRelated: 'Memory Hub',
       advancedSettings: 'Advanced Settings',
       promptHistory: 'My history',
       platformManagement: 'Platform Management',
@@ -629,6 +633,7 @@ export const en = {
       video: 'Video',
       thinking: 'Deep Thinking',
       is_thinking: 'Deep Thinking Support',
+      json_output: 'Support JSON formatted output',
     },
     knowledgeBase: {
       home: 'Home',
@@ -1524,6 +1529,7 @@ export const en = {
 }`,
       uploadCover: 'Import and Overwrite',
       refresh: 'Refresh Current Page',
+      json_output: 'Support JSON formatted output',
     },
     userMemory: {
       userMemory: 'User Memory',
@@ -1595,7 +1601,6 @@ export const en = {
       domain: 'Domain',
       expertise: 'Expertise',
       interests: 'Interests',
-      knowledge_tags: 'Knowledge Tags',
 
       memoryWindow: "{{name}}'s Memory Overview",
       memory_insight: 'Overall Overview',
@@ -2287,6 +2292,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           messagesPlaceholder: 'Write prompts here, type "{" to insert variables, type "insert" to insert',
           vision: 'Vision',
           parameterSettings: 'Parameter Settings',
+          json_output: 'Support JSON formatted output',
         },
         start: {
           variables: 'Input Fields',
@@ -2383,6 +2389,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           else_desc: 'Used to define the logic that should be executed when the if condition is not met.',
           unset: 'Condition Not Set',
           set: 'Set',
+          addSubVariable: 'Add Sub Variable',
         },
         'http-request': {
           auth: 'Authentication',
@@ -2560,6 +2567,9 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         'list-operator.input_list': 'Input list',
       },
       checkListHasErrors: 'Please resolve all issues in the checklist before publishing',
+      variableSelect: {
+        empty: 'No variables available',
+      },
     },
     emotionEngine: {
       emotionEngineConfig: 'Emotion Engine Configuration',
@@ -2892,8 +2902,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       context_details: 'Preference Details',
       supporting_evidence: 'Preference Source',
       specific_examples: 'Source',
-      preferencesTip: 'Reminder: Click on the preferences above to view the corresponding Lenovo network',
-      wordEmpty: 'There is currently no Lenovo network available',
+      preferencesTip: 'Reminder: Click on the preferences above to view the corresponding association network',
+      wordEmpty: 'There is currently no association network available',
       noData: 'Portrait data does not exist, please click the refresh button to initialize',
     },
     shortTermDetail: {
@@ -3080,6 +3090,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       ontology_project_quota: 'Ontology Project',
       model_quota: 'Model Quota',
       editPackage: 'Edit Package',
+
+      viewDetail: 'View full package details',
     },
   },
 };

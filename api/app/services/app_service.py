@@ -1452,6 +1452,32 @@ class AppService:
         logger.debug("配置不存在，返回默认模板", extra={"app_id": str(app_id)})
         return self._create_default_agent_config(app_id)
 
+    def get_default_model_parameters(
+            self,
+            *,
+            app_id: uuid.UUID,
+    ) -> "ModelParameters":
+        """获取 Agent 默认模型参数（不修改数据库）
+
+        Args:
+            app_id: 应用ID
+
+        Returns:
+            ModelParameters: 默认模型参数
+        """
+        logger.info("获取 Agent 默认模型参数", extra={"app_id": str(app_id)})
+
+        app = self._get_app_or_404(app_id)
+
+        if app.type != "agent":
+            raise BusinessException("只有 Agent 类型应用支持 Agent 配置", BizCode.APP_TYPE_NOT_SUPPORTED)
+
+        from app.schemas.app_schema import ModelParameters
+        default_model_parameters = ModelParameters()
+
+        logger.info("获取 Agent 默认模型参数成功", extra={"app_id": str(app_id)})
+        return default_model_parameters
+
     def _create_default_agent_config(self, app_id: uuid.UUID) -> AgentConfig:
         """创建默认的 Agent 配置模板（不保存到数据库）
 

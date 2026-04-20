@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>合规</title>
+    <g id="空间外层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="平台管理-收费管理" transform="translate(-314, -702)" fill="currentColor" fill-rule="nonzero">
+            <g id="编组-5" transform="translate(288, 64)">
+                <g id="编组-13" transform="translate(0, 228)">
+                    <g transform="translate(20, 16)" id="合规">
+                        <g transform="translate(6, 394)">
+                            <path d="M8,1 C10.1666667,2.37375001 12.3333333,3.47275 14.5,4.294375 C14.5,9.68437502 12.3333333,13.252625 8,15 L7.98618857,14.99475 L7.97410359,15 C3.65803454,13.252625 1.5,9.68437499 1.5,4.294375 C3.65803454,3.471875 5.81606905,2.37462499 7.97410359,1 L7.98705179,1.00874999 L8,1 Z M8,2.74999999 L8,13.25 C11.25,11.93925 12.8745684,9.262625 12.8745684,5.221 C11.25,4.604125 9.6245684,3.78074999 8,2.74999999 Z" id="形状"></path>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

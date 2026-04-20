@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 import AutoImport from 'unplugin-auto-import/vite'
 import tailwindcss from '@tailwindcss/vite'
+import svgr from 'vite-plugin-svgr';
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -32,6 +33,7 @@ export default defineConfig({
       imports: ['react', 'react-router-dom'],
       dts: 'public/auto-imports.d.ts',
     }),
+    svgr({ svgrOptions: { icon: true } }),
   ],
   css: {
     modules: {

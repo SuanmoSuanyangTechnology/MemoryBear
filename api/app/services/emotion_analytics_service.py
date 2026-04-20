@@ -679,9 +679,9 @@ class EmotionAnalyticsService:
 
             # 查询用户的实体和标签
             query = """
-            MATCH (e:Entity)
+            MATCH (e:ExtractedEntity)
             WHERE e.end_user_id = $end_user_id
-            RETURN e.name as name, e.type as type
+            RETURN e.name as name, e.entity_type as type
             ORDER BY e.created_at DESC
             LIMIT 20
             """

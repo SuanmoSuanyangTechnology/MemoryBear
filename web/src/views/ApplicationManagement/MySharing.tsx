@@ -2,27 +2,33 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 14:39:18
+ * @Last Modified time: 2026-04-16 11:19:20
  */
 import React, { useState, useEffect, useMemo, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, App, Flex, Collapse } from 'antd';
+import { App, Flex, Row, Col, Space } from 'antd';
 import clsx from 'clsx';
 
 import type { MySharedOutItem } from './types';
 import { mySharedOutList, cancelShare, cancelSpaceShare } from '@/api/application'
 import BodyWrapper from '@/components/Empty/BodyWrapper'
+import RbCard from '@/components/RbCard/Card'
+import RbDescriptions from '@/components/RbDescriptions'
+import Tag from '@/components/Tag'
 
 const MySharing: React.FC = () => {
   const { t } = useTranslation();
   const { modal } = App.useApp();
+  const [loading, setLoading] = useState(false)
   const [data, setData] = useState<MySharedOutItem[]>([])
 
   useEffect(() => { getList() }, [])
 
   const getList = () => {
+    setLoading(true)
     mySharedOutList()
       .then(res => setData(res as MySharedOutItem[]))
+      .finally(() => setLoading(false))
   }
 
   /** Group items by target_workspace_id */
@@ -80,89 +86,114 @@ const MySharing: React.FC = () => {
     window.open(url);
   }
 
+  const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(null)
+  const [appList, setAppList] = useState<MySharedOutItem[]>([])
+
+  useEffect(() => {
+    if (grouped.length === 0) {
+      setSelectedWorkspace(null)
+      setAppList([])
+      return
+    }
+    const current = grouped.find(g => g.workspace.target_workspace_id === selectedWorkspace)
+    if (current) {
+      setAppList(current.items)
+    } else {
+      setSelectedWorkspace(grouped[0].workspace.target_workspace_id)
+      setAppList(grouped[0].items)
+    }
+  }, [grouped, selectedWorkspace])
+
+  const handleSelectWorkspace = async (target_workspace_id: string) => {
+    if (target_workspace_id === selectedWorkspace) return
+    setSelectedWorkspace(target_workspace_id);
+    const filterWorkspace = grouped.find(item => item.workspace.target_workspace_id === target_workspace_id);
+
+    setAppList(filterWorkspace?.items || [])
+  };
+
   return (
-    <Flex vertical gap={12} className="rb:max-h-[calc(100%-48px)]! rb:overflow-y-auto!">
-      <BodyWrapper loading={false} empty={data.length === 0}>
-        {grouped.map(({ workspace, items }) => (
-          <Collapse
-            key={workspace.target_workspace_id}
-            defaultActiveKey={[workspace.target_workspace_id]}
-            items={[{
-              key: workspace.target_workspace_id,
-              label: (
+    <BodyWrapper loading={loading} empty={data.length === 0}>
+      <Row gutter={12}>
+        <Col flex="384px">
+          <Flex vertical gap={12}>
+            {grouped.map(({ workspace, items }) => (
+              <Flex
+                key={workspace.target_workspace_id}
+                gap={8}
+                justify="space-between"
+                align="center"
+                className={clsx("rb:cursor-pointer rb:bg-white rb:py-3! rb:px-4! rb:rounded-2xl rb:border rb:border-white rb:group", {
+                  'rb:border-[#171719]!': selectedWorkspace === workspace.target_workspace_id
+                })}
+                onClick={() => handleSelectWorkspace(workspace.target_workspace_id)}
+              >
                 <Flex align="center" gap={12}>
                   {workspace.target_workspace_icon
-                    ? <img src={workspace.target_workspace_icon} alt={workspace.target_workspace_icon} className="rb:w-8 rb:h-8 rb:rounded-lg rb:object-cover" />
-                    : <div className="rb:w-8 rb:h-8 rb:rounded-lg rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[14px] rb:text-white">
-                        {workspace.target_workspace_name[0]}
-                      </div>
+                    ? <img src={workspace.target_workspace_icon} alt={workspace.target_workspace_icon} className="rb:size-8.5 rb:rounded-lg rb:object-cover" />
+                    : <div className="rb:size-8.5 rb:rounded-lg rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[14px] rb:text-white">
+                      {workspace.target_workspace_name[0]}
+                    </div>
                   }
                   <div>
-                    <span className="rb:font-medium">{workspace.target_workspace_name}</span>
-                    <div className="rb:text-[#5B6167] rb:text-[12px]">{t('application.appCount', { count: items.length })}</div>
+                    <span className="rb:font-medium rb:text-[16px] rb:leading-5.5">{workspace.target_workspace_name}</span>
+                    <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:mt-0.5">{t('application.appCount', { count: items.length })}</div>
                   </div>
                 </Flex>
-              ),
-              extra: (
-                <Button
-                  size="small"
+                <div
+                  className="rb:hidden rb:group-hover:block rb:size-7 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')] rb:hover:bg-[url('@/assets/images/common/delete_hover.svg')]"
                   onClick={e => { e.stopPropagation(); handleAllCancel(workspace); }}
-                >
-                  {t('application.allCancel')}
-                </Button>
-              ),
-              children: (
-                <div className="rb:grid rb:grid-cols-4 rb:gap-3">
-                  {items.map(item => (
-                    <div key={item.id} className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-3! rb:px-4! rb:relative rb:cursor-pointer" onClick={() => handleEdit(item)}>
-                      <div
-                        className="rb:absolute rb:top-3 rb:right-3 rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/close.svg')]"
-                        onClick={(e) => handleCancelOne(item, e)}
-                      />
-                      <Flex gap={8} align="center">
-                        <div className="rb:size-7 rb:rounded-lg rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[14px] rb:text-white">
-                          {item.source_app_name[0]}
-                        </div>
-                        <div className="rb:font-medium">{item.source_app_name}</div>
-                      </Flex>
-                      <Flex vertical gap={4} className="rb:mt-3! rb:text-[12px]!">
-                        <Flex gap={5} justify="space-between">
-                          <span className="rb:text-[#5B6167]">{t('application.type')}</span>
-                          <span className={clsx({
-                            'rb:text-[#155EEF] rb:font-medium': item.source_app_type === 'agent',
-                            'rb:text-[#369F21] rb:font-medium': item.source_app_type === 'multi_agent',
-                          })}>
-                            {t(`application.${item.source_app_type}`)}
-                          </span>
-                        </Flex>
-                        <Flex gap={5} justify="space-between">
-                          <span className="rb:text-[#5B6167]">{t('application.version')}</span>
-                          <span>{item.source_app_version}</span>
-                        </Flex>
-                        <Flex gap={5} justify="space-between">
-                          <span className="rb:text-[#5B6167]">{t('application.permission')}</span>
-                          <span className={clsx({
-                            'rb:text-[#369F21] rb:font-medium': item.permission === 'editable',
-                            'rb:text-[#5B6167] rb:font-medium': item.permission === 'readonly',
-                          })}>
-                            {t(`application.${item.permission}`)}
-                          </span>
-                        </Flex>
-                        <Flex gap={5} justify="space-between">
-                          <span className="rb:text-[#5B6167]">{t('application.souceStatus')}</span>
-                          <span>{item.source_app_is_active ? t('application.sourceActive') : t('application.sourceInactive')}</span>
-                        </Flex>
-                      </Flex>
-                    </div>
-                  ))}
-                </div>
-              ),
-            }]}
-          />
-        ))}
-      </BodyWrapper>
-    </Flex>
-  );
+                ></div>
+              </Flex>
+            ))}
+          </Flex>
+        </Col>
+        <Col flex="1">
+          <div className="rb:grid rb:grid-cols-2 rb:gap-3">
+            {appList.map(item => (
+              <RbCard
+                key={item.source_app_id}
+                title={item.source_app_name}
+                avatar={<Flex align="center" justify="center" className={clsx("rb:size-12 rb:rounded-lg rb:text-[24px] rb:text-[#ffffff] rb:bg-[#155EEF]", {
+                  'rb:bg-[#155EEF]': item.source_app_type === 'agent',
+                  'rb:bg-[#9C6FFF]!': item.source_app_type === 'multi_agent',
+                  'rb:bg-[#171719]': item.source_app_type === 'workflow',
+                })}>{item.source_app_name.trim()[0]}</Flex>}
+                subTitle={<Space size={6}>
+                  <Tag color={item.source_app_type === 'agent' ? 'processing' : item.source_app_type === 'multi_agent' ? 'dark' : 'purple'}>{t(`application.${item.source_app_type}`)}</Tag>
+                  <Tag color={item.source_app_is_active ? 'success' : 'error'}>{item.source_app_is_active ? t('application.sourceActive') : t('application.sourceInactive')}</Tag>
+                </Space>}
+                extra={<div
+                  className="rb:-mt-6 rb:cursor-pointer rb:size-5.5 rb:rounded-lg rb:hover:bg-[#F6F6F6] rb:bg-[url('@/assets/images/common/close_grey.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat"
+                  onClick={(e) => handleCancelOne(item, e)}
+                ></div>}
+                bodyClassName="rb:py-6! rb:px-4!"
+                className="rb:cursor-pointer"
+                onClick={() => handleEdit(item)}
+              >
+                <RbDescriptions
+                  items={[
+                    {
+                      key: 'version',
+                      label: t(`application.version`),
+                      children: item.source_app_version
+                    },
+                    {
+                      key: 'permission',
+                      label: t(`application.permission`),
+                      children: <span className={clsx('rb:font-medium', {
+                        'rb:text-[#369F21]': item.permission === 'editable',
+                      })}>{t(`application.${item.permission}`)}</span>
+                    },
+                  ]}
+                />
+              </RbCard>
+            ))}
+          </div>
+        </Col>
+      </Row>
+    </BodyWrapper>
+  )
 };
 
 export default MySharing;

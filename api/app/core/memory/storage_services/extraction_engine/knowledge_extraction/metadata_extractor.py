@@ -118,7 +118,7 @@ class MetadataExtractor:
         existing_aliases: Optional[List[str]] = None,
     ) -> Optional[tuple]:
         """
-        对筛选后的 statement 列表调用 LLM 提取元数据和用户别名。
+        对筛选后的 statement 列表调用 LLM 提取元数据增量变更和用户别名。
 
         Args:
             statements: 用户发言的 statement 文本列表
@@ -126,7 +126,8 @@ class MetadataExtractor:
             existing_aliases: 数据库已有的用户别名列表（可选）
 
         Returns:
-            (UserMetadata, List[str], List[str]) tuple: (metadata, aliases_to_add, aliases_to_remove) on success, None on failure
+            (List[MetadataFieldChange], List[str], List[str]) tuple:
+            (metadata_changes, aliases_to_add, aliases_to_remove) on success, None on failure
         """
         if not statements:
             return None
@@ -160,12 +161,12 @@ class MetadataExtractor:
             )
 
             if response:
-                metadata = response.user_metadata if response.user_metadata else None
+                changes = response.metadata_changes if response.metadata_changes else []
                 to_add = response.aliases_to_add if response.aliases_to_add else []
                 to_remove = (
                     response.aliases_to_remove if response.aliases_to_remove else []
                 )
-                return metadata, to_add, to_remove
+                return changes, to_add, to_remove
 
             logger.warning("LLM 返回的响应为空")
             return None

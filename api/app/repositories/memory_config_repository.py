@@ -328,7 +328,7 @@ class MemoryConfigRepository:
             if not db_config:
                 db_logger.warning(f"记忆配置不存在: config_id={update.config_id}")
                 return None
-
+            #TODO：部分更新没有用patch请求，是在Repository层中用先查再部分更新的方式实现的，后续可以考虑改成patch请求更符合RESTful设计原则
             update_data = update.model_dump(exclude_unset=True)
             update_data.pop("config_id", None)
 

@@ -175,3 +175,7 @@ export const getAppLogsUrl = (app_id: string) => `/apps/${app_id}/logs`
 export const getAppLogDetail = (app_id: string, conversation_id: string) => {
   return request.get(`/apps/${app_id}/logs/${conversation_id}`)
 }
+// Reset agent model config to default
+export const resetAppModelConfig = (app_id: string) => {
+  return request.get(`/apps/${app_id}/model/parameters/default`)
+}

@@ -6,6 +6,30 @@ from app.core.workflow.nodes.base_config import BaseNodeConfig
 from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator, ValueInputType
 
 
+class SubVariableConditionItem(BaseModel):
+    """A single condition on a file object's field, used inside sub_variable_condition."""
+    key: str = Field(..., description="Field name of the file object, e.g. type, size, name")
+    operator: ComparisonOperator = Field(..., description="Comparison operator")
+    value: Any = Field(default=None, description="Value to compare with, or variable selector when input_type=variable")
+    input_type: ValueInputType = Field(default=ValueInputType.CONSTANT, description="constant or variable")
+
+    @field_validator("input_type", mode="before")
+    @classmethod
+    def lower_input_type(cls, v):
+        if isinstance(v, str):
+            try:
+                return ValueInputType(v.lower())
+            except ValueError:
+                raise ValueError(f"Invalid input_type: {v}")
+        return v
+
+
+class SubVariableCondition(BaseModel):
+    """Sub-conditions applied to each file element in an array[file] variable."""
+    logical_operator: LogicOperator = Field(default=LogicOperator.AND)
+    conditions: list[SubVariableConditionItem] = Field(default_factory=list)
+
+
 class ConditionDetail(BaseModel):
     operator: ComparisonOperator = Field(
         ...,
@@ -14,17 +38,22 @@ class ConditionDetail(BaseModel):
 
     left: str = Field(
         ...,
-        description="Value to compare against"
+        description="Variable selector, e.g. {{sys.files}}"
     )
 
     right: Any = Field(
         default=None,
-        description="Value to compare with"
+        description="Value to compare with (unused when sub_variable_condition is set)"
     )
 
     input_type: ValueInputType = Field(
         default=ValueInputType.CONSTANT,
         description="Value input type for comparison"
+    )
+
+    sub_variable_condition: SubVariableCondition | None = Field(
+        default=None,
+        description="Sub-conditions for array[file] fields. When set, operator must be contains/not_contains."
     )
 
     @field_validator("input_type", mode="before")
@@ -39,16 +68,19 @@ class ConditionDetail(BaseModel):
 
 
 class ConditionBranchConfig(BaseModel):
-    """Configuration for a conditional branch"""
+    """Configuration for a conditional branch.
+
+    logical_operator controls how all expressions are combined (AND/OR).
+    """
 
     logical_operator: LogicOperator = Field(
         default=LogicOperator.AND,
-        description="Logical operator used to combine multiple condition expressions"
+        description="Logical operator used to combine all conditions"
     )
 
     expressions: list[ConditionDetail] = Field(
-        ...,
-        description="List of condition expressions within this branch"
+        default_factory=list,
+        description="List of conditions within this branch"
     )
 
 

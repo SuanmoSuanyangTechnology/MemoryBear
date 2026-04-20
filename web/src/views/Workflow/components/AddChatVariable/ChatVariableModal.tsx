@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-30 13:59:36 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-08 11:05:34
+ * @Last Modified time: 2026-04-13 15:26:33
  */
 import { forwardRef, useImperativeHandle, useState, useRef, useMemo } from 'react';
 import { Form, Input, Select, InputNumber, Button, Row, Col, Flex } from 'antd';
@@ -136,7 +136,7 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
     form.validateFields().then((values) => {
       const defaultValue = Array.isArray(values.defaultValue)
         ? values.defaultValue.filter((v: any) => v !== undefined && v !== null && v !== '')
-        : values.type.includes('object')
+        : values.type.includes('object') && values.defaultValue
         ? JSON.parse(values.defaultValue)
         : values.defaultValue;
       refresh({ ...values, defaultValue }, editIndex);
@@ -345,15 +345,16 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
           <Form.Item
             name="defaultValue"
             label={t('workflow.config.parameter-extractor.default')}
-            rules={[
-              (type === 'object' || type === 'array[object]') ? {
+            rules={(type === 'object' || type === 'array[object]') 
+              ? [{
                 validator: (_, value) => {
                   if (!value) return Promise.resolve();
                   try { JSON.parse(value); return Promise.resolve(); }
                   catch { return Promise.reject(t('workflow.invalidJSON')); }
                 }
-              } : {}
-            ]}
+              }]
+              : undefined
+            }
           >
             {type === 'number'
               ? <InputNumber placeholder={t('common.enter')} style={{ width: '100%' }} />
