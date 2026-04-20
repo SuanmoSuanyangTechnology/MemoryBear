@@ -2528,6 +2528,7 @@ export const zh = {
         'jinja-render.template': '模板',
         'document-extractor.file_selector': '文件变量',
         'list-operator.input_list': '输入变量',
+        'tool.tool_id': '工具',
       },
       checkListHasErrors: '发布前确认检查清单中所有问题均已解决',
       variableSelect: {

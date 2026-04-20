@@ -2564,6 +2564,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         'jinja-render.template': 'Template',
         'document-extractor.file_selector': 'File variable',
         'list-operator.input_list': 'Input list',
+        'tool.tool_id': 'Tool',
       },
       checkListHasErrors: 'Please resolve all issues in the checklist before publishing',
       variableSelect: {

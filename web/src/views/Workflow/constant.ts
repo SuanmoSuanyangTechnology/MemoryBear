@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-20 11:39:40
+ * @Last Modified time: 2026-04-20 14:36:41
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -428,7 +428,8 @@ export const nodeLibrary: NodeLibrary[] = [
       { type: "tool", icon: 'rb:bg-[url("@/assets/images/workflow/tools.svg")]',
         config: {
           tool_id: {
-            type: 'cascader'
+            type: 'cascader',
+            required: true
           },
           tool_parameters: {
             type: 'define'

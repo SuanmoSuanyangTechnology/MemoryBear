@@ -147,6 +147,11 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
   };
 
   const handleChange: CascaderProps<Option>['onChange'] = (value, selectedOptions) => {
+    if (!value) {
+      setParameters([])
+      form.resetFields()
+      return
+    }
     const targetOption = selectedOptions[selectedOptions.length - 1];
     const curParameters = [...(targetOption.parameters ?? [])]
     setParameters([...curParameters])
