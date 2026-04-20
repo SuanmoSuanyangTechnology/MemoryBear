@@ -19,7 +19,6 @@ from app.core.exceptions import (
 )
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
-from app.i18n.exceptions import I18nException
 
 logger = get_business_logger()
 
@@ -52,7 +51,7 @@ class ApiKeyService:
             if existing:
                 raise BusinessException(f"API Key 名称 {data.name} 已存在", BizCode.API_KEY_DUPLICATE_NAME)
 
-            # 校验 rate_limit 不能超过租户套餐的 api_ops_rate_limit
+            # 若 rate_limit 超过租户套餐的 api_ops_rate_limit，自动截断到套餐上限
             from app.models.workspace_model import Workspace
             from app.core.quota_manager import get_api_ops_rate_limit
 
@@ -60,13 +59,7 @@ class ApiKeyService:
             if workspace:
                 tenant_api_ops_limit = get_api_ops_rate_limit(db, workspace.tenant_id)
                 if tenant_api_ops_limit and data.rate_limit > tenant_api_ops_limit:
-                    raise I18nException(
-                        error_key="errors.api.api_key_rate_limit_exceeded",
-                        status_code=400,
-                        error_code="API_KEY_RATE_LIMIT_EXCEEDED",
-                        rate_limit=data.rate_limit,
-                        limit=tenant_api_ops_limit,
-                    )
+                    data.rate_limit = tenant_api_ops_limit
 
             # 生成 API Key
             api_key = generate_api_key(data.type)
@@ -169,7 +162,7 @@ class ApiKeyService:
             if existing:
                 raise BusinessException(f"API Key 名称 {data.name} 已存在", BizCode.API_KEY_DUPLICATE_NAME)
 
-        # 校验 rate_limit 不能超过租户套餐的 api_ops_rate_limit
+        # 若 rate_limit 超过租户套餐的 api_ops_rate_limit，自动截断到套餐上限
         if data.rate_limit is not None:
             from app.models.workspace_model import Workspace
             from app.core.quota_manager import get_api_ops_rate_limit
@@ -178,13 +171,7 @@ class ApiKeyService:
             if workspace:
                 tenant_api_ops_limit = get_api_ops_rate_limit(db, workspace.tenant_id)
                 if tenant_api_ops_limit and data.rate_limit > tenant_api_ops_limit:
-                    raise I18nException(
-                        error_key="errors.api.api_key_rate_limit_exceeded",
-                        status_code=400,
-                        error_code="API_KEY_RATE_LIMIT_EXCEEDED",
-                        rate_limit=data.rate_limit,
-                        limit=tenant_api_ops_limit,
-                    )
+                    data.rate_limit = tenant_api_ops_limit
 
         update_data = data.model_dump(exclude_unset=True)
         ApiKeyRepository.update(db, api_key_id, update_data)
