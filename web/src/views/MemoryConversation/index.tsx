@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:09:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 12:21:56
+ * @Last Modified time: 2026-04-20 16:59:25
  */
 /**
  * Memory Conversation Page
@@ -78,8 +78,8 @@ interface DataItem {
     id: string;
     question: string;
     type: string;
-    reason: string;
-  }
+    reason?: string;
+}
 /**
  * Log item for conversation analysis
  */
@@ -88,13 +88,15 @@ export interface LogItem {
   title: string;
   data?: DataItem[] | AnyObject;
   raw_results?: string | Record<string, AnyObject>;
+  raw_result?: Array<AnyObject>;
   summary?: string;
   query?: string;
   reason?: string;
   result?: string;
-  original_query: string;
+  original_query?: string;
   index?: number;
   result_count?: number;
+  total?: number;
 }
 
 /**
@@ -242,7 +244,6 @@ const MemoryConversation: FC = () => {
                           <ContentWrapper key={vo.id}>
                             <>
                               <div className="rb:font-medium rb:text-[#212332]">{vo.id}. {vo.question}</div>
-                              <div className="rb:mt-2 rb:text-[#5B6167]">{vo.reason}</div>
                             </>
                           </ContentWrapper>
                         ))}
@@ -260,25 +261,9 @@ const MemoryConversation: FC = () => {
                           </ContentWrapper>
                         ))}
                       </Flex>
-                      : log.type === 'search_result' && log.raw_results && typeof log.raw_results !== 'string'
+                      : log.type === 'search_result' && log.result
                       ? <ContentWrapper>
-                          <div className="rb:font-medium rb:text-[#212332] rb:mb-2">{log.query}</div>
-                          {(log.raw_results.reranked_results as AnyObject)?.communities?.length > 0 && <>
-                            <div className="rb:font-medium rb:text-[#212332]">{t('memoryConversation.communities')}</div>
-                            <ul className='rb:mt-2 rb:text-[#5B6167] rb:list-disc rb:pl-4'>
-                                {((log.raw_results.reranked_results as AnyObject)?.communities as { content: string }[]).map((item, index: number) => (
-                                <li key={index}>{item.content}</li>
-                              ))}
-                            </ul>
-                          </>}
-                          {(log.raw_results.reranked_results as AnyObject)?.summaries?.length > 0 && <>
-                            <div className="rb:font-medium rb:text-[#212332]">{t('memoryConversation.summaries')}</div>
-                            <ul className='rb:mt-2 rb:text-[#5B6167] rb:list-disc rb:pl-4'>
-                              {((log.raw_results.reranked_results as AnyObject)?.summaries as { content: string }[]).map((item, index: number) => (
-                                <li key={index}>{item.content}</li>
-                              ))}
-                            </ul>
-                          </>}
+                          <Markdown content={log.result} />
                         </ContentWrapper>
                     : log.type === 'retrieval_summary' && log.summary
                     ? <ContentWrapper>

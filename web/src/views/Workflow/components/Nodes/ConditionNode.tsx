@@ -9,7 +9,7 @@ import { useVariableList } from '../Properties/hooks/useVariableList'
 import { isSubExprSet } from '../../utils'
 import { fileSubFieldOperators } from '../Properties/CaseList'
 
-const caculateIsSet = (item: any, type: string) => {
+const calculateIsSet = (item: any, type: string) => {
   switch (type) {
     case 'categories':
       return typeof item?.class_name === 'string' && item?.class_name !== ''
@@ -79,7 +79,7 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
             <div key={index} className="rb:bg-[#F0F3F8] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)] rb:rounded-md rb:py-1 rb:px-1.5 rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-3.5">
               <Flex justify="space-between">
                 <span>{t('workflow.config.question-classifier.class_name')} {index + 1}</span>
-                {caculateIsSet(item, 'categories') ? t(`workflow.config.${data.type}.set`) : t(`workflow.config.${data.type}.unset`)}
+                {calculateIsSet(item, 'categories') ? t(`workflow.config.${data.type}.set`) : t(`workflow.config.${data.type}.unset`)}
               </Flex>
             </div>
           ))}
@@ -89,17 +89,24 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
         <Flex vertical gap={4} className="rb:mt-3!">
           {data.config?.cases?.defaultValue.map((item: any, index: number) => (
             <div key={index} className={item.expressions.length > 0 ? '' : 'rb:mb-1'}>
-              <Flex justify={item.expressions.length > 0 ? "space-between" : 'end'} className="rb:mb-1">
-                {item.expressions.length > 0 && <span className="rb:text-[#5B6167] rb:text-[10px]">CASE{index + 1}</span>}
+              <Flex justify={item.expressions.length > 0 ? "space-between" : 'end'} className="rb:mb-1! rb:leading-4">
+                {item.expressions.length > 0 && <span className="rb:text-[#5B6167] rb:text-[10px] rb:pl-1">CASE{index + 1}</span>}
                 <span className="rb:text-[#212332] rb:font-medium rb:text-[12px]">{index === 0 ? 'IF' : `ELIF`}</span>
               </Flex>
               {item.expressions.length > 0 && <Flex vertical gap={2}>
                 {item.expressions.map((expression: any, eIndex: number) => (
                   <div key={eIndex} className="rb:relative">
-                    {item.expressions.length > 1 && eIndex > 0 && <div className="rb:absolute rb:-top-2 rb:right-2 rb:text-[10px] rb:text-[#155EEF] rb:font-medium rb:leading-3.5 rb:text-right rb:pr-0.5">{item.logical_operator?.toLocaleUpperCase()}</div>}
-                    <Flex vertical gap={2} className="rb:bg-[#F0F3F8] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)] rb:rounded-md rb:py-1! rb:px-1.5! rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-3.5">
+                    {item.expressions.length > 1 && eIndex > 0 &&
+                      <div className="rb:absolute rb:-top-2 rb:right-2 rb:text-[10px] rb:text-[#155EEF] rb:font-medium rb:leading-3.5 rb:text-right rb:pr-0.5">{item.logical_operator?.toLocaleUpperCase()}</div>
+                    }
+                    <Flex vertical gap={2}
+                      className={clsx("rb:bg-[#F0F3F8] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)] rb:rounded-md rb:px-1.5! rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-4", {
+                        'rb:pt-1!': expression.sub_variable_condition?.conditions?.length > 0,
+                        'rb:py-1!': !expression.sub_variable_condition?.conditions || !expression.sub_variable_condition?.conditions?.length
+                      })}
+                    >
                       <Flex align="center">
-                      {caculateIsSet(expression, 'cases')
+                      {calculateIsSet(expression, 'cases')
                         ? <>
                           {labelRender(expression.left)}
                           <span className="rb:mx-1">{getLocaleField(expression.operator, typeof expression.right)}</span>
@@ -109,11 +116,16 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
                       }
                       </Flex>
                       {expression.sub_variable_condition?.conditions?.length > 0 && expression.sub_variable_condition?.conditions.every(isSubExprSet)
-                        ? <div className="rb-border-l rb:ml-2 rb:mt-1.5">
+                        ? <div className="rb-border-l rb:ml-2 rb:mt-1">
                           {expression.sub_variable_condition?.conditions.map((sub: any, sIndex: number) => (
                             <div key={sIndex} className="rb:relative">
                               {expression.sub_variable_condition?.conditions.length > 1 && sIndex > 0 && <div className="rb:absolute rb:-top-2 rb:right-2 rb:text-[10px] rb:text-[#155EEF] rb:font-medium rb:leading-3.5 rb:text-right rb:pr-0.5">{expression.sub_variable_condition?.logical_operator?.toLocaleUpperCase()}</div>}
-                              <Flex align="center" className=" rb:py-1! rb:px-1.5! rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-3.5">
+                              <Flex align="center"
+                                className={clsx("rb:px-1.5! rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-3.5", {
+                                  'rb:py-1!': sIndex !== 0,
+                                  'rb:pb-1': sIndex === 0
+                                })}
+                              >
                                 <span className="rb:text-[#155EEF]">{sub.key}</span>
                                 <span className="rb:mx-1">{getSubLocaleField(sub.operator, sub.key)}</span>
                                 <span className="rb:break-all rb:line-clamp-1">
@@ -129,7 +141,7 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
                           ))}
                         </div>
                         : expression.sub_variable_condition?.conditions?.length > 0
-                        ? <Flex align="center" className="rb:mt-1! rb:pl-2! rb:rounded-md rb:py-1! rb:px-1.5! rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-3.5">
+                        ? <Flex align="center" className="rb:pl-2! rb:rounded-md rb:pb-1! rb:px-1.5! rb:text-[10px] rb:text-[#5B6167] rb:font-medium rb:leading-4">
                           {t(`workflow.config.${data.type}.unset`)}
                         </Flex>
                         : null

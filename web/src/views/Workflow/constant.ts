@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-16 17:52:30
+ * @Last Modified time: 2026-04-20 14:36:41
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -428,7 +428,8 @@ export const nodeLibrary: NodeLibrary[] = [
       { type: "tool", icon: 'rb:bg-[url("@/assets/images/workflow/tools.svg")]',
         config: {
           tool_id: {
-            type: 'cascader'
+            type: 'cascader',
+            required: true
           },
           tool_parameters: {
             type: 'define'
@@ -734,7 +735,7 @@ export const portTextAttrs = { fontSize: 12, fill: '#5B6167' }
 /**
  * Port position arguments
  */
-export const portItemArgsY = 26.5;
+export const portItemArgsY = 27.5;
 export const portArgs = { x: nodeWidth, y: portItemArgsY }
 
 const defaultPortGroup = {

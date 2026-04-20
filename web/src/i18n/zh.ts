@@ -2501,6 +2501,7 @@ export const zh = {
       checkListErrors: {
         'llm.model_id': '模型',
         'llm.messages': '提示词',
+        'llm.vision_input': '视觉变量',
         'end.output': '回复',
         'knowledge-retrieval.knowledge_retrieval': '知识库',
         'parameter-extractor.model_id': '模型',
@@ -2528,6 +2529,7 @@ export const zh = {
         'jinja-render.template': '模板',
         'document-extractor.file_selector': '文件变量',
         'list-operator.input_list': '输入变量',
+        'tool.tool_id': '工具',
       },
       checkListHasErrors: '发布前确认检查清单中所有问题均已解决',
       variableSelect: {

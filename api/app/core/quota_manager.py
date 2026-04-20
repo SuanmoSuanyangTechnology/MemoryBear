@@ -6,7 +6,6 @@
 2. 降级到 default_free_plan.py 配置文件（社区版兜底）
 """
 import asyncio
-import time
 from functools import wraps
 from typing import Optional, Callable, Dict, Any
 from uuid import UUID
@@ -15,9 +14,12 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_auth_logger
-from app.i18n.exceptions import QuotaExceededError
+from app.i18n.exceptions import QuotaExceededError, InternalServerError
 
 logger = get_auth_logger()
+
+# Redis key 格式常量，与 RateLimiterService.check_qps 保持一致（per api_key 独立计数）
+API_KEY_QPS_REDIS_KEY = "rate_limit:qps:{api_key_id}"
 
 
 def _get_user_from_kwargs(kwargs: dict):
@@ -65,7 +67,9 @@ def _get_tenant_id_from_kwargs(db: Session, kwargs: dict):
         if share_record:
             app = db.query(App).filter(App.id == share_record.app_id, App.is_active.is_(True)).first()
             if app:
-                return app.workspace.tenant_id
+                workspace = db.query(Workspace).filter(Workspace.id == app.workspace_id).first()
+                if workspace:
+                    return workspace.tenant_id
 
     return None
 
@@ -73,29 +77,50 @@ def _get_tenant_id_from_kwargs(db: Session, kwargs: dict):
 def _get_quota_config(db: Session, tenant_id: UUID) -> Optional[Dict[str, Any]]:
     """
     获取租户的配额配置
-    
+
     优先级：
     1. premium 模块的 tenant_subscriptions（SaaS 版）
     2. default_free_plan.py 配置文件（社区版兜底）
     """
-    # 尝试从 premium 模块获取
+    # 尝试从 premium 模块获取（SaaS 版）
     try:
         from premium.platform_admin.package_plan_service import TenantSubscriptionService
+        # premium 模块存在，运行时错误不应被静默降级，直接抛出
         quota_config = TenantSubscriptionService(db).get_effective_quota(tenant_id)
         if quota_config:
             logger.debug(f"从 premium 模块获取租户 {tenant_id} 配额配置")
             return quota_config
-    except (ModuleNotFoundError, ImportError, Exception) as e:
-        logger.debug(f"无法从 premium 模块获取配额配置: {e}")
+        # premium 存在但该租户无订阅记录，降级到免费套餐
+        logger.debug(f"租户 {tenant_id} 无 premium 订阅，降级到免费套餐")
+    except (ModuleNotFoundError, ImportError):
+        # 社区版：premium 包不存在，正常降级
+        logger.debug("premium 模块不存在，使用社区版免费套餐配额")
 
-    # 降级到配置文件
+    # 降级到社区版配置文件
     try:
         from app.config.default_free_plan import DEFAULT_FREE_PLAN
-        logger.info(f"使用配置文件中的免费套餐配额: tenant={tenant_id}")
+        logger.debug(f"使用社区版免费套餐配额: tenant={tenant_id}")
         return DEFAULT_FREE_PLAN.get("quotas")
     except Exception as e:
         logger.error(f"无法从配置文件获取配额: {e}")
         return None
+
+
+def get_api_ops_rate_limit(db: Session, tenant_id: UUID) -> Optional[int]:
+    """
+    获取租户套餐的 API 操作速率限制（QPS 上限）
+    
+    该函数兼容社区版和 SaaS 版：
+    - SaaS 版：从 premium 模块的套餐配额读取
+    - 社区版：从 default_free_plan.py 配置文件读取
+    
+    Returns:
+        int: api_ops_rate_limit 值，如果未配置则返回 None
+    """
+    quota_config = _get_quota_config(db, tenant_id)
+    if quota_config:
+        return quota_config.get("api_ops_rate_limit")
+    return None
 
 
 class QuotaUsageRepository:
@@ -247,41 +272,74 @@ def _check_quota(
 
 def check_workspace_quota(func: Callable) -> Callable:
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    async def async_wrapper(*args, **kwargs):
         db: Session = kwargs.get("db")
         user = _get_user_from_kwargs(kwargs)
         if not db or not user:
-            logger.warning("配额检查失败：缺少 db 或 user 参数")
-            return func(*args, **kwargs)
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
+            raise InternalServerError()
+        _check_quota(db, user.tenant_id, "workspace_quota", "workspace")
+        return await func(*args, **kwargs)
+
+    @wraps(func)
+    def sync_wrapper(*args, **kwargs):
+        db: Session = kwargs.get("db")
+        user = _get_user_from_kwargs(kwargs)
+        if not db or not user:
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
+            raise InternalServerError()
         _check_quota(db, user.tenant_id, "workspace_quota", "workspace")
         return func(*args, **kwargs)
-    return wrapper
+
+    return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
 
 def check_skill_quota(func: Callable) -> Callable:
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    async def async_wrapper(*args, **kwargs):
         db: Session = kwargs.get("db")
         user = _get_user_from_kwargs(kwargs)
         if not db or not user:
-            logger.warning("配额检查失败：缺少 db 或 user 参数")
-            return func(*args, **kwargs)
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
+            raise InternalServerError()
+        _check_quota(db, user.tenant_id, "skill_quota", "skill")
+        return await func(*args, **kwargs)
+
+    @wraps(func)
+    def sync_wrapper(*args, **kwargs):
+        db: Session = kwargs.get("db")
+        user = _get_user_from_kwargs(kwargs)
+        if not db or not user:
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
+            raise InternalServerError()
         _check_quota(db, user.tenant_id, "skill_quota", "skill")
         return func(*args, **kwargs)
-    return wrapper
+
+    return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
 
 def check_app_quota(func: Callable) -> Callable:
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    async def async_wrapper(*args, **kwargs):
         db: Session = kwargs.get("db")
         user = _get_user_from_kwargs(kwargs)
         if not db or not user:
-            logger.warning("配额检查失败：缺少 db 或 user 参数")
-            return func(*args, **kwargs)
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
+            raise InternalServerError()
+        _check_quota(db, user.tenant_id, "app_quota", "app")
+        return await func(*args, **kwargs)
+
+    @wraps(func)
+    def sync_wrapper(*args, **kwargs):
+        db: Session = kwargs.get("db")
+        user = _get_user_from_kwargs(kwargs)
+        if not db or not user:
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
+            raise InternalServerError()
         _check_quota(db, user.tenant_id, "app_quota", "app")
         return func(*args, **kwargs)
-    return wrapper
+
+    return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
 
 def check_knowledge_capacity_quota(func: Callable) -> Callable:
@@ -289,12 +347,12 @@ def check_knowledge_capacity_quota(func: Callable) -> Callable:
     async def async_wrapper(*args, **kwargs):
         db: Session = kwargs.get("db")
         if not db:
-            logger.warning("配额检查失败：缺少 db 参数")
-            return await func(*args, **kwargs)
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 参数，拒绝请求")
+            raise InternalServerError()
         tenant_id = _get_tenant_id_from_kwargs(db, kwargs)
         if not tenant_id:
-            logger.warning("配额检查失败：无法获取 tenant_id")
-            return await func(*args, **kwargs)
+            logger.error(f"配额检查失败：{func.__name__} 无法获取 tenant_id，拒绝请求")
+            raise InternalServerError()
         _check_quota(db, tenant_id, "knowledge_capacity_quota", "knowledge_capacity")
         return await func(*args, **kwargs)
 
@@ -303,8 +361,8 @@ def check_knowledge_capacity_quota(func: Callable) -> Callable:
         db: Session = kwargs.get("db")
         user = _get_user_from_kwargs(kwargs)
         if not db or not user:
-            logger.warning("配额检查失败：缺少 db 或 user 参数")
-            return func(*args, **kwargs)
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
+            raise InternalServerError()
         _check_quota(db, user.tenant_id, "knowledge_capacity_quota", "knowledge_capacity")
         return func(*args, **kwargs)
 
@@ -313,15 +371,26 @@ def check_knowledge_capacity_quota(func: Callable) -> Callable:
 
 def check_memory_engine_quota(func: Callable) -> Callable:
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    async def async_wrapper(*args, **kwargs):
         db: Session = kwargs.get("db")
         user = _get_user_from_kwargs(kwargs)
         if not db or not user:
-            logger.warning("配额检查失败：缺少 db 或 user 参数")
-            return func(*args, **kwargs)
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
+            raise InternalServerError()
+        _check_quota(db, user.tenant_id, "memory_engine_quota", "memory_engine")
+        return await func(*args, **kwargs)
+
+    @wraps(func)
+    def sync_wrapper(*args, **kwargs):
+        db: Session = kwargs.get("db")
+        user = _get_user_from_kwargs(kwargs)
+        if not db or not user:
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
+            raise InternalServerError()
         _check_quota(db, user.tenant_id, "memory_engine_quota", "memory_engine")
         return func(*args, **kwargs)
-    return wrapper
+
+    return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
 
 def check_end_user_quota(func: Callable) -> Callable:
@@ -329,12 +398,12 @@ def check_end_user_quota(func: Callable) -> Callable:
     async def async_wrapper(*args, **kwargs):
         db: Session = kwargs.get("db")
         if not db:
-            logger.warning("配额检查失败：缺少 db 参数")
-            return await func(*args, **kwargs)
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 参数，拒绝请求")
+            raise InternalServerError()
         tenant_id = _get_tenant_id_from_kwargs(db, kwargs)
         if not tenant_id:
-            logger.warning("配额检查失败：无法获取 tenant_id")
-            return await func(*args, **kwargs)
+            logger.error(f"配额检查失败：{func.__name__} 无法获取 tenant_id，拒绝请求")
+            raise InternalServerError()
         _check_quota(db, tenant_id, "end_user_quota", "end_user")
         return await func(*args, **kwargs)
 
@@ -342,12 +411,12 @@ def check_end_user_quota(func: Callable) -> Callable:
     def sync_wrapper(*args, **kwargs):
         db: Session = kwargs.get("db")
         if not db:
-            logger.warning("配额检查失败：缺少 db 参数")
-            return func(*args, **kwargs)
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 参数，拒绝请求")
+            raise InternalServerError()
         tenant_id = _get_tenant_id_from_kwargs(db, kwargs)
         if not tenant_id:
-            logger.warning("配额检查失败：无法获取 tenant_id")
-            return func(*args, **kwargs)
+            logger.error(f"配额检查失败：{func.__name__} 无法获取 tenant_id，拒绝请求")
+            raise InternalServerError()
         _check_quota(db, tenant_id, "end_user_quota", "end_user")
         return func(*args, **kwargs)
 
@@ -356,88 +425,155 @@ def check_end_user_quota(func: Callable) -> Callable:
 
 def check_ontology_project_quota(func: Callable) -> Callable:
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    async def async_wrapper(*args, **kwargs):
         db: Session = kwargs.get("db")
         user = _get_user_from_kwargs(kwargs)
         if not db or not user:
-            logger.warning("配额检查失败：缺少 db 或 user 参数")
-            return func(*args, **kwargs)
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
+            raise InternalServerError()
+        _check_quota(db, user.tenant_id, "ontology_project_quota", "ontology_project")
+        return await func(*args, **kwargs)
+
+    @wraps(func)
+    def sync_wrapper(*args, **kwargs):
+        db: Session = kwargs.get("db")
+        user = _get_user_from_kwargs(kwargs)
+        if not db or not user:
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
+            raise InternalServerError()
         _check_quota(db, user.tenant_id, "ontology_project_quota", "ontology_project")
         return func(*args, **kwargs)
-    return wrapper
+
+    return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
 
 def check_model_quota(func: Callable) -> Callable:
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    async def async_wrapper(*args, **kwargs):
         db: Session = kwargs.get("db")
         user = _get_user_from_kwargs(kwargs)
         if not db or not user:
-            logger.warning("配额检查失败：缺少 db 或 user 参数")
-            return func(*args, **kwargs)
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
+            raise InternalServerError()
+        _check_quota(db, user.tenant_id, "model_quota", "model")
+        return await func(*args, **kwargs)
+
+    @wraps(func)
+    def sync_wrapper(*args, **kwargs):
+        db: Session = kwargs.get("db")
+        user = _get_user_from_kwargs(kwargs)
+        if not db or not user:
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
+            raise InternalServerError()
         _check_quota(db, user.tenant_id, "model_quota", "model")
         return func(*args, **kwargs)
-    return wrapper
+
+    return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
 
 def check_model_activation_quota(func: Callable) -> Callable:
     """模型激活时的配额检查装饰器"""
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    async def async_wrapper(*args, **kwargs):
         db: Session = kwargs.get("db")
         user = _get_user_from_kwargs(kwargs)
         if not db or not user:
-            logger.warning("配额检查失败：缺少 db 或 user 参数")
-            return func(*args, **kwargs)
-        
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
+            raise InternalServerError()
+
         model_id = kwargs.get("model_id") or (args[1] if len(args) > 1 else None)
         model_data = kwargs.get("model_data")
-        
+
         if not model_id or not model_data:
             logger.warning("模型激活配额检查失败：缺少 model_id 或 model_data 参数")
-            return func(*args, **kwargs)
-        
-        if model_data.is_active is True:
+            return await func(*args, **kwargs)
+
+        if model_data.is_active:
             try:
-                from app.models.models_model import ModelConfig
                 from app.services.model_service import ModelConfigService
-                
+
                 existing_model = ModelConfigService.get_model_by_id(
-                    db=db, 
-                    model_id=model_id, 
+                    db=db,
+                    model_id=model_id,
                     tenant_id=user.tenant_id
                 )
-                
+
                 if not existing_model.is_active:
                     logger.info(f"模型激活操作，检查配额: model_id={model_id}, tenant_id={user.tenant_id}")
                     _check_quota(db, user.tenant_id, "model_quota", "model")
             except Exception as e:
                 logger.error(f"模型激活配额检查异常: model_id={model_id}, error={str(e)}")
                 raise
-        
+
+        return await func(*args, **kwargs)
+
+    @wraps(func)
+    def sync_wrapper(*args, **kwargs):
+        db: Session = kwargs.get("db")
+        user = _get_user_from_kwargs(kwargs)
+        if not db or not user:
+            logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
+            raise InternalServerError()
+
+        model_id = kwargs.get("model_id") or (args[1] if len(args) > 1 else None)
+        model_data = kwargs.get("model_data")
+
+        if not model_id or not model_data:
+            logger.warning("模型激活配额检查失败：缺少 model_id 或 model_data 参数")
+            return func(*args, **kwargs)
+
+        if model_data.is_active:
+            try:
+                from app.services.model_service import ModelConfigService
+
+                existing_model = ModelConfigService.get_model_by_id(
+                    db=db,
+                    model_id=model_id,
+                    tenant_id=user.tenant_id
+                )
+
+                if not existing_model.is_active:
+                    logger.info(f"模型激活操作，检查配额: model_id={model_id}, tenant_id={user.tenant_id}")
+                    _check_quota(db, user.tenant_id, "model_quota", "model")
+            except Exception as e:
+                logger.error(f"模型激活配额检查异常: model_id={model_id}, error={str(e)}")
+                raise
+
         return func(*args, **kwargs)
-    return wrapper
+
+    return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
 
 def check_quota(quota_type: str, resource_name: str, usage_func: Optional[Callable] = None):
     """通用配额检查装饰器，支持自定义使用量获取函数"""
     def decorator(func: Callable) -> Callable:
         @wraps(func)
-        def wrapper(*args, **kwargs):
+        async def async_wrapper(*args, **kwargs):
             db: Session = kwargs.get("db")
             user = _get_user_from_kwargs(kwargs)
             if not db or not user:
-                logger.warning("配额检查失败：缺少 db 或 user 参数")
-                return func(*args, **kwargs)
+                logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
+                raise InternalServerError()
+            _check_quota(db, user.tenant_id, quota_type, resource_name, usage_func)
+            return await func(*args, **kwargs)
+
+        @wraps(func)
+        def sync_wrapper(*args, **kwargs):
+            db: Session = kwargs.get("db")
+            user = _get_user_from_kwargs(kwargs)
+            if not db or not user:
+                logger.error(f"配额检查失败：{func.__name__} 缺少 db 或 user 参数，拒绝请求")
+                raise InternalServerError()
             _check_quota(db, user.tenant_id, quota_type, resource_name, usage_func)
             return func(*args, **kwargs)
-        return wrapper
+
+        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
     return decorator
 
 
 # ─── 配额使用统计 ────────────────────────────────────────────────────────────
 
-def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
+async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
     """获取租户所有配额的使用情况"""
     quota_config = _get_quota_config(db, tenant_id)
     if not quota_config:
@@ -459,18 +595,25 @@ def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
 
     api_ops_current = 0
     try:
-        from app.core.config import settings
-        import redis
-        _now = time.time()
-        _rk = f"rate_limit:tenant_qps:{tenant_id}"
-        _r = redis.StrictRedis(
-            host=settings.REDIS_HOST, port=settings.REDIS_PORT,
-            db=settings.REDIS_DB, password=settings.REDIS_PASSWORD,
-            decode_responses=True
-        )
-        api_ops_current = int(_r.zcount(_rk, _now - 1, "+inf"))
-    except Exception:
-        pass
+        from app.aioRedis import aio_redis as _aio_redis
+        from app.models.api_key_model import ApiKey
+        from app.models.workspace_model import Workspace
+        # api_ops_rate_limit 限的是每个 api_key 每秒最高限额
+        # 展示当前最接近触发限流的 key 的 QPS（取最大值）
+        api_key_ids = db.query(ApiKey.id).join(
+            Workspace, ApiKey.workspace_id == Workspace.id
+        ).filter(
+            Workspace.tenant_id == tenant_id,
+            ApiKey.is_active.is_(True)
+        ).all()
+        for (key_id,) in api_key_ids:
+            _rk = API_KEY_QPS_REDIS_KEY.format(api_key_id=key_id)
+            val = await _aio_redis.get(_rk)
+            count = int(val) if val else 0
+            if count > api_ops_current:
+                api_ops_current = count
+    except Exception as e:
+        logger.warning(f"获取 api_ops_current 失败，返回 0: {type(e).__name__}: {e}")
 
     return {
         "workspace": {"used": workspace_count, "limit": quota_config.get("workspace_quota"), "percentage": pct(workspace_count, quota_config.get("workspace_quota"))},

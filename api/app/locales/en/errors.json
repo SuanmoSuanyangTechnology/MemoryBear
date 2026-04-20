@@ -106,7 +106,7 @@
   },
   "api": {
     "rate_limit_exceeded": "API rate limit exceeded",
-    "quota_exceeded": "API quota exceeded",
+    "quota_exceeded": "{resource} quota exceeded",
     "invalid_api_key": "Invalid API key",
     "api_key_expired": "API key has expired",
     "api_key_revoked": "API key has been revoked",
@@ -114,7 +114,8 @@
     "method_not_allowed": "Method not allowed",
     "invalid_request": "Invalid request",
     "missing_parameter": "Missing required parameter: {param}",
-    "invalid_parameter": "Invalid parameter: {param}"
+    "invalid_parameter": "Invalid parameter: {param}",
+    "api_key_rate_limit_exceeded": "API Key rate limit ({rate_limit}) exceeds tenant plan limit ({limit})"
   },
   "database": {
     "connection_failed": "Database connection failed",
@@ -134,5 +135,16 @@
     "invalid_format": "Invalid format: {field}",
     "invalid_value": "Invalid value: {field}",
     "out_of_range": "Value out of range: {field}"
+  },
+  "quota_resources": {
+    "workspace": "Workspace",
+    "app": "App",
+    "skill": "Skill",
+    "knowledge_capacity": "Knowledge capacity",
+    "memory_engine": "Memory engine",
+    "end_user": "End user",
+    "model": "Model",
+    "ontology_project": "Ontology project",
+    "api_ops_rate_limit": "API ops rate limit"
   }
 }

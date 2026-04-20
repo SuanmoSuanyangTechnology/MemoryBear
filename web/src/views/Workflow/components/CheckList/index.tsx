@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-04-09 18:58:21 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-04-20 10:39:17 
+ */
 import { useState, useCallback, useEffect, useRef, type FC } from 'react'
 import { Popover, Flex } from 'antd'
 import { WarningFilled } from '@ant-design/icons'
@@ -49,7 +55,7 @@ const specialValidators: Record<string, (val: any) => boolean> = {
       if (expr?.sub_variable_condition?.conditions?.length > 0) return expr.sub_variable_condition?.conditions.every(isSubExprSet)
       if (!expr.left) return false
       if (['not_empty', 'empty'].includes(expr.operator)) return true
-      return !!expr.left && (!!expr.right || typeof expr.right === 'boolean' || typeof expr.right === 'number')
+      return !!expr.left && (expr?.sub_variable_condition || !!expr.right || typeof expr.right === 'boolean' || typeof expr.right === 'number')
     }
     return val.some(c => !c?.expressions?.length || c.expressions.some((expr: any) => !isExprSet(expr)))
   },
@@ -99,6 +105,18 @@ function validateNode(type: string, config: Record<string, any>): CheckError[] {
     const isInvalid = specialValidator ? specialValidator(val) : isEmpty(val)
     if (isInvalid) errors.push({ key: specialKey, message: '' })
   })
+
+  // llm: vision_input required when vision is enabled
+  if (type === 'llm') {
+    const vision = get('vision')
+    if (vision === true || vision === 'true') {
+      const visionInput = get('vision_input')
+      console.log('vision', vision, isEmpty(visionInput))
+      if (isEmpty(visionInput)) {
+        errors.push({ key: 'llm.vision_input', message: '' })
+      }
+    }
+  }
 
   // http-request body.data (binary) — not a top-level required field, check separately
   if (type === 'http-request') {

@@ -482,14 +482,39 @@ class RateLimitExceededError(I18nException):
         )
 
 
-class QuotaExceededError(ForbiddenError):
-    """Quota exceeded error."""
+class QuotaExceededError(I18nException):
+    """Quota exceeded error (402)."""
+
+    # resource key -> i18n display key
+    _RESOURCE_KEY_MAP = {
+        "workspace": "errors.quota_resources.workspace",
+        "app": "errors.quota_resources.app",
+        "skill": "errors.quota_resources.skill",
+        "knowledge_capacity": "errors.quota_resources.knowledge_capacity",
+        "memory_engine": "errors.quota_resources.memory_engine",
+        "end_user": "errors.quota_resources.end_user",
+        "model": "errors.quota_resources.model",
+        "ontology_project": "errors.quota_resources.ontology_project",
+        "api_ops_rate_limit": "errors.quota_resources.api_ops_rate_limit",
+    }
 
     def __init__(self, resource: Optional[str] = None, **params):
+        # Translate resource key to a localized display name before calling super()
         if resource:
-            params["resource"] = resource
+            resource_i18n_key = self._RESOURCE_KEY_MAP.get(resource)
+            if resource_i18n_key:
+                try:
+                    from app.i18n.service import get_translation_service
+                    from app.core.config import settings
+                    _locale = _current_locale.get() or settings.I18N_DEFAULT_LANGUAGE
+                    params["resource"] = get_translation_service().translate(resource_i18n_key, _locale)
+                except Exception:
+                    params["resource"] = resource
+            else:
+                params["resource"] = resource
         super().__init__(
             error_key="errors.api.quota_exceeded",
+            status_code=402,
             error_code="QUOTA_EXCEEDED",
             **params
         )

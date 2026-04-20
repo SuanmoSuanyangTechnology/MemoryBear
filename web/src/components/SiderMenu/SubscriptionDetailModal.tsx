@@ -82,7 +82,7 @@ const SubscriptionDetailModal = forwardRef<SubscriptionDetailModalRef>((_props, 
       {/* Features */}
       <Flex gap={12} vertical className="rb:space-y-3 rb:mb-4 rb:h-[calc(100vh-341px)]! rb:overflow-y-auto">
         {billingUnits.map(({ key, unit, icon }) => {
-          const value = detail?.quota[key as keyof Subscription['quota']];
+          const value = detail?.quotas[key as keyof Subscription['quotas']];
           if (value === undefined || value === null) return null;
           return (
             <UnitWrapper

@@ -2537,6 +2537,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       checkListErrors: {
         'llm.model_id': 'Model',
         'llm.messages': 'Messages',
+        'llm.vision_input': 'Vision Variable',
         'end.output': 'Output',
         'knowledge-retrieval.knowledge_retrieval': 'Knowledge bases',
         'parameter-extractor.model_id': 'Model',
@@ -2564,6 +2565,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         'jinja-render.template': 'Template',
         'document-extractor.file_selector': 'File variable',
         'list-operator.input_list': 'Input list',
+        'tool.tool_id': 'Tool',
       },
       checkListHasErrors: 'Please resolve all issues in the checklist before publishing',
       variableSelect: {

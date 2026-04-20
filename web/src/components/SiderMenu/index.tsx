@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:25:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-16 17:35:38
+ * @Last Modified time: 2026-04-20 10:15:20 
  */
 /**
  * SiderMenu Component
@@ -114,7 +114,7 @@ export interface Subscription {
   started_at: number | null
   expired_at: number | null
   status: string
-  quota: SubscriptionQuota
+  quotas: SubscriptionQuota
   created_at: number
   updated_at: number
 }
@@ -417,7 +417,7 @@ const Menu: FC<{
           <div className="rb:grid rb:grid-cols-4 rb:mt-4">
             {['workspace_quota', 'skill_quota', 'app_quota', 'model_quota'].map(key => (
               <div key={key} className="rb:text-center">
-                <div className="rb:text-[13px] rb:font-[MiSans-Semibold] rb:font-semibold">{subscription.quota?.[key as keyof typeof subscription.quota]}</div>
+                <div className="rb:text-[13px] rb:font-[MiSans-Semibold] rb:font-semibold">{subscription.quotas?.[key as keyof typeof subscription.quotas]}</div>
                 <div className="rb:mt-1 rb:text-[#5B6167] rb:text-[10px] rb:leading-3.5">{t(`index.${key}`)}</div>
               </div>
             ))}
