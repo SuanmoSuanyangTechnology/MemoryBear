@@ -167,6 +167,8 @@ def update_api_key(
 
         return success(data=api_key_schema.ApiKey.model_validate(api_key), msg="API Key 更新成功")
 
+    except BusinessException:
+        raise
     except Exception as e:
         logger.error(f"未知错误: {str(e)}", extra={
             "api_key_id": str(api_key_id),
