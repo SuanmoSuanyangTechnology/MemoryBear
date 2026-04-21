@@ -12,6 +12,8 @@ from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.memory.agent.utils.redis_tool import store
 from app.core.memory.agent.utils.session_tools import SessionService
+from app.core.memory.enums import SearchStrategy, Neo4jNodeType
+from app.core.memory.memory_service import MemoryService
 from app.core.rag.llm.cv_model import QWenCV
 from app.core.response_utils import fail, success
 from app.db import get_db
@@ -23,6 +25,7 @@ from app.schemas.memory_agent_schema import UserInput, Write_UserInput
 from app.schemas.response_schema import ApiResponse
 from app.services import task_service, workspace_service
 from app.services.memory_agent_service import MemoryAgentService
+from app.services.memory_agent_service import get_end_user_connected_config as get_config
 from app.services.model_service import ModelConfigService
 
 load_dotenv()
@@ -300,33 +303,90 @@ async def read_server(
     api_logger.info(
         f"Read service: group={user_input.end_user_id}, storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}, workspace_id={workspace_id}")
     try:
-        result = await memory_agent_service.read_memory(
-            user_input.end_user_id,
-            user_input.message,
-            user_input.history,
-            user_input.search_switch,
-            config_id,
+        # result = await memory_agent_service.read_memory(
+        #     user_input.end_user_id,
+        #     user_input.message,
+        #     user_input.history,
+        #     user_input.search_switch,
+        #     config_id,
+        #     db,
+        #     storage_type,
+        #     user_rag_memory_id
+        # )
+        # if str(user_input.search_switch) == "2":
+        #     retrieve_info = result['answer']
+        #     history = await SessionService(store).get_history(user_input.end_user_id, user_input.end_user_id,
+        #                                                       user_input.end_user_id)
+        #     query = user_input.message
+        #
+        #     # 调用 memory_agent_service 的方法生成最终答案
+        #     result['answer'] = await memory_agent_service.generate_summary_from_retrieve(
+        #         end_user_id=user_input.end_user_id,
+        #         retrieve_info=retrieve_info,
+        #         history=history,
+        #         query=query,
+        #         config_id=config_id,
+        #         db=db
+        #     )
+        #     if "信息不足，无法回答" in result['answer']:
+        #         result['answer'] = retrieve_info
+        memory_config = get_config(user_input.end_user_id, db)
+        service = MemoryService(
             db,
-            storage_type,
-            user_rag_memory_id
+            memory_config["memory_config_id"],
+            end_user_id=user_input.end_user_id
         )
-        if str(user_input.search_switch) == "2":
-            retrieve_info = result['answer']
-            history = await SessionService(store).get_history(user_input.end_user_id, user_input.end_user_id,
-                                                              user_input.end_user_id)
-            query = user_input.message
+        search_result = await service.read(
+            user_input.message,
+            SearchStrategy(user_input.search_switch)
+        )
+        intermediate_outputs = []
+        sub_queries = set()
+        for memory in search_result.memories:
+            sub_queries.add(str(memory.query))
+        if user_input.search_switch in [SearchStrategy.DEEP, SearchStrategy.NORMAL]:
+            intermediate_outputs.append({
+                "type": "problem_split",
+                "title": "问题拆分",
+                "data": [
+                    {
+                        "id": f"Q{idx+1}",
+                        "question": question
+                    }
+                    for idx, question in enumerate(sub_queries)
+                ]
+            })
+        perceptual_data = [
+            memory.data
+            for memory in search_result.memories
+            if memory.source == Neo4jNodeType.PERCEPTUAL
+        ]
 
-            # 调用 memory_agent_service 的方法生成最终答案
-            result['answer'] = await memory_agent_service.generate_summary_from_retrieve(
+        intermediate_outputs.append({
+            "type": "perceptual_retrieve",
+            "title": "感知记忆检索",
+            "data": perceptual_data,
+            "total": len(perceptual_data),
+        })
+        intermediate_outputs.append({
+            "type": "search_result",
+            "title": f"合并检索结果 (共{len(sub_queries)}个查询,{len(search_result.memories)}条结果)",
+            "result": search_result.content,
+            "raw_result": search_result.memories,
+            "total": len(search_result.memories),
+        })
+        result = {
+            'answer': await memory_agent_service.generate_summary_from_retrieve(
                 end_user_id=user_input.end_user_id,
-                retrieve_info=retrieve_info,
-                history=history,
-                query=query,
+                retrieve_info=search_result.content,
+                history=[],
+                query=user_input.message,
                 config_id=config_id,
                 db=db
-            )
-            if "信息不足，无法回答" in result['answer']:
-                result['answer'] = retrieve_info
+            ),
+            "intermediate_outputs": intermediate_outputs
+        }
+
         return success(data=result, msg="回复对话消息成功")
     except BaseException as e:
         # Handle ExceptionGroup from TaskGroup (Python 3.11+) or BaseExceptionGroup
@@ -801,9 +861,6 @@ async def get_end_user_connected_config(
     Returns:
         包含 memory_config_id 和相关信息的响应
     """
-    from app.services.memory_agent_service import (
-        get_end_user_connected_config as get_config,
-    )
 
     api_logger.info(f"Getting connected config for end_user: {end_user_id}")
 

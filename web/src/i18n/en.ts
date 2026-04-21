@@ -2243,6 +2243,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       coreNode: 'Core Nodes',
       start: 'Start',
       end: 'End',
+      output: 'Output',
       answer: 'Answer',
       aiAndCognitiveProcessing: 'AI & Cognitive Processing',
       llm: 'Large Language Model (LLM)',
@@ -2494,12 +2495,15 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
             ne: 'Not In',
           }
         },
+        output: {
+          outputs: 'Output Variable',
+        },
         name: 'Key',
         type: 'Type',
         value: 'Value',
         addCase: 'Add Condition',
         addVariable: 'Add Variables',
-        output: 'Output Variable',
+        outputVariable: 'Output Variable',
         duplicateName: 'Variable name cannot be duplicated',
       },
 
@@ -2517,8 +2521,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       undo: 'Undo',
       fit: 'Fit View',
 
-      input: 'Input',
-      output: 'Output',
+      input_result: 'Input',
+      output_result: 'Output',
       error: 'Error Message',
       loopNum: ' loops',
       iterationNum: ' iterations',
@@ -2565,6 +2569,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         'jinja-render.template': 'Template',
         'document-extractor.file_selector': 'File variable',
         'list-operator.input_list': 'Input list',
+        'output.outputs': 'Output Variable',
       },
       checkListHasErrors: 'Please resolve all issues in the checklist before publishing',
       variableSelect: {

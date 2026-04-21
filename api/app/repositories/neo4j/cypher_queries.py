@@ -1,3 +1,4 @@
+from app.core.memory.enums import Neo4jNodeType
 
 DIALOGUE_NODE_SAVE = """
     UNWIND $dialogues AS dialogue
@@ -149,57 +150,6 @@ SET r.predicate = rel.predicate,
 RETURN elementId(r) AS uuid
 """
 
-# 在 Neo4j 5及后续版本中，id() 函数已被标记为弃用，用elementId() 函数替代
-
-# 保存弱关系实体，设置 e.is_weak = true；不维护 e.relations 聚合字段
-WEAK_ENTITY_NODE_SAVE = """
-UNWIND $weak_entities AS entity
-MERGE (e:ExtractedEntity {id: entity.id, run_id: entity.run_id})
-SET e += {
-    name: entity.name,
-    end_user_id: entity.end_user_id,
-    run_id: entity.run_id,
-    description: entity.description,
-    chunk_id: entity.chunk_id,
-    dialog_id: entity.dialog_id
-}
-// Independent weak flag，仅标记弱关系，不再维护 relations 聚合字段
-SET e.is_weak = true
-RETURN e.id AS id
-"""
-
-# 为强关系三元组中的主语和宾语创建/更新实体节点，仅设置 e.is_strong = true，不维护 e.relations 字段
-SAVE_STRONG_TRIPLE_ENTITIES = """
-UNWIND $items AS item
-MERGE (s:ExtractedEntity {id: item.source_id, run_id: item.run_id})
-SET s += {name: item.subject, end_user_id: item.end_user_id, run_id: item.run_id}
-// Independent strong flag
-SET s.is_strong = true
-MERGE (o:ExtractedEntity {id: item.target_id, run_id: item.run_id})
-SET o += {name: item.object, end_user_id: item.end_user_id, run_id: item.run_id}
-// Independent strong flag
-SET o.is_strong = true
-"""
-
-
-DIALOGUE_STATEMENT_EDGE_SAVE = """
-    UNWIND $dialogue_statement_edges AS edge
-    // 支持按 uuid 或 ref_id 连接到 Dialogue，避免因来源 ID 不一致而断链
-    MATCH (dialogue:Dialogue)
-    WHERE dialogue.uuid = edge.source OR dialogue.ref_id = edge.source
-    MATCH (statement:Statement {id: edge.target})
-    // 仅按端点去重，关系属性可更新
-    MERGE (dialogue)-[e:MENTIONS]->(statement)
-    SET e.uuid = edge.id,
-        e.end_user_id = edge.end_user_id,
-        e.created_at = edge.created_at,
-        e.expired_at = edge.expired_at
-    RETURN e.uuid AS uuid
-"""
-
-# 在 Neo4j 5及后续版本中，id() 函数已被标记为弃用，用elementId() 函数替代
-
-
 CHUNK_STATEMENT_EDGE_SAVE = """
     UNWIND $chunk_statement_edges AS edge
     MATCH (statement:Statement {id: edge.source, run_id: edge.run_id})
@@ -228,87 +178,6 @@ SET r.end_user_id = rel.end_user_id,
 RETURN elementId(r) AS uuid
 """
 
-ENTITY_EMBEDDING_SEARCH = """
-CALL db.index.vector.queryNodes('entity_embedding_index', $limit * 100, $embedding)
-YIELD node AS e, score
-WHERE e.name_embedding IS NOT NULL
-  AND ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
-RETURN e.id AS id,
-       e.name AS name,
-       e.end_user_id AS end_user_id,
-       e.entity_type AS entity_type,
-       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
-       COALESCE(e.importance_score, 0.5) AS importance_score,
-       e.last_access_time AS last_access_time,
-       COALESCE(e.access_count, 0) AS access_count,
-       score
-ORDER BY score DESC
-LIMIT $limit
-"""
-# Embedding-based search: cosine similarity on Statement.statement_embedding
-STATEMENT_EMBEDDING_SEARCH = """
-CALL db.index.vector.queryNodes('statement_embedding_index', $limit * 100, $embedding)
-YIELD node AS s, score
-WHERE s.statement_embedding IS NOT NULL
-  AND ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
-RETURN s.id AS id,
-       s.statement AS statement,
-       s.end_user_id AS end_user_id,
-       s.chunk_id AS chunk_id,
-       s.created_at AS created_at,
-       s.expired_at AS expired_at,
-       s.valid_at AS valid_at,
-       s.invalid_at AS invalid_at,
-       COALESCE(s.activation_value, s.importance_score, 0.5) AS activation_value,
-       COALESCE(s.importance_score, 0.5) AS importance_score,
-       s.last_access_time AS last_access_time,
-       COALESCE(s.access_count, 0) AS access_count,
-       score
-ORDER BY score DESC
-LIMIT $limit
-"""
-
-# Embedding-based search: cosine similarity on Chunk.chunk_embedding
-CHUNK_EMBEDDING_SEARCH = """
-CALL db.index.vector.queryNodes('chunk_embedding_index', $limit * 100, $embedding)
-YIELD node AS c, score
-WHERE c.chunk_embedding IS NOT NULL
-  AND ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
-RETURN c.id AS chunk_id,
-       c.end_user_id AS end_user_id,
-       c.content AS content,
-       c.dialog_id AS dialog_id,
-       COALESCE(c.activation_value, 0.5) AS activation_value,
-       c.last_access_time AS last_access_time,
-       COALESCE(c.access_count, 0) AS access_count,
-       score
-ORDER BY score DESC
-LIMIT $limit
-"""
-
-SEARCH_STATEMENTS_BY_KEYWORD = """
-CALL db.index.fulltext.queryNodes("statementsFulltext", $query) YIELD node AS s, score
-WHERE ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
-OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
-OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
-RETURN s.id AS id,
-       s.statement AS statement,
-       s.end_user_id AS end_user_id,
-       s.chunk_id AS chunk_id,
-       s.created_at AS created_at,
-       s.expired_at AS expired_at,
-       s.valid_at AS valid_at,
-       s.invalid_at AS invalid_at,
-       c.id AS chunk_id_from_rel,
-       collect(DISTINCT e.id) AS entity_ids,
-       COALESCE(s.activation_value, s.importance_score, 0.5) AS activation_value,
-       COALESCE(s.importance_score, 0.5) AS importance_score,
-       s.last_access_time AS last_access_time,
-       COALESCE(s.access_count, 0) AS access_count,
-       score
-ORDER BY score DESC
-LIMIT $limit
-"""
 # 查询实体名称包含指定字符串的实体
 SEARCH_ENTITIES_BY_NAME = """
 CALL db.index.fulltext.queryNodes("entitiesFulltext", $query) YIELD node AS e, score
@@ -335,73 +204,6 @@ RETURN e.id AS id,
        COALESCE(e.importance_score, 0.5) AS importance_score,
        e.last_access_time AS last_access_time,
        COALESCE(e.access_count, 0) AS access_count,
-       score
-ORDER BY score DESC
-LIMIT $limit
-"""
-
-SEARCH_ENTITIES_BY_NAME_OR_ALIAS = """
-CALL db.index.fulltext.queryNodes("entitiesFulltext", $query) YIELD node AS e, score
-WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
-WITH e, score
-With collect({entity: e, score: score}) AS fulltextResults
-
-OPTIONAL MATCH (ae:ExtractedEntity)
-WHERE ($end_user_id IS NULL OR ae.end_user_id = $end_user_id)
-  AND ae.aliases IS NOT NULL
-  AND ANY(alias IN ae.aliases WHERE toLower(alias) CONTAINS toLower($query))
-WITH fulltextResults, collect(ae) AS aliasEntities
-
-UNWIND (fulltextResults + [x IN aliasEntities | {entity: x, score:
-     CASE 
-       WHEN ANY(alias IN x.aliases WHERE toLower(alias) = toLower($query)) THEN 1.0
-       WHEN ANY(alias IN x.aliases WHERE toLower(alias) STARTS WITH toLower($query)) THEN 0.9
-       ELSE 0.8
-     END
-}]) AS row
-WITH row.entity AS e, row.score AS score
-WITH DISTINCT e, MAX(score) AS score
-OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
-OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
-RETURN e.id AS id,
-       e.name AS name,
-       e.end_user_id AS end_user_id,
-       e.entity_type AS entity_type,
-       e.created_at AS created_at,
-       e.expired_at AS expired_at,
-       e.entity_idx AS entity_idx,
-       e.statement_id AS statement_id,
-       e.description AS description,
-       e.aliases AS aliases,
-       e.name_embedding AS name_embedding,
-       e.connect_strength AS connect_strength,
-       collect(DISTINCT s.id) AS statement_ids,
-       collect(DISTINCT c.id) AS chunk_ids,
-       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
-       COALESCE(e.importance_score, 0.5) AS importance_score,
-       e.last_access_time AS last_access_time,
-       COALESCE(e.access_count, 0) AS access_count,
-       score
-ORDER BY score DESC
-LIMIT $limit
-"""
-
-
-SEARCH_CHUNKS_BY_CONTENT = """
-CALL db.index.fulltext.queryNodes("chunksFulltext", $query) YIELD node AS c, score
-WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
-OPTIONAL MATCH (c)-[:CONTAINS]->(s:Statement)
-OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
-RETURN c.id AS chunk_id,
-       c.end_user_id AS end_user_id,
-       c.content AS content,
-       c.dialog_id AS dialog_id,
-       c.sequence_number AS sequence_number,
-       collect(DISTINCT s.id) AS statement_ids,
-       collect(DISTINCT e.id) AS entity_ids,
-       COALESCE(c.activation_value, 0.5) AS activation_value,
-       c.last_access_time AS last_access_time,
-       COALESCE(c.access_count, 0) AS access_count,
        score
 ORDER BY score DESC
 LIMIT $limit
@@ -677,49 +479,6 @@ LIMIT $limit
 UPDATE_STATEMENT_INVALID_AT = """
 MATCH (n:Statement {end_user_id: $end_user_id, id: $id})
 SET n.invalid_at = $new_invalid_at
-"""
-
-# MemorySummary keyword search using fulltext index
-SEARCH_MEMORY_SUMMARIES_BY_KEYWORD = """
-CALL db.index.fulltext.queryNodes("summariesFulltext", $query) YIELD node AS m, score
-WHERE ($end_user_id IS NULL OR m.end_user_id = $end_user_id)
-OPTIONAL MATCH (m)-[:DERIVED_FROM_STATEMENT]->(s:Statement)
-RETURN m.id AS id,
-       m.name AS name,
-       m.end_user_id AS end_user_id,
-       m.dialog_id AS dialog_id,
-       m.chunk_ids AS chunk_ids,
-       m.content AS content,
-       m.created_at AS created_at,
-       COALESCE(m.activation_value, m.importance_score, 0.5) AS activation_value,
-       COALESCE(m.importance_score, 0.5) AS importance_score,
-       m.last_access_time AS last_access_time,
-       COALESCE(m.access_count, 0) AS access_count,
-       score
-ORDER BY score DESC
-LIMIT $limit
-"""
-
-# Embedding-based search: cosine similarity on MemorySummary.summary_embedding
-MEMORY_SUMMARY_EMBEDDING_SEARCH = """
-CALL db.index.vector.queryNodes('summary_embedding_index', $limit * 100, $embedding)
-YIELD node AS m, score
-WHERE m.summary_embedding IS NOT NULL
-  AND ($end_user_id IS NULL OR m.end_user_id = $end_user_id)
-RETURN m.id AS id,
-       m.name AS name,
-       m.end_user_id AS end_user_id,
-       m.dialog_id AS dialog_id,
-       m.chunk_ids AS chunk_ids,
-       m.content AS content,
-       m.created_at AS created_at,
-       COALESCE(m.activation_value, m.importance_score, 0.5) AS activation_value,
-       COALESCE(m.importance_score, 0.5) AS importance_score,
-       m.last_access_time AS last_access_time,
-       COALESCE(m.access_count, 0) AS access_count,
-       score
-ORDER BY score DESC
-LIMIT $limit
 """
 
 MEMORY_SUMMARY_NODE_SAVE = """
@@ -1031,8 +790,6 @@ RETURN DISTINCT
   e.emotion_type      AS emotion_type,
   e.statement         AS statement;
 """
-
-'''获取实体'''
 
 Memory_Space_User = """
 MATCH (n)-[r]->(m)
@@ -1365,22 +1122,6 @@ WHERE c.name IS NULL OR c.name = ''
 RETURN c.community_id AS community_id
 """
 
-# Community keyword search: matches name or summary via fulltext index
-SEARCH_COMMUNITIES_BY_KEYWORD = """
-CALL db.index.fulltext.queryNodes("communitiesFulltext", $query) YIELD node AS c, score
-WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
-RETURN c.community_id AS id,
-       c.name AS name,
-       c.summary AS content,
-       c.core_entities AS core_entities,
-       c.member_count AS member_count,
-       c.end_user_id AS end_user_id,
-       c.updated_at AS updated_at,
-       score
-ORDER BY score DESC
-LIMIT $limit
-"""
-
 # Community 向量检索 ──────────────────────────────────────────────────
 # Community embedding-based search: cosine similarity on Community.summary_embedding
 COMMUNITY_EMBEDDING_SEARCH = """
@@ -1454,7 +1195,144 @@ ON CREATE SET r.end_user_id = edge.end_user_id,
 RETURN elementId(r) AS uuid
 """
 
-SEARCH_PERCEPTUAL_BY_KEYWORD = """
+# -------------------
+# search by user id
+# -------------------
+SEARCH_PERCEPTUAL_BY_USER_ID = """
+MATCH (p:Perceptual)
+WHERE p.end_user_id = $end_user_id
+RETURN p.id AS id,
+       p.summary_embedding AS embedding
+"""
+
+SEARCH_STATEMENTS_BY_USER_ID = """
+MATCH (s:Statement)
+WHERE s.end_user_id = $end_user_id
+RETURN s.id AS id,
+       s.statement_embedding AS embedding
+"""
+
+SEARCH_ENTITIES_BY_USER_ID = """
+MATCH (e:ExtractedEntity)
+WHERE e.end_user_id = $end_user_id
+RETURN e.id AS id,
+       e.name_embedding AS embedding
+"""
+
+SEARCH_CHUNKS_BY_USER_ID = """
+MATCH (c:Chunk)
+WHERE c.end_user_id = $end_user_id
+RETURN c.id AS id,
+       c.chunk_embedding AS embedding
+"""
+
+SEARCH_MEMORY_SUMMARIES_BY_USER_ID = """
+MATCH (s:MemorySummary)
+WHERE s.end_user_id = $end_user_id
+RETURN s.id AS id,
+       s.summary_embedding AS embedding
+"""
+
+SEARCH_COMMUNITIES_BY_USER_ID = """
+MATCH (c:Community)
+WHERE c.end_user_id = $end_user_id
+RETURN c.id AS id,
+       c.summary_embedding AS embedding
+"""
+
+# -------------------
+# search by id
+# -------------------
+SEARCH_PERCEPTUAL_BY_IDS = """
+MATCH (p:Perceptual)
+WHERE p.id IN $ids
+RETURN p.id AS id,
+       p.end_user_id AS end_user_id,
+       p.perceptual_type AS perceptual_type,
+       p.file_path AS file_path,
+       p.file_name AS file_name,
+       p.file_ext AS file_ext,
+       p.summary AS summary,
+       p.keywords AS keywords,
+       p.topic AS topic,
+       p.domain AS domain,
+       p.created_at AS created_at,
+       p.file_type AS file_type
+"""
+
+SEARCH_STATEMENTS_BY_IDS = """
+MATCH (s:Statement)
+WHERE s.id IN $ids
+RETURN s.id AS id,
+       s.statement AS statement,
+       s.end_user_id AS end_user_id,
+       s.chunk_id AS chunk_id,
+       s.created_at AS created_at,
+       s.expired_at AS expired_at,
+       s.valid_at AS valid_at,
+       properties(s)['invalid_at'] AS invalid_at,
+       COALESCE(s.activation_value, s.importance_score, 0.5) AS activation_value,
+       COALESCE(s.importance_score, 0.5) AS importance_score,
+       s.last_access_time AS last_access_time,
+       COALESCE(s.access_count, 0) AS access_count
+"""
+
+SEARCH_CHUNKS_BY_IDS = """
+MATCH (c:Chunk)
+WHERE c.id IN $ids
+RETURN c.id AS id,
+       c.end_user_id AS end_user_id,
+       c.content AS content,
+       c.dialog_id AS dialog_id,
+       COALESCE(c.activation_value, 0.5) AS activation_value,
+       c.last_access_time AS last_access_time,
+       COALESCE(c.access_count, 0) AS access_count
+"""
+
+SEARCH_ENTITIES_BY_IDS = """
+MATCH (e:ExtractedEntity)
+WHERE e.id IN $ids
+RETURN e.id AS id,
+       e.name AS name,
+       e.end_user_id AS end_user_id,
+       e.entity_type AS entity_type,
+       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
+       COALESCE(e.importance_score, 0.5) AS importance_score,
+       e.last_access_time AS last_access_time,
+       COALESCE(e.access_count, 0) AS access_count
+"""
+
+SEARCH_MEMORY_SUMMARIES_BY_IDS = """
+MATCH (m:MemorySummary)
+WHERE m.id IN $ids
+RETURN m.id AS id,
+       m.name AS name,
+       m.end_user_id AS end_user_id,
+       m.dialog_id AS dialog_id,
+       m.chunk_ids AS chunk_ids,
+       m.content AS content,
+       m.created_at AS created_at,
+       COALESCE(m.activation_value, m.importance_score, 0.5) AS activation_value,
+       COALESCE(m.importance_score, 0.5) AS importance_score,
+       m.last_access_time AS last_access_time,
+       COALESCE(m.access_count, 0) AS access_count
+"""
+
+SEARCH_COMMUNITIES_BY_IDS = """
+MATCH (c:Community)
+WHERE c.id IN $ids
+RETURN c.id AS id,
+       c.name AS name,
+       c.summary AS content,
+       c.core_entities AS core_entities,
+       c.member_count AS member_count,
+       c.end_user_id AS end_user_id,
+       c.updated_at AS updated_at
+"""
+# -------------------
+# search by fulltext
+# -------------------
+SEARCH_PERCEPTUALS_BY_KEYWORD = """
 CALL db.index.fulltext.queryNodes("perceptualFulltext", $query) YIELD node AS p, score
 WHERE p.end_user_id = $end_user_id
 RETURN p.id AS id,
@@ -1474,23 +1352,154 @@ ORDER BY score DESC
 LIMIT $limit
 """
 
-PERCEPTUAL_EMBEDDING_SEARCH = """
-CALL db.index.vector.queryNodes('perceptual_summary_embedding_index', $limit * 100, $embedding)
-YIELD node AS p, score
-WHERE p.summary_embedding IS NOT NULL AND p.end_user_id = $end_user_id
-RETURN p.id AS id,
-       p.end_user_id AS end_user_id,
-       p.perceptual_type AS perceptual_type,
-       p.file_path AS file_path,
-       p.file_name AS file_name,
-       p.file_ext AS file_ext,
-       p.summary AS summary,
-       p.keywords AS keywords,
-       p.topic AS topic,
-       p.domain AS domain,
-       p.created_at AS created_at,
-       p.file_type AS file_type,
+SEARCH_STATEMENTS_BY_KEYWORD = """
+CALL db.index.fulltext.queryNodes("statementsFulltext", $query) YIELD node AS s, score
+WHERE ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
+OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
+OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
+RETURN s.id AS id,
+       s.statement AS statement,
+       s.end_user_id AS end_user_id,
+       s.chunk_id AS chunk_id,
+       s.created_at AS created_at,
+       s.expired_at AS expired_at,
+       s.valid_at AS valid_at,
+       properties(s)['invalid_at'] AS invalid_at,
+       c.id AS chunk_id_from_rel,
+       collect(DISTINCT e.id) AS entity_ids,
+       COALESCE(s.activation_value, s.importance_score, 0.5) AS activation_value,
+       COALESCE(s.importance_score, 0.5) AS importance_score,
+       s.last_access_time AS last_access_time,
+       COALESCE(s.access_count, 0) AS access_count,
        score
 ORDER BY score DESC
 LIMIT $limit
 """
+
+SEARCH_ENTITIES_BY_NAME_OR_ALIAS = """
+CALL db.index.fulltext.queryNodes("entitiesFulltext", $query) YIELD node AS e, score
+WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
+WITH e, score
+With collect({entity: e, score: score}) AS fulltextResults
+
+OPTIONAL MATCH (ae:ExtractedEntity)
+WHERE ($end_user_id IS NULL OR ae.end_user_id = $end_user_id)
+  AND ae.aliases IS NOT NULL
+  AND ANY(alias IN ae.aliases WHERE toLower(alias) CONTAINS toLower($query))
+WITH fulltextResults, collect(ae) AS aliasEntities
+
+UNWIND (fulltextResults + [x IN aliasEntities | {entity: x, score:
+     CASE 
+       WHEN ANY(alias IN x.aliases WHERE toLower(alias) = toLower($query)) THEN 1.0
+       WHEN ANY(alias IN x.aliases WHERE toLower(alias) STARTS WITH toLower($query)) THEN 0.9
+       ELSE 0.8
+     END
+}]) AS row
+WITH row.entity AS e, row.score AS score
+WITH DISTINCT e, MAX(score) AS score
+OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
+RETURN e.id AS id,
+       e.name AS name,
+       e.end_user_id AS end_user_id,
+       e.entity_type AS entity_type,
+       e.created_at AS created_at,
+       e.expired_at AS expired_at,
+       e.entity_idx AS entity_idx,
+       e.statement_id AS statement_id,
+       e.description AS description,
+       e.aliases AS aliases,
+       e.name_embedding AS name_embedding,
+       e.connect_strength AS connect_strength,
+       collect(DISTINCT s.id) AS statement_ids,
+       collect(DISTINCT c.id) AS chunk_ids,
+       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
+       COALESCE(e.importance_score, 0.5) AS importance_score,
+       e.last_access_time AS last_access_time,
+       COALESCE(e.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+SEARCH_CHUNKS_BY_CONTENT = """
+CALL db.index.fulltext.queryNodes("chunksFulltext", $query) YIELD node AS c, score
+WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
+OPTIONAL MATCH (c)-[:CONTAINS]->(s:Statement)
+OPTIONAL MATCH (s)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
+RETURN c.id AS id,
+       c.end_user_id AS end_user_id,
+       c.content AS content,
+       c.dialog_id AS dialog_id,
+       c.sequence_number AS sequence_number,
+       collect(DISTINCT s.id) AS statement_ids,
+       collect(DISTINCT e.id) AS entity_ids,
+       COALESCE(c.activation_value, 0.5) AS activation_value,
+       c.last_access_time AS last_access_time,
+       COALESCE(c.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+# MemorySummary keyword search using fulltext index
+SEARCH_MEMORY_SUMMARIES_BY_KEYWORD = """
+CALL db.index.fulltext.queryNodes("summariesFulltext", $query) YIELD node AS m, score
+WHERE ($end_user_id IS NULL OR m.end_user_id = $end_user_id)
+OPTIONAL MATCH (m)-[:DERIVED_FROM_STATEMENT]->(s:Statement)
+RETURN m.id AS id,
+       m.name AS name,
+       m.end_user_id AS end_user_id,
+       m.dialog_id AS dialog_id,
+       m.chunk_ids AS chunk_ids,
+       m.content AS content,
+       m.created_at AS created_at,
+       COALESCE(m.activation_value, m.importance_score, 0.5) AS activation_value,
+       COALESCE(m.importance_score, 0.5) AS importance_score,
+       m.last_access_time AS last_access_time,
+       COALESCE(m.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+# Community keyword search: matches name or summary via fulltext index
+SEARCH_COMMUNITIES_BY_KEYWORD = """
+CALL db.index.fulltext.queryNodes("communitiesFulltext", $query) YIELD node AS c, score
+WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
+RETURN c.id AS id,
+       c.name AS name,
+       c.summary AS content,
+       c.core_entities AS core_entities,
+       c.member_count AS member_count,
+       c.end_user_id AS end_user_id,
+       c.updated_at AS updated_at,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+FULLTEXT_QUERY_CYPHER_MAPPING = {
+    Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_KEYWORD,
+    Neo4jNodeType.EXTRACTEDENTITY: SEARCH_ENTITIES_BY_NAME_OR_ALIAS,
+    Neo4jNodeType.CHUNK: SEARCH_CHUNKS_BY_CONTENT,
+    Neo4jNodeType.MEMORYSUMMARY: SEARCH_MEMORY_SUMMARIES_BY_KEYWORD,
+    Neo4jNodeType.COMMUNITY: SEARCH_COMMUNITIES_BY_KEYWORD,
+    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUALS_BY_KEYWORD
+}
+USER_ID_QUERY_CYPHER_MAPPING = {
+    Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_USER_ID,
+    Neo4jNodeType.EXTRACTEDENTITY: SEARCH_ENTITIES_BY_USER_ID,
+    Neo4jNodeType.CHUNK: SEARCH_CHUNKS_BY_USER_ID,
+    Neo4jNodeType.MEMORYSUMMARY: SEARCH_MEMORY_SUMMARIES_BY_USER_ID,
+    Neo4jNodeType.COMMUNITY: SEARCH_COMMUNITIES_BY_USER_ID,
+    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUAL_BY_USER_ID
+}
+NODE_ID_QUERY_CYPHER_MAPPING = {
+    Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_IDS,
+    Neo4jNodeType.EXTRACTEDENTITY: SEARCH_ENTITIES_BY_IDS,
+    Neo4jNodeType.CHUNK: SEARCH_CHUNKS_BY_IDS,
+    Neo4jNodeType.MEMORYSUMMARY: SEARCH_MEMORY_SUMMARIES_BY_IDS,
+    Neo4jNodeType.COMMUNITY: SEARCH_COMMUNITIES_BY_IDS,
+    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUAL_BY_IDS
+}

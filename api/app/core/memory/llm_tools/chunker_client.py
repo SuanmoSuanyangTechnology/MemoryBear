@@ -21,6 +21,7 @@ from chonkie import (
 
 from app.core.memory.models.config_models import ChunkerConfig
 from app.core.memory.models.message_models import DialogData, Chunk
+
 try:
     from app.core.memory.llm_tools.openai_client import OpenAIClient
 except Exception:
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 class LLMChunker:
     """LLM-based intelligent chunking strategy"""
+
     def __init__(self, llm_client: OpenAIClient, chunk_size: int = 1000):
         self.llm_client = llm_client
         self.chunk_size = chunk_size
@@ -46,7 +48,8 @@ class LLMChunker:
             """
 
         messages = [
-            {"role": "system", "content": "You are a professional text analysis assistant, skilled at splitting long texts into semantically coherent paragraphs."},
+            {"role": "system",
+             "content": "You are a professional text analysis assistant, skilled at splitting long texts into semantically coherent paragraphs."},
             {"role": "user", "content": prompt}
         ]
 
@@ -311,7 +314,7 @@ class ChunkerClient:
             f.write("=" * 60 + "\n\n")
 
             for i, chunk in enumerate(dialogue.chunks):
-                f.write(f"Chunk {i+1}:\n")
+                f.write(f"Chunk {i + 1}:\n")
                 f.write(f"Size: {len(chunk.content)} characters\n")
                 if hasattr(chunk, 'metadata') and 'start_index' in chunk.metadata:
                     f.write(f"Position: {chunk.metadata.get('start_index')}-{chunk.metadata.get('end_index')}\n")

@@ -2204,6 +2204,7 @@ export const zh = {
       coreNode: '核心节点',
       start: '开始（Start）',
       end: '结束（End）',
+      output: '输出（Output）',
       answer: '回复（Answer）',
       aiAndCognitiveProcessing: 'AI与认知处理',
       llm: '大语言模型 (LLM)',
@@ -2458,12 +2459,15 @@ export const zh = {
             ne: '不在',
           }
         },
+        output: {
+          outputs: '输出变量',
+        },
         name: '键',
         type: '类型',
         value: '值',
         addCase: '添加条件',
         addVariable: '添加变量',
-        output: '输出变量',
+        outputVariable: '输出变量',
         duplicateName: '变量名不能重复',
       },
 
@@ -2481,8 +2485,8 @@ export const zh = {
       undo: '撤销',
       fit: '自适应',
 
-      input: '输入',
-      output: '输出',
+      input_result: '输入',
+      output_result: '输出',
       error: '错误信息',
       loopNum: '个循环',
       iterationNum: '个迭代',
@@ -2529,6 +2533,7 @@ export const zh = {
         'jinja-render.template': '模板',
         'document-extractor.file_selector': '文件变量',
         'list-operator.input_list': '输入变量',
+        'output.outputs': '输出变量',
       },
       checkListHasErrors: '发布前确认检查清单中所有问题均已解决',
       variableSelect: {

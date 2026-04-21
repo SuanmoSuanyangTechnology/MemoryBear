@@ -81,6 +81,7 @@ class DifyConverter(BaseConverter):
             NodeType.START: self.convert_start_node_config,
             NodeType.LLM: self.convert_llm_node_config,
             NodeType.END: self.convert_end_node_config,
+            NodeType.OUTPUT: self.convert_output_node_config,
             NodeType.IF_ELSE: self.convert_if_else_node_config,
             NodeType.LOOP: self.convert_loop_node_config,
             NodeType.ITERATION: self.convert_iteration_node_config,
@@ -174,12 +175,20 @@ class DifyConverter(BaseConverter):
             "file": VariableType.FILE,
             "paragraph": VariableType.STRING,
             "text-input": VariableType.STRING,
+            "string": VariableType.STRING,
             "number": VariableType.NUMBER,
-            "checkbox": VariableType.BOOLEAN,
-            "file-list": VariableType.ARRAY_FILE,
-            "select": VariableType.STRING,
             "integer": VariableType.NUMBER,
             "float": VariableType.NUMBER,
+            "checkbox": VariableType.BOOLEAN,
+            "boolean": VariableType.BOOLEAN,
+            "object": VariableType.OBJECT,
+            "file-list": VariableType.ARRAY_FILE,
+            "array[string]": VariableType.ARRAY_STRING,
+            "array[number]": VariableType.ARRAY_NUMBER,
+            "array[boolean]": VariableType.ARRAY_BOOLEAN,
+            "array[object]": VariableType.ARRAY_OBJECT,
+            "array[file]": VariableType.ARRAY_FILE,
+            "select": VariableType.STRING,
         }
         var_type = type_map.get(source_type, source_type)
         return var_type
@@ -274,7 +283,18 @@ class DifyConverter(BaseConverter):
     def convert_start_node_config(self, node: dict) -> dict:
         node_data = node["data"]
         start_vars = []
-        for var in node_data["variables"]:
+        # workflow mode 用 user_input_form，advanced-chat 用 variables
+        raw_vars = node_data.get("variables") or []
+        if not raw_vars:
+            for form_item in node_data.get("user_input_form") or []:
+                # 每个 form_item 是 {"text-input": {...}} 或 {"paragraph": {...}} 等
+                for input_type, var in form_item.items():
+                    var["type"] = input_type
+                    var.setdefault("variable", var.get("variable", ""))
+                    var.setdefault("required", var.get("required", False))
+                    var.setdefault("label", var.get("label", ""))
+                    raw_vars.append(var)
+        for var in raw_vars:
             var_type = self.variable_type_map(var["type"])
             if not var_type:
                 self.errors.append(
@@ -403,6 +423,19 @@ class DifyConverter(BaseConverter):
         ).model_dump()
         self.config_validate(node["id"], node["data"]["title"], EndNodeConfig, result)
         return result
+
+    def convert_output_node_config(self, node: dict) -> dict:
+        node_data = node["data"]
+        outputs = []
+        for item in node_data.get("outputs", []):
+            value_selector = item.get("value_selector") or []
+            var_type = self.variable_type_map(item.get("value_type", "string")) or VariableType.STRING
+            outputs.append({
+                "name": item.get("variable") or item.get("name", ""),
+                "type": var_type,
+                "value": self._process_list_variable_literal(value_selector) or "",
+            })
+        return {"outputs": outputs}
 
     def convert_if_else_node_config(self, node: dict) -> dict:
         node_data = node["data"]

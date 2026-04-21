@@ -131,7 +131,7 @@ class AccessHistoryManager:
                 end_user_id=end_user_id
             )
             
-            logger.info(
+            logger.debug(
                 f"成功记录访问: {node_label}[{node_id}], "
                 f"activation={update_data['activation_value']:.4f}, "
                 f"access_count={update_data['access_count']}"

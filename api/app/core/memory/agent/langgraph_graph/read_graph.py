@@ -1,24 +1,20 @@
 #!/usr/bin/env python3
+import logging
 from contextlib import asynccontextmanager
 
-from langchain_core.messages import HumanMessage
 from langgraph.constants import START, END
 from langgraph.graph import StateGraph
 
-from app.db import get_db
-from app.services.memory_config_service import MemoryConfigService
-
-from app.core.memory.agent.utils.llm_tools import ReadState
 from app.core.memory.agent.langgraph_graph.nodes.data_nodes import content_input_node
+from app.core.memory.agent.langgraph_graph.nodes.perceptual_retrieve_node import (
+    perceptual_retrieve_node,
+)
 from app.core.memory.agent.langgraph_graph.nodes.problem_nodes import (
     Split_The_Problem,
     Problem_Extension,
 )
 from app.core.memory.agent.langgraph_graph.nodes.retrieve_nodes import (
     retrieve_nodes,
-)
-from app.core.memory.agent.langgraph_graph.nodes.perceptual_retrieve_node import (
-    perceptual_retrieve_node,
 )
 from app.core.memory.agent.langgraph_graph.nodes.summary_nodes import (
     Input_Summary,
@@ -32,6 +28,9 @@ from app.core.memory.agent.langgraph_graph.routing.routers import (
     Retrieve_continue,
     Verify_continue,
 )
+from app.core.memory.agent.utils.llm_tools import ReadState
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -51,7 +50,7 @@ async def make_read_graph():
     """
     try:
         # Build workflow graph
-        workflow = StateGraph(ReadState)    
+        workflow = StateGraph(ReadState)
         workflow.add_node("content_input", content_input_node)
         workflow.add_node("Split_The_Problem", Split_The_Problem)
         workflow.add_node("Problem_Extension", Problem_Extension)

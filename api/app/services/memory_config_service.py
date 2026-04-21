@@ -163,7 +163,7 @@ class MemoryConfigService:
 
     def load_memory_config(
             self,
-            config_id: Optional[UUID] = None,
+            config_id: UUID | str | int | None = None,
             workspace_id: Optional[UUID] = None,
             service_name: str = "MemoryConfigService",
     ) -> MemoryConfig:
@@ -186,16 +186,6 @@ class MemoryConfigService:
             ConfigurationError: If no valid configuration can be found
         """
         start_time = time.time()
-
-        config_logger.info(
-            "Starting memory configuration loading",
-            extra={
-                "operation": "load_memory_config",
-                "service": service_name,
-                "config_id": str(config_id) if config_id else None,
-                "workspace_id": str(workspace_id) if workspace_id else None,
-            },
-        )
 
         logger.info(f"Loading memory configuration from database: config_id={config_id}, workspace_id={workspace_id}")
 
@@ -236,11 +226,7 @@ class MemoryConfigService:
                     f"Configuration not found: config_id={config_id}, workspace_id={workspace_id}"
                 )
 
-            # Get workspace for the config
-            db_query_start = time.time()
             result = MemoryConfigRepository.get_config_with_workspace(self.db, memory_config.config_id)
-            db_query_time = time.time() - db_query_start
-            logger.info(f"[PERF] Config+Workspace query: {db_query_time:.4f}s")
 
             if not result:
                 raise ConfigurationError(

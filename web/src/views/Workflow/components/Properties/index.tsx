@@ -38,6 +38,7 @@ import RbCard from '@/components/RbCard/Card';
 import ModelConfig from './ModelConfig'
 import ModelSelect from '@/components/ModelSelect'
 import ListOperator from './ListOperator'
+import MappingList from "./MappingList";
 
 /**
  * Props for Properties component
@@ -807,6 +808,15 @@ const Properties: FC<PropertiesProps> = ({
                           </Form.Item>
                         )
                       }
+                      if (config.type === 'mappingList') {
+                        return <MappingList
+                          key={key}
+                          label={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
+                          name={key}
+                          options={variableList}
+                          isNeedType={config.isNeedType as boolean}
+                        />
+                      }
 
                       if (key === 'vision_input' && !values?.vision) {
                         return null
@@ -906,7 +916,6 @@ const Properties: FC<PropertiesProps> = ({
                                                   }
                                                 });
 
-                                                console.log('list', list)
                                                 return list
                                               }
                                               // Filter child nodes for iteration output
@@ -960,7 +969,7 @@ const Properties: FC<PropertiesProps> = ({
           <div className="rb:text-[12px] rb:leading-4.5">
             <Flex gap={8} vertical>
               <Flex align="center" className="rb:font-medium rb:cursor-pointer" onClick={handleToggle}>
-                {t('workflow.config.output')}
+                {t('workflow.config.outputVariable')}
                 <div
                   className={clsx("rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/caret_right_outlined.svg')]", {
                     'rb:rotate-90': !outputCollapsed
