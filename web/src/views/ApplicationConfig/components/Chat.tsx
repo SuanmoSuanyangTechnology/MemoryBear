@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-21 15:06:40
+ * @Last Modified time: 2026-04-10 18:51:43
  */
 /**
  * Chat debugging component for application testing
@@ -79,6 +79,8 @@ const Chat: FC<ChatProps> = ({
     setCompareLoading(false)
     setLoading(false)
     return () => {
+      abortRef.current?.()
+      abortRef.current = null
       audioPollingRef.current.forEach(timer => clearInterval(timer))
       audioPollingRef.current.clear()
     }
