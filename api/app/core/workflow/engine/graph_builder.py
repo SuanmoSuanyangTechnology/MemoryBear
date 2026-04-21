@@ -21,6 +21,7 @@ from app.core.workflow.nodes import NodeFactory
 from app.core.workflow.nodes.enums import NodeType, BRANCH_NODES
 from app.core.workflow.utils.expression_evaluator import evaluate_condition
 from app.core.workflow.validator import WorkflowValidator
+from app.core.workflow.variable.base_variable import VariableType
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +195,7 @@ class GraphBuilder:
                 outputs_list = config.get("outputs", [])
                 output = "\n".join(
                     item.get("value", "") for item in outputs_list
-                    if item.get("value") and item.get("type", "string") == "string"
+                    if item.get("value") and item.get("type", VariableType.STRING) == VariableType.STRING
                 ) or None
             else:
                 output = config.get("output")

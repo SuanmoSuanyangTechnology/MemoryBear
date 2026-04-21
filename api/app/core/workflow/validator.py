@@ -135,7 +135,7 @@ class WorkflowValidator:
                 # 2. 验证 主图end 节点（至少一个，output 节点也可作为终止节点）
                 end_nodes = [n for n in nodes if n.get("type") in [NodeType.END, NodeType.OUTPUT]]
                 if len(end_nodes) == 0:
-                    errors.append("工作流必须至少有一个 end 节点 或 output节点")
+                    errors.append("工作流必须至少有一个 end 节点 或 output 节点")
 
             # 3. 验证节点 ID 唯一性
             node_ids = [n.get("id") for n in nodes if n.get("type") != NodeType.NOTES]
