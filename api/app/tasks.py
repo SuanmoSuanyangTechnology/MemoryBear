@@ -254,11 +254,30 @@ def parse_document(file_path: str, document_id: uuid.UUID):
         # 先将文件读入内存，避免解析过程中依赖 NFS 文件持续可访问
         # python-docx 等库在 binary=None 时会用路径直接打开文件，
         # 在 NFS/共享存储上可能因缓存失效导致 "Package not found"
-        try:
-            with open(file_path, "rb") as f:
-                file_binary = f.read()
-        except FileNotFoundError:
-            raise FileNotFoundError(f"File not found at '{file_path}'")
+        max_wait_seconds = 30
+        wait_interval = 2
+        waited = 0
+        file_binary = None
+        while waited <= max_wait_seconds:
+            # os.listdir 强制 NFS 客户端刷新目录缓存
+            parent_dir = os.path.dirname(file_path)
+            try:
+                os.listdir(parent_dir)
+            except OSError:
+                pass
+            try:
+                with open(file_path, "rb") as f:
+                    file_binary = f.read()
+                break
+            except FileNotFoundError:
+                if waited >= max_wait_seconds:
+                    raise FileNotFoundError(
+                        f"File not found at '{file_path}' after waiting {max_wait_seconds}s "
+                        f"(NFS cache may be stale)"
+                    )
+                logger.warning(f"File not visible yet on this node, retrying in {wait_interval}s: {file_path}")
+                time.sleep(wait_interval)
+                waited += wait_interval
 
         from app.core.rag.app.naive import chunk
         res = chunk(filename=file_path,
