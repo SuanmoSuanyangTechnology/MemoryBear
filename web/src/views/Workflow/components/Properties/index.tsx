@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-20 15:42:36
+ * @Last Modified time: 2026-04-21 18:36:42
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -807,14 +807,13 @@ const Properties: FC<PropertiesProps> = ({
                         )
                       }
                       if (config.type === 'mappingList') {
-                        return <Form.Item name={key}>
-                          <MappingList
-                            label={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
-                            name={key}
-                            options={variableList}
-                            isNeedType={config.isNeedType as boolean}
-                          />
-                        </Form.Item>
+                        return <MappingList
+                          key={key}
+                          label={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
+                          name={key}
+                          options={variableList}
+                          isNeedType={config.isNeedType as boolean}
+                        />
                       }
 
                       if (key === 'vision_input' && !values?.vision) {
