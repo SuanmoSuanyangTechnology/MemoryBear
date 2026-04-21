@@ -6,12 +6,14 @@ error messages based on the current request's language.
 """
 
 import logging
+import time
 from contextvars import ContextVar
 from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, Request
 
 from app.i18n.service import get_translation_service
+from app.core.error_codes import ERROR_CODE_TO_BIZ_CODE, BizCode
 
 logger = logging.getLogger(__name__)
 
@@ -118,15 +120,24 @@ class I18nException(HTTPException):
             **params
         )
 
-        # Build error detail
-        detail = {
-            "error_code": self.error_code,
-            "message": message,
-        }
+        # Convert error_code string to BizCode value
+        biz_code = ERROR_CODE_TO_BIZ_CODE.get(
+            self.error_code,
+            BizCode.BAD_REQUEST
+        )
 
-        # Add parameters to detail if provided
-        if params:
-            detail["params"] = params
+        # Build error detail in standard format for compatibility
+        # main.py handler expects "message" and "error_code" fields for filtering
+        # but we also include standard format fields
+        detail = {
+            "code": biz_code.value,
+            "msg": message,
+            "message": message,
+            "error_code": self.error_code,
+            "data": params if params else {},
+            "error": message,
+            "time": int(time.time() * 1000),
+        }
 
         # Initialize HTTPException
         super().__init__(
