@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-16 17:52:30
+ * @Last Modified time: 2026-04-21 18:23:31
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -69,6 +69,15 @@ export const nodeLibrary: NodeLibrary[] = [
           output: {
             type: 'editor',
             required: true,
+          }
+        }
+      },
+      { type: "output", icon: 'rb:bg-[url("@/assets/images/workflow/output.svg")]',
+        config: {
+          outputs: {
+            type: 'mappingList',
+            required: true,
+            isNeedType: true
           }
         }
       },
