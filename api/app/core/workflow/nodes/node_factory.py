@@ -28,6 +28,7 @@ from app.core.workflow.nodes.breaker import BreakNode
 from app.core.workflow.nodes.tool import ToolNode
 from app.core.workflow.nodes.document_extractor import DocExtractorNode
 from app.core.workflow.nodes.list_operator import ListOperatorNode
+from app.core.workflow.nodes.output import OutputNode
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,8 @@ WorkflowNode = Union[
     MemoryWriteNode,
     CodeNode,
     DocExtractorNode,
-    ListOperatorNode
+    ListOperatorNode,
+    OutputNode
 ]
 
 
@@ -86,7 +88,8 @@ class NodeFactory:
         NodeType.MEMORY_WRITE: MemoryWriteNode,
         NodeType.CODE: CodeNode,
         NodeType.DOCUMENT_EXTRACTOR: DocExtractorNode,
-        NodeType.LIST_OPERATOR: ListOperatorNode
+        NodeType.LIST_OPERATOR: ListOperatorNode,
+        NodeType.OUTPUT: OutputNode,
     }
 
     @classmethod

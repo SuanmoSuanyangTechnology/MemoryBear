@@ -24,6 +24,7 @@ from app.core.workflow.nodes.configs import (
     NoteNodeConfig,
     ListOperatorNodeConfig,
     DocExtractorNodeConfig,
+    OutputNodeConfig,
 )
 from app.core.workflow.nodes.enums import NodeType
 
@@ -36,6 +37,7 @@ class MemoryBearConverter(BaseConverter):
         NodeType.START: StartNodeConfig,
         NodeType.END: EndNodeConfig,
         NodeType.ANSWER: EndNodeConfig,
+        NodeType.OUTPUT: OutputNodeConfig,
         NodeType.LLM: LLMNodeConfig,
         NodeType.AGENT: AgentNodeConfig,
         NodeType.IF_ELSE: IfElseNodeConfig,
