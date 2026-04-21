@@ -434,19 +434,37 @@ class AppDslService:
     def _resolve_model(self, ref: Optional[dict], tenant_id: uuid.UUID, warnings: list) -> Optional[uuid.UUID]:
         if not ref:
             return None
-        q = self.db.query(ModelConfig).filter(
-            ModelConfig.tenant_id == tenant_id,
-            ModelConfig.name == ref.get("name"),
-            ModelConfig.is_active.is_(True)
-        )
-        if ref.get("provider"):
-            q = q.filter(ModelConfig.provider == ref["provider"])
-        if ref.get("type"):
-            q = q.filter(ModelConfig.type == ref["type"])
-        m = q.first()
-        if not m:
-            warnings.append(f"模型 '{ref.get('name')}' 未匹配，已置空，请导入后手动配置")
-        return m.id if m else None
+        model_id = ref.get("id")
+        if model_id:
+            try:
+                model_uuid = uuid.UUID(str(model_id))
+                m = self.db.query(ModelConfig).filter(
+                    ModelConfig.id == model_uuid,
+                    ModelConfig.tenant_id == tenant_id,
+                    ModelConfig.is_active.is_(True)
+                ).first()
+                if m:
+                    return str(m.id)
+            except (ValueError, AttributeError):
+                pass
+        model_name = ref.get("name")
+        if model_name:
+            q = self.db.query(ModelConfig).filter(
+                ModelConfig.tenant_id == tenant_id,
+                ModelConfig.name == model_name,
+                ModelConfig.is_active.is_(True)
+            )
+            if ref.get("provider"):
+                q = q.filter(ModelConfig.provider == ref["provider"])
+            if ref.get("type"):
+                q = q.filter(ModelConfig.type == ref["type"])
+            m = q.first()
+            if m:
+                return str(m.id)
+            warnings.append(f"模型 '{model_name}' 未匹配，已置空，请导入后手动配置")
+        else:
+            warnings.append(f"模型 ID '{model_id}' 未匹配，已置空，请导入后手动配置")
+        return None
 
     def _resolve_kb(self, ref: Optional[dict], workspace_id: uuid.UUID, warnings: list) -> Optional[str]:
         if not ref:
@@ -587,12 +605,14 @@ class AppDslService:
                     if not kb_id:
                         continue
                     kb_ref = {}
-                    if isinstance(kb_id, str) and kb_id != "None":
+                    if isinstance(kb_id, str):
                         try:
                             uuid.UUID(kb_id)
                             kb_ref["id"] = kb_id
                         except ValueError:
                             kb_ref["name"] = kb_id
+                    else:
+                        kb_ref["name"] = kb_id
                     resolved_id = self._resolve_kb(kb_ref, workspace_id, [])
                     if resolved_id:
                         resolved_kbs.append({**kb, "kb_id": resolved_id})
@@ -608,9 +628,9 @@ class AppDslService:
                         ref_name = model_ref.get("name")
                         if ref_id:
                             ref_dict = {"id": ref_id}
-                        elif ref_name and ref_name != "None":
+                        elif ref_name is not None:
                             ref_dict = {"name": ref_name, "provider": model_ref.get("provider"), "type": model_ref.get("type")}
-                    elif isinstance(model_ref, str) and model_ref != "None":
+                    elif isinstance(model_ref, str):
                         try:
                             uuid.UUID(model_ref)
                             ref_dict = {"id": model_ref}
