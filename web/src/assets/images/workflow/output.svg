@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组 13备份</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="应用管理-工作流-配置-开始" transform="translate(-685, -694)">
+            <g id="编组-13备份" transform="translate(685, 694)">
+                <rect id="矩形" fill="#FF8A4C" x="0" y="0" width="24" height="24" rx="8"></rect>
+                <g id="编组" transform="translate(5.3, 6.5)" stroke="#FFFFFF" stroke-width="1.2">
+                    <rect id="矩形" x="0" y="0" width="4.4" height="4.4" rx="1"></rect>
+                    <rect id="矩形备份-7" x="9" y="0" width="4.4" height="4.4" rx="1"></rect>
+                    <path d="M2,4 L2,9 C2,10.1045695 2.8954305,11 4,11 L10.4342273,11 L10.4342273,11" id="路径-23"></path>
+                    <polyline id="路径" stroke-linecap="round" stroke-linejoin="round" points="9 9 11 11 9 13"></polyline>
+                    <line x1="4" y1="2.2" x2="9" y2="2.2" id="路径-24"></line>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-24 17:57:08 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 16:33:33
+ * @Last Modified time: 2026-04-20 15:33:48
  */
 /*
  * Runtime Component
@@ -187,7 +187,7 @@ const Runtime: FC<{ item: ChatItem; index: number;}> = ({
                     {['input', 'output'].map(key => (
                       <div key={key} className="rb:bg-[#EBEBEB] rb:rounded-lg">
                         <div className="rb:py-2 rb:px-3 rb:flex rb:justify-between rb:items-center rb:text-[12px]">
-                          {isLoop ? t(`workflow.runtime.${key}_cycle_vars`) : t(`workflow.${key}`)}
+                          {isLoop ? t(`workflow.runtime.${key}_cycle_vars`) : t(`workflow.${key}_result`)}
                           <Button
                             className="rb:py-0! rb:px-1! rb:text-[12px]!"
                             size="small"
