@@ -7,7 +7,6 @@ from app.models.models_model import ModelConfig
 from app.schemas.knowledge_schema import KnowledgeCreate, KnowledgeUpdate
 from app.repositories import knowledge_repository
 from app.core.logging_config import get_business_logger
-from app.repositories.model_repository import ModelConfigRepository
 from app.models.models_model import ModelType
 
 business_logger = get_business_logger()
@@ -77,53 +76,32 @@ def create_knowledge(
 
         tenant_id = workspace.tenant_id
 
-        def _get_model_by_name_or_fallback(model_name: str | None, model_types: list, label: str):
-            """优先按 workspace 指定的 model name 查，找不到再 fallback 到 tenant 下第一个"""
-            if model_name:
-                model = db.query(ModelConfig).filter(
-                    ModelConfig.tenant_id == tenant_id,
-                    ModelConfig.name == model_name,
-                    ModelConfig.type.in_([t.value for t in model_types]),
-                    ModelConfig.is_active == True,
-                    ModelConfig.is_composite == False
-                ).first()
-                if model:
-                    business_logger.debug(f"Auto-bind {label} model from workspace default: {model.id} ({model_name})")
-                    return model
-                business_logger.debug(f"Workspace default {label} model '{model_name}' not found, falling back to tenant")
-            models = ModelConfigRepository.get_by_type(db=db, model_types=model_types, tenant_id=tenant_id, is_active=True)
-            if models:
-                business_logger.debug(f"Auto-bind {label} model from tenant fallback: {models[0].id}")
-                return models[0]
-            return None
-
         if not knowledge.embedding_id:
-            model = _get_model_by_name_or_fallback(workspace.embedding, [ModelType.EMBEDDING], "embedding")
-            if model:
-                knowledge.embedding_id = model.id
+            if not workspace.embedding:
+                raise Exception("工作空间未配置 Embedding 模型，请先完善工作空间配置后重试")
+            knowledge.embedding_id = workspace.embedding
 
         if not knowledge.reranker_id:
-            model = _get_model_by_name_or_fallback(workspace.rerank, [ModelType.RERANK], "rerank")
-            if model:
-                knowledge.reranker_id = model.id
+            if not workspace.rerank:
+                raise Exception("工作空间未配置 Rerank 模型，请先完善工作空间配置后重试")
+            knowledge.reranker_id = workspace.rerank
 
         if not knowledge.llm_id:
-            model = _get_model_by_name_or_fallback(workspace.llm, [ModelType.LLM, ModelType.CHAT], "llm")
-            if model:
-                knowledge.llm_id = model.id
+            if not workspace.llm:
+                raise Exception("工作空间未配置 LLM 模型，请先完善工作空间配置后重试")
+            knowledge.llm_id = workspace.llm
 
         if not knowledge.image2text_id:
-            image2text_models = db.query(ModelConfig).filter(
+            model = db.query(ModelConfig).filter(
                 ModelConfig.tenant_id == tenant_id,
-                ModelConfig.type.in_([ModelType.CHAT.value]),
+                ModelConfig.type.in_([ModelType.CHAT.value, ModelType.LLM.value]),
                 ModelConfig.capability.contains(["vision"]),
                 ModelConfig.is_active == True,
-                ModelConfig.is_composite == False
-            ).order_by(ModelConfig.created_at.desc()).all()
-            if not image2text_models:
+            ).order_by(ModelConfig.created_at.desc()).first()
+            if not model:
                 raise Exception("租户下没有可用的视觉模型，创建知识库失败")
-            knowledge.image2text_id = image2text_models[0].id
-            business_logger.debug(f"Auto-bind image2text model: {image2text_models[0].id}")
+            knowledge.image2text_id = model.id
+            business_logger.debug(f"Auto-bind image2text model: {model.id}")
 
         business_logger.debug(f"Start creating the knowledge base: {knowledge.name}")
         db_knowledge = knowledge_repository.create_knowledge(
