@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-20 14:36:41
+ * @Last Modified time: 2026-04-21 11:36:03
  */
 import LoopNode from './components/Nodes/LoopNode';
 import NormalNode from './components/Nodes/NormalNode';
@@ -134,7 +134,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           vision_input: {
             type: 'variableList',
-            onFilterVariableType: ['array[file]']
+            onFilterVariableType: ['array[file]', 'file']
           }
         }
       },
