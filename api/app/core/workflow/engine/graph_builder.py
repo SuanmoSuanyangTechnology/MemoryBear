@@ -21,6 +21,7 @@ from app.core.workflow.nodes import NodeFactory
 from app.core.workflow.nodes.enums import NodeType, BRANCH_NODES
 from app.core.workflow.utils.expression_evaluator import evaluate_condition
 from app.core.workflow.validator import WorkflowValidator
+from app.core.workflow.variable.base_variable import VariableType
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +145,7 @@ class GraphBuilder:
                     (node_info["id"], node_info["branch"])
                 )
             else:
-                if self.get_node_type(node_info["id"]) == NodeType.END:
+                if self.get_node_type(node_info["id"]) in (NodeType.END, NodeType.OUTPUT):
                     output_nodes.append(node_info["id"])
                 non_branch_nodes.append(node_info["id"])
 
@@ -187,7 +188,17 @@ class GraphBuilder:
         for end_node in self.end_nodes:
             end_node_id = end_node.get("id")
             config = end_node.get("config", {})
-            output = config.get("output")
+            node_type = end_node.get("type")
+
+            # Output node: STRING type items participate in streaming text output
+            if node_type == NodeType.OUTPUT:
+                outputs_list = config.get("outputs", [])
+                output = "\n".join(
+                    item.get("value", "") for item in outputs_list
+                    if item.get("value") and item.get("type", VariableType.STRING) == VariableType.STRING
+                ) or None
+            else:
+                output = config.get("output")
 
             # Skip End nodes without output configuration
             if not output:
@@ -515,7 +526,7 @@ class GraphBuilder:
         self.end_nodes = [
             node
             for node in self.nodes
-            if node.get("type") == "end" and node.get("id") in self.reachable_nodes
+            if node.get("type") in ("end", "output") and node.get("id") in self.reachable_nodes
         ]
         self._build_adj()
         self._find_upstream_activation_dep: Callable = lru_cache(

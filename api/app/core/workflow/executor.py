@@ -258,6 +258,21 @@ class WorkflowExecutor:
             end_time = datetime.datetime.now()
             elapsed_time = (end_time - start_time).total_seconds()
 
+            # For output nodes, collect structured results from variable_pool and serialize to JSON
+            output_node_ids = [
+                node["id"] for node in self.workflow_config.get("nodes", [])
+                if node.get("type") == "output"
+            ]
+            if output_node_ids:
+                structured_output = {}
+                for node_id in output_node_ids:
+                    node_output = self.variable_pool.get_node_output(node_id, default=None, strict=False)
+                    if node_output:
+                        structured_output.update(node_output)
+                final_output = structured_output if structured_output else full_content
+            else:
+                final_output = full_content
+
             # Append messages for user and assistant
             if input_data.get("files"):
                 result["messages"].extend(
@@ -301,7 +316,7 @@ class WorkflowExecutor:
                     self.execution_context,
                     self.variable_pool,
                     elapsed_time,
-                    full_content,
+                    final_output,
                     success=True)
             }
 
