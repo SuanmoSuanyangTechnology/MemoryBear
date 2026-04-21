@@ -3057,6 +3057,7 @@ export const zh = {
       editPackage: '编辑套餐',
 
       viewDetail: '查看完整套餐详情',
+      noLimit: '不限制',
     },
   },
 }

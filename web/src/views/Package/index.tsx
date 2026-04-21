@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-04-14 11:34:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-16 17:23:49
+ * @Last Modified time: 2026-04-21 15:45:30
  */
 /**
  * Package Component
@@ -60,7 +60,7 @@ const btnClassNames = {
   default: 'rb:h-10! rb:rounded-[8px]! rb:bg-[#212332]! rb:text-white! rb:border-0! rb:hover:border-0! rb:hover:opacity-[0.8]',
 }
 
-export const UnitWrapper = ({ titleKey, value, icon, unit, theme_color = '#171719' }: { titleKey: string; value: number | string; icon: string; unit?: string; theme_color?: string; }) => {
+export const UnitWrapper = ({ titleKey, value, icon, unit, theme_color = '#171719' }: { titleKey: string; value?: number | string | null; icon: string; unit?: string; theme_color?: string; }) => {
   const { t } = useTranslation();
 
   const renderFeatureIcon = (iconKey: string, color: string) => {
@@ -78,7 +78,7 @@ export const UnitWrapper = ({ titleKey, value, icon, unit, theme_color = '#17171
       >{renderFeatureIcon(icon, theme_color)}</Flex>
       <div className="rb:text-[13px] rb:leading-4.5">
         <div className="rb:text-[#5F6266]">{t(`package.${titleKey}`)}</div>
-        <div>{value} {unit ? t(`package.${unit}`) : ''}</div>
+        {value ? <div>{value} {unit ? t(`package.${unit}`) : ''}</div> : <div>{t('package.noLimit')}</div>}
       </div>
     </Flex>
   )
@@ -252,7 +252,6 @@ const Package: FC = () => {
                     >
                       {billingUnits.map(({ key, unit, icon }) => {
                         const value = pkg?.quotas?.[key as keyof Package['quotas']];
-                        if (value === undefined || value === null) return null;
                         return (
                           <UnitWrapper
                             key={key}
@@ -264,7 +263,7 @@ const Package: FC = () => {
                           />
                         )
                       })}
-                      {pkg.tech_support && (
+                      {pkg.tech_support && pkg[getKeyWithLanguage('tech_support')] && (
                         <UnitWrapper
                             titleKey="tech_support"
                             value={String(pkg[getKeyWithLanguage('tech_support')] ?? '')}
@@ -272,7 +271,7 @@ const Package: FC = () => {
                             theme_color={pkg.theme_color}
                           />
                       )}
-                      {pkg.sla_compliance && (
+                      {pkg.sla_compliance && pkg[getKeyWithLanguage('sla_compliance')] && (
                         <UnitWrapper
                           titleKey="sla"
                           value={String(pkg[getKeyWithLanguage('sla_compliance')] ?? '')}
