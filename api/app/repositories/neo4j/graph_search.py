@@ -1,25 +1,20 @@
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, List, Optional, Coroutine
 
+import numpy as np
+
+from app.core.memory.enums import Neo4jNodeType
+from app.core.memory.llm_tools import OpenAIEmbedderClient
 from app.core.memory.utils.data.text_utils import escape_lucene_query
+from app.core.models import RedBearEmbeddings
 from app.repositories.neo4j.cypher_queries import (
-    CHUNK_EMBEDDING_SEARCH,
-    COMMUNITY_EMBEDDING_SEARCH,
-    ENTITY_EMBEDDING_SEARCH,
     EXPAND_COMMUNITY_STATEMENTS,
-    MEMORY_SUMMARY_EMBEDDING_SEARCH,
-    PERCEPTUAL_EMBEDDING_SEARCH,
     SEARCH_CHUNK_BY_CHUNK_ID,
-    SEARCH_CHUNKS_BY_CONTENT,
-    SEARCH_COMMUNITIES_BY_KEYWORD,
     SEARCH_DIALOGUE_BY_DIALOG_ID,
     SEARCH_ENTITIES_BY_NAME,
-    SEARCH_ENTITIES_BY_NAME_OR_ALIAS,
-    SEARCH_MEMORY_SUMMARIES_BY_KEYWORD,
-    SEARCH_PERCEPTUAL_BY_KEYWORD,
     SEARCH_STATEMENTS_BY_CREATED_AT,
-    SEARCH_STATEMENTS_BY_KEYWORD,
     SEARCH_STATEMENTS_BY_KEYWORD_TEMPORAL,
     SEARCH_STATEMENTS_BY_TEMPORAL,
     SEARCH_STATEMENTS_BY_VALID_AT,
@@ -27,13 +22,45 @@ from app.repositories.neo4j.cypher_queries import (
     SEARCH_STATEMENTS_G_VALID_AT,
     SEARCH_STATEMENTS_L_CREATED_AT,
     SEARCH_STATEMENTS_L_VALID_AT,
-    STATEMENT_EMBEDDING_SEARCH,
+    SEARCH_PERCEPTUALS_BY_KEYWORD,
+    SEARCH_PERCEPTUAL_BY_IDS,
+    SEARCH_PERCEPTUAL_BY_USER_ID,
+    FULLTEXT_QUERY_CYPHER_MAPPING,
+    USER_ID_QUERY_CYPHER_MAPPING,
+    NODE_ID_QUERY_CYPHER_MAPPING
 )
 
-# 使用新的仓储层
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 logger = logging.getLogger(__name__)
+
+
+def cosine_similarity_search(
+        query: list[float],
+        vectors: list[list[float]],
+        limit: int
+) -> dict[int, float]:
+    if not vectors:
+        return {}
+    vectors: np.ndarray = np.array(vectors, dtype=np.float32)
+    vectors_norm = vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
+    query: np.ndarray = np.array(query, dtype=np.float32)
+    norm = np.linalg.norm(query)
+    if norm == 0:
+        return {}
+    query_norm = query / norm
+
+    similarities = vectors_norm @ query_norm
+    similarities = np.clip(similarities, 0, 1)
+    top_k = min(limit, similarities.shape[0])
+    if top_k <= 0:
+        return {}
+    top_indices = np.argpartition(-similarities, top_k - 1)[:top_k]
+    top_indices = top_indices[np.argsort(-similarities[top_indices])]
+    result = {}
+    for idx in top_indices:
+        result[idx] = float(similarities[idx])
+    return result
 
 
 async def _update_activation_values_batch(
@@ -145,7 +172,10 @@ async def _update_search_results_activation(
     knowledge_node_types = {
         'statements': 'Statement',
         'entities': 'ExtractedEntity',
-        'summaries': 'MemorySummary'
+        'summaries': 'MemorySummary',
+        Neo4jNodeType.STATEMENT: Neo4jNodeType.STATEMENT.value,
+        Neo4jNodeType.EXTRACTEDENTITY: Neo4jNodeType.EXTRACTEDENTITY.value,
+        Neo4jNodeType.MEMORYSUMMARY: Neo4jNodeType.MEMORYSUMMARY.value,
     }
 
     # 并行更新所有类型的节点
@@ -222,12 +252,147 @@ async def _update_search_results_activation(
     return updated_results
 
 
+async def search_perceptual_by_fulltext(
+        connector: Neo4jConnector,
+        query: str,
+        end_user_id: Optional[str] = None,
+        limit: int = 10,
+) -> Dict[str, List[Dict[str, Any]]]:
+    try:
+        perceptuals = await connector.execute_query(
+            SEARCH_PERCEPTUALS_BY_KEYWORD,
+            query=escape_lucene_query(query),
+            end_user_id=end_user_id,
+            limit=limit,
+        )
+    except Exception as e:
+        logger.warning(f"search_perceptual: keyword search failed: {e}")
+        perceptuals = []
+
+    # Deduplicate
+    from app.core.memory.src.search import deduplicate_results
+    perceptuals = deduplicate_results(perceptuals)
+
+    return {"perceptuals": perceptuals}
+
+
+async def search_perceptual_by_embedding(
+        connector: Neo4jConnector,
+        embedder_client: OpenAIEmbedderClient,
+        query_text: str,
+        end_user_id: Optional[str] = None,
+        limit: int = 10,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Search Perceptual memory nodes using embedding-based semantic search.
+
+    Uses cosine similarity on summary_embedding via the perceptual_summary_embedding_index.
+
+    Args:
+        connector: Neo4j connector
+        embedder_client: Embedding client with async response() method
+        query_text: Query text to embed
+        end_user_id: Optional user filter
+        limit: Max results
+
+    Returns:
+        Dictionary with 'perceptuals' key containing matched perceptual memory nodes
+    """
+    embeddings = await embedder_client.response([query_text])
+    if not embeddings or not embeddings[0]:
+        logger.warning(f"search_perceptual_by_embedding: embedding generation failed for '{query_text[:50]}'")
+        return {"perceptuals": []}
+
+    embedding = embeddings[0]
+
+    try:
+        perceptuals = await connector.execute_query(
+            SEARCH_PERCEPTUAL_BY_USER_ID,
+            end_user_id=end_user_id,
+        )
+        ids = [item['id'] for item in perceptuals]
+        vectors = [item['summary_embedding'] for item in perceptuals]
+        sim_res = cosine_similarity_search(embedding, vectors, limit=limit)
+        perceptual_res = {
+            ids[idx]: score
+            for idx, score in sim_res.items()
+        }
+        perceptuals = await connector.execute_query(
+            SEARCH_PERCEPTUAL_BY_IDS,
+            ids=list(perceptual_res.keys())
+        )
+        for perceptual in perceptuals:
+            perceptual["score"] = perceptual_res[perceptual["id"]]
+    except Exception as e:
+        logger.warning(f"search_perceptual_by_embedding: vector search failed: {e}")
+        perceptuals = []
+
+    from app.core.memory.src.search import deduplicate_results
+    perceptuals = deduplicate_results(perceptuals)
+
+    return {"perceptuals": perceptuals}
+
+
+def search_by_fulltext(
+        connector: Neo4jConnector,
+        node_type: Neo4jNodeType,
+        end_user_id: str,
+        query: str,
+        limit: int = 10,
+) -> Coroutine[Any, Any, list[dict[str, Any]]]:
+    cypher = FULLTEXT_QUERY_CYPHER_MAPPING[node_type]
+    return connector.execute_query(
+        cypher,
+        json_format=True,
+        end_user_id=end_user_id,
+        query=query,
+        limit=limit,
+    )
+
+
+async def search_by_embedding(
+        connector: Neo4jConnector,
+        node_type: Neo4jNodeType,
+        end_user_id: str,
+        query_embedding: list[float],
+        limit: int = 10,
+) -> list[dict[str, Any]]:
+    try:
+        records = await connector.execute_query(
+            USER_ID_QUERY_CYPHER_MAPPING[node_type],
+            end_user_id=end_user_id,
+        )
+        records = [record for record in records if record and record.get("embedding") is not None]
+        ids = [item['id'] for item in records]
+        vectors = [item['embedding'] for item in records]
+        sim_res = cosine_similarity_search(query_embedding, vectors, limit=limit)
+        records_score_map = {
+            ids[idx]: score
+            for idx, score in sim_res.items()
+        }
+        records = await connector.execute_query(
+            NODE_ID_QUERY_CYPHER_MAPPING[node_type],
+            ids=list(records_score_map.keys()),
+            json_format=True
+        )
+        for record in records:
+            record["score"] = records_score_map[record["id"]]
+    except Exception as e:
+        logger.warning(f"search_graph_by_embedding: vector search failed: {e}, node_type:{node_type.value}",
+                       exc_info=True)
+        records = []
+
+    from app.core.memory.src.search import deduplicate_results
+    records = deduplicate_results(records)
+    return records
+
+
 async def search_graph(
         connector: Neo4jConnector,
         query: str,
         end_user_id: Optional[str] = None,
         limit: int = 50,
-        include: List[str] = None,
+        include: List[Neo4jNodeType] = None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
     Search across Statements, Entities, Chunks, and Summaries using a free-text query.
@@ -251,7 +416,13 @@ async def search_graph(
         Dictionary with search results per category (with updated activation values)
     """
     if include is None:
-        include = ["statements", "chunks", "entities", "summaries"]
+        include = [
+            Neo4jNodeType.STATEMENT,
+            Neo4jNodeType.CHUNK,
+            Neo4jNodeType.EXTRACTEDENTITY,
+            Neo4jNodeType.MEMORYSUMMARY,
+            Neo4jNodeType.PERCEPTUAL
+        ]
 
     # Escape Lucene special characters to prevent query parse errors
     escaped_query = escape_lucene_query(query)
@@ -260,55 +431,9 @@ async def search_graph(
     tasks = []
     task_keys = []
 
-    if "statements" in include:
-        tasks.append(connector.execute_query(
-            SEARCH_STATEMENTS_BY_KEYWORD,
-            json_format=True,
-            query=escaped_query,
-            end_user_id=end_user_id,
-            limit=limit,
-        ))
-        task_keys.append("statements")
-
-    if "entities" in include:
-        tasks.append(connector.execute_query(
-            SEARCH_ENTITIES_BY_NAME_OR_ALIAS,
-            json_format=True,
-            query=escaped_query,
-            end_user_id=end_user_id,
-            limit=limit,
-        ))
-        task_keys.append("entities")
-
-    if "chunks" in include:
-        tasks.append(connector.execute_query(
-            SEARCH_CHUNKS_BY_CONTENT,
-            json_format=True,
-            query=escaped_query,
-            end_user_id=end_user_id,
-            limit=limit,
-        ))
-        task_keys.append("chunks")
-
-    if "summaries" in include:
-        tasks.append(connector.execute_query(
-            SEARCH_MEMORY_SUMMARIES_BY_KEYWORD,
-            json_format=True,
-            query=escaped_query,
-            end_user_id=end_user_id,
-            limit=limit,
-        ))
-        task_keys.append("summaries")
-
-    if "communities" in include:
-        tasks.append(connector.execute_query(
-            SEARCH_COMMUNITIES_BY_KEYWORD,
-            json_format=True,
-            query=escaped_query,
-            end_user_id=end_user_id,
-            limit=limit,
-        ))
-        task_keys.append("communities")
+    for node_type in include:
+        tasks.append(search_by_fulltext(connector, node_type, end_user_id, escaped_query, limit))
+        task_keys.append(node_type.value)
 
     # Execute all queries in parallel
     task_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -324,16 +449,16 @@ async def search_graph(
 
     # Deduplicate results before updating activation values
     # This prevents duplicates from propagating through the pipeline
-    from app.core.memory.src.search import _deduplicate_results
+    from app.core.memory.src.search import deduplicate_results
     for key in results:
         if isinstance(results[key], list):
-            results[key] = _deduplicate_results(results[key])
+            results[key] = deduplicate_results(results[key])
 
     # 更新知识节点的激活值（Statement, ExtractedEntity, MemorySummary）
     # Skip activation updates if only searching summaries (optimization)
     needs_activation_update = any(
         key in include and key in results and results[key]
-        for key in ['statements', 'entities', 'chunks']
+        for key in [Neo4jNodeType.STATEMENT, Neo4jNodeType.EXTRACTEDENTITY, Neo4jNodeType.MEMORYSUMMARY]
     )
 
     if needs_activation_update:
@@ -348,11 +473,11 @@ async def search_graph(
 
 async def search_graph_by_embedding(
         connector: Neo4jConnector,
-        embedder_client,
+        embedder_client: RedBearEmbeddings | OpenAIEmbedderClient,
         query_text: str,
-        end_user_id: Optional[str] = None,
+        end_user_id: str,
         limit: int = 50,
-        include: List[str] = ["statements", "chunks", "entities", "summaries"],
+        include=None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
     Embedding-based semantic search across Statements, Chunks, and Entities.
@@ -365,95 +490,36 @@ async def search_graph_by_embedding(
     - Filters by end_user_id if provided
     - Returns up to 'limit' per included type
     """
-    import time
+    if include is None:
+        include = [
+            Neo4jNodeType.STATEMENT,
+            Neo4jNodeType.CHUNK,
+            Neo4jNodeType.EXTRACTEDENTITY,
+            Neo4jNodeType.MEMORYSUMMARY,
+            Neo4jNodeType.PERCEPTUAL
+        ]
 
-    # Get embedding for the query
-    embed_start = time.time()
-    embeddings = await embedder_client.response([query_text])
-    embed_time = time.time() - embed_start
-    logger.debug(f"[PERF] Embedding generation took: {embed_time:.4f}s")
-
+    if isinstance(embedder_client, RedBearEmbeddings):
+        embeddings = embedder_client.embed_documents([query_text])
+    else:
+        embeddings = await embedder_client.response([query_text])
     if not embeddings or not embeddings[0]:
-        logger.warning(
-            f"search_graph_by_embedding: embedding 生成失败或为空，"
-            f"query='{query_text[:50]}', end_user_id={end_user_id}，向量检索跳过"
-        )
-        return {"statements": [], "chunks": [], "entities": [], "summaries": [], "communities": []}
+        logger.warning(f"search_graph_by_embedding: embedding generation failed for '{query_text[:50]}'")
+        return {search_key: [] for search_key in include}
     embedding = embeddings[0]
 
     # Prepare tasks for parallel execution
     tasks = []
     task_keys = []
 
-    # Statements (embedding)
-    if "statements" in include:
-        tasks.append(connector.execute_query(
-            STATEMENT_EMBEDDING_SEARCH,
-            json_format=True,
-            embedding=embedding,
-            end_user_id=end_user_id,
-            limit=limit,
-        ))
-        task_keys.append("statements")
+    for node_type in include:
+        tasks.append(search_by_embedding(connector, node_type, end_user_id, embedding, limit*2))
+        task_keys.append(node_type.value)
 
-    # Chunks (embedding)
-    if "chunks" in include:
-        tasks.append(connector.execute_query(
-            CHUNK_EMBEDDING_SEARCH,
-            json_format=True,
-            embedding=embedding,
-            end_user_id=end_user_id,
-            limit=limit,
-        ))
-        task_keys.append("chunks")
-
-    # Entities
-    if "entities" in include:
-        tasks.append(connector.execute_query(
-            ENTITY_EMBEDDING_SEARCH,
-            json_format=True,
-            embedding=embedding,
-            end_user_id=end_user_id,
-            limit=limit,
-        ))
-        task_keys.append("entities")
-
-    # Memory summaries
-    if "summaries" in include:
-        tasks.append(connector.execute_query(
-            MEMORY_SUMMARY_EMBEDDING_SEARCH,
-            json_format=True,
-            embedding=embedding,
-            end_user_id=end_user_id,
-            limit=limit,
-        ))
-        task_keys.append("summaries")
-
-    # Communities (向量语义匹配)
-    if "communities" in include:
-        tasks.append(connector.execute_query(
-            COMMUNITY_EMBEDDING_SEARCH,
-            json_format=True,
-            embedding=embedding,
-            end_user_id=end_user_id,
-            limit=limit,
-        ))
-        task_keys.append("communities")
-
-    # Execute all queries in parallel
-    query_start = time.time()
     task_results = await asyncio.gather(*tasks, return_exceptions=True)
-    query_time = time.time() - query_start
-    logger.debug(f"[PERF] Neo4j queries (parallel) took: {query_time:.4f}s")
 
     # Build results dictionary
-    results: Dict[str, List[Dict[str, Any]]] = {
-        "statements": [],
-        "chunks": [],
-        "entities": [],
-        "summaries": [],
-        "communities": [],
-    }
+    results: Dict[str, List[Dict[str, Any]]] = {}
 
     for key, result in zip(task_keys, task_results):
         if isinstance(result, Exception):
@@ -464,16 +530,16 @@ async def search_graph_by_embedding(
 
     # Deduplicate results before updating activation values
     # This prevents duplicates from propagating through the pipeline
-    from app.core.memory.src.search import _deduplicate_results
+    from app.core.memory.src.search import deduplicate_results
     for key in results:
         if isinstance(results[key], list):
-            results[key] = _deduplicate_results(results[key])
+            results[key] = deduplicate_results(results[key])
 
     # 更新知识节点的激活值（Statement, ExtractedEntity, MemorySummary）
     # Skip activation updates if only searching summaries (optimization)
     needs_activation_update = any(
         key in include and key in results and results[key]
-        for key in ['statements', 'entities', 'chunks']
+        for key in [Neo4jNodeType.STATEMENT, Neo4jNodeType.EXTRACTEDENTITY, Neo4jNodeType.MEMORYSUMMARY]
     )
 
     if needs_activation_update:
@@ -751,12 +817,12 @@ async def search_graph_community_expand(
             expanded.extend(result)
 
     # 按 activation_value 全局排序后去重
-    from app.core.memory.src.search import _deduplicate_results
+    from app.core.memory.src.search import deduplicate_results
     expanded.sort(
         key=lambda x: float(x.get("activation_value") or 0),
         reverse=True,
     )
-    expanded = _deduplicate_results(expanded)
+    expanded = deduplicate_results(expanded)
 
     logger.info(f"社区展开检索完成: community_ids={community_ids}, 展开 statements={len(expanded)}")
     return {"expanded_statements": expanded}
@@ -969,87 +1035,3 @@ async def search_graph_l_valid_at(
     )
 
     return results
-
-
-async def search_perceptual(
-        connector: Neo4jConnector,
-        query: str,
-        end_user_id: Optional[str] = None,
-        limit: int = 10,
-) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Search Perceptual memory nodes using fulltext keyword search.
-
-    Matches against summary, topic, and domain fields via the perceptualFulltext index.
-
-    Args:
-        connector: Neo4j connector
-        query: Query text for full-text search
-        end_user_id: Optional user filter
-        limit: Max results
-
-    Returns:
-        Dictionary with 'perceptuals' key containing matched perceptual memory nodes
-    """
-    try:
-        perceptuals = await connector.execute_query(
-            SEARCH_PERCEPTUAL_BY_KEYWORD,
-            query=escape_lucene_query(query),
-            end_user_id=end_user_id,
-            limit=limit,
-        )
-    except Exception as e:
-        logger.warning(f"search_perceptual: keyword search failed: {e}")
-        perceptuals = []
-
-    # Deduplicate
-    from app.core.memory.src.search import _deduplicate_results
-    perceptuals = _deduplicate_results(perceptuals)
-
-    return {"perceptuals": perceptuals}
-
-
-async def search_perceptual_by_embedding(
-        connector: Neo4jConnector,
-        embedder_client,
-        query_text: str,
-        end_user_id: Optional[str] = None,
-        limit: int = 10,
-) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Search Perceptual memory nodes using embedding-based semantic search.
-
-    Uses cosine similarity on summary_embedding via the perceptual_summary_embedding_index.
-
-    Args:
-        connector: Neo4j connector
-        embedder_client: Embedding client with async response() method
-        query_text: Query text to embed
-        end_user_id: Optional user filter
-        limit: Max results
-
-    Returns:
-        Dictionary with 'perceptuals' key containing matched perceptual memory nodes
-    """
-    embeddings = await embedder_client.response([query_text])
-    if not embeddings or not embeddings[0]:
-        logger.warning(f"search_perceptual_by_embedding: embedding generation failed for '{query_text[:50]}'")
-        return {"perceptuals": []}
-
-    embedding = embeddings[0]
-
-    try:
-        perceptuals = await connector.execute_query(
-            PERCEPTUAL_EMBEDDING_SEARCH,
-            embedding=embedding,
-            end_user_id=end_user_id,
-            limit=limit,
-        )
-    except Exception as e:
-        logger.warning(f"search_perceptual_by_embedding: vector search failed: {e}")
-        perceptuals = []
-
-    from app.core.memory.src.search import _deduplicate_results
-    perceptuals = _deduplicate_results(perceptuals)
-
-    return {"perceptuals": perceptuals}

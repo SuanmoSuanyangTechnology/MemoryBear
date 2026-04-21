@@ -15,13 +15,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.celery_app import celery_app
 from app.core.agent.agent_middleware import AgentMiddleware
 from app.core.agent.langchain_agent import LangChainAgent
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
+from app.core.memory.enums import SearchStrategy
+from app.core.memory.memory_service import MemoryService
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_db_context
 from app.models import AgentConfig, ModelConfig
@@ -29,10 +30,8 @@ from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput, Citation
 from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
-from app.services import task_service
 from app.services.conversation_service import ConversationService
 from app.services.langchain_tool_server import Search
-from app.services.memory_agent_service import MemoryAgentService
 from app.services.model_parameter_merger import ModelParameterMerger
 from app.services.model_service import ModelApiKeyService
 from app.services.multimodal_service import MultimodalService
@@ -107,38 +106,41 @@ def create_long_term_memory_tool(
         logger.info(f" 长期记忆工具被调用！question={question}, user={end_user_id}")
         try:
             with get_db_context() as db:
-                memory_content = asyncio.run(
-                    MemoryAgentService().read_memory(
-                        end_user_id=end_user_id,
-                        message=question,
-                        history=[],
-                        search_switch="2",
-                        config_id=config_id,
-                        db=db,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id
-                    )
-                )
-                task = celery_app.send_task(
-                    "app.core.memory.agent.read_message",
-                    args=[end_user_id, question, [], "1", config_id, storage_type, user_rag_memory_id]
-                )
-                result = task_service.get_task_memory_read_result(task.id)
-                status = result.get("status")
-                logger.info(f"读取任务状态：{status}")
-                if memory_content:
-                    memory_content = memory_content['answer']
-            logger.info(f'用户ID：Agent:{end_user_id}')
-            logger.debug("调用长期记忆 API", extra={"question": question, "end_user_id": end_user_id})
+                memory_service = MemoryService(db, config_id, end_user_id)
+                search_result = asyncio.run(memory_service.read(question, SearchStrategy.QUICK))
 
-            logger.info(
-                "长期记忆检索成功",
-                extra={
-                    "end_user_id": end_user_id,
-                    "content_length": len(str(memory_content))
-                }
-            )
-            return f"检索到以下历史记忆：\n\n{memory_content}"
+            #     memory_content = asyncio.run(
+            #         MemoryAgentService().read_memory(
+            #             end_user_id=end_user_id,
+            #             message=question,
+            #             history=[],
+            #             search_switch="2",
+            #             config_id=config_id,
+            #             db=db,
+            #             storage_type=storage_type,
+            #             user_rag_memory_id=user_rag_memory_id
+            #         )
+            #     )
+            #     task = celery_app.send_task(
+            #         "app.core.memory.agent.read_message",
+            #         args=[end_user_id, question, [], "1", config_id, storage_type, user_rag_memory_id]
+            #     )
+            #     result = task_service.get_task_memory_read_result(task.id)
+            #     status = result.get("status")
+            #     logger.info(f"读取任务状态：{status}")
+            #     if memory_content:
+            #         memory_content = memory_content['answer']
+            # logger.info(f'用户ID：Agent:{end_user_id}')
+            # logger.debug("调用长期记忆 API", extra={"question": question, "end_user_id": end_user_id})
+            #
+            # logger.info(
+            #     "长期记忆检索成功",
+            #     extra={
+            #         "end_user_id": end_user_id,
+            #         "content_length": len(str(memory_content))
+            #     }
+            # )
+            return f"检索到以下历史记忆：\n\n{search_result.content}"
         except Exception as e:
             logger.error("长期记忆检索失败", extra={"error": str(e), "error_type": type(e).__name__})
             return f"记忆检索失败: {str(e)}"

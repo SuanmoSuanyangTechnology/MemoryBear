@@ -6,6 +6,8 @@ import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from app.core.memory.enums import Neo4jNodeType
+
 if TYPE_CHECKING:
     from app.schemas.memory_config_schema import MemoryConfig
 
@@ -131,7 +133,7 @@ def normalize_scores(results: List[Dict[str, Any]], score_field: str = "score") 
     return results
 
 
-def _deduplicate_results(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def deduplicate_results(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Remove duplicate items from search results based on content.
     
@@ -194,7 +196,7 @@ def rerank_with_activation(
         forgetting_config: ForgettingEngineConfig | None = None,
         activation_boost_factor: float = 0.8,
         now: datetime | None = None,
-        content_score_threshold: float = 0.5,
+        content_score_threshold: float = 0.1,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
     两阶段排序：先按内容相关性筛选，再按激活值排序。
@@ -239,7 +241,7 @@ def rerank_with_activation(
 
     reranked: Dict[str, List[Dict[str, Any]]] = {}
 
-    for category in ["statements", "chunks", "entities", "summaries", "communities"]:
+    for category in [Neo4jNodeType.STATEMENT, Neo4jNodeType.CHUNK, Neo4jNodeType.EXTRACTEDENTITY, Neo4jNodeType.MEMORYSUMMARY, Neo4jNodeType.COMMUNITY]:
         keyword_items = keyword_results.get(category, [])
         embedding_items = embedding_results.get(category, [])
 
@@ -405,7 +407,7 @@ def rerank_with_activation(
                     f"items below content_score_threshold={content_score_threshold}"
                 )
 
-        sorted_items = _deduplicate_results(sorted_items)
+        sorted_items = deduplicate_results(sorted_items)
 
         reranked[category] = sorted_items
 
@@ -691,7 +693,7 @@ async def run_hybrid_search(
         search_type: str,
         end_user_id: str | None,
         limit: int,
-        include: List[str],
+        include: List[Neo4jNodeType],
         output_path: str | None,
         memory_config: "MemoryConfig",
         rerank_alpha: float = 0.6,

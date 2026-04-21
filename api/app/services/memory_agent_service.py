@@ -405,7 +405,7 @@ class MemoryAgentService:
             self,
             end_user_id: str,
             message: str,
-            history: List[Dict],
+            history: List[Dict],  # FIXME: unused parameter
             search_switch: str,
             config_id: Optional[uuid.UUID] | int,
             db: Session,
@@ -505,8 +505,8 @@ class MemoryAgentService:
                 initial_state = {
                     "messages": [HumanMessage(content=message)],
                     "search_switch": search_switch,
-                    "end_user_id": end_user_id
-                    , "storage_type": storage_type,
+                    "end_user_id": end_user_id,
+                    "storage_type": storage_type,
                     "user_rag_memory_id": user_rag_memory_id,
                     "memory_config": memory_config}
                 # 获取节点更新信息
@@ -642,6 +642,8 @@ class MemoryAgentService:
                     "answer": summary,
                     "intermediate_outputs": result
                 }
+
+            # TODO: redis search -> answer
         except Exception as e:
             # Ensure proper error handling and logging
             error_msg = f"Read operation failed: {str(e)}"

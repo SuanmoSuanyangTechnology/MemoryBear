@@ -70,6 +70,12 @@ class Neo4jConnector:
             auth=basic_auth(username, password)
         )
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
     async def close(self):
         """关闭数据库连接
         
