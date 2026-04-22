@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>切换</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="工作台-记忆看板-3" transform="translate(-22, -813)" stroke="#171719" stroke-width="1.2">
+            <g id="退出" transform="translate(0, 791)">
+                <g id="返回空间备份" transform="translate(12, 11)">
+                    <g id="切换" transform="translate(10, 11)">
+                        <g id="编组-33" transform="translate(1.5, 3.5)">
+                            <path d="M6.18518092,1.69615364 L4.33333333,0 L8.66666667,0 C11.0599006,0 13,2.0118047 13,4.49349156 C13,5.84177845 12.4273429,7.05137071 11.5204839,7.875" id="路径"></path>
+                            <path d="M1.85184759,2.82115364 L0,1.125 L4.33333333,1.125 C6.72656725,1.125 8.66666667,3.1368047 8.66666667,5.61849156 C8.66666667,6.96677845 8.09400958,8.17637071 7.18715055,9" id="路径" transform="translate(4.3333, 5.0625) scale(-1, -1) translate(-4.3333, -5.0625)"></path>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

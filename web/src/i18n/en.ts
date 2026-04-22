@@ -474,6 +474,7 @@ export const en = {
       view: 'View',
       updated_at: 'Updated At',
       callbackUrlInvalid: 'Please enter a valid URL',
+      switchSpace: 'Switch Space',
     },
     model: {
       searchPlaceholder: 'search model…',
