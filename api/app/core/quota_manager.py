@@ -35,34 +35,16 @@ def _get_workspace_id_from_kwargs(kwargs: dict):
     # 优先从 kwargs['workspace_id'] 获取
     workspace_id = kwargs.get("workspace_id")
     if workspace_id:
-        logger.info(f"_get_workspace_id_from_kwargs: 从 kwargs['workspace_id'] 获取: {workspace_id}")
         return workspace_id
 
-    # 从 current_user.current_workspace_id 获取（管理端接口）
+    # 从 user.current_workspace_id 获取
     user = _get_user_from_kwargs(kwargs)
-    logger.info(f"_get_workspace_id_from_kwargs: user={user}, type={type(user)}")
     if user:
         ws_id = getattr(user, 'current_workspace_id', None)
-        logger.info(f"_get_workspace_id_from_kwargs: user.current_workspace_id={ws_id}")
         if ws_id:
             return ws_id
 
-    # 从 payload/data/body 获取（仅当上述方式都失败时）
-    data = kwargs.get("data") or kwargs.get("body") or kwargs.get("payload")
-    if data and hasattr(data, "workspace_id"):
-        ws_id = data.workspace_id
-        if ws_id:
-            logger.info(f"_get_workspace_id_from_kwargs: 从 payload 获取: {ws_id}")
-            return ws_id
-
-    # 从 api_key_auth 获取（API Key 认证方式）
-    api_key_auth = kwargs.get("api_key_auth")
-    if api_key_auth and hasattr(api_key_auth, 'workspace_id'):
-        ws_id = api_key_auth.workspace_id
-        logger.info(f"_get_workspace_id_from_kwargs: 从 api_key_auth 获取: {ws_id}")
-        return ws_id
-
-    logger.warning(f"_get_workspace_id_from_kwargs: 无法从 kwargs 获取 workspace_id, keys={list(kwargs.keys())}")
+    logger.warning(f"无法获取 workspace_id, kwargs keys: {list(kwargs.keys())}")
     return None
 
 
