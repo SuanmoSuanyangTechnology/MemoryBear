@@ -219,6 +219,7 @@ def delete_app(
 
 @router.post("/{app_id}/copy", summary="复制应用")
 @cur_workspace_access_guard()
+@check_app_quota
 def copy_app(
         app_id: uuid.UUID,
         new_name: Optional[str] = None,
@@ -1144,6 +1145,7 @@ async def import_workflow_config(
 
 @router.post("/workflow/import/save")
 @cur_workspace_access_guard()
+@check_app_quota
 async def save_workflow_import(
         data: WorkflowImportSave,
         db: Session = Depends(get_db),
@@ -1281,6 +1283,10 @@ async def import_app(
         return fail(msg="YAML 格式无效，缺少 app 字段", code=BizCode.BAD_REQUEST)
 
     target_app_id = uuid.UUID(app_id) if app_id else None
+    # 仅新建应用时检查配额，覆盖已有应用时跳过
+    if target_app_id is None:
+        from app.core.quota_manager import _check_quota
+        _check_quota(db, current_user.tenant_id, "app_quota", "app")
     result_app, warnings = AppDslService(db).import_dsl(
         dsl=dsl,
         workspace_id=current_user.current_workspace_id,

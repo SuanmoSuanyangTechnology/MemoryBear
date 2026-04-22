@@ -51,7 +51,7 @@ class ApiKeyService:
             if existing:
                 raise BusinessException(f"API Key 名称 {data.name} 已存在", BizCode.API_KEY_DUPLICATE_NAME)
 
-            # 若 rate_limit 超过租户套餐的 api_ops_rate_limit，自动截断到套餐上限
+            # 若 rate_limit 超过租户套餐的 api_ops_rate_limit，直接报错
             from app.models.workspace_model import Workspace
             from app.core.quota_manager import get_api_ops_rate_limit
 
@@ -59,7 +59,10 @@ class ApiKeyService:
             if workspace:
                 tenant_api_ops_limit = get_api_ops_rate_limit(db, workspace.tenant_id)
                 if tenant_api_ops_limit and data.rate_limit > tenant_api_ops_limit:
-                    data.rate_limit = tenant_api_ops_limit
+                    raise BusinessException(
+                        f"API Key QPS 不能超过套餐上限 {tenant_api_ops_limit}",
+                        BizCode.BAD_REQUEST
+                    )
 
             # 生成 API Key
             api_key = generate_api_key(data.type)
@@ -162,7 +165,7 @@ class ApiKeyService:
             if existing:
                 raise BusinessException(f"API Key 名称 {data.name} 已存在", BizCode.API_KEY_DUPLICATE_NAME)
 
-        # 若 rate_limit 超过租户套餐的 api_ops_rate_limit，自动截断到套餐上限
+        # 若 rate_limit 超过租户套餐的 api_ops_rate_limit，直接报错
         if data.rate_limit is not None:
             from app.models.workspace_model import Workspace
             from app.core.quota_manager import get_api_ops_rate_limit
@@ -171,7 +174,10 @@ class ApiKeyService:
             if workspace:
                 tenant_api_ops_limit = get_api_ops_rate_limit(db, workspace.tenant_id)
                 if tenant_api_ops_limit and data.rate_limit > tenant_api_ops_limit:
-                    data.rate_limit = tenant_api_ops_limit
+                    raise BusinessException(
+                        f"API Key QPS 不能超过套餐上限 {tenant_api_ops_limit}",
+                        BizCode.BAD_REQUEST
+                    )
 
         update_data = data.model_dump(exclude_unset=True)
         ApiKeyRepository.update(db, api_key_id, update_data)
