@@ -2911,6 +2911,12 @@ export const zh = {
       emotion: '情绪',
       core_definition: '核心定义',
       detailed_notes: '详细笔记',
+      episodic_type: '情景类型',
+      conversation: '对话',
+      project_work: '项目/工作',
+      learning: '学习',
+      decision: '决策',
+      important_event: '重要事件',
     },
     workingDetail: {
       conversation: '对话',

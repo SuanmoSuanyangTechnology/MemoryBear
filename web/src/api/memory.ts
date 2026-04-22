@@ -21,6 +21,7 @@ import type {
 import type {
   ConfigForm as SelfReflectionEngineConfig
 } from '@/views/SelfReflectionEngine/types'
+import type { EpisodicMemoryType } from '@/views/UserMemoryDetail/pages/ExplicitDetail'
 import type { TestParams } from '@/views/MemoryConversation'
 import type { EndUser } from '@/views/UserMemoryDetail/types'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
@@ -87,11 +88,11 @@ export const getUserSummary = (end_user_id: string) => {
 export const getNodeStatistics = (end_user_id: string) => {
   return request.get(`/memory-storage/analytics/node_statistics`, { end_user_id })
 }
-// 查询用户别名及信息
+// Get user alias and info
 export const getEndUserInfo = (end_user_id: string) => {
   return request.get(`/memory-storage/end_user_info`, { end_user_id })
 }
-// 更新用户别名及信息
+// Update user alias and info
 export const updatedEndUserInfo = (values: EndUser) => {
   return request.post(`/memory-storage/end_user_info/updated`, values)
 }
@@ -154,7 +155,7 @@ export const analyticsRefresh = (end_user_id: string) => {
 export const getForgetStats = (end_user_id: string) => {
   return request.get(`/memory/forget-memory/stats`, { end_user_id })
 }
-// 获取带遗忘节点列表
+// Get pending forgetting nodes list
 export const getForgetPendingNodesUrl = '/memory/forget-memory/pending-nodes'
 // Implicit Memory - Preferences
 export const getImplicitPreferences = (end_user_id: string) => {
@@ -217,6 +218,22 @@ export const getTimelineMemories = (data: { id: string; label: string; }) => {
 }
 export const getExplicitMemory = (end_user_id: string) => {
   return request.post(`/memory/explicit-memory/overview`, { end_user_id })
+}
+export interface EpisodicMemoryQuery {
+  end_user_id?: string;
+  page?: number;
+  pagesize?: number;
+  start_date?: number;
+  end_date?: number;
+  episodic_type?: EpisodicMemoryType;
+}
+// Explicit Memory - Episodic memory paginated query
+export const getEpisodicMemory = (data: EpisodicMemoryQuery) => {
+  return request.get(`/memory/explicit-memory/episodics`, data)
+}
+// Explicit Memory - Get user semantic memory list
+export const getSemanticsMemory = (end_user_id: string) => {
+  return request.get(`/memory/explicit-memory/semantics`, { end_user_id })
 }
 export const getExplicitMemoryDetails = (data: { end_user_id: string, memory_id: string; }) => {
   return request.post(`/memory/explicit-memory/details`, data)
