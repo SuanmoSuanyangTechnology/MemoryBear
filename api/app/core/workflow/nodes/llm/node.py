@@ -5,7 +5,6 @@ LLM 节点实现
 """
 
 import logging
-import re
 from typing import Any
 
 from langchain_core.messages import AIMessage
@@ -81,7 +80,7 @@ class LLMNode(BaseNode):
 
     def _render_context(self, message: str, variable_pool: VariablePool):
         context = f"<context>{self._render_template(self.typed_config.context, variable_pool)}</context>"
-        return re.sub(r"{{context}}", context, message)
+        return message.replace("{{context}}", context)
 
     async def _prepare_llm(
             self,
