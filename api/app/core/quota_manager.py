@@ -179,11 +179,18 @@ class QuotaUsageRepository:
     def count_end_users(self, tenant_id: UUID) -> int:
         from app.models.end_user_model import EndUser
         from app.models.workspace_model import Workspace
-        return self.db.query(EndUser).join(
+        from app.models.user_model import User
+        trial_user_ids = [
+            str(u.id) for u in self.db.query(User.id).filter(User.tenant_id == tenant_id).all()
+        ]
+        query = self.db.query(EndUser).join(
             Workspace, EndUser.workspace_id == Workspace.id
         ).filter(
             Workspace.tenant_id == tenant_id
-        ).count()
+        )
+        if trial_user_ids:
+            query = query.filter(~EndUser.other_id.in_(trial_user_ids))
+        return query.count()
 
     def count_models(self, tenant_id: UUID) -> int:
         from app.models.models_model import ModelConfig
