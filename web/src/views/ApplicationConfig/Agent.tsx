@@ -62,7 +62,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   const { id } = useParams();
   const { message } = App.useApp()
   const [form] = Form.useForm()
-  const [loading, setLoading] = useState(false)
   const [data, setData] = useState<Config | null>(null);
   const modelConfigModalRef = useRef<ModelConfigModalRef>(null)
   const [modelList, setModelList] = useState<Model[]>([])
@@ -94,7 +93,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
    * Fetch agent configuration data
    */
   const getData = () => {
-    setLoading(true)
     getApplicationConfig(id as string).then(res => {
       const response = res as Config
       const { skills, variables } = response
@@ -127,8 +125,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
         tools: allTools
       })
       onFeaturesLoad?.(response.features)
-    }).finally(() => {
-      setLoading(false)
     })
   }
 
@@ -421,7 +417,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   console.log('agent values', values)
   return (
     <>
-      {loading && <Spin fullscreen></Spin>}
       <Row className="rb:h-full!" gutter={12}>
         <Col span={12} className="rb:h-full!">
           <Form form={form}>

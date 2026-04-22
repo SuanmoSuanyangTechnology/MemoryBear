@@ -3096,7 +3096,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       editPackage: 'Edit Package',
 
       viewDetail: 'View full package details',
-      noLimit: 'Unlimited',
+      noLimit: 'Infinite',
     },
   },
 };
