@@ -37,6 +37,11 @@ def _get_workspace_id_from_kwargs(kwargs: dict):
     if workspace_id:
         return workspace_id
 
+    # 从 api_key_auth.workspace_id 获取（API Key 认证场景）
+    api_key_auth = kwargs.get("api_key_auth")
+    if api_key_auth and hasattr(api_key_auth, 'workspace_id'):
+        return api_key_auth.workspace_id
+
     # 从 user.current_workspace_id 获取
     user = _get_user_from_kwargs(kwargs)
     if user:
