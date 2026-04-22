@@ -178,7 +178,7 @@ export interface EndUser {
   created_at: string;
   updated_at: string;
   profile: {
-    role: string[];
+    role: string[] | string;
     domain: string[];
     expertise: string[];
     interests: string[];
