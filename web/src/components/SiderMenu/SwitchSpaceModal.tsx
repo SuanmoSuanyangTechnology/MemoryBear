@@ -1,15 +1,14 @@
 /*
  * @Author: ZhaoYing 
- * @Date: 2026-02-25 11:45:07 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-27 09:59:41
+ * @Date: 2026-04-22 18:50:14 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-04-22 18:50:14 
  */
 /**
  * SwitchSpaceModal Component
  * 
- * A two-step modal for changing user email address with verification code.
- * Step 1: Enter new email and send verification code
- * Step 2: Confirm the email change
+ * A modal for switching the current workspace.
+ * Displays a dropdown to select a workspace and reloads the page upon confirmation.
  */
 
 import { forwardRef, useImperativeHandle, useState } from 'react';
@@ -77,7 +76,6 @@ const SwitchSpaceModal = forwardRef<SwitchSpaceModalRef>((_props, ref) => {
   /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
     handleOpen,
-    handleClose
   }));
 
   return (
