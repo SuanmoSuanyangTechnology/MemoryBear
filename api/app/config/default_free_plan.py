@@ -60,9 +60,9 @@ def _build_default_free_plan():
             "app_quota": 2,
             "knowledge_capacity_quota": 0.3,
             "memory_engine_quota": 1,
-            "end_user_quota": 1,
+            "end_user_quota": 10,
             "ontology_project_quota": 3,
-            "model_quota": 4,
+            "model_quota": 1,
             "api_ops_rate_limit": 50,
         },
     }

@@ -237,7 +237,6 @@ def delete_model_base(
 
 
 @router.post("/model_plaza/{model_base_id}/add", response_model=ApiResponse)
-@check_model_quota
 def add_model_from_plaza(
     model_base_id: uuid.UUID,
     db: Session = Depends(get_db),
@@ -275,7 +274,6 @@ def get_model_by_id(
 
 
 @router.post("", response_model=ApiResponse)
-@check_model_quota
 async def create_model(
     model_data: model_schema.ModelConfigCreate,
     db: Session = Depends(get_db),

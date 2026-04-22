@@ -228,7 +228,7 @@ def list_conversations(
         from app.models.workspace_model import Workspace
         ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
         if ws:
-            _check_quota(db, ws.tenant_id, "end_user_quota", "end_user")
+            _check_quota(db, ws.tenant_id, "end_user_quota", "end_user", workspace_id=workspace_id)
 
     new_end_user = end_user_repo.get_or_create_end_user(
         app_id=share.app_id,
@@ -370,7 +370,7 @@ async def chat(
             ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
             if ws:
                 logger.info(f"新终端用户，执行配额检查: tenant_id={ws.tenant_id}")
-                _check_quota(db, ws.tenant_id, "end_user_quota", "end_user")
+                _check_quota(db, ws.tenant_id, "end_user_quota", "end_user", workspace_id=workspace_id)
 
         new_end_user = end_user_repo.get_or_create_end_user(
             app_id=share.app_id,

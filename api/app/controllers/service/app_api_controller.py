@@ -114,7 +114,7 @@ async def chat(
         from app.models.workspace_model import Workspace
         ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
         if ws:
-            _check_quota(db, ws.tenant_id, "end_user_quota", "end_user")
+            _check_quota(db, ws.tenant_id, "end_user_quota", "end_user", workspace_id=workspace_id)
 
     new_end_user = end_user_repo.get_or_create_end_user(
         app_id=app.id,
