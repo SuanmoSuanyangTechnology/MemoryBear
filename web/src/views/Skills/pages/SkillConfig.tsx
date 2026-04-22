@@ -182,7 +182,6 @@ const SkillConfig: FC = () => {
               <Form.Item
                 name={['config', 'keywords']}
                 label={t('skills.keywords')}
-                rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('skills.keywords') }) }]}
               >
                 <Select
                   mode="tags"
