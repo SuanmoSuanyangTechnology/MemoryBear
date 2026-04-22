@@ -10,7 +10,7 @@
  */
 
 import React, { useRef } from 'react';
-import { App, Button, Space, Flex } from 'antd';
+import { Button, Space } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
 
@@ -20,13 +20,15 @@ import type { Member, MemberModalRef } from './types'
 import Tag from '@/components/Tag';
 import Table, { type TableRef } from '@/components/Table'
 import { formatDateTime } from '@/utils/format';
+import TablePageLayout from '@/components/TablePageLayout';
+import useDeleteConfirm from '@/hooks/useDeleteConfirm';
 
 /**
  * Member management main component
  */
 const MemberManagement: React.FC = () => {
   const { t } = useTranslation();
-  const { message, modal } = App.useApp();
+  const deleteConfirm = useDeleteConfirm();
   const memberFormRef = useRef<MemberModalRef>(null);
   const tableRef = useRef<TableRef>(null);
 
@@ -43,20 +45,11 @@ const MemberManagement: React.FC = () => {
   }
 
   /** Delete member with confirmation */
-  const handleDelete = async (member: Member) => {
-    modal.confirm({
-      title: t('common.confirmDeleteDesc', { name: member.username }),
-      okText: t('common.delete'),
-      cancelText: t('common.cancel'),
-      okType: 'danger',
-      onOk: () => {
-        deleteMember(member.id)
-          .then(() => {
-            message.success(t('common.deleteSuccess'));
-            refreshTable();
-          })
-      }
-    })
+  const handleDelete = (member: Member) => {
+    deleteConfirm({
+      name: member.username,
+      onOk: () => deleteMember(member.id).then(refreshTable),
+    });
   };
 
   /** Table column configuration */
@@ -105,13 +98,10 @@ const MemberManagement: React.FC = () => {
   ];
 
   return (
-    <div className="rb:h-full rb:overflow-hidden rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
-      <Flex justify="space-between" align="center" className="rb:px-1! rb:mb-3!">
-        <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[#212332] rb:leading-5">{t('member.memberList')}</div>
-        <Button type="primary" onClick={() => handleEdit()}>
-          + {t('member.createMember')}
-        </Button>
-      </Flex>
+    <TablePageLayout
+      title={t('member.memberList')}
+      extra={<Button type="primary" onClick={() => handleEdit()}>+ {t('member.createMember')}</Button>}
+    >
       <Table<Member>
         ref={tableRef}
         apiUrl={memberListUrl}
@@ -125,7 +115,7 @@ const MemberManagement: React.FC = () => {
         ref={memberFormRef}
         refreshTable={refreshTable}
       />
-    </div>
+    </TablePageLayout>
   );
 };
 

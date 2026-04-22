@@ -21,6 +21,7 @@ import StatusTag from '@/components/StatusTag'
 import { deleteUser, enableUser, getUserListUrl } from '@/api/user'
 import ResetPasswordModal from './components/ResetPasswordModal'
 import { formatDateTime } from '@/utils/format';
+import TablePageLayout from '@/components/TablePageLayout';
 
 const UserManagement: React.FC = () => {
   const { t } = useTranslation();
@@ -142,14 +143,10 @@ const UserManagement: React.FC = () => {
   ];
 
   return (
-    <div className="rb:h-full rb:overflow-hidden rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
-      <Flex justify="space-between" align="center" className="rb:px-1! rb:mb-3!">
-        <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[#212332] rb:leading-5">{t('user.userList')}</div>
-        <Button type="primary" onClick={handleCreate}>
-          + {t('user.createUser')}
-        </Button>
-      </Flex>
-
+    <TablePageLayout
+      title={t('user.userList')}
+      extra={<Button type="primary" onClick={handleCreate}>+ {t('user.createUser')}</Button>}
+    >
       <Table<User>
         ref={tableRef}
         apiUrl={getUserListUrl}
@@ -169,7 +166,7 @@ const UserManagement: React.FC = () => {
       <ResetPasswordModal
         ref={resetPasswordModalRef}
       />
-    </div>
+    </TablePageLayout>
   );
 };
 
