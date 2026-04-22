@@ -1,8 +1,8 @@
 from app.core.memory.enums import SearchStrategy, StorageType
 from app.core.memory.models.service_models import MemorySearchResult
 from app.core.memory.pipelines.base_pipeline import ModelClientMixin, DBRequiredPipeline
-from app.core.memory.read_services.content_search import Neo4jSearchService, RAGSearchService
-from app.core.memory.read_services.query_preprocessor import QueryPreprocessor
+from core.memory.read_services.search_engine.content_search import Neo4jSearchService, RAGSearchService
+from core.memory.read_services.generate_engine.query_preprocessor import QueryPreprocessor
 
 
 class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):

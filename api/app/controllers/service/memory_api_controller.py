@@ -86,7 +86,7 @@ async def write_memory(
         user_rag_memory_id=payload.user_rag_memory_id,
     )
 
-    logger.info(f"Memory write task submitted: task_id={result['task_id']}, end_user_id: {payload.end_user_id}")
+    logger.info(f"Memory write task submitted: end_user_id: {payload.end_user_id}")
     return success(data=MemoryWriteResponse(**result).model_dump(), msg="Memory write task submitted")
 
 

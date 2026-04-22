@@ -34,7 +34,7 @@ from app.core.rag.prompts.generator import question_proposal
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
 )
-from app.db import get_db, get_db_context
+from app.db import get_db_context
 from app.models import Document, File, Knowledge
 from app.models.end_user_model import EndUser
 from app.schemas import document_schema, file_schema
@@ -1993,7 +1993,7 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
             end_users = db.query(EndUser).all()
             if not end_users:
                 logger.info("没有终端用户，跳过遗忘周期")
-                return {"status": "SUCCESS", "message": "没有终端用户", 
+                return {"status": "SUCCESS", "message": "没有终端用户",
                         "report": {"merged_count": 0, "failed_count": 0, "processed_users": 0},
                         "duration_seconds": time.time() - start_time}
 
@@ -2007,7 +2007,7 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
                     # 获取用户配置（自动回退到工作空间默认配置）
                     connected_config = get_end_user_connected_config(str(end_user.id), db)
                     user_config_id = resolve_config_id(connected_config.get("memory_config_id"), db)
-                    
+
                     if not user_config_id:
                         failed_users.append({"end_user_id": str(end_user.id), "error": "无法获取配置"})
                         continue
@@ -2016,13 +2016,13 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
                     report = await forget_service.trigger_forgetting_cycle(
                         db=db, end_user_id=str(end_user.id), config_id=user_config_id
                     )
-                    
+
                     total_merged += report.get('merged_count', 0)
                     total_failed += report.get('failed_count', 0)
                     processed_users += 1
-                    
+
                     logger.info(f"用户 {end_user.id}: 融合 {report.get('merged_count', 0)} 对节点")
-                    
+
                 except Exception as e:
                     logger.error(f"处理用户 {end_user.id} 失败: {e}", exc_info=True)
                     failed_users.append({"end_user_id": str(end_user.id), "error": str(e)})
@@ -2769,18 +2769,18 @@ def run_incremental_clustering(
         包含任务执行结果的字典
     """
     start_time = time.time()
-    
+
     async def _run() -> Dict[str, Any]:
         from app.core.logging_config import get_logger
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         from app.core.memory.storage_services.clustering_engine.label_propagation import LabelPropagationEngine
-        
+
         logger = get_logger(__name__)
         logger.info(
             f"[IncrementalClustering] 开始增量聚类任务 - end_user_id={end_user_id}, "
             f"实体数={len(new_entity_ids)}, llm_model_id={llm_model_id}"
         )
-        
+
         connector = Neo4jConnector()
         try:
             engine = LabelPropagationEngine(
@@ -2788,12 +2788,12 @@ def run_incremental_clustering(
                 llm_model_id=llm_model_id,
                 embedding_model_id=embedding_model_id,
             )
-            
+
             # 执行增量聚类
             await engine.run(end_user_id=end_user_id, new_entity_ids=new_entity_ids)
-            
+
             logger.info(f"[IncrementalClustering] 增量聚类完成 - end_user_id={end_user_id}")
-            
+
             return {
                 "status": "SUCCESS",
                 "end_user_id": end_user_id,
@@ -2804,18 +2804,18 @@ def run_incremental_clustering(
             raise
         finally:
             await connector.close()
-    
+
     try:
         loop = set_asyncio_event_loop()
         result = loop.run_until_complete(_run())
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
-        
+
         logger.info(
             f"[IncrementalClustering] 任务完成 - task_id={self.request.id}, "
             f"elapsed_time={result['elapsed_time']:.2f}s"
         )
-        
+
         return result
     except Exception as e:
         elapsed_time = time.time() - start_time

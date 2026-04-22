@@ -11,7 +11,7 @@ from app.core.workflow.variable.base_variable import VariableType
 from app.core.workflow.variable.variable_objects import FileVariable, ArrayVariable
 from app.db import get_db_read
 from app.schemas import FileInput
-from app.tasks import write_message_task
+from celery_task_scheduler import scheduler
 
 
 class MemoryReadNode(BaseNode):
@@ -126,12 +126,23 @@ class MemoryWriteNode(BaseNode):
                 "files": file_info
             })
 
-        write_message_task.delay(
-            end_user_id=end_user_id,
-            message=messages,
-            config_id=str(self.typed_config.config_id),
-            storage_type=state["memory_storage_type"],
-            user_rag_memory_id=state["user_rag_memory_id"]
+        scheduler.push_task(
+            "app.core.memory.agent.write_message",
+            end_user_id,
+            {
+                "end_user_id": end_user_id,
+                "message": messages,
+                "config_id": str(self.typed_config.config_id),
+                "storage_type": state["memory_storage_type"],
+                "user_rag_memory_id": state["user_rag_memory_id"]
+            }
         )
+        # write_message_task.delay(
+        #     end_user_id=end_user_id,
+        #     message=messages,
+        #     config_id=str(self.typed_config.config_id),
+        #     storage_type=state["memory_storage_type"],
+        #     user_rag_memory_id=state["user_rag_memory_id"]
+        # )
 
         return "success"

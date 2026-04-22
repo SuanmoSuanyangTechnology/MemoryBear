@@ -8,7 +8,7 @@ from neo4j import Session
 from app.core.memory.enums import Neo4jNodeType
 from app.core.memory.memory_service import MemoryContext
 from app.core.memory.models.service_models import Memory, MemorySearchResult
-from app.core.memory.read_services.result_builder import data_builder_factory
+from core.memory.read_services.search_engine.result_builder import data_builder_factory
 from app.core.models import RedBearEmbeddings
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.repositories import knowledge_repository
