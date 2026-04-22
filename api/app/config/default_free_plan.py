@@ -62,7 +62,7 @@ def _build_default_free_plan():
             "memory_engine_quota": 1,
             "end_user_quota": 1,
             "ontology_project_quota": 3,
-            "model_quota": 1,
+            "model_quota": 4,
             "api_ops_rate_limit": 50,
         },
     }
