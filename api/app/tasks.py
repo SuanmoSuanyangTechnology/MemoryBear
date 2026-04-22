@@ -268,18 +268,21 @@ def parse_document(file_path: str, document_id: uuid.UUID):
             try:
                 with open(file_path, "rb") as f:
                     file_binary = f.read()
+                if not file_binary:
+                    # NFS 上文件存在但内容为空（可能还在同步中）
+                    raise IOError(f"File is empty (0 bytes), NFS may still be syncing: {file_path}")
                 break
-            except FileNotFoundError:
+            except (FileNotFoundError, IOError) as e:
                 if waited >= max_wait_seconds:
-                    raise FileNotFoundError(
-                        f"File not found at '{file_path}' after waiting {max_wait_seconds}s "
-                        f"(NFS cache may be stale)"
+                    raise type(e)(
+                        f"File not accessible at '{file_path}' after waiting {max_wait_seconds}s: {e}"
                     )
-                logger.warning(f"File not visible yet on this node, retrying in {wait_interval}s: {file_path}")
+                logger.warning(f"File not ready on this node, retrying in {wait_interval}s: {file_path} ({e})")
                 time.sleep(wait_interval)
                 waited += wait_interval
 
         from app.core.rag.app.naive import chunk
+        logger.info(f"[ParseDoc] file_binary size={len(file_binary)} bytes, type={type(file_binary).__name__}, bool={bool(file_binary)}")
         res = chunk(filename=file_path,
                     binary=file_binary,
                     from_page=0,
