@@ -68,14 +68,14 @@ const Chat: FC<ChatProps> = ({
   const [loading, setLoading] = useState(false)
   const [isCluster, setIsCluster] = useState(source === 'multi_agent')
   const [conversationId, setConversationId] = useState<string | null>(null)
-  const [compareLoading, setCompareLoading] = useState(false)
+  const compareLoadingRef = useRef(false)
   const [fileList, setFileList] = useState<any[]>([])
   const [message, setMessage] = useState<string | undefined>(undefined)
   const [features, setFeatures] = useState<FeaturesConfigForm>({} as FeaturesConfigForm)
   const [audioStatusMap, setAudioStatusMap] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    setCompareLoading(false)
+    compareLoadingRef.current = false
     setLoading(false)
     return () => {
       audioPollingRef.current.forEach(timer => clearInterval(timer))
@@ -254,7 +254,7 @@ const Chat: FC<ChatProps> = ({
   const handleSend = (msg?: string) => {
     if (loading || !id) return
     setLoading(true)
-    setCompareLoading(true)
+    compareLoadingRef.current = true
     const files = (fileList || []).filter(item => !['uploading', 'error'].includes(item.status))
     handleSave(false)
       .then(() => {
@@ -280,7 +280,7 @@ const Chat: FC<ChatProps> = ({
         }
         if (!isCanSend) {
           setLoading(false)
-          setCompareLoading(false)
+          compareLoadingRef.current = false
           return
         }
 
@@ -305,20 +305,20 @@ const Chat: FC<ChatProps> = ({
             
             switch (item.event) {
               case 'model_reasoning':
-                if (compareLoading) {
-                  setCompareLoading(false)
+                if (compareLoadingRef.current) {
+                  compareLoadingRef.current = false
                 }
                 updateAssistantReasoningMessage(content, model_config_id, conversation_id)
                 break;
               case 'model_message':
-                if (compareLoading) {
-                  setCompareLoading(false)
+                if (compareLoadingRef.current) {
+                  compareLoadingRef.current = false
                 }
                 updateAssistantMessage(content, model_config_id, conversation_id, audio_url)
                 break;
               case 'model_end':
-                if (compareLoading) {
-                  setCompareLoading(false)
+                if (compareLoadingRef.current) {
+                  compareLoadingRef.current = false
                 }
                 const idToPoll = `${model_config_id}_${audio_url}`
                 if (audio_url && !audioStatusMap[idToPoll]) {
@@ -360,8 +360,8 @@ const Chat: FC<ChatProps> = ({
                 updateErrorAssistantMessage(message_length, model_config_id)
                 break;
               case 'compare_end':
-                if (compareLoading) {
-                  setCompareLoading(false)
+                if (compareLoadingRef.current) {
+                  compareLoadingRef.current = false
                 }
                 setLoading(false);
                 break;
@@ -396,18 +396,18 @@ const Chat: FC<ChatProps> = ({
           }, handleStreamMessage)
             .catch(() => {
               setLoading(false)
-              setCompareLoading(false)
+              compareLoadingRef.current = false
               updateClusterErrorAssistantMessage(0)
             })
             .finally(() => {
               setLoading(false)
-              setCompareLoading(false)
+              compareLoadingRef.current = false
             })
         }, 0)
       })
       .catch(() => {
         setLoading(false)
-        setCompareLoading(false)
+        compareLoadingRef.current = false
       })
   }
 
@@ -471,7 +471,7 @@ const Chat: FC<ChatProps> = ({
   const handleClusterSend = (msg?: string) => {
     if (loading || !id) return
     setLoading(true)
-    setCompareLoading(true)
+    compareLoadingRef.current = true
     const files = (fileList || []).filter(item => !['uploading', 'error'].includes(item.status))
     handleSave(false)
       .then(() => {
@@ -495,8 +495,8 @@ const Chat: FC<ChatProps> = ({
                 }
                 break
               case 'message':
-                if (compareLoading) {
-                  setCompareLoading(false)
+                if (compareLoadingRef.current) {
+                  compareLoadingRef.current = false
                 }
                 updateClusterAssistantMessage(content)
                 if (conversation_id && conversationId !== conversation_id) {
@@ -504,14 +504,14 @@ const Chat: FC<ChatProps> = ({
                 }
                 break;
               case 'model_end':
-                if (compareLoading) {
-                  setCompareLoading(false)
+                if (compareLoadingRef.current) {
+                  compareLoadingRef.current = false
                 }
                 updateClusterErrorAssistantMessage(message_length)
                 break;
               case 'compare_end':
-                if (compareLoading) {
-                  setCompareLoading(false)
+                if (compareLoadingRef.current) {
+                  compareLoadingRef.current = false
                 }
                 setLoading(false);
                 break;
@@ -541,18 +541,18 @@ const Chat: FC<ChatProps> = ({
           )
             .catch(() => {
               setLoading(false)
-              setCompareLoading(false)
+              compareLoadingRef.current = false
               updateClusterErrorAssistantMessage(0)
             })
             .finally(() => {
               setLoading(false)
-              setCompareLoading(false)
+              compareLoadingRef.current = false
             })
         }, 0)
       })
       .catch(() => {
         setLoading(false)
-        setCompareLoading(false)
+        compareLoadingRef.current = false
       })
   }
 
@@ -622,7 +622,7 @@ const Chat: FC<ChatProps> = ({
                   />}
                   onSend={isCluster ? handleClusterSend : handleSend}
                   data={chat.list || []}
-                  streamLoading={compareLoading}
+                  streamLoading={compareLoadingRef.current}
                   labelPosition="top"
                   labelFormat={(item) => item.role === 'user' ? t('application.you') : chat.label || t(`application.ai`)}
                   errorDesc={t('application.ReplyException')}
