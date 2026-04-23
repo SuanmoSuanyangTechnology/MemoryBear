@@ -132,21 +132,10 @@ class HttpErrorDefaultTemplate(BaseModel):
         description="Default HTTP headers returned on error",
     )
 
-    files: list = Field(
-        default_factory=list,
-        description="Default files list returned on error",
-    )
-
     output: str = Field(
         default="SUCCESS",
         description="HTTP response body",
     )
-
-    curl: str = Field(
-        default="",
-        description="Default curl command returned on error",
-    )
-
 
 class HttpErrorHandleConfig(BaseModel):
     method: HttpErrorHandle = Field(
@@ -280,11 +269,6 @@ class HttpRequestNodeOutput(BaseModel):
     output: str = Field(
         default="SUCCESS",
         description="HTTP response body",
-    )
-
-    curl: str = Field(
-        default="",
-        description="Equivalent curl command for the HTTP request",
     )
 
     # files: list[File] = Field(
