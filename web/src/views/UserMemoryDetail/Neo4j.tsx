@@ -98,8 +98,8 @@ const Neo4j: FC = () => {
               align="center"
               justify="center"
               className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group", {
-                'rb:bg-[#155EEF]': selectedKey === 'userProfile',
-                'rb:hover:bg-[#F0F3F8]': selectedKey !== 'userProfile',
+                'rb:bg-[#171719]': selectedKey === 'userProfile',
+                'rb:hover:bg-[#EBEBEB]': selectedKey !== 'userProfile',
               })}
               onClick={(e) => onOpenChange(e, 'userProfile')}
             >
@@ -113,8 +113,8 @@ const Neo4j: FC = () => {
               align="center"
               justify="center"
               className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group", {
-                'rb:bg-[#155EEF]': selectedKey === 'aboutMe',
-                'rb:hover:bg-[#F0F3F8]': selectedKey !== 'aboutMe',
+                'rb:bg-[#171719]': selectedKey === 'aboutMe',
+                'rb:hover:bg-[#EBEBEB]': selectedKey !== 'aboutMe',
               })}
               onClick={(e) => onOpenChange(e, 'aboutMe')}
             >
@@ -128,8 +128,8 @@ const Neo4j: FC = () => {
               align="center"
               justify="center"
               className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group", {
-                'rb:bg-[#155EEF]': selectedKey === 'interestDistribution',
-                'rb:hover:bg-[#F0F3F8]': selectedKey !== 'interestDistribution',
+                'rb:bg-[#171719]': selectedKey === 'interestDistribution',
+                'rb:hover:bg-[#EBEBEB]': selectedKey !== 'interestDistribution',
               })}
               onClick={(e) => onOpenChange(e, 'interestDistribution')}
             >
@@ -143,8 +143,8 @@ const Neo4j: FC = () => {
               align="center"
               justify="center"
               className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group", {
-                'rb:bg-[#155EEF]': selectedKey === 'memoryInsight',
-                'rb:hover:bg-[#F0F3F8]': selectedKey !== 'memoryInsight',
+                'rb:bg-[#171719]': selectedKey === 'memoryInsight',
+                'rb:hover:bg-[#EBEBEB]': selectedKey !== 'memoryInsight',
               })}
               onClick={(e) => onOpenChange(e, 'memoryInsight')}
             >
