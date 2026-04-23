@@ -1282,7 +1282,7 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     }
 
     logger.info(
-        f"Successfully retrieved connected config: memory_config_id={memory_config_id}, workspace_id={app.workspace_id}")
+        f"Successfully retrieved connected config: memory_config_id={memory_config_id}, workspace_id={end_user.workspace_id}")
     return result
 
 

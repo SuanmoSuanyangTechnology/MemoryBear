@@ -11,6 +11,7 @@ from app.core.workflow.nodes.tool.config import ToolNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_db_read
 from app.services.tool_service import ToolService
+from app.models.tool_model import ToolType
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,18 @@ class ToolNode(BaseNode):
         # 执行工具
         with get_db_read() as db:
             tool_service = ToolService(db)
+
+            # MCP 工具：将 operation 映射为 tool_name，其余参数包装进 arguments
+            tool_instance = tool_service.get_tool_instance(self.typed_config.tool_id, tenant_id)
+            if tool_instance and tool_instance.tool_type == ToolType.MCP:
+                operation = rendered_parameters.pop("operation", None)
+                if operation:
+                    old_params = rendered_parameters
+                    rendered_parameters = {
+                        "tool_name": operation,
+                        "arguments": old_params
+                    }
+
             result = await tool_service.execute_tool(
                 tool_id=self.typed_config.tool_id,
                 parameters=rendered_parameters,

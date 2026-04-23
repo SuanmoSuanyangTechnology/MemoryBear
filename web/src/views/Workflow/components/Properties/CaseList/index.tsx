@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:24:53 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-17 20:47:49
+ * @Last Modified time: 2026-04-20 10:46:05
  */
 import { useEffect, useMemo, type FC } from 'react'
 import clsx from 'clsx'
@@ -39,7 +39,7 @@ interface Expression {
   sub_variable_condition?: SubVariableCondition;
 }
 
-interface CaseItem {
+export interface CaseItem {
   logical_operator: 'and' | 'or';
   expressions: Expression[];
 }
@@ -274,7 +274,9 @@ const ArrayFileSubConditions: FC<ArrayFileSubConditionsProps> = ({ conditionFiel
                                       className="rb:w-full!"
                                       suffix="Byte"
                                       size="small"
-                                      onChange={(value) => { form.setFieldValue([name, caseIndex, 'expressions', conditionIndex, 'right'], value); }}
+                                      onChange={(value) => {
+                                        form.setFieldValue([name, caseIndex, 'expressions', conditionIndex, 'sub_variable_condition', 'conditions', subIndex, 'value'], value);
+                                      }}
                                     />
                                   }
                                 </Form.Item>
@@ -483,13 +485,24 @@ const CaseList: FC<CaseListProps> = ({
     form.setFieldValue([name, index, 'logical_operator'], currentValue === 'and' ? 'or' : 'and');
   };
 
-  const handleLeftFieldChange = (caseIndex: number, conditionIndex: number, newValue: string) => {
-    form.setFieldValue([name, caseIndex, 'expressions', conditionIndex], {
-      left: newValue,
-      operator: undefined,
-      right: undefined,
-      input_type: 'constant'
-    });
+  const handleLeftFieldChange = (caseIndex: number, conditionIndex: number, newValue: string, option?: Suggestion | undefined) => {
+    if (option?.dataType === 'array[file]') {
+      form.setFieldValue([name, caseIndex, 'expressions', conditionIndex], {
+        left: newValue,
+        operator: undefined,
+        sub_variable_condition: {
+          conditions: [],
+          logical_operator: 'and'
+        }
+      });
+    } else {
+      form.setFieldValue([name, caseIndex, 'expressions', conditionIndex], {
+        left: newValue,
+        operator: undefined,
+        right: undefined,
+        input_type: 'constant'
+      });
+    }
   };
 
   const handleAddCase = (addCaseFunc: Function) => {
@@ -590,7 +603,7 @@ const CaseList: FC<CaseListProps> = ({
                                             options={options}
                                             size="small"
                                             allowClear={false}
-                                            onChange={(val) => handleLeftFieldChange(caseIndex, conditionIndex, val as string)}
+                                            onChange={(val, option) => handleLeftFieldChange(caseIndex, conditionIndex, val as string, option as unknown as Suggestion)}
                                             variant="borderless"
                                             className="rb:w-36!"
                                           />

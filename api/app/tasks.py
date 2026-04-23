@@ -251,8 +251,40 @@ def parse_document(file_path: str, document_id: uuid.UUID):
         # Prepare vision_model for parsing
         vision_model = _build_vision_model(file_path, db_knowledge)
 
+        # 先将文件读入内存，避免解析过程中依赖 NFS 文件持续可访问
+        # python-docx 等库在 binary=None 时会用路径直接打开文件，
+        # 在 NFS/共享存储上可能因缓存失效导致 "Package not found"
+        max_wait_seconds = 30
+        wait_interval = 2
+        waited = 0
+        file_binary = None
+        while waited <= max_wait_seconds:
+            # os.listdir 强制 NFS 客户端刷新目录缓存
+            parent_dir = os.path.dirname(file_path)
+            try:
+                os.listdir(parent_dir)
+            except OSError:
+                pass
+            try:
+                with open(file_path, "rb") as f:
+                    file_binary = f.read()
+                if not file_binary:
+                    # NFS 上文件存在但内容为空（可能还在同步中）
+                    raise IOError(f"File is empty (0 bytes), NFS may still be syncing: {file_path}")
+                break
+            except (FileNotFoundError, IOError) as e:
+                if waited >= max_wait_seconds:
+                    raise type(e)(
+                        f"File not accessible at '{file_path}' after waiting {max_wait_seconds}s: {e}"
+                    )
+                logger.warning(f"File not ready on this node, retrying in {wait_interval}s: {file_path} ({e})")
+                time.sleep(wait_interval)
+                waited += wait_interval
+
         from app.core.rag.app.naive import chunk
+        logger.info(f"[ParseDoc] file_binary size={len(file_binary)} bytes, type={type(file_binary).__name__}, bool={bool(file_binary)}")
         res = chunk(filename=file_path,
+                    binary=file_binary,
                     from_page=0,
                     to_page=DEFAULT_PARSE_TO_PAGE,
                     callback=progress_callback,

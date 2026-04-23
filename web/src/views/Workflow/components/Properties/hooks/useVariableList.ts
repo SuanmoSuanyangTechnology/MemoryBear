@@ -393,18 +393,19 @@ export const useVariableList = (
     // Add chat variables
     chatVariables?.forEach(v => addVariable(list, keys, `CONVERSATION_${v.name}`, v.name, v.type, `conv.${v.name}`, { type: 'CONVERSATION', name: 'CONVERSATION', icon: '' }, { group: 'CONVERSATION' }));
 
-    // Process each relevant node: non-list-operator first, then list-operator
-    const listOperatorIds: string[] = [];
+    // Process each relevant node: deferred types last (they depend on prior variables)
+    const deferredIds: string[] = [];
     relevantIds.forEach(id => {
       const node = nodes.find(n => n.id === id);
       if (!node) return;
-      if (node.getData()?.type === 'list-operator') {
-        listOperatorIds.push(id);
+      const t = node.getData()?.type;
+      if (['var-aggregator', 'list-operator', 'iteration'].includes(t)) {
+        deferredIds.push(id);
       } else {
         processNodeVariables(node.getData(), node.getData().id, list, keys);
       }
     });
-    listOperatorIds.forEach(id => {
+    deferredIds.forEach(id => {
       const node = nodes.find(n => n.id === id);
       if (node) processNodeVariables(node.getData(), node.getData().id, list, keys);
     });

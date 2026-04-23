@@ -113,7 +113,7 @@ def knowledge_retrieval(
                 continue
 
         # Use the specified reranker for re-ranking
-        if reranker_id:
+        if reranker_id and all_results:
             try:
                 all_results = rerank(db=db, reranker_id=reranker_id, query=query, docs=all_results, top_k=reranker_top_k)
             except Exception as rerank_error:

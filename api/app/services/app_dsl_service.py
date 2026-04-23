@@ -434,19 +434,37 @@ class AppDslService:
     def _resolve_model(self, ref: Optional[dict], tenant_id: uuid.UUID, warnings: list) -> Optional[uuid.UUID]:
         if not ref:
             return None
-        q = self.db.query(ModelConfig).filter(
-            ModelConfig.tenant_id == tenant_id,
-            ModelConfig.name == ref.get("name"),
-            ModelConfig.is_active.is_(True)
-        )
-        if ref.get("provider"):
-            q = q.filter(ModelConfig.provider == ref["provider"])
-        if ref.get("type"):
-            q = q.filter(ModelConfig.type == ref["type"])
-        m = q.first()
-        if not m:
-            warnings.append(f"模型 '{ref.get('name')}' 未匹配，已置空，请导入后手动配置")
-        return m.id if m else None
+        model_id = ref.get("id")
+        if model_id:
+            try:
+                model_uuid = uuid.UUID(str(model_id))
+                m = self.db.query(ModelConfig).filter(
+                    ModelConfig.id == model_uuid,
+                    ModelConfig.tenant_id == tenant_id,
+                    ModelConfig.is_active.is_(True)
+                ).first()
+                if m:
+                    return str(m.id)
+            except (ValueError, AttributeError):
+                pass
+        model_name = ref.get("name")
+        if model_name:
+            q = self.db.query(ModelConfig).filter(
+                ModelConfig.tenant_id == tenant_id,
+                ModelConfig.name == model_name,
+                ModelConfig.is_active.is_(True)
+            )
+            if ref.get("provider"):
+                q = q.filter(ModelConfig.provider == ref["provider"])
+            if ref.get("type"):
+                q = q.filter(ModelConfig.type == ref["type"])
+            m = q.first()
+            if m:
+                return str(m.id)
+            warnings.append(f"模型 '{model_name}' 未匹配，已置空，请导入后手动配置")
+        else:
+            warnings.append(f"模型 ID '{model_id}' 未匹配，已置空，请导入后手动配置")
+        return None
 
     def _resolve_kb(self, ref: Optional[dict], workspace_id: uuid.UUID, warnings: list) -> Optional[str]:
         if not ref:
@@ -587,7 +605,7 @@ class AppDslService:
                     if not kb_id:
                         continue
                     kb_ref = {}
-                    if isinstance(kb_id, str) and len(kb_id) >= 36:
+                    if isinstance(kb_id, str):
                         try:
                             uuid.UUID(kb_id)
                             kb_ref["id"] = kb_id
@@ -601,6 +619,33 @@ class AppDslService:
                     else:
                         warnings.append(f"[{node_label}] 知识库 '{kb_id}' 未匹配，已移除，请导入后手动配置")
                 config["knowledge_bases"] = resolved_kbs
+            elif node_type in (NodeType.LLM.value, NodeType.QUESTION_CLASSIFIER.value, NodeType.PARAMETER_EXTRACTOR.value):
+                model_ref = config.get("model_id")
+                if model_ref:
+                    ref_dict = None
+                    if isinstance(model_ref, dict):
+                        ref_id = model_ref.get("id")
+                        ref_name = model_ref.get("name")
+                        if ref_id:
+                            ref_dict = {"id": ref_id}
+                        elif ref_name is not None:
+                            ref_dict = {"name": ref_name, "provider": model_ref.get("provider"), "type": model_ref.get("type")}
+                    elif isinstance(model_ref, str):
+                        try:
+                            uuid.UUID(model_ref)
+                            ref_dict = {"id": model_ref}
+                        except ValueError:
+                            ref_dict = {"name": model_ref}
+                    if ref_dict:
+                        resolved_model_id = self._resolve_model(ref_dict, tenant_id, warnings)
+                        if resolved_model_id:
+                            config["model_id"] = resolved_model_id
+                        else:
+                            warnings.append(f"[{node_label}] 模型未匹配，已置空，请导入后手动配置")
+                            config["model_id"] = None
+                    else:
+                        warnings.append(f"[{node_label}] 模型未匹配，已置空，请导入后手动配置")
+                        config["model_id"] = None
             resolved_nodes.append({**node, "config": config})
         return resolved_nodes
 

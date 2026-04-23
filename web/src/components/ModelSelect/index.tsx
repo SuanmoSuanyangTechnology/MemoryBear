@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-07 16:49:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-17 10:11:54
+ * @Last Modified time: 2026-04-20 18:14:34
  */
 import { type FC, useEffect, useState } from 'react';
 import { Select, Flex, Space } from 'antd';
@@ -56,7 +56,7 @@ const ModelSelect: FC<ModelSelectProps> = ({ params, placeholder, fontClassName,
 
   useEffect(() => {
     if (updateOptions) updateOptions([...options, ...initialData]);
-  }, [options, initialData])
+  }, [JSON.stringify(options), JSON.stringify(initialData)])
 
   return (
     <Select

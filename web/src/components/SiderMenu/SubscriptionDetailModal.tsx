@@ -2,11 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-04-14 12:28:23 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-16 17:34:02
+ * @Last Modified time: 2026-04-21 15:46:35
  */
 
 import { useState, forwardRef, useImperativeHandle } from 'react';
-import { Flex, Tooltip, Divider } from 'antd';
+import { Flex, Divider } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 
@@ -82,8 +82,7 @@ const SubscriptionDetailModal = forwardRef<SubscriptionDetailModalRef>((_props, 
       {/* Features */}
       <Flex gap={12} vertical className="rb:space-y-3 rb:mb-4 rb:h-[calc(100vh-341px)]! rb:overflow-y-auto">
         {billingUnits.map(({ key, unit, icon }) => {
-          const value = detail?.quota[key as keyof Subscription['quota']];
-          if (value === undefined || value === null) return null;
+          const value = detail?.quotas?.[key as keyof Subscription['quotas']];
           return (
             <UnitWrapper
               key={key}
@@ -95,7 +94,7 @@ const SubscriptionDetailModal = forwardRef<SubscriptionDetailModalRef>((_props, 
             />
           )
         })}
-        {detail?.package_plan?.tech_support && (
+        {detail?.package_plan?.tech_support && detail?.package_plan?.[getKeyWithLanguage('tech_support')] && (
           <UnitWrapper
             titleKey="tech_support"
             value={String(detail?.package_plan?.[getKeyWithLanguage('tech_support')] ?? '')}
@@ -103,7 +102,7 @@ const SubscriptionDetailModal = forwardRef<SubscriptionDetailModalRef>((_props, 
             theme_color={detail?.package_plan?.theme_color}
           />
         )}
-        {detail?.package_plan?.sla_compliance && (
+        {detail?.package_plan?.sla_compliance && detail?.package_plan?.[getKeyWithLanguage('sla_compliance')] && (
           <UnitWrapper
             titleKey="sla"
             value={String(detail?.package_plan?.[getKeyWithLanguage('sla_compliance')] ?? '')}

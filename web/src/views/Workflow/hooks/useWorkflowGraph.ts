@@ -465,11 +465,11 @@ export const useWorkflowGraph = ({
       graphRef.current.addEdges(edgeList.filter(vo => vo !== null))
     }
 
+    graphRef.current.centerContent()
     // Initialize after completion, display nodes in visible area
     if (nodes.length > 0 || edges.length > 0) {
       setTimeout(() => {
         if (graphRef.current) {
-          graphRef.current.centerContent()
           graphRef.current.getNodes().forEach(node => {
             if (!node.getData()?.cycle) node.toFront();
           });

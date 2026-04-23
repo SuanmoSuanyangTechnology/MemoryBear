@@ -106,6 +106,16 @@ async def chat(
     other_id = payload.user_id
     workspace_id = api_key_auth.workspace_id
     end_user_repo = EndUserRepository(db)
+
+    # 仅在新建终端用户时检查配额，已有用户复用不受限制
+    existing_end_user = end_user_repo.get_end_user_by_other_id(workspace_id=workspace_id, other_id=other_id)
+    if existing_end_user is None:
+        from app.core.quota_manager import _check_quota
+        from app.models.workspace_model import Workspace
+        ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+        if ws:
+            _check_quota(db, ws.tenant_id, "end_user_quota", "end_user", workspace_id=workspace_id)
+
     new_end_user = end_user_repo.get_or_create_end_user(
         app_id=app.id,
         workspace_id=workspace_id,

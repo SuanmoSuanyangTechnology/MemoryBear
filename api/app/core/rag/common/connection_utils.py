@@ -33,18 +33,16 @@ def timeout(seconds: float | int | str = None, attempts: int = 2, *, exception: 
             thread.daemon = True
             thread.start()
 
+            effective_timeout = seconds if seconds else 120  # 默认 120 秒超时
             for a in range(attempts):
                 try:
-                    if os.environ.get("ENABLE_TIMEOUT_ASSERTION"):
-                        result = result_queue.get(timeout=seconds)
-                    else:
-                        result = result_queue.get()
+                    result = result_queue.get(timeout=effective_timeout)
                     if isinstance(result, Exception):
                         raise result
                     return result
                 except queue.Empty:
                     pass
-            raise TimeoutError(f"Function '{func.__name__}' timed out after {seconds} seconds and {attempts} attempts.")
+            raise TimeoutError(f"Function '{func.__name__}' timed out after {effective_timeout} seconds and {attempts} attempts.")
 
         @wraps(func)
         async def async_wrapper(*args, **kwargs) -> Any:

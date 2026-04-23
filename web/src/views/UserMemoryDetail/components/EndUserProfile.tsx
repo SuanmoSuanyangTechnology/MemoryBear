@@ -31,6 +31,13 @@ interface EndUserProfileProps {
   className?: string;
 }
 
+const formatValue = (value: string | string[] | null | undefined) => {
+  if (!value) return '-'
+  if (Array.isArray(value)) {
+    return value.length ? value.join(' | ') : '-'
+  }
+  return value
+}
 const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ className, onDataLoaded }, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
@@ -89,19 +96,19 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
           </div>
           <div>
             <div className="rb:text-[#7B8085]">{t('userMemory.role')}</div>
-            <div className="rb:mt-0.5">{data?.profile?.role?.join(' | ') || '-'}</div>
+            <div className="rb:mt-0.5">{formatValue(data?.profile?.role)}</div>
           </div>
           <div>
             <div className="rb:text-[#7B8085]">{t('userMemory.domain')}</div>
-            <div className="rb:mt-0.5">{data?.profile?.domain?.join(' | ') || '-'}</div>
+            <div className="rb:mt-0.5">{formatValue(data?.profile?.domain)}</div>
           </div>
           <div>
             <div className="rb:text-[#7B8085]">{t('userMemory.expertise')}</div>
-            <div className="rb:mt-0.5">{data?.profile?.expertise?.join(' | ') || '-'}</div>
+            <div className="rb:mt-0.5">{formatValue(data?.profile?.expertise)}</div>
           </div>
           <div>
             <div className="rb:text-[#7B8085]">{t('userMemory.interests')}</div>
-            <div className="rb:mt-0.5">{data?.profile?.interests?.join(' | ') || '-'}</div>
+            <div className="rb:mt-0.5">{formatValue(data?.profile?.interests)}</div>
           </div>
 
           <div className="rb:text-[#7B8085] rb:text-[12px] rb:leading-4.5">

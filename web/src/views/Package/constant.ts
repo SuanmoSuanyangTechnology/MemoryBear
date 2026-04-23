@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-04-14 11:43:57 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 11:44:40
+ * @Last Modified time: 2026-04-21 15:44:13
  */
 export const billingUnits = [
   {
@@ -42,7 +42,7 @@ export const billingUnits = [
   },
   {
     key: 'model_quota',
-    unit: 'ops', placeholder: 'numberPlaceholder',
+    unit: 'pcs', placeholder: 'numberPlaceholder',
     icon: 'model',
   },
   {

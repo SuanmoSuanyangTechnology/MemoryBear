@@ -18,61 +18,61 @@
  * @component
  */
 
-import { useState, useEffect, useRef, type FC } from 'react';
-import { Menu as AntMenu, Layout, Flex, Divider } from 'antd';
 import { UserOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
+import { Menu as AntMenu, Divider, Flex, Layout } from 'antd';
 import clsx from 'clsx';
+import { useEffect, useRef, useState, type FC } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useLocation, useNavigate } from 'react-router-dom';
 
-import { useMenu, type MenuItem } from '@/store/menu';
-import styles from './index.module.css'
-import logo from '@/assets/images/logo.png'
-import { useUser } from '@/store/user';
 import { getTenantSubscription } from '@/api/user';
-import { useI18n } from '@/store/locale'
+import logo from '@/assets/images/logo.png';
+import { useI18n } from '@/store/locale';
+import { useMenu, type MenuItem } from '@/store/menu';
+import { useUser } from '@/store/user';
+import styles from './index.module.css';
 import SubscriptionDetailModal, { type SubscriptionDetailModalRef } from './SubscriptionDetailModal';
 import SwitchSpaceModal, { type SwitchSpaceModalRef } from './SwitchSpaceModal';
 
 // Import SVG files
 // space
-import dashboardIcon from '@/assets/images/menuNew/dashboard.svg';
-import dashboardActiveIcon from '@/assets/images/menuNew/dashboard_active.svg';
-import applicationIcon from '@/assets/images/menuNew/application.svg';
-import applicationActiveIcon from '@/assets/images/menuNew/application_active.svg';
-import knowledgeIcon from '@/assets/images/menuNew/knowledge.svg';
-import knowledgeActiveIcon from '@/assets/images/menuNew/knowledge_active.svg';
-import memoryIcon from '@/assets/images/menuNew/memory.svg';
-import memoryActiveIcon from '@/assets/images/menuNew/memory_active.svg';
-import userMemoryIcon from '@/assets/images/menuNew/userMemory.svg';
-import userMemoryActiveIcon from '@/assets/images/menuNew/userMemory_active.svg';
-import memoryConversationIcon from '@/assets/images/menuNew/memoryConversation.svg';
-import memoryConversationActiveIcon from '@/assets/images/menuNew/memoryConversation_active.svg';
 import apiKeyIcon from '@/assets/images/menuNew/apiKey.svg';
 import apiKeyActiveIcon from '@/assets/images/menuNew/apiKey_active.svg';
+import applicationIcon from '@/assets/images/menuNew/application.svg';
+import applicationActiveIcon from '@/assets/images/menuNew/application_active.svg';
+import dashboardIcon from '@/assets/images/menuNew/dashboard.svg';
+import dashboardActiveIcon from '@/assets/images/menuNew/dashboard_active.svg';
+import knowledgeIcon from '@/assets/images/menuNew/knowledge.svg';
+import knowledgeActiveIcon from '@/assets/images/menuNew/knowledge_active.svg';
 import memberIcon from '@/assets/images/menuNew/member.svg';
 import memberActiveIcon from '@/assets/images/menuNew/member_active.svg';
-import ontologyIcon from '@/assets/images/menuNew/ontology.svg'
-import ontologyActiveIcon from '@/assets/images/menuNew/ontology_active.svg'
-import spaceConfigIcon from '@/assets/images/menuNew/spaceConfig.svg'
-import spaceConfigActiveIcon from '@/assets/images/menuNew/spaceConfig_active.svg'
-import promptIcon from '@/assets/images/menuNew/prompt.svg'
-import promptActiveIcon from '@/assets/images/menuNew/prompt_active.svg'
+import memoryIcon from '@/assets/images/menuNew/memory.svg';
+import memoryActiveIcon from '@/assets/images/menuNew/memory_active.svg';
+import memoryConversationIcon from '@/assets/images/menuNew/memoryConversation.svg';
+import memoryConversationActiveIcon from '@/assets/images/menuNew/memoryConversation_active.svg';
+import ontologyIcon from '@/assets/images/menuNew/ontology.svg';
+import ontologyActiveIcon from '@/assets/images/menuNew/ontology_active.svg';
+import promptIcon from '@/assets/images/menuNew/prompt.svg';
+import promptActiveIcon from '@/assets/images/menuNew/prompt_active.svg';
+import spaceConfigIcon from '@/assets/images/menuNew/spaceConfig.svg';
+import spaceConfigActiveIcon from '@/assets/images/menuNew/spaceConfig_active.svg';
+import userMemoryIcon from '@/assets/images/menuNew/userMemory.svg';
+import userMemoryActiveIcon from '@/assets/images/menuNew/userMemory_active.svg';
 
 // manage
 import modelIcon from '@/assets/images/menuNew/model.svg';
 import modelActiveIcon from '@/assets/images/menuNew/model_active.svg';
+import pricingIcon from '@/assets/images/menuNew/pricing.svg';
+import pricingActiveIcon from '@/assets/images/menuNew/pricing_active.svg';
+import skillsIcon from '@/assets/images/menuNew/skills.svg';
+import skillsActiveIcon from '@/assets/images/menuNew/skills_active.svg';
 import spaceIcon from '@/assets/images/menuNew/space.svg';
 import spaceActiveIcon from '@/assets/images/menuNew/space_active.svg';
-import userIcon from '@/assets/images/menuNew/user.svg';
-import userActiveIcon from '@/assets/images/menuNew/user_active.svg';
 import toolIcon from '@/assets/images/menuNew/tool.svg';
 import toolActiveIcon from '@/assets/images/menuNew/tool_active.svg';
-import pricingIcon from '@/assets/images/menuNew/pricing.svg'
-import pricingActiveIcon from '@/assets/images/menuNew/pricing_active.svg'
-import skillsIcon from '@/assets/images/menuNew/skills.svg'
-import skillsActiveIcon from '@/assets/images/menuNew/skills_active.svg'
+import userIcon from '@/assets/images/menuNew/user.svg';
+import userActiveIcon from '@/assets/images/menuNew/user_active.svg';
 
 export interface PackagePlan {
   id: string
@@ -115,7 +115,7 @@ export interface Subscription {
   started_at: number | null
   expired_at: number | null
   status: string
-  quota: SubscriptionQuota
+  quotas: SubscriptionQuota
   created_at: number
   updated_at: number
 }
@@ -431,7 +431,7 @@ const Menu: FC<{
           <div className="rb:grid rb:grid-cols-4 rb:mt-4">
             {['workspace_quota', 'skill_quota', 'app_quota', 'model_quota'].map(key => (
               <div key={key} className="rb:text-center">
-                <div className="rb:text-[13px] rb:font-[MiSans-Semibold] rb:font-semibold">{subscription.quota?.[key as keyof typeof subscription.quota]}</div>
+                <div className="rb:text-[13px] rb:font-[MiSans-Semibold] rb:font-semibold">{subscription.quotas?.[key as keyof typeof subscription.quotas] ?? t('package.noLimit')}</div>
                 <div className="rb:mt-1 rb:text-[#5B6167] rb:text-[10px] rb:leading-3.5">{t(`index.${key}`)}</div>
               </div>
             ))}

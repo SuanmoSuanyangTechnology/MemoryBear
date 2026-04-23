@@ -68,9 +68,9 @@ class ESConnection(DocStoreConnection):
         client_config = {
             "hosts": [hosts],
             "basic_auth": (os.getenv("ELASTICSEARCH_USERNAME", "elastic"), os.getenv("ELASTICSEARCH_PASSWORD", "elastic")),
-            "request_timeout": int(os.getenv("ELASTICSEARCH_REQUEST_TIMEOUT", 100000)),
+            "request_timeout": int(os.getenv("ELASTICSEARCH_REQUEST_TIMEOUT", 30)),
             "retry_on_timeout": os.getenv("ELASTICSEARCH_RETRY_ON_TIMEOUT", True) == "true",
-            "max_retries": int(os.getenv("ELASTICSEARCH_MAX_RETRIES", 10000)),
+            "max_retries": int(os.getenv("ELASTICSEARCH_MAX_RETRIES", 3)),
         }
 
         # Only add SSL settings if using HTTPS

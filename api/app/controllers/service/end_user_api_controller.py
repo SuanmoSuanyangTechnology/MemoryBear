@@ -47,7 +47,7 @@ async def create_end_user(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
-    message: str = Body(..., description="Request body"),
+    message: str = Body(None, description="Request body"),
 ):
     """
     Create or retrieve an end user for the workspace.

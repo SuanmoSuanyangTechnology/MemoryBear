@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 16:35:43 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-21 14:20:39
+ * @Last Modified time: 2026-04-22 10:16:43
  */
 /**
  * Server-Sent Events (SSE) Stream Utility Module
@@ -16,11 +16,11 @@
  * @module stream
  */
 
+import { refreshToken } from '@/api/user';
+import i18n from '@/i18n';
 import { message } from 'antd';
-import i18n from '@/i18n'
-import { cookieUtils } from './request'
-import { refreshToken } from '@/api/user'
-import { clearAuthData } from './auth'
+import { clearAuthData } from './auth';
+import { cookieUtils } from './request';
 const API_PREFIX = '/api'
 
 // Token refresh state
@@ -181,12 +181,12 @@ export const handleSSE = async (url: string, data: any, onMessage?: (data: SSEMe
       case 500:
       case 502:
         const errorData = await response.json();
-        const errorInfo = errorData.error || i18n.t('common.serviceUpgrading');
+        const errorInfo = errorData.error || errorData.msg || i18n.t('common.serviceUpgrading');
         message.warning(errorInfo);
         throw new Error(errorData);
       case 400:
         const error = await response.json();
-        const error400 = error.error || 'Bad Request';
+        const error400 = error.error || error.msg || 'Bad Request';
         message.warning(error400);
         throw new Error(error);
       case 403:
@@ -195,7 +195,7 @@ export const handleSSE = async (url: string, data: any, onMessage?: (data: SSEMe
         throw new Error(errors);
       case 504:
         const errorJson = await response.json();
-        const errorMsg = errorJson.error || i18n.t('common.serverError');
+        const errorMsg = errorJson.error || errorJson.msg || i18n.t('common.serverError');
         message.warning(errorMsg);
         throw new Error(errorJson);
       case 401:
@@ -209,6 +209,13 @@ export const handleSSE = async (url: string, data: any, onMessage?: (data: SSEMe
           return;
         }
         break;
+      default:
+        if (!response.ok) {
+          const defaultData = await response.json().catch(() => ({}));
+          const defaultMsg = defaultData.error || defaultData.msg;
+          if (defaultMsg) message.warning(defaultMsg);
+          throw new Error(defaultMsg || `HTTP ${response.status}`);
+        }
     }
     if (!response.body) throw new Error('No response body');
 

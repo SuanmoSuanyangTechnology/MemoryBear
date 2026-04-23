@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-28 14:08:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-13 18:17:32
+ * @Last Modified time: 2026-04-20 16:52:32
  */
 /**
  * UploadModal Component
@@ -16,6 +16,7 @@
 import { forwardRef, useImperativeHandle, useState, useMemo } from 'react';
 import { Form, Steps, Flex, Alert, Button, Result, message } from 'antd';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 
 import type { Application, UploadModalRef } from '../types'
 import RbModal from '@/components/RbModal'
@@ -51,6 +52,7 @@ const UploadModal = forwardRef<UploadModalRef, UploadModalProps>(({
   id
 }, ref) => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
 
   // State management
   const [visible, setVisible] = useState(false);           // Modal visibility
@@ -146,6 +148,10 @@ const UploadModal = forwardRef<UploadModalRef, UploadModalProps>(({
             window.open(`/#/application/config/${appId}`, '_blank');
           }
           break;
+        case 'list':
+          if (id) {
+            navigate('/application')
+          }
       }
     }, 100)
   };

@@ -7,7 +7,6 @@ from app.models.models_model import ModelConfig
 from app.schemas.knowledge_schema import KnowledgeCreate, KnowledgeUpdate
 from app.repositories import knowledge_repository
 from app.core.logging_config import get_business_logger
-from app.repositories.model_repository import ModelConfigRepository
 from app.models.models_model import ModelType
 
 business_logger = get_business_logger()
@@ -78,41 +77,31 @@ def create_knowledge(
         tenant_id = workspace.tenant_id
 
         if not knowledge.embedding_id:
-            embedding_models = ModelConfigRepository.get_by_type(
-                db=db, model_types=[ModelType.EMBEDDING], tenant_id=tenant_id, is_active=True
-            )
-            if embedding_models:
-                knowledge.embedding_id = embedding_models[0].id
-                business_logger.debug(f"Auto-bind embedding model: {embedding_models[0].id}")
+            if not workspace.embedding:
+                raise Exception("工作空间未配置 Embedding 模型，请先完善工作空间配置后重试")
+            knowledge.embedding_id = workspace.embedding
 
         if not knowledge.reranker_id:
-            rerank_models = ModelConfigRepository.get_by_type(
-                db=db, model_types=[ModelType.RERANK], tenant_id=tenant_id, is_active=True
-            )
-            if rerank_models:
-                knowledge.reranker_id = rerank_models[0].id
-                business_logger.debug(f"Auto-bind rerank model: {rerank_models[0].id}")
+            if not workspace.rerank:
+                raise Exception("工作空间未配置 Rerank 模型，请先完善工作空间配置后重试")
+            knowledge.reranker_id = workspace.rerank
 
         if not knowledge.llm_id:
-            llm_models = ModelConfigRepository.get_by_type(
-                db=db, model_types=[ModelType.LLM, ModelType.CHAT], tenant_id=tenant_id, is_active=True
-            )
-            if llm_models:
-                knowledge.llm_id = llm_models[0].id
-                business_logger.debug(f"Auto-bind llm model: {llm_models[0].id}")
+            if not workspace.llm:
+                raise Exception("工作空间未配置 LLM 模型，请先完善工作空间配置后重试")
+            knowledge.llm_id = workspace.llm
 
         if not knowledge.image2text_id:
-            image2text_models = db.query(ModelConfig).filter(
+            model = db.query(ModelConfig).filter(
                 ModelConfig.tenant_id == tenant_id,
-                ModelConfig.type.in_([ModelType.CHAT.value]),
+                ModelConfig.type.in_([ModelType.CHAT.value, ModelType.LLM.value]),
                 ModelConfig.capability.contains(["vision"]),
                 ModelConfig.is_active == True,
-                ModelConfig.is_composite == False
-            ).order_by(ModelConfig.created_at.desc()).all()
-            if not image2text_models:
+            ).order_by(ModelConfig.created_at.desc()).first()
+            if not model:
                 raise Exception("租户下没有可用的视觉模型，创建知识库失败")
-            knowledge.image2text_id = image2text_models[0].id
-            business_logger.debug(f"Auto-bind image2text model: {image2text_models[0].id}")
+            knowledge.image2text_id = model.id
+            business_logger.debug(f"Auto-bind image2text model: {model.id}")
 
         business_logger.debug(f"Start creating the knowledge base: {knowledge.name}")
         db_knowledge = knowledge_repository.create_knowledge(
