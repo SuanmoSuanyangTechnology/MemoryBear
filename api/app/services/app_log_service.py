@@ -29,7 +29,7 @@ class AppLogService:
         workspace_id: uuid.UUID,
         page: int = 1,
         pagesize: int = 20,
-        is_draft: bool = False,
+        is_draft: Optional[bool] = None,
         keyword: Optional[str] = None,
     ) -> Tuple[list[Conversation], int]:
         """
@@ -40,7 +40,7 @@ class AppLogService:
             workspace_id: 工作空间 ID
             page: 页码（从 1 开始）
             pagesize: 每页数量
-            is_draft: 是否草稿会话（默认False，即发布会话）
+            is_draft: 是否草稿会话（None表示返回全部）
             keyword: 搜索关键词（匹配消息内容）
 
         Returns:
@@ -226,6 +226,7 @@ class AppLogService:
                         status=node_data.get("status", "unknown"),
                         error=node_data.get("error"),
                         input=node_data.get("input"),
+                        process=node_data.get("process"),
                         output=node_data.get("output"),
                         elapsed_time=node_data.get("elapsed_time"),
                         token_usage=node_data.get("token_usage"),

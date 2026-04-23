@@ -24,17 +24,18 @@ def list_app_logs(
         app_id: uuid.UUID,
         page: int = Query(1, ge=1),
         pagesize: int = Query(20, ge=1, le=100),
-        is_draft: bool = Query(False, description="是否草稿会话（默认false，即发布会话）"),
+        is_draft: Optional[bool] = Query(None, description="是否草稿会话（不传则返回全部）"),
         keyword: Optional[str] = Query(None, description="搜索关键词（匹配消息内容）"),
         db: Session = Depends(get_db),
         current_user=Depends(get_current_user),
 ):
     """查看应用下所有会话记录（分页）
 
-    - 支持按 is_draft 筛选（草稿会话 / 发布会话）
+    - is_draft 不传则返回所有会话（草稿 + 正式）
+    - is_draft=True 只返回草稿会话
+    - is_draft=False 只返回发布会话
     - 支持按 keyword 搜索（匹配消息内容）
     - 按最新更新时间倒序排列
-    - 所有人（包括共享者和被共享者）都只能查看自己的会话记录
     """
     workspace_id = current_user.current_workspace_id
 

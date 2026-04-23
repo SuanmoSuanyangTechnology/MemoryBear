@@ -160,6 +160,7 @@ class HttpRequestNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
         super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: HttpRequestNodeConfig | None = None
+        self.last_request: str = ""
 
     def _output_types(self) -> dict[str, VariableType]:
         return {
@@ -168,6 +169,47 @@ class HttpRequestNode(BaseNode):
             "headers": VariableType.OBJECT,
             "files": VariableType.ARRAY_FILE,
             "output": VariableType.STRING
+        }
+
+    def _extract_output(self, business_result: Any) -> Any:
+        if isinstance(business_result, dict):
+            result = {k: v for k, v in business_result.items() if k != "request"}
+            return result
+        return business_result
+
+    def _extract_extra_fields(self, business_result: Any) -> dict[str, Any]:
+        if isinstance(business_result, dict) and "request" in business_result:
+            return {
+                "process": {
+                    "request": business_result.get("request", "")
+                }
+            }
+        return {}
+
+    def _wrap_error(
+            self,
+            error_message: str,
+            elapsed_time: float,
+            state: WorkflowState,
+            variable_pool: VariablePool
+    ) -> dict[str, Any]:
+        input_data = self._extract_input(state, variable_pool)
+        node_output = {
+            "node_id": self.node_id,
+            "node_type": self.node_type,
+            "node_name": self.node_name,
+            "status": "failed",
+            "input": input_data,
+            "output": None,
+            "process": {"request": self.last_request} if self.last_request else None,
+            "elapsed_time": elapsed_time,
+            "token_usage": None,
+            "error": error_message
+        }
+        return {
+            "node_outputs": {self.node_id: node_output},
+            "error": error_message,
+            "error_node": self.node_id
         }
 
     def _build_timeout(self) -> Timeout:
@@ -255,10 +297,13 @@ class HttpRequestNode(BaseNode):
             case HttpContentType.NONE:
                 return {}
             case HttpContentType.JSON:
-                content["json"] = json.loads(self._render_template(
+                rendered_body = self._render_template(
                     self.typed_config.body.data, variable_pool
-                ))
-
+                ).strip()
+                if not rendered_body:
+                    content["json"] = {}
+                else:
+                    content["json"] = json.loads(rendered_body)
             case HttpContentType.FROM_DATA:
                 data = {}
                 files = []
@@ -326,6 +371,62 @@ class HttpRequestNode(BaseNode):
             case _:
                 raise RuntimeError(f"HttpRequest method not supported: {self.typed_config.method}")
 
+    def _generate_raw_request(
+        self,
+        variable_pool: VariablePool,
+        url: str,
+        headers: dict[str, str],
+        params: dict[str, str],
+        content: dict[str, Any]
+    ) -> str:
+        """
+        Generate raw HTTP request format for debugging.
+
+        Args:
+            variable_pool: Variable Pool
+            url: Rendered URL
+            headers: Request headers
+            params: Query parameters
+            content: Request body content
+
+        Returns:
+            Raw HTTP request string
+        """
+        method = self.typed_config.method.value
+
+        if params:
+            param_str = "&".join([f"{k}={v}" for k, v in params.items()])
+            full_url = f"{url}?{param_str}" if "?" not in url else f"{url}&{param_str}"
+        else:
+            full_url = url
+
+        lines = [f"{method} {full_url} HTTP/1.1"]
+
+        for key, value in headers.items():
+            lines.append(f"{key}: {value}")
+
+        if "json" in content and content["json"]:
+            json_body = json.dumps(content["json"], ensure_ascii=False)
+            lines.append(f"Content-Length: {len(json_body)}")
+            lines.append("")
+            lines.append(json_body)
+        elif "data" in content and "files" not in content:
+            if isinstance(content["data"], dict):
+                body_str = "&".join([f"{k}={v}" for k, v in content["data"].items()])
+                lines.append(f"Content-Length: {len(body_str)}")
+                lines.append("")
+                lines.append(body_str)
+        elif "content" in content:
+            lines.append(f"Content-Length: {len(content['content'])}")
+            lines.append("")
+            lines.append(content["content"])
+        elif "files" in content:
+            lines.append("Content-Length: 0")
+            lines.append("")
+            lines.append("# Note: This request includes file uploads")
+
+        return "\r\n".join(lines)
+
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict | str:
         """
         Execute the HTTP request node.
@@ -344,11 +445,25 @@ class HttpRequestNode(BaseNode):
             - str: Branch identifier (e.g. "ERROR") when branching is enabled
         """
         self.typed_config = HttpRequestNodeConfig(**self.config)
+        
+        # Build request components
+        headers = self._build_header(variable_pool) | self._build_auth(variable_pool)
+        params = self._build_params(variable_pool)
+        content = await self._build_content(variable_pool)
+        url = self._render_template(self.typed_config.url, variable_pool)
+
+        logger.info(f"Node {self.node_id}: headers={headers}, params={params}, content keys={list(content.keys())}")
+
+        # Generate raw HTTP request for debugging
+        raw_request = self._generate_raw_request(variable_pool, url, headers, params, content)
+        self.last_request = raw_request
+        logger.info(f"Node {self.node_id}: Generated HTTP request:\n{raw_request}")
+
         async with httpx.AsyncClient(
                 verify=self.typed_config.verify_ssl,
                 timeout=self._build_timeout(),
-                headers=self._build_header(variable_pool) | self._build_auth(variable_pool),
-                params=self._build_params(variable_pool),
+                headers=headers,
+                params=params,
                 follow_redirects=True
         ) as client:
             retries = self.typed_config.retry.max_attempts
@@ -356,18 +471,21 @@ class HttpRequestNode(BaseNode):
                 try:
                     request_func = self._get_client_method(client)
                     resp = await request_func(
-                        url=self._render_template(self.typed_config.url, variable_pool),
-                        **(await self._build_content(variable_pool))
+                        url=url,
+                        **content
                     )
                     resp.raise_for_status()
                     logger.info(f"Node {self.node_id}: HTTP request succeeded")
                     response = HttpResponse(resp)
-                    return HttpRequestNodeOutput(
-                        body=response.body,
-                        status_code=resp.status_code,
-                        headers=resp.headers,
-                        files=response.files
-                    ).model_dump()
+                    return {
+                        **HttpRequestNodeOutput(
+                            body=response.body,
+                            status_code=resp.status_code,
+                            headers=resp.headers,
+                            files=response.files
+                        ).model_dump(),
+                        "request": raw_request
+                    }
                 except (httpx.HTTPStatusError, httpx.RequestError) as e:
                     logger.error(f"HTTP request node exception: {e}")
                     retries -= 1
@@ -383,10 +501,19 @@ class HttpRequestNode(BaseNode):
                         logger.warning(
                             f"Node {self.node_id}: HTTP request failed, returning default result"
                         )
-                        return self.typed_config.error_handle.default.model_dump()
+                        error_result = self.typed_config.error_handle.default.model_dump()
+                        error_result["request"] = raw_request
+                        return error_result
                     case HttpErrorHandle.BRANCH:
                         logger.warning(
                             f"Node {self.node_id}: HTTP request failed, switching to error handling branch"
                         )
-                        return {"output": "ERROR"}
+                        return {
+                            "output": "ERROR",
+                            "body": "",
+                            "status_code": 500,
+                            "headers": {},
+                            "files": [],
+                            "request": raw_request
+                        }
                 raise RuntimeError("http request failed")

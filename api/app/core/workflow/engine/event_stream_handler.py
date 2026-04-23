@@ -167,8 +167,9 @@ class EventStreamHandler:
                 "node_id": node_id,
                 "status": "failed",
                 "input": data.get("input_data"),
-                "elapsed_time": data.get("elapsed_time"),
                 "output": None,
+                "process": data.get("process_data"),
+                "elapsed_time": data.get("elapsed_time"),
                 "error": data.get("error")
             }
         }
@@ -266,6 +267,7 @@ class EventStreamHandler:
                     ).timestamp() * 1000),
                     "input": result.get("node_outputs", {}).get(node_name, {}).get("input"),
                     "output": result.get("node_outputs", {}).get(node_name, {}).get("output"),
+                    "process": result.get("node_outputs", {}).get(node_name, {}).get("process"),
                     "elapsed_time": result.get("node_outputs", {}).get(node_name, {}).get("elapsed_time"),
                     "token_usage": result.get("node_outputs", {}).get(node_name, {}).get("token_usage")
                 }

@@ -203,7 +203,7 @@ class ConversationRepository:
             self,
             app_id: uuid.UUID,
             workspace_id: uuid.UUID,
-            is_draft: bool = False,
+            is_draft: Optional[bool] = None,
             keyword: Optional[str] = None,
             page: int = 1,
             pagesize: int = 20
@@ -214,7 +214,7 @@ class ConversationRepository:
         Args:
             app_id: 应用 ID
             workspace_id: 工作空间 ID
-            is_draft: 是否草稿会话（默认False，即发布会话）
+            is_draft: 是否草稿会话（None表示返回全部）
             keyword: 搜索关键词（匹配消息内容）
             page: 页码（从 1 开始）
             pagesize: 每页数量
@@ -222,12 +222,15 @@ class ConversationRepository:
         Returns:
             Tuple[List[Conversation], int]: (会话列表，总数)
         """
-        base_stmt = select(Conversation).where(
+        base_conditions = [
             Conversation.app_id == app_id,
             Conversation.workspace_id == workspace_id,
             Conversation.is_active.is_(True),
-            Conversation.is_draft == is_draft
-        )
+        ]
+        if is_draft is not None:
+            base_conditions.append(Conversation.is_draft == is_draft)
+
+        base_stmt = select(Conversation).where(*base_conditions)
 
         # 如果有关键词搜索，通过子查询过滤包含该关键词的 conversation
         if keyword:
