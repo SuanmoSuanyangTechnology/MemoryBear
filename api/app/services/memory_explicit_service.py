@@ -201,12 +201,12 @@ class MemoryExplicitService(MemoryBaseService):
             where_clauses = ["s.end_user_id = $end_user_id"]
             params = {"end_user_id": end_user_id}
 
-            # 时间戳筛选（毫秒时间戳转为 ISO 字符串，使用 Neo4j datetime() 精确比较）
+            # 时间戳筛选（毫秒时间戳转为 UTC ISO 字符串，使用 Neo4j datetime() 精确比较）
             if start_date is not None and end_date is not None:
-                from datetime import datetime
-                start_dt = datetime.fromtimestamp(start_date / 1000)
-                end_dt = datetime.fromtimestamp(end_date / 1000)
-                # 开始时间取当天 00:00:00，结束时间取当天 23:59:59.999999
+                from datetime import datetime, timezone
+                start_dt = datetime.fromtimestamp(start_date / 1000, tz=timezone.utc)
+                end_dt = datetime.fromtimestamp(end_date / 1000, tz=timezone.utc)
+                # 开始时间取当天 UTC 00:00:00，结束时间取当天 UTC 23:59:59.999999
                 start_iso = start_dt.strftime("%Y-%m-%dT") + "00:00:00.000000"
                 end_iso = end_dt.strftime("%Y-%m-%dT") + "23:59:59.999999"
             

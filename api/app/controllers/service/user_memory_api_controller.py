@@ -9,6 +9,7 @@
 5./analytics/memory_insight - 记忆洞察接口
 6./analytics/interest_distribution - 兴趣分布接口
 7./analytics/end_user_info - 终端用户信息接口
+8./analytics/generate_cache - 缓存生成接口
 
 
 路由前缀: /memory
@@ -19,7 +20,7 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request, Body
 from sqlalchemy.orm import Session
 
 from app.core.api_key_auth import require_api_key
@@ -27,6 +28,7 @@ from app.core.api_key_utils import get_current_user_from_api_key, validate_end_u
 from app.core.logging_config import get_business_logger
 from app.db import get_db
 from app.schemas.api_key_schema import ApiKeyAuth
+from app.schemas.memory_storage_schema import GenerateCacheRequest
 
 # 包装内部服务 controller
 from app.controllers import user_memory_controllers, memory_agent_controller
@@ -195,3 +197,34 @@ async def get_end_user_info(
         current_user=current_user,
         db=db,
     )
+
+
+# ==================== 缓存生成 ====================
+
+
+@router.post("/analytics/generate_cache")
+@require_api_key(scopes=["memory"])
+async def generate_cache(
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+    message: str = Body(None, description="Request body"),
+    language_type: str = Header(default=None, alias="X-Language-Type"),
+):
+    """Trigger cache generation (user summary + memory insight) for an end user or all workspace users."""
+    body = await request.json()
+    cache_request = GenerateCacheRequest(**body)
+
+    current_user = get_current_user_from_api_key(db, api_key_auth)
+
+    if cache_request.end_user_id:
+        validate_end_user_in_workspace(db, cache_request.end_user_id, api_key_auth.workspace_id)
+
+    return await user_memory_controllers.generate_cache_api(
+        request=cache_request,
+        language_type=language_type,
+        current_user=current_user,
+        db=db,
+    )
+
+
