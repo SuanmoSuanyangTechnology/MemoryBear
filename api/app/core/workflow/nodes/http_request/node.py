@@ -256,6 +256,7 @@ class HttpRequestNode(BaseNode):
                 return {}
             case HttpContentType.JSON:
                 content["json"] = json.loads(self._render_template(
+                    self.typed_config.body.data, variable_pool
                 ))
 
             case HttpContentType.FROM_DATA:
@@ -343,18 +344,11 @@ class HttpRequestNode(BaseNode):
             - str: Branch identifier (e.g. "ERROR") when branching is enabled
         """
         self.typed_config = HttpRequestNodeConfig(**self.config)
-
-        # Build request components
-        headers = self._build_header(variable_pool) | self._build_auth(variable_pool)
-        params = self._build_params(variable_pool)
-        content = await self._build_content(variable_pool)
-        url = self._render_template(self.typed_config.url, variable_pool)
-
         async with httpx.AsyncClient(
                 verify=self.typed_config.verify_ssl,
                 timeout=self._build_timeout(),
-                headers=headers,
-                params=params,
+                headers=self._build_header(variable_pool) | self._build_auth(variable_pool),
+                params=self._build_params(variable_pool),
                 follow_redirects=True
         ) as client:
             retries = self.typed_config.retry.max_attempts
@@ -362,8 +356,8 @@ class HttpRequestNode(BaseNode):
                 try:
                     request_func = self._get_client_method(client)
                     resp = await request_func(
-                        url=url,
-                        **content
+                        url=self._render_template(self.typed_config.url, variable_pool),
+                        **(await self._build_content(variable_pool))
                     )
                     resp.raise_for_status()
                     logger.info(f"Node {self.node_id}: HTTP request succeeded")
@@ -372,7 +366,7 @@ class HttpRequestNode(BaseNode):
                         body=response.body,
                         status_code=resp.status_code,
                         headers=resp.headers,
-                        files=response.files,
+                        files=response.files
                     ).model_dump()
                 except (httpx.HTTPStatusError, httpx.RequestError) as e:
                     logger.error(f"HTTP request node exception: {e}")
@@ -394,11 +388,5 @@ class HttpRequestNode(BaseNode):
                         logger.warning(
                             f"Node {self.node_id}: HTTP request failed, switching to error handling branch"
                         )
-                        return {
-                            "output": "ERROR",
-                            "body": "",
-                            "status_code": 500,
-                            "headers": {},
-                            "files": [],
-                        }
+                        return {"output": "ERROR"}
                 raise RuntimeError("http request failed")
