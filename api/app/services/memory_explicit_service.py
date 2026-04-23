@@ -4,7 +4,6 @@
 处理显性记忆相关的业务逻辑，包括情景记忆和语义记忆的查询。
 """
 
-from datetime import date
 from typing import Any, Dict, Optional
 
 from app.core.logging_config import get_logger

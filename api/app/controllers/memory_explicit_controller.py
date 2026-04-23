@@ -4,7 +4,6 @@
 处理显性记忆相关的API接口，包括情景记忆和语义记忆的查询。
 """
 
-from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -100,11 +99,11 @@ async def get_episodic_memory_list_api(
         ApiResponse: 包含情景记忆分页列表
 
     Examples:
-        - 基础分页查询：GET /episodic-list?end_user_id=xxx&page=1&pagesize=5
+        - 基础分页查询：GET /episodics?end_user_id=xxx&page=1&pagesize=5
           返回第1页，每页5条数据
-        - 按时间范围筛选：GET /episodic-list?end_user_id=xxx&page=1&pagesize=5&start_date=1738684800000&end_date=1738771199000
+        - 按时间范围筛选：GET /episodics?end_user_id=xxx&page=1&pagesize=5&start_date=1738684800000&end_date=1738771199000
           返回指定时间范围内的数据
-        - 按情景类型筛选：GET /episodic-list?end_user_id=xxx&page=1&pagesize=5&episodic_type=important_event
+        - 按情景类型筛选：GET /episodics?end_user_id=xxx&page=1&pagesize=5&episodic_type=important_event
           返回类型为"重要事件"的数据
 
     Notes:
