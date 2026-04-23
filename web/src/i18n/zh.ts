@@ -864,6 +864,8 @@ export const zh = {
       uploadCover: '导入并覆盖',
       refresh: '刷新当前页',
       json_output: '支持JSON格式化输出',
+      thinking_budget_tokens: '深度思考预算Token数',
+      thinking_budget_tokens_max_error: "不能超过 最大令牌数 ({{max}})",
     },
     table: {
       totalRecords: '共 {{total}} 条记录'

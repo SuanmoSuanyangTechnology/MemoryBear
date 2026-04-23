@@ -108,7 +108,8 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
     const newValues: ModelConfig = {
       capability: (option as Model).capability,
       deep_thinking: false,
-      json_output: false
+      thinking_budget_tokens: undefined,
+      json_output: false,
     }
     if (source === 'chat') {
       newValues.label = (option as Model).name
@@ -124,8 +125,8 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
 
   useEffect(() => {
     const { deep_thinking: _, json_output: __, ...rest } = data?.model_parameters || {}
-    form.setFieldsValue(rest)
-  }, [values?.default_model_config_id])
+    form.setFieldsValue({ ...rest })
+  }, [data?.default_model_config_id])
 
   const handleReset = () => {
     if (!id) return
@@ -167,11 +168,36 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
         {['model', 'chat'].includes(source) && <>
           <FormItem name="capability" hidden />
         </>}
+        <FormItem name="json_output" valuePropName="checked" hidden={!(values?.capability?.includes('json_output'))}>
+          <Checkbox>{t('application.json_output')}</Checkbox>
+        </FormItem>
         <FormItem name="deep_thinking" valuePropName="checked" hidden={!['model', 'chat'].includes(source) || !(values?.deep_thinking || values?.capability?.includes('thinking'))}>
           <Checkbox>{t('application.deep_thinking')}</Checkbox>
         </FormItem>
-        <FormItem name="json_output" valuePropName="checked" hidden={!(values?.capability?.includes('json_output'))}>
-          <Checkbox>{t('application.json_output')}</Checkbox>
+        <FormItem
+          name="thinking_budget_tokens"
+          label={t('application.thinking_budget_tokens')}
+          hidden={!['model', 'chat'].includes(source) || !(values?.deep_thinking || values?.capability?.includes('thinking'))}
+          rules={[
+            { required: values?.deep_thinking, message: t('common.pleaseEnter') },
+            {
+              validator: (_, value) => {
+                const maxTokens = values?.max_tokens
+                if (value !== undefined && maxTokens !== undefined && value > maxTokens) {
+                  return Promise.reject(t('application.thinking_budget_tokens_max_error', { max: maxTokens }))
+                }
+                return Promise.resolve()
+              }
+            }
+          ]}
+        >
+          <RbSlider
+            step={0}
+            min={0}
+            max={32000}
+            isInput={true}
+            disabled={!values?.deep_thinking}
+          />
         </FormItem>
         {source === 'chat' && <FormItem name="label" hidden />}
 

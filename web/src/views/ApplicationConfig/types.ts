@@ -38,6 +38,7 @@ export interface ModelConfig {
   /** Stop sequences */
   stop?: string;
   deep_thinking?: boolean;
+  thinking_budget_tokens?: number;
   json_output?: boolean;
 }
 

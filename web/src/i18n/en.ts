@@ -1534,6 +1534,8 @@ export const en = {
       uploadCover: 'Import and Overwrite',
       refresh: 'Refresh Current Page',
       json_output: 'Support JSON formatted output',
+      thinking_budget_tokens: 'thinking budget tokens',
+      thinking_budget_tokens_max_error: "Cannot exceed the max tokens limit ({{max}})",
     },
     userMemory: {
       userMemory: 'User Memory',

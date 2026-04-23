@@ -218,17 +218,22 @@ const Chat: FC<ChatProps> = ({
         const modelChatList = [...prev]
         const curModelChat = modelChatList[targetIndex]
         const curChatMsgList = curModelChat.list || []
-        const lastMsg = curChatMsgList[curChatMsgList.length - 2]
-        modelChatList[targetIndex] = {
-          ...modelChatList[targetIndex],
-          list: [
-            ...curChatMsgList.slice(0, curChatMsgList.length - 2),
-            {
-              ...lastMsg,
-              ...(lastMsg.role === 'user' ? { status: 'error' } : { content: null })
-            }
-          ]
+        const lastUserMsg = curChatMsgList[curChatMsgList.length - 2]
+        const lastAssistantMsg = curChatMsgList[curChatMsgList.length - 1]
+
+        if (!lastAssistantMsg.meta_data?.reasoning_content || lastAssistantMsg.meta_data?.reasoning_content.length === 0) {
+          modelChatList[targetIndex] = {
+            ...modelChatList[targetIndex],
+            list: [
+              ...curChatMsgList.slice(0, curChatMsgList.length - 2),
+              {
+                ...lastUserMsg,
+                ...(lastUserMsg.role === 'user' ? { status: 'error' } : { content: null })
+              }
+            ]
+          }
         }
+
         return [...modelChatList]
       }
 
