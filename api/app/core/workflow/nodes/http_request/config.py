@@ -137,6 +137,7 @@ class HttpErrorDefaultTemplate(BaseModel):
         description="HTTP response body",
     )
 
+
 class HttpErrorHandleConfig(BaseModel):
     method: HttpErrorHandle = Field(
         default=HttpErrorHandle.NONE,

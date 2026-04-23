@@ -167,8 +167,7 @@ class HttpRequestNode(BaseNode):
             "status_code": VariableType.NUMBER,
             "headers": VariableType.OBJECT,
             "files": VariableType.ARRAY_FILE,
-            "output": VariableType.STRING,
-            "curl": VariableType.STRING
+            "output": VariableType.STRING
         }
 
     def _build_timeout(self) -> Timeout:
@@ -256,13 +255,9 @@ class HttpRequestNode(BaseNode):
             case HttpContentType.NONE:
                 return {}
             case HttpContentType.JSON:
-                rendered_body = self._render_template(
-                    self.typed_config.body.data, variable_pool
-                ).strip()
-                if not rendered_body:
-                    content["json"] = {}
-                else:
-                    content["json"] = json.loads(rendered_body)
+                content["json"] = json.loads(self._render_template(
+                ))
+
             case HttpContentType.FROM_DATA:
                 data = {}
                 files = []
@@ -330,65 +325,6 @@ class HttpRequestNode(BaseNode):
             case _:
                 raise RuntimeError(f"HttpRequest method not supported: {self.typed_config.method}")
 
-    def _generate_curl_command(
-        self,
-        variable_pool: VariablePool,
-        url: str,
-        headers: dict[str, str],
-        params: dict[str, str],
-        content: dict[str, Any]
-    ) -> str:
-        """
-        Generate equivalent curl command for debugging.
-
-        Args:
-            variable_pool: Variable Pool
-            url: Rendered URL
-            headers: Request headers
-            params: Query parameters
-            content: Request body content
-
-        Returns:
-            Curl command string
-        """
-        # Start with curl command
-        curl_parts = ["curl"]
-
-        # Add HTTP method
-        method = self.typed_config.method.value
-        if method != "GET":
-            curl_parts.append(f"-X {method}")
-
-        # Add URL with query parameters
-        if params:
-            param_str = "&".join([f"{k}={v}" for k, v in params.items()])
-            full_url = f"{url}?{param_str}" if "?" not in url else f"{url}&{param_str}"
-        else:
-            full_url = url
-
-        curl_parts.append(f"'{full_url}'")
-
-        # Add headers
-        for key, value in headers.items():
-            curl_parts.append(f"-H '{key}: {value}'")
-
-        # Add body based on content type
-        if "json" in content:
-            json_body = json.dumps(content["json"], ensure_ascii=False)
-            curl_parts.append(f"-d '{json_body}'")
-        elif "data" in content and "files" not in content:
-            # Form data
-            if isinstance(content["data"], dict):
-                for key, value in content["data"].items():
-                    curl_parts.append(f"-F '{key}={value}'")
-        elif "content" in content:
-            # Raw content
-            curl_parts.append(f"-d '{content['content']}'")
-        elif "files" in content:
-            curl_parts.append("# Note: This request includes file uploads")
-
-        return " \\\n  ".join(curl_parts)
-
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict | str:
         """
         Execute the HTTP request node.
@@ -407,17 +343,13 @@ class HttpRequestNode(BaseNode):
             - str: Branch identifier (e.g. "ERROR") when branching is enabled
         """
         self.typed_config = HttpRequestNodeConfig(**self.config)
-        
+
         # Build request components
         headers = self._build_header(variable_pool) | self._build_auth(variable_pool)
         params = self._build_params(variable_pool)
         content = await self._build_content(variable_pool)
         url = self._render_template(self.typed_config.url, variable_pool)
-        
-        # Generate curl command for debugging
-        curl_command = self._generate_curl_command(variable_pool, url, headers, params, content)
-        logger.info(f"Node {self.node_id}: Generated curl command:\n{curl_command}")
-        
+
         async with httpx.AsyncClient(
                 verify=self.typed_config.verify_ssl,
                 timeout=self._build_timeout(),
@@ -441,7 +373,6 @@ class HttpRequestNode(BaseNode):
                         status_code=resp.status_code,
                         headers=resp.headers,
                         files=response.files,
-                        curl=curl_command
                     ).model_dump()
                 except (httpx.HTTPStatusError, httpx.RequestError) as e:
                     logger.error(f"HTTP request node exception: {e}")
@@ -458,10 +389,7 @@ class HttpRequestNode(BaseNode):
                         logger.warning(
                             f"Node {self.node_id}: HTTP request failed, returning default result"
                         )
-                        # Update curl command in default error template
-                        error_result = self.typed_config.error_handle.default.model_dump()
-                        error_result["curl"] = curl_command
-                        return error_result
+                        return self.typed_config.error_handle.default.model_dump()
                     case HttpErrorHandle.BRANCH:
                         logger.warning(
                             f"Node {self.node_id}: HTTP request failed, switching to error handling branch"
@@ -472,6 +400,5 @@ class HttpRequestNode(BaseNode):
                             "status_code": 500,
                             "headers": {},
                             "files": [],
-                            "curl": curl_command
                         }
                 raise RuntimeError("http request failed")
