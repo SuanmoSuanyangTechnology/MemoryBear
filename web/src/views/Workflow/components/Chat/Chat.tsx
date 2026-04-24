@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-21 14:59:13
+ * @Last Modified time: 2026-04-24 18:13:22
  */
 /**
  * Workflow Chat Component
@@ -66,7 +66,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   const [fileList, setFileList] = useState<any[]>([])
   const [message, setMessage] = useState<string | undefined>(undefined)
 
-  console.log('abortRef', abortRef)
+  console.log('abortRef', abortRef, chatList)
 
   /**
    * Opens the chat drawer and loads workflow variables from the start node
@@ -185,7 +185,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
      */
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach(item => {
-        const { content, conversation_id, node_id, cycle_id, cycle_idx, input, output, error, elapsed_time, status, citations } = item.data as {
+        const { content, conversation_id, node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status, citations } = item.data as {
           content: string;
           conversation_id: string | null;
           cycle_id: string;
@@ -193,6 +193,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
           node_id: string;
           node_name?: string;
           node_type?: string;
+          process?: any;
           input?: any;
           output?: any;
           elapsed_time?: string;
@@ -277,6 +278,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
                     content: {
                       input,
                       output,
+                      process,
                       error,
                     },
                     status: status || 'completed',
@@ -305,13 +307,14 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
                     cycle_id,
                     cycle_idx,
                     node_id,
-                    node_name: name,
+                    node_name: type === 'cycle-start' ? t('workflow.cycle-start') : name,
                     node_type: type,
                     icon,
                     content: {
                       cycle_idx,
                       input,
                       output,
+                      process,
                       error,
                     },
                     status: status || 'completed',

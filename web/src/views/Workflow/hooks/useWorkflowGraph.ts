@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-20 16:00:26
+ * @Last Modified time: 2026-04-24 17:21:09
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, type Edge } from '@antv/x6';
 import type { HistoryCommand as Command } from '@antv/x6/lib/plugin/history/type';
@@ -1492,7 +1492,7 @@ export const useWorkflowGraph = ({
     // Reset all node execution status first
     nodes.forEach(node => {
       const data = node.getData();
-      if (typeof data.status === 'string') {
+      if (typeof data.executionStatus === 'string') {
         node.setData({ ...data, executionStatus: undefined });
       }
     });

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 21:48:30
+ * @Last Modified time: 2026-04-24 18:14:25
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -59,6 +59,7 @@ interface NodeData {
   node_type?: string;
   input?: any;
   output?: any;
+  process?: any;
   elapsed_time?: string;
   error?: any;
   state: Record<string, any>;
@@ -485,7 +486,7 @@ const TestChat: FC<TestChatProps> = ({
   }
 
   const updateWorkflowNodeEndMessage = (data: NodeData) => {
-    const { node_id, input, output, error, elapsed_time, status } = data;
+    const { node_id, input, output, process, error, elapsed_time, status } = data;
     setChatList(prev => {
       const newList = [...prev]
       const lastIndex = newList.length - 1
@@ -498,6 +499,7 @@ const TestChat: FC<TestChatProps> = ({
             content: {
               input,
               output,
+              process,
               error,
             },
             status: status || 'completed',
@@ -514,7 +516,7 @@ const TestChat: FC<TestChatProps> = ({
   }
 
   const updateWorkflowCycleMessage = (data: NodeData) => {
-    const { node_id, cycle_id, cycle_idx, input, output, error, elapsed_time, status } = data;
+    const { node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status } = data;
     const { nodes } = config as WorkflowConfig
     const node = nodes.find(n => n.id === node_id);
     const { name, type } = node || {}
@@ -538,6 +540,7 @@ const TestChat: FC<TestChatProps> = ({
               cycle_idx,
               input,
               output,
+              process,
               error,
             },
             status: status || 'completed',

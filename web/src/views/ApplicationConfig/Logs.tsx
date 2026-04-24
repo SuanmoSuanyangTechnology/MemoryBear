@@ -7,7 +7,7 @@
 import { type FC, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
-import { Flex, Button } from 'antd';
+import { Flex, Button, Form } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 
 import { getAppLogsUrl } from '@/api/application';
@@ -15,11 +15,14 @@ import Table from '@/components/Table'
 import { formatDateTime } from '@/utils/format';
 import type { LogItem, LogDetailModalRef } from './types'
 import LogDetailModal from './components/LogDetailModal'
+import SearchInput from '@/components/SearchInput'
 
 const Statistics: FC = () => {
   const { t } = useTranslation();
   const { id } = useParams();
   const logDetailRef = useRef<LogDetailModalRef>(null);
+  const [form] = Form.useForm();
+  const values = Form.useWatch([], form);
 
   const handleViewDetail = (item: LogItem) => {
     logDetailRef.current?.handleOpen(item);
@@ -62,15 +65,26 @@ const Statistics: FC = () => {
   ];
   return (
     <div className="rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
+      <Flex justify="flex-end" className="rb:mb-3!">
+        <Form form={form}>
+          <Form.Item name="keyword" noStyle>
+            <SearchInput
+              placeholder={t('application.logSearchPlaceholder')}
+              variant="outlined"
+            />
+          </Form.Item>
+        </Form>
+      </Flex>
       <Table<LogItem>
         apiUrl={getAppLogsUrl(id || '')}
         apiParams={{
           is_draft: false,
+          ...(values ?? {})
         }}
         columns={columns}
         rowKey="id"
         isScroll={true}
-        scrollY="calc(100vh - 214px)"
+        scrollY="calc(100vh - 242px)"
       />
       <LogDetailModal ref={logDetailRef} />
     </div>
