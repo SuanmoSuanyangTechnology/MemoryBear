@@ -655,7 +655,8 @@ class AgentRunService:
                     fu_config = fu_config.model_dump()
                 doc_img_recognition = isinstance(fu_config, dict) and fu_config.get("document_image_recognition", False)
                 processed_files = await multimodal_service.process_files(
-                    files, document_image_recognition=doc_img_recognition
+                    files, document_image_recognition=doc_img_recognition,
+                    workspace_id=workspace_id
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
                 capability = api_key_config.get("capability", [])
@@ -936,7 +937,8 @@ class AgentRunService:
                     fu_config = fu_config.model_dump()
                 doc_img_recognition = isinstance(fu_config, dict) and fu_config.get("document_image_recognition", False)
                 processed_files = await multimodal_service.process_files(
-                    files, document_image_recognition=doc_img_recognition
+                    files, document_image_recognition=doc_img_recognition,
+                    workspace_id=workspace_id
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
                 capability = api_key_config.get("capability", [])
@@ -947,8 +949,11 @@ class AgentRunService:
                 )
             if has_doc_with_images:
                 agent.system_prompt += (
-                    "\n\n文档中包含图片，图片位置已在文本中以 [第N页 第M张图片]: URL 标记。"
+                    "\n\n文档中包含图片，图片位置已在文本中以 [图片 第N页 第M张图片]: URL 标记。"
                     "请在回答中用 Markdown 格式 ![描述](URL) 展示相关图片，做到图文并茂。"
+                    "**规则1：图片URL必须原封不动、一字不差地复制，禁止修改、禁止省略任何字符**"
+                    "**规则2：禁止修改URL中UUID里的任何数字和字母**"
+                    "**规则3：直接使用 ![描述](完整URL) 格式输出**"
                 )
                 agent.agent = create_agent(
                     model=agent.llm,
