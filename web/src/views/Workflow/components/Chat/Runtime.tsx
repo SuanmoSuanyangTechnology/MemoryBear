@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-24 17:57:08 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-20 15:33:48
+ * @Last Modified time: 2026-04-24 18:04:31
  */
 /*
  * Runtime Component
@@ -184,27 +184,30 @@ const Runtime: FC<{ item: ChatItem; index: number;}> = ({
                       </Flex>
                     )}
                     {/* Display input and output data as JSON code blocks */}
-                    {['input', 'output'].map(key => (
-                      <div key={key} className="rb:bg-[#EBEBEB] rb:rounded-lg">
-                        <div className="rb:py-2 rb:px-3 rb:flex rb:justify-between rb:items-center rb:text-[12px]">
-                          {isLoop ? t(`workflow.runtime.${key}_cycle_vars`) : t(`workflow.${key}_result`)}
-                          <Button
-                            className="rb:py-0! rb:px-1! rb:text-[12px]!"
-                            size="small"
-                            onClick={() => handleCopy(typeof vo.content === 'object' && vo.content?.[key] ? JSON.stringify(vo.content[key], null, 2) : '{}')}
-                          >{t('common.copy')}</Button>
+                    {['input', 'process', 'output'].map(key => {
+                      if (vo.node_type !== 'http-request' && key === 'process') return null
+                      return (
+                        <div key={key} className="rb:bg-[#EBEBEB] rb:rounded-lg">
+                          <div className="rb:py-2 rb:px-3 rb:flex rb:justify-between rb:items-center rb:text-[12px]">
+                            {isLoop ? t(`workflow.runtime.${key}_cycle_vars`) : t(`workflow.${key}_result`)}
+                            <Button
+                              className="rb:py-0! rb:px-1! rb:text-[12px]!"
+                              size="small"
+                              onClick={() => handleCopy(typeof vo.content === 'object' && vo.content?.[key] ? JSON.stringify(vo.content[key], null, 2) : '{}')}
+                            >{t('common.copy')}</Button>
+                          </div>
+                          <div className="rb:max-h-40 rb:overflow-auto">
+                            <CodeBlock
+                              size="small"
+                              value={typeof vo.content === 'object' && vo.content?.[key] ? JSON.stringify(vo.content[key], null, 2) : '{}'}
+                              needCopy={false}
+                              showLineNumbers={true}
+                              background="#EBEBEB"
+                            />
+                          </div>
                         </div>
-                        <div className="rb:max-h-40 rb:overflow-auto">
-                          <CodeBlock
-                            size="small"
-                            value={typeof vo.content === 'object' && vo.content?.[key] ? JSON.stringify(vo.content[key], null, 2) : '{}'}
-                            needCopy={false}
-                            showLineNumbers={true}
-                            background="#EBEBEB"
-                          />
-                        </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </Flex>
                 )
               }]}

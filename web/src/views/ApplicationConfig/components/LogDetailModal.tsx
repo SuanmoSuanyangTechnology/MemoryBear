@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-03-24 16:31:24 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-24 16:31:24 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-04-24 17:49:58
  */
 import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
 import { Flex, Button, Empty, Skeleton } from 'antd';
@@ -14,6 +14,12 @@ import { getAppLogDetail } from '@/api/application'
 import ChatContent from '@/components/Chat/ChatContent'
 import { formatDateTime } from '@/utils/format'
 import type { ChatItem } from '@/components/Chat/types'
+import Runtime from '@/views/Workflow/components/Chat/Runtime'
+import { nodeLibrary } from '@/views/Workflow/constant'
+
+const nodeIconMap = Object.fromEntries(
+  nodeLibrary.flatMap(c => c.nodes.map(n => [n.type, n.icon]))
+)
 
 /** Log detail data with conversation messages */
 type Data = LogItem & {
@@ -54,7 +60,30 @@ const LogDetailModal = forwardRef<LogDetailModalRef>((_props, ref) => {
     if (!vo) return
     setLoading(true)
     getAppLogDetail(vo.app_id, vo.id).then(res => {
-      setData(res as Data)
+      const { node_executions_map, messages, ...rest } = res as Data;
+      let hasSubContentMessages = messages
+      if (messages && messages.length > 0 && node_executions_map && Object.keys(node_executions_map).length > 0) {
+        hasSubContentMessages = messages.map(item => {
+          if (item.id && node_executions_map[item.id]) {
+            item.subContent = node_executions_map[item.id]?.map(({ input, output, cycle_items = [], error, process, ...node }: any) => {
+              const converted: any = { ...node, icon: nodeIconMap[node.node_type], content: { input, output, process, error } }
+              if (node.node_type === 'loop' && Array.isArray(cycle_items) && cycle_items.length > 0) {
+                converted.subContent = cycle_items.map(({ input: cInput, output: cOutput, error: cError, process: cProcess, ...cNode }: any) => ({
+                  ...cNode,
+                  icon: nodeIconMap[cNode.node_type],
+                  content: { input: cInput, output: cOutput, process: cProcess, error: cError }
+                }))
+              }
+              return converted
+            })
+          }
+          return { ...item }
+        })
+      }
+      setData({
+        ...rest,
+        messages: hasSubContentMessages
+      })
     })
     .finally(() => {
       setLoading(false)
@@ -65,6 +94,8 @@ const LogDetailModal = forwardRef<LogDetailModalRef>((_props, ref) => {
     handleOpen,
     handleClose
   }));
+
+  console.log('data', data)
 
   return (
     <RbModal
@@ -92,6 +123,7 @@ const LogDetailModal = forwardRef<LogDetailModalRef>((_props, ref) => {
               data={data.messages || []}
               streamLoading={false}
               labelFormat={(item) => formatDateTime(item.created_at)}
+              renderRuntime={(item, index) => <Runtime item={item} index={index} />}
             />
           )
       }

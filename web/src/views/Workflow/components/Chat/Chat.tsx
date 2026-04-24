@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-21 14:59:13
+ * @Last Modified time: 2026-04-24 17:34:51
  */
 /**
  * Workflow Chat Component
@@ -66,7 +66,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   const [fileList, setFileList] = useState<any[]>([])
   const [message, setMessage] = useState<string | undefined>(undefined)
 
-  console.log('abortRef', abortRef)
+  console.log('abortRef', abortRef, chatList)
 
   /**
    * Opens the chat drawer and loads workflow variables from the start node
@@ -305,7 +305,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
                     cycle_id,
                     cycle_idx,
                     node_id,
-                    node_name: name,
+                    node_name: type === 'cycle-start' ? t('workflow.cycle-start') : name,
                     node_type: type,
                     icon,
                     content: {
