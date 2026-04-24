@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Body, Depends, Query, Request
 from sqlalchemy.orm import Session
 
+from app.celery_task_scheduler import scheduler
 from app.core.api_key_auth import require_api_key
 from app.core.logging_config import get_business_logger
 from app.core.quota_stub import check_end_user_quota
@@ -18,7 +19,6 @@ from app.schemas.memory_api_schema import (
     MemoryWriteSyncResponse,
 )
 from app.services.memory_api_service import MemoryAPIService
-from celery_task_scheduler import scheduler
 
 router = APIRouter(prefix="/memory", tags=["V1 - Memory API"])
 logger = get_business_logger()
