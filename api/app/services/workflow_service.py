@@ -17,8 +17,9 @@ from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.validator import validate_workflow_config
 from app.db import get_db
+from sqlalchemy import select
 from app.models import App
-from app.models.workflow_model import WorkflowConfig, WorkflowExecution
+from app.models.workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution
 from app.repositories import knowledge_repository
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
@@ -909,6 +910,8 @@ class WorkflowService:
                 input_data["conv_messages"] = conv_messages
             init_message_length = len(input_data.get("conv_messages", []))
             message_id = uuid.uuid4()
+            _node_order_counter = 0
+            _cycle_items: dict[str, list] = {}
 
             # 新会话时写入开场白
             is_new_conversation = init_message_length == 0
@@ -939,6 +942,52 @@ class WorkflowService:
                     memory_storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id
             ):
+                event_type = event.get("event")
+                event_data = event.get("data", {})
+
+                # 持久化节点执行记录
+                if event_type == "node_end":
+                    node_id = event_data.get("node_id")
+                    node_cfg = next((n for n in config.nodes if n.get("id") == node_id), {})
+                    self.db.add(WorkflowNodeExecution(
+                        execution_id=execution.id,
+                        node_id=node_id,
+                        node_type=node_cfg.get("type", "unknown"),
+                        node_name=node_cfg.get("data", {}).get("label") or node_id,
+                        execution_order=_node_order_counter,
+                        status="completed",
+                        input_data=event_data.get("input"),
+                        output_data=event_data.get("output"),
+                        elapsed_time=event_data.get("elapsed_time"),
+                        token_usage=event_data.get("token_usage"),
+                    ))
+                    self.db.commit()
+                    _node_order_counter += 1
+
+                elif event_type == "node_error":
+                    node_id = event_data.get("node_id")
+                    node_cfg = next((n for n in config.nodes if n.get("id") == node_id), {})
+                    self.db.add(WorkflowNodeExecution(
+                        execution_id=execution.id,
+                        node_id=node_id,
+                        node_type=node_cfg.get("type", "unknown"),
+                        node_name=node_cfg.get("data", {}).get("label") or node_id,
+                        execution_order=_node_order_counter,
+                        status="failed",
+                        input_data=event_data.get("input"),
+                        output_data=None,
+                        error_message=event_data.get("error"),
+                        elapsed_time=event_data.get("elapsed_time"),
+                    ))
+                    self.db.commit()
+                    _node_order_counter += 1
+
+                elif event_type == "cycle_item":
+                    cycle_id = event_data.get("cycle_id")
+                    if cycle_id not in _cycle_items:
+                        _cycle_items[cycle_id] = []
+                    _cycle_items[cycle_id].append(event_data)
+
                 if event.get("event") == "workflow_end":
                     status = event.get("data", {}).get("status")
                     token_usage = event.get("data", {}).get("token_usage", {}) or {}
@@ -1003,6 +1052,33 @@ class WorkflowService:
                         )
                     else:
                         logger.error(f"unexpect workflow run status, status: {status}")
+                    # 把积累的 cycle_item 写入对应循环节点的 output_data
+                    if _cycle_items:
+                        for cycle_node_id, items in _cycle_items.items():
+                            node_exec = self.db.execute(
+                                select(WorkflowNodeExecution).where(
+                                    WorkflowNodeExecution.execution_id == execution.id,
+                                    WorkflowNodeExecution.node_id == cycle_node_id
+                                )
+                            ).scalar_one_or_none()
+                            if node_exec:
+                                node_exec.output_data = {
+                                    **(node_exec.output_data or {}),
+                                    "cycle_items": items
+                                }
+                            else:
+                                node_cfg = next((n for n in config.nodes if n.get("id") == cycle_node_id), {})
+                                self.db.add(WorkflowNodeExecution(
+                                    execution_id=execution.id,
+                                    node_id=cycle_node_id,
+                                    node_type=node_cfg.get("type", "cycle"),
+                                    node_name=node_cfg.get("data", {}).get("label") or cycle_node_id,
+                                    execution_order=_node_order_counter,
+                                    status="completed",
+                                    output_data={"cycle_items": items},
+                                ))
+                                _node_order_counter += 1
+                        self.db.commit()
                 elif event.get("event") == "workflow_start":
                     event["data"]["message_id"] = str(message_id)
                 event = self._emit(public, event)

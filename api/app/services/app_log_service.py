@@ -163,7 +163,7 @@ class AppLogService:
         # 查询该会话关联的所有工作流执行记录（按时间正序）
         stmt = select(WorkflowExecution).where(
             WorkflowExecution.conversation_id == conversation_id,
-            WorkflowExecution.status == "completed"
+            WorkflowExecution.status.in_(["completed", "failed"])
         ).order_by(WorkflowExecution.started_at.asc())
 
         executions = self.db.scalars(stmt).all()
@@ -188,10 +188,33 @@ class AppLogService:
         used_message_ids: set[str] = set()
 
         for execution in executions:
-            if not execution.output_data:
+            # 构建节点执行记录列表
+            execution_nodes = []
+            for node_exec in execution.node_executions:
+                node_execution = AppLogNodeExecution(
+                    node_id=node_exec.node_id,
+                    node_type=node_exec.node_type,
+                    node_name=node_exec.node_name,
+                    status=node_exec.status,
+                    error=node_exec.error_message,
+                    input=node_exec.input_data,
+                    process=None,
+                    output=node_exec.output_data,
+                    elapsed_time=node_exec.elapsed_time,
+                    token_usage=node_exec.token_usage,
+                )
+                node_executions.append(node_execution)
+                execution_nodes.append(node_execution)
+
+            if not execution_nodes:
                 continue
 
-            # 找到该 execution 对应的 assistant message
+            # 失败的执行没有 assistant message，直接用 execution id 作为 key
+            if execution.status == "failed":
+                node_executions_map[f"execution_{str(execution.id)}"] = execution_nodes
+                continue
+
+            # completed：通过时序匹配关联到对应的 assistant message
             # 逻辑：找 execution.started_at 之后最近的、未使用的 assistant message
             best_msg = None
             best_dt = None
@@ -210,31 +233,6 @@ class AppLogService:
 
             msg_id_str = str(best_msg.id)
             used_message_ids.add(msg_id_str)
-
-            # 提取节点输出
-            output_data = execution.output_data
-            if isinstance(output_data, dict):
-                node_outputs = output_data.get("node_outputs", {})
-                execution_nodes = []
-                for node_id, node_data in node_outputs.items():
-                    if not isinstance(node_data, dict):
-                        continue
-                    node_execution = AppLogNodeExecution(
-                        node_id=node_data.get("node_id", node_id),
-                        node_type=node_data.get("node_type", "unknown"),
-                        node_name=node_data.get("node_name"),
-                        status=node_data.get("status", "unknown"),
-                        error=node_data.get("error"),
-                        input=node_data.get("input"),
-                        process=node_data.get("process"),
-                        output=node_data.get("output"),
-                        elapsed_time=node_data.get("elapsed_time"),
-                        token_usage=node_data.get("token_usage"),
-                    )
-                    node_executions.append(node_execution)
-                    execution_nodes.append(node_execution)
-
-                # 将节点记录关联到 message_id
-                node_executions_map[msg_id_str] = execution_nodes
+            node_executions_map[msg_id_str] = execution_nodes
 
         return node_executions, node_executions_map

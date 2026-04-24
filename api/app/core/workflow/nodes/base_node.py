@@ -228,19 +228,21 @@ class BaseNode(ABC):
             logger.error(
                 f"Node {self.node_id} execution timed out ({timeout} seconds)."
             )
-            return self._wrap_error(
+            self._wrap_error(
                 f"Node execution timed out ({timeout} seconds).",
                 elapsed_time,
                 state,
                 variable_pool,
             )
+            raise
         except Exception as e:
             elapsed_time = (time.time() - start_time) * 1000
             logger.error(
                 f"Node {self.node_id} execution failed: {e}",
                 exc_info=True,
             )
-            return self._wrap_error(str(e), elapsed_time, state, variable_pool)
+            self._wrap_error(str(e), elapsed_time, state, variable_pool)
+            raise
 
     async def run_stream(
             self, state: WorkflowState,
@@ -351,11 +353,13 @@ class BaseNode(ABC):
                 variable_pool
             )
             yield error_output
+            raise
         except Exception as e:
             elapsed_time = (time.time() - start_time) * 1000
             logger.error(f"Node {self.node_id} execution failed: {e}", exc_info=True)
             error_output = self._wrap_error(str(e), elapsed_time, state, variable_pool)
             yield error_output
+            raise
 
     def _wrap_output(
             self,
@@ -447,26 +451,19 @@ class BaseNode(ABC):
             "error": error_message
         }
 
-        # if error_edge:
-        #     # If an error edge exists, log a warning and continue to error node
-        #     logger.warning(
-        #         f"Node {self.node_id} execution failed, redirecting to error node: {error_edge['target']}"
-        #     )
-        #     return {
-        #         "node_outputs": {
-        #             self.node_id: node_output
-        #         },
-        #         "error": error_message,
-        #         "error_node": self.node_id
-        #     }
-        # else:
         writer = get_stream_writer()
         writer({
             "type": "node_error",
             **node_output
         })
         logger.error(f"Node {self.node_id} execution failed, stopping workflow: {error_message}")
-        raise Exception(f"Node {self.node_id} execution failed: {error_message}")
+        return {
+            "node_outputs": {
+                self.node_id: node_output
+            },
+            "error": error_message,
+            "error_node": self.node_id
+        }
 
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """Extracts the input data for this node (used for logging or audit).
