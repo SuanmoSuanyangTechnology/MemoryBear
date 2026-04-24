@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 
+from app.celery_task_scheduler import scheduler
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.logging_config import get_logger
@@ -166,20 +167,31 @@ class MemoryAPIService:
         # Convert to message list format expected by write_message_task
         messages = message if isinstance(message, list) else [{"role": "user", "content": message}]
 
-        from app.tasks import write_message_task
-        task = write_message_task.delay(
+        # from app.tasks import write_message_task
+        # task = write_message_task.delay(
+        #     end_user_id,
+        #     messages,
+        #     config_id,
+        #     storage_type,
+        #     user_rag_memory_id or "",
+        # )
+        task_id = scheduler.push_task(
+            "app.core.memory.agent.write_message",
             end_user_id,
-            messages,
-            config_id,
-            storage_type,
-            user_rag_memory_id or "",
+            {
+                "end_user_id": end_user_id,
+                "message": messages,
+                "config_id": config_id,
+                "storage_type": storage_type,
+                "user_rag_memory_id": user_rag_memory_id or ""
+            }
         )
 
-        logger.info(f"Memory write task submitted: task_id={task.id}, end_user_id={end_user_id}")
+        logger.info(f"Memory write task submitted, task_id={task_id} end_user_id={end_user_id}")
 
         return {
-            "task_id": task.id,
-            "status": "PENDING",
+            "task_id": task_id,
+            "status": "QUEUED",
             "end_user_id": end_user_id,
         }
 

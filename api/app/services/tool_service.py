@@ -815,11 +815,12 @@ class ToolService:
                         "default": param_info.get("default")
                     })
                 
-                # 请求体参数
+                # 请求体参数 — _extract_request_body 返回 {"schema": {...}, "required": bool, ...}
                 request_body = operation.get("request_body")
                 if request_body:
-                    schema_props = request_body.get("schema", {}).get("properties", {})
-                    required_props = request_body.get("schema", {}).get("required", [])
+                    body_schema = request_body.get("schema", {})
+                    schema_props = body_schema.get("properties", {})
+                    required_props = body_schema.get("required", [])
                     
                     for prop_name, prop_schema in schema_props.items():
                         parameters.append({

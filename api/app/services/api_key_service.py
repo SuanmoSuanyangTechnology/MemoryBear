@@ -65,6 +65,11 @@ class ApiKeyService:
                         BizCode.BAD_REQUEST
                     )
 
+            if data.resource_id:
+                app = db.get(App, data.resource_id)
+                if not app or not app.current_release_id:
+                    raise BusinessException("该应用未发布", BizCode.APP_NOT_PUBLISHED)
+
             # 生成 API Key
             api_key = generate_api_key(data.type)
 

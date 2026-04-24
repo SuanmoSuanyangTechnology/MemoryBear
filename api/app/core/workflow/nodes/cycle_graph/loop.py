@@ -210,6 +210,9 @@ class LoopRuntime:
                                 "cycle_id": self.node_id,
                                 "cycle_idx": idx,
                                 "node_id": node_name,
+                                "node_type": node_type,
+                                "node_name": node_name,
+                                "status": result.get("node_outputs", {}).get(node_name, {}).get("status", "completed"),
                                 "input": result.get("node_outputs", {}).get(node_name, {}).get("input")
                                 if not cycle_variable else cycle_variable,
                                 "output": result.get("node_outputs", {}).get(node_name, {}).get("output")

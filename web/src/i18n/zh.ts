@@ -790,6 +790,7 @@ export const zh = {
       maxCount: '最大文件数',
       singleMaxSize: '单文件最大大小',
       unix: '个',
+      document_image_recognition: '是否识别文档中的图片',
       text_to_speech: '文字转语音',
       text_to_speech_desc: '文本可以转换成语音',
       opening_statement: '对话开场白',
@@ -799,6 +800,7 @@ export const zh = {
       add_questions: '添加选项',
       citation: '引用和归属',
       citation_desc: '显示源文档和生成内容的归属部分',
+      allow_download: '允许下载引用原文',
       invalidVariablesTitle: "对话开场白中引用了以下未定义的变量，是否保存开场白配置？",
       deep_thinking: '开启深度思考',
 
@@ -866,6 +868,7 @@ export const zh = {
       json_output: '支持JSON格式化输出',
       thinking_budget_tokens: '深度思考预算Token数',
       thinking_budget_tokens_max_error: "不能超过 最大令牌数 ({{max}})",
+      logSearchPlaceholder: '搜索日志内容',
     },
     table: {
       totalRecords: '共 {{total}} 条记录'
@@ -2493,6 +2496,7 @@ export const zh = {
 
       input_result: '输入',
       output_result: '输出',
+      process_result: '数据处理',
       error: '错误信息',
       loopNum: '个循环',
       iterationNum: '个迭代',

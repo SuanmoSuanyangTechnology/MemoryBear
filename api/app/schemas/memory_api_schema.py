@@ -112,12 +112,12 @@ class MemoryWriteResponse(BaseModel):
     """Response schema for memory write operation.
     
     Attributes:
-        task_id: Celery task ID for status polling
-        status: Initial task status (PENDING)
+        task_id: task ID for status polling
+        status: Initial task status (QUEUED)
         end_user_id: End user ID the write was submitted for
     """
-    task_id: str = Field(..., description="Celery task ID for polling")
-    status: str = Field(..., description="Task status: PENDING")
+    task_id: str = Field(..., description="task ID for polling")
+    status: str = Field(..., description="Task status: QUEUED")
     end_user_id: str = Field(..., description="End user ID")
 
 

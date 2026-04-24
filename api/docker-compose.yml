@@ -63,6 +63,23 @@ services:
     networks:
       - celery
 
+  celery-task-scheduler:
+    image: redbear-mem-open:latest
+    container_name: celery-task-scheduler
+    env_file:
+      - .env
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    command: python -m app.celery_task_scheduler
+    restart: unless-stopped
+    healthcheck:
+      test:  CMD curl -f 127.0.0.1:8001 || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - celery
+
   # Celery Beat - scheduler
   beat:
     image: redbear-mem-open:latest

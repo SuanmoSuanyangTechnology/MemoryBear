@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Body, Depends, Query, Request
 from sqlalchemy.orm import Session
 
+from app.celery_task_scheduler import scheduler
 from app.core.api_key_auth import require_api_key
 from app.core.logging_config import get_business_logger
 from app.core.quota_stub import check_end_user_quota
@@ -86,7 +87,7 @@ async def write_memory(
         user_rag_memory_id=payload.user_rag_memory_id,
     )
 
-    logger.info(f"Memory write task submitted: task_id={result['task_id']}, end_user_id: {payload.end_user_id}")
+    logger.info(f"Memory write task submitted: task_id: {result['task_id']} end_user_id: {payload.end_user_id}")
     return success(data=MemoryWriteResponse(**result).model_dump(), msg="Memory write task submitted")
 
 
@@ -105,8 +106,7 @@ async def get_write_task_status(
     """
     logger.info(f"Write task status check - task_id: {task_id}")
 
-    from app.services.task_service import get_task_memory_write_result
-    result = get_task_memory_write_result(task_id)
+    result = scheduler.get_task_status(task_id)
 
     return success(data=_sanitize_task_result(result), msg="Task status retrieved")
 

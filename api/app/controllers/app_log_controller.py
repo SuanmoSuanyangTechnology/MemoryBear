@@ -9,7 +9,7 @@ from app.core.logging_config import get_business_logger
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user, cur_workspace_access_guard
-from app.schemas.app_log_schema import AppLogConversation, AppLogConversationDetail
+from app.schemas.app_log_schema import AppLogConversation, AppLogConversationDetail, AppLogMessage
 from app.schemas.response_schema import PageData, PageMeta
 from app.services.app_service import AppService
 from app.services.app_log_service import AppLogService
@@ -78,17 +78,32 @@ def get_app_log_detail(
 
     # 验证应用访问权限
     app_service = AppService(db)
-    app_service.get_app(app_id, workspace_id)
+    app = app_service.get_app(app_id, workspace_id)
 
     # 使用 Service 层查询
     log_service = AppLogService(db)
-    conversation, node_executions_map = log_service.get_conversation_detail(
+    conversation, messages, node_executions_map = log_service.get_conversation_detail(
         app_id=app_id,
         conversation_id=conversation_id,
-        workspace_id=workspace_id
+        workspace_id=workspace_id,
+        app_type=app.type
     )
 
-    detail = AppLogConversationDetail.model_validate(conversation)
-    detail.node_executions_map = node_executions_map
+    # 构建基础会话信息（不经过 ORM relationship）
+    base = AppLogConversation.model_validate(conversation)
+
+    # 单独处理 messages，避免触发 SQLAlchemy relationship 校验
+    if messages and isinstance(messages[0], AppLogMessage):
+        # 工作流：已经是 AppLogMessage 实例
+        msg_list = messages
+    else:
+        # Agent：ORM Message 对象逐个转换
+        msg_list = [AppLogMessage.model_validate(m) for m in messages]
+
+    detail = AppLogConversationDetail(
+        **base.model_dump(),
+        messages=msg_list,
+        node_executions_map=node_executions_map,
+    )
 
     return success(data=detail)

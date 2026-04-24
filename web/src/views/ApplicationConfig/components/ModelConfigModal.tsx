@@ -184,7 +184,8 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
             {
               validator: (_, value) => {
                 const maxTokens = values?.max_tokens
-                if (value !== undefined && maxTokens !== undefined && value > maxTokens) {
+                const deep_thinking = values?.deep_thinking;
+                if (deep_thinking && value !== undefined && maxTokens !== undefined && value > maxTokens) {
                   return Promise.reject(t('application.thinking_budget_tokens_max_error', { max: maxTokens }))
                 }
                 return Promise.resolve()

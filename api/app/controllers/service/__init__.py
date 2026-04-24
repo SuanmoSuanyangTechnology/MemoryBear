@@ -14,6 +14,7 @@ from . import (
     rag_api_document_controller,
     rag_api_file_controller,
     rag_api_knowledge_controller,
+    user_memory_api_controller,
 )
 
 # 创建 V1 API 路由器
@@ -28,5 +29,6 @@ service_router.include_router(rag_api_chunk_controller.router)
 service_router.include_router(memory_api_controller.router)
 service_router.include_router(end_user_api_controller.router)
 service_router.include_router(memory_config_api_controller.router)
+service_router.include_router(user_memory_api_controller.router)
 
 __all__ = ["service_router"]

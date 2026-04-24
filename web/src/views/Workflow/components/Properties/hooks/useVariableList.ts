@@ -56,6 +56,8 @@ const NODE_VARIABLES = {
   ],
   'document-extractor': [
     { label: 'text', dataType: 'string', field: 'text' },
+    // { label: 'chunks', dataType: 'array[string]', field: 'chunks' },
+    { label: 'images', dataType: 'array[file]', field: 'images' },
   ],
   'list-operator': [
     { label: 'result', dataType: 'array[string]', field: 'result' },
