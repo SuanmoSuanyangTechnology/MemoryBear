@@ -388,6 +388,7 @@ class MultimodalService:
                         from app.models.workspace_model import Workspace as WorkspaceModel
                         ws = self.db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
                         tenant_id = ws.tenant_id if ws else None
+                        img_result = []
                         for img_info in img_infos:
                             page = img_info["page"]
                             index = img_info["index"]
@@ -407,9 +408,10 @@ class MultimodalService:
                                     file_type="image/png",
                                 )
                                 _, img_content = await self._process_image(img_file, strategy_class(img_file))
-                                result.append(img_content)
+                                img_result.append(img_content)
                             except Exception as img_err:
                                 logger.warning(f"文档图片处理失败: {img_err}")
+                        result.extend(img_result)
                 elif file.type == FileType.AUDIO and "audio" in self.capability:
                     is_support, content = await self._process_audio(file, strategy)
                     result.append(content)
