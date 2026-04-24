@@ -131,8 +131,8 @@ const LoopNode: ReactShapeConfig['component'] = ({ node, graph }) => {
 
   return (
     <div className={clsx('rb:cursor-pointer rb:group rb:relative rb:h-full rb:w-full rb:p-3 rb:border rb:rounded-2xl rb:bg-[#FCFCFD] rb:shadow-[0px_2px_4px_0px_rgba(23,23,25,0.03)]', {
-      'rb:border-[#171719]': data.isSelected,
-      'rb:border-[#FCFCFD]': !data.isSelected,
+      'rb:border-[#171719]!': data.isSelected && !data.executionStatus,
+      'rb:border-[#FCFCFD]': !data.isSelected && !data.executionStatus,
       'rb:border-[#369F21]!': !data.isSelected && data.executionStatus === 'completed',
       'rb:border-[#FF5D34]!': !data.isSelected && data.executionStatus === 'failed',
     })}>
