@@ -14,6 +14,7 @@ class AppLogMessage(BaseModel):
     conversation_id: uuid.UUID
     role: str = Field(description="角色: user / assistant / system")
     content: str
+    status: Optional[str] = Field(default=None, description="执行状态（工作流专用）: completed / failed")
     meta_data: Optional[Dict[str, Any]] = None
     created_at: datetime.datetime
 
@@ -58,6 +59,7 @@ class AppLogNodeExecution(BaseModel):
     input: Optional[Any] = None
     process: Optional[Any] = None
     output: Optional[Any] = None
+    cycle_items: Optional[List[Any]] = None
     elapsed_time: Optional[float] = None
     token_usage: Optional[Dict[str, Any]] = None
 
