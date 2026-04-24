@@ -1236,7 +1236,7 @@ RETURN s.id AS id,
 SEARCH_COMMUNITIES_BY_USER_ID = """
 MATCH (c:Community)
 WHERE c.end_user_id = $end_user_id
-RETURN c.id AS id,
+RETURN c.community_id AS id,
        c.summary_embedding AS embedding
 """
 
@@ -1467,7 +1467,7 @@ LIMIT $limit
 SEARCH_COMMUNITIES_BY_KEYWORD = """
 CALL db.index.fulltext.queryNodes("communitiesFulltext", $query) YIELD node AS c, score
 WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
-RETURN c.id AS id,
+RETURN c.community_id AS id,
        c.name AS name,
        c.summary AS content,
        c.core_entities AS core_entities,
