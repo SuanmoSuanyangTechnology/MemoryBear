@@ -16,7 +16,7 @@ from app.models import MultiAgentConfig, AgentConfig, ModelType
 from app.models import WorkflowConfig
 from app.repositories.tool_repository import ToolRepository
 from app.schemas import DraftRunRequest
-from app.schemas.app_schema import FileInput
+from app.schemas.app_schema import FileInput, FileType
 from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 from app.services.conversation_service import ConversationService
@@ -165,8 +165,27 @@ class AppChatService:
         processed_files = None
         if files:
             multimodal_service = MultimodalService(self.db, model_info)
-            processed_files = await multimodal_service.process_files(files)
+            fu_config = features_config.get("file_upload", {})
+            if hasattr(fu_config, "model_dump"):
+                fu_config = fu_config.model_dump()
+            doc_img_recognition = isinstance(fu_config, dict) and fu_config.get("document_image_recognition", False)
+            processed_files = await multimodal_service.process_files(
+                files, document_image_recognition=doc_img_recognition
+            )
             logger.info(f"处理了 {len(processed_files)} 个文件")
+            if doc_img_recognition and "vision" in (api_key_obj.capability or []) and any(
+                f.type == FileType.DOCUMENT for f in files
+            ):
+                from langchain.agents import create_agent
+                agent.system_prompt += (
+                    "\n\n文档中包含图片，图片位置已在文本中以 [第N页 第M张图片]: URL 标记。"
+                    "请在回答中用 Markdown 格式 ![描述](URL) 展示相关图片，做到图文并茂。"
+                )
+                agent.agent = create_agent(
+                    model=agent.llm,
+                    tools=agent._wrap_tools_with_tracking(agent.tools) if agent.tools else None,
+                    system_prompt=agent.system_prompt
+                )
         # 为需要运行时上下文的工具注入上下文
         for t in tools:
             if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
@@ -438,8 +457,27 @@ class AppChatService:
             processed_files = None
             if files:
                 multimodal_service = MultimodalService(self.db, model_info)
-                processed_files = await multimodal_service.process_files(files)
+                fu_config = features_config.get("file_upload", {})
+                if hasattr(fu_config, "model_dump"):
+                    fu_config = fu_config.model_dump()
+                doc_img_recognition = isinstance(fu_config, dict) and fu_config.get("document_image_recognition", False)
+                processed_files = await multimodal_service.process_files(
+                    files, document_image_recognition=doc_img_recognition
+                )
                 logger.info(f"处理了 {len(processed_files)} 个文件")
+                if doc_img_recognition and "vision" in (api_key_obj.capability or []) and any(
+                    f.type == FileType.DOCUMENT for f in files
+                ):
+                    from langchain.agents import create_agent
+                    agent.system_prompt += (
+                        "\n\n文档中包含图片，图片位置已在文本中以 [第N页 第M张图片]: URL 标记。"
+                        "请在回答中用 Markdown 格式 ![描述](URL) 展示相关图片，做到图文并茂。"
+                    )
+                    agent.agent = create_agent(
+                        model=agent.llm,
+                        tools=agent._wrap_tools_with_tracking(agent.tools) if agent.tools else None,
+                        system_prompt=agent.system_prompt
+                    )
 
             # 为需要运行时上下文的工具注入上下文
             for t in tools:

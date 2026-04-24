@@ -155,6 +155,10 @@ class FileUploadConfig(BaseModel):
     document_allowed_extensions: List[str] = Field(
         default=["pdf", "docx", "doc", "xlsx", "xls", "txt", "csv", "json", "md"]
     )
+    document_image_recognition: bool = Field(
+        default=False,
+        description="是否识别文档中的图片（需配置视觉模型）"
+    )
     # 视频文件：MP4/MOV/AVI/WebM，最大 500MB
     video_enabled: bool = Field(default=False)
     video_max_size_mb: int = Field(default=50)

@@ -10,6 +10,7 @@ import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
+from langchain.agents import create_agent
 from langchain.tools import tool
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -27,7 +28,7 @@ from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_db_context
 from app.models import AgentConfig, ModelConfig
 from app.repositories.tool_repository import ToolRepository
-from app.schemas.app_schema import FileInput, Citation
+from app.schemas.app_schema import FileInput, Citation, FileType
 from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
 from app.services.conversation_service import ConversationService
@@ -637,12 +638,35 @@ class AgentRunService:
 
             # 6. 处理多模态文件
             processed_files = None
+            has_doc_with_images = False
             if files:
-                # 获取 provider 信息
                 provider = api_key_config.get("provider", "openai")
                 multimodal_service = MultimodalService(self.db, model_info)
-                processed_files = await multimodal_service.process_files(files)
+                fu_config = features_config.get("file_upload", {})
+                if hasattr(fu_config, "model_dump"):
+                    fu_config = fu_config.model_dump()
+                doc_img_recognition = isinstance(fu_config, dict) and fu_config.get("document_image_recognition", False)
+                processed_files = await multimodal_service.process_files(
+                    files, document_image_recognition=doc_img_recognition
+                )
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
+                capability = api_key_config.get("capability", [])
+                has_doc_with_images = (
+                    doc_img_recognition
+                    and "vision" in capability
+                    and any(f.type == FileType.DOCUMENT for f in files)
+                )
+            if has_doc_with_images:
+                agent.system_prompt += (
+                    "\n\n文档中包含图片，图片位置已在文本中以 [第N页 第M张图片]: URL 标记。"
+                    "请在回答中用 Markdown 格式 ![描述](URL) 展示相关图片，做到图文并茂。"
+                )
+                # 重建 agent graph 以使新 system_prompt 生效
+                agent.agent = create_agent(
+                    model=agent.llm,
+                    tools=agent._wrap_tools_with_tracking(agent.tools) if agent.tools else None,
+                    system_prompt=agent.system_prompt
+                )
             # 为需要运行时上下文的工具注入上下文
             for t in tools:
                 if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
@@ -895,12 +919,34 @@ class AgentRunService:
 
             # 6. 处理多模态文件
             processed_files = None
+            has_doc_with_images = False
             if files:
-                # 获取 provider 信息
                 provider = api_key_config.get("provider", "openai")
                 multimodal_service = MultimodalService(self.db, model_info)
-                processed_files = await multimodal_service.process_files(files)
+                fu_config = features_config.get("file_upload", {})
+                if hasattr(fu_config, "model_dump"):
+                    fu_config = fu_config.model_dump()
+                doc_img_recognition = isinstance(fu_config, dict) and fu_config.get("document_image_recognition", False)
+                processed_files = await multimodal_service.process_files(
+                    files, document_image_recognition=doc_img_recognition
+                )
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
+                capability = api_key_config.get("capability", [])
+                has_doc_with_images = (
+                    doc_img_recognition
+                    and "vision" in capability
+                    and any(f.type == FileType.DOCUMENT for f in files)
+                )
+            if has_doc_with_images:
+                agent.system_prompt += (
+                    "\n\n文档中包含图片，图片位置已在文本中以 [第N页 第M张图片]: URL 标记。"
+                    "请在回答中用 Markdown 格式 ![描述](URL) 展示相关图片，做到图文并茂。"
+                )
+                agent.agent = create_agent(
+                    model=agent.llm,
+                    tools=agent._wrap_tools_with_tracking(agent.tools) if agent.tools else None,
+                    system_prompt=agent.system_prompt
+                )
             # 为需要运行时上下文的工具注入上下文
             for t in tools:
                 if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):

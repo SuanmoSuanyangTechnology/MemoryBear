@@ -1,3 +1,5 @@
+import uuid
+
 from sqlalchemy.orm import Session
 from typing import Optional, Tuple, Union
 import jwt
@@ -130,7 +132,7 @@ def register_user_with_invite(
     email: str,
     password: str,
     invite_token: str,
-    workspace_id: str,
+    workspace_id: uuid.UUID,
     username: Optional[str] = None,
 ) -> User:
     """
@@ -147,6 +149,7 @@ def register_user_with_invite(
     from app.schemas.user_schema import UserCreate
     from app.schemas.workspace_schema import InviteAcceptRequest
     from app.services import user_service, workspace_service
+    from app.repositories import workspace_repository as ws_repo
     from app.core.logging_config import get_business_logger
     
     logger = get_business_logger()
@@ -159,7 +162,8 @@ def register_user_with_invite(
             password=password,
             username=email.split('@')[0] if not username else username
         )
-        user = user_service.create_user(db=db, user=user_create)
+        workspace = ws_repo.get_workspace_by_id(db=db, workspace_id=workspace_id)
+        user = user_service.create_user(db=db, user=user_create, workspace=workspace)
         logger.info(f"用户创建成功: {user.email} (ID: {user.id})")
         
         # 接受工作空间邀请（此时用户已成为工作空间成员，并且会 commit）

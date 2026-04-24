@@ -147,7 +147,8 @@ dependencies = [
     "modelscope>=1.34.0",
     "python-magic>=0.4.14; sys_platform == 'linux' or sys_platform == 'darwin'",
     "python-magic-bin>=0.4.14; sys_platform=='win32'",
-    "volcengine-python-sdk[ark]==5.0.19"
+    "volcengine-python-sdk[ark]==5.0.19",
+    "pymupdf>=1.27.2.2",
 ]
 
 [tool.pytest.ini_options]

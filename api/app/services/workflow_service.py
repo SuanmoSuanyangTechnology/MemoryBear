@@ -694,7 +694,8 @@ class WorkflowService:
             "nodes": config.nodes,
             "edges": config.edges,
             "variables": config.variables,
-            "execution_config": config.execution_config
+            "execution_config": config.execution_config,
+            "features": feature_configs
         }
 
         try:
@@ -894,7 +895,8 @@ class WorkflowService:
             "nodes": config.nodes,
             "edges": config.edges,
             "variables": config.variables,
-            "execution_config": config.execution_config
+            "execution_config": config.execution_config,
+            "features": feature_configs
         }
 
         try:
