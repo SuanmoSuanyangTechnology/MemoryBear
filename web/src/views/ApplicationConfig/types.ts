@@ -438,6 +438,7 @@ interface FileSetttings {
   document_enabled: boolean;
   document_max_size_mb: number;
   document_allowed_extensions: string[];
+  document_image_recognition: boolean;
   video_enabled: boolean;
   video_max_size_mb: number;
   video_allowed_extensions: string[];
@@ -499,6 +500,7 @@ export interface LogItem {
   is_draft: boolean;
   created_at: number;
   updated_at: number;
+  node_executions_map?: Record<string, ChatItem['subContent']>
 }
 export interface LogDetailModalRef {
   handleOpen: (vo: LogItem) => void;

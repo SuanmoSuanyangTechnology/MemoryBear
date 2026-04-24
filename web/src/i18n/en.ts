@@ -1460,6 +1460,7 @@ export const en = {
       maxCount: 'Max Files',
       singleMaxSize: 'Max Size',
       unix: 'items',
+      document_image_recognition: 'Enable image recognition in documents',
       text_to_speech: 'Text to Speech',
       text_to_speech_desc: 'Text can be converted to speech',
       opening_statement: 'Conversation Opening',
@@ -1469,6 +1470,7 @@ export const en = {
       add_questions: 'Add Option',
       citation: 'Citation and Attribution',
       citation_desc: 'Display the attribution of source documents and generated content',
+      allow_download: 'Allow downloading cited source text',
       invalidVariablesTitle: "The following undefined variables are referenced in the conversation opening. Do you want to save the opening configuration?",
       deep_thinking: 'Enable Deep Thinking',
 
@@ -1536,6 +1538,7 @@ export const en = {
       json_output: 'Support JSON formatted output',
       thinking_budget_tokens: 'thinking budget tokens',
       thinking_budget_tokens_max_error: "Cannot exceed the max tokens limit ({{max}})",
+      logSearchPlaceholder: 'Search log content',
     },
     userMemory: {
       userMemory: 'User Memory',
@@ -2529,6 +2532,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
 
       input_result: 'Input',
       output_result: 'Output',
+      process_result: 'Data Processing',
       error: 'Error Message',
       loopNum: ' loops',
       iterationNum: ' iterations',

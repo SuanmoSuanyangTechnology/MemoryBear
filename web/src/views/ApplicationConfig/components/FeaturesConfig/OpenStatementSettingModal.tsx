@@ -104,6 +104,7 @@ const OpenStatementSettingModal = forwardRef<OpenStatementSettingModalRef, OpenS
         <Form.Item
           label={t('application.opening_statement')}
           name="statement"
+          rules={[{ required: true, message: t('common.pleaseEnter') }]}
         >
           {source === 'workflow'
             ? <Editor options={chatVariables as any} variant="outlined" />
