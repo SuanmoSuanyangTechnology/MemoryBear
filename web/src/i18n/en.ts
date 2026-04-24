@@ -1470,6 +1470,7 @@ export const en = {
       add_questions: 'Add Option',
       citation: 'Citation and Attribution',
       citation_desc: 'Display the attribution of source documents and generated content',
+      allow_download: 'Allow downloading cited source text',
       invalidVariablesTitle: "The following undefined variables are referenced in the conversation opening. Do you want to save the opening configuration?",
       deep_thinking: 'Enable Deep Thinking',
 

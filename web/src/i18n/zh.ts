@@ -800,6 +800,7 @@ export const zh = {
       add_questions: '添加选项',
       citation: '引用和归属',
       citation_desc: '显示源文档和生成内容的归属部分',
+      allow_download: '允许下载引用原文',
       invalidVariablesTitle: "对话开场白中引用了以下未定义的变量，是否保存开场白配置？",
       deep_thinking: '开启深度思考',
 
