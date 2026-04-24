@@ -773,9 +773,16 @@ class WorkflowService:
                 # 过滤 citations
                 citations = result.get("citations", [])
                 citation_cfg = feature_configs.get("citation", {})
-                filtered_citations = (
-                    citations if isinstance(citation_cfg, dict) and citation_cfg.get("enabled") else []
-                )
+                if isinstance(citation_cfg, dict) and citation_cfg.get("enabled"):
+                    allow_download = citation_cfg.get("allow_download", False)
+                    if allow_download:
+                        from app.core.config import settings
+                        for c in citations:
+                            if c.get("document_id"):
+                                c["download_url"] = f"{settings.FILE_LOCAL_SERVER_URL}/apps/citations/{c['document_id']}/download"
+                    filtered_citations = citations
+                else:
+                    filtered_citations = []
                 assistant_meta = {"usage": token_usage, "audio_url": None}
                 if filtered_citations:
                     assistant_meta["citations"] = filtered_citations
@@ -975,9 +982,16 @@ class WorkflowService:
                         # 过滤 citations
                         citations = event.get("data", {}).get("citations", [])
                         citation_cfg = feature_configs.get("citation", {})
-                        filtered_citations = (
-                            citations if isinstance(citation_cfg, dict) and citation_cfg.get("enabled") else []
-                        )
+                        if isinstance(citation_cfg, dict) and citation_cfg.get("enabled"):
+                            allow_download = citation_cfg.get("allow_download", False)
+                            if allow_download:
+                                from app.core.config import settings
+                                for c in citations:
+                                    if c.get("document_id"):
+                                        c["download_url"] = f"{settings.FILE_LOCAL_SERVER_URL}/apps/citations/{c['document_id']}/download"
+                            filtered_citations = citations
+                        else:
+                            filtered_citations = []
                         assistant_meta = {"usage": token_usage, "audio_url": None}
                         if filtered_citations:
                             assistant_meta["citations"] = filtered_citations
