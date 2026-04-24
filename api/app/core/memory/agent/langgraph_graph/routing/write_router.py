@@ -1,6 +1,7 @@
 import json
 import os
 
+from app.celery_task_scheduler import scheduler
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.langgraph_graph.tools.write_tool import format_parsing, messages_parse
 from app.core.memory.agent.models.write_aggregate_model import WriteAggregateModel
@@ -13,7 +14,6 @@ from app.db import get_db_context
 from app.repositories.memory_short_repository import LongTermMemoryRepository
 from app.schemas.memory_agent_schema import AgentMemory_Long_Term
 from app.utils.config_utils import resolve_config_id
-from celery_task_scheduler import scheduler
 
 logger = get_agent_logger(__name__)
 template_root = os.path.join(PROJECT_ROOT_, 'memory', 'agent', 'utils', 'prompt')

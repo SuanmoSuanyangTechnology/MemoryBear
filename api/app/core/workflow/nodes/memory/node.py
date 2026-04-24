@@ -1,6 +1,7 @@
 import re
 from typing import Any
 
+from app.celery_task_scheduler import scheduler
 from app.core.memory.enums import SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.workflow.engine.state_manager import WorkflowState
@@ -11,7 +12,6 @@ from app.core.workflow.variable.base_variable import VariableType
 from app.core.workflow.variable.variable_objects import FileVariable, ArrayVariable
 from app.db import get_db_read
 from app.schemas import FileInput
-from celery_task_scheduler import scheduler
 
 
 class MemoryReadNode(BaseNode):
