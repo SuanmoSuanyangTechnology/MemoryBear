@@ -181,7 +181,7 @@ async def window_dialogue(end_user_id, langchain_messages, memory_config, scope)
             {
                 "end_user_id": str(end_user_id),
                 "message": redis_messages,
-                "config_id": config_id,
+                "config_id": str(config_id),
                 "storage_type": AgentMemory_Long_Term.STORAGE_NEO4J,
                 "user_rag_memory_id": ""
             }
