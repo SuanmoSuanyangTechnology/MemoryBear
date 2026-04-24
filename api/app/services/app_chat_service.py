@@ -170,7 +170,8 @@ class AppChatService:
                 fu_config = fu_config.model_dump()
             doc_img_recognition = isinstance(fu_config, dict) and fu_config.get("document_image_recognition", False)
             processed_files = await multimodal_service.process_files(
-                files, document_image_recognition=doc_img_recognition
+                files, document_image_recognition=doc_img_recognition,
+                workspace_id=workspace_id
             )
             logger.info(f"处理了 {len(processed_files)} 个文件")
             if doc_img_recognition and "vision" in (api_key_obj.capability or []) and any(
@@ -462,7 +463,8 @@ class AppChatService:
                     fu_config = fu_config.model_dump()
                 doc_img_recognition = isinstance(fu_config, dict) and fu_config.get("document_image_recognition", False)
                 processed_files = await multimodal_service.process_files(
-                    files, document_image_recognition=doc_img_recognition
+                    files, document_image_recognition=doc_img_recognition,
+                    workspace_id=workspace_id
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件")
                 if doc_img_recognition and "vision" in (api_key_obj.capability or []) and any(

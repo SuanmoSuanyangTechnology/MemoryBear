@@ -24,6 +24,7 @@ import chardet
 import httpx
 import magic
 import openpyxl
+import uuid
 from docx import Document
 from sqlalchemy.orm import Session
 
@@ -344,6 +345,7 @@ class MultimodalService:
     async def process_files(
             self,
             files: Optional[List[FileInput]],
+            workspace_id: uuid.UUID = None,
             document_image_recognition: bool = False,
     ) -> List[Dict[str, Any]]:
         """
@@ -383,17 +385,20 @@ class MultimodalService:
                     # 仅当开关开启且模型支持视觉时，才提取文档内嵌图片
                     if document_image_recognition and "vision" in self.capability:
                         img_infos = await self.extract_document_images(file)
+                        from app.models.workspace_model import Workspace as WorkspaceModel
+                        ws = self.db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
+                        tenant_id = ws.tenant_id if ws else None
                         for img_info in img_infos:
                             page = img_info["page"]
                             index = img_info["index"]
                             ext = img_info.get("ext", "png")
                             try:
-                                _, img_url = await self._save_doc_image_to_storage(img_info["bytes"], ext)
+                                _, img_url = await self._save_doc_image_to_storage(img_info["bytes"], ext, tenant_id, workspace_id)
                                 placeholder = f"第{page}页 第{index + 1}张图片" if page > 0 else f"第{index + 1}张图片"
                                 # 在文本内容中追加图片位置标记
                                 if result and result[-1].get("type") in ("text", "document"):
                                     key = "text" if "text" in result[-1] else list(result[-1].keys())[-1]
-                                    result[-1][key] = result[-1].get(key, "") + f"\n[{placeholder}]: {img_url}"
+                                    result[-1][key] = result[-1].get(key, "") + f"\n[图片 {placeholder}]: {img_url}"
                                 # 将图片以视觉格式追加到消息内容中
                                 img_file = FileInput(
                                     type=FileType.IMAGE,
@@ -475,31 +480,25 @@ class MultimodalService:
             file_name = file_metadata.file_name if file_metadata else "unknown"
             return await strategy.format_document(file_name, text)
 
+    @staticmethod
     async def _save_doc_image_to_storage(
-            self,
             img_bytes: bytes,
             ext: str,
+            tenant_id: uuid.UUID,
+            workspace_id: uuid.UUID,
     ) -> tuple[str, str]:
         """
         将文档内嵌图片保存到存储后端，写入 FileMetadata。
-        tenant_id / workspace_id 从 api_config 所在的 FileMetadata 上下文获取，
-        无法获取时使用占位 UUID（图片仍可通过 permanent URL 访问）。
 
         Returns:
             (file_id_str, permanent_url)
         """
-        import uuid as _uuid
         from app.services.file_storage_service import FileStorageService, generate_file_key
         from app.db import get_db_context
 
-        file_id = _uuid.uuid4()
+        file_id = uuid.uuid4()
         file_ext = f".{ext}" if not ext.startswith(".") else ext
         content_type = f"image/{ext}"
-
-        # tenant_id / workspace_id 尽量从已有 FileMetadata 推断，否则用占位值
-        placeholder = _uuid.UUID(int=0)
-        tenant_id = placeholder
-        workspace_id = placeholder
 
         file_key = generate_file_key(tenant_id, workspace_id, file_id, file_ext)
         storage_svc = FileStorageService()
