@@ -595,23 +595,6 @@ class AgentRunService:
                 )
                 tools.extend(memory_tools)
 
-            # 4. 创建 LangChain Agent
-            agent = LangChainAgent(
-                model_name=api_key_config["model_name"],
-                api_key=api_key_config["api_key"],
-                provider=api_key_config.get("provider", "openai"),
-                api_base=api_key_config.get("api_base"),
-                is_omni=api_key_config.get("is_omni", False),
-                temperature=effective_params.get("temperature", 0.7),
-                max_tokens=effective_params.get("max_tokens", 2000),
-                system_prompt=system_prompt,
-                tools=tools,
-                deep_thinking=effective_params.get("deep_thinking", False),
-                thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
-                json_output=effective_params.get("json_output", False),
-                capability=api_key_config.get("capability", []),
-            )
-
             # 5. 处理会话ID（创建或验证），新会话时写入开场白
             is_new_conversation = not conversation_id
             opening, suggested_questions = None, None
@@ -666,16 +649,26 @@ class AgentRunService:
                     and any(f.type == FileType.DOCUMENT for f in files)
                 )
             if has_doc_with_images:
-                agent.system_prompt += (
-                    "\n\n文档中包含图片，图片位置已在文本中以 [第N页 第M张图片]: URL 标记。"
-                    "请在回答中用 Markdown 格式 ![描述](URL) 展示相关图片，做到图文并茂。"
+                system_prompt += (
+                    "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: http://...，请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
                 )
-                # 重建 agent graph 以使新 system_prompt 生效
-                agent.agent = create_agent(
-                    model=agent.llm,
-                    tools=agent._wrap_tools_with_tracking(agent.tools) if agent.tools else None,
-                    system_prompt=agent.system_prompt
-                )
+
+            agent = LangChainAgent(
+                model_name=api_key_config["model_name"],
+                api_key=api_key_config["api_key"],
+                provider=api_key_config.get("provider", "openai"),
+                api_base=api_key_config.get("api_base"),
+                is_omni=api_key_config.get("is_omni", False),
+                temperature=effective_params.get("temperature", 0.7),
+                max_tokens=effective_params.get("max_tokens", 2000),
+                system_prompt=system_prompt,
+                tools=tools,
+                deep_thinking=effective_params.get("deep_thinking", False),
+                thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
+                json_output=effective_params.get("json_output", False),
+                capability=api_key_config.get("capability", []),
+            )
+
             # 为需要运行时上下文的工具注入上下文
             for t in tools:
                 if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):

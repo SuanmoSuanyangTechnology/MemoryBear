@@ -107,23 +107,6 @@ class AppChatService:
         # 获取模型参数
         model_parameters = config.model_parameters
 
-        # 创建 LangChain Agent
-        agent = LangChainAgent(
-            model_name=api_key_obj.model_name,
-            api_key=api_key_obj.api_key,
-            provider=api_key_obj.provider,
-            api_base=api_key_obj.api_base,
-            is_omni=api_key_obj.is_omni,
-            temperature=model_parameters.get("temperature", 0.7),
-            max_tokens=model_parameters.get("max_tokens", 2000),
-            system_prompt=system_prompt,
-            tools=tools,
-            deep_thinking=model_parameters.get("deep_thinking", False),
-            thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
-            json_output=model_parameters.get("json_output", False),
-            capability=api_key_obj.capability or [],
-        )
-
         model_info = ModelInfo(
             model_name=api_key_obj.model_name,
             provider=api_key_obj.provider,
@@ -177,16 +160,27 @@ class AppChatService:
             if doc_img_recognition and "vision" in (api_key_obj.capability or []) and any(
                 f.type == FileType.DOCUMENT for f in files
             ):
-                from langchain.agents import create_agent
-                agent.system_prompt += (
-                    "\n\n文档中包含图片，图片位置已在文本中以 [第N页 第M张图片]: URL 标记。"
-                    "请在回答中用 Markdown 格式 ![描述](URL) 展示相关图片，做到图文并茂。"
+                system_prompt += (
+                    "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: http://...，请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
                 )
-                agent.agent = create_agent(
-                    model=agent.llm,
-                    tools=agent._wrap_tools_with_tracking(agent.tools) if agent.tools else None,
-                    system_prompt=agent.system_prompt
-                )
+
+        # 创建 LangChain Agent
+        agent = LangChainAgent(
+            model_name=api_key_obj.model_name,
+            api_key=api_key_obj.api_key,
+            provider=api_key_obj.provider,
+            api_base=api_key_obj.api_base,
+            is_omni=api_key_obj.is_omni,
+            temperature=model_parameters.get("temperature", 0.7),
+            max_tokens=model_parameters.get("max_tokens", 2000),
+            system_prompt=system_prompt,
+            tools=tools,
+            deep_thinking=model_parameters.get("deep_thinking", False),
+            thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
+            json_output=model_parameters.get("json_output", False),
+            capability=api_key_obj.capability or [],
+        )
+
         # 为需要运行时上下文的工具注入上下文
         for t in tools:
             if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
