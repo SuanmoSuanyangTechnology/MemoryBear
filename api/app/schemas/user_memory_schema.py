@@ -99,7 +99,7 @@ class GraphStatistics(BaseModel):
     total_nodes: int = Field(0, description="节点总数")
     total_edges: int = Field(0, description="边总数")
     node_types: Dict[str, int] = Field(default_factory=dict, description="各节点类型数量")
-    edge_types: Optional[Dict[str, int]] = Field(default_factory=dict, description="各边类型数量")
+    edge_types: Dict[str, int] = Field(default_factory=dict, description="各边类型数量")
 
 
 class GraphData(BaseModel):

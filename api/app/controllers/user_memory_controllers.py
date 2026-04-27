@@ -350,7 +350,7 @@ async def get_graph_data_api(
         )
 
         # 检查是否有错误消息
-        if data.message and data.statistics.total_nodes == 0:
+        if data.message is not None and data.statistics.total_nodes == 0:
             api_logger.warning(f"图数据查询返回空结果: {data.message}")
             return success(data=data.model_dump(), msg=data.message)
 
@@ -394,7 +394,7 @@ async def get_community_graph_data_api(
             message=result.get("message"),
         )
 
-        if data.message and data.statistics.total_nodes == 0:
+        if data.message is not None and data.statistics.total_nodes == 0:
             api_logger.warning(f"社区图谱查询返回空结果: {data.message}")
             return success(data=data.model_dump(), msg=data.message)
 
