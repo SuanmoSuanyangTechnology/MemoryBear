@@ -2,10 +2,9 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-24 17:21:09
+ * @Last Modified time: 2026-04-27 16:30:30
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, type Edge } from '@antv/x6';
-import type { HistoryCommand as Command } from '@antv/x6/lib/plugin/history/type';
 import { register } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 import { App } from 'antd';
@@ -493,6 +492,72 @@ export const useWorkflowGraph = ({
       graphRef.current.cleanHistory()
     }
   }
+
+  const resizeGroupNodes = (graph: Graph) => {
+    graph.getNodes().forEach(parentNode => {
+      const parentType = parentNode.getData()?.type
+      if (parentType !== 'loop' && parentType !== 'iteration') return
+      const children = graph.getNodes().filter(
+        n => n.getData()?.cycle === parentNode.getData()?.id && n.getData()?.type !== 'add-node'
+      )
+      if (!children.length) return
+      const padding = 24
+      const headerHeight = 50
+      const childBounds = children.map(c => c.getBBox())
+      const minX = Math.min(...childBounds.map(b => b.x))
+      const minY = Math.min(...childBounds.map(b => b.y))
+      const maxX = Math.max(...childBounds.map(b => b.x + b.width))
+      const maxY = Math.max(...childBounds.map(b => b.y + b.height))
+      const parentBBox = parentNode.getBBox()
+      const newWidth = Math.max(parentBBox.width, maxX - minX + padding * 2)
+      const newHeight = Math.max(parentBBox.height, maxY - minY + padding * 2 + headerHeight)
+      parentNode.prop('size', { width: newWidth, height: newHeight })
+      parentNode.getPorts().forEach(port => {
+        if (port.group === 'right' && port.args) {
+          parentNode.portProp(port.id!, 'args/x', newWidth)
+        }
+      })
+    })
+  }
+
+  const syncChildRelationships = () => {
+    if (!graphRef.current) return
+    const graph = graphRef.current
+    // Re-establish parent-child relationships based on cycle data
+    graph.getNodes().forEach(node => {
+      const cycleId = node.getData()?.cycle
+      if (!cycleId) return
+      const parentNode = graph.getCellById(cycleId) as Node | null
+      if (!parentNode) return
+      if (!parentNode.getChildren()?.some(c => c.id === node.id)) {
+        parentNode.addChild(node)
+      }
+    })
+    // Remove stale parent-child links (parent exists but child's cycle no longer points to it)
+    graph.getNodes().forEach(node => {
+      const children = node.getChildren()
+      if (!children?.length) return
+      children.forEach(child => {
+        const childCycleId = (child as Node).getData?.()?.cycle
+        if (childCycleId !== node.id && childCycleId !== node.getData?.()?.id) {
+          node.removeChild(child)
+        }
+      })
+    })
+    // Recalculate group node size based on current children
+    resizeGroupNodes(graph)
+    // Bring child edges and nodes to front
+    graph.getEdges().forEach(edge => {
+      const src = graph.getCellById(edge.getSourceCellId())
+      const tgt = graph.getCellById(edge.getTargetCellId())
+      if (src?.getData()?.cycle || tgt?.getData()?.cycle) {
+        edge.toFront()
+      }
+    })
+    graph.getNodes().forEach(node => {
+      if (node.getData()?.cycle) node.toFront()
+    })
+  }
   /**
    * Setup X6 graph plugins (MiniMap, Snapline, Clipboard, Keyboard)
    */
@@ -538,6 +603,9 @@ export const useWorkflowGraph = ({
       setCanUndo(graphRef.current?.canUndo() ?? false)
       setCanRedo(graphRef.current?.canRedo() ?? false)
     })
+
+    graphRef.current.on('history:undo', syncChildRelationships)
+    graphRef.current.on('history:redo', syncChildRelationships)
   };
   // 显示/隐藏连接桩
   // const showPorts = (show: boolean) => {
@@ -781,48 +849,50 @@ export const useWorkflowGraph = ({
 
     // Delete all collected nodes and edges
     if (cells.length > 0) {
+      // Pre-calculate which parents need an add-node restored (before removal changes the graph)
+      const parentsNeedingAddNode = parentNodesToUpdate
+        .filter(parentNode => {
+          const parentShape = parentNode.shape;
+          if (parentShape !== 'loop-node' && parentShape !== 'iteration-node') return false;
+          const parentData = parentNode.getData();
+          const allChildren = graphRef.current!.getNodes().filter(n => n.getData()?.cycle === parentData.id);
+          const cycleStartNodes = allChildren.filter(n => n.getData()?.type === 'cycle-start');
+          // After deletion, only cycle-start will remain
+          const nonCycleStartToDelete = cells.filter(c =>
+            c.isNode() &&
+            (c as Node).getData()?.cycle === parentData.id &&
+            (c as Node).getData()?.type !== 'cycle-start'
+          );
+          return cycleStartNodes.length === 1 && (allChildren.length - nonCycleStartToDelete.length) === 1;
+        })
+        .map(parentNode => ({
+          parentNode,
+          cycleStartNode: graphRef.current!.getNodes().find(
+            n => n.getData()?.cycle === parentNode.getData().id && n.getData()?.type === 'cycle-start'
+          )!
+        }))
+        .filter(({ cycleStartNode }) => !!cycleStartNode);
+
       graphRef.current?.startBatch('delete');
-      // Remove parent-child relationships before removeCells
-      parentNodesToUpdate.forEach(parentNode => {
-        cells.filter(c => c.isNode() && (c as Node).getData()?.cycle === parentNode.getData()?.id)
-          .forEach(child => parentNode.removeChild(child));
-      });
       graphRef.current?.removeCells(cells);
 
-      // If parent is iteration/loop and only cycle-start remains, add add-node connected to it
-      parentNodesToUpdate.forEach(parentNode => {
-        const parentShape = parentNode.shape;
-        if (parentShape !== 'loop-node' && parentShape !== 'iteration-node') return;
+      parentsNeedingAddNode.forEach(({ parentNode, cycleStartNode }) => {
         const parentData = parentNode.getData();
-        const remainingChildren = graphRef.current!.getNodes().filter(
-          n => n.getData()?.cycle === parentData.id
-        );
-        const cycleStartNodes = remainingChildren.filter(n => n.getData()?.type === 'cycle-start');
-        if (cycleStartNodes.length === 1 && remainingChildren.length === 1) {
-          const cycleStartNode = cycleStartNodes[0];
-          const bbox = cycleStartNode.getBBox();
-          const addNode = graphRef.current!.addNode({
-            ...graphNodeLibrary.addStart,
-            x: bbox.x + 84,
-            y: bbox.y + 4,
-            data: {
-              type: 'add-node',
-              parentId: parentNode.id,
-              cycle: parentData.id,
-              label: t('workflow.addNode'),
-              icon: '+',
-            },
-          });
-          parentNode.addChild(addNode);
-          const sourcePort = cycleStartNode.getPorts().find(p => p.group === 'right')?.id || 'right';
-          const targetPort = addNode.getPorts().find(p => p.group === 'left')?.id || 'left';
-          graphRef.current!.addEdge({
-            source: { cell: cycleStartNode.id, port: sourcePort },
-            target: { cell: addNode.id, port: targetPort },
-            ...edgeAttrs,
-          });
-        }
+        const bbox = cycleStartNode.getBBox();
+        const addNode = graphRef.current!.addNode({
+          ...graphNodeLibrary.addStart,
+          x: bbox.x + 84,
+          y: bbox.y + 4,
+          data: { type: 'add-node', parentId: parentNode.id, cycle: parentData.id, label: t('workflow.addNode'), icon: '+' },
+        });
+        parentNode.addChild(addNode);
+        graphRef.current!.addEdge({
+          source: { cell: cycleStartNode.id, port: cycleStartNode.getPorts().find(p => p.group === 'right')?.id || 'right' },
+          target: { cell: addNode.id, port: addNode.getPorts().find(p => p.group === 'left')?.id || 'left' },
+          ...edgeAttrs,
+        });
       });
+
       graphRef.current?.stopBatch('delete');
     }
     return false;
@@ -1199,13 +1269,39 @@ export const useWorkflowGraph = ({
     };
 
     if (dragData.type === 'loop' || dragData.type === 'iteration') {
-      graphRef.current.addNode({
+      graphRef.current.startBatch('add-group')
+      const parentNode = graphRef.current.addNode({
         ...graphNodeLibrary[dragData.type],
         x: point.x - 150,
         y: point.y - 100,
         id: cleanNodeData.id,
         data: { ...cleanNodeData, isGroup: true },
       });
+      const parentBBox = parentNode.getBBox()
+      const cycleStartId = `cycle_start_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      const cycleStartNode = graphRef.current.addNode({
+        ...graphNodeLibrary.cycleStart,
+        x: parentBBox.x + 24,
+        y: parentBBox.y + 70,
+        id: cycleStartId,
+        data: { id: cycleStartId, type: 'cycle-start', parentId: cleanNodeData.id, isDefault: true, cycle: cleanNodeData.id },
+      })
+      const addNode = graphRef.current.addNode({
+        ...graphNodeLibrary.addStart,
+        x: parentBBox.x + 24 + 84,
+        y: parentBBox.y + 70 + 4,
+        data: { type: 'add-node', label: t('workflow.addNode'), icon: '+', parentId: cleanNodeData.id, cycle: cleanNodeData.id },
+      })
+      parentNode.addChild(cycleStartNode)
+      parentNode.addChild(addNode)
+      graphRef.current.addEdge({
+        source: { cell: cycleStartNode.id, port: cycleStartNode.getPorts().find(p => p.group === 'right')?.id || 'right' },
+        target: { cell: addNode.id, port: addNode.getPorts().find(p => p.group === 'left')?.id || 'left' },
+        ...edgeAttrs,
+      })
+      cycleStartNode.toFront()
+      addNode.toFront()
+      graphRef.current.stopBatch('add-group')
     } else if (dragData.type === 'if-else') {
       // Create condition node
       graphRef.current.addNode({
@@ -1494,20 +1590,16 @@ export const useWorkflowGraph = ({
     if (!graphRef.current) return;
     const nodes = graphRef.current.getNodes();
 
-    const lastWithSub = [...chatHistory].reverse().find(item => item.subContent?.length);
-    // Reset all node execution status first
+    // Reset all node execution status on every chatHistory change
     nodes.forEach(node => {
       const data = node.getData();
-      if (typeof data.executionStatus === 'string') {
-        node.setData({ ...data, executionStatus: undefined });
-      }
+      node.setData({ ...data, executionStatus: '' });
     });
-    if (!lastWithSub?.subContent) return;
-    // Build a nodeId -> status map first
-    const statusMap: Record<string, string> = {};
-    lastWithSub.subContent.forEach(sub => {
+
+    const lastAssistant = [...chatHistory].reverse().find(item => item.role === 'assistant');
+    if (!lastAssistant?.subContent?.length) return;
+    lastAssistant.subContent.forEach(sub => {
       if (typeof sub.status === 'string') {
-        statusMap[sub.node_id] = sub.status;
         const node = nodes.find(n => n.getData()?.id === sub.node_id);
         if (node) {
           node.setData({ ...node.getData(), executionStatus: sub.status });
