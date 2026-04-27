@@ -18,6 +18,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
 
   // Handle node selection from popover and create new node replacing the add-node placeholder
   const handleNodeSelect = (selectedNodeType: any) => {
+    graph.startBatch('add-node');
     const parentBBox = node.getBBox();
     const cycleId = data.cycle;
     const horizontalSpacing = 0;
@@ -75,6 +76,8 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
         n.remove();
       }
     });
+
+    graph.stopBatch('add-node');
 
     setTimeout(() => {
       addedEdges.forEach(e => {
