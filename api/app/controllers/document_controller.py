@@ -305,38 +305,25 @@ async def parse_documents(
                 detail="The file does not exist or you do not have permission to access it"
             )
 
-        # 3. Construct file path：/files/{kb_id}/{parent_id}/{file.id}{file.file_ext}
-        file_path = os.path.join(
-            settings.FILE_PATH,
-            str(db_file.kb_id),
-            str(db_file.parent_id),
-            f"{db_file.id}{db_file.file_ext}"
-        )
-
-        # 4. Check if the file exists
-        api_logger.debug(f"Constructed file path: {file_path}")
-        api_logger.debug(f"File metadata - kb_id: {db_file.kb_id}, parent_id: {db_file.parent_id}, file_id: {db_file.id}, extension: {db_file.file_ext}")
-        if not os.path.exists(file_path):
-            api_logger.error(f"File not found (possibly deleted): file_path={file_path}, file_id={db_file.id}, document_id={document_id}")
+        # 3. Get file_key for storage backend
+        if not db_file.file_key:
+            api_logger.error(f"File has no storage key (legacy data not migrated): file_id={db_file.id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="File not found (possibly deleted)"
+                detail="File has no storage key (legacy data not migrated)"
             )
 
-        # 5. Obtain knowledge base information
-        api_logger.info( f"Obtain details of the knowledge base: knowledge_id={db_document.kb_id}")
+        # 4. Obtain knowledge base information
+        api_logger.info(f"Obtain details of the knowledge base: knowledge_id={db_document.kb_id}")
         db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=db_document.kb_id, current_user=current_user)
         if not db_knowledge:
-            api_logger.warning(f"The knowledge base does not exist or access is denied: knowledge_id={db_document.kb_id}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="The knowledge base does not exist or access is denied"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Knowledge base not found")
 
-        # 6. Task: Document parsing, vectorization, and storage
-        # from app.tasks import parse_document
-        # parse_document(file_path, document_id)
-        task = celery_app.send_task("app.core.rag.tasks.parse_document", args=[file_path, document_id])
+        # 5. Dispatch parse task with file_key (not file_path)
+        task = celery_app.send_task(
+            "app.core.rag.tasks.parse_document",
+            args=[db_file.file_key, document_id, db_file.file_name]
+        )
         result = {
             "task_id": task.id
         }
