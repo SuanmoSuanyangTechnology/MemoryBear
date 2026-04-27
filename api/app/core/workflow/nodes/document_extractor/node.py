@@ -182,7 +182,7 @@ class DocExtractorNode(BaseNode):
                                     mime_type=f"image/{ext}",
                                     is_file=True,
                                 ).model_dump())
-                                text = text + f"\n{placeholder}: {url}"
+                                text = text + f"\n{placeholder}: <img src=\"{url}\" data-url=\"{url}\">"
                             except Exception as e:
                                 logger.error(f"Node {self.node_id}: failed to save image {placeholder}: {e}")
 

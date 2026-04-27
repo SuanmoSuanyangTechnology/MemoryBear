@@ -554,13 +554,16 @@ class WorkflowService:
                     }
                 }
             case "workflow_end":
+                data = {
+                    "elapsed_time": payload.get("elapsed_time"),
+                    "message_length": len(payload.get("output", "")),
+                    "error": payload.get("error", "")
+                }
+                if "citations" in payload and payload["citations"]:
+                    data["citations"] = payload["citations"]
                 return {
                     "event": "end",
-                    "data": {
-                        "elapsed_time": payload.get("elapsed_time"),
-                        "message_length": len(payload.get("output", "")),
-                        "error": payload.get("error", "")
-                    }
+                    "data": data
                 }
             case "node_start" | "node_end" | "node_error" | "cycle_item":
                 return None

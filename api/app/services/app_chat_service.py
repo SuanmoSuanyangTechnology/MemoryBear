@@ -161,7 +161,10 @@ class AppChatService:
                 f.type == FileType.DOCUMENT for f in files
             ):
                 system_prompt += (
-                    "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: http://...，请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
+                    "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: <img src=\"url\"...>，"
+                    "请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
+                    "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
+                    "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
                 )
 
         # 创建 LangChain Agent
@@ -448,7 +451,10 @@ class AppChatService:
                 ):
                     from langchain.agents import create_agent
                     system_prompt += (
-                        "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: http://...，请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
+                        "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: <img src=\"url\"...>，"
+                        "请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
+                        "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
+                        "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
                     )
 
             # 创建 LangChain Agent

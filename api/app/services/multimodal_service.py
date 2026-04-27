@@ -400,7 +400,7 @@ class MultimodalService:
                                 # 在文本内容中追加图片位置标记
                                 if result and result[-1].get("type") in ("text", "document"):
                                     key = "text" if "text" in result[-1] else list(result[-1].keys())[-1]
-                                    result[-1][key] = result[-1].get(key, "") + f"\n[图片 {placeholder}]: {img_url}"
+                                    result[-1][key] = result[-1].get(key, "") + f"\n[图片 {placeholder}]: <img src=\"{img_url}\" data-url=\"{img_url}\">"
                                 # 将图片以视觉格式追加到消息内容中
                                 img_file = FileInput(
                                     type=FileType.IMAGE,
