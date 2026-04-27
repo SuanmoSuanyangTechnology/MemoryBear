@@ -56,7 +56,7 @@ const MessageFiles = ({ files, contentClassNames, onDownload }: MessageFilesProp
             </div>
           )
         }
-        const documentType = (file.file_type || file.type)?.split('/')
+        const documentType = (file.file_type || file.type)?.split('/') ?? []
         return (
           <Flex
             key={key}
