@@ -174,6 +174,9 @@ class IterationRuntime:
                             continue
                         node_type = result.get("node_outputs", {}).get(node_name, {}).get("node_type")
                         cycle_variable = {"item": item} if node_type == NodeType.CYCLE_START else None
+                        node_cfg = next(
+                            (n for n in self.cycle_nodes if n.get("id") == node_name), None
+                        )
                         self.event_write({
                             "type": "cycle_item",
                             "data": {

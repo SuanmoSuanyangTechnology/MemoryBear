@@ -41,7 +41,7 @@ def list_app_logs(
 
     # 验证应用访问权限
     app_service = AppService(db)
-    app_service.get_app(app_id, workspace_id)
+    app = app_service.get_app(app_id, workspace_id)
 
     # 使用 Service 层查询
     log_service = AppLogService(db)
@@ -51,7 +51,8 @@ def list_app_logs(
         page=page,
         pagesize=pagesize,
         is_draft=is_draft,
-        keyword=keyword
+        keyword=keyword,
+        app_type=app.type,
     )
 
     items = [AppLogConversation.model_validate(c) for c in conversations]

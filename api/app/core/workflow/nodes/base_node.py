@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -20,6 +21,20 @@ from app.schemas.model_schema import ModelInfo
 from app.services.multimodal_service import MultimodalService
 
 logger = logging.getLogger(__name__)
+
+
+class NodeExecutionError(Exception):
+    """节点执行失败异常。
+
+    携带失败节点的完整 node_output，供 executor 兜底注入 node_outputs，
+    保证 workflow_executions.output_data 里能看到失败节点的日志记录。
+    """
+
+    def __init__(self, node_id: str, node_output: dict[str, Any], error_message: str):
+        super().__init__(f"Node {node_id} execution failed: {error_message}")
+        self.node_id = node_id
+        self.node_output = node_output
+        self.error_message = error_message
 
 
 class BaseNode(ABC):
@@ -396,6 +411,8 @@ class BaseNode(ABC):
             "elapsed_time": elapsed_time,
             "token_usage": token_usage,
             "error": None,
+            # 单调递增序号，用于日志按执行顺序排序（JSONB 不保证 key 顺序）
+            "execution_order": time.monotonic_ns(),
             **self._extract_extra_fields(business_result),
         }
         final_output = {
@@ -444,7 +461,9 @@ class BaseNode(ABC):
             "output": None,
             "elapsed_time": elapsed_time,
             "token_usage": None,
-            "error": error_message
+            "error": error_message,
+            # 单调递增序号，用于日志按执行顺序排序
+            "execution_order": time.monotonic_ns(),
         }
 
         # if error_edge:
@@ -466,7 +485,12 @@ class BaseNode(ABC):
             **node_output
         })
         logger.error(f"Node {self.node_id} execution failed, stopping workflow: {error_message}")
-        raise Exception(f"Node {self.node_id} execution failed: {error_message}")
+        # 抛出自定义异常，把 node_output 带给 executor，供其写入 node_outputs
+        raise NodeExecutionError(
+            node_id=self.node_id,
+            node_output=node_output,
+            error_message=error_message,
+        )
 
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """Extracts the input data for this node (used for logging or audit).
