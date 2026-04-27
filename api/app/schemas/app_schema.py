@@ -3,7 +3,7 @@ import uuid
 from typing import Optional, Any, List, Dict, Union
 from enum import Enum, StrEnum
 
-from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator, model_serializer
 
 from app.schemas.workflow_schema import WorkflowConfigCreate
 
@@ -661,9 +661,11 @@ class DraftRunResponse(BaseModel):
     suggested_questions: List[str] = Field(default_factory=list, description="下一步建议问题")
     citations: List[Dict[str, Any]] = Field(default_factory=list, description="引用来源")
     audio_url: Optional[str] = Field(default=None, description="TTS 语音URL")
+    audio_status: Optional[str] = Field(default=None, description="TTS 语音状态")
 
-    def model_dump(self, **kwargs):
-        data = super().model_dump(**kwargs)
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler):
+        data = handler(self)
         if not data.get("reasoning_content"):
             data.pop("reasoning_content", None)
         return data

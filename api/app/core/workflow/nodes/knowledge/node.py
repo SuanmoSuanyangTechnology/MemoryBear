@@ -334,7 +334,8 @@ class KnowledgeRetrievalNode(BaseNode):
             for kb_config in knowledge_bases:
                 db_knowledge = knowledge_repository.get_knowledge_by_id(db=db, knowledge_id=kb_config.kb_id)
                 if not (db_knowledge and db_knowledge.chunk_num > 0 and db_knowledge.status == 1):
-                    raise RuntimeError("The knowledge base does not exist or access is denied.")
+                    logger.warning("The knowledge base does not exist or access is denied.")
+                    continue
                 tasks.append(self.knowledge_retrieval(db, query, db_knowledge, kb_config))
             if tasks:
                 result = await asyncio.gather(*tasks)

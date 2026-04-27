@@ -2,7 +2,7 @@
 import uuid
 import datetime
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, ConfigDict, field_serializer
+from pydantic import BaseModel, Field, ConfigDict, field_serializer, model_serializer
 
 # 导入 FileInput（用于体验运行）
 from app.schemas.app_schema import FileInput
@@ -94,6 +94,18 @@ class ChatResponse(BaseModel):
     message_id: str
     usage: Optional[Dict[str, Any]] = None
     elapsed_time: Optional[float] = None
+    reasoning_content: Optional[str] = None
+    suggested_questions: Optional[List[str]] = None
+    citations: Optional[List[Any]] = None
+    audio_url: Optional[str] = None
+    audio_status: Optional[str] = None
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler):
+        data = handler(self)
+        if not data.get("reasoning_content"):
+            data.pop("reasoning_content", None)
+        return data
 
 
 # ---------- Conversation Summary Schemas ----------
