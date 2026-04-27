@@ -3,10 +3,7 @@ name: Sync to Gitee
 on:
   push:
     branches:
-      - main     # Production
-      - develop  # Integration
-      - 'release/*' # Release preparation
-      - 'hotfix/*'  # Urgent fixes
+      - '*' # All branchs
     tags:
       - '*'      # All version tags (v1.0.0, etc.)
 
