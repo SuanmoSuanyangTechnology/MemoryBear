@@ -16,6 +16,7 @@ from app.core.workflow.engine.runtime_schema import ExecutionContext
 from app.core.workflow.engine.state_manager import WorkflowStateManager
 from app.core.workflow.engine.stream_output_coordinator import StreamOutputCoordinator
 from app.core.workflow.engine.variable_pool import VariablePool, VariablePoolInitializer
+from app.core.workflow.nodes.base_node import NodeExecutionError
 
 logger = logging.getLogger(__name__)
 
@@ -326,10 +327,43 @@ class WorkflowExecutor:
 
             logger.error(f"Workflow execution failed: execution_id={self.execution_context.execution_id}, error={e}",
                          exc_info=True)
+
+            # 1) 尝试从 checkpoint 回补已成功节点的 node_outputs
+            recovered: dict[str, Any] = {}
+            try:
+                if self.graph is not None:
+                    recovered = self.graph.get_state(
+                        self.execution_context.checkpoint_config
+                    ).values or {}
+            except Exception as recover_err:
+                logger.warning(
+                    f"Recover state on failure failed: {recover_err}, "
+                    f"execution_id={self.execution_context.execution_id}"
+                )
+
             if result is None:
-                result = {"error": str(e)}
+                result = dict(recovered) if recovered else {}
             else:
-                result["error"] = str(e)
+                # 已有 result 与 recovered 合并，node_outputs 深度合并
+                for k, v in recovered.items():
+                    if k == "node_outputs" and isinstance(v, dict):
+                        existing = result.get("node_outputs") or {}
+                        result["node_outputs"] = {**v, **existing}
+                    else:
+                        result.setdefault(k, v)
+
+            # 2) 如果是节点抛出的 NodeExecutionError，把失败节点的 node_output 注入 node_outputs
+            failed_node_id: str | None = None
+            if isinstance(e, NodeExecutionError):
+                failed_node_id = e.node_id
+                node_outputs = result.setdefault("node_outputs", {})
+                # 不覆盖已有（理论上不会有），保底写入失败节点记录
+                node_outputs.setdefault(e.node_id, e.node_output)
+
+            result["error"] = str(e)
+            if failed_node_id:
+                result["error_node"] = failed_node_id
+
             yield {
                 "event": "workflow_end",
                 "data": self.result_builder.build_final_output(

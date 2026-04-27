@@ -255,9 +255,18 @@ class HttpRequestNode(BaseNode):
             case HttpContentType.NONE:
                 return {}
             case HttpContentType.JSON:
-                content["json"] = json.loads(self._render_template(
+                rendered = self._render_template(
                     self.typed_config.body.data, variable_pool
-                ))
+                )
+                if not rendered or not rendered.strip():
+                    # 第三方导入的工作流可能出现 content_type=json 但 data 为空的情况，视为无 body
+                    return {}
+                try:
+                    content["json"] = json.loads(rendered)
+                except json.JSONDecodeError as e:
+                    raise RuntimeError(
+                        f"Invalid JSON body for HTTP request node: {e.msg} (data={rendered!r})"
+                    )
             case HttpContentType.FROM_DATA:
                 data = {}
                 files = []
