@@ -8,12 +8,11 @@ import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
 import Markdown from '@/components/Markdown'
 import type { ChatContentProps } from './types'
-import { Spin, Image, Flex, Button } from 'antd'
+import { Spin, Flex, Button } from 'antd'
 import { SoundOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 
-import AudioPlayer from './AudioPlayer'
-import VideoPlayer from './VideoPlayer'
+import MessageFiles from './MessageFiles'
 
 const getFileUrl = (file: any) => {
   return file.thumbUrl || file.url || (file.originFileObj ? URL.createObjectURL(file.originFileObj) : undefined)
@@ -149,72 +148,7 @@ const ChatContent: FC<ChatContentProps> = ({
                     {labelFormat(item)}
                   </div>
                 }
-                {item?.meta_data?.files && item.meta_data?.files.length > 0 && <Flex gap={8} vertical align="end" className="rb:mb-2!">
-                  {item.meta_data?.files?.map((file) => {
-                    if (file.type.includes('image')) {
-                      return (
-                        <div key={file.url || file.uid} className={`rb:inline-block rb:group rb:relative rb:rounded-lg ${contentClassNames}`}>
-                          <Image src={getFileUrl(file)} alt={file.name} className="rb:w-full rb:max-w-80 rb:rounded-lg rb:object-cover rb:cursor-pointer" />
-                        </div>
-                      )
-                    }
-                    if (file.type.includes('video')) {
-                      return (
-                        <div key={file.url || file.uid} className="rb:w-50">
-                          {/* <video src={getFileUrl(file)} controls className="rb:max-w-80 rb:rounded-lg rb:object-cover rb:cursor-pointer" /> */}
-                          <VideoPlayer key={file.url || file.uid} src={getFileUrl(file)} />
-                        </div>
-                      )
-                    }
-                    if (file.type.includes('audio')) {
-                      return (
-                        <div key={file.url || file.uid} className="rb:w-50">
-                          <AudioPlayer key={file.url || file.uid} src={getFileUrl(file)} />
-                        </div>
-                      )
-                    }
-
-                    const documentType = (file.file_type || file.type)?.split('/')
-                    return (
-                      <Flex
-                        key={file.url || file.uid}
-                        align="center"
-                        gap={10}
-                        className="rb:text-left rb:w-45 rb:text-[12px] rb:group rb:relative rb:rounded-lg rb-border rb:py-2! rb:px-2.5! rb:border rb:border-[#F6F6F6]"
-                        onClick={() => handleDownload(file)}
-                      >
-                        <div
-                          className={clsx(
-                            "rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/pdf_disabled.svg')]",
-                            file.type?.includes('pdf')
-                              ? "rb:bg-[url('@/assets/images/file/pdf.svg')]"
-                              : (file.type?.includes('excel') || file.type?.includes('spreadsheetml.sheet')) || file.type?.includes('xls') || file.type?.includes('xlsx')
-                                ? "rb:bg-[url('@/assets/images/file/excel.svg')]"
-                                : file.type?.includes('csv')
-                                  ? "rb:bg-[url('@/assets/images/file/csv.svg')]"
-                                  : file.type?.includes('html')
-                                    ? "rb:bg-[url('@/assets/images/file/html.svg')]"
-                                    : file.type?.includes('json')
-                                      ? "rb:bg-[url('@/assets/images/file/json.svg')]"
-                                      : file.type?.includes('ppt')
-                                        ? "rb:bg-[url('@/assets/images/file/ppt.svg')]"
-                                        : file.type?.includes('markdown')
-                                          ? "rb:bg-[url('@/assets/images/file/md.svg')]"
-                                          : file.type?.includes('text')
-                                            ? "rb:bg-[url('@/assets/images/file/txt.svg')]"
-                                            : (file.type?.includes('doc') || file.type?.includes('docx') || file.type?.includes('word') || file.type?.includes('wordprocessingml.document'))
-                                              ? "rb:bg-[url('@/assets/images/file/word.svg')]"
-                                              : "rb:bg-[url('@/assets/images/file/txt.svg')]"
-                          )}
-                        ></div>
-                        <div className="rb:flex-1 rb:w-32.5">
-                          <div className="rb:leading-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.name}</div>
-                          <div className="rb:leading-3.5 rb:mt-0.5 rb:text-[#5B6167] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{documentType?.[documentType.length - 1]} · {file.size}</div>
-                        </div>
-                      </Flex>
-                    )
-                  })}
-                </Flex>}
+                <MessageFiles files={item.meta_data?.files ?? []} contentClassNames={contentClassNames} onDownload={handleDownload} />
                 {/* Message bubble */}
                 <div className={clsx('rb:text-left rb:leading-5 rb:inline-block rb:wrap-break-word rb:relative', item.role === 'user' ? contentClassNames : '', {
                   // Error message style (content is null and not assistant message)

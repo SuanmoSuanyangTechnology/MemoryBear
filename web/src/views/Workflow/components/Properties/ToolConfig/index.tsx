@@ -242,10 +242,11 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
               className={parameter.type === 'boolean' ? 'rb:mb-0!' : ''}
             >
               {parameter.type === 'string' && parameter.enum && parameter.enum.length > 0
-                ? <Select size="small" options={parameter.enum.map(vo => ({ value: vo, label: vo }))} placeholder={t('common.pleaseSelect')} />
+                ? <Select key={values.tool_id} size="small" options={parameter.enum.map(vo => ({ value: vo, label: vo }))} placeholder={t('common.pleaseSelect')} />
                 : parameter.type === 'boolean'
-                  ? <Switch size="small" />
+                  ? <Switch key={values.tool_id} size="small" />
                   : <Editor
+                    key={values.tool_id}
                     variant="outlined"
                     type="input"
                     size="small"
