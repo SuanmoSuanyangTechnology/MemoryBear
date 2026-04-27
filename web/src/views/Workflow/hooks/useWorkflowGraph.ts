@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-24 17:21:09
+ * @Last Modified time: 2026-04-27 13:47:02
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, type Edge } from '@antv/x6';
 import type { HistoryCommand as Command } from '@antv/x6/lib/plugin/history/type';
@@ -1488,20 +1488,16 @@ export const useWorkflowGraph = ({
     if (!graphRef.current) return;
     const nodes = graphRef.current.getNodes();
 
-    const lastWithSub = [...chatHistory].reverse().find(item => item.subContent?.length);
-    // Reset all node execution status first
+    // Reset all node execution status on every chatHistory change
     nodes.forEach(node => {
       const data = node.getData();
-      if (typeof data.executionStatus === 'string') {
-        node.setData({ ...data, executionStatus: undefined });
-      }
+      node.setData({ ...data, executionStatus: '' });
     });
-    if (!lastWithSub?.subContent) return;
-    // Build a nodeId -> status map first
-    const statusMap: Record<string, string> = {};
-    lastWithSub.subContent.forEach(sub => {
+
+    const lastAssistant = [...chatHistory].reverse().find(item => item.role === 'assistant');
+    if (!lastAssistant?.subContent?.length) return;
+    lastAssistant.subContent.forEach(sub => {
       if (typeof sub.status === 'string') {
-        statusMap[sub.node_id] = sub.status;
         const node = nodes.find(n => n.getData()?.id === sub.node_id);
         if (node) {
           node.setData({ ...node.getData(), executionStatus: sub.status });
