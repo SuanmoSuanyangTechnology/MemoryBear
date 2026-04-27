@@ -95,7 +95,7 @@ class DashScopeFormatStrategy(MultimodalFormatStrategy):
         """通义千问文档格式"""
         return True, {
             "type": "text",
-            "text": f"<document name=\"{file_name}\">\n{text}\n</document>"
+            "text": f"<document name=\"{file_name}\">\n文档内容：\n{text}\n</document>"
         }
 
     async def format_audio(
@@ -167,6 +167,7 @@ class BedrockFormatStrategy(MultimodalFormatStrategy):
     async def format_document(self, file_name: str, text: str) -> tuple[bool, Dict[str, Any]]:
         """Bedrock/Anthropic 文档格式（需要 base64 编码）"""
         # Bedrock 文档需要 base64 编码
+        text = f"文档内容：\n{text}\n"
         text_bytes = text.encode('utf-8')
         base64_text = base64.b64encode(text_bytes).decode('utf-8')
 
@@ -223,7 +224,7 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
         """OpenAI 文档格式"""
         return True, {
             "type": "text",
-            "text": f"<document name=\"{file_name}\">\n{text}\n</document>"
+            "text": f"<document name=\"{file_name}\">\n文档内容：\n{text}\n</document>"
         }
 
     async def format_audio(
@@ -395,7 +396,7 @@ class MultimodalService:
                             ext = img_info.get("ext", "png")
                             try:
                                 _, img_url = await self._save_doc_image_to_storage(img_info["bytes"], ext, tenant_id, workspace_id)
-                                placeholder = f"第{page}页 第{index + 1}张图片" if page > 0 else f"第{index + 1}张图片"
+                                placeholder = f"第{page}页 第{index + 1}张" if page > 0 else f"第{index + 1}张"
                                 # 在文本内容中追加图片位置标记
                                 if result and result[-1].get("type") in ("text", "document"):
                                     key = "text" if "text" in result[-1] else list(result[-1].keys())[-1]
