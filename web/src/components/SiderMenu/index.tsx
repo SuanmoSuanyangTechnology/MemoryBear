@@ -399,7 +399,7 @@ const Menu: FC<{
         className="rb:overflow-y-auto rb:flex-1!"
       />
       {/* Return to space button for superusers */}
-      {user?.is_superuser && source === 'space' &&
+      {source === 'space' &&
         <Flex gap={4} vertical className="rb:my-3! rb:mx-3!">
           <Divider className="rb:mb-2.5! rb:mt-0! rb:border-[#DFE4ED]! rb:mx-2! rb:min-w-[calc(100%-20px)]! rb:w-[calc(100%-20px)]!" />
           <Flex
@@ -412,16 +412,18 @@ const Menu: FC<{
             <div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/switch.svg')]"></div>
             {collapsed ? null : t('common.switchSpace')}
           </Flex>
-          <Flex
-            gap={8}
-            align="center"
-            justify="start"
-            onClick={goToSpace}
-            className="rb:p-2.5! rb:text-[13px] rb:hover:bg-[rgba(223,228,237,0.5)] rb:rounded-lg rb:leading-3.5 rb:font-regular rb:text-center rb:cursor-pointer"
-          >
-            <div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/return.svg')]"></div>
-            {collapsed ? null : t('common.returnToSpace')}
-          </Flex>
+          {user?.is_superuser &&
+            <Flex
+              gap={8}
+              align="center"
+              justify="start"
+              onClick={goToSpace}
+              className="rb:p-2.5! rb:text-[13px] rb:hover:bg-[rgba(223,228,237,0.5)] rb:rounded-lg rb:leading-3.5 rb:font-regular rb:text-center rb:cursor-pointer"
+            >
+              <div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/return.svg')]"></div>
+              {collapsed ? null : t('common.returnToSpace')}
+            </Flex>
+          }
         </Flex>
       }
       {source === 'manage' && subscription && !collapsed &&
