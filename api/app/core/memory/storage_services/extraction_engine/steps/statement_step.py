@@ -34,6 +34,10 @@ class _ExtractedStatement(BaseModel):
     statement_type: str = Field(..., description="FACT / OPINION / OTHER")
     temporal_type: str = Field(..., description="STATIC / DYNAMIC / ATEMPORAL")
     # relevance: str = Field("RELEVANT", description="RELEVANT / IRRELEVANT")
+    has_emotional_state: bool = Field(
+        False,
+        description="Whether the statement reflects user's emotional state",
+    )
     valid_at: str = Field("NULL", description="ISO 8601 or NULL")
     invalid_at: str = Field("NULL", description="ISO 8601 or NULL")
     has_unsolved_reference: bool = Field(False, description="Whether the statement has unresolved references")
@@ -155,6 +159,7 @@ class StatementExtractionStep(ExtractionStep[StatementStepInput, List[StatementS
                     temporal_type=stmt.temporal_type.strip().upper(),
                     # relevance=stmt.relevance.strip().upper(),
                     speaker="user",  # default; orchestrator overrides from chunk metadata
+                    has_emotional_state=getattr(stmt, "has_emotional_state", False),
                     valid_at=stmt.valid_at or "NULL",
                     invalid_at=stmt.invalid_at or "NULL",
                     has_unsolved_reference=getattr(stmt, "has_unsolved_reference", False),

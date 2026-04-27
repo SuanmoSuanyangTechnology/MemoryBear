@@ -273,6 +273,12 @@ class Settings:
     
     MEMORY_OUTPUT_DIR: str = os.getenv("MEMORY_OUTPUT_DIR", "logs/memory-output")
     MEMORY_CONFIG_DIR: str = os.getenv("MEMORY_CONFIG_DIR", "app/core/memory")
+    # Pilot run pipeline switch:
+    # true  -> use refactored PilotWritePipeline
+    # false -> use legacy ExtractionOrchestrator pipeline
+    PILOT_RUN_USE_REFACTORED_PIPELINE: bool = (
+        os.getenv("PILOT_RUN_USE_REFACTORED_PIPELINE", "true").lower() == "true"
+    )
 
     # Tool Management Configuration
     TOOL_CONFIG_DIR: str = os.getenv("TOOL_CONFIG_DIR", "app/core/tools")

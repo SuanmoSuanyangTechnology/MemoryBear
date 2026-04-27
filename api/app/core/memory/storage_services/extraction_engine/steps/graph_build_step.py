@@ -250,6 +250,7 @@ async def build_graph_nodes_and_edges(
                             entity_idx=entity.entity_idx,
                             statement_id=statement.id,
                             entity_type=getattr(entity, "type", "unknown"),
+                            type_description=getattr(entity, "type_description", ""),
                             description=getattr(entity, "description", ""),
                             example=getattr(entity, "example", ""),
                             connect_strength=(
@@ -296,6 +297,7 @@ async def build_graph_nodes_and_edges(
                                 source=subject_entity_id,
                                 target=object_entity_id,
                                 relation_type=triplet.predicate,
+                                relation_type_description=getattr(triplet, "predicate_description", ""),
                                 statement=statement.statement,
                                 source_statement_id=statement.id,
                                 end_user_id=dialog_data.end_user_id,

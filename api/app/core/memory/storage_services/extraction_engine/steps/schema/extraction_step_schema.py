@@ -46,6 +46,7 @@ class StatementStepOutput(BaseModel):
     temporal_type: str    # STATIC / DYNAMIC / ATEMPORAL
     # relevance: str        # RELEVANT / IRRELEVANT
     speaker: str          # "user" / "assistant"
+    has_emotional_state: bool = False  # Whether statement reflects user's emotional state
     valid_at: str         # ISO 8601 or "NULL"
     invalid_at: str       # ISO 8601 or "NULL"
     has_unsolved_reference: bool = False  # Whether the statement has unresolved references
@@ -72,6 +73,7 @@ class EntityItem(BaseModel):
     entity_idx: int
     name: str
     type: str
+    type_description: str = ""
     description: str
     is_explicit_memory: bool = False
 
@@ -82,6 +84,7 @@ class TripletItem(BaseModel):
     subject_name: str
     subject_id: int
     predicate: str
+    predicate_description: str = ""
     object_name: str
     object_id: int
 

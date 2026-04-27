@@ -9,7 +9,8 @@ async def get_chunked_dialogs(
         end_user_id: str = "group_1",
         messages: list = None,
         ref_id: str = "",
-        config_id: str = None
+        config_id: str = None,
+        snapshot=None,
 ) -> List[DialogData]:
     """Generate chunks from structured messages using the specified chunker strategy.
 
@@ -19,6 +20,7 @@ async def get_chunked_dialogs(
         messages: Structured message list [{"role": "user", "content": "..."}, ...]
         ref_id: Reference identifier
         config_id: Configuration ID for processing (used to load pruning config)
+        snapshot: Optional PipelineSnapshot instance for saving pruning output
 
     Returns:
         List of DialogData objects with generated chunks
@@ -93,7 +95,7 @@ async def get_chunked_dialogs(
                             llm_client = factory.get_llm_client_from_config(memory_config)
                             
                             # 执行剪枝 - 使用 prune_dataset 支持消息级剪枝
-                            pruner = SemanticPruner(config=pruning_config, llm_client=llm_client)
+                            pruner = SemanticPruner(config=pruning_config, llm_client=llm_client, snapshot=snapshot)
                             original_msg_count = len(dialog_data.context.msgs)
                             
                             # 使用 prune_dataset 而不是 prune_dialog

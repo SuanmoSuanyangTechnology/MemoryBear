@@ -92,6 +92,7 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
         THEN entity.expired_at ELSE e.expired_at END,
     e.entity_idx = CASE WHEN e.entity_idx IS NULL OR e.entity_idx = 0 THEN entity.entity_idx ELSE e.entity_idx END,
     e.entity_type = CASE WHEN entity.entity_type IS NOT NULL AND entity.entity_type <> '' THEN entity.entity_type ELSE e.entity_type END,
+    e.type_description = CASE WHEN entity.type_description IS NOT NULL AND entity.type_description <> '' THEN entity.type_description ELSE coalesce(e.type_description, '') END,
     e.description = CASE
         WHEN entity.description IS NOT NULL AND entity.description <> ''
          AND (e.description IS NULL OR size(e.description) = 0 OR size(entity.description) > size(e.description))
@@ -147,6 +148,7 @@ MATCH (object:ExtractedEntity {id: rel.target_id, end_user_id: rel.end_user_id})
 // Avoid duplicate edges across runs for the same endpoints
 MERGE (subject)-[r:EXTRACTED_RELATIONSHIP]->(object)
 SET r.predicate = rel.predicate,
+    r.predicate_description = rel.predicate_description,
     r.statement_id = rel.statement_id,
     r.value = rel.value,
     r.statement = rel.statement,

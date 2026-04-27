@@ -185,7 +185,8 @@ async def write(
                         "entities": [
                             {
                                 "entity_idx": e.entity_idx, "name": e.name,
-                                "type": e.type, "description": e.description,
+                                "type": e.type, "type_description": getattr(e, "type_description", ""),
+                                "description": e.description,
                                 "is_explicit_memory": getattr(e, "is_explicit_memory", False),
                             }
                             for e in s.triplet_extraction_info.entities
@@ -194,6 +195,7 @@ async def write(
                             {
                                 "subject_name": t.subject_name, "subject_id": t.subject_id,
                                 "predicate": t.predicate,
+                                "predicate_description": getattr(t, "predicate_description", ""),
                                 "object_name": t.object_name, "object_id": t.object_id,
                             }
                             for t in s.triplet_extraction_info.triplets
@@ -207,13 +209,13 @@ async def write(
         "chunk_nodes_count": len(all_chunk_nodes),
         "statement_nodes_count": len(all_statement_nodes),
         "entity_nodes": [
-            {"id": e.id, "name": e.name, "entity_type": e.entity_type, "description": e.description}
+            {"id": e.id, "name": e.name, "entity_type": e.entity_type, "type_description": e.type_description, "description": e.description}
             for e in all_entity_nodes
         ],
         "entity_entity_edges": [
             {
                 "source": e.source, "target": e.target,
-                "relation_type": e.relation_type, "statement": e.statement,
+                "relation_type": e.relation_type, "relation_type_description": e.relation_type_description, "statement": e.statement,
             }
             for e in all_entity_entity_edges
         ],

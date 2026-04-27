@@ -180,7 +180,11 @@ class WritePipeline:
             self._init_clients()
             self._init_neo4j_connector()
 
-            # Step 1: 预处理 - 消息分块 + AI消息语义剪枝（暂无实现）
+            # 初始化 Snapshot（提前创建，供预处理阶段的剪枝使用）
+            from app.core.memory.utils.debug.pipeline_snapshot import PipelineSnapshot
+            self._snapshot = PipelineSnapshot("new")
+
+            # Step 1: 预处理 - 消息分块 + AI消息语义剪枝
             step_start = time.time()
             chunked_dialogs = await self._preprocess(messages, ref_id)
             chunks_count = sum(len(d.chunks) for d in chunked_dialogs)
@@ -220,7 +224,7 @@ class WritePipeline:
             )
 
             # Step 3.5: 异步情绪提取（fire-and-forget，需在 _store 之后确保 Statement 节点已存在）
-            self._extract_emotion(getattr(self, "_emotion_statements", []))
+            await self._extract_emotion(getattr(self, "_emotion_statements", []))
 
             # Step 4: 聚类 - 增量更新社区（异步，不阻塞）
             step_start = time.time()
@@ -266,7 +270,7 @@ class WritePipeline:
 
     async def _preprocess(self, messages: List[dict], ref_id: str) -> List[DialogData]:
         """
-        预处理：消息校验 → AI消息语义剪枝（暂未实现） → 对话分块。
+        预处理：消息校验 → AI消息语义剪枝 → 对话分块。
 
         委托给 get_chunked_dialogs()，保持现有预处理逻辑不变。
         get_dialogs.py 内部已包含：
@@ -276,12 +280,15 @@ class WritePipeline:
         """
         from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
 
+        snapshot = getattr(self, "_snapshot", None)
+
         return await get_chunked_dialogs(
             chunker_strategy=self.memory_config.chunker_strategy,
             end_user_id=self.end_user_id,
             messages=messages,
             ref_id=ref_id,
             config_id=str(self.memory_config.config_id),
+            snapshot=snapshot,
         )
 
     # ──────────────────────────────────────────────
@@ -321,7 +328,9 @@ class WritePipeline:
         pipeline_config = get_pipeline_config(self.memory_config)
         ontology_types = self._load_ontology_types()
 
-        snapshot = PipelineSnapshot("new")
+        # 复用 run() 中已创建的 snapshot（剪枝阶段已使用同一实例）
+        snapshot = getattr(self, "_snapshot", None) or PipelineSnapshot("new")
+        self._snapshot = snapshot
 
         # ── 新编排器：LLM 萃取 + 数据赋值 ──
         new_orchestrator = NewExtractionOrchestrator(
@@ -589,11 +598,15 @@ class WritePipeline:
     #    fire-and-forget 提交 Celery 任务，不阻塞主流程
     # ──────────────────────────────────────────────
 
-    def _extract_emotion(self, emotion_statements: list) -> None:
+    async def _extract_emotion(self, emotion_statements: list) -> None:
         """提交异步情绪提取 Celery 任务。
 
         从编排器收集的 user statement 列表中提取情绪，
         异步回写到 Neo4j Statement 节点。失败不影响主流程。
+
+        在 PIPELINE_SNAPSHOT_ENABLED=true 时，会把当前运行的快照目录路径
+        通过 snapshot_dir 透传给 Celery 任务；worker 端在完成 LLM 抽取后，
+        将结果落盘到 <snapshot_dir>/4_emotion_outputs.json，避免主进程重复调用 LLM。
         """
         if not emotion_statements:
             return
@@ -607,6 +620,14 @@ class WritePipeline:
             logger.warning("[Emotion] 无法提交情绪提取任务：llm_model_id 为空")
             return
 
+        # 快照目录：仅在 PIPELINE_SNAPSHOT_ENABLED=true 时非空，供 worker 端落盘
+        snapshot = getattr(self, "_snapshot", None)
+        snapshot_dir = (
+            snapshot.directory
+            if snapshot is not None and getattr(snapshot, "enabled", False)
+            else None
+        )
+
         try:
             from app.celery_app import celery_app
 
@@ -616,12 +637,14 @@ class WritePipeline:
                     "statements": emotion_statements,
                     "llm_model_id": llm_model_id,
                     "language": self.language,
+                    "snapshot_dir": snapshot_dir,
                 },
             )
             logger.info(
                 f"[Emotion] 异步情绪提取任务已提交 - "
                 f"task_id={result.id}, "
                 f"statement_count={len(emotion_statements)}, "
+                f"snapshot_dir={snapshot_dir}, "
                 f"source=async"
             )
         except Exception as e:
@@ -629,6 +652,7 @@ class WritePipeline:
                 f"[Emotion] 提交情绪提取任务失败（不影响主流程）: {e}",
                 exc_info=True,
             )
+
     # ──────────────────────────────────────────────
     # Step 5: 摘要
     # （+ entity_description）+ meta_data部分在此提取

@@ -1264,6 +1264,7 @@ class ExtractionOrchestrator:
                                     entity_idx=entity.entity_idx,  # 使用实体自己的 entity_idx
                                     statement_id=statement.id,  # 添加必需的 statement_id 字段
                                     entity_type=getattr(entity, 'type', 'unknown'),  # 使用 type 而不是 entity_type
+                                    type_description=getattr(entity, 'type_description', ''),
                                     description=getattr(entity, 'description', ''),  # 添加必需的 description 字段
                                     example=getattr(entity, 'example', ''),  # 新增：传递示例字段
                                     # TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
@@ -1306,6 +1307,7 @@ class ExtractionOrchestrator:
                                     source=subject_entity_id,
                                     target=object_entity_id,
                                     relation_type=triplet.predicate,
+                                    relation_type_description=getattr(triplet, 'predicate_description', ''),
                                     statement=statement.statement,
                                     source_statement_id=statement.id,
                                     end_user_id=dialog_data.end_user_id,

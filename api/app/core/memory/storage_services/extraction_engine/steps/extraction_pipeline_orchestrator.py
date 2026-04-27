@@ -300,6 +300,33 @@ class NewExtractionOrchestrator:
             "embedding_output": None,
         }
 
+        if self.progress_callback:
+            statements_count = sum(
+                len(stmts)
+                for chunk_stmts in all_stmt_results.values()
+                for stmts in chunk_stmts.values()
+            )
+            entities_count = sum(
+                len(t_out.entities)
+                for stmt_triplets in all_triplet_results.values()
+                for t_out in stmt_triplets.values()
+            )
+            triplets_count = sum(
+                len(t_out.triplets)
+                for stmt_triplets in all_triplet_results.values()
+                for t_out in stmt_triplets.values()
+            )
+            await self.progress_callback(
+                "knowledge_extraction_complete",
+                "知识抽取完成",
+                {
+                    "entities_count": entities_count,
+                    "statements_count": statements_count,
+                    "temporal_ranges_count": 0,
+                    "triplets_count": triplets_count,
+                },
+            )
+
         logger.info("Pilot extraction complete")
         return dialog_data_list
 
@@ -467,6 +494,11 @@ class NewExtractionOrchestrator:
                 else None
             )
             for chunk in dialog.chunks:
+                # 仅对 speaker="user" 的 chunk 进行陈述句抽取；assistant 内容交给
+                # 上游预处理/剪枝阶段处理，避免浪费 LLM 调用。
+                chunk_speaker = getattr(chunk, "speaker", "user")
+                if chunk_speaker != "user":
+                    continue
                 inp = StatementStepInput(
                     chunk_id=chunk.id,
                     end_user_id=dialog.end_user_id,
@@ -478,7 +510,7 @@ class NewExtractionOrchestrator:
                 )
                 tasks.append(self.statement_step.run(inp))
                 task_meta.append(
-                    (dialog.id, chunk.id, getattr(chunk, "speaker", "user"), ctx)
+                    (dialog.id, chunk.id, chunk_speaker, ctx)
                 )
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -499,6 +531,15 @@ class NewExtractionOrchestrator:
                 for s in stmts:
                     s.speaker = speaker
                 stmt_map[dialog_id][chunk_id] = stmts
+                if self.progress_callback:
+                    # Frontend consumes knowledge_extraction_result with data.statement.
+                    # Emit one event per statement to keep payload contract simple.
+                    for s in stmts:
+                        await self.progress_callback(
+                            "knowledge_extraction_result",
+                            "知识抽取中",
+                            {"statement": s.statement_text},
+                        )
 
         return stmt_map
 
@@ -520,6 +561,11 @@ class NewExtractionOrchestrator:
             chunk_stmts = all_stmt_results.get(dialog.id, {})
             for _chunk_id, stmts in chunk_stmts.items():
                 for stmt in stmts:
+                    # 防御性过滤：三元组抽取仅针对 user statement。
+                    # 上游 _extract_all_statements 已过滤 chunk.speaker，此处再做
+                    # 一次 statement.speaker 的二次校验，防止外部注入或 legacy 数据脱漏。
+                    if getattr(stmt, "speaker", "user") != "user":
+                        continue
                     inp = self._convert_to_triplet_input(stmt, ctx)
                     tasks.append(self.triplet_step.run(inp))
                     task_meta.append((dialog.id, stmt.statement_id))
@@ -541,6 +587,24 @@ class NewExtractionOrchestrator:
                 triplet_map[dialog_id][stmt_id] = self.triplet_step.get_default_output()
             else:
                 triplet_map[dialog_id][stmt_id] = result
+                if self.progress_callback:
+                    await self.progress_callback(
+                        "extract_triplet_result",
+                        f"statement {stmt_id} 提取完成",
+                        {
+                            "statement_id": stmt_id,
+                            "triplet_count": len(result.triplets),
+                            "entity_count": len(result.entities),
+                            "triplets": [
+                                {
+                                    "subject_name": t.subject_name,
+                                    "predicate": t.predicate,
+                                    "object_name": t.object_name,
+                                }
+                                for t in result.triplets[:5]
+                            ],
+                        },
+                    )
 
         return triplet_map
 
@@ -842,6 +906,8 @@ class NewExtractionOrchestrator:
                         temporal_info=_TEMPORAL_MAP.get(stmt_out.temporal_type, TemporalInfo.ATEMPORAL),
                         # relevence_info=RelevenceInfo.RELEVANT if stmt_out.relevance == "RELEVANT" else RelevenceInfo.IRRELEVANT,
                         temporal_validity=TemporalValidityRange(valid_at=valid_at, invalid_at=invalid_at),
+                        has_unsolved_reference=stmt_out.has_unsolved_reference,
+                        has_emotional_state=stmt_out.has_emotional_state,
                         triplet_extraction_info=triplet_info,
                         statement_embedding=stmt_embedding,
                         **emotion_kwargs,

@@ -1573,6 +1573,7 @@ def extract_emotion_batch_task(
     llm_model_id: str,
     language: str = "zh",
     emotion_config: Optional[Dict[str, Any]] = None,
+    snapshot_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Celery task: batch emotion extraction + Neo4j backfill.
 
@@ -1586,6 +1587,10 @@ def extract_emotion_batch_task(
         language: Language code ("zh" / "en").
         emotion_config: Optional dict with emotion step config overrides
                         (emotion_extract_keywords, emotion_enable_subject).
+        snapshot_dir: Optional absolute path of the current run's snapshot directory.
+                      When provided (only in debug mode), emotion outputs will be
+                      dumped to <snapshot_dir>/4_emotion_outputs.json for offline
+                      comparison between the legacy / new pipelines.
     """
     task_id = self.request.id
     total = len(statements)
@@ -1636,6 +1641,8 @@ def extract_emotion_batch_task(
         extracted = 0
         failed = 0
         update_items = []
+        # 快照用：收集每条 statement 的 EmotionStepOutput（仅当 snapshot_dir 非空时使用）
+        snapshot_outputs: Dict[str, Any] = {} if snapshot_dir else None  # type: ignore[assignment]
 
         async def _extract_one(stmt_dict: Dict[str, str]):
             nonlocal extracted, failed
@@ -1652,6 +1659,8 @@ def extract_emotion_batch_task(
                     "emotion_intensity": result.emotion_intensity,
                     "emotion_keywords": result.emotion_keywords,
                 })
+                if snapshot_outputs is not None:
+                    snapshot_outputs[stmt_dict["statement_id"]] = result.model_dump()
                 extracted += 1
                 logger.debug(
                     f"[Emotion] 单条提取完成: stmt={stmt_dict['statement_id']}, "
@@ -1659,11 +1668,32 @@ def extract_emotion_batch_task(
                 )
             except Exception as e:
                 failed += 1
+                if snapshot_outputs is not None:
+                    snapshot_outputs[stmt_dict["statement_id"]] = {"error": str(e)}
                 logger.warning(
                     f"[Emotion] 单条提取失败 stmt={stmt_dict['statement_id']}: {e}"
                 )
 
         await asyncio.gather(*[_extract_one(s) for s in statements])
+
+        # 快照落盘（worker 端）：不影响 Neo4j 写入流程，失败只打日志
+        if snapshot_outputs is not None:
+            try:
+                from pathlib import Path as _Path
+                import json as _json
+
+                _dir = _Path(snapshot_dir)
+                _dir.mkdir(parents=True, exist_ok=True)
+                _path = _dir / "4_emotion_outputs.json"
+                with open(_path, "w", encoding="utf-8") as _f:
+                    _json.dump(snapshot_outputs, _f, ensure_ascii=False, indent=2, default=str)
+                logger.info(
+                    f"[Emotion][Snapshot] 已落盘 {len(snapshot_outputs)} 条情绪结果 → {_path}"
+                )
+            except Exception as _e:
+                logger.warning(
+                    f"[Emotion][Snapshot] 快照落盘失败（不影响主流程）: {_e}"
+                )
 
         # Batch update Neo4j via write transaction
         if update_items:

@@ -96,6 +96,10 @@ class Statement(BaseModel):
     emotion_target: Optional[str] = Field(None, description="Emotion target: person or object name")
     # Reference resolution
     has_unsolved_reference: bool = Field(False, description="Whether the statement has unresolved references")
+    has_emotional_state: bool = Field(
+        False,
+        description="Whether the statement reflects user's emotional state",
+    )
 
 
 class ConversationContext(BaseModel):

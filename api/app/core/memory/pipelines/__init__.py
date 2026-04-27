@@ -14,13 +14,31 @@ def __getattr__(name):
             WritePipeline,
             WriteResult,
         )
+
         _exports = {
             "WritePipeline": WritePipeline,
             "ExtractionResult": ExtractionResult,
             "WriteResult": WriteResult,
         }
         return _exports[name]
+    if name in ("PilotWritePipeline", "PilotWriteResult"):
+        from app.core.memory.pipelines.pilot_write_pipeline import (
+            PilotWritePipeline,
+            PilotWriteResult,
+        )
+
+        _exports = {
+            "PilotWritePipeline": PilotWritePipeline,
+            "PilotWriteResult": PilotWriteResult,
+        }
+        return _exports[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["WritePipeline", "ExtractionResult", "WriteResult"]
+__all__ = [
+    "WritePipeline",
+    "ExtractionResult",
+    "WriteResult",
+    "PilotWritePipeline",
+    "PilotWriteResult",
+]
