@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 13:56:18
+ * @Last Modified time: 2026-04-21 15:02:53
  */
 /**
  * Custom Model Modal
@@ -14,7 +14,7 @@ import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
 import { Form, Input, App, Checkbox, Button, Row, Col } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { CustomModelForm, ModelListItem, CustomModelModalRef, CustomModelModalProps } from '../types';
+import type { CustomModelForm, ModelListItem, CustomModelModalRef, CustomModelModalProps, Capability } from '../types';
 import RbModal from '@/components/RbModal'
 import CustomSelect from '@/components/CustomSelect'
 import UploadImages from '@/components/Upload/UploadImages'
@@ -73,6 +73,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         is_video: capability?.includes('video') || false,
         is_audio: capability?.includes('audio') || false,
         is_thinking: capability?.includes('thinking') || false,
+        json_output: capability?.includes('json_output') || false,
       });
     } else {
       setIsEdit(false);
@@ -102,13 +103,13 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
     form
       .validateFields()
       .then((values) => {
-        const { logo, type, is_vision, is_video, is_audio, is_omni, is_thinking, ...rest } = values;
+        const { logo, type, is_vision, is_video, is_audio, is_omni, is_thinking, json_output, ...rest } = values;
         const formData: CustomModelForm = {
           ...rest,
           type,
         }
         if (!['embedding', 'rerank'].includes(type as string)) {
-          let capability = is_omni ? ["vision", "audio", 'video'] : []
+          let capability: Capability[] = is_omni ? ["vision", "audio", 'video'] : []
 
           if (!is_omni) {
             if (is_vision) {
@@ -123,6 +124,9 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           }
           if (is_thinking) {
             capability.push('thinking')
+          }
+          if (json_output) {
+            capability.push('json_output')
           }
 
           formData.capability = capability
@@ -226,21 +230,23 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           <Input.TextArea placeholder={t('common.pleaseEnter')} />
         </Form.Item>
 
-        <Form.Item
-          name={["api_keys", 0, "api_key"]}
-          label={t('modelNew.api_key')}
-          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.api_key') }) }]}
-        >
-          <Input.Password placeholder={t('common.pleaseEnter')} />
-        </Form.Item>
+        {!isEdit && <>
+          <Form.Item
+            name={["api_keys", 0, "api_key"]}
+            label={t('modelNew.api_key')}
+            rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.api_key') }) }]}
+          >
+            <Input.Password placeholder={t('common.pleaseEnter')} />
+          </Form.Item>
 
-        <Form.Item
-          name={["api_keys", 0, "api_base"]}
-          label={t('modelNew.api_base')}
-          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.api_base') }) }]}
-        >
-          <Input placeholder="https://api.example.com/v1" />
-        </Form.Item>
+          <Form.Item
+            name={["api_keys", 0, "api_base"]}
+            label={t('modelNew.api_base')}
+            rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.api_base') }) }]}
+          >
+            <Input placeholder="https://api.example.com/v1" />
+          </Form.Item>
+        </>}
 
         {['llm', 'chat'].includes(modelType as string) &&
           <Row gutter={16}>
@@ -267,6 +273,11 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
             <Col span={24}>
               <Form.Item name="is_thinking" valuePropName="checked" className="rb:mb-0!">
                 <Checkbox>{t('modelNew.is_thinking')}</Checkbox>
+              </Form.Item>
+            </Col>
+            <Col span={24}>
+              <Form.Item name="json_output" valuePropName="checked" className="rb:mb-0!">
+                <Checkbox>{t('modelNew.json_output')}</Checkbox>
               </Form.Item>
             </Col>
           </Row>

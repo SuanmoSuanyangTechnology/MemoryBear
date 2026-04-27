@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-04 17:20:52 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-04 17:20:52 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-04-16 11:46:39
  */
 import { useEffect, useRef, useMemo } from 'react';
 import { EditorView, basicSetup } from 'codemirror';
@@ -35,7 +35,7 @@ interface CodeMirrorEditorProps {
   height?: string;
   size?: 'default' | 'small';
   placeholder?: string;
-  variant?: 'outlined' | 'borderless';
+  variant?: 'outlined' | 'borderless' | 'filled';
 }
 
 /**
@@ -156,7 +156,7 @@ const CodeMirrorEditor = ({
     <div
       ref={editorRef}
       style={{ minHeight, fontSize, lineHeight }}
-      className={variant === 'borderless' ? '' : 'rb-border rb:rounded-[8px]'}
+      className={variant === 'outlined' ? 'rb-border rb:rounded-lg' : variant === 'filled' ? 'cm-editor-filled  rb:rounded-lg' : ''}
     />
   );
 };

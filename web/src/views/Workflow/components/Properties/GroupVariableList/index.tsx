@@ -62,14 +62,18 @@ const GroupVariableList: FC<GroupVariableListProps> = ({
    */
   useEffect(() => {
     if (!isCanAdd && value[0]) {
-      const firstVariable = options.find(opt => `{{${opt.value}}}` === value[0]);
+      const firstVariable = options.find(opt => `{{${opt.value}}}` === value[0])
+        ?? options.flatMap(o => o.children ?? []).find(c => `{{${c.value}}}` === value[0])
+        ?? options.flatMap(o => o.children ?? []).flatMap((c: any) => c.children ?? []).find((gc: any) => `{{${gc.value}}}` === value[0]);
       if (firstVariable) {
         form.setFieldValue(['group_type', 'output'], firstVariable.dataType);
       }
     } else if (isCanAdd) {
       value.forEach((item: any, index: number) => {
         if (item?.value?.[0]) {
-          const firstVariable = options.find(opt => `{{${opt.value}}}` === item.value[0]);
+          const firstVariable = options.find(opt => `{{${opt.value}}}` === item.value[0])
+            ?? options.flatMap(o => o.children ?? []).find(c => `{{${c.value}}}` === item.value[0])
+            ?? options.flatMap(o => o.children ?? []).flatMap((c: any) => c.children ?? []).find((gc: any) => `{{${gc.value}}}` === item.value[0]);
           if (firstVariable) {
             form.setFieldValue(['group_type', index], firstVariable.dataType);
           }

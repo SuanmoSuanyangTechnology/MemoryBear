@@ -2,11 +2,13 @@ import uuid
 from sqlalchemy.orm import Session
 from app.models.user_model import User
 from app.models.knowledge_model import Knowledge
+from app.models.workspace_model import Workspace
+from app.models.models_model import ModelConfig
 from app.schemas.knowledge_schema import KnowledgeCreate, KnowledgeUpdate
 from app.repositories import knowledge_repository
 from app.core.logging_config import get_business_logger
+from app.models.models_model import ModelType
 
-# Obtain a dedicated logger for business logic
 business_logger = get_business_logger()
 
 
@@ -60,13 +62,47 @@ def create_knowledge(
         db: Session, knowledge: KnowledgeCreate, current_user: User
 ) -> Knowledge:
     business_logger.info(f"Create a knowledge base: {knowledge.name}, creator: {current_user.username}")
-    
+
     try:
         knowledge.created_by = current_user.id
         if knowledge.workspace_id is None:
             knowledge.workspace_id = current_user.current_workspace_id
         if knowledge.parent_id is None:
             knowledge.parent_id = knowledge.workspace_id
+
+        workspace = db.query(Workspace).filter(Workspace.id == knowledge.workspace_id).first()
+        if not workspace:
+            raise Exception(f"Workspace {knowledge.workspace_id} not found")
+
+        tenant_id = workspace.tenant_id
+
+        if not knowledge.embedding_id:
+            if not workspace.embedding:
+                raise Exception("工作空间未配置 Embedding 模型，请先完善工作空间配置后重试")
+            knowledge.embedding_id = workspace.embedding
+
+        if not knowledge.reranker_id:
+            if not workspace.rerank:
+                raise Exception("工作空间未配置 Rerank 模型，请先完善工作空间配置后重试")
+            knowledge.reranker_id = workspace.rerank
+
+        if not knowledge.llm_id:
+            if not workspace.llm:
+                raise Exception("工作空间未配置 LLM 模型，请先完善工作空间配置后重试")
+            knowledge.llm_id = workspace.llm
+
+        if not knowledge.image2text_id:
+            model = db.query(ModelConfig).filter(
+                ModelConfig.tenant_id == tenant_id,
+                ModelConfig.type.in_([ModelType.CHAT.value, ModelType.LLM.value]),
+                ModelConfig.capability.contains(["vision"]),
+                ModelConfig.is_active == True,
+            ).order_by(ModelConfig.created_at.desc()).first()
+            if not model:
+                raise Exception("租户下没有可用的视觉模型，创建知识库失败")
+            knowledge.image2text_id = model.id
+            business_logger.debug(f"Auto-bind image2text model: {model.id}")
+
         business_logger.debug(f"Start creating the knowledge base: {knowledge.name}")
         db_knowledge = knowledge_repository.create_knowledge(
             db=db, knowledge=knowledge

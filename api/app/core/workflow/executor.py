@@ -16,6 +16,7 @@ from app.core.workflow.engine.runtime_schema import ExecutionContext
 from app.core.workflow.engine.state_manager import WorkflowStateManager
 from app.core.workflow.engine.stream_output_coordinator import StreamOutputCoordinator
 from app.core.workflow.engine.variable_pool import VariablePool, VariablePoolInitializer
+from app.core.workflow.nodes.base_node import NodeExecutionError
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +259,21 @@ class WorkflowExecutor:
             end_time = datetime.datetime.now()
             elapsed_time = (end_time - start_time).total_seconds()
 
+            # For output nodes, collect structured results from variable_pool and serialize to JSON
+            output_node_ids = [
+                node["id"] for node in self.workflow_config.get("nodes", [])
+                if node.get("type") == "output"
+            ]
+            if output_node_ids:
+                structured_output = {}
+                for node_id in output_node_ids:
+                    node_output = self.variable_pool.get_node_output(node_id, default=None, strict=False)
+                    if node_output:
+                        structured_output.update(node_output)
+                final_output = structured_output if structured_output else full_content
+            else:
+                final_output = full_content
+
             # Append messages for user and assistant
             if input_data.get("files"):
                 result["messages"].extend(
@@ -301,7 +317,7 @@ class WorkflowExecutor:
                     self.execution_context,
                     self.variable_pool,
                     elapsed_time,
-                    full_content,
+                    final_output,
                     success=True)
             }
 
@@ -311,10 +327,43 @@ class WorkflowExecutor:
 
             logger.error(f"Workflow execution failed: execution_id={self.execution_context.execution_id}, error={e}",
                          exc_info=True)
+
+            # 1) 尝试从 checkpoint 回补已成功节点的 node_outputs
+            recovered: dict[str, Any] = {}
+            try:
+                if self.graph is not None:
+                    recovered = self.graph.get_state(
+                        self.execution_context.checkpoint_config
+                    ).values or {}
+            except Exception as recover_err:
+                logger.warning(
+                    f"Recover state on failure failed: {recover_err}, "
+                    f"execution_id={self.execution_context.execution_id}"
+                )
+
             if result is None:
-                result = {"error": str(e)}
+                result = dict(recovered) if recovered else {}
             else:
-                result["error"] = str(e)
+                # 已有 result 与 recovered 合并，node_outputs 深度合并
+                for k, v in recovered.items():
+                    if k == "node_outputs" and isinstance(v, dict):
+                        existing = result.get("node_outputs") or {}
+                        result["node_outputs"] = {**v, **existing}
+                    else:
+                        result.setdefault(k, v)
+
+            # 2) 如果是节点抛出的 NodeExecutionError，把失败节点的 node_output 注入 node_outputs
+            failed_node_id: str | None = None
+            if isinstance(e, NodeExecutionError):
+                failed_node_id = e.node_id
+                node_outputs = result.setdefault("node_outputs", {})
+                # 不覆盖已有（理论上不会有），保底写入失败节点记录
+                node_outputs.setdefault(e.node_id, e.node_output)
+
+            result["error"] = str(e)
+            if failed_node_id:
+                result["error_node"] = failed_node_id
+
             yield {
                 "event": "workflow_end",
                 "data": self.result_builder.build_final_output(

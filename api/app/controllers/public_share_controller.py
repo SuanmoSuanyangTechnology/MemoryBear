@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
+from app.core.quota_manager import check_end_user_quota
 from app.core.response_utils import success, fail
 from app.db import get_db, get_db_read
 from app.dependencies import get_share_user_id, ShareTokenData
@@ -218,9 +219,20 @@ def list_conversations(
     end_user_repo = EndUserRepository(db)
     app_service = AppService(db)
     app = app_service._get_app_or_404(share.app_id)
+    workspace_id = app.workspace_id
+
+    # 仅在新建终端用户时检查配额
+    existing_end_user = end_user_repo.get_end_user_by_other_id(workspace_id=workspace_id, other_id=other_id)
+    if existing_end_user is None:
+        from app.core.quota_manager import _check_quota
+        from app.models.workspace_model import Workspace
+        ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+        if ws:
+            _check_quota(db, ws.tenant_id, "end_user_quota", "end_user", workspace_id=workspace_id)
+
     new_end_user = end_user_repo.get_or_create_end_user(
         app_id=share.app_id,
-        workspace_id=app.workspace_id,
+        workspace_id=workspace_id,
         other_id=other_id
     )
     logger.debug(new_end_user.id)
@@ -348,6 +360,18 @@ async def chat(
         app_service = AppService(db)
         app = app_service._get_app_or_404(share.app_id)
         workspace_id = app.workspace_id
+
+        # 仅在新建终端用户时检查配额，已有用户复用不受限制
+        existing_end_user = end_user_repo.get_end_user_by_other_id(workspace_id=workspace_id, other_id=other_id)
+        logger.info(f"终端用户配额检查: workspace_id={workspace_id}, other_id={other_id}, existing={existing_end_user is not None}")
+        if existing_end_user is None:
+            from app.core.quota_manager import _check_quota
+            from app.models.workspace_model import Workspace
+            ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+            if ws:
+                logger.info(f"新终端用户，执行配额检查: tenant_id={ws.tenant_id}")
+                _check_quota(db, ws.tenant_id, "end_user_quota", "end_user", workspace_id=workspace_id)
+
         new_end_user = end_user_repo.get_or_create_end_user(
             app_id=share.app_id,
             workspace_id=workspace_id,

@@ -457,10 +457,10 @@ async def retrieve_chunks(
     match retrieve_data.retrieve_type:
         case chunk_schema.RetrieveType.PARTICIPLE:
             rs = vector_service.search_by_full_text(query=retrieve_data.query, top_k=retrieve_data.top_k, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter)
-            return success(data=rs, msg="retrieval successful")
+            return success(data=jsonable_encoder(rs), msg="retrieval successful")
         case chunk_schema.RetrieveType.SEMANTIC:
             rs = vector_service.search_by_vector(query=retrieve_data.query, top_k=retrieve_data.top_k, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter)
-            return success(data=rs, msg="retrieval successful")
+            return success(data=jsonable_encoder(rs), msg="retrieval successful")
         case _:
             rs1 = vector_service.search_by_vector(query=retrieve_data.query, top_k=retrieve_data.top_k, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter)
             rs2 = vector_service.search_by_full_text(query=retrieve_data.query, top_k=retrieve_data.top_k, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter)

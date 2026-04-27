@@ -14,6 +14,7 @@ from app.core.exceptions import BusinessException
 from app.core.workflow.adapters.base_adapter import WorkflowImportResult, WorkflowParserResult
 from app.core.workflow.adapters.errors import UnsupportedPlatform, InvalidConfiguration
 from app.core.workflow.adapters.registry import PlatformAdapterRegistry
+from app.models.app_model import AppType
 from app.schemas import AppCreate
 from app.schemas.workflow_schema import WorkflowConfigCreate
 from app.services.app_service import AppService
@@ -86,11 +87,12 @@ class WorkflowImportService:
         if config is None:
             raise BusinessException("Configuration import timed out. Please try again.")
         config = json.loads(config)
+        unique_name = self.app_service._unique_app_name(name, workspace_id, AppType.WORKFLOW)
         app = self.app_service.create_app(
             user_id=user_id,
             workspace_id=workspace_id,
             data=AppCreate(
-                name=name,
+                name=unique_name,
                 description=description,
                 type="workflow",
                 workflow_config=WorkflowConfigCreate(

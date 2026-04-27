@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-10 17:24:19
+ * @Last Modified time: 2026-04-21 20:27:33
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -38,6 +38,7 @@ import RbCard from '@/components/RbCard/Card';
 import ModelConfig from './ModelConfig'
 import ModelSelect from '@/components/ModelSelect'
 import ListOperator from './ListOperator'
+import MappingList from "./MappingList";
 
 /**
  * Props for Properties component
@@ -121,6 +122,7 @@ const Properties: FC<PropertiesProps> = ({
 
   useEffect(() => {
     if (values && selectedNode) {
+      const nodeData = selectedNode.getData()
       const { id, knowledge_retrieval, group, group_variables, ...rest } = values
       const { knowledge_bases = [], name: _name, description: _description, ...restKnowledgeConfig } = (knowledge_retrieval as any) || {}
 
@@ -133,9 +135,10 @@ const Properties: FC<PropertiesProps> = ({
           id: vo.id,
           ...vo.config
         }))
+      } else if (nodeData.type === 'knowledge-retrieval') {
+        allRest.knowledge_bases = []
       }
 
-      const nodeData = selectedNode.getData()
 
       Object.keys(values).forEach(key => {
         if (nodeData?.config?.[key]) {
@@ -153,7 +156,7 @@ const Properties: FC<PropertiesProps> = ({
       selectedNode?.setData({
         ...nodeData,
         ...allRest,
-      })
+      }, { deep: false })
     }
   }, [values, selectedNode, form])
 
@@ -266,7 +269,7 @@ const Properties: FC<PropertiesProps> = ({
                 key,
                 label: cycleVar.name,
                 type: 'variable',
-                dataType: cycleVar.type || 'String',
+                dataType: cycleVar.type || 'string',
                 value: `${parentNodeId}.${cycleVar.name}`,
                 nodeData: parentData,
               });
@@ -643,7 +646,7 @@ const Properties: FC<PropertiesProps> = ({
                               key: contextKey,
                               label: 'context',
                               type: 'variable',
-                              dataType: 'String',
+                              dataType: 'string',
                               value: `context`,
                               nodeData: selectedNode.getData(),
                               isContext: true,
@@ -791,7 +794,7 @@ const Properties: FC<PropertiesProps> = ({
                                   key: `${selectedNode.id}_cycle_${cycleVar.name}`,
                                   label: cycleVar.name,
                                   type: 'variable',
-                                  dataType: cycleVar.type || 'String',
+                                  dataType: cycleVar.type || 'string',
                                   value: `${selectedNode.getData().id}.${cycleVar.name}`,
                                   nodeData: selectedNode.getData(),
                                 }));
@@ -804,6 +807,15 @@ const Properties: FC<PropertiesProps> = ({
                             />
                           </Form.Item>
                         )
+                      }
+                      if (config.type === 'mappingList') {
+                        return <MappingList
+                          key={key}
+                          label={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
+                          name={key}
+                          options={variableList}
+                          isNeedType={config.isNeedType as boolean}
+                        />
                       }
 
                       if (key === 'vision_input' && !values?.vision) {
@@ -904,7 +916,6 @@ const Properties: FC<PropertiesProps> = ({
                                                   }
                                                 });
 
-                                                console.log('list', list)
                                                 return list
                                               }
                                               // Filter child nodes for iteration output
@@ -958,7 +969,7 @@ const Properties: FC<PropertiesProps> = ({
           <div className="rb:text-[12px] rb:leading-4.5">
             <Flex gap={8} vertical>
               <Flex align="center" className="rb:font-medium rb:cursor-pointer" onClick={handleToggle}>
-                {t('workflow.config.output')}
+                {t('workflow.config.outputVariable')}
                 <div
                   className={clsx("rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/caret_right_outlined.svg')]", {
                     'rb:rotate-90': !outputCollapsed

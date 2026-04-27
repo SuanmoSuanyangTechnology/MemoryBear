@@ -29,11 +29,8 @@ class Tenants(Base):
     contact_email = Column(String(255), nullable=True)  # 联系人邮箱
     contact_phone = Column(String(50), nullable=True)   # 联系人电话
 
-    # 租户套餐信息
-    plan = Column(String(50), nullable=True)                        # 套餐类型
-    plan_expired_at = Column(DateTime, nullable=True)               # 套餐到期时间
-    api_ops_rate_limit = Column(String(100), nullable=True)         # API 调用频率限制
-    status = Column(String(50), nullable=True, default='active')    # 租户状态
+    # 租户套餐信息（只读，从 tenant_subscriptions 动态获取）
+    status = Column(String(50), nullable=True, default='active', server_default='active')    # 租户状态
     
     # Relationship to users - one tenant has many users
     users = relationship("User", back_populates="tenant")

@@ -2,11 +2,12 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:37 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 15:37:18
+ * @Last Modified time: 2026-04-14 16:53:27
  */
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { Flex } from 'antd'
+import { useTranslation } from 'react-i18next'
 
 import ConfigHeader from './components/ConfigHeader'
 import type { AgentRef, ClusterRef, WorkflowRef, Config } from './types'
@@ -21,6 +22,7 @@ import Statistics from './Statistics'
 import TestChat from './TestChat'
 import type { WorkflowConfig } from '@/views/Workflow/types';
 import Logs from './Logs';
+import { useI18n } from '@/store/locale'
 
 /**
  * Application configuration page component
@@ -30,6 +32,8 @@ import Logs from './Logs';
 const ApplicationConfig: React.FC = () => {
   // Hooks
   const { id, source } = useParams();
+  const { t } = useTranslation()
+  const { language } = useI18n()
   
   // Refs for different application types
   const agentRef = useRef<AgentRef>(null)
@@ -94,6 +98,13 @@ const ApplicationConfig: React.FC = () => {
   useEffect(() => {
     getApplicationInfo()
   }, [id])
+
+  useEffect(() => {
+    if (application?.name) {
+      const appName = t('memoryBear');
+      document.title = `${application.name} - ${appName}`;
+    }
+  }, [application?.name, language])
 
   /**
    * Fetch application information

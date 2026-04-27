@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:25:32 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 10:34:43
+ * @Last Modified time: 2026-04-21 13:34:52
  */
 /**
  * Knowledge Base Component
@@ -54,7 +54,7 @@ const Knowledge: FC<{value?: KnowledgeConfig; onChange?: (config: KnowledgeConfi
       const basesWithoutName = knowledge_bases.filter(base => !base.name)
       if (basesWithoutName.length > 0) {
         // Call API to get complete knowledge base information
-        getKnowledgeBaseList().then(res => {
+        getKnowledgeBaseList(undefined, { kb_ids: basesWithoutName.map(vo => vo.kb_id).join(',') }).then(res => {
           const fullBases = knowledge_bases.map(base => {
             if (!base.name) {
               const fullBase = res.items.find((item: any) => item.id === base.kb_id)

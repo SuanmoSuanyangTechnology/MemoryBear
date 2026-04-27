@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 21:48:30
+ * @Last Modified time: 2026-04-24 18:14:25
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -59,6 +59,7 @@ interface NodeData {
   node_type?: string;
   input?: any;
   output?: any;
+  process?: any;
   elapsed_time?: string;
   error?: any;
   state: Record<string, any>;
@@ -92,6 +93,7 @@ const TestChat: FC<TestChatProps> = ({
   const audioPollingRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
   const streamLoadingRef = useRef(false)
   const [audioStatusMap, setAudioStatusMap] = useState<Record<string, string>>({})
+  const abortRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     getVariables()
@@ -99,6 +101,8 @@ const TestChat: FC<TestChatProps> = ({
 
   useEffect(() => {
     return () => {
+      abortRef.current?.()
+      abortRef.current = null
       audioPollingRef.current.forEach(timer => clearInterval(timer))
       audioPollingRef.current.clear()
     }
@@ -262,7 +266,8 @@ const TestChat: FC<TestChatProps> = ({
     draftRun(
       application.id,
       formatParams((msg || message) as string, conversationId, files, params),
-      handleStreamMessage
+      handleStreamMessage,
+      (abort) => { abortRef.current = abort }
     )
       .catch(() => {
         updateErrorAssistantMessage(0)
@@ -373,7 +378,8 @@ const TestChat: FC<TestChatProps> = ({
     draftRun(
       application.id,
       formatParams((msg || message) as string, conversationId, files, params),
-      handleWorkflowStreamMessage
+      handleWorkflowStreamMessage,
+      (abort) => { abortRef.current = abort }
     )
       .catch((error) => {
         const errorInfo = JSON.parse(error.message)
@@ -480,7 +486,7 @@ const TestChat: FC<TestChatProps> = ({
   }
 
   const updateWorkflowNodeEndMessage = (data: NodeData) => {
-    const { node_id, input, output, error, elapsed_time, status } = data;
+    const { node_id, input, output, process, error, elapsed_time, status } = data;
     setChatList(prev => {
       const newList = [...prev]
       const lastIndex = newList.length - 1
@@ -493,6 +499,7 @@ const TestChat: FC<TestChatProps> = ({
             content: {
               input,
               output,
+              process,
               error,
             },
             status: status || 'completed',
@@ -509,7 +516,7 @@ const TestChat: FC<TestChatProps> = ({
   }
 
   const updateWorkflowCycleMessage = (data: NodeData) => {
-    const { node_id, cycle_id, cycle_idx, input, output, error, elapsed_time, status } = data;
+    const { node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status } = data;
     const { nodes } = config as WorkflowConfig
     const node = nodes.find(n => n.id === node_id);
     const { name, type } = node || {}
@@ -533,6 +540,7 @@ const TestChat: FC<TestChatProps> = ({
               cycle_idx,
               input,
               output,
+              process,
               error,
             },
             status: status || 'completed',

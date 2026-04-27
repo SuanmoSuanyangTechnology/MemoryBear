@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:21:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 20:24:43
+ * @Last Modified time: 2026-04-22 12:03:08
  */
 /**
  * RbCard Component
@@ -67,7 +67,7 @@ const RbCard: FC<RbCardProps> = ({
               {title}
             </div>
           </Tooltip>
-          : <div className="rb:flex-1 rb:leading-5.5 rb:min-w-0 rb:whitespace-break-spaces rb:wrap-break-word rb:line-clamp-2">
+          : <div className={`rb:flex-1 rb:leading-5.5 rb:min-w-0 rb:whitespace-break-spaces rb:wrap-break-word rb:line-clamp-2 ${titleClassName}`}>
             {title}
           </div>
         }

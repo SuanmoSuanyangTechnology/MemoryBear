@@ -7,25 +7,31 @@
 import { type FC, useEffect, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Skeleton, Row, Col, Flex, DatePicker, Pagination } from 'antd'
+import { Skeleton, Row, Col, Flex, DatePicker, Pagination, Form, Select } from 'antd'
 import type { Dayjs } from 'dayjs'
 import * as echarts from 'echarts'
 import 'echarts-wordcloud'
+import clsx from 'clsx'
 
 import RbCard from '@/components/RbCard/Card'
 import {
-  getExplicitMemory,
+  getSemanticsMemory,
+  getEpisodicMemory,
+  type EpisodicMemoryQuery,
+  type EpisodicMemoryType,
 } from '@/api/memory'
 import { formatDateTime } from '@/utils/format'
 import Empty from '@/components/Empty'
 import ExplicitDetailModal from '../components/ExplicitDetailModal'
 
 /** An episodic (event-based) memory entry with a title and free-text content. */
+
 export interface EpisodicMemory {
   id: string;
   title: string;
   content: string;
   created_at: number;
+  memory_type: EpisodicMemoryType;
 }
 
 /** A semantic (concept-based) memory entry extracted as a named entity. */
@@ -37,7 +43,6 @@ export interface SemanticMemory {
   entity_type: string;
   /** Brief definition or description of the entity. */
   core_definition: string;
-  created_at: number;
 }
 
 /** Combined API response containing both memory categories. */
@@ -51,10 +56,12 @@ interface Data {
 export interface ExplicitDetailModalRef {
   handleOpen: (vo: EpisodicMemory | SemanticMemory) => void;
 }
+interface PaginationConfig { pagesize?: number; page?: number; }
 
 /** Rotating colour palette used for word-cloud text. */
 const DEFAULT_COLORS = ['#FF8A4C', '#FF5D34', '#155EEF', '#9C6FFF', '#4DA8FF', '#369F21']
 
+const PAGE_SIZE = 10
 /**
  * ExplicitDetail – Two-column view of a user's explicit memories.
  *
@@ -73,19 +80,62 @@ const ExplicitDetail: FC = () => {
   /** Keeps a stable reference to the ECharts instance for cleanup. */
   const chartInstance = useRef<echarts.ECharts | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
-  const [data, setData] = useState<Data>({ episodic_memories: [], semantic_memories: [], total: 0 })
-  const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null)
-  const [page, setPage] = useState(1)
-  const PAGE_SIZE = 10
+  const [semanticsMemory, setSemanticsMemory] = useState<SemanticMemory[]>([])
 
-  const filteredEpisodic = dateRange?.[0] && dateRange?.[1]
-    ? data.episodic_memories.filter(item => {
-        const ts = item.created_at
-        return ts >= dateRange[0]!.startOf('day').valueOf() && ts <= dateRange[1]!.endOf('day').valueOf()
+  const [form] = Form.useForm<EpisodicMemoryQuery & { range?: [Dayjs, Dayjs] | null }>()
+  const values = Form.useWatch([], form)
+  const [episodicLoading, setEpisodicLoading] = useState(false)
+  const [episodicMemories, setEpisodicMemories] = useState<Data['episodic_memories']>([])
+  const [currentPagination, setCurrentPagination] = useState<PaginationConfig>({
+    page: 1,
+    pagesize: PAGE_SIZE,
+  });
+  const [total, setTotal] = useState(0);
+  const [allEpisodicTotal, setAllEpisodicTotal] = useState(0)
+
+  useEffect(() => {
+    getEpisodicMemoryList({ page: 1 })
+  }, [values])
+
+  const getEpisodicMemoryList = (pagination?: PaginationConfig) => {
+    if (!id) return
+    if (pagination) {
+      setCurrentPagination({
+        ...currentPagination,
+        ...pagination,
       })
-    : data.episodic_memories
+    }
 
-  const pagedEpisodic = filteredEpisodic.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+    const { range, ...rest } = values || {};
+    const params = {
+      end_user_id: id,
+      ...currentPagination,
+      ...pagination,
+      ...rest
+    }
+
+    if (range && range.length === 2) {
+      params.start_date = range[0]!.startOf('day').valueOf()
+      params.end_date = range[1]!.endOf('day').valueOf()
+    }
+    setEpisodicLoading(true)
+    getEpisodicMemory(params)
+      .then(res => {
+        const response = res as { total: number; items: EpisodicMemory[]; page: { hasnext: boolean; pagesize: number; total: number; } }
+        setEpisodicMemories(response.items)
+        setTotal(response.page.total)
+        setAllEpisodicTotal(response.total)
+      })
+      .finally(() => {
+        setEpisodicLoading(false)
+      })
+  }
+  const handlePageChange = (page: number, pagesize: number) => {
+    getEpisodicMemoryList({
+      page: page,
+      pagesize
+    })
+  }
 
   /* Fetch data whenever the route user ID changes. */
   useEffect(() => {
@@ -97,9 +147,8 @@ const ExplicitDetail: FC = () => {
   const getData = () => {
     if (!id) return
     setLoading(true)
-    getExplicitMemory(id).then((res) => {
-      const response = res as Data
-      setData(response)
+    getSemanticsMemory(id).then((res) => {
+      setSemanticsMemory(res as SemanticMemory[])
       setLoading(false)
     })
     .finally(() => {
@@ -117,7 +166,7 @@ const ExplicitDetail: FC = () => {
    * The chart instance is disposed on cleanup to prevent memory leaks.
    */
   useEffect(() => {
-    if (!wordCloudRef.current || !data.semantic_memories?.length) return
+    if (!wordCloudRef.current || !semanticsMemory?.length) return
     if (chartInstance.current) chartInstance.current.dispose()
     chartInstance.current = echarts.init(wordCloudRef.current)
     chartInstance.current.setOption({
@@ -131,7 +180,7 @@ const ExplicitDetail: FC = () => {
         height: '100%',
         textStyle: { fontFamily: 'sans-serif', fontWeight: 'bold' },
         emphasis: { textStyle: { shadowBlur: 10, shadowColor: '#333' } },
-        data: data.semantic_memories.map((item, index) => ({
+        data: semanticsMemory.map((item, index) => ({
           name: item.name,
           value: 50 + (index % 5) * 10,
           itemIndex: index,
@@ -140,11 +189,11 @@ const ExplicitDetail: FC = () => {
       }]
     })
     chartInstance.current.on('click', (params) => {
-      const item = data.semantic_memories[(params.data as any).itemIndex]
+      const item = semanticsMemory[(params.data as any).itemIndex]
       if (item) handleView(item)
     })
     return () => { chartInstance.current?.dispose(); chartInstance.current = null }
-  }, [data.semantic_memories])
+  }, [semanticsMemory])
 
   /* Redraw the word cloud when the container dimensions change. */
   useEffect(() => {
@@ -168,55 +217,78 @@ const ExplicitDetail: FC = () => {
       <Col span={12} className="rb:h-full!">
         <RbCard
           title={() => <span className="rb:font-[MiSans-Bold] rb:font-bold">{t('explicitDetail.episodic_memories')}</span>}
-          extra={<span className="rb:text-[#5B6167]">{t('table.totalRecords', { total: data.total })}</span>}
+          extra={<span className="rb:text-[#5B6167]">{t('table.totalRecords', { total: allEpisodicTotal })}</span>}
           headerType="borderless"
           headerClassName="rb:min-h-[50px]!"
           bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-50px)]"
           className="rb:h-full!"
         >
-          {loading ?
-            <Skeleton active />
-            : (
-              <Flex gap={12} vertical className="rb:h-full!">
-                <Row gutter={12}>
-                  <Col span={12}>
+          <Flex vertical gap={12} className="rb:h-full!">
+            <Form form={form} initialValues={{ episodic_type: null }}>
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item name="range" noStyle>
                     <DatePicker.RangePicker
-                      value={dateRange}
-                      onChange={(val) => { setDateRange(val); setPage(1) }}
                       allowClear
+                      className="rb:w-full!"
                     />
-                  </Col>
-                </Row>
-                <div className="rb:max-h-[calc(100%-92px)] rb:overflow-y-auto">
-                  {pagedEpisodic.length > 0 ? pagedEpisodic.map(item => (
-                    <div
-                      key={item.id}
-                      className="rb:cursor-pointer rb:bg-[#F6F6F6] rb:rounded-xl rb:pt-2.5 rb:px-3 rb:pb-3"
-                      onClick={() => handleView(item)}
-                    >
-                      <Flex align="center" justify="space-between">
-                        <span className="rb:font-medium rb:pl-1">{item.title}</span>
-                        <div className="rb:text-[#5B6167] rb:leading-4.25 rb:text-[12px]">{formatDateTime(item.created_at)}</div>
-                      </Flex>
-                      <div className="rb:bg-white rb:rounded-lg rb:py-2.5 rb:px-3 rb:mt-2.5 rb:leading-5">{item.content}</div>
-                    </div>
-                  )) : <Empty />}
-                </div>
-                {filteredEpisodic.length > PAGE_SIZE && (
-                  <Pagination
-                    current={page}
-                    pageSize={PAGE_SIZE}
-                    total={filteredEpisodic.length}
-                    onChange={setPage}
-                    size="small"
-                    showSizeChanger={true}
-                    showQuickJumper={true}
-                    className="rb:mt-1!"
-                  />
-                )}
-              </Flex>
-            )
-          }
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="episodic_type" noStyle>
+                    <Select
+                      options={[
+                        { value: null, label: t('common.all') },
+                        ...["conversation", "project_work", "learning", "decision", "important_event"].map(type => ({
+                          value: type, label: t(`explicitDetail.${type}`)
+                        }))
+                      ]}
+                      placeholder={t('explicitDetail.episodic_type')}
+                      className="rb:w-full!"
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+            </Form>
+            {episodicLoading ?
+              <Skeleton active />
+              : (
+                <>
+                  <Flex vertical gap={12} className={clsx(" rb:overflow-y-auto", {
+                    'rb:max-h-[calc(100%-92px)]!': total > PAGE_SIZE,
+                    'rb:max-h-[calc(100%-36px)]!': total <= PAGE_SIZE && episodicMemories.length > 0,
+                    'rb:h-full!': episodicMemories.length === 0
+                  })}>
+                    {episodicMemories.length > 0 ? episodicMemories.map(item => (
+                      <div
+                        key={item.id}
+                        className="rb:cursor-pointer rb:bg-[#F6F6F6] rb:rounded-xl rb:pt-2.5 rb:px-3 rb:pb-3"
+                        onClick={() => handleView(item)}
+                      >
+                        <Flex align="center" justify="space-between">
+                          <span className="rb:font-medium rb:pl-1">{item.title}</span>
+                          <div className="rb:text-[#5B6167] rb:leading-4.25 rb:text-[12px]">{formatDateTime(item.created_at)}</div>
+                        </Flex>
+                        <div className="rb:bg-white rb:rounded-lg rb:py-2.5 rb:px-3 rb:mt-2.5 rb:leading-5">{item.content}</div>
+                      </div>
+                    )) : <Empty className="rb:h-full!" />}
+                  </Flex>
+                  {total > PAGE_SIZE && (
+                    <Pagination
+                      current={currentPagination.page}
+                      pageSize={currentPagination.pagesize}
+                      total={total}
+                      onChange={handlePageChange}
+                      size="small"
+                      showSizeChanger={true}
+                      showQuickJumper={true}
+                      className="rb:mt-1!"
+                    />
+                  )}
+                </>
+              )
+            }
+          </Flex>
         </RbCard>
       </Col>
       <Col span={12} className="rb:h-full!">
@@ -229,7 +301,7 @@ const ExplicitDetail: FC = () => {
         >
           {loading ?
             <Skeleton active />
-            : data.semantic_memories?.length > 0
+            : semanticsMemory?.length > 0
               ? <div ref={wordCloudRef} className="rb:h-full rb:w-full rb:cursor-pointer" />
               : <Empty />
           }

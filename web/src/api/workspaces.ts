@@ -9,8 +9,9 @@ import type { SpaceModalData } from '@/views/SpaceManagement/types'
 import type { SpaceConfigData } from '@/views/SpaceConfig/types'
 
 // Workspace list
+export const getWorkspacesUrl = '/workspaces'
 export const getWorkspaces = (data?: { include_current?: boolean }) => {
-  return request.get('/workspaces', data)
+  return request.get(getWorkspacesUrl, data)
 }
 // Create workspace
 export const createWorkspace = (values: SpaceModalData) => {

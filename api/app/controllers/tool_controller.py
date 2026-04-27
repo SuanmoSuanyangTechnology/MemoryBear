@@ -173,6 +173,8 @@ async def delete_tool(
         return success(msg="工具删除成功")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -249,6 +251,8 @@ async def parse_openapi_schema(
         if result["success"] is False:
             raise HTTPException(status_code=400, detail=result["message"])
         return success(data=result, msg="Schema解析完成")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

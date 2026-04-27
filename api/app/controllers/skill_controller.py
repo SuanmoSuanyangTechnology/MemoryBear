@@ -11,11 +11,13 @@ from app.schemas import skill_schema
 from app.schemas.response_schema import PageData, PageMeta
 from app.services.skill_service import SkillService
 from app.core.response_utils import success
+from app.core.quota_stub import check_skill_quota
 
 router = APIRouter(prefix="/skills", tags=["Skills"])
 
 
 @router.post("", summary="创建技能")
+@check_skill_quota
 def create_skill(
     data: skill_schema.SkillCreate,
     db: Session = Depends(get_db),

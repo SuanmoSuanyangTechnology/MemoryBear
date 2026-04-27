@@ -85,9 +85,9 @@ const EditableTable: FC<EditableTableProps> = ({
     return [
       {
         title: t('workflow.config.name'),
-        dataIndex: 'name',
+        dataIndex: 'key',
         render: (_: any, __: TableRow, index: number) => (
-          <Form.Item name={[index, 'name']} className={formClassName}>
+          <Form.Item name={[index, 'key']} className={formClassName}>
             <Editor
               options={namefilterOptions}
               type="input"

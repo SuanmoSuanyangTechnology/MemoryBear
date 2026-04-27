@@ -28,6 +28,7 @@ from app.services.app_statistics_service import AppStatisticsService
 from app.services.workflow_import_service import WorkflowImportService
 from app.services.workflow_service import WorkflowService, get_workflow_service
 from app.services.app_dsl_service import AppDslService
+from app.core.quota_stub import check_app_quota
 
 router = APIRouter(prefix="/apps", tags=["Apps"])
 logger = get_business_logger()
@@ -35,6 +36,7 @@ logger = get_business_logger()
 
 @router.post("", summary="创建应用（可选创建 Agent 配置）")
 @cur_workspace_access_guard()
+@check_app_quota
 def create_app(
         payload: app_schema.AppCreate,
         db: Session = Depends(get_db),
@@ -217,6 +219,7 @@ def delete_app(
 
 @router.post("/{app_id}/copy", summary="复制应用")
 @cur_workspace_access_guard()
+@check_app_quota
 def copy_app(
         app_id: uuid.UUID,
         new_name: Optional[str] = None,
@@ -267,6 +270,19 @@ def update_agent_config(
     cfg = app_service.update_agent_config(db, app_id=app_id, data=payload, workspace_id=workspace_id)
     cfg = enrich_agent_config(cfg)
     return success(data=app_schema.AgentConfig.model_validate(cfg))
+
+
+@router.get("/{app_id}/model/parameters/default", summary="获取 Agent 模型参数默认配置")
+@cur_workspace_access_guard()
+def get_agent_model_parameters(
+        app_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    workspace_id = current_user.current_workspace_id
+    service = AppService(db)
+    model_parameters = service.get_default_model_parameters(app_id=app_id)
+    return success(data=model_parameters, msg="获取 Agent 模型参数默认配置")
 
 
 @router.get("/{app_id}/config", summary="获取 Agent 配置")
@@ -1129,6 +1145,7 @@ async def import_workflow_config(
 
 @router.post("/workflow/import/save")
 @cur_workspace_access_guard()
+@check_app_quota
 async def save_workflow_import(
         data: WorkflowImportSave,
         db: Session = Depends(get_db),
@@ -1250,9 +1267,11 @@ async def export_app(
 async def import_app(
         file: UploadFile = File(...),
         db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        current_user: User = Depends(get_current_user),
+        app_id: Optional[str] = Form(None),
 ):
     """从 YAML 文件导入 agent / multi_agent / workflow 应用。
+    传入 app_id 时覆盖该应用的配置（类型必须一致），否则创建新应用。
     跨空间/跨租户导入时，模型/工具/知识库会按名称匹配，匹配不到则置空并返回 warnings。
     """
     if not file.filename.lower().endswith((".yaml", ".yml")):
@@ -1263,13 +1282,62 @@ async def import_app(
     if not dsl or "app" not in dsl:
         return fail(msg="YAML 格式无效，缺少 app 字段", code=BizCode.BAD_REQUEST)
 
-    new_app, warnings = AppDslService(db).import_dsl(
+    target_app_id = uuid.UUID(app_id) if app_id else None
+    # 仅新建应用时检查配额，覆盖已有应用时跳过
+    if target_app_id is None:
+        from app.core.quota_manager import _check_quota
+        _check_quota(db, current_user.tenant_id, "app_quota", "app", workspace_id=current_user.current_workspace_id)
+    result_app, warnings = AppDslService(db).import_dsl(
         dsl=dsl,
         workspace_id=current_user.current_workspace_id,
         tenant_id=current_user.tenant_id,
         user_id=current_user.id,
+        app_id=target_app_id,
     )
     return success(
-        data={"app": app_schema.App.model_validate(new_app), "warnings": warnings},
+        data={"app": app_schema.App.model_validate(result_app), "warnings": warnings},
         msg="应用导入成功" + ("，但部分资源需手动配置" if warnings else "")
+    )
+
+
+@router.get("/citations/{document_id}/download", summary="下载引用文档原始文件")
+async def download_citation_file(
+        document_id: uuid.UUID = Path(..., description="引用文档ID"),
+        db: Session = Depends(get_db),
+):
+    """
+    下载引用文档的原始文件。
+    仅当应用功能特性 citation.allow_download=true 时，前端才会展示此下载链接。
+    路由本身不做权限校验，由业务层通过 allow_download 开关控制入口。
+    """
+    import os
+    from fastapi import HTTPException, status as http_status
+    from fastapi.responses import FileResponse
+    from app.core.config import settings
+    from app.models.document_model import Document
+    from app.models.file_model import File as FileModel
+
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="文档不存在")
+
+    file_record = db.query(FileModel).filter(FileModel.id == doc.file_id).first()
+    if not file_record:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="原始文件不存在")
+
+    file_path = os.path.join(
+        settings.FILE_PATH,
+        str(file_record.kb_id),
+        str(file_record.parent_id),
+        f"{file_record.id}{file_record.file_ext}"
+    )
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="文件未找到")
+
+    encoded_name = quote(doc.file_name)
+    return FileResponse(
+        path=file_path,
+        filename=doc.file_name,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"}
     )

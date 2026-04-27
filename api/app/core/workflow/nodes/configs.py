@@ -26,6 +26,7 @@ from app.core.workflow.nodes.variable_aggregator.config import VariableAggregato
 from app.core.workflow.nodes.notes.config import NoteNodeConfig
 from app.core.workflow.nodes.list_operator.config import ListOperatorNodeConfig
 from app.core.workflow.nodes.document_extractor.config import DocExtractorNodeConfig
+from app.core.workflow.nodes.output.config import OutputNodeConfig
 
 __all__ = [
     # 基础类
@@ -54,4 +55,5 @@ __all__ = [
     "NoteNodeConfig",
     "ListOperatorNodeConfig",
     "DocExtractorNodeConfig",
+    "OutputNodeConfig"
 ]

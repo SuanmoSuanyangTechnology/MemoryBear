@@ -7,7 +7,7 @@ from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator, ValueInputType
 from app.core.workflow.nodes.if_else import IfElseNodeConfig
-from app.core.workflow.nodes.operators import ConditionExpressionResolver, CompareOperatorInstance
+from app.core.workflow.nodes.operators import ConditionExpressionResolver, CompareOperatorInstance, ArrayFileContainsOperator
 from app.core.workflow.variable.base_variable import VariableType
 
 logger = logging.getLogger(__name__)
@@ -90,11 +90,9 @@ class IfElseNode(BaseNode):
             list[str]: A list of Python boolean expression strings,
             ordered by branch priority.
         """
-        branch_index = 0
         conditions = []
 
         for case_branch in self.typed_config.cases:
-            branch_index += 1
             branch_result = []
             for expression in case_branch.expressions:
                 pattern = r"\{\{\s*(.*?)\s*\}\}"
@@ -103,13 +101,18 @@ class IfElseNode(BaseNode):
                     left_value = self.get_variable(left_string, variable_pool)
                 except KeyError:
                     left_value = None
-                evaluator = ConditionExpressionResolver.resolve_by_value(left_value)(
-                    variable_pool,
-                    expression.left,
-                    expression.right,
-                    expression.input_type
-                )
+
+                if expression.sub_variable_condition is not None and isinstance(left_value, list):
+                    evaluator = ArrayFileContainsOperator(left_value, expression.sub_variable_condition, variable_pool)
+                else:
+                    evaluator = ConditionExpressionResolver.resolve_by_value(left_value)(
+                        variable_pool,
+                        expression.left,
+                        expression.right,
+                        expression.input_type
+                    )
                 branch_result.append(self._evaluate(expression.operator, evaluator))
+
             if case_branch.logical_operator == LogicOperator.AND:
                 conditions.append(all(branch_result))
             else:

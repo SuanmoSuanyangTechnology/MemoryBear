@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:35:43 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-02 17:17:06
+ * @Last Modified time: 2026-04-14 17:36:53
  */
 import { type FC, useMemo, useRef, useState } from "react";
 import { useTranslation } from 'react-i18next'
@@ -35,9 +35,8 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
     form.setFieldsValue({ auth })
   }
 
-  const handleChangeBodyContentType = (e: any) => {
-    const value = e.target.value || e.target.value
-    form.setFieldValue(['body', 'data'], ['form-data', 'x-www-form-urlencoded'].includes(value) ? [{}] : undefined)
+  const handleChangeBodyContentType = () => {
+    form.setFieldValue(['body', 'data'], undefined)
   }
 
   // Handle error handling method change and update node ports accordingly

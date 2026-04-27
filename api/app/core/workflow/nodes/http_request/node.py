@@ -255,22 +255,36 @@ class HttpRequestNode(BaseNode):
             case HttpContentType.NONE:
                 return {}
             case HttpContentType.JSON:
-                content["json"] = json.loads(self._render_template(
+                rendered = self._render_template(
                     self.typed_config.body.data, variable_pool
-                ))
+                )
+                if not rendered or not rendered.strip():
+                    # 第三方导入的工作流可能出现 content_type=json 但 data 为空的情况，视为无 body
+                    return {}
+                try:
+                    content["json"] = json.loads(rendered)
+                except json.JSONDecodeError as e:
+                    raise RuntimeError(
+                        f"Invalid JSON body for HTTP request node: {e.msg} (data={rendered!r})"
+                    )
             case HttpContentType.FROM_DATA:
                 data = {}
-                content["files"] = {}
+                files = []
                 for item in self.typed_config.body.data:
+                    key = self._render_template(item.key, variable_pool)
                     if item.type == "text":
-                        data[self._render_template(item.key, variable_pool)] = self._render_template(item.value,
-                                                                                                     variable_pool)
+                        data[key] = self._render_template(item.value, variable_pool)
                     elif item.type == "file":
-                        content["files"][self._render_template(item.key, variable_pool)] = (
-                            uuid.uuid4().hex,
-                            await variable_pool.get_instance(item.value).get_content()
-                        )
+                        file_instance = variable_pool.get_instance(item.value)
+                        if isinstance(file_instance, ArrayVariable):
+                            for v in file_instance.value:
+                                if isinstance(v, FileVariable):
+                                    files.append((key, (uuid.uuid4().hex, await v.get_content())))
+                        elif isinstance(file_instance, FileVariable):
+                            files.append((key, (uuid.uuid4().hex, await file_instance.get_content())))
                 content["data"] = data
+                if files:
+                    content["files"] = files
             case HttpContentType.BINARY:
                 content["files"] = []
                 file_instence = variable_pool.get_instance(self.typed_config.body.data)
@@ -320,6 +334,16 @@ class HttpRequestNode(BaseNode):
             case _:
                 raise RuntimeError(f"HttpRequest method not supported: {self.typed_config.method}")
 
+    def _extract_output(self, business_result: Any) -> Any:
+        if isinstance(business_result, dict):
+            return {k: v for k, v in business_result.items() if k != "process_data"}
+        return business_result
+
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        if isinstance(business_result, dict) and "process_data" in business_result:
+            return {"process": business_result["process_data"]}
+        return {}
+
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict | str:
         """
         Execute the HTTP request node.
@@ -338,29 +362,41 @@ class HttpRequestNode(BaseNode):
             - str: Branch identifier (e.g. "ERROR") when branching is enabled
         """
         self.typed_config = HttpRequestNodeConfig(**self.config)
+        rendered_url = self._render_template(self.typed_config.url, variable_pool)
+        built_headers = self._build_header(variable_pool) | self._build_auth(variable_pool)
+        built_params = self._build_params(variable_pool)
         async with httpx.AsyncClient(
                 verify=self.typed_config.verify_ssl,
                 timeout=self._build_timeout(),
-                headers=self._build_header(variable_pool) | self._build_auth(variable_pool),
-                params=self._build_params(variable_pool),
+                headers=built_headers,
+                params=built_params,
                 follow_redirects=True
         ) as client:
             retries = self.typed_config.retry.max_attempts
             while retries > 0:
                 try:
                     request_func = self._get_client_method(client)
+                    built_content = await self._build_content(variable_pool)
                     resp = await request_func(
-                        url=self._render_template(self.typed_config.url, variable_pool),
-                        **(await self._build_content(variable_pool))
+                        url=rendered_url,
+                        **built_content
                     )
                     resp.raise_for_status()
                     logger.info(f"Node {self.node_id}: HTTP request succeeded")
                     response = HttpResponse(resp)
+                    # Build raw request summary for process_data
+                    raw_request = (
+                        f"{self.typed_config.method.upper()} {resp.request.url} HTTP/1.1\r\n"
+                        + "".join(f"{k}: {v}\r\n" for k, v in resp.request.headers.items())
+                        + "\r\n"
+                        + (resp.request.content.decode(errors="replace") if resp.request.content else "")
+                    )
                     return HttpRequestNodeOutput(
                         body=response.body,
                         status_code=resp.status_code,
                         headers=resp.headers,
-                        files=response.files
+                        files=response.files,
+                        process_data={"request": raw_request},
                     ).model_dump()
                 except (httpx.HTTPStatusError, httpx.RequestError) as e:
                     logger.error(f"HTTP request node exception: {e}")

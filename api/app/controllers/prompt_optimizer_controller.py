@@ -124,10 +124,11 @@ async def get_prompt_opt(
                     skill=data.skill
             ):
                 # chunk 是 prompt 的增量内容
-                yield f"event:message\ndata: {json.dumps(chunk)}\n\n"
+                yield f"event:message\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
         except Exception as e:
             yield f"event:error\ndata: {json.dumps(
-                {"error": str(e)}
+                {"error": str(e)},
+                ensure_ascii=False
             )}\n\n"
         yield "event:end\ndata: {}\n\n"
 

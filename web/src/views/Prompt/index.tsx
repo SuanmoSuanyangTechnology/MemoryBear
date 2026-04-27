@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:44:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 15:14:58
+ * @Last Modified time: 2026-04-21 16:30:26
  */
 /**
  * Prompt Editor Component
@@ -46,8 +46,16 @@ const Prompt: FC = () => {
   const promptSaveModalRef = useRef<PromptSaveModalRef>(null)
   const editorRef = useRef<any>(null)
   const currentPromptValueRef = useRef<string>(undefined)
+  const abortRef = useRef<(() => void) | null>(null)
   const values = Form.useWatch([], form)
   const [editVo, setEditVo] = useState<HistoryItem | null>(null)
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.()
+      abortRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
     setEditVo(state)
@@ -126,7 +134,7 @@ const Prompt: FC = () => {
         }
       })
     };
-    updatePromptMessages((promptSession) as string, values, handleStreamMessage)
+    updatePromptMessages((promptSession) as string, values, handleStreamMessage, undefined, (abort) => { abortRef.current = abort })
       .finally(() => {
         setLoading(false)
       })
@@ -279,8 +287,12 @@ const Prompt: FC = () => {
                 {values?.current_prompt
                   ? <Editor
                     ref={editorRef}
+                    disabled={loading}
                     className="rb:h-[calc(100vh-193px)] rb:bg-white! rb:border-none! rb:p-0! rb:text-[#212332] rb:leading-5"
-                    onChange={(value) => form.setFieldValue('current_prompt', value)}
+                    onChange={(value) => {
+                      if (loading) return
+                      form.setFieldValue('current_prompt', value)
+                    }}
                   />
                   : <Empty url={analysisEmptyIcon} title={t(`prompt.promptPlaceholder`)} isNeedSubTitle={false} size={[270, 170]} className="rb:h-[calc(100vh-193px)] rb:mx-auto! rb:text-center! rb:text-[12px]! rb:leading-4!" />
                 }

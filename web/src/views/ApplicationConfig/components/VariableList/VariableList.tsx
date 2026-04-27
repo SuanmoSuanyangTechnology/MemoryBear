@@ -60,7 +60,7 @@ interface VariableListProps {
       extra={
         <Button
           size="small"
-          className="rb:h-6! rb:py-0! rb:px-2! rb:rounded-md! rb:text-[#21233"
+          className="rb:h-6! rb:py-0! rb:px-2! rb:rounded-md! rb:text-[#212332]"
           onClick={handleAddVariable}
         >
           + {t('application.addVariables')}

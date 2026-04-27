@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:29:57 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 15:29:57 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-04-22 13:48:09
  */
 /**
  * Tag Component
@@ -18,11 +18,12 @@ import { type FC, type ReactNode } from 'react'
 /** Props interface for Tag component */
 export interface TagProps {
   /** Color theme for the tag */
-  color?: 'processing' | 'error' | 'success' | 'warning' | 'default',
+  color?: 'processing' | 'error' | 'success' | 'warning' | 'default' | 'purple' | 'dark',
   /** Tag content */
   children: ReactNode;
   /** Additional CSS classes */
   className?: string;
+  variant?: 'outline' | 'borderless'
 }
 
 /** Color theme mappings with text, border, and background colors */
@@ -32,12 +33,14 @@ const colors = {
   success: 'rb:text-[#369F21] rb:border-[rgba(54,159,33,0.25)] rb:bg-[rgba(54,159,33,0.06)]',
   warning: 'rb:text-[#FF5D34] rb:border-[rgba(255,93,52,0.30)] rb:bg-[rgba(255,93,52,0.08)]',
   default: 'rb:text-[#5B6167] rb:border-[rgba(91,97,103,0.30)] rb:bg-[rgba(91,97,103,0.08)]',
+  purple: 'rb:text-[#9C6FFF] rb:border-[rgba(156,111,255,0.25)] rb:bg-[rgba(156,111,255,0.06)]',
+  dark: 'rb:text-[#171719] rb:border-[rgba(23,23,25,0.25)] rb:bg-[rgba(23,23,25,0.06)]'
 }
 
 /** Custom tag component with color themes */
-const Tag: FC<TagProps> = ({ color = 'processing', children, className }) => {
+const Tag: FC<TagProps> = ({ color = 'processing', children, className, variant = 'outline' }) => {
   return (
-    <span className={`rb:inline-block rb:px-1 rb:py-0.5 rb:rounded-sm rb:text-[12px] rb:font-regular! rb:leading-4 rb:border ${colors[color]} ${className || ''}`}>
+    <span className={`rb:inline-block rb:px-1 rb:py-0.5 rb:rounded-sm rb:text-[12px] rb:font-regular! rb:leading-4 rb:border ${colors[color]} ${className || ''} ${variant === 'borderless' ? 'rb:border-none!' : ''}`}>
       {children}
     </span>
   )

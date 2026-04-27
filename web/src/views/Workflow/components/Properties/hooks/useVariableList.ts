@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-19 17:00:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-08 10:12:27
+ * @Last Modified time: 2026-04-13 10:44:17
  */
 /**
  * useVariableList Hook
@@ -56,6 +56,8 @@ const NODE_VARIABLES = {
   ],
   'document-extractor': [
     { label: 'text', dataType: 'string', field: 'text' },
+    // { label: 'chunks', dataType: 'array[string]', field: 'chunks' },
+    { label: 'images', dataType: 'array[file]', field: 'images' },
   ],
   'list-operator': [
     { label: 'result', dataType: 'array[string]', field: 'result' },
@@ -393,18 +395,19 @@ export const useVariableList = (
     // Add chat variables
     chatVariables?.forEach(v => addVariable(list, keys, `CONVERSATION_${v.name}`, v.name, v.type, `conv.${v.name}`, { type: 'CONVERSATION', name: 'CONVERSATION', icon: '' }, { group: 'CONVERSATION' }));
 
-    // Process each relevant node: non-list-operator first, then list-operator
-    const listOperatorIds: string[] = [];
+    // Process each relevant node: deferred types last (they depend on prior variables)
+    const deferredIds: string[] = [];
     relevantIds.forEach(id => {
       const node = nodes.find(n => n.id === id);
       if (!node) return;
-      if (node.getData()?.type === 'list-operator') {
-        listOperatorIds.push(id);
+      const t = node.getData()?.type;
+      if (['var-aggregator', 'list-operator', 'iteration'].includes(t)) {
+        deferredIds.push(id);
       } else {
         processNodeVariables(node.getData(), node.getData().id, list, keys);
       }
     });
-    listOperatorIds.forEach(id => {
+    deferredIds.forEach(id => {
       const node = nodes.find(n => n.id === id);
       if (node) processNodeVariables(node.getData(), node.getData().id, list, keys);
     });
@@ -414,7 +417,7 @@ export const useVariableList = (
       const pd = parentLoop.getData();
       const pid = pd.id;
       if (pd.type === 'loop') {
-        (pd.cycle_vars || []).forEach((cv: any) => addVariable(list, keys, `${pid}_cycle_${cv.name}`, cv.name, cv.type || 'String', `${pid}.${cv.name}`, pd));
+        (pd.cycle_vars || []).forEach((cv: any) => addVariable(list, keys, `${pid}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${pid}.${cv.name}`, pd));
       } else if (pd.type === 'iteration' && pd.config.input.defaultValue) {
         let itemType = 'object';
         const iv = list.find(v => `{{${v.value}}}` === pd.config.input.defaultValue);

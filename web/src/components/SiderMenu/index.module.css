@@ -2,6 +2,10 @@
   /* border-right: 1px solid #EAECEE; */
   max-height: 100vh;
 }
+.sider :global(.ant-layout-sider-children) {
+  display: flex;
+  flex-direction: column;
+}
 .title {
   height: 64px;
   padding: 24px 10px 12px 12px;

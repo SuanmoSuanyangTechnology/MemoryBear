@@ -94,7 +94,7 @@ const CodeExecution: FC<CodeExecutionProps> = ({ options }) => {
               { label: 'JAVASCRIPT', value: 'javascript' }
             ]}
             popupMatchSelectWidth={false}
-            className={`rb:font-medium! rb:w-25! rb:h-4! rb:p-0! ${styles.editor}`}
+            className={`rb:font-medium! rb:w-25! rb:h-4! rb:py-0! rb:px-2! ${styles.editor}`}
             onChange={handleChangeLanguage}
             variant="borderless"
           />

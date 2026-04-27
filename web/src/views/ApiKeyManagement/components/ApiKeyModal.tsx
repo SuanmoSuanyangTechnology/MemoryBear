@@ -13,6 +13,7 @@ import type { ApiKey, ApiKeyModalRef } from '../types';
 import RbModal from '@/components/RbModal'
 import { createApiKey, updateApiKey  } from '@/api/apiKey';
 import { stringRegExp } from '@/utils/validator';
+import RbSlider from '@/components/RbSlider'
 
 const FormItem = Form.Item;
 
@@ -57,11 +58,10 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
    */
   const handleOpen = (apiKey?: ApiKey) => {
     if (apiKey?.id) {
-      const { scopes = [], expires_at } = apiKey
+      const { scopes = [], expires_at, ...rest } = apiKey
       // Edit mode - populate form with existing data
       form.setFieldsValue({
-        name: apiKey.name,
-        description: apiKey.description,
+        ...rest,
         memory: scopes.includes('memory'),
         rag: scopes.includes('rag'),
         expires_at: expires_at ? dayjs(expires_at) : undefined
@@ -126,6 +126,10 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
       <Form
         form={form}
         layout="vertical"
+        initialValues={{
+          rate_limit: 50,
+          daily_request_limit: 100000
+        }}
       >
         <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5 rb:mb-4">{t('apiKey.baseInfo')}</div>
         <FormItem
@@ -177,6 +181,36 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
           <DatePicker
             className="rb:w-full"
             disabledDate={(current) => current && current < dayjs().subtract(1, 'day').endOf('day')}
+          />
+        </FormItem>
+        <FormItem
+          name="rate_limit"
+          label={<>{t(`application.qpsLimit`)}({t('application.qpsLimitTip')}, {t('application.qpsLimitUnit')})</>}
+          extra={t('application.qpsLimitDesc')}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+          ]}
+        >
+          <RbSlider
+            min={1}
+            max={100}
+            step={1}
+            isInput={true}
+          />
+        </FormItem>
+        <FormItem
+          name="daily_request_limit"
+          label={<>{t(`application.dailyUsageLimit`)} ({t('application.dailyUsageLimitUnit')})</>}
+          extra={t('application.dailyUsageLimitDesc')}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+          ]}
+        >
+          <RbSlider
+            min={100}
+            max={100000}
+            step={100}
+            isInput={true}
           />
         </FormItem>
       </Form>

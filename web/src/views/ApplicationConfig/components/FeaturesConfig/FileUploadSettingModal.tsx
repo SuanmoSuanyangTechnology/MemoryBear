@@ -97,6 +97,7 @@ export const defaultValues: FileUpload = {
     "json",
     "md",
   ],
+  document_image_recognition: false,
   video_enabled: false,
   video_max_size_mb: 100,
   video_allowed_extensions: [
@@ -219,11 +220,22 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
                     </Col>
                   </Row>
                   {isEnabled && (
-                    <Flex align="center" gap={12} className="rb:mt-3! rb:pt-3! rb:border-t rb:border-[#DFE4ED]">
-                      <div>{t('application.singleMaxSize')}: </div>
-                      <Form.Item name={sizeKey} noStyle>
-                        <InputNumber min={1} max={100} suffix="MB" className="rb:flex-1" />
-                      </Form.Item>
+                    <Flex align="center" gap={16} className="rb:mt-3! rb:pt-3! rb:border-t rb:border-[#DFE4ED]">
+                      <div>
+                        <div>{t('application.singleMaxSize')}</div>
+                        <Form.Item name={sizeKey} noStyle>
+                          <InputNumber min={1} max={100} suffix="MB" className="rb:flex-1" />
+                        </Form.Item>
+                      </div>
+                      {option.type === 'document' &&
+                        <div>
+                          <div>{t('application.document_image_recognition')}</div>
+                          <Form.Item name="document_image_recognition" valuePropName="checked" noStyle>
+                            <Switch className="rb:mt-1.5!" />
+                          </Form.Item>
+                        </div>
+                      }
+
                       <Form.Item name={`${option.type}_allowed_extensions`} hidden />
                     </Flex>
                   )}

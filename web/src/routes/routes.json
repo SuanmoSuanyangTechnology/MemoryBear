@@ -7,7 +7,7 @@
       { "path": "/model", "element": "ModelManagement" },
       { "path": "/space", "element": "SpaceManagement" },
       { "path": "/tool", "element": "ToolManagement" },
-      { "path": "/pricing", "element": "Pricing" },
+      { "path": "/pricing", "element": "Package" },
       { "path": "/order-pay", "element": "OrderPayment" },
       { "path": "/orders", "element": "OrderHistory" },
       { "path": "/skills", "element": "Skills" },
@@ -48,7 +48,6 @@
       { "path": "/application/config/:id", "element": "ApplicationConfig" },
       { "path": "/application/config/:id/:source", "element": "ApplicationConfig" },
       { "path": "/user-memory/neo4j/:id", "element": "Neo4jUserMemoryDetail" },
-      { "path": "/statement/:id", "element": "StatementDetail" },
       { "path": "/user-memory/detail/:id/:type", "element": "MemoryNodeDetail" },
       { "path": "/ontology/:id", "element": "OntologyDetail" }
     ]

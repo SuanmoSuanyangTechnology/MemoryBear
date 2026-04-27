@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-10 18:46:57
+ * @Last Modified time: 2026-04-14 10:13:56
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -174,6 +174,7 @@ const ChatContent: FC<ChatContentProps> = ({
                       )
                     }
 
+                    const documentType = (file.file_type || file.type)?.split('/')
                     return (
                       <Flex
                         key={file.url || file.uid}
@@ -208,7 +209,7 @@ const ChatContent: FC<ChatContentProps> = ({
                         ></div>
                         <div className="rb:flex-1 rb:w-32.5">
                           <div className="rb:leading-4 rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.name}</div>
-                          <div className="rb:leading-3.5 rb:mt-0.5 rb:text-[#5B6167] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{file.type?.split('/')[file.type?.split('/').length - 1]} · {file.size}</div>
+                          <div className="rb:leading-3.5 rb:mt-0.5 rb:text-[#5B6167] rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap">{documentType?.[documentType.length - 1]} · {file.size}</div>
                         </div>
                       </Flex>
                     )
@@ -271,14 +272,21 @@ const ChatContent: FC<ChatContentProps> = ({
                     <Flex vertical gap={4} className="rb:mt-1! rb:pt-3! rb-border-t rb:mb-2!">
                       <div className="rb:font-medium">{t('memoryConversation.citations')}</div>
                       {item.meta_data?.citations?.map((citation, idx) => (
-                        <div
-                          key={idx}
-                          className="rb:text-[#155EEF] rb:leading-5 rb:underline rb:cursor-pointer"
-                          onClick={() => {
-                            const params = new URLSearchParams({ documentId: citation.document_id, parentId: citation.knowledge_id });
-                            window.open(`/#/knowledge-base/${citation.knowledge_id}/DocumentDetails?${params}`, '_blank');
-                          }}
-                        >{citation.file_name}</div>
+                        <Flex key={idx} align="center" gap={12}>
+                          <div
+                            className="rb:text-[#155EEF] rb:leading-5 rb:underline rb:cursor-pointer"
+                            onClick={() => {
+                              const params = new URLSearchParams({ documentId: citation.document_id, parentId: citation.knowledge_id });
+                              window.open(`/#/knowledge-base/${citation.knowledge_id}/DocumentDetails?${params}`, '_blank');
+                            }}
+                          >{citation.file_name}</div>
+
+                          {citation.download_url &&
+                            <div className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/application/export.svg')]"
+                              onClick={() => handleDownload({ url: citation.download_url })}
+                            ></div>
+                          }
+                        </Flex>
                       ))}
                     </Flex>
                   }

@@ -73,6 +73,7 @@ class CustomTool(BaseTool):
         # 添加通用参数（基于第一个操作的参数）
         if self._parsed_operations:
             first_operation = next(iter(self._parsed_operations.values()))
+            # path/query 参数
             for param_name, param_info in first_operation.get("parameters", {}).items():
                 params.append(ToolParameter(
                     name=param_name,
@@ -85,6 +86,23 @@ class CustomTool(BaseTool):
                     maximum=param_info.get("maximum"),
                     pattern=param_info.get("pattern")
                 ))
+            # requestBody 参数 — 将 body 字段平铺为独立参数暴露给模型
+            request_body = first_operation.get("request_body")
+            if request_body:
+                body_schema = request_body.get("properties", {})
+                required_fields = request_body.get("required", [])
+                for prop_name, prop_schema in body_schema.items():
+                    params.append(ToolParameter(
+                        name=prop_name,
+                        type=self._convert_openapi_type(prop_schema.get("type", "string")),
+                        description=prop_schema.get("description", ""),
+                        required=prop_name in required_fields,
+                        default=prop_schema.get("default"),
+                        enum=prop_schema.get("enum"),
+                        minimum=prop_schema.get("minimum"),
+                        maximum=prop_schema.get("maximum"),
+                        pattern=prop_schema.get("pattern")
+                    ))
         
         return params
     

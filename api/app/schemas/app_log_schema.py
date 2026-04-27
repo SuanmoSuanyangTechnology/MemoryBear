@@ -14,6 +14,7 @@ class AppLogMessage(BaseModel):
     conversation_id: uuid.UUID
     role: str = Field(description="角色: user / assistant / system")
     content: str
+    status: Optional[str] = Field(default=None, description="执行状态（工作流专用）: completed / failed")
     meta_data: Optional[Dict[str, Any]] = None
     created_at: datetime.datetime
 
@@ -48,6 +49,22 @@ class AppLogConversation(BaseModel):
         return int(dt.timestamp() * 1000) if dt else None
 
 
+class AppLogNodeExecution(BaseModel):
+    """工作流节点执行记录"""
+    node_id: str
+    node_type: str
+    node_name: Optional[str] = None
+    status: str = "pending"
+    error: Optional[str] = None
+    input: Optional[Any] = None
+    process: Optional[Any] = None
+    output: Optional[Any] = None
+    cycle_items: Optional[List[Any]] = None
+    elapsed_time: Optional[float] = None
+    token_usage: Optional[Dict[str, Any]] = None
+
+
 class AppLogConversationDetail(AppLogConversation):
     """会话详情（包含消息列表）"""
     messages: List[AppLogMessage] = Field(default_factory=list)
+    node_executions_map: Dict[str, List[AppLogNodeExecution]] = Field(default_factory=dict, description="按消息ID分组的节点执行记录")

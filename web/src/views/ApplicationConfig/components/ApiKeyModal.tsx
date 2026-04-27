@@ -17,6 +17,7 @@ import type { Application } from '@/views/ApplicationManagement/types'
 import type { ApiKeyModalRef } from '../types'
 import { createApiKey  } from '@/api/apiKey';
 import RbModal from '@/components/RbModal'
+import RbSlider from '@/components/RbSlider'
 
 const FormItem = Form.Item;
 
@@ -97,6 +98,10 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, ApiKeyModalProps>(({
         form={form}
         layout="vertical"
         scrollToFirstError={{ behavior: 'instant', block: 'end', focus: true }}
+        initialValues={{
+          rate_limit: 50,
+          daily_request_limit: 100000
+        }}
       >
         {/* Key name */}
         <FormItem
@@ -115,6 +120,36 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, ApiKeyModalProps>(({
           label={t('application.description')}
         >
           <Input.TextArea placeholder={t('application.apiKeyDescPlaceholder')} />
+        </FormItem>
+        <FormItem
+          name="rate_limit"
+          label={<>{t(`application.qpsLimit`)}({t('application.qpsLimitTip')}, {t('application.qpsLimitUnit')})</>}
+          extra={t('application.qpsLimitDesc')}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+          ]}
+        >
+          <RbSlider
+            min={1}
+            max={100}
+            step={1}
+            isInput={true}
+          />
+        </FormItem>
+        <FormItem
+          name="daily_request_limit"
+          label={<>{t(`application.dailyUsageLimit`)} ({t('application.dailyUsageLimitUnit')})</>}
+          extra={t('application.dailyUsageLimitDesc')}
+          rules={[
+            { required: true, message: t('common.pleaseEnter') },
+          ]}
+        >
+          <RbSlider
+            min={100}
+            max={100000}
+            step={100}
+            isInput={true}
+          />
         </FormItem>
       </Form>
     </RbModal>

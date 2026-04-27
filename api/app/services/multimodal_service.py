@@ -24,6 +24,7 @@ import chardet
 import httpx
 import magic
 import openpyxl
+import uuid
 from docx import Document
 from sqlalchemy.orm import Session
 
@@ -94,7 +95,7 @@ class DashScopeFormatStrategy(MultimodalFormatStrategy):
         """通义千问文档格式"""
         return True, {
             "type": "text",
-            "text": f"<document name=\"{file_name}\">\n{text}\n</document>"
+            "text": f"<document name=\"{file_name}\">\n文档内容：\n{text}\n</document>"
         }
 
     async def format_audio(
@@ -166,6 +167,7 @@ class BedrockFormatStrategy(MultimodalFormatStrategy):
     async def format_document(self, file_name: str, text: str) -> tuple[bool, Dict[str, Any]]:
         """Bedrock/Anthropic 文档格式（需要 base64 编码）"""
         # Bedrock 文档需要 base64 编码
+        text = f"文档内容：\n{text}\n"
         text_bytes = text.encode('utf-8')
         base64_text = base64.b64encode(text_bytes).decode('utf-8')
 
@@ -222,7 +224,7 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
         """OpenAI 文档格式"""
         return True, {
             "type": "text",
-            "text": f"<document name=\"{file_name}\">\n{text}\n</document>"
+            "text": f"<document name=\"{file_name}\">\n文档内容：\n{text}\n</document>"
         }
 
     async def format_audio(
@@ -344,6 +346,8 @@ class MultimodalService:
     async def process_files(
             self,
             files: Optional[List[FileInput]],
+            workspace_id: uuid.UUID = None,
+            document_image_recognition: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         处理文件列表，返回 LLM 可用的格式
@@ -379,6 +383,36 @@ class MultimodalService:
                 elif file.type == FileType.DOCUMENT:
                     is_support, content = await self._process_document(file, strategy)
                     result.append(content)
+                    # 仅当开关开启且模型支持视觉时，才提取文档内嵌图片
+                    if document_image_recognition and "vision" in self.capability:
+                        img_infos = await self.extract_document_images(file)
+                        from app.models.workspace_model import Workspace as WorkspaceModel
+                        ws = self.db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
+                        tenant_id = ws.tenant_id if ws else None
+                        img_result = []
+                        for img_info in img_infos:
+                            page = img_info["page"]
+                            index = img_info["index"]
+                            ext = img_info.get("ext", "png")
+                            try:
+                                _, img_url = await self._save_doc_image_to_storage(img_info["bytes"], ext, tenant_id, workspace_id)
+                                placeholder = f"第{page}页 第{index + 1}张" if page > 0 else f"第{index + 1}张"
+                                # 在文本内容中追加图片位置标记
+                                if result and result[-1].get("type") in ("text", "document"):
+                                    key = "text" if "text" in result[-1] else list(result[-1].keys())[-1]
+                                    result[-1][key] = result[-1].get(key, "") + f"\n[图片 {placeholder}]: {img_url}"
+                                # 将图片以视觉格式追加到消息内容中
+                                img_file = FileInput(
+                                    type=FileType.IMAGE,
+                                    transfer_method=TransferMethod.REMOTE_URL,
+                                    url=img_url,
+                                    file_type="image/png",
+                                )
+                                _, img_content = await self._process_image(img_file, strategy_class(img_file))
+                                img_result.append(img_content)
+                            except Exception as img_err:
+                                logger.warning(f"文档图片处理失败: {img_err}")
+                        result.extend(img_result)
                 elif file.type == FileType.AUDIO and "audio" in self.capability:
                     is_support, content = await self._process_audio(file, strategy)
                     result.append(content)
@@ -431,12 +465,8 @@ class MultimodalService:
         """
         处理文档文件（PDF、Word 等）
         
-        Args:
-            file: 文档文件输入
-            strategy: 格式化策略
-            
         Returns:
-            Dict: 根据 provider 返回不同格式的文档内容
+            仅返回文本内容（图片通过 process_files 中的额外步骤追加）
         """
         if file.transfer_method == TransferMethod.REMOTE_URL:
             return True, {
@@ -444,18 +474,56 @@ class MultimodalService:
                 "text": f"<document url=\"{file.url}\">\n{await self.extract_document_text(file)}\n</document>"
             }
         else:
-            # 本地文件，提取文本内容
             server_url = settings.FILE_LOCAL_SERVER_URL
             file.url = f"{server_url}/storage/permanent/{file.upload_file_id}"
             text = await self.extract_document_text(file)
             file_metadata = self.db.query(FileMetadata).filter(
                 FileMetadata.id == file.upload_file_id
             ).first()
-
             file_name = file_metadata.file_name if file_metadata else "unknown"
-
-            # 使用策略格式化文档
             return await strategy.format_document(file_name, text)
+
+    @staticmethod
+    async def _save_doc_image_to_storage(
+            img_bytes: bytes,
+            ext: str,
+            tenant_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+    ) -> tuple[str, str]:
+        """
+        将文档内嵌图片保存到存储后端，写入 FileMetadata。
+
+        Returns:
+            (file_id_str, permanent_url)
+        """
+        from app.services.file_storage_service import FileStorageService, generate_file_key
+        from app.db import get_db_context
+
+        file_id = uuid.uuid4()
+        file_ext = f".{ext}" if not ext.startswith(".") else ext
+        content_type = f"image/{ext}"
+
+        file_key = generate_file_key(tenant_id, workspace_id, file_id, file_ext)
+        storage_svc = FileStorageService()
+        await storage_svc.storage.upload(file_key, img_bytes, content_type)
+
+        with get_db_context() as db:
+            meta = FileMetadata(
+                id=file_id,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                file_key=file_key,
+                file_name=f"doc_image_{file_id}{file_ext}",
+                file_ext=file_ext,
+                file_size=len(img_bytes),
+                content_type=content_type,
+                status="completed",
+            )
+            db.add(meta)
+            db.commit()
+
+        url = f"{settings.FILE_LOCAL_SERVER_URL}/storage/permanent/{file_id}"
+        return str(file_id), url
 
     async def _process_audio(self, file: FileInput, strategy) -> tuple[bool, Dict[str, Any]]:
         """
@@ -581,6 +649,84 @@ class MultimodalService:
         except Exception as e:
             logger.error(f"Failed to load file. - {e}")
             return "[Failed to load file.]"
+
+    async def extract_document_images(self, file: FileInput) -> list[dict]:
+        """
+        提取文档中的内嵌图片（支持 PDF 和 DOCX），附带位置信息。
+
+        Returns:
+            list[dict]: 每项包含:
+                - bytes: 图片二进制
+                - page: 所在页码（PDF 从 1 开始，DOCX 为 0）
+                - index: 该页/文档内的图片序号（从 0 开始）
+                - ext: 图片扩展名（如 png、jpeg）
+        """
+        try:
+            file_content = file.get_content()
+            if not file_content:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(file.url, follow_redirects=True)
+                    response.raise_for_status()
+                    file_content = response.content
+                    file.set_content(file_content)
+
+            file_mime_type = magic.from_buffer(file_content, mime=True)
+            if file_mime_type in PDF_MIME:
+                return self._extract_pdf_images(file_content)
+            elif self._is_word_file(file_content, file_mime_type):
+                return self._extract_docx_images(file_content)
+            return []
+        except Exception as e:
+            logger.error(f"提取文档图片失败: {e}")
+            return []
+
+    @staticmethod
+    def _extract_pdf_images(file_content: bytes) -> list[dict]:
+        """从 PDF 提取内嵌图片，附带页码和序号"""
+        images = []
+        try:
+            import fitz  # PyMuPDF
+            doc = fitz.open(stream=file_content, filetype="pdf")
+            for page_num, page in enumerate(doc, start=1):
+                for idx, img in enumerate(page.get_images(full=True)):
+                    xref = img[0]
+                    base_image = doc.extract_image(xref)
+                    images.append({
+                        "bytes": base_image["image"],
+                        "ext": base_image.get("ext", "png"),
+                        "page": page_num,
+                        "index": idx,
+                    })
+            doc.close()
+        except ImportError:
+            logger.warning("PyMuPDF 未安装，无法提取 PDF 图片，请执行: uv add pymupdf")
+        except Exception as e:
+            logger.error(f"提取 PDF 图片失败: {e}")
+        return images
+
+    @staticmethod
+    def _extract_docx_images(file_content: bytes) -> list[dict]:
+        """从 DOCX 提取内嵌图片，附带序号（DOCX 无页码概念，page 固定为 0）"""
+        images = []
+        try:
+            if file_content[:2] != b'PK':
+                return []
+            with zipfile.ZipFile(io.BytesIO(file_content)) as zf:
+                media_files = sorted(
+                    name for name in zf.namelist()
+                    if name.startswith("word/media/") and not name.endswith("/")
+                )
+                for idx, name in enumerate(media_files):
+                    ext = name.rsplit(".", 1)[-1].lower() if "." in name else "png"
+                    images.append({
+                        "bytes": zf.read(name),
+                        "ext": ext,
+                        "page": 0,
+                        "index": idx,
+                    })
+        except Exception as e:
+            logger.error(f"提取 DOCX 图片失败: {e}")
+        return images
 
     @staticmethod
     async def _extract_pdf_text(file_content: bytes) -> str:

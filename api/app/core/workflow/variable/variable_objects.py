@@ -84,7 +84,7 @@ class FileVariable(BaseVariable):
         total_bytes = 0
         chunks = []
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
             async with client.stream("GET", self.value.url) as resp:
                 resp.raise_for_status()
                 async for chunk in resp.aiter_bytes(8192):

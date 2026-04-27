@@ -66,6 +66,17 @@ class EndUserRepository:
             db_logger.error(f"查询宿主 {end_user_id} 时出错: {str(e)}")
             raise
 
+    def get_end_user_by_other_id(self, workspace_id: uuid.UUID, other_id: str) -> Optional["EndUser"]:
+        """按 workspace_id + other_id 查找终端用户，不存在返回 None"""
+        return (
+            self.db.query(EndUser)
+            .filter(
+                EndUser.workspace_id == workspace_id,
+                EndUser.other_id == other_id
+            )
+            .first()
+        )
+
     def get_or_create_end_user(
         self,
         app_id: uuid.UUID,

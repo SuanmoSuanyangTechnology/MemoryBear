@@ -155,6 +155,12 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
                 name={['citation', "enabled"]}
                 desc={t('application.citation_desc')}
               />
+              <SwitchFormItem
+                title={t(`application.allow_download`)}
+                name={['citation', "allow_download"]}
+                disabled={!values?.citation?.enabled}
+                className="rb:mt-2!"
+              />
             </div>
 
             <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">

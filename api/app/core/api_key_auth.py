@@ -70,6 +70,8 @@ def require_api_key(
                 })
                 raise BusinessException("API Key 无效或已过期", BizCode.API_KEY_INVALID)
 
+            ApiKeyAuthService.check_app_published(db, api_key_obj)
+
             if scopes:
                 missing_scopes = []
                 for scope in scopes:
@@ -97,7 +99,7 @@ def require_api_key(
             )
 
             rate_limiter = RateLimiterService()
-            is_allowed, error_msg, rate_headers = await rate_limiter.check_all_limits(api_key_obj)
+            is_allowed, error_msg, rate_headers = await rate_limiter.check_all_limits(api_key_obj, db=db)
             if not is_allowed:
                 logger.warning("API Key 限流触发", extra={
                     "api_key_id": str(api_key_obj.id),
@@ -106,10 +108,12 @@ def require_api_key(
                     "error_msg": error_msg
                 })
                 # 根据错误消息判断限流类型
-                if "QPS" in error_msg:
-                    code = BizCode.API_KEY_QPS_LIMIT_EXCEEDED
-                elif "Daily" in error_msg:
+                if "Daily" in error_msg:
                     code = BizCode.API_KEY_DAILY_LIMIT_EXCEEDED
+                elif "Tenant" in error_msg:
+                    code = BizCode.API_KEY_QPS_LIMIT_EXCEEDED  # 租户套餐速率超限，同属 QPS 类
+                elif "QPS" in error_msg:
+                    code = BizCode.API_KEY_QPS_LIMIT_EXCEEDED
                 else:
                     code = BizCode.API_KEY_QUOTA_EXCEEDED
 

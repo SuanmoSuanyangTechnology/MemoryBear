@@ -23,6 +23,7 @@ from app.services.file_storage_service import (
     generate_kb_file_key,
     get_file_storage_service,
 )
+from app.core.quota_stub import check_knowledge_capacity_quota
 
 api_logger = get_api_logger()
 
@@ -94,6 +95,7 @@ async def create_folder(
 
 
 @router.post("/file", response_model=ApiResponse)
+@check_knowledge_capacity_quota
 async def upload_file(
         kb_id: uuid.UUID,
         parent_id: uuid.UUID,

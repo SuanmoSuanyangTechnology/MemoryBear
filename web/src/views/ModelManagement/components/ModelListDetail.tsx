@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 18:06:23
+ * @Last Modified time: 2026-04-22 10:24:32
  */
 /**
  * Model List Detail Drawer
@@ -12,12 +12,13 @@
 
 import { useState, useImperativeHandle, forwardRef, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Switch, Row, Col, Space, Tooltip, Popover } from 'antd'
+import { Button, Switch, Row, Col, Tooltip } from 'antd'
 
 import type { ProviderModelItem, ModelListItem, ModelListDetailRef, MultiKeyConfigModalRef } from '../types';
 import RbDrawer from '@/components/RbDrawer';
 import RbCard from '@/components/RbCard/Card'
 import Tag from '@/components/Tag';
+import OverflowTags from '@/components/OverflowTags';
 import PageEmpty from '@/components/Empty/PageEmpty';
 import MultiKeyConfigModal from './MultiKeyConfigModal'
 import { getModelNewList, updateModelStatus, modelTypeUrl } from '@/api/models'
@@ -139,18 +140,13 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
               key={item.id}
               title={item.name}
               subTitle={
-                <Popover content={
-                  <Space size={8} className="rb:mt-1!">
-                    <Tag>{t(`modelNew.${item.type}`)}</Tag>
-                    <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag>
-                    {item.capability?.map(vo => <Tag key={vo}>{t(`modelNew.${vo}`)}</Tag>)}
-                  </Space>}>
-                  <Space size={8} className="rb:mt-1!">
-                    <Tag>{t(`modelNew.${item.type}`)}</Tag>
-                    <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag>
-                    {item.capability?.map(vo => <Tag key={vo}>{t(`modelNew.${vo}`)}</Tag>)}
-                  </Space>
-                </Popover>}
+                <OverflowTags
+                  items={[
+                    <Tag>{t(`modelNew.${item.type}`)}</Tag>,
+                    <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag>,
+                    ...(item.capability ?? []).map(vo => <Tag>{t(`modelNew.${vo}`)}</Tag>)
+                  ]}
+                />}
               avatarUrl={getLogoUrl(item.logo)}
               avatar={
                 <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">

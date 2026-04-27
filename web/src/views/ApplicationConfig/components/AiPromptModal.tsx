@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:26:44 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 13:53:05
+ * @Last Modified time: 2026-04-21 16:29:40
  */
 /**
  * AI Prompt Assistant Modal
@@ -61,11 +61,14 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
   const aiPromptVariableModalRef = useRef<AiPromptVariableModalRef>(null)
   const editorRef = useRef<any>(null)
   const currentPromptValueRef = useRef<string>('')
+  const abortRef = useRef<(() => void) | null>(null)
 
   const values = Form.useWatch([], form)
 
   /** Close modal and reset state */
   const handleClose = () => {
+    abortRef.current?.()
+    abortRef.current = null
     setVisible(false);
     setLoading(false)
     setChatList([])
@@ -148,7 +151,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
     updatePromptMessages(promptSession, {
       ...values,
       skill: source === 'skills'
-    }, handleStreamMessage)
+    }, handleStreamMessage, undefined, abort => { abortRef.current = abort })
       .finally(() => {
         setLoading(false)
       })
@@ -221,7 +224,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
             </Form.Item>
 
             <ChatContent
-              classNames="rb:h-105.5 rb:pb-[15px]!"
+              classNames="rb:h-[calc(100vh-330px)] rb:pb-[15px]!"
               contentClassNames="rb:max-w-75!"
               empty={<Empty url={ConversationEmptyIcon} title={t(`${source}.promptChatEmpty`)} isNeedSubTitle={false} size={[140, 100]} className="rb:h-full" />}
               data={chatList || []}
@@ -292,10 +295,14 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
               {values?.current_prompt
                 ? <Editor 
                   ref={editorRef}
-                  className="rb:h-119 rb:bg-white! rb:border-none! rb:p-0!" 
-                  onChange={(value) => form.setFieldValue('current_prompt', value)}
+                  className="rb:h-[calc(100vh-278px)] rb:bg-white! rb:border-none! rb:p-0!"
+                  disabled={loading}
+                  onChange={(value) => {
+                    if (loading) return
+                    form.setFieldValue('current_prompt', value)
+                  }}
                 />
-                : <Empty url={analysisEmptyIcon} title={t(`${source}.promptOptimizationEmpty`)} isNeedSubTitle={false} size={[270, 170]} className="rb:h-119 rb:w-70 rb:mx-auto! rb:text-center! rb:text-[12px]! rb:leading-4!" />
+                : <Empty url={analysisEmptyIcon} title={t(`${source}.promptOptimizationEmpty`)} isNeedSubTitle={false} size={[270, 170]} className="rb:h-[calc(100vh-278px)] rb:w-70 rb:mx-auto! rb:text-center! rb:text-[12px]! rb:leading-4!" />
               }
             </Form.Item>
           </div>

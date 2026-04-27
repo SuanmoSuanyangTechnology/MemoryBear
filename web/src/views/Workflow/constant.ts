@@ -2,19 +2,19 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 19:56:56
+ * @Last Modified time: 2026-04-21 18:23:31
  */
-import LoopNode from './components/Nodes/LoopNode';
-import NormalNode from './components/Nodes/NormalNode';
+import type { ReactShapeConfig } from '@antv/x6-react-shape';
+import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
+import AddNode from './components/Nodes/AddNode';
 import ConditionNode from './components/Nodes/ConditionNode';
 import GroupStartNode from './components/Nodes/GroupStartNode';
-import AddNode from './components/Nodes/AddNode'
+import LoopNode from './components/Nodes/LoopNode';
+import NormalNode from './components/Nodes/NormalNode';
 import NoteNode from './components/Nodes/NoteNode';
-import type { PortMetadata, GroupMetadata } from '@antv/x6/lib/model/port';
-import type { ReactShapeConfig } from '@antv/x6-react-shape';
 
-import { memoryConfigListUrl } from '@/api/memory'
-import type { NodeLibrary } from './types'
+import { memoryConfigListUrl } from '@/api/memory';
+import type { NodeLibrary } from './types';
 
 /**
  * Workflow node library configuration
@@ -72,6 +72,15 @@ export const nodeLibrary: NodeLibrary[] = [
           }
         }
       },
+      { type: "output", icon: 'rb:bg-[url("@/assets/images/workflow/output.svg")]',
+        config: {
+          outputs: {
+            type: 'mappingList',
+            required: true,
+            isNeedType: true
+          }
+        }
+      },
       // { type: "answer", icon: answerIcon },
     ]
   },
@@ -100,6 +109,10 @@ export const nodeLibrary: NodeLibrary[] = [
             min: 256, 
             step: 1, 
             defaultValue: 2000 
+          },
+          json_output: {
+            type: 'define',
+            defaultValue: false
           },
           context: {
             type: 'variableList',
@@ -130,7 +143,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           vision_input: {
             type: 'variableList',
-            onFilterVariableType: ['array[file]']
+            onFilterVariableType: ['array[file]', 'file']
           }
         }
       },
@@ -424,7 +437,8 @@ export const nodeLibrary: NodeLibrary[] = [
       { type: "tool", icon: 'rb:bg-[url("@/assets/images/workflow/tools.svg")]',
         config: {
           tool_id: {
-            type: 'cascader'
+            type: 'cascader',
+            required: true
           },
           tool_parameters: {
             type: 'define'
@@ -730,7 +744,7 @@ export const portTextAttrs = { fontSize: 12, fill: '#5B6167' }
 /**
  * Port position arguments
  */
-export const portItemArgsY = 26.5;
+export const portItemArgsY = 27.5;
 export const portArgs = { x: nodeWidth, y: portItemArgsY }
 
 const defaultPortGroup = {

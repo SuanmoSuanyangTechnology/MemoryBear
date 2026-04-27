@@ -155,7 +155,7 @@ const CycleVarsList: FC<CycleVarsListProps> = ({
                           ? <CodeMirrorEditor
                             language="json"
                             placeholder={object_placeholder}
-                            variant="outlined"
+                            variant="filled"
                             size="small"
                           />
                         : (

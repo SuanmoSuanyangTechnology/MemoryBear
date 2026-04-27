@@ -106,16 +106,28 @@ const ApiKeyDetailModal = forwardRef<ApiKeyModalRef, { handleCopy: (content: str
         </span>
       </div>
 
-      {data.expires_at && <>
-        <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5 rb:my-4">{t('apiKey.advancedSettings')}</div>
+      <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5 rb:my-4">{t('apiKey.advancedSettings')}</div>
 
+      {data.expires_at &&
         <div className="rb:flex rb:justify-between rb:gap-5 rb:font-regular rb:text-[14px] rb:mt-3">
           <span className="rb:text-[#5B6167]">{t(`apiKey.expires_at`)}</span>
           <span>
             {data.expires_at ? formatDateTime(data.expires_at as number, 'YYYY-MM-DD HH:mm:ss') : '-'}
           </span>
-          </div>
-      </>}
+        </div>
+      }
+      <div className="rb:flex rb:justify-between rb:gap-5 rb:font-regular rb:text-[14px] rb:mt-3">
+        <span className="rb:text-[#5B6167]">{t(`application.qpsLimit`)}</span>
+        <span>
+          {data.rate_limit} {t('application.qpsLimitUnit')}
+        </span>
+      </div>
+      <div className="rb:flex rb:justify-between rb:gap-5 rb:font-regular rb:text-[14px] rb:mt-3">
+        <span className="rb:text-[#5B6167]">{t(`application.dailyUsageLimit`)}</span>
+        <span>
+          {data.daily_request_limit} {t('application.dailyUsageLimitUnit')}
+        </span>
+      </div>
     </RbModal>
   );
 });

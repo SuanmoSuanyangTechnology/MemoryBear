@@ -126,7 +126,6 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
         // 内容不足以填满容器时，主动继续加载
         setTimeout(() => {
           const el = scrollRef.current;
-          console.log(el, el?.scrollHeight, el?.clientHeight, hasMoreRef.current)
           if (el && hasMoreRef.current && el.scrollHeight <= el.clientHeight) {
             loadMoreData();
           }

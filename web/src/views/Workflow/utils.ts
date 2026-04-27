@@ -1,90 +1,71 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-03-24 15:07:49 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-24 15:07:49 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-04-20 14:20:34
  */
 
-import { portItemArgsY, conditionNodePortItemArgsY, conditionNodeHeight } from './constant'
+import { conditionNodePortItemArgsY, conditionNodeHeight } from './constant'
 
+export const isSubExprSet = (sub: any) => {
+  if (!sub?.key) return false;
+  if (['not_empty', 'empty'].includes(sub?.operator)) return true;
+  return !!sub.value || typeof sub.value === 'boolean' || typeof sub.value === 'number';
+};
 /**
  * Calculate the total height of a condition (if-else) node based on its cases.
- *
- * The height is composed of:
- * - `conditionNodeHeight`: the base height of the node (header + padding).
- * - `(cases.length - 1) * 26`: vertical spacing added for each additional case
- *   beyond the first (each case separator row is 26px).
- * - `exprCount * 20`: each individual expression row occupies 20px.
- * - `hasMultiExprCount * 3`: a small extra padding (3px per expression) is added
- *   for cases that contain more than one expression, to account for the logical
- *   operator indicator (AND/OR) between expressions.
- *
- * @param cases - Array of case objects, each containing an `expressions` array.
- * @returns The total pixel height for the condition node.
+ * Uses the same per-expression height logic as getConditionNodeCasePortY.
  */
 export const calcConditionNodeTotalHeight = (cases: any[]) => {
-  // Total number of expressions across all cases
-  const exprCount = cases.reduce((acc: number, c: any) => acc + (c?.expressions?.length || 0), 0);
-  // Sum of expression counts only for cases that have more than one expression
-  const hasMultiExprCount = cases.reduce((acc: number, c: any) => acc + (c?.expressions?.length > 1 ? c?.expressions?.length : 0), 0);
+  const casesHeight = cases.reduce((acc: number, c: any) => {
+    const exprs = c?.expressions ?? [];
+    const n = exprs.length;
+    const exprsHeight = n === 0 ? 0 : exprs.reduce((s: number, e: any) => s + calcExpressionHeight(e), 0) + 2 * (n - 1);
+    return acc + 20 + exprsHeight;
+  }, 0);
+  return conditionNodeHeight + casesHeight + (cases.length - 1) * 4 - 27.5;
+};
 
-  return conditionNodeHeight + (cases.length - 1) * 26 + exprCount * 20 + hasMultiExprCount * 3;
+/**
+ * Height of a single expression block in ConditionNode (px).
+ *
+ * expression outer Flex padding:
+ *   - has sub conditions (length > 0): pt-1 (4px top only)
+ *   - no sub conditions:              py-1 (4px top + 4px bottom)
+ * expression main row: leading-4 = 16px
+ * sub_variable_condition block (mt-1 = 4px gap):
+ *   - all isSet, m subs: sub[0] = leading-3.5(14) + pb-1(4) = 18px;
+ *                        sub[k>0] = py-1(8) + leading-3.5(14) = 22px
+ *                        total = 18 + 22*(m-1)
+ *   - exists but not all isSet: pb-1(4) + leading-4(16) = 20px
+ */
+const calcExpressionHeight = (expression: any): number => {
+  const subs = expression?.sub_variable_condition?.conditions;
+  if (!subs?.length) return 24; // py-1(8) + leading-4(16)
+  const subBlockHeight = subs.every(isSubExprSet)
+    ? 18 + 22 * (subs.length - 1)
+    : 20;
+  return 4 + 16 + 4 + subBlockHeight - 2; // pt-1 + main row + mt-1 + sub block (-2 rendering correction)
 };
 
 /**
  * Calculate the Y-coordinate of the right-side output port for a specific case
- * in a condition (if-else) node.
+ * in a condition (if-else) node, aligned with the IF/ELIF label in ConditionNode.
  *
- * The port position is determined by iterating through all preceding cases
- * (index 0 to caseIndex - 1) and accumulating their visual heights. Several
- * pixel-level corrections are applied to align ports with the rendered UI:
- *
- * 1. **Base offset**: starts at `conditionNodePortItemArgsY`, which is the Y
- *    position of the first case port relative to the node top.
- *
- * 2. **Per-case accumulation**: for each preceding case with `n` expressions,
- *    add `portItemArgsY * (n + 1)` — this accounts for `n` expression rows
- *    plus one case header/separator row.
- *
- * 3. **Single-expression correction**: cases with exactly 1 expression render
- *    slightly shorter than the generic formula predicts. Subtract
- *    `singleExprCount * 7 + 2` to compensate for the reduced row height when
- *    no logical operator row is shown.
- *
- * 4. **Multi-expression correction**: cases with 2+ expressions have a compact
- *    logical operator row. Subtract `multiExprCount * 9` to offset the
- *    over-estimated spacing.
- *
- * 5. **Extra expression correction**: for cases with more than 2 expressions,
- *    each additional expression beyond the second introduces a minor spacing
- *    discrepancy. Subtract `(extraExprs + 1) * 2` to fine-tune alignment.
- *
- * @param cases - Array of case objects, each containing an `expressions` array.
- * @param caseIndex - The zero-based index of the target case whose port Y is needed.
- * @returns The Y-coordinate (in pixels) for the output port of the given case.
+ * Layout (from node top):
+ * - 12px padding-top + 24px header + 12px mt-3 = 48px to cases area
+ * - Each IF/ELIF label row: leading-4 (16px), center at +8px → first port Y = 56.5
+ * - Each case: IF/ELIF row (leading-4=16) + mb-1(4) + expressions (gap={2}=2px between)
+ * - Gap between cases (Flex gap={4}): 4px
  */
 export const getConditionNodeCasePortY = (cases: any[], caseIndex: number) => {
-  let y = conditionNodePortItemArgsY;
-  let singleExprCount = 0;
-  let multiExprCount = 0;
-  let extraExprs = 0;
-
+  let y = conditionNodePortItemArgsY; // 56.5, center of first IF label
   for (let i = 0; i < caseIndex; i++) {
-    const n = cases[i]?.expressions?.length || 0;
-    y += portItemArgsY * (n + 1);
-    if (n === 1) singleExprCount++;
-    else if (n >= 2) {
-      multiExprCount++;
-      if (n > 2) extraExprs += n - 2;
-    }
+    const exprs = cases[i]?.expressions ?? [];
+    const n = exprs.length;
+    // IF/ELIF row (16) + mb-1 (4) = 20px base; expressions: sum of heights + 2px gap between
+    const exprsHeight = n === 0 ? 0 : exprs.reduce((acc: number, e: any) => acc + calcExpressionHeight(e), 0) + 2 * (n - 1);
+    y += 20 + exprsHeight + 4; // case height + Flex gap between cases
   }
-
-  // Correction for single-expression cases (slightly shorter rendered height)
-  if (singleExprCount > 0) y -= singleExprCount * 7 + 2;
-  // Correction for multi-expression cases (compact logical operator row)
-  y -= multiExprCount * 9;
-  // Correction for cases with more than 2 expressions (minor spacing drift)
-  if (extraExprs > 0) y -= (extraExprs + 1) * 2;
-
   return y;
 };

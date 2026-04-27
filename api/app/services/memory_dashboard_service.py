@@ -821,7 +821,7 @@ def get_rag_content(
         for document in documents:
             try:
                 kb = knowledge_repository.get_knowledge_by_id(db, document.kb_id)
-                if not kb:
+                if not (kb and kb.status == 1):
                     business_logger.warning(f"知识库不存在: kb_id={document.kb_id}")
                     continue
                 

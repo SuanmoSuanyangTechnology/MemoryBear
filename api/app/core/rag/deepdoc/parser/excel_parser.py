@@ -232,14 +232,14 @@ class RAGExcelParser:
                         t = str(ti[i].value) if i < len(ti) else ""
                         t += ("：" if t else "") + str(c.value)
                         fields.append(t)
-                    line = "; ".join(fields)
+                    line = "\n".join(fields)
                     if sheetname.lower().find("sheet") < 0:
-                        line += " ——" + sheetname
+                        line += "\n——" + sheetname
                     res.append(line)
             else:
                 # 只有表头的情况
                 if header_fields:
-                    line = "; ".join(header_fields)
+                    line = "\n".join(header_fields)
                     if sheetname.lower().find("sheet") < 0:
                         line += " ——" + sheetname
                     res.append(line)

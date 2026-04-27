@@ -1,8 +1,9 @@
 import type { FC } from 'react';
-import { Select, Divider } from 'antd';
-import { PlusOutlined, MinusOutlined, FileAddOutlined } from '@ant-design/icons'
+import { Select, Divider, Tooltip } from 'antd';
+import { PlusOutlined, MinusOutlined, FileAddOutlined, UndoOutlined, RedoOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
 import { Node } from '@antv/x6';
+import { useTranslation } from 'react-i18next'
 
 import type { GraphRef } from '../types'
 
@@ -15,6 +16,10 @@ interface CanvasToolbarProps {
   setIsHandMode: React.Dispatch<React.SetStateAction<boolean>>;
   zoomLevel: number;
   addNotes: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
 }
 
 const CanvasToolbar: FC<CanvasToolbarProps> = ({
@@ -22,12 +27,13 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
   miniMapRef,
   graphRef,
   zoomLevel,
-  // canUndo,
-  // canRedo,
-  // onUndo,
-  // onRedo,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
   addNotes,
 }) => {
+  const { t } = useTranslation()
   return (
     <>
       {/* 小地图 */}
@@ -63,12 +69,15 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
             { label: '125%', value: 125 },
             { label: '150%', value: 150 },
             { label: '200%', value: 200 },
-            { label: '自适应', value: 'fit' },
+            { label: t('workflow.fit'), value: 'fit' },
           ]}
           variant='borderless'
           size="small"
         />
         <PlusOutlined className="rb:text-[16px] rb:cursor-pointer" onClick={() => graphRef.current?.zoom(0.1)} />
+        <Divider type="vertical" className="rb:h-4" />
+        <Tooltip title={`${t('workflow.undo')} (Ctrl+Z)`}><UndoOutlined className={clsx('rb:text-[16px]', canUndo ? 'rb:cursor-pointer' : 'rb:opacity-30 rb:cursor-not-allowed')} onClick={onUndo} /></Tooltip>
+        <Tooltip title={`${t('workflow.redo')} (Ctrl+Y)`}><RedoOutlined className={clsx('rb:text-[16px]', canRedo ? 'rb:cursor-pointer' : 'rb:opacity-30 rb:cursor-not-allowed')} onClick={onRedo} /></Tooltip>
         <Divider type="vertical" className="rb:h-4" />
         <FileAddOutlined onClick={addNotes} />
       </div>

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:21:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-25 16:20:39
+ * @Last Modified time: 2026-04-22 10:51:00
  */
 /**
  * RbCard Component
@@ -98,7 +98,7 @@ const RbCard: FC<RbCardProps> = ({
               {typeof title === 'function' ? title() : title ?
                 <Flex align="center">
                   {avatarUrl
-                    ? <img src={avatarUrl} alt={avatarUrl} className="rb:mr-3.25 rb:size-12 rb:rounded-lg" />
+                    ? <img src={avatarUrl} alt={avatarUrl} className="rb:size-12 rb:rounded-lg" />
                     : avatar ? avatar : null
                   }
                   <div className={
@@ -110,7 +110,7 @@ const RbCard: FC<RbCardProps> = ({
                     )
                   }>
                     <div className={`rb:w-full rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap ${titleClassName}`}>{title}</div>
-                    {subTitle && <div className="rb:text-[#5B6167] rb:text-[12px]">{subTitle}</div>}
+                    {subTitle && <div className="rb:w-full rb:text-[#5B6167] rb:text-[12px]">{subTitle}</div>}
                   </div>
                 </Flex> : null
               }
@@ -130,22 +130,24 @@ const RbCard: FC<RbCardProps> = ({
       variant={variant}
       {...props}
       title={typeof title === 'function' ? title() : title ?
-        <Flex align="center" gap={12}>
+        <Flex align="center" gap={12} className={extra ? 'rb:mr-3!' : ''}>
           {/* Avatar image or custom avatar component */}
           {avatarUrl 
-            ? <img src={avatarUrl} alt={avatarUrl} className="rb:mr-3.25 rb:size-12 rb:rounded-lg" />
+            ? <img src={avatarUrl} alt={avatarUrl} className="rb:size-12 rb:rounded-lg" />
             : avatar ? avatar : null
           }
           <div className={
-            clsx(
+            clsx('rb:flex-1',
               {
                 'rb:max-w-full': !avatarUrl && !avatar,
-                'rb:max-w-[calc(100%-80px)]': avatarUrl || avatar,
+                'rb:w-[calc(100%-80px)]': avatarUrl || avatar,
               }
             )
           }>
             {/* Title with tooltip for overflow text */}
-            <Tooltip title={title}><div className={`rb:w-full rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap ${titleClassName}`}>{title}</div></Tooltip>
+            <Tooltip title={title}>
+              <div className={`rb:w-full rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap ${titleClassName}`}>{title}</div>
+            </Tooltip>
             {/* Optional subtitle */}
             {subTitle && <div className="rb:text-[#5B6167] rb:text-[12px]">{subTitle}</div>}
           </div>

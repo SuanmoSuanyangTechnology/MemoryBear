@@ -1,4 +1,7 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, Type
+
+from json_repair import json_repair
+from langchain_core.messages import AIMessage
 
 from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.models.base import RedBearModelConfig
@@ -13,6 +16,27 @@ async def handle_response(response: type[BaseModel]) -> dict:
     return response.model_dump()
 
 
+class StructResponse:
+    def __init__(self, mode: Literal["json", "pydantic"], model: Type[BaseModel] = None):
+        self.mode = mode
+        if mode == "pydantic" and model is None:
+            raise ValueError("Pydantic model is required")
+
+        self.model = model
+
+    def __ror__(self, other: AIMessage):
+        if not isinstance(other, AIMessage):
+            raise RuntimeError(f"Unsupported struct type {type(other)}")
+        text = ''
+        for block in other.content_blocks:
+            if block.get("type") == "text":
+                text += block.get("text", "")
+        fixed_json = json_repair.repair_json(text, return_objects=True)
+        if self.mode == "json":
+            return fixed_json
+        return self.model.model_validate(fixed_json)
+
+
 class MemoryClientFactory:
     """
     Factory for creating LLM, embedder, and reranker clients.
@@ -24,21 +48,21 @@ class MemoryClientFactory:
         >>> llm_client = factory.get_llm_client(model_id)
         >>> embedder_client = factory.get_embedder_client(embedding_id)
     """
-    
+
     def __init__(self, db: Session):
         from app.services.memory_config_service import MemoryConfigService
         self._config_service = MemoryConfigService(db)
-    
+
     def get_llm_client(self, llm_id: str) -> OpenAIClient:
         """Get LLM client by model ID."""
         if not llm_id:
             raise ValueError("LLM ID is required")
-        
+
         try:
             model_config = self._config_service.get_model_config(llm_id)
         except Exception as e:
             raise ValueError(f"Invalid LLM ID '{llm_id}': {str(e)}") from e
-        
+
         try:
             return OpenAIClient(
                 RedBearModelConfig(
@@ -52,19 +76,19 @@ class MemoryClientFactory:
         except Exception as e:
             model_name = model_config.get('model_name', 'unknown')
             raise ValueError(f"Failed to initialize LLM client for model '{model_name}': {str(e)}") from e
-    
+
     def get_embedder_client(self, embedding_id: str):
         """Get embedder client by model ID."""
         from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-        
+
         if not embedding_id:
             raise ValueError("Embedding ID is required")
-        
+
         try:
             embedder_config = self._config_service.get_embedder_config(embedding_id)
         except Exception as e:
             raise ValueError(f"Invalid embedding ID '{embedding_id}': {str(e)}") from e
-        
+
         try:
             return OpenAIEmbedderClient(
                 RedBearModelConfig(
@@ -77,17 +101,17 @@ class MemoryClientFactory:
         except Exception as e:
             model_name = embedder_config.get('model_name', 'unknown')
             raise ValueError(f"Failed to initialize embedder client for model '{model_name}': {str(e)}") from e
-    
+
     def get_reranker_client(self, rerank_id: str) -> OpenAIClient:
         """Get reranker client by model ID."""
         if not rerank_id:
             raise ValueError("Rerank ID is required")
-        
+
         try:
             model_config = self._config_service.get_model_config(rerank_id)
         except Exception as e:
             raise ValueError(f"Invalid rerank ID '{rerank_id}': {str(e)}") from e
-        
+
         try:
             return OpenAIClient(
                 RedBearModelConfig(

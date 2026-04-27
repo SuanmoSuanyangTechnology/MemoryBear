@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:18:50 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-02 15:18:50 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-04-21 16:36:54
  */
 /**
  * PageTabs Component
@@ -16,8 +16,6 @@
 import { type FC } from 'react';
 import { Segmented, type SegmentedProps } from 'antd';
 
-import styles from './index.module.css';
-
 /**
  * Page tabs component wrapper for Ant Design Segmented component.
  * Applies custom styling via CSS modules.
@@ -27,11 +25,12 @@ const PageTabs: FC<SegmentedProps> = ({
   options,
   onChange
 }) => {
+  console.log('value', value)
   return <Segmented
     value={value}
     options={options}
     onChange={onChange}
-    className={styles.pageTabs}
+    className="pageTabs"
   />;
 };
 

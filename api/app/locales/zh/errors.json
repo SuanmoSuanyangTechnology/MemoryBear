@@ -106,7 +106,7 @@
   },
   "api": {
     "rate_limit_exceeded": "API调用频率超限",
-    "quota_exceeded": "API调用配额已用完",
+    "quota_exceeded": "{resource} 配额已超限",
     "invalid_api_key": "无效的API密钥",
     "api_key_expired": "API密钥已过期",
     "api_key_revoked": "API密钥已被撤销",
@@ -114,7 +114,8 @@
     "method_not_allowed": "不支持的请求方法",
     "invalid_request": "无效的请求",
     "missing_parameter": "缺少必需参数：{param}",
-    "invalid_parameter": "参数无效：{param}"
+    "invalid_parameter": "参数无效：{param}",
+    "api_key_rate_limit_exceeded": "API Key 的 QPS 限制（{rate_limit}）超过租户套餐上限（{limit}）"
   },
   "database": {
     "connection_failed": "数据库连接失败",
@@ -134,5 +135,16 @@
     "invalid_format": "格式不正确：{field}",
     "invalid_value": "值无效：{field}",
     "out_of_range": "值超出范围：{field}"
+  },
+  "quota_resources": {
+    "workspace": "工作空间",
+    "app": "应用",
+    "skill": "技能",
+    "knowledge_capacity": "知识库容量",
+    "memory_engine": "记忆引擎",
+    "end_user": "终端用户",
+    "model": "模型",
+    "ontology_project": "本体工程",
+    "api_ops_rate_limit": "API 操作速率"
   }
 }

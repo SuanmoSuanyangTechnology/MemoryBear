@@ -30,6 +30,25 @@ const operationsObj = {
   ],
 }
 
+const filterByDataType = (options: Suggestion[], dataType: string): Suggestion[] =>
+  options.reduce<Suggestion[]>((acc, vo) => {
+    if (vo.children?.length) {
+      const children = vo.children.reduce<Suggestion[]>((cacc, child) => {
+        if (child.children?.length) {
+          const grandchildren = child.children.filter(gc => gc.dataType === dataType);
+          if (grandchildren.length) cacc.push({ ...child, children: grandchildren });
+        } else if (child.dataType === dataType) {
+          cacc.push(child);
+        }
+        return cacc;
+      }, []);
+      if (children.length) acc.push({ ...vo, children });
+    } else if (vo.dataType === dataType) {
+      acc.push(vo);
+    }
+    return acc;
+  }, []);
+
 const AssignmentList: FC<AssignmentListProps> = ({
   parentName,
   options = [],
@@ -59,7 +78,9 @@ const AssignmentList: FC<AssignmentListProps> = ({
           <Flex gap={10} vertical>
             {fields.map(({ key, name, ...restField }) => {
               const variableSelector = form.getFieldValue([parentName, name, 'variable_selector']);
-              const selectedOption = options.find(option => `{{${option.value}}}` === variableSelector);
+              const selectedOption = options.find(option => `{{${option.value}}}` === variableSelector)
+                ?? options.flatMap(o => o.children ?? []).find(child => `{{${child.value}}}` === variableSelector)
+                ?? options.flatMap(o => o.children ?? []).flatMap((c: any) => c.children ?? []).find((gc: any) => `{{${gc.value}}}` === variableSelector);
               const dataType = selectedOption?.dataType;
               const operationOptions = dataType === 'number' ? operationsObj.number : operationsObj.default;
               
@@ -119,7 +140,7 @@ const AssignmentList: FC<AssignmentListProps> = ({
                             {dataType === 'number' && operation === 'cover'
                               ? <VariableSelect
                                 placeholder={t('common.pleaseSelect')}
-                                options={dataType ? options.filter(vo => vo.dataType === dataType) : options}
+                                options={dataType ? filterByDataType(options, dataType) : options}
                                 size={size}
                                 className="rb:flex-1!"
                                 variant="filled"
@@ -150,7 +171,7 @@ const AssignmentList: FC<AssignmentListProps> = ({
                                   </>
                                   : <VariableSelect
                                     placeholder={t('common.pleaseSelect')}
-                                    options={dataType ? options.filter(vo => vo.dataType === dataType) : options}
+                                    options={dataType ? filterByDataType(options, dataType) : options}
                                     size={size}
                                     className="rb:flex-1!"
                                     variant="filled"

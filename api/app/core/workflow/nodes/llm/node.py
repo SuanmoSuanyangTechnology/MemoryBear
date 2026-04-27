@@ -5,7 +5,6 @@ LLM 节点实现
 """
 
 import logging
-import re
 from typing import Any
 
 from langchain_core.messages import AIMessage
@@ -22,6 +21,7 @@ from app.db import get_db_context
 from app.models import ModelType
 from app.schemas.model_schema import ModelInfo
 from app.services.model_service import ModelConfigService
+from app.models.models_model import ModelProvider
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ class LLMNode(BaseNode):
 
     def _render_context(self, message: str, variable_pool: VariablePool):
         context = f"<context>{self._render_template(self.typed_config.context, variable_pool)}</context>"
-        return re.sub(r"{{context}}", context, message)
+        return message.replace("{{context}}", context)
 
     async def _prepare_llm(
             self,
@@ -126,7 +126,11 @@ class LLMNode(BaseNode):
 
         # 4. 创建 LLM 实例（使用已提取的数据）
         # 注意：对于流式输出，需要在模型初始化时设置 streaming=True
-        extra_params = {"streaming": stream} if stream else {}
+        extra_params: dict[str, Any] = {"streaming": stream} if stream else {}
+        if self.typed_config.temperature is not None:
+            extra_params["temperature"] = self.typed_config.temperature
+        if self.typed_config.max_tokens is not None:
+            extra_params["max_tokens"] = self.typed_config.max_tokens
 
         llm = RedBearLLM(
             RedBearModelConfig(
@@ -135,7 +139,9 @@ class LLMNode(BaseNode):
                 api_key=model_info.api_key,
                 base_url=model_info.api_base,
                 extra_params=extra_params,
-                is_omni=model_info.is_omni
+                is_omni=model_info.is_omni,
+                capability=model_info.capability,
+                json_output=self.typed_config.json_output,
             ),
             type=model_info.model_type
         )
@@ -217,6 +223,19 @@ class LLMNode(BaseNode):
             prompt_template = self.config.get("prompt", "")
             rendered = self._render_template(prompt_template, variable_pool)
             self.messages = [{"role": "user", "content": rendered}]
+
+        # ChatTongyi 要求 messages 含 'json' 字样才能使用 response_format，在 system prompt 中注入
+        # VOLCANO 模型不支持 response_format，同样需要 system prompt 注入
+        need_json_prompt = self.typed_config.json_output and (
+            (model_info.provider.lower() == ModelProvider.DASHSCOPE and not model_info.is_omni)
+            or model_info.provider.lower() == ModelProvider.VOLCANO
+        )
+        if need_json_prompt:
+            system_msg = next((m for m in self.messages if m["role"] == "system"), None)
+            if system_msg:
+                system_msg["content"] += "\n请以JSON格式输出。"
+            else:
+                self.messages.insert(0, {"role": "system", "content": "请以JSON格式输出。"})
 
         return llm
 

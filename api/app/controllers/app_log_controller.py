@@ -9,7 +9,7 @@ from app.core.logging_config import get_business_logger
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user, cur_workspace_access_guard
-from app.schemas.app_log_schema import AppLogConversation, AppLogConversationDetail
+from app.schemas.app_log_schema import AppLogConversation, AppLogConversationDetail, AppLogMessage
 from app.schemas.response_schema import PageData, PageMeta
 from app.services.app_service import AppService
 from app.services.app_log_service import AppLogService
@@ -24,21 +24,24 @@ def list_app_logs(
         app_id: uuid.UUID,
         page: int = Query(1, ge=1),
         pagesize: int = Query(20, ge=1, le=100),
-        is_draft: Optional[bool] = None,
+        is_draft: Optional[bool] = Query(None, description="是否草稿会话（不传则返回全部）"),
+        keyword: Optional[str] = Query(None, description="搜索关键词（匹配消息内容）"),
         db: Session = Depends(get_db),
         current_user=Depends(get_current_user),
 ):
     """查看应用下所有会话记录（分页）
 
-    - 支持按 is_draft 筛选（草稿会话 / 发布会话）
+    - is_draft 不传则返回所有会话（草稿 + 正式）
+    - is_draft=True 只返回草稿会话
+    - is_draft=False 只返回发布会话
+    - 支持按 keyword 搜索（匹配消息内容）
     - 按最新更新时间倒序排列
-    - 所有人（包括共享者和被共享者）都只能查看自己的会话记录
     """
     workspace_id = current_user.current_workspace_id
 
     # 验证应用访问权限
     app_service = AppService(db)
-    app_service.get_app(app_id, workspace_id)
+    app = app_service.get_app(app_id, workspace_id)
 
     # 使用 Service 层查询
     log_service = AppLogService(db)
@@ -47,7 +50,9 @@ def list_app_logs(
         workspace_id=workspace_id,
         page=page,
         pagesize=pagesize,
-        is_draft=is_draft
+        is_draft=is_draft,
+        keyword=keyword,
+        app_type=app.type,
     )
 
     items = [AppLogConversation.model_validate(c) for c in conversations]
@@ -74,16 +79,32 @@ def get_app_log_detail(
 
     # 验证应用访问权限
     app_service = AppService(db)
-    app_service.get_app(app_id, workspace_id)
+    app = app_service.get_app(app_id, workspace_id)
 
     # 使用 Service 层查询
     log_service = AppLogService(db)
-    conversation = log_service.get_conversation_detail(
+    conversation, messages, node_executions_map = log_service.get_conversation_detail(
         app_id=app_id,
         conversation_id=conversation_id,
-        workspace_id=workspace_id
+        workspace_id=workspace_id,
+        app_type=app.type
     )
 
-    detail = AppLogConversationDetail.model_validate(conversation)
+    # 构建基础会话信息（不经过 ORM relationship）
+    base = AppLogConversation.model_validate(conversation)
+
+    # 单独处理 messages，避免触发 SQLAlchemy relationship 校验
+    if messages and isinstance(messages[0], AppLogMessage):
+        # 工作流：已经是 AppLogMessage 实例
+        msg_list = messages
+    else:
+        # Agent：ORM Message 对象逐个转换
+        msg_list = [AppLogMessage.model_validate(m) for m in messages]
+
+    detail = AppLogConversationDetail(
+        **base.model_dump(),
+        messages=msg_list,
+        node_executions_map=node_executions_map,
+    )
 
     return success(data=detail)

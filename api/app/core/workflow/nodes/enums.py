@@ -25,6 +25,7 @@ class NodeType(StrEnum):
     MEMORY_WRITE = "memory-write"
     DOCUMENT_EXTRACTOR = "document-extractor"
     LIST_OPERATOR = "list-operator"
+    OUTPUT = "output"
 
     UNKNOWN = "unknown"
     NOTES = "notes"

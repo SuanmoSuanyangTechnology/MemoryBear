@@ -1,21 +1,21 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:52:50 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 15:52:50 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-04-22 12:07:40
  */
 import React, { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, App, Dropdown, Flex } from 'antd';
+import { Button, App, Flex } from 'antd';
 import clsx from 'clsx';
-import { DeleteOutlined, EditOutlined, EyeOutlined } from '@ant-design/icons';
 import copy from 'copy-to-clipboard'
-import type { MenuInfo } from 'rc-menu/lib/interface';
 
 import type { ApiKey, ApiKeyModalRef } from './types';
 import ApiKeyModal from './components/ApiKeyModal';
 import ApiKeyDetailModal from './components/ApiKeyDetailModal';
 import RbCard from '@/components/RbCard'
+import MoreDropdown from '@/components/MoreDropdown'
+import useDeleteConfirm from '@/hooks/useDeleteConfirm'
 import { getApiKeyListUrl, deleteApiKey } from '@/api/apiKey';
 import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
 import { formatDateTime } from '@/utils/format';
@@ -30,7 +30,8 @@ import RbDescriptions from '@/components/RbDescriptions';
 const ApiKeyManagement: React.FC = () => {
   // Hooks
   const { t } = useTranslation();
-  const { modal, message } = App.useApp();
+  const { message } = App.useApp();
+  const deleteConfirm = useDeleteConfirm();
   
   // Refs
   const apiKeyModalRef = useRef<ApiKeyModalRef>(null);
@@ -65,18 +66,9 @@ const ApiKeyManagement: React.FC = () => {
    * @param item - API key item to delete
    */
   const handleDelete = (item: ApiKey) => {
-    modal.confirm({
-      title: t('common.confirmDeleteDesc', { name: item.name }),
-      okText: t('common.delete'),
-      cancelText: t('common.cancel'),
-      okType: 'danger',
-      onOk: () => {
-      deleteApiKey(item.id)
-        .then(() => {
-          refresh();
-          message.success(t('common.deleteSuccess'))
-        })
-      }
+    deleteConfirm({
+      name: item.name,
+      onOk: () => deleteApiKey(item.id).then(refresh),
     })
   }
   /**
@@ -103,49 +95,39 @@ const ApiKeyManagement: React.FC = () => {
         renderItem={(apiKeyItem) => {
           return (
             <RbCard
-              title={
-                <Flex justify="space-between">
-                  <Flex gap={4} vertical>
-                    {apiKeyItem.name}
-                    <Flex gap={6}>
-                      {apiKeyItem.scopes?.includes('memory') && <Tag>{t('apiKey.memoryEngine')}</Tag>}
-                      {apiKeyItem.scopes?.includes('rag') && <Tag color="success">{t('apiKey.knowledgeBase')}</Tag>}
-                      {!apiKeyItem.scopes?.includes('memory') && !apiKeyItem.scopes?.includes('rag') && <div>{t('apiKey.noScopes')}</div>}
-                    </Flex>
-                  </Flex>
-                  <Dropdown
-                    menu={{
-                      items: [
-                        {
-                          key: 'edit',
-                          icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit_bold.svg')]" />,
-                          label: t('common.edit'),
-                          onClick: () => handleEdit(apiKeyItem),
-                        },
-                        {
-                          key: 'view',
-                          icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/eye.svg')]" />,
-                          label: t('common.view'),
-                          onClick: () => handleView(apiKeyItem),
-                        },
-                        {
-                          key: 'delete',
-                          danger: true,
-                          icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red_big.svg')]" />,
-                          label: t('common.delete'),
-                          onClick: () => handleDelete(apiKeyItem),
-                        },
-                      ]
-                    }}
-                    placement="bottomRight"
-                  >
-                    <div className="rb:cursor-pointer rb:size-5.5 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
-                  </Dropdown>
-                </Flex>
-              }
-              isNeedTooltip={false}
-              headerClassName="rb:min-h-[78px]!"
+              title={apiKeyItem.name}
+              extra={<MoreDropdown
+                items={[
+                  {
+                    key: 'edit',
+                    icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit_bold.svg')]" />,
+                    label: t('common.edit'),
+                    onClick: () => handleEdit(apiKeyItem),
+                  },
+                  {
+                    key: 'view',
+                    icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/eye.svg')]" />,
+                    label: t('common.view'),
+                    onClick: () => handleView(apiKeyItem),
+                  },
+                  {
+                    key: 'delete',
+                    danger: true,
+                    icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red_big.svg')]" />,
+                    label: t('common.delete'),
+                    onClick: () => handleDelete(apiKeyItem),
+                  },
+                ]}
+              />}
+              variant="borderless"
+              headerClassName="rb:min-h-[42px]!"
+              titleClassName="rb:line-clamp-1!"
             >
+              <Flex gap={6} className="rb:-mt-2! rb:mb-4!">
+                {apiKeyItem.scopes?.includes('memory') && <Tag>{t('apiKey.memoryEngine')}</Tag>}
+                {apiKeyItem.scopes?.includes('rag') && <Tag color="success">{t('apiKey.knowledgeBase')}</Tag>}
+                {!apiKeyItem.scopes?.includes('memory') && !apiKeyItem.scopes?.includes('rag') && <div className="rb:font-regular!">{t('apiKey.noScopes')}</div>}
+              </Flex>
               <RbDescriptions
                 items={['id', 'is_expired', 'created_at'].map(key => ({
                   key,
@@ -166,7 +148,7 @@ const ApiKeyManagement: React.FC = () => {
               <Flex align="center" justify="space-between" className="rb:h-8! rb:mt-4! rb:py-1! rb:pl-2.5! rb:pr-1! rb:bg-[#F6F6F6] rb:rounded-md rb:leading-5">
                 {maskApiKeys(apiKeyItem.api_key)}
                 
-                <div onClick={() => handleCopy(apiKeyItem.api_key)} className="rb:cursor-pointer rb:rounded-md rb:size-6 rb:bg-[url('@/assets/images/common/copy_dark.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat" style={{ backgroundColor: 'rgba(0,0,0,0.08)' }}></div>
+                <div onClick={() => handleCopy(apiKeyItem.api_key)} className="rb:cursor-pointer rb:rounded-md rb:size-6 rb:bg-[url('@/assets/images/common/copy_dark.svg')] rb:bg-size-[16px_16px] rb:bg-center rb:bg-no-repeat rb:hover:bg-[rgba(0,0,0,0.08)]"></div>
               </Flex>
             </RbCard>
           );

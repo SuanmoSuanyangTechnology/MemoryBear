@@ -1,4 +1,4 @@
-import { type FC, useEffect, useState, useMemo } from "react";
+import { type FC, useEffect, useState } from "react";
 import { useTranslation } from 'react-i18next'
 import { Form, Select, Switch, Cascader, type CascaderProps, Tooltip } from 'antd'
 import type { Suggestion } from '../../Editor/plugin/AutocompletePlugin'
@@ -45,15 +45,15 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
       getToolDetail(values.tool_id)
         .then(res => {
           const detail = res as { tool_type: ToolType; }
-          
+
           getTools({ tool_type: detail.tool_type })
             .then(toolsRes => {
               const tools = toolsRes as ToolItem[]
-              
+
               getToolMethods(values.tool_id)
                 .then(methodsRes => {
                   const response = methodsRes as Array<{ method_id: string; name: string; parameters: Parameter[] }>
-                  
+
                   setOptionList(prevList => {
                     return prevList.map(item => {
                       if (item.value === detail.tool_type) {
@@ -76,7 +76,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
                       return item
                     })
                   })
-                  
+
                   if (response.length > 1) {
                     const filterTarget = response.find(vo => vo.name === values.tool_parameters?.operation)
                     if (filterTarget) {
@@ -98,7 +98,7 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
   useEffect(() => {
     if (values.tools && values.tools.length === 3) {
       const [toolType, toolId, operation] = values.tools
-      
+
       // 从 optionList 中查找对应的参数
       const typeOption = optionList.find(opt => opt.value === toolType)
       if (typeOption?.children) {
@@ -147,21 +147,26 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
   };
 
   const handleChange: CascaderProps<Option>['onChange'] = (value, selectedOptions) => {
+    if (!value) {
+      setParameters([])
+      form.resetFields()
+      return
+    }
     const targetOption = selectedOptions[selectedOptions.length - 1];
     const curParameters = [...(targetOption.parameters ?? [])]
     setParameters([...curParameters])
-    const inititalValue: any = { tool_id: selectedOptions[1].value, tool_parameters: {} }
+    const initialValue: any = { tool_id: selectedOptions[1].value, tool_parameters: { operation: undefined } }
 
     if (value[0] === 'mcp' || (value[0] === 'builtin' && selectedOptions[1]?.children && selectedOptions[1].children.length > 1)) {
-      inititalValue.tool_parameters.operation = value?.[2]
+      initialValue.tool_parameters.operation = value?.[2]
     } else if (value[0] === 'custom') {
-      inititalValue.tool_parameters.operation = selectedOptions?.[2].method_id
+      initialValue.tool_parameters.operation = selectedOptions?.[2].method_id
     }
     curParameters.forEach(vo => {
-      inititalValue.tool_parameters[vo.name] = vo.default
+      initialValue.tool_parameters[vo.name] = vo.default
     })
 
-    form.setFieldsValue(inititalValue)
+    form.setFieldsValue(initialValue)
   }
 
   // string -> string
@@ -209,9 +214,9 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
         name="tools"
         label={t('workflow.config.tool.tool_id')}
       >
-        <Cascader 
+        <Cascader
           placeholder={t('common.pleaseSelect')}
-          options={optionList} 
+          options={optionList}
           loadData={loadData}
           onChange={handleChange}
           changeOnSelect={false}
@@ -239,8 +244,8 @@ const ToolConfig: FC<{ options: Suggestion[]; }> = ({
               {parameter.type === 'string' && parameter.enum && parameter.enum.length > 0
                 ? <Select size="small" options={parameter.enum.map(vo => ({ value: vo, label: vo }))} placeholder={t('common.pleaseSelect')} />
                 : parameter.type === 'boolean'
-                ? <Switch size="small" />
-                : <Editor
+                  ? <Switch size="small" />
+                  : <Editor
                     variant="outlined"
                     type="input"
                     size="small"

@@ -195,53 +195,55 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
             </Col>
           </Row>
           {/* API Key List */}
-          {apiKeyList.sort((a, b) => b.created_at - a.created_at).map(item => (
-            <div key={item.id} className="rb:p-4 rb-border rb:rounded-xl">
-              <Flex align="center" justify="space-between">
-                <Flex vertical className="rb:max-w-[calc(100%-92px)]" gap={4}>
-                  <div className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1 rb:leading-5 rb:font-medium">{item.name}</div>
-                  <div className="rb:text-[#5B6167] rb:leading-4.5">ID: {item.id}</div>
-                </Flex>
-                <Space size={12}>
-                  <div 
-                    className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]" 
-                    onClick={() => handleEdit(item)}
-                  ></div>
-                  <div 
-                    className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]" 
-                    onClick={() => handleDelete(item)}
-                  ></div>
-                </Space>
-              </Flex>
-
-              <Row className="rb:mt-4">
-                <Col span={8}>
-                  <Row className="rb:px-4 rb:py-2">
-                    <Col span={12}>
-                      <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5">{item.total_requests}</div>
-                      <div className="rb:mt-1 rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{t('application.apiKeyRequestTotal')}</div>
-                    </Col>
-                    <Col span={12}>
-                      <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5">{item.rate_limit}</div>
-                      <div className="rb:mt-1 rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{t('application.qpsLimit')}</div>
-                    </Col>
-                  </Row>
-                </Col>
-                <Col span={16}>
-                  <Flex align="center" justify="space-between" className="rb:text-[#5B6167] rb:py-5! rb:px-4! rb:bg-white rb-border rb:rounded-lg rb:leading-5">
-                    {maskApiKeys(item.api_key)}
-
-                    <Button className="rb:px-2! rb:h-7! rb:group rb:-mt-1.75!" onClick={() => handleCopy(item.api_key)}>
-                      <div
-                        className="rb:w-4 rb:h-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/copy.svg')] rb:group-hover:bg-[url('@/assets/images/copy_active.svg')]"
-                      ></div>
-                      {t('common.copy')}
-                    </Button>
+          <Flex vertical gap={12}>
+            {apiKeyList.sort((a, b) => b.created_at - a.created_at).map(item => (
+              <div key={item.id} className="rb:p-4 rb-border rb:rounded-xl">
+                <Flex align="center" justify="space-between">
+                  <Flex vertical className="rb:max-w-[calc(100%-92px)]" gap={4}>
+                    <div className="rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap rb:flex-1 rb:leading-5 rb:font-medium">{item.name}</div>
+                    <div className="rb:text-[#5B6167] rb:leading-4.5">ID: {item.id}</div>
                   </Flex>
-                </Col>
-              </Row>
-            </div>
-          ))}
+                  <Space size={12}>
+                    <div 
+                      className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]" 
+                      onClick={() => handleEdit(item)}
+                    ></div>
+                    <div 
+                      className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]" 
+                      onClick={() => handleDelete(item)}
+                    ></div>
+                  </Space>
+                </Flex>
+
+                <Row className="rb:mt-4">
+                  <Col span={8}>
+                    <Row className="rb:px-4 rb:py-2">
+                      <Col span={12}>
+                        <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5">{item.total_requests}</div>
+                        <div className="rb:mt-1 rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{t('application.apiKeyRequestTotal')}</div>
+                      </Col>
+                      <Col span={12}>
+                        <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5">{item.rate_limit}</div>
+                        <div className="rb:mt-1 rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{t('application.qpsLimit')}</div>
+                      </Col>
+                    </Row>
+                  </Col>
+                  <Col span={16}>
+                    <Flex align="center" justify="space-between" className="rb:text-[#5B6167] rb:py-5! rb:px-4! rb:bg-white rb-border rb:rounded-lg rb:leading-5">
+                      {maskApiKeys(item.api_key)}
+
+                      <Button className="rb:px-2! rb:h-7! rb:group rb:-mt-1.75!" onClick={() => handleCopy(item.api_key)}>
+                        <div
+                          className="rb:w-4 rb:h-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/copy.svg')] rb:group-hover:bg-[url('@/assets/images/copy_active.svg')]"
+                        ></div>
+                        {t('common.copy')}
+                      </Button>
+                    </Flex>
+                  </Col>
+                </Row>
+              </div>
+            ))}
+          </Flex>
         </RbCard>
       </Flex>
 

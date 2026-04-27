@@ -47,7 +47,8 @@ from . import (
     user_memory_controllers,
     workspace_controller,
     ontology_controller,
-    skill_controller
+    skill_controller,
+    tenant_subscription_controller,
 )
 
 # 创建管理端 API 路由器
@@ -98,5 +99,7 @@ manager_router.include_router(file_storage_controller.router)
 manager_router.include_router(ontology_controller.router)
 manager_router.include_router(skill_controller.router)
 manager_router.include_router(i18n_controller.router)
+manager_router.include_router(tenant_subscription_controller.router)
+manager_router.include_router(tenant_subscription_controller.public_router)
 
 __all__ = ["manager_router"]

@@ -72,8 +72,9 @@ class HttpContentTypeConfig(BaseModel):
     @classmethod
     def validate_data(cls, v, info):
         content_type = info.data.get("content_type")
-        if content_type == HttpContentType.FROM_DATA and not isinstance(v, HttpFormData):
-            raise ValueError("When content_type is 'form-data', data must be of type HttpFormData")
+        if content_type == HttpContentType.FROM_DATA and (
+                not isinstance(v, list) or not all(isinstance(item, HttpFormData) for item in v)):
+            raise ValueError("When content_type is 'form-data', data must be a list of HttpFormData")
         elif content_type in [HttpContentType.JSON] and not isinstance(v, str):
             raise ValueError("When content_type is JSON, data must be of type str")
         elif content_type in [HttpContentType.WWW_FORM] and not isinstance(v, dict):
@@ -269,6 +270,11 @@ class HttpRequestNodeOutput(BaseModel):
     output: str = Field(
         default="SUCCESS",
         description="HTTP response body",
+    )
+
+    process_data: dict = Field(
+        default_factory=dict,
+        description="Raw HTTP request details for debugging",
     )
 
     # files: list[File] = Field(

@@ -1,5 +1,5 @@
 ===Task===
-Extract user metadata from the following conversation statements spoken by the user.
+Extract user metadata changes from the following conversation statements spoken by the user.
 
 {% if language == "zh" %}
 **"三度原则"判断标准：**
@@ -10,28 +10,36 @@ Extract user metadata from the following conversation statements spoken by the u
 **提取规则：**
 - **只提取关于"用户本人"的画像信息**，忽略用户提到的第三方人物（如朋友、同事、家人）的信息
 - 仅提取文本中明确提到的信息，不要推测
-- 如果文本中没有可提取的用户画像信息，返回空的 user_metadata 对象
 - **输出语言必须与输入文本的语言一致**（输入中文则输出中文值，输入英文则输出英文值）
 
+**增量模式（重要）：**
+你只需要输出**本次对话引起的变更操作**，不要输出完整的元数据。每个变更是一个对象，包含：
+- `field_path`：字段路径，用点号分隔（如 `profile.role`、`profile.expertise`）
+- `action`：操作类型
+  * `set`：新增或修改一个字段的值
+  * `remove`：移除一个字段的值
+- `value`：字段的新值（`action="set"` 时必填，`action="remove"` 时填要移除的元素值）
+  * 所有字段均为列表类型，每个元素一条变更记录
+
+**判断规则：**
+- 用户提到新信息 → `action="set"`，填入新值
+- 用户明确否定已有信息（如"我不再做老师了"、"我已经不学Python了"）→ `action="remove"`，`value` 填要移除的元素值
+- 如果本次对话没有任何可提取的变更，返回空的 `metadata_changes` 数组 `[]`
+- **不要为未被提及的字段生成任何变更操作**
+
 {% if existing_metadata %}
-**重要：合并已有元数据**
-下方提供了数据库中已有的用户元数据。请结合用户最新发言，输出**合并后的完整元数据**：
-- 如果用户明确否定了已有信息（如"我不再教高中物理了"），在输出中**移除**该信息
-- 如果用户提到了新信息，**添加**到对应字段中
-- 如果已有信息未被用户否定，**保留**在输出中
-- 标量字段（如 role、domain）：如果用户提到了新值，用新值替换；否则保留已有值
-- 最终输出应该是完整的、合并后的元数据，不是增量
+**已有元数据（仅供参考，用于判断是否需要变更）：**
+请对比已有数据和用户最新发言，只输出差异部分的变更操作。
+- 如果用户说的信息和已有数据一致，不需要输出变更
+- 如果用户否定了已有数据中的某个值，输出 `remove` 操作
+- 如果用户提到了新信息，输出 `set` 操作
 {% endif %}
 
 **字段说明：**
-- profile.role：用户的职业或角色，如 教师、医生、后端工程师
-- profile.domain：用户所在领域，如 教育、医疗、软件开发
-- profile.expertise：用户擅长的技能或工具（通用，不限于编程），如 Python、心理咨询、高中物理
-- profile.interests：用户主动表达兴趣的话题或领域标签
-- behavioral_hints.learning_stage：学习阶段（初学者/中级/高级）
-- behavioral_hints.preferred_depth：偏好深度（概览/技术细节/深入探讨）
-- behavioral_hints.tone_preference：语气偏好（轻松随意/专业简洁/学术严谨）
-- knowledge_tags：用户涉及的知识领域标签
+- profile.role：用户的职业或角色（列表），如 教师、医生、后端工程师，一个人可以有多个角色
+- profile.domain：用户所在领域（列表），如 教育、医疗、软件开发，一个人可以涉及多个领域
+- profile.expertise：用户擅长的技能或工具（列表），如 Python、心理咨询、高中物理
+- profile.interests：用户主动表达兴趣的话题或领域标签（列表）
 
 **用户别名变更（增量模式）：**
 - **aliases_to_add**：本次新发现的用户别名，包括：
@@ -43,7 +51,6 @@ Extract user metadata from the following conversation statements spoken by the u
 - **aliases_to_remove**：用户明确否认的别名，包括：
   * 用户说"我不叫XX了"、"别叫我XX"、"我改名了，不叫XX" → 将 XX 放入此数组
   * **严格限制**：只将用户原文中**逐字提到**的被否认名字放入，不要推断关联的其他别名
-  * 例如：用户说"我不叫陈小刀了" → 只移除"陈小刀"，不要移除"陈哥"、"老陈"等未被提及的别名
   * 如果没有要移除的别名，返回空数组 `[]`
 {% if existing_aliases %}
 - 已有别名：{{ existing_aliases | tojson }}（仅供参考，不需要在输出中重复）
@@ -57,28 +64,36 @@ Extract user metadata from the following conversation statements spoken by the u
 **Extraction rules:**
 - **Only extract profile information about the user themselves**, ignore information about third parties (friends, colleagues, family) mentioned by the user
 - Only extract information explicitly mentioned in the text, do not speculate
-- If no user profile information can be extracted, return an empty user_metadata object
 - **Output language must match the input text language**
 
+**Incremental mode (important):**
+You should only output **the change operations caused by this conversation**, not the complete metadata. Each change is an object containing:
+- `field_path`: Field path separated by dots (e.g. `profile.role`, `profile.expertise`)
+- `action`: Operation type
+  * `set`: Add or update a field value
+  * `remove`: Remove a field value
+- `value`: The new value for the field (required when `action="set"`, for `action="remove"` fill in the element value to remove)
+  * All fields are list types, one change record per element
+
+**Decision rules:**
+- User mentions new information → `action="set"`, fill in the new value
+- User explicitly negates existing info (e.g. "I'm no longer a teacher", "I stopped learning Python") → `action="remove"`, `value` is the element to remove
+- If this conversation has no extractable changes, return an empty `metadata_changes` array `[]`
+- **Do NOT generate any change operations for fields not mentioned in the conversation**
+
 {% if existing_metadata %}
-**Important: Merge with existing metadata**
-Existing user metadata from the database is provided below. Combine with the user's latest statements to output the **complete merged metadata**:
-- If the user explicitly negates existing info (e.g. "I no longer teach high school physics"), **remove** it from output
-- If the user mentions new info, **add** it to the corresponding field
-- If existing info is not negated by the user, **keep** it in the output
-- Scalar fields (e.g. role, domain): replace with new value if user mentions one; otherwise keep existing
-- The final output should be the complete, merged metadata — not an incremental update
+**Existing metadata (for reference only, to determine if changes are needed):**
+Compare existing data with the user's latest statements, and only output change operations for the differences.
+- If the user's statement matches existing data, no change is needed
+- If the user negates a value in existing data, output a `remove` operation
+- If the user mentions new information, output a `set` operation
 {% endif %}
 
 **Field descriptions:**
-- profile.role: User's occupation or role, e.g. teacher, doctor, software engineer
-- profile.domain: User's domain, e.g. education, healthcare, software development
-- profile.expertise: User's skills or tools (general, not limited to programming)
-- profile.interests: Topics or domain tags the user actively expressed interest in
-- behavioral_hints.learning_stage: Learning stage (beginner/intermediate/advanced)
-- behavioral_hints.preferred_depth: Preferred depth (overview/detailed/deep dive)
-- behavioral_hints.tone_preference: Tone preference (casual/professional/academic)
-- knowledge_tags: Knowledge domain tags related to the user
+- profile.role: User's occupation or role (list), e.g. teacher, doctor, software engineer. A person can have multiple roles
+- profile.domain: User's domain (list), e.g. education, healthcare, software development. A person can span multiple domains
+- profile.expertise: User's skills or tools (list), e.g. Python, counseling, physics
+- profile.interests: Topics or domain tags the user actively expressed interest in (list)
 
 **User alias changes (incremental mode):**
 - **aliases_to_add**: Newly discovered user aliases from this conversation, including:
@@ -90,7 +105,6 @@ Existing user metadata from the database is provided below. Combine with the use
 - **aliases_to_remove**: Aliases the user explicitly denies, including:
   * User says "Don't call me XX anymore", "I'm not called XX", "I changed my name from XX" → put XX in this array
   * **Strict rule**: Only include the exact name the user **verbatim mentions** as denied. Do NOT infer or remove related aliases
-  * Example: User says "I'm not called John anymore" → only remove "John", do NOT remove "Johnny", "J" or other related aliases not mentioned
   * If no aliases to remove, return empty array `[]`
 {% if existing_aliases %}
 - Existing aliases: {{ existing_aliases | tojson }} (for reference only, do not repeat in output)
@@ -113,20 +127,11 @@ Existing user metadata from the database is provided below. Combine with the use
 Return a JSON object with the following structure:
 ```json
 {
-  "user_metadata": {
-    "profile": {
-      "role": "",
-      "domain": "",
-      "expertise": [],
-      "interests": []
-    },
-    "behavioral_hints": {
-      "learning_stage": "",
-      "preferred_depth": "",
-      "tone_preference": ""
-    },
-    "knowledge_tags": []
-  },
+  "metadata_changes": [
+    {"field_path": "profile.role", "action": "set", "value": "后端工程师"},
+    {"field_path": "profile.expertise", "action": "set", "value": "Python"},
+    {"field_path": "profile.expertise", "action": "remove", "value": "Java"}
+  ],
   "aliases_to_add": [],
   "aliases_to_remove": []
 }

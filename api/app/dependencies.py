@@ -564,6 +564,7 @@ async def get_app_or_workspace(
             if not app:
                 auth_logger.warning(f"App not found for API Key: {api_key_obj.resource_id}")
                 raise credentials_exception
+            ApiKeyAuthService.check_app_published(db, api_key_obj)
             auth_logger.info(f"App access granted: {app.id}")
             return app
         

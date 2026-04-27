@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 21:21:52
+ * @Last Modified time: 2026-04-21 14:27:15
  */
 /**
  * Conversation Page
@@ -53,6 +53,7 @@ const Conversation: FC = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<ChatToolbarRef>(null)
   const audioPollingRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
+  const abortRef = useRef<(() => void) | null>(null)
   const [shareToken, setShareToken] = useState<string | null>(localStorage.getItem(`shareToken_${token}`))
   const [fileList, setFileList] = useState<any[]>([])
   const [webSearch, setWebSearch] = useState(false)
@@ -67,6 +68,8 @@ const Conversation: FC = () => {
 
   useEffect(() => {
     return () => {
+      abortRef.current?.()
+      abortRef.current = null
       audioPollingRef.current.forEach((timer) => clearInterval(timer))
       audioPollingRef.current.clear()
     }
@@ -150,6 +153,8 @@ const Conversation: FC = () => {
   const handleChangeHistory = (id: string | null) => {
     if (id !== conversation_id) setConversationId(id)
     if (!id) setMessage('')
+    abortRef.current?.()
+    abortRef.current = null
   }
 
   useEffect(() => {
@@ -397,13 +402,16 @@ const Conversation: FC = () => {
           return {
             type: file.type,
             transfer_method: 'local_file',
-            upload_file_id: file.response.data.file_id
+            upload_file_id: file.response.data.file_id,
+            file_type: file.response.data.file_type,
+            size: file.response.data.file_size,
+            name: file.response.data.file_name
           }
         }
       }),
       variables: params,
       thinking,
-    }, handleStreamMessage, shareToken)
+    }, handleStreamMessage, shareToken, (abort) => { abortRef.current = abort })
       .catch(() => {
         setLoading(false)
         streamLoadingRef.current = false
@@ -444,7 +452,7 @@ const Conversation: FC = () => {
     })
   }
 
-  console.log('chatList', chatList, streamLoadingRef.current)
+  console.log('chatList', fileList, streamLoadingRef.current)
 
   return (
     <Flex className="rb:w-full rb:p-[-16px]!">

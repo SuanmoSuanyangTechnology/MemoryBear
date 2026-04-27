@@ -16,6 +16,8 @@ import BodyWrapper from '@/components/Empty/BodyWrapper'
 import RbCard from '@/components/RbCard'
 import { getTools, deleteTool } from '@/api/tools'
 import { formatDateTime } from '@/utils/format'
+import OverflowTags from '@/components/OverflowTags'
+import Tag from '@/components/Tag'
 
 const Custom = forwardRef<CustomRef, { getStatusTag: (status: string) => ReactNode; keyword?: string | undefined }>(({ getStatusTag, keyword }, ref) => {
   const { t } = useTranslation();
@@ -110,24 +112,12 @@ const Custom = forwardRef<CustomRef, { getStatusTag: (status: string) => ReactNo
                 isNeedTooltip={false}
               >
                 {item.tags?.length > 0
-                  ? <Flex gap={8} wrap align="center">
-                    <Flex gap={6}>
-                      {item.tags?.slice(0, 2).map((type, i) => (
-                        <div key={i} className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">{type}</div>
-                      ))}
-                    </Flex>
-                    {item.tags.length > 2 && (
-                      <Tooltip
-                        title={<Flex wrap gap={6}>{item.tags?.slice(2, item.tags.length).map((type, i) => (
-                          <div key={i} className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5 rb:text-[#171719]">{type}</div>
-                        ))}</Flex>}
-                        color="white"
-                        placement="bottom"
-                      >
-                        <div className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">+{item.tags.length - 2}</div>
-                      </Tooltip>
-                    )}
-                  </Flex>
+                  ? <div>
+                    <OverflowTags
+                      items={item.tags?.map((type, i) => <Tag variant="borderless" color="dark" key={i}>{type}</Tag>)}
+                      numTag={(num?: number) => <Tag variant="borderless" color="dark">{`+${num}`}</Tag>}
+                    />
+                  </div>
                   : <div className="rb:text-[#A8A9AA] rb:leading-5">{t('tool.noTags')}</div>
                 }
                 <Row className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2! rb:px-3! rb:leading-5 rb:mt-4!">

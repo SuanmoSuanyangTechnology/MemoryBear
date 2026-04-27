@@ -17,6 +17,8 @@ import JsonToolModal from './components/JsonToolModal'
 import InnerToolModal from './components/InnerToolModal'
 import { getTools } from '@/api/tools'
 import { InnerConfigData } from './constant'
+import OverflowTags from '@/components/OverflowTags'
+import Tag from '@/components/Tag'
 
 const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: string | undefined }> = ({ getStatusTag, keyword }) => {
   const { t } = useTranslation();
@@ -98,24 +100,12 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: s
                   <div className="rb:h-10 rb:wrap-break-word rb:line-clamp-2 rb:leading-5">{t(`tool.${item.config_data.tool_class}_features`)}</div>
                 </Tooltip>
 
-                <Flex gap={8} wrap align="center" className="rb:mt-2! rb:mb-4!">
-                  <Flex gap={6}>
-                    {InnerConfigData[item.config_data.tool_class].features?.slice(0, 2).map((type, i) => (
-                      <div key={i} className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">{t(`tool.${type}`)}</div>
-                    ))}
-                  </Flex>
-                  {InnerConfigData[item.config_data.tool_class].features.length > 2 && (
-                    <Tooltip
-                      title={<Flex wrap gap={6}>{InnerConfigData[item.config_data.tool_class].features?.slice(2, InnerConfigData[item.config_data.tool_class].features.length).map((type, i) => (
-                        <div key={i} className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5 rb:text-[#171719]">{t(`tool.${type}`)}</div>
-                      ))}</Flex>}
-                      color="white"
-                      placement="bottom"
-                    >
-                      <div className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">+{InnerConfigData[item.config_data.tool_class].features.length - 2}</div>
-                    </Tooltip>
-                  )}
-                </Flex>
+                <div className="rb:mt-2 rb:mb-4">
+                  <OverflowTags
+                    items={InnerConfigData[item.config_data.tool_class].features?.map((type, i) => <Tag key={i} variant="borderless" color="dark">{t(`tool.${type}`)}</Tag>)}
+                    numTag={(num?: number) => <Tag variant="borderless" color="dark">{`+${num}`}</Tag>}
+                  />
+                </div>
 
                 <Row className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2! rb:px-3! rb:leading-5">
                   {item.config_data.tool_class === 'DateTimeTool'

@@ -1,4 +1,72 @@
 {
+  "v0.3.1": {
+    "introduction": {
+      "codeName": "无境",
+      "releaseDate": "2026-4-22",
+      "upgradePosition": "🐻 聚焦应用体验优化、记忆 API 开放与工作流可靠性提升，打破边界，自由流动",
+      "coreUpgrades": [
+        "1. 应用与模型增强<br>* 模型 Key 全删后自动关闭：避免无 Key 运行时错误<br>* 模型 JSON 格式化输出开关：支持旧工作流迁移的稳定 JSON 输出<br>* 配置导入覆盖：支持完整替换当前配置<br>* 导入时缺失资源清理：自动清空不存在的工具和知识库引用",
+        "2. 记忆 API 与智能 📚<br>* 记忆读写 API 与 End-User Key 供给：支持第三方直接交互记忆层<br>* 记忆库 API 与配置更新：程序化控制记忆设置（提供顺序接口）<br>* End-User 元数据存储：丰富用户上下文持久化",
+        "3. 工作流与体验优化 ⚙️<br>* 会话历史文件元数据：增加文件大小、名称和类型<br>* 迭代节点并行输入修复：恢复并发执行行为<br>* API Key 后四位展示：便于密钥识别<br>* 条件分支多文件子变量：更精细的条件逻辑<br>* Agent 模型配置重置接口：完善前后端契约<br>* 三级变量键盘导航：提升变量选择体验<br>* 应用标签页动态标题：动态显示应用名称<br>* 变量聚合三级勾选修复：修复勾选行为<br>* 工作流检查清单校验增强：工具必填和视觉变量必填<br>* 变量聚合器到参数提取器输出：修复输出变量获取",
+        "4. 知识库与性能 ⚡<br>* 文档解析与 Graph 异步执行：提升文档摄入吞吐量",
+        "5. 稳健性与缺陷修复 🔧<br>* 工具节点原始参数类型：修复类型不匹配问题<br>* 前端部署后资源过期导入错误：解决缓存资源导入失败<br>* 工作流工具节点必填校验：防止不完整配置发布",
+        "<br>",
+        "v0.3.1 是平台哲学演进中的关键时刻——边界的打破。记忆 API 开放和应用体验优化为社区用户提供更强大的集成能力。展望未来，我们将持续提升记忆智能管线的萃取精度与自适应遗忘策略，深化工作流引擎能力。破界而行，臻于无境。",
+        "MemoryBear — 无境 🐻✨"
+      ]
+    },
+    "introduction_en": {
+      "codeName": "WuJing",
+      "releaseDate": "2026-4-22",
+      "upgradePosition": "🐻 Focused application improvements, memory API openness, and workflow reliability — dissolving boundaries, flowing freely",
+      "coreUpgrades": [
+        "1. Application & Model Enhancements<br>* Model Auto-Disable on Key Deletion: Prevents keyless runtime errors<br>* Model JSON Formatted Output Toggle: Stable JSON output for legacy workflow migration<br>* Configuration Import with Override: Full configuration replacement support<br>* Import Cleanup for Missing Resources: Auto-clears missing tool and knowledge base references",
+        "2. Memory API & Intelligence 📚<br>* Memory Read/Write API with End-User Key Provisioning: Third-party memory layer interaction<br>* Memory Store API & Configuration Update: Programmatic memory settings control with sequential interface<br>* End-User Metadata Storage: Richer user context persistence",
+        "3. Workflow & UX Improvements ⚙️<br>* Conversation History File Metadata: File size, name, and type labels<br>* Iteration Node Parallel Input Fix: Restored concurrent execution<br>* API Key Last Four Digits Display: Key identification without exposure<br>* Condition Branch Multi-File Sub-Variables: Granular conditional logic<br>* Agent Model Config Reset Endpoint: Completed frontend-backend contract<br>* Three-Level Variable Keyboard Navigation: Improved selection experience<br>* Dynamic Tab Title for Applications: Dynamic app name in browser tab<br>* Variable Aggregator Three-Level Checkbox Fix: Corrected checkbox behavior<br>* Workflow Checklist Validation Enhancements: Tool required and vision variable validation<br>* Variable Aggregator to Parameter Extractor Output: Fixed output variable access",
+        "4. Knowledge Base & Performance ⚡<br>* Async Document Parsing & Graph Execution: Improved document ingestion throughput",
+        "5. Robustness & Bug Fixes 🔧<br>* Tool Node Raw Parameter Types: Fixed type mismatch issues<br>* Stale Frontend Resource Import Error: Resolved cached resource import failure<br>* Workflow Tool Node Required Validation: Prevents incomplete configuration publishing",
+        "<br>",
+        "v0.3.1 marks a pivotal moment in the platform's evolution — the dissolution of boundaries. Memory API openness and application experience improvements provide community users with stronger integration capabilities. Looking ahead, we will continue improving extraction accuracy, adaptive forgetting strategies, and deepening workflow engine capabilities. Beyond boundaries — the boundless awaits.",
+        "MemoryBear — The Boundless 🐻✨"
+      ]
+    }
+  },
+  "v0.3.0": {
+    "introduction": {
+      "codeName": "破晓",
+      "releaseDate": "2026-4-15",
+      "upgradePosition": "🐻 全面升级应用工作流、记忆智能与系统稳健性，引入版本化API、多模态记忆感知及大量工作流增强，打造更可靠、精准的 MemoryBear",
+      "coreUpgrades": [
+        "1. 应用与API增强<br>* 版本化API调用支持：对外服务API支持指定版本调用<br>* 工作流检查清单：新增结构化验证步骤<br>* 深度思考参数精准控制：仅向支持深度推理的模型发送思考参数<br>* 提示器模型返回优化：优化提示器模型响应处理",
+        "2. 记忆智能 🧠<br>* 多模态记忆感知Agent：支持多模态记忆读取与写入<br>* OpenClaw内置工具：新增内置工具扩展Agent工具集",
+        "3. 用户体验 🎨<br>* 流式渲染稳定性优化：解决LLM流式输出页面抖动问题<br>* 记忆中枢更名：「记忆相关」更名为「记忆中枢」",
+        "4. 工作流改进 ⚙️<br>* 三级变量模板转换：支持三级变量解析<br>* VL模型Token统计：修复模型组合中VL模型Token未统计问题<br>* 导入工作流功能特性同步：正确同步开场白、引用等属性<br>* 会话变量名称唯一性校验：防止变量名冲突<br>* 文件类型提取修复：正确提取file.type信息<br>* 条件分支显示修复：值为0或会话变量时正确渲染<br>* Object/Array校验规则：防止JSON序列化错误<br>* HTTP请求Body字段修正：body字段从name改为key",
+        "5. 知识库 📚<br>* Embedding Token截断安全边界：统一添加8000 token截断，优化Excel独立chunk处理",
+        "6. 稳健性与缺陷修复 🔧<br>* 原子性更新与批量访问失败修复<br>* 对话别名提取错误修复<br>* 工作流别名提取修正（区分用户和AI回复）<br>* RAG记忆分页数据修复<br>* 隐式记忆详情显示修复<br>* 向量查询驱动关闭异常修复<br>* 用户管理启停异常修复<br>* 模型列表筛选不一致修复",
+        "<br>",
+        "v0.3.0 标志着 MemoryBear 向生产成熟度迈出坚实一步。后续版本将持续深化工作流表达力、记忆检索精度和跨模态理解能力，强化复杂Agent编排支持，稳固大规模生产部署基础。",
+        "<br>",
+        "MemoryBear — 破晓 🐻✨"
+      ]
+    },
+    "introduction_en": {
+      "codeName": "PoXiao",
+      "releaseDate": "2026-4-15",
+      "upgradePosition": "🐻 Comprehensive upgrades across application workflows, memory intelligence, and system robustness — introducing versioned APIs, multimodal memory perception, and extensive workflow enhancements for a more reliable MemoryBear",
+      "coreUpgrades": [
+        "1. Application & API Enhancements<br>* Versioned API Support: External APIs now support version-specific calls<br>* Workflow Checklist: Structured validation steps before deployment<br>* Deep Thinking Parameter Control: Only send thinking params to supported models<br>* Prompt Optimizer Return Optimization: Improved prompt optimizer response handling",
+        "2. Memory Intelligence 🧠<br>* Multimodal Memory Perception Agent: Read/write multimodal memory<br>* OpenClaw Built-in Tool: New built-in tool for agent operations",
+        "3. User Experience 🎨<br>* Streaming Render Stabilization: Eliminated page jitter during LLM output<br>* Memory Hub Renaming: Renamed to better reflect central memory role",
+        "4. Workflow Improvements ⚙️<br>* Three-Level Variable Template Conversion: Support for three-level variable resolution<br>* VL Model Token Tracking: Fixed token tracking for VL models in model groups<br>* Imported Workflow Feature Sync: Properly sync opening messages, citations, etc.<br>* Session Variable Name Uniqueness: Prevent variable name conflicts<br>* File Type Extraction Fix: Correctly extract file.type information<br>* Condition Branch Display Fix: Correct rendering for value 0 or session variables<br>* Object/Array Validation Rules: Prevent JSON serialization save errors<br>* HTTP Request Body Key Fix: Body field uses key instead of name",
+        "5. Knowledge Base 📚<br>* Embedding Token Truncation Safety: Unified 8000-token boundary, optimized Excel chunk processing",
+        "6. Robustness & Bug Fixes 🔧<br>* Atomic update & batch access failure fixes<br>* Conversation alias extraction fix<br>* Workflow alias extraction correction (user vs AI distinction)<br>* RAG memory pagination fix<br>* Implicit memory detail display fix<br>* Vector query driver closed exception fix<br>* User management enable/disable fix<br>* Model list filter inconsistency fix",
+        "<br>",
+        "v0.3.0 marks a meaningful step toward production maturity for MemoryBear. Upcoming releases will deepen workflow expressiveness, memory retrieval precision, and cross-modal understanding while strengthening complex agent orchestration and large-scale deployment foundations.",
+        "<br>",
+        "MemoryBear — Daybreak 🐻✨"
+      ]
+    }
+  },
   "v0.2.10": {
     "introduction": {
       "codeName": "炼剑",

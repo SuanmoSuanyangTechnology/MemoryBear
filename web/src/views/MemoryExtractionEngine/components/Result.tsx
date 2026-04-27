@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:30:11 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 15:46:30
+ * @Last Modified time: 2026-04-21 14:54:14
  */
 /**
  * Result Component
@@ -10,7 +10,7 @@
  * Shows text preprocessing, knowledge extraction, node/edge creation, and deduplication
  */
 
-import { type FC, useState } from 'react'
+import { type FC, useState, useRef, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Space, Button, Progress, Form, Input, Flex } from 'antd'
@@ -105,7 +105,14 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
 
   const [runForm] = Form.useForm()
   const customText = Form.useWatch(['custom_text'], runForm)
+  const abortRef = useRef<(() => void) | null>(null)
 
+  useEffect(() => {
+    return () => {
+      abortRef.current?.()
+      abortRef.current = null;
+    }
+  }, [])
   /** Run pilot test */
   const handleRun = () => {
     if(!id) return
@@ -229,11 +236,13 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
       })
     }
     setRunLoading(true)
+    abortRef.current?.()
+    abortRef.current = null;
     pilotRunMemoryExtractionConfig({
       config_id: id,
       dialogue_text: t('memoryExtractionEngine.exampleText'),
       custom_text: runForm.getFieldValue('custom_text')
-    }, handleStreamMessage)
+    }, handleStreamMessage, (abort) => { abortRef.current = abort })
       .finally(() => {
         setRunLoading(false)
       })
@@ -328,6 +337,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave }) => {
       <Space size={24} className="rb:mt-4! rb:mb-3!">
         {['processData', 'finalResult'].map(tab => (
           <div
+            key={tab}
             className={clsx('rb:font-[MiSans-Bold] rb:font-bold rb:leading-5 rb:cursor-pointer', {
               'rb:text-[#212332]': activeTab === tab,
               'rb:text-[#A8A9AA]': activeTab !== tab,

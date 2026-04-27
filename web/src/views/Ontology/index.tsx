@@ -2,13 +2,13 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:10:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 15:03:09
+ * @Last Modified time: 2026-04-22 11:47:38
  */
 import { type FC, useState, useRef } from 'react';
 import type { MenuInfo } from 'rc-menu/lib/interface';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Row, Col, Flex, Space, App, Tooltip, Dropdown } from 'antd'
+import { Row, Col, Flex, Space, Tooltip } from 'antd'
 
 import SearchInput from '@/components/SearchInput';
 import OntologyModal from './components/OntologyModal'
@@ -21,6 +21,9 @@ import { formatDateTime } from '@/utils/format'
 import OntologyImportModal from './components/OntologyImportModal'
 import OntologyExportModal from './components/OntologyExportModal'
 import RbButton from '@/components/RbButton'
+import MoreDropdown from '@/components/MoreDropdown'
+import useDeleteConfirm from '@/hooks/useDeleteConfirm'
+import OverflowTags from '@/components/OverflowTags'
 
 /**
  * Ontology management page component
@@ -30,7 +33,7 @@ const Ontology: FC = () => {
   // Hooks
   const { t } = useTranslation();
   const navigate = useNavigate()
-  const { modal, message } = App.useApp();
+  const deleteConfirm = useDeleteConfirm();
   
   // State
   const [query, setQuery] = useState<Query>({});
@@ -65,18 +68,9 @@ const Ontology: FC = () => {
    */
   const handleDelete = (item: OntologyItem, e: MenuInfo) => {
     e.domEvent.stopPropagation();
-    modal.confirm({
-      title: t('common.confirmDeleteDesc', { name: item.scene_name }),
-      okText: t('common.delete'),
-      cancelText: t('common.cancel'),
-      okType: 'danger',
-      onOk: () => {
-        deleteOntologyScene(item.scene_id)
-          .then(() => {
-            message.success(t('common.deleteSuccess'))
-            scrollListRef.current?.refresh()
-          })
-      }
+    deleteConfirm({
+      name: item.scene_name,
+      onOk: () => deleteOntologyScene(item.scene_id).then(() => scrollListRef.current?.refresh()),
     })
   }
   
@@ -145,27 +139,22 @@ const Ontology: FC = () => {
                     {item.is_system_default  && <Tag color="warning">{t('common.default')}</Tag>}
                   </Space>
                 </Flex>
-                <Dropdown
-                  menu={{
-                    items: [
-                      {
-                        key: 'edit',
-                        icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit_bold.svg')]" />,
-                        label: t('common.edit'),
-                        onClick: (e: MenuInfo) => handleEdit(item, e),
-                      },
-                      {
-                        key: 'delete',
-                        icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red_big.svg')]" />,
-                        label: t('common.delete'),
-                        onClick: (e: MenuInfo) => handleDelete(item, e),
-                      },
-                    ]
-                  }}
-                  placement="bottomRight"
-                >
-                  <div onClick={(e) => e.stopPropagation()} className="rb:cursor-pointer rb:size-5.5 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
-                </Dropdown>
+                <MoreDropdown
+                  items={[
+                    {
+                      key: 'edit',
+                      icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/edit_bold.svg')]" />,
+                      label: t('common.edit'),
+                      onClick: (e: MenuInfo) => handleEdit(item, e),
+                    },
+                    {
+                      key: 'delete',
+                      icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red_big.svg')]" />,
+                      label: t('common.delete'),
+                      onClick: (e: MenuInfo) => handleDelete(item, e),
+                    },
+                  ]}
+                />
               </Flex>
             }
             isNeedTooltip={false}
@@ -177,16 +166,13 @@ const Ontology: FC = () => {
               <div className="rb:h-10 rb:wrap-break-word rb:line-clamp-2 rb:leading-5">{item.scene_description}</div>
             </Tooltip>
 
-            <Flex gap={8} wrap align="center" className="rb:mt-2!">
-              <Flex gap={8} className="rb:flex-1 rb:overflow-hidden rb:wrap-break-word! rb:line-clamp-1!">
-                {item.entity_type?.map((type, i) => (
-                  <span key={i} className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">{type}</span>
-                ))}
-              </Flex>
-              {item.type_num > 3 && (
-                <span className="rb:bg-[#F6F6F6] rb:rounded-full rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">+{item.type_num - 3}</span>
-              )}
-            </Flex>
+            <div className="rb:mt-2">
+              <OverflowTags
+                popoverProps={false}
+                items={[...item.entity_type?.map((type, i) => <Tag key={i} variant="borderless" color="dark">{type}</Tag>), <Tag variant="borderless" color="dark">{`+${item.type_num - 3}`}</Tag>]}
+                numTag={(num?: number) => <Tag variant="borderless" color="dark">{`+${item.type_num - 3 + (num ? num - 1 : 0)}`}</Tag>}
+              />
+            </div>
 
             <Row className="rb:mt-4!">
               {(['created_at', 'updated_at'] as const).map(key => (

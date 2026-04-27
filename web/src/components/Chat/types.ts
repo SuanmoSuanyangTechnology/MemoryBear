@@ -24,7 +24,7 @@ export interface ChatItem {
   subContent?: Record<string, any>[];
   error?: string;
   meta_data?: {
-    audio_url?: string;
+    audio_url?: string | null;
     audio_status?: string;
     files?: any[];
     suggested_questions?: string[];
@@ -33,6 +33,7 @@ export interface ChatItem {
       file_name: string;
       knowledge_id: string;
       score: string;
+      download_url?: string;
     }[];
     reasoning_content?: string;
   },

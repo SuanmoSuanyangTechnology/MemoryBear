@@ -11,10 +11,12 @@ from app.core.workflow.nodes.tool.config import ToolNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_db_read
 from app.services.tool_service import ToolService
+from app.models.tool_model import ToolType
 
 logger = logging.getLogger(__name__)
 
 TEMPLATE_PATTERN = re.compile(r"\{\{.*?}}")
+PURE_VARIABLE_PATTERN = re.compile(r"^\{\{\s*([\w.]+)\s*}}$")
 
 
 class ToolNode(BaseNode):
@@ -52,13 +54,21 @@ class ToolNode(BaseNode):
         # 渲染工具参数
         rendered_parameters = {}
         for param_name, param_template in self.typed_config.tool_parameters.items():
-            if isinstance(param_template, str) and TEMPLATE_PATTERN.search(param_template):
-                try:
-                    rendered_value = self._render_template(param_template, variable_pool)
-                except Exception as e:
-                    raise ValueError(f"模板渲染失败：参数 {param_name} 的模板 {param_template} 解析错误") from e
+            if isinstance(param_template, str):
+                pure_match = PURE_VARIABLE_PATTERN.match(param_template)
+                if pure_match:
+                    # 纯单变量引用直接取原始值，保留 int/bool/float 等类型
+                    rendered_value = self.get_variable(pure_match.group(1), variable_pool, strict=False)
+                    if rendered_value is None:
+                        rendered_value = self._render_template(param_template, variable_pool)
+                elif TEMPLATE_PATTERN.search(param_template):
+                    try:
+                        rendered_value = self._render_template(param_template, variable_pool)
+                    except Exception as e:
+                        raise ValueError(f"模板渲染失败：参数 {param_name} 的模板 {param_template} 解析错误") from e
+                else:
+                    rendered_value = param_template
             else:
-                # 非模板参数（数字/布尔/普通字符串）直接保留原值
                 rendered_value = param_template
             rendered_parameters[param_name] = rendered_value
 
@@ -67,6 +77,18 @@ class ToolNode(BaseNode):
         # 执行工具
         with get_db_read() as db:
             tool_service = ToolService(db)
+
+            # MCP 工具：将 operation 映射为 tool_name，其余参数包装进 arguments
+            tool_instance = tool_service.get_tool_instance(self.typed_config.tool_id, tenant_id)
+            if tool_instance and tool_instance.tool_type == ToolType.MCP:
+                operation = rendered_parameters.pop("operation", None)
+                if operation:
+                    old_params = rendered_parameters
+                    rendered_parameters = {
+                        "tool_name": operation,
+                        "arguments": old_params
+                    }
+
             result = await tool_service.execute_tool(
                 tool_id=self.typed_config.tool_id,
                 parameters=rendered_parameters,

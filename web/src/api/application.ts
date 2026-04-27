@@ -53,12 +53,12 @@ export const saveWorkflowConfig = (app_id: string, values: WorkflowConfig) => {
   return request.put(`/apps/${app_id}/workflow`, values)
 }
 // Model comparison test run
-export const runCompare = (app_id: string, values: Record<string, unknown>, onMessage?: (data: SSEMessage[]) => void) => {
-  return handleSSE(`/apps/${app_id}/draft/run/compare`, values, onMessage)
+export const runCompare = (app_id: string, values: Record<string, unknown>, onMessage?: (data: SSEMessage[]) => void, onAbort?: (abort: () => void) => void) => {
+  return handleSSE(`/apps/${app_id}/draft/run/compare`, values, onMessage, undefined, onAbort)
 }
 // Test run
-export const draftRun = (app_id: string, values: Record<string, unknown>, onMessage?: (data: SSEMessage[]) => void) => {
-  return handleSSE(`/apps/${app_id}/draft/run`, values, onMessage)
+export const draftRun = (app_id: string, values: Record<string, unknown>, onMessage?: (data: SSEMessage[]) => void, onAbort?: (abort: () => void) => void) => {
+  return handleSSE(`/apps/${app_id}/draft/run`, values, onMessage, undefined, onAbort)
 }
 // Delete application
 export const deleteApplication = (app_id: string) => {
@@ -93,12 +93,12 @@ export const getConversationHistory = (share_token: string, data: { page: number
   })
 }
 // Send conversation
-export const sendConversation = (values: QueryParams, onMessage: (data: SSEMessage[]) => void, shareToken: string) => {
+export const sendConversation = (values: QueryParams, onMessage: (data: SSEMessage[]) => void, shareToken: string, onAbort?: (abort: () => void) => void) => {
   return handleSSE(`/public/share/chat`, values, onMessage, {
     headers: {
       'Authorization': `Bearer ${shareToken}`
     }
-  })
+  }, onAbort)
 }
 // Get conversation details
 export const getConversationDetail = (share_token: string, conversation_id: string) => {
@@ -174,4 +174,8 @@ export const getAppLogsUrl = (app_id: string) => `/apps/${app_id}/logs`
 // Get full conversation message history
 export const getAppLogDetail = (app_id: string, conversation_id: string) => {
   return request.get(`/apps/${app_id}/logs/${conversation_id}`)
+}
+// Reset agent model config to default
+export const resetAppModelConfig = (app_id: string) => {
+  return request.get(`/apps/${app_id}/model/parameters/default`)
 }

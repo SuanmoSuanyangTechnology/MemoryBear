@@ -10,29 +10,29 @@ import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
+from langchain.agents import create_agent
 from langchain.tools import tool
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.celery_app import celery_app
 from app.core.agent.agent_middleware import AgentMiddleware
 from app.core.agent.langchain_agent import LangChainAgent
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
+from app.core.memory.enums import SearchStrategy
+from app.core.memory.memory_service import MemoryService
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_db_context
 from app.models import AgentConfig, ModelConfig
 from app.repositories.tool_repository import ToolRepository
-from app.schemas.app_schema import FileInput, Citation
+from app.schemas.app_schema import FileInput, Citation, FileType
 from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
-from app.services import task_service
 from app.services.conversation_service import ConversationService
 from app.services.langchain_tool_server import Search
-from app.services.memory_agent_service import MemoryAgentService
 from app.services.model_parameter_merger import ModelParameterMerger
 from app.services.model_service import ModelApiKeyService
 from app.services.multimodal_service import MultimodalService
@@ -107,38 +107,41 @@ def create_long_term_memory_tool(
         logger.info(f" 长期记忆工具被调用！question={question}, user={end_user_id}")
         try:
             with get_db_context() as db:
-                memory_content = asyncio.run(
-                    MemoryAgentService().read_memory(
-                        end_user_id=end_user_id,
-                        message=question,
-                        history=[],
-                        search_switch="2",
-                        config_id=config_id,
-                        db=db,
-                        storage_type=storage_type,
-                        user_rag_memory_id=user_rag_memory_id
-                    )
-                )
-                task = celery_app.send_task(
-                    "app.core.memory.agent.read_message",
-                    args=[end_user_id, question, [], "1", config_id, storage_type, user_rag_memory_id]
-                )
-                result = task_service.get_task_memory_read_result(task.id)
-                status = result.get("status")
-                logger.info(f"读取任务状态：{status}")
-                if memory_content:
-                    memory_content = memory_content['answer']
-            logger.info(f'用户ID：Agent:{end_user_id}')
-            logger.debug("调用长期记忆 API", extra={"question": question, "end_user_id": end_user_id})
+                memory_service = MemoryService(db, config_id, end_user_id)
+                search_result = asyncio.run(memory_service.read(question, SearchStrategy.QUICK))
 
-            logger.info(
-                "长期记忆检索成功",
-                extra={
-                    "end_user_id": end_user_id,
-                    "content_length": len(str(memory_content))
-                }
-            )
-            return f"检索到以下历史记忆：\n\n{memory_content}"
+            #     memory_content = asyncio.run(
+            #         MemoryAgentService().read_memory(
+            #             end_user_id=end_user_id,
+            #             message=question,
+            #             history=[],
+            #             search_switch="2",
+            #             config_id=config_id,
+            #             db=db,
+            #             storage_type=storage_type,
+            #             user_rag_memory_id=user_rag_memory_id
+            #         )
+            #     )
+            #     task = celery_app.send_task(
+            #         "app.core.memory.agent.read_message",
+            #         args=[end_user_id, question, [], "1", config_id, storage_type, user_rag_memory_id]
+            #     )
+            #     result = task_service.get_task_memory_read_result(task.id)
+            #     status = result.get("status")
+            #     logger.info(f"读取任务状态：{status}")
+            #     if memory_content:
+            #         memory_content = memory_content['answer']
+            # logger.info(f'用户ID：Agent:{end_user_id}')
+            # logger.debug("调用长期记忆 API", extra={"question": question, "end_user_id": end_user_id})
+            #
+            # logger.info(
+            #     "长期记忆检索成功",
+            #     extra={
+            #         "end_user_id": end_user_id,
+            #         "content_length": len(str(memory_content))
+            #     }
+            # )
+            return f"检索到以下历史记忆：\n\n{search_result.content}"
         except Exception as e:
             logger.error("长期记忆检索失败", extra={"error": str(e), "error_type": type(e).__name__})
             return f"记忆检索失败: {str(e)}"
@@ -472,11 +475,19 @@ class AgentRunService:
             features_config: Dict[str, Any],
             citations: List[Citation]
     ) -> List[Any]:
-        """根据 citation 开关决定是否返回引用来源"""
+        """根据 citation 开关决定是否返回引用来源，并根据 allow_download 附加下载链接"""
         citation_cfg = features_config.get("citation", {})
-        if isinstance(citation_cfg, dict) and citation_cfg.get("enabled"):
-            return [cit.model_dump() for cit in citations]
-        return []
+        if not (isinstance(citation_cfg, dict) and citation_cfg.get("enabled")):
+            return []
+        allow_download = citation_cfg.get("allow_download", False)
+        result = []
+        for cit in citations:
+            item = cit.model_dump() if hasattr(cit, "model_dump") else dict(cit)
+            if allow_download and item.get("document_id"):
+                from app.core.config import settings
+                item["download_url"] = f"{settings.FILE_LOCAL_SERVER_URL}/apps/citations/{item['document_id']}/download"
+            result.append(item)
+        return result
 
     async def run(
             self,
@@ -584,22 +595,6 @@ class AgentRunService:
                 )
                 tools.extend(memory_tools)
 
-            # 4. 创建 LangChain Agent
-            agent = LangChainAgent(
-                model_name=api_key_config["model_name"],
-                api_key=api_key_config["api_key"],
-                provider=api_key_config.get("provider", "openai"),
-                api_base=api_key_config.get("api_base"),
-                is_omni=api_key_config.get("is_omni", False),
-                temperature=effective_params.get("temperature", 0.7),
-                max_tokens=effective_params.get("max_tokens", 2000),
-                system_prompt=system_prompt,
-                tools=tools,
-                deep_thinking=effective_params.get("deep_thinking", False),
-                thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
-                capability=api_key_config.get("capability", []),
-            )
-
             # 5. 处理会话ID（创建或验证），新会话时写入开场白
             is_new_conversation = not conversation_id
             opening, suggested_questions = None, None
@@ -634,12 +629,46 @@ class AgentRunService:
 
             # 6. 处理多模态文件
             processed_files = None
+            has_doc_with_images = False
             if files:
-                # 获取 provider 信息
                 provider = api_key_config.get("provider", "openai")
                 multimodal_service = MultimodalService(self.db, model_info)
-                processed_files = await multimodal_service.process_files(files)
+                fu_config = features_config.get("file_upload", {})
+                if hasattr(fu_config, "model_dump"):
+                    fu_config = fu_config.model_dump()
+                doc_img_recognition = isinstance(fu_config, dict) and fu_config.get("document_image_recognition", False)
+                processed_files = await multimodal_service.process_files(
+                    files, document_image_recognition=doc_img_recognition,
+                    workspace_id=workspace_id
+                )
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
+                capability = api_key_config.get("capability", [])
+                has_doc_with_images = (
+                    doc_img_recognition
+                    and "vision" in capability
+                    and any(f.type == FileType.DOCUMENT for f in files)
+                )
+            if has_doc_with_images:
+                system_prompt += (
+                    "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: http://...，请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
+                )
+
+            agent = LangChainAgent(
+                model_name=api_key_config["model_name"],
+                api_key=api_key_config["api_key"],
+                provider=api_key_config.get("provider", "openai"),
+                api_base=api_key_config.get("api_base"),
+                is_omni=api_key_config.get("is_omni", False),
+                temperature=effective_params.get("temperature", 0.7),
+                max_tokens=effective_params.get("max_tokens", 2000),
+                system_prompt=system_prompt,
+                tools=tools,
+                deep_thinking=effective_params.get("deep_thinking", False),
+                thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
+                json_output=effective_params.get("json_output", False),
+                capability=api_key_config.get("capability", []),
+            )
+
             # 为需要运行时上下文的工具注入上下文
             for t in tools:
                 if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
@@ -725,7 +754,7 @@ class AgentRunService:
                 ) if not sub_agent else [],
                 "citations": filtered_citations,
                 "audio_url": audio_url,
-                "audio_status": "pending"
+                "audio_status": "pending" if audio_url else None
             }
 
             logger.info(
@@ -839,23 +868,6 @@ class AgentRunService:
                                                                     user_rag_memory_id)
                 tools.extend(memory_tools)
 
-            # 4. 创建 LangChain Agent
-            agent = LangChainAgent(
-                model_name=api_key_config["model_name"],
-                api_key=api_key_config["api_key"],
-                provider=api_key_config.get("provider", "openai"),
-                api_base=api_key_config.get("api_base"),
-                is_omni=api_key_config.get("is_omni", False),
-                temperature=effective_params.get("temperature", 0.7),
-                max_tokens=effective_params.get("max_tokens", 2000),
-                system_prompt=system_prompt,
-                tools=tools,
-                streaming=True,
-                deep_thinking=effective_params.get("deep_thinking", False),
-                thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
-                capability=api_key_config.get("capability", []),
-            )
-
             # 5. 处理会话ID（创建或验证），新会话时写入开场白
             is_new_conversation = not conversation_id
             opening, suggested_questions = None, None
@@ -891,12 +903,48 @@ class AgentRunService:
 
             # 6. 处理多模态文件
             processed_files = None
+            has_doc_with_images = False
             if files:
-                # 获取 provider 信息
                 provider = api_key_config.get("provider", "openai")
                 multimodal_service = MultimodalService(self.db, model_info)
-                processed_files = await multimodal_service.process_files(files)
+                fu_config = features_config.get("file_upload", {})
+                if hasattr(fu_config, "model_dump"):
+                    fu_config = fu_config.model_dump()
+                doc_img_recognition = isinstance(fu_config, dict) and fu_config.get("document_image_recognition", False)
+                processed_files = await multimodal_service.process_files(
+                    files, document_image_recognition=doc_img_recognition,
+                    workspace_id=workspace_id
+                )
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
+                capability = api_key_config.get("capability", [])
+                has_doc_with_images = (
+                    doc_img_recognition
+                    and "vision" in capability
+                    and any(f.type == FileType.DOCUMENT for f in files)
+                )
+            if has_doc_with_images:
+                system_prompt += (
+                    "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: http://...，请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
+                )
+
+            # 创建 LangChain Agent
+            agent = LangChainAgent(
+                model_name=api_key_config["model_name"],
+                api_key=api_key_config["api_key"],
+                provider=api_key_config.get("provider", "openai"),
+                api_base=api_key_config.get("api_base"),
+                is_omni=api_key_config.get("is_omni", False),
+                temperature=effective_params.get("temperature", 0.7),
+                max_tokens=effective_params.get("max_tokens", 2000),
+                system_prompt=system_prompt,
+                tools=tools,
+                streaming=True,
+                deep_thinking=effective_params.get("deep_thinking", False),
+                thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
+                json_output=effective_params.get("json_output", False),
+                capability=api_key_config.get("capability", []),
+            )
+
             # 为需要运行时上下文的工具注入上下文
             for t in tools:
                 if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
@@ -1299,10 +1347,30 @@ class AgentRunService:
                 "history_files": {}
             }
             if files:
+                from app.models.file_metadata_model import FileMetadata
+                local_ids = [f.upload_file_id for f in files
+                             if f.transfer_method.value == "local_file" and f.upload_file_id
+                             and (not f.name or not f.size)]
+                meta_map = {}
+                if local_ids:
+                    rows = self.db.query(FileMetadata).filter(
+                        FileMetadata.id.in_(local_ids),
+                        FileMetadata.status == "completed"
+                    ).all()
+                    meta_map = {str(r.id): r for r in rows}
                 for f in files:
+                    name, size = f.name, f.size
+                    if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
+                        meta = meta_map.get(str(f.upload_file_id))
+                        if meta:
+                            name = name or meta.file_name
+                            size = size or meta.file_size
                     human_meta["files"].append({
                         "type": f.type,
-                        "url": f.url
+                        "url": f.url,
+                        "file_type": f.file_type,
+                        "name": name,
+                        "size": size
                     })
 
             # 保存 history_files，包含 provider 和 is_omni 信息

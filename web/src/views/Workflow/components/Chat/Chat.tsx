@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 18:07:38
+ * @Last Modified time: 2026-04-24 18:13:22
  */
 /**
  * Workflow Chat Component
@@ -41,13 +41,17 @@ import type { ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import Runtime from './Runtime';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
 import { replaceVariables } from '@/views/ApplicationConfig/Agent';
+import { useWorkflowStore } from '@/store/workflow';
 
-const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: WorkflowConfig | null; features?: FeaturesConfigForm }>(({
+const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: WorkflowConfig | null; features?: FeaturesConfigForm }>(({ // eslint-disable-line
   appId, graphRef, features
 }, ref) => {
   const { t } = useTranslation()
   const { message: messageApi } = App.useApp()
+  const { setChatHistory } = useWorkflowStore()
+  const conversationIdRef = useRef<string>('draft')
   const toolbarRef = useRef<ChatToolbarRef>(null)
+  const abortRef = useRef<(() => void) | null>(null)
   const [toolbarReady, setToolbarReady] = useState(false)
   const toolbarCallbackRef = useCallback((node: ChatToolbarRef | null) => {
     (toolbarRef as React.MutableRefObject<ChatToolbarRef | null>).current = node
@@ -61,6 +65,8 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [fileList, setFileList] = useState<any[]>([])
   const [message, setMessage] = useState<string | undefined>(undefined)
+
+  console.log('abortRef', abortRef, chatList)
 
   /**
    * Opens the chat drawer and loads workflow variables from the start node
@@ -113,11 +119,14 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
    * Closes the drawer and resets all state
    */
   const handleClose = () => {
+    abortRef.current?.()
+    abortRef.current = null;
     setOpen(false)
     setToolbarReady(false)
     setChatList([])
     setVariables([])
     setConversationId(null)
+    conversationIdRef.current = 'draft'
     setMessage(undefined)
     toolbarRef.current?.setFiles([])
     toolbarRef.current?.setVariables([])
@@ -176,7 +185,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
      */
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach(item => {
-        const { content, conversation_id, node_id, cycle_id, cycle_idx, input, output, error, elapsed_time, status, citations } = item.data as {
+        const { content, conversation_id, node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status, citations } = item.data as {
           content: string;
           conversation_id: string | null;
           cycle_id: string;
@@ -184,12 +193,13 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
           node_id: string;
           node_name?: string;
           node_type?: string;
+          process?: any;
           input?: any;
           output?: any;
           elapsed_time?: string;
           error?: any;
           state: Record<string, any>;
-          status?: 'completed' | 'failed',
+          status?: 'completed' | 'failed' | 'running',
           citations?: {
             document_id: string;
             file_name: string;
@@ -231,6 +241,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
                     node_name: name,
                     node_type: type,
                     icon,
+                    status: 'running',
                     content: {},
                   }
                 } else {
@@ -240,6 +251,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
                     node_name: name,
                     node_type: type,
                     icon,
+                    status: 'running',
                     content: {},
                   })
                 }
@@ -266,6 +278,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
                     content: {
                       input,
                       output,
+                      process,
                       error,
                     },
                     status: status || 'completed',
@@ -294,13 +307,14 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
                     cycle_id,
                     cycle_idx,
                     node_id,
-                    node_name: name,
+                    node_name: type === 'cycle-start' ? t('workflow.cycle-start') : name,
                     node_type: type,
                     icon,
                     content: {
                       cycle_idx,
                       input,
                       output,
+                      process,
                       error,
                     },
                     status: status || 'completed',
@@ -344,6 +358,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
         }
 
         if (conversation_id && conversationId !== conversation_id) {
+          conversationIdRef.current = conversation_id
           setConversationId(conversation_id)
         }
       })
@@ -388,7 +403,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
     ])
     setLoading(true)
     setStreamLoading(true)
-    draftRun(appId, data, handleStreamMessage)
+    draftRun(appId, data, handleStreamMessage, abort => { abortRef.current = abort })
       .catch((error) => {
         const errorInfo = JSON.parse(error.message)
         setChatList(prev => {
@@ -439,6 +454,10 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
       })
     }
   }, [chatList.length, features?.opening_statement, variables])
+
+  useEffect(() => {
+    setChatHistory(conversationIdRef.current, chatList)
+  }, [chatList])
 
   return (
     <RbDrawer

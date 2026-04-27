@@ -14,8 +14,8 @@ export const createPromptSessions = () => {
   return request.post(`/prompt/sessions`)
 }
 // Get prompt optimization
-export const updatePromptMessages = (session_id: string, data: AiPromptForm, onMessage?: (data: SSEMessage[]) => void) => {
-  return handleSSE(`/prompt/sessions/${session_id}/messages`, data, onMessage)
+export const updatePromptMessages = (session_id: string, data: AiPromptForm, onMessage?: (data: SSEMessage[]) => void, config?: any, onAbort?: (abort: () => void) => void) => {
+  return handleSSE(`/prompt/sessions/${session_id}/messages`, data, onMessage, config, onAbort)
 }
 // Prompt release list
 export const getPromptReleaseListUrl = '/prompt/releases/list'

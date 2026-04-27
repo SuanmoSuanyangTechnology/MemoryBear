@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 import uuid
 
 from app.aioRedis import aio_redis_set, aio_redis_get, aio_redis_delete
+from app.models import Workspace
 from app.models.user_model import User
 from app.repositories import user_repository
 from app.schemas.user_schema import UserCreate
@@ -74,7 +75,7 @@ def create_initial_superuser(db: Session):
         )
 
 
-def create_user(db: Session, user: UserCreate) -> User:
+def create_user(db: Session, user: UserCreate, workspace: Workspace) -> User:
     business_logger.info(f"创建用户: {user.username}, email: {user.email}")
     
     try:
@@ -93,24 +94,9 @@ def create_user(db: Session, user: UserCreate) -> User:
         business_logger.debug(f"开始创建用户: {user.username}")
         hashed_password = get_password_hash(user.password)
         
-        # 获取默认租户（第一个活跃租户）
-        from app.repositories.tenant_repository import TenantRepository
-        tenant_repo = TenantRepository(db)
-        tenants = tenant_repo.get_tenants(skip=0, limit=1, is_active=True)
-        
-        if not tenants:
-            business_logger.error("系统中没有可用的租户")
-            raise BusinessException(
-                "系统配置错误：没有可用的租户", 
-                code=BizCode.TENANT_NOT_FOUND,
-                context={"username": user.username, "email": user.email}
-            )
-        
-        default_tenant = tenants[0]
-        
         new_user = user_repository.create_user(
             db=db, user=user, hashed_password=hashed_password, 
-            tenant_id=default_tenant.id, is_superuser=False
+            tenant_id=workspace.tenant_id, is_superuser=False
         )
 
         db.commit()
@@ -285,7 +271,7 @@ def activate_user(db: Session, user_id_to_activate: uuid.UUID, current_user: Use
     try:
         # 查找用户
         business_logger.debug(f"查找待激活用户: {user_id_to_activate}")
-        db_user = user_repository.get_user_by_id(db, user_id=user_id_to_activate)
+        db_user = user_repository.get_user_by_id_regardless_active(db, user_id=user_id_to_activate)
         if not db_user:
             business_logger.warning(f"用户不存在: {user_id_to_activate}")
             raise BusinessException("用户不存在", code=BizCode.USER_NOT_FOUND)

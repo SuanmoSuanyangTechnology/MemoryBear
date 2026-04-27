@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:56:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 15:43:29
+ * @Last Modified time: 2026-04-14 16:59:16
  */
 /**
  * Emotion Engine Configuration Page
@@ -25,6 +25,7 @@ import DescWrapper from '@/components/FormItem/DescWrapper'
 import RbSlider from '@/components/RbSlider';
 import RbAlert from '@/components/RbAlert';
 import ModelSelect from '@/components/ModelSelect';
+import { useI18n } from '@/store/locale'
 
 /**
  * Configuration field definitions
@@ -69,8 +70,13 @@ const EmotionEngine: React.FC = () => {
   const [form] = Form.useForm<ConfigForm>();
   const { message: messageApi } = App.useApp();
   const [loading, setLoading] = useState(false)
+  const { language } = useI18n()
 
   const values = Form.useWatch([], form);
+
+  useEffect(() => {
+    document.title = [document.title.split(' - ')[0], t('memoryBear')].join(' - ')
+  }, [language])
 
   useEffect(() => {
     getConfigData()

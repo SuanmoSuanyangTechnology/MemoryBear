@@ -157,7 +157,7 @@ const ToolList: FC<ToolListProps> = ({value, onChange}) => {
     <Card
       title={t('application.toolConfiguration')}
       extra={
-        <Button className="rb:h-6! rb:py-0! rb:px-2! rb:rounded-md! rb:text-[#21233" onClick={handleAddTool}>+ {t('application.addTool')}</Button>
+        <Button className="rb:h-6! rb:py-0! rb:px-2! rb:rounded-md! rb:text-[#212332]" onClick={handleAddTool}>+ {t('application.addTool')}</Button>
       }
     >
       {toolList.length === 0

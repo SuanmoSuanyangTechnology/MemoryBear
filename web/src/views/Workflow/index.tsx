@@ -39,6 +39,10 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
     handleSaveFeaturesConfig,
     features,
     getStartNodeVariables,
+    canUndo,
+    canRedo,
+    undo,
+    redo,
   } = useWorkflowGraph({ containerRef, miniMapRef, onFeaturesLoad });
 
   const onDragOver = (event: React.DragEvent) => {
@@ -96,6 +100,10 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
           setIsHandMode={setIsHandMode}
           zoomLevel={zoomLevel}
           addNotes={handleAddNotes}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onUndo={undo}
+          onRedo={redo}
         />
       </div>
       

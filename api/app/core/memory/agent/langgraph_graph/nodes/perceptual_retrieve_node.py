@@ -15,7 +15,7 @@ from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.utils.llm_tools import ReadState
 from app.core.memory.utils.data.text_utils import escape_lucene_query
 from app.repositories.neo4j.graph_search import (
-    search_perceptual,
+    search_perceptual_by_fulltext,
     search_perceptual_by_embedding,
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -152,7 +152,7 @@ class PerceptualSearchService:
         if not escaped.strip():
             return []
         try:
-            r = await search_perceptual(
+            r = await search_perceptual_by_fulltext(
                 connector=connector, query=escaped,
                 end_user_id=self.end_user_id,
                 limit=limit * 5,  # 多查一些以提高命中率
@@ -177,7 +177,7 @@ class PerceptualSearchService:
             escaped = escape_lucene_query(kw)
             if not escaped.strip():
                 return []
-            r = await search_perceptual(
+            r = await search_perceptual_by_fulltext(
                 connector=connector, query=escaped,
                 end_user_id=self.end_user_id, limit=limit,
             )

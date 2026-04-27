@@ -17,8 +17,9 @@ from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.validator import validate_workflow_config
 from app.db import get_db
+from sqlalchemy import select
 from app.models import App
-from app.models.workflow_model import WorkflowConfig, WorkflowExecution
+from app.models.workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution
 from app.repositories import knowledge_repository
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
@@ -694,7 +695,8 @@ class WorkflowService:
             "nodes": config.nodes,
             "edges": config.edges,
             "variables": config.variables,
-            "execution_config": config.execution_config
+            "execution_config": config.execution_config,
+            "features": feature_configs
         }
 
         try:
@@ -772,9 +774,16 @@ class WorkflowService:
                 # 过滤 citations
                 citations = result.get("citations", [])
                 citation_cfg = feature_configs.get("citation", {})
-                filtered_citations = (
-                    citations if isinstance(citation_cfg, dict) and citation_cfg.get("enabled") else []
-                )
+                if isinstance(citation_cfg, dict) and citation_cfg.get("enabled"):
+                    allow_download = citation_cfg.get("allow_download", False)
+                    if allow_download:
+                        from app.core.config import settings
+                        for c in citations:
+                            if c.get("document_id"):
+                                c["download_url"] = f"{settings.FILE_LOCAL_SERVER_URL}/apps/citations/{c['document_id']}/download"
+                    filtered_citations = citations
+                else:
+                    filtered_citations = []
                 assistant_meta = {"usage": token_usage, "audio_url": None}
                 if filtered_citations:
                     assistant_meta["citations"] = filtered_citations
@@ -894,7 +903,8 @@ class WorkflowService:
             "nodes": config.nodes,
             "edges": config.edges,
             "variables": config.variables,
-            "execution_config": config.execution_config
+            "execution_config": config.execution_config,
+            "features": feature_configs
         }
 
         try:
@@ -909,6 +919,7 @@ class WorkflowService:
                 input_data["conv_messages"] = conv_messages
             init_message_length = len(input_data.get("conv_messages", []))
             message_id = uuid.uuid4()
+            _cycle_items: dict[str, list] = {}
 
             # 新会话时写入开场白
             is_new_conversation = init_message_length == 0
@@ -939,6 +950,15 @@ class WorkflowService:
                     memory_storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id
             ):
+                event_type = event.get("event")
+                event_data = event.get("data", {})
+
+                if event_type == "cycle_item":
+                    cycle_id = event_data.get("cycle_id")
+                    if cycle_id not in _cycle_items:
+                        _cycle_items[cycle_id] = []
+                    _cycle_items[cycle_id].append(event_data)
+
                 if event.get("event") == "workflow_end":
                     status = event.get("data", {}).get("status")
                     token_usage = event.get("data", {}).get("token_usage", {}) or {}
@@ -957,7 +977,10 @@ class WorkflowService:
                                     for file in message["content"]:
                                         human_meta["files"].append({
                                             "type": file.get("type"),
-                                            "url": file.get("url")
+                                            "url": file.get("url"),
+                                            "file_type": file.get("origin_file_type"),
+                                            "name": file.get("name"),
+                                            "size": file.get("size")
                                         })
                             if message["role"] == "assistant":
                                 assistant_message = message["content"]
@@ -970,9 +993,16 @@ class WorkflowService:
                         # 过滤 citations
                         citations = event.get("data", {}).get("citations", [])
                         citation_cfg = feature_configs.get("citation", {})
-                        filtered_citations = (
-                            citations if isinstance(citation_cfg, dict) and citation_cfg.get("enabled") else []
-                        )
+                        if isinstance(citation_cfg, dict) and citation_cfg.get("enabled"):
+                            allow_download = citation_cfg.get("allow_download", False)
+                            if allow_download:
+                                from app.core.config import settings
+                                for c in citations:
+                                    if c.get("document_id"):
+                                        c["download_url"] = f"{settings.FILE_LOCAL_SERVER_URL}/apps/citations/{c['document_id']}/download"
+                            filtered_citations = citations
+                        else:
+                            filtered_citations = []
                         assistant_meta = {"usage": token_usage, "audio_url": None}
                         if filtered_citations:
                             assistant_meta["citations"] = filtered_citations
@@ -1000,6 +1030,18 @@ class WorkflowService:
                         )
                     else:
                         logger.error(f"unexpect workflow run status, status: {status}")
+                    # 把积累的 cycle_item 写入 workflow_executions.output_data["node_outputs"]
+                    if _cycle_items and execution.output_data:
+                        import copy
+                        new_output_data = copy.deepcopy(execution.output_data)
+                        node_outputs = new_output_data.setdefault("node_outputs", {})
+                        for cycle_node_id, items in _cycle_items.items():
+                            if cycle_node_id in node_outputs:
+                                node_outputs[cycle_node_id]["cycle_items"] = items
+                            else:
+                                node_outputs[cycle_node_id] = {"cycle_items": items}
+                        execution.output_data = new_output_data
+                        self.db.commit()
                 elif event.get("event") == "workflow_start":
                     event["data"]["message_id"] = str(message_id)
                 event = self._emit(public, event)

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:00:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 15:47:37
+ * @Last Modified time: 2026-04-14 16:54:38
  */
 /**
  * Forgetting Engine Configuration Page
@@ -22,6 +22,7 @@ import type { ConfigForm } from './types'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import RbSlider from '@/components/RbSlider';
 import DescWrapper from '@/components/FormItem/DescWrapper'
+import { useI18n } from '@/store/locale'
 
 /**
  * Configuration field definitions
@@ -109,8 +110,13 @@ const ForgettingEngine: React.FC = () => {
   const [form] = Form.useForm<ConfigForm>();
   const { message: messageApi } = App.useApp();
   const [loading, setLoading] = useState(false)
+  const { language } = useI18n()
 
   const values = Form.useWatch([], form);
+
+  useEffect(() => {
+    document.title = [document.title.split(' - ')[0], t('memoryBear')].join(' - ')
+  }, [language])
 
   useEffect(() => {
     getConfigData()
@@ -182,6 +188,7 @@ const ForgettingEngine: React.FC = () => {
                 if (config.type === 'button') {
                   return (
                     <SwitchFormItem
+                      key={config.key}
                       title={t(`forgettingEngine.${config.key}`)}
                       name={config.name}
                       desc={config.type && <span>{t(`forgettingEngine.type`)}: {config.type}</span>}

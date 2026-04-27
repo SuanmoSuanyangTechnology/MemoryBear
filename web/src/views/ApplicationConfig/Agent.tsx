@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom';
-import { Row, Col, Space, Form, Input, Button, App, Spin, Flex } from 'antd'
+import { Row, Col, Space, Form, Input, Button, App, Flex } from 'antd'
 
 import Chat from './components/Chat'
 import RbCard from '@/components/RbCard/Card'
@@ -62,7 +62,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   const { id } = useParams();
   const { message } = App.useApp()
   const [form] = Form.useForm()
-  const [loading, setLoading] = useState(false)
   const [data, setData] = useState<Config | null>(null);
   const modelConfigModalRef = useRef<ModelConfigModalRef>(null)
   const [modelList, setModelList] = useState<Model[]>([])
@@ -94,7 +93,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
    * Fetch agent configuration data
    */
   const getData = () => {
-    setLoading(true)
     getApplicationConfig(id as string).then(res => {
       const response = res as Config
       const { skills, variables } = response
@@ -127,8 +125,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
         tools: allTools
       })
       onFeaturesLoad?.(response.features)
-    }).finally(() => {
-      setLoading(false)
     })
   }
 
@@ -361,21 +357,23 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
     const { statement = '' } = value?.opening_statement || {}
     onFeaturesLoad?.(value)
 
-    const usedVars = [...new Set([...(statement?.matchAll(/\{\{(\w+)\}\}/g) ?? [])].map(m => m[1]))]
-    const variables = values?.variables
-    const validNames = new Set(variables.map(v => v.name))
-    const invalid = usedVars.filter(v => !validNames.has(v))
-    if (invalid.length > 0) {
-      const newVars = invalid.map((name, i) => ({
-        index: variables.length + i,
-        name,
-        display_name: name,
-        type: 'text',
-        required: true,
-        max_length: 48,
-      }))
+    if (value?.opening_statement?.enabled) {
+      const usedVars = [...new Set([...(statement?.matchAll(/\{\{(\w+)\}\}/g) ?? [])].map(m => m[1]))]
+      const variables = values?.variables
+      const validNames = new Set(variables.map(v => v.name))
+      const invalid = usedVars.filter(v => !validNames.has(v))
+      if (invalid.length > 0) {
+        const newVars = invalid.map((name, i) => ({
+          index: variables.length + i,
+          name,
+          display_name: name,
+          type: 'text',
+          required: true,
+          max_length: 48,
+        }))
 
-      form.setFieldValue('variables', [...variables, ...newVars])
+        form.setFieldValue('variables', [...variables, ...newVars])
+      }
     }
   }
   const modelLogo = useMemo(() => {
@@ -421,7 +419,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   console.log('agent values', values)
   return (
     <>
-      {loading && <Spin fullscreen></Spin>}
       <Row className="rb:h-full!" gutter={12}>
         <Col span={12} className="rb:h-full!">
           <Form form={form}>

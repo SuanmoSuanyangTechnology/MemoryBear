@@ -1,6 +1,7 @@
 import json
 import os
 
+from app.celery_task_scheduler import scheduler
 from app.core.logging_config import get_agent_logger
 from app.core.memory.agent.langgraph_graph.tools.write_tool import format_parsing, messages_parse
 from app.core.memory.agent.models.write_aggregate_model import WriteAggregateModel
@@ -12,8 +13,6 @@ from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.repositories.memory_short_repository import LongTermMemoryRepository
 from app.schemas.memory_agent_schema import AgentMemory_Long_Term
-from app.services.task_service import get_task_memory_write_result
-from app.tasks import write_message_task
 from app.utils.config_utils import resolve_config_id
 
 logger = get_agent_logger(__name__)
@@ -86,16 +85,28 @@ async def write(
 
         logger.info(
             f"[WRITE] Submitting Celery task - user={actual_end_user_id}, messages={len(structured_messages)}, config={actual_config_id}")
-        write_id = write_message_task.delay(
-            actual_end_user_id,  # end_user_id: User ID
-            structured_messages,  # message: JSON string format message list
-            str(actual_config_id),  # config_id: Configuration ID string
-            storage_type,  # storage_type: "neo4j"
-            user_rag_memory_id or ""  # user_rag_memory_id: RAG memory ID (not used in Neo4j mode)
+        # write_id = write_message_task.delay(
+        #     actual_end_user_id,  # end_user_id: User ID
+        #     structured_messages,  # message: JSON string format message list
+        #     str(actual_config_id),  # config_id: Configuration ID string
+        #     storage_type,  # storage_type: "neo4j"
+        #     user_rag_memory_id or ""  # user_rag_memory_id: RAG memory ID (not used in Neo4j mode)
+        # )
+        scheduler.push_task(
+            "app.core.memory.agent.write_message",
+            str(actual_end_user_id),
+            {
+                "end_user_id": str(actual_end_user_id),
+                "message": structured_messages,
+                "config_id": str(actual_config_id),
+                "storage_type": storage_type,
+                "user_rag_memory_id": user_rag_memory_id or ""
+            }
         )
-        logger.info(f"[WRITE] Celery task submitted - task_id={write_id}")
-        write_status = get_task_memory_write_result(str(write_id))
-        logger.info(f'[WRITE] Task result - user={actual_end_user_id}, status={write_status}')
+
+        # logger.info(f"[WRITE] Celery task submitted - task_id={write_id}")
+        # write_status = get_task_memory_write_result(str(write_id))
+        # logger.info(f'[WRITE] Task result - user={actual_end_user_id}')
 
 
 async def term_memory_save(end_user_id, strategy_type, scope):
@@ -164,13 +175,24 @@ async def window_dialogue(end_user_id, langchain_messages, memory_config, scope)
         else:
             config_id = memory_config
 
-        write_message_task.delay(
-            end_user_id,  # end_user_id: User ID
-            redis_messages,  # message: JSON string format message list
-            config_id,  # config_id: Configuration ID string
-            AgentMemory_Long_Term.STORAGE_NEO4J,  # storage_type: "neo4j"
-            ""  # user_rag_memory_id: RAG memory ID (not used in Neo4j mode)
+        scheduler.push_task(
+            "app.core.memory.agent.write_message",
+            str(end_user_id),
+            {
+                "end_user_id": str(end_user_id),
+                "message": redis_messages,
+                "config_id": str(config_id),
+                "storage_type": AgentMemory_Long_Term.STORAGE_NEO4J,
+                "user_rag_memory_id": ""
+            }
         )
+        # write_message_task.delay(
+        #     end_user_id,  # end_user_id: User ID
+        #     redis_messages,  # message: JSON string format message list
+        #     config_id,  # config_id: Configuration ID string
+        #     AgentMemory_Long_Term.STORAGE_NEO4J,  # storage_type: "neo4j"
+        #     ""  # user_rag_memory_id: RAG memory ID (not used in Neo4j mode)
+        # )
         count_store.update_sessions_count(end_user_id, 0, [])
 
 

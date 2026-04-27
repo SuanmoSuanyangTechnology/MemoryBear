@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:33:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 14:56:00
+ * @Last Modified time: 2026-04-14 16:17:29
  */
 /**
  * Memory Management Page
@@ -74,7 +74,8 @@ const MemoryManagement: React.FC = () => {
   };
 
   /** Navigate to engine configuration page */
-  const handleClick = (id: number, type: string) => {
+  const handleClick = (id: number, type: string, config_name: string) => {
+    document.title = `${config_name} - ${t('memoryBear')}`;
     switch (type) {
       case 'memoryExtractionEngine':
         navigate(`/memory-extraction-engine/${id}`)
@@ -130,7 +131,7 @@ const MemoryManagement: React.FC = () => {
                         align="center"
                         justify="space-between"
                         className="rb:cursor-pointer rb:bg-[#F6F6F6] rb:h-8 rb:rounded-lg rb:font-medium rb:leading-5 rb:pl-2! rb:pr-1! rb:hover:shadow-[0px_2px_8px_0px_rgba(23,23,25,0.16)]"
-                        onClick={() => handleClick(item.config_id, key)}
+                        onClick={() => handleClick(item.config_id, key, item.config_name)}
                       >
                         {t(`memory.${key}`)}
                         <div

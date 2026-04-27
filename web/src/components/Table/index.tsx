@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:29:46 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 14:52:23
+ * @Last Modified time: 2026-04-14 17:55:15
  */
 /**
  * RbTable Component
@@ -27,7 +27,7 @@ import { useTranslation } from 'react-i18next';
 import { request } from '@/utils/request';
 import Empty from '@/components/Empty';
 
-interface TablePaginationConfig { pagesize: number; page: number; }
+interface TablePaginationConfig { pagesize?: number; page?: number; }
 
 /** Props interface for Table component */
 interface TableComponentProps<T = Record<string, unknown>, Q = Record<string, unknown>> extends Omit<TableProps<T>, 'pagination'> {
@@ -102,7 +102,7 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
   const [loading, setLoading] = useState(false)
   const [currentPagination, setCurrentPagination] = useState({
     page: 1,
-    pagesize: 20,
+    pagesize: typeof pagination === 'object' ? (pagination.pagesize || 20) : 20,
   });
   const [total, setTotal] = useState(0);
 

@@ -11,12 +11,14 @@ interface MappingListProps {
   options: Suggestion[];
   extra?: ReactNode;
   valueKey?: string;
+  isNeedType?: boolean;
 }
-const MappingList: FC<MappingListProps> = ({ label, name, options, extra, valueKey = 'value' }) => {
+const MappingList: FC<MappingListProps> = ({ label, name: listName, options, extra, valueKey = 'value', isNeedType = false }) => {
   const { t } = useTranslation()
+  const form = Form.useFormInstance()
   return (
     <>
-      <Form.List name={name}>
+      <Form.List name={listName}>
         {(fields, { add, remove }) => (
           <>
             <Flex align="center" justify="space-between" className="rb:mb-2!">
@@ -58,9 +60,14 @@ const MappingList: FC<MappingListProps> = ({ label, name, options, extra, valueK
                       placeholder={t('common.pleaseSelect')}
                       options={options}
                       size="small"
-                      className="rb:w-51!"
+                      className="rb:flex-1!"
+                      onChange={isNeedType ? (_val, option) => {
+                        const dataType = (option as Suggestion | undefined)?.dataType
+                        form.setFieldValue([listName, name, 'type'], dataType)
+                      } : undefined}
                     />
                   </Form.Item>
+                  {isNeedType && <Form.Item name={[name, 'type']} hidden />}
                   <div
                     className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/workflow/deleteBg.svg')] rb:hover:bg-[url('@/assets/images/workflow/deleteBg_hover.svg')]"
                     onClick={() => remove(name)}

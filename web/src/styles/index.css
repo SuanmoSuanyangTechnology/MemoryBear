@@ -353,6 +353,26 @@ body {
   background-color: transparent;
   border: none;
 }
+.cm-editor-filled {
+  background: #F6F6F6;
+  border-radius: 8px;
+}
+.cm-editor-filled .ͼ1 .cm-lineNumbers .cm-gutterElement {
+  border-radius: 8px 0 0 8px;
+}
+.cm-editor-filled .ͼ4 .cm-line {
+  border-radius: 0 8px 8px 0;
+}
+.cm-editor-filled .ͼ2 .cm-activeLineGutter,
+.cm-editor-filled .ͼ2 .cm-activeLine {
+  background: transparent;
+}
+.cm-editor-filled .ͼ1 .cm-placeholder {
+  color: rgba(23, 23, 25, 0.25);
+}
+.cm-editor-filled .ͼ1 .cm-lineNumbers .cm-gutterElement {
+  color: #212332;
+}
 ::-webkit-scrollbar {
   width: 6px;
   height: 8px;
@@ -424,3 +444,27 @@ body {
 .ͼ1.cm-focused {
   outline: none;
 }
+.pageTabs.ant-segmented {
+  padding: 4px;
+  margin-left: 4px;
+}
+
+.pageTabs.ant-segmented .ant-segmented-item-label {
+  line-height: 24px;
+  min-height: 24px;
+  padding: 0 12px;
+}
+
+.pageTabs.ant-segmented .ant-segmented-item-selected {
+  box-shadow: 0px 2px 4px 0px rgba(33, 35, 50, 0.16);
+}
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px transparent inset !important;
+  transition: background-color 5000s ease-in-out 0s !important;
+  animation-name: onAutoFillStart;
+  animation-duration: 1ms;
+}
+@keyframes onAutoFillStart { from {} to {} }

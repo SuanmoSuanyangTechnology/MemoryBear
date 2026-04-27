@@ -93,7 +93,8 @@
     "typescript-eslint": "^8.45.0",
     "unplugin-auto-import": "^20.2.0",
     "unplugin-vue-components": "^29.1.0",
-    "vite": "npm:rolldown-vite@7.1.14"
+    "vite": "npm:rolldown-vite@7.1.14",
+    "vite-plugin-svgr": "^5.2.0"
   },
   "overrides": {
     "vite": "npm:rolldown-vite@7.1.14"

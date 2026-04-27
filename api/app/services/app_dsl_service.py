@@ -14,12 +14,14 @@ from app.models.app_model import App, AppType
 from app.models.appshare_model import AppShare
 from app.models.app_release_model import AppRelease
 from app.models.knowledge_model import Knowledge
+from app.models.knowledgeshare_model import KnowledgeShare
 from app.models.models_model import ModelConfig
 from app.models.tool_model import ToolConfig as ToolConfigModel
 from app.models.skill_model import Skill
 from app.models.workflow_model import WorkflowConfig
 from app.services.workflow_service import WorkflowService
 from app.core.workflow.adapters.memory_bear.memory_bear_adapter import MemoryBearAdapter
+from app.core.workflow.nodes.enums import NodeType
 from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
 
 
@@ -73,15 +75,14 @@ class AppDslService:
             AppType.MULTI_AGENT: "multi_agent_config",
             AppType.WORKFLOW: "workflow"
         }.get(app.type, "config")
-        config_data = self._enrich_release_config(app.type, release.config or {})
+        config_data = self._enrich_release_config(app.type, release.config or {}, release.default_model_config_id)
         dsl = {**meta, "app": app_meta, config_key: config_data}
         return yaml.dump(dsl, default_flow_style=False, allow_unicode=True), f"{release.name}_v{release.version_name}.yaml"
 
-    def _enrich_release_config(self, app_type: str, cfg: dict) -> dict:
+    def _enrich_release_config(self, app_type: str, cfg: dict, default_model_config_id=None) -> dict:
         if app_type == AppType.AGENT:
             enriched = {**cfg}
-            if "default_model_config_id" in cfg:
-                enriched["default_model_config_ref"] = self._model_ref(cfg["default_model_config_id"])
+            enriched["default_model_config_ref"] = self._model_ref(default_model_config_id)
             if "knowledge_retrieval" in cfg:
                 enriched["knowledge_retrieval"] = self._enrich_knowledge_retrieval(cfg["knowledge_retrieval"])
             if "tools" in cfg:
@@ -91,8 +92,7 @@ class AppDslService:
             return enriched
         if app_type == AppType.MULTI_AGENT:
             enriched = {**cfg}
-            if "default_model_config_id" in cfg:
-                enriched["default_model_config_ref"] = self._model_ref(cfg["default_model_config_id"])
+            enriched["default_model_config_ref"] = self._model_ref(default_model_config_id)
             if "master_agent_id" in cfg:
                 enriched["master_agent_ref"] = self._release_ref(cfg["master_agent_id"])
             if "sub_agents" in cfg:
@@ -229,8 +229,11 @@ class AppDslService:
         workspace_id: uuid.UUID,
         tenant_id: uuid.UUID,
         user_id: uuid.UUID,
+        app_id: Optional[uuid.UUID] = None,
     ) -> tuple[App, list[str]]:
-        """解析 DSL，创建应用及配置，返回 (new_app, warnings)"""
+        """解析 DSL，创建或覆盖应用配置，返回 (app, warnings)。
+        app_id 不为空时：校验类型一致后覆盖配置；为空时创建新应用。
+        """
         app_meta = dsl.get("app", {})
         app_type = app_meta.get("type")
         if app_type not in (AppType.AGENT, AppType.MULTI_AGENT, AppType.WORKFLOW):
@@ -238,6 +241,9 @@ class AppDslService:
 
         warnings: list[str] = []
         now = datetime.datetime.now()
+
+        if app_id is not None:
+            return self._overwrite_dsl(dsl, app_id, app_type, workspace_id, tenant_id, warnings, now)
 
         new_app = App(
             id=uuid.uuid4(),
@@ -258,11 +264,57 @@ class AppDslService:
         self.db.add(new_app)
         self.db.flush()
 
+        self._write_config(new_app.id, app_type, dsl, workspace_id, tenant_id, warnings, now, create=True)
+
+        self.db.commit()
+        self.db.refresh(new_app)
+        return new_app, warnings
+
+    def _overwrite_dsl(
+        self,
+        dsl: dict,
+        app_id: uuid.UUID,
+        app_type: str,
+        workspace_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        warnings: list,
+        now: datetime.datetime,
+    ) -> tuple[App, list[str]]:
+        """覆盖已有应用的配置，类型不一致时抛出异常"""
+        app = self.db.query(App).filter(
+            App.id == app_id,
+            App.workspace_id == workspace_id,
+            App.is_active.is_(True)
+        ).first()
+        if not app:
+            raise ResourceNotFoundException("应用", str(app_id))
+        if app.type != app_type:
+            raise BusinessException(
+                f"YAML 类型 '{app_type}' 与应用类型 '{app.type}' 不一致，无法导入",
+                BizCode.BAD_REQUEST
+            )
+
+        self._write_config(app_id, app_type, dsl, workspace_id, tenant_id, warnings, now, create=False)
+
+        self.db.commit()
+        self.db.refresh(app)
+        return app, warnings
+
+    def _write_config(
+        self,
+        app_id: uuid.UUID,
+        app_type: str,
+        dsl: dict,
+        workspace_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        warnings: list,
+        now: datetime.datetime,
+        create: bool,
+    ) -> None:
+        """写入（新建或覆盖）应用配置"""
         if app_type == AppType.AGENT:
             cfg = dsl.get("agent_config") or {}
-            self.db.add(AgentConfig(
-                id=uuid.uuid4(),
-                app_id=new_app.id,
+            fields = dict(
                 system_prompt=cfg.get("system_prompt"),
                 model_parameters=cfg.get("model_parameters"),
                 default_model_config_id=self._resolve_model(cfg.get("default_model_config_ref"), tenant_id, warnings),
@@ -272,16 +324,21 @@ class AppDslService:
                 tools=self._resolve_tools(cfg.get("tools", []), tenant_id, warnings),
                 skills=self._resolve_skills(cfg.get("skills", {}), tenant_id, warnings),
                 features=cfg.get("features", {}),
-                is_active=True,
-                created_at=now,
                 updated_at=now,
-            ))
+            )
+            if create:
+                self.db.add(AgentConfig(id=uuid.uuid4(), app_id=app_id, is_active=True, created_at=now, **fields))
+            else:
+                existing = self.db.query(AgentConfig).filter(AgentConfig.app_id == app_id).first()
+                if existing:
+                    for k, v in fields.items():
+                        setattr(existing, k, v)
+                else:
+                    self.db.add(AgentConfig(id=uuid.uuid4(), app_id=app_id, is_active=True, created_at=now, **fields))
 
         elif app_type == AppType.MULTI_AGENT:
             cfg = dsl.get("multi_agent_config") or {}
-            self.db.add(MultiAgentConfig(
-                id=uuid.uuid4(),
-                app_id=new_app.id,
+            fields = dict(
                 orchestration_mode=cfg.get("orchestration_mode", "collaboration"),
                 master_agent_name=cfg.get("master_agent_name"),
                 model_parameters=cfg.get("model_parameters"),
@@ -291,13 +348,24 @@ class AppDslService:
                 routing_rules=self._resolve_routing_rules(cfg.get("routing_rules"), warnings),
                 execution_config=cfg.get("execution_config", {}),
                 aggregation_strategy=cfg.get("aggregation_strategy", "merge"),
-                is_active=True,
-                created_at=now,
                 updated_at=now,
-            ))
+            )
+            if create:
+                self.db.add(MultiAgentConfig(id=uuid.uuid4(), app_id=app_id, is_active=True, created_at=now, **fields))
+            else:
+                existing = self.db.query(MultiAgentConfig).filter(MultiAgentConfig.app_id == app_id).first()
+                if existing:
+                    for k, v in fields.items():
+                        setattr(existing, k, v)
+                else:
+                    self.db.add(MultiAgentConfig(id=uuid.uuid4(), app_id=app_id, is_active=True, created_at=now, **fields))
 
         elif app_type == AppType.WORKFLOW:
-            adapter = MemoryBearAdapter(dsl)
+            raw_wf = dsl.get("workflow") or {}
+            raw_nodes = raw_wf.get("nodes") or []
+            resolved_nodes = self._resolve_workflow_nodes(raw_nodes, tenant_id, workspace_id, warnings)
+            resolved_dsl = {**dsl, "workflow": {**raw_wf, "nodes": resolved_nodes}}
+            adapter = MemoryBearAdapter(resolved_dsl)
             if not adapter.validate_config():
                 raise BusinessException("工作流配置格式无效", BizCode.BAD_REQUEST)
             result = adapter.parse_workflow()
@@ -305,21 +373,39 @@ class AppDslService:
                 warnings.append(f"[节点错误] {e.node_name or e.node_id}: {e.detail}")
             for w in result.warnings:
                 warnings.append(f"[节点警告] {w.node_name or w.node_id}: {w.detail}")
-            wf = dsl.get("workflow") or {}
-            WorkflowService(self.db).create_workflow_config(
-                app_id=new_app.id,
-                nodes=[n.model_dump() for n in result.nodes],
-                edges=[e.model_dump() for e in result.edges],
-                variables=[v.model_dump() for v in result.variables],
-                execution_config=wf.get("execution_config", {}),
-                features=wf.get("features", {}),
-                triggers=wf.get("triggers", []),
-                validate=False,
-            )
-
-        self.db.commit()
-        self.db.refresh(new_app)
-        return new_app, warnings
+            wf_service = WorkflowService(self.db)
+            if create:
+                wf_service.create_workflow_config(
+                    app_id=app_id,
+                    nodes=[n.model_dump() for n in result.nodes],
+                    edges=[e.model_dump() for e in result.edges],
+                    variables=[v.model_dump() for v in result.variables],
+                    execution_config=raw_wf.get("execution_config", {}),
+                    features=raw_wf.get("features", {}),
+                    triggers=raw_wf.get("triggers", []),
+                    validate=False,
+                )
+            else:
+                existing = self.db.query(WorkflowConfig).filter(WorkflowConfig.app_id == app_id).first()
+                if existing:
+                    existing.nodes = [n.model_dump() for n in result.nodes]
+                    existing.edges = [e.model_dump() for e in result.edges]
+                    existing.variables = [v.model_dump() for v in result.variables]
+                    existing.execution_config = raw_wf.get("execution_config", {})
+                    existing.features = raw_wf.get("features", {})
+                    existing.triggers = raw_wf.get("triggers", [])
+                    existing.updated_at = now
+                else:
+                    wf_service.create_workflow_config(
+                        app_id=app_id,
+                        nodes=[n.model_dump() for n in result.nodes],
+                        edges=[e.model_dump() for e in result.edges],
+                        variables=[v.model_dump() for v in result.variables],
+                        execution_config=raw_wf.get("execution_config", {}),
+                        features=raw_wf.get("features", {}),
+                        triggers=raw_wf.get("triggers", []),
+                        validate=False,
+                    )
 
     def _unique_app_name(self, name: str, workspace_id: uuid.UUID, app_type: AppType) -> str:
         """生成唯一应用名称，同时检查本空间自有应用和共享到本空间的应用"""
@@ -348,44 +434,98 @@ class AppDslService:
     def _resolve_model(self, ref: Optional[dict], tenant_id: uuid.UUID, warnings: list) -> Optional[uuid.UUID]:
         if not ref:
             return None
-        q = self.db.query(ModelConfig).filter(
-            ModelConfig.tenant_id == tenant_id,
-            ModelConfig.name == ref.get("name"),
-            ModelConfig.is_active.is_(True)
-        )
-        if ref.get("provider"):
-            q = q.filter(ModelConfig.provider == ref["provider"])
-        if ref.get("type"):
-            q = q.filter(ModelConfig.type == ref["type"])
-        m = q.first()
-        if not m:
-            warnings.append(f"模型 '{ref.get('name')}' 未匹配，已置空，请导入后手动配置")
-        return m.id if m else None
+        model_id = ref.get("id")
+        if model_id:
+            try:
+                model_uuid = uuid.UUID(str(model_id))
+                m = self.db.query(ModelConfig).filter(
+                    ModelConfig.id == model_uuid,
+                    ModelConfig.tenant_id == tenant_id,
+                    ModelConfig.is_active.is_(True)
+                ).first()
+                if m:
+                    return str(m.id)
+            except (ValueError, AttributeError):
+                pass
+        model_name = ref.get("name")
+        if model_name:
+            q = self.db.query(ModelConfig).filter(
+                ModelConfig.tenant_id == tenant_id,
+                ModelConfig.name == model_name,
+                ModelConfig.is_active.is_(True)
+            )
+            if ref.get("provider"):
+                q = q.filter(ModelConfig.provider == ref["provider"])
+            if ref.get("type"):
+                q = q.filter(ModelConfig.type == ref["type"])
+            m = q.first()
+            if m:
+                return str(m.id)
+            warnings.append(f"模型 '{model_name}' 未匹配，已置空，请导入后手动配置")
+        else:
+            warnings.append(f"模型 ID '{model_id}' 未匹配，已置空，请导入后手动配置")
+        return None
 
     def _resolve_kb(self, ref: Optional[dict], workspace_id: uuid.UUID, warnings: list) -> Optional[str]:
         if not ref:
             return None
-        kb = self.db.query(Knowledge).filter(
-            Knowledge.workspace_id == workspace_id,
-            Knowledge.name == ref.get("name")
-        ).first()
-        if not kb:
-            warnings.append(f"知识库 '{ref.get('name')}' 未匹配，已置空，请导入后手动配置")
-        return str(kb.id) if kb else None
+        kb_id = ref.get("id")
+        if kb_id:
+            try:
+                kb_uuid = uuid.UUID(str(kb_id))
+                kb_share = self.db.query(KnowledgeShare).filter(
+                    KnowledgeShare.target_workspace_id == workspace_id,
+                    KnowledgeShare.source_kb_id == kb_uuid
+                ).first()
+                if kb_share:
+                    kb = self.db.query(Knowledge).filter(
+                        Knowledge.id == kb_share.target_kb_id
+                    ).first()
+                    if kb and kb.status == 1:
+                        return str(kb_share.target_kb_id)
+                kb = self.db.query(Knowledge).filter(
+                    Knowledge.workspace_id == workspace_id,
+                    Knowledge.id == kb_uuid,
+                    Knowledge.status == 1
+                ).first()
+                if kb:
+                    return str(kb.id)
+            except (ValueError, AttributeError):
+                pass
+        warnings.append(f"知识库 '{kb_id}' 未匹配，已置空，请导入后手动配置")
+        return None
 
     def _resolve_tool(self, ref: Optional[dict], tenant_id: uuid.UUID, warnings: list) -> Optional[str]:
         if not ref:
             return None
-        q = self.db.query(ToolConfigModel).filter(
-            ToolConfigModel.tenant_id == tenant_id,
-            ToolConfigModel.name == ref.get("name")
-        )
-        if ref.get("tool_type"):
-            q = q.filter(ToolConfigModel.tool_type == ref["tool_type"])
-        t = q.first()
-        if not t:
-            warnings.append(f"工具 '{ref.get('name')}' 未匹配，已置空，请导入后手动配置")
-        return str(t.id) if t else None
+        tool_id = ref.get("id")
+        tool_name = ref.get("name")
+        if tool_id:
+            try:
+                tool_uuid = uuid.UUID(str(tool_id))
+                t = self.db.query(ToolConfigModel).filter(
+                    ToolConfigModel.id == tool_uuid,
+                    ToolConfigModel.tenant_id == tenant_id,
+                    ToolConfigModel.is_active.is_(True)
+                ).first()
+                if t:
+                    return str(t.id)
+            except (ValueError, AttributeError):
+                pass
+        if tool_name:
+            q = self.db.query(ToolConfigModel).filter(
+                ToolConfigModel.tenant_id == tenant_id,
+                ToolConfigModel.name == tool_name
+            )
+            if ref.get("tool_type"):
+                q = q.filter(ToolConfigModel.tool_type == ref["tool_type"])
+            t = q.first()
+            if t:
+                return str(t.id)
+            warnings.append(f"工具 '{tool_name}' 未匹配，已置空，请导入后手动配置")
+        else:
+            warnings.append(f"工具 '{tool_id}' 未匹配，已置空，请导入后手动配置")
+        return None
 
     def _resolve_release(self, ref: Optional[dict], warnings: list) -> Optional[uuid.UUID]:
         if not ref:
@@ -426,6 +566,88 @@ class AppDslService:
                 entry["target_agent_id"] = str(a.id) if a else None
             result.append(entry)
         return result
+
+    def _resolve_workflow_nodes(self, nodes: list, tenant_id: uuid.UUID, workspace_id: uuid.UUID, warnings: list) -> list:
+        """解析工作流节点中的工具ID和知识库ID，匹配不到则清空配置"""
+        resolved_nodes = []
+        for node in nodes:
+            node_type = node.get("type")
+            config = dict(node.get("config") or {})
+            node_label = node.get("name") or node.get("id")
+            if node_type == NodeType.TOOL.value:
+                tool_id = config.get("tool_id")
+                if not tool_id:
+                    # tool_id 本身就是空，直接置空不重复 warning
+                    config["tool_id"] = None
+                    config["tool_parameters"] = {}
+                else:
+                    tool_ref = {}
+                    if isinstance(tool_id, str) and len(tool_id) >= 36:
+                        try:
+                            uuid.UUID(tool_id)
+                            tool_ref["id"] = tool_id
+                        except ValueError:
+                            tool_ref["name"] = tool_id
+                    else:
+                        tool_ref["name"] = tool_id
+                    resolved_tool_id = self._resolve_tool(tool_ref, tenant_id, [])
+                    if resolved_tool_id:
+                        config["tool_id"] = resolved_tool_id
+                    else:
+                        warnings.append(f"[{node_label}] 工具 '{tool_id}' 未匹配，已置空，请导入后手动配置")
+                        config["tool_id"] = None
+                        config["tool_parameters"] = {}
+            elif node_type == NodeType.KNOWLEDGE_RETRIEVAL.value:
+                knowledge_bases = config.get("knowledge_bases") or []
+                resolved_kbs = []
+                for kb in knowledge_bases:
+                    kb_id = kb.get("kb_id")
+                    if not kb_id:
+                        continue
+                    kb_ref = {}
+                    if isinstance(kb_id, str):
+                        try:
+                            uuid.UUID(kb_id)
+                            kb_ref["id"] = kb_id
+                        except ValueError:
+                            kb_ref["name"] = kb_id
+                    else:
+                        kb_ref["name"] = kb_id
+                    resolved_id = self._resolve_kb(kb_ref, workspace_id, [])
+                    if resolved_id:
+                        resolved_kbs.append({**kb, "kb_id": resolved_id})
+                    else:
+                        warnings.append(f"[{node_label}] 知识库 '{kb_id}' 未匹配，已移除，请导入后手动配置")
+                config["knowledge_bases"] = resolved_kbs
+            elif node_type in (NodeType.LLM.value, NodeType.QUESTION_CLASSIFIER.value, NodeType.PARAMETER_EXTRACTOR.value):
+                model_ref = config.get("model_id")
+                if model_ref:
+                    ref_dict = None
+                    if isinstance(model_ref, dict):
+                        ref_id = model_ref.get("id")
+                        ref_name = model_ref.get("name")
+                        if ref_id:
+                            ref_dict = {"id": ref_id}
+                        elif ref_name is not None:
+                            ref_dict = {"name": ref_name, "provider": model_ref.get("provider"), "type": model_ref.get("type")}
+                    elif isinstance(model_ref, str):
+                        try:
+                            uuid.UUID(model_ref)
+                            ref_dict = {"id": model_ref}
+                        except ValueError:
+                            ref_dict = {"name": model_ref}
+                    if ref_dict:
+                        resolved_model_id = self._resolve_model(ref_dict, tenant_id, warnings)
+                        if resolved_model_id:
+                            config["model_id"] = resolved_model_id
+                        else:
+                            warnings.append(f"[{node_label}] 模型未匹配，已置空，请导入后手动配置")
+                            config["model_id"] = None
+                    else:
+                        warnings.append(f"[{node_label}] 模型未匹配，已置空，请导入后手动配置")
+                        config["model_id"] = None
+            resolved_nodes.append({**node, "config": config})
+        return resolved_nodes
 
     def _resolve_knowledge_retrieval(self, kr: Optional[dict], workspace_id: uuid.UUID, warnings: list) -> Optional[dict]:
         if not kr:

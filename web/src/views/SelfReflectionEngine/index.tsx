@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:46:47 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 18:57:08
+ * @Last Modified time: 2026-04-14 16:59:56
  */
 /**
  * Self Reflection Engine Configuration Page
@@ -98,6 +98,10 @@ const SelfReflectionEngine: React.FC = () => {
   const { language } = useI18n()
 
   const values = Form.useWatch([], form);
+
+  useEffect(() => {
+    document.title = [document.title.split(' - ')[0], t('memoryBear')].join(' - ')
+  }, [language])
 
   useEffect(() => {
     getConfigData()
@@ -242,6 +246,7 @@ const SelfReflectionEngine: React.FC = () => {
 
                 return (
                   <SwitchFormItem
+                    key={config.key}
                     title={t(`reflectionEngine.${config.key}`)}
                     name={config.key}
                     desc={<>

@@ -17,6 +17,7 @@ def _mask_url(url: str) -> str:
     """隐藏 URL 中的密码部分，适用于 redis:// 和 amqp:// 等协议"""
     return re.sub(r'(://[^:]*:)[^@]+(@)', r'\1***\2', url)
 
+
 # macOS fork() safety - must be set before any Celery initialization
 if platform.system() == 'Darwin':
     os.environ.setdefault('OBJC_DISABLE_INITIALIZE_FORK_SAFETY', 'YES')
@@ -29,7 +30,7 @@ if platform.system() == 'Darwin':
 #       这些名称会被 Celery CLI 的 Click 框架劫持，详见 docs/celery-env-bug-report.md
 
 _broker_url = os.getenv("CELERY_BROKER_URL") or \
-    f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB_CELERY_BROKER}"
+              f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB_CELERY_BROKER}"
 _backend_url = f"redis://:{quote(settings.REDIS_PASSWORD)}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB_CELERY_BACKEND}"
 os.environ["CELERY_BROKER_URL"] = _broker_url
 os.environ["CELERY_RESULT_BACKEND"] = _backend_url
@@ -66,11 +67,11 @@ celery_app.conf.update(
     task_serializer='json',
     accept_content=['json'],
     result_serializer='json',
-    
+
     # # 时区
     # timezone='Asia/Shanghai',
     # enable_utc=False,
-    
+
     # 任务追踪
     task_track_started=True,
     task_ignore_result=False,
@@ -101,7 +102,6 @@ celery_app.conf.update(
         'app.core.memory.agent.read_message_priority': {'queue': 'memory_tasks'},
         'app.core.memory.agent.read_message': {'queue': 'memory_tasks'},
         'app.core.memory.agent.write_message': {'queue': 'memory_tasks'},
-        'app.tasks.write_perceptual_memory': {'queue': 'memory_tasks'},
 
         # Long-term storage tasks → memory_tasks queue (batched write strategies)
         'app.core.memory.agent.long_term_storage.window': {'queue': 'memory_tasks'},

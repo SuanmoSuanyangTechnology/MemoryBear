@@ -30,6 +30,7 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         "start": NodeType.START,
         "llm": NodeType.LLM,
         "answer": NodeType.END,
+        "end": NodeType.OUTPUT,
         "if-else": NodeType.IF_ELSE,
         "loop-start": NodeType.CYCLE_START,
         "iteration-start": NodeType.CYCLE_START,
@@ -86,13 +87,6 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
         require_fields = frozenset({'app', 'kind', 'version', 'workflow'})
         if not all(field in self.config for field in require_fields):
             return False
-        if self.config.get("app", {}).get("mode") == "workflow":
-            self.errors.append(ExceptionDefinition(
-                type=ExceptionType.PLATFORM,
-                detail="workflow mode is not supported"
-            ))
-            return False
-
         for node in self.origin_nodes:
             if not self._valid_nodes(node):
                 return False
@@ -114,7 +108,11 @@ class DifyAdapter(BasePlatformAdapter, DifyConverter):
             if edge:
                 self.edges.append(edge)
 
-        for variable in self.config.get("workflow").get("conversation_variables"):
+        mode = self.config.get("app", {}).get("mode", "advanced-chat")
+        conv_variables = self.config.get("workflow").get("conversation_variables") or []
+        if mode == "workflow":
+            conv_variables = []
+        for variable in conv_variables:
             con_var = self._convert_variable(variable)
             if variable:
                 self.conv_variables.append(con_var)
