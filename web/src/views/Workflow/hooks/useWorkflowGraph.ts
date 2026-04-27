@@ -488,6 +488,9 @@ export const useWorkflowGraph = ({
           graphRef.current.cleanHistory()
         }
       }, 200)
+    } else {
+      graphRef.current.enableHistory()
+      graphRef.current.cleanHistory()
     }
   }
   /**
@@ -526,14 +529,12 @@ export const useWorkflowGraph = ({
         enabled: false,
         beforeAddCommand(_event, args: any) {
           const event = args?.key ? `cell:change:${args.key}` : _event;
-          if (event.startsWith('cell:change:') &&
-            event !== 'cell:change:position' &&
-            event !== 'cell:change:source' &&
-            event !== 'cell:change:target') return false;
+          const allowed = ['cell:added', 'cell:removed', 'cell:change:position', 'cell:change:source', 'cell:change:target'];
+          if (!allowed.includes(event)) return false;
         },
       }),
     );
-    graphRef.current.on('history:change', ({ cmds }: { cmds: Command[] }) => {
+    graphRef.current.on('history:change', () => {
       setCanUndo(graphRef.current?.canUndo() ?? false)
       setCanRedo(graphRef.current?.canRedo() ?? false)
     })
@@ -753,8 +754,6 @@ export const useWorkflowGraph = ({
           // Find corresponding parent node
           const parentNode = nodes?.find(n => n.id === nodeData.cycle);
           if (parentNode) {
-            // Use removeChild method to delete child node
-            parentNode.removeChild(nodeToDelete);
             parentNodesToUpdate.push(parentNode);
           }
           // Add child node to deletion list
@@ -782,6 +781,12 @@ export const useWorkflowGraph = ({
 
     // Delete all collected nodes and edges
     if (cells.length > 0) {
+      graphRef.current?.startBatch('delete');
+      // Remove parent-child relationships before removeCells
+      parentNodesToUpdate.forEach(parentNode => {
+        cells.filter(c => c.isNode() && (c as Node).getData()?.cycle === parentNode.getData()?.id)
+          .forEach(child => parentNode.removeChild(child));
+      });
       graphRef.current?.removeCells(cells);
 
       // If parent is iteration/loop and only cycle-start remains, add add-node connected to it
@@ -818,6 +823,7 @@ export const useWorkflowGraph = ({
           });
         }
       });
+      graphRef.current?.stopBatch('delete');
     }
     return false;
   };

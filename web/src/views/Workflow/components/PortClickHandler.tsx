@@ -46,6 +46,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
   // Handle node selection from popover menu and create new node with edge connection
   const handleNodeSelect = (selectedNodeType: any) => {
     if (!sourceNode || !graph) return;
+    graph.startBatch('add-node');
 
     const sourceNodeData = sourceNode.getData();
     const sourceNodeType = sourceNodeData?.type;
@@ -308,6 +309,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
           if (tgt?.isNode()) tgt.toFront();
         });
       }
+      graph.stopBatch('add-node');
     }, 50);
 
     // Clean up temporary element

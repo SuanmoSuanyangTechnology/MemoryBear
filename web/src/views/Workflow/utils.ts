@@ -17,6 +17,7 @@ export const isSubExprSet = (sub: any) => {
  * Uses the same per-expression height logic as getConditionNodeCasePortY.
  */
 export const calcConditionNodeTotalHeight = (cases: any[]) => {
+  if (!cases?.length) return conditionNodeHeight;
   const casesHeight = cases.reduce((acc: number, c: any) => {
     const exprs = c?.expressions ?? [];
     const n = exprs.length;
