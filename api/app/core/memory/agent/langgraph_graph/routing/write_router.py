@@ -94,9 +94,9 @@ async def write(
         # )
         scheduler.push_task(
             "app.core.memory.agent.write_message",
-            actual_end_user_id,
+            str(actual_end_user_id),
             {
-                "end_user_id": actual_end_user_id,
+                "end_user_id": str(actual_end_user_id),
                 "message": structured_messages,
                 "config_id": str(actual_config_id),
                 "storage_type": storage_type,
@@ -177,11 +177,11 @@ async def window_dialogue(end_user_id, langchain_messages, memory_config, scope)
 
         scheduler.push_task(
             "app.core.memory.agent.write_message",
-            end_user_id,
+            str(end_user_id),
             {
-                "end_user_id": end_user_id,
+                "end_user_id": str(end_user_id),
                 "message": redis_messages,
-                "config_id": config_id,
+                "config_id": str(config_id),
                 "storage_type": AgentMemory_Long_Term.STORAGE_NEO4J,
                 "user_rag_memory_id": ""
             }

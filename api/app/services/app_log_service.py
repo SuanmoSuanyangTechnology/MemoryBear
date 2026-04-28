@@ -32,6 +32,7 @@ class AppLogService:
         pagesize: int = 20,
         is_draft: Optional[bool] = None,
         keyword: Optional[str] = None,
+        app_type: Optional[str] = None,
     ) -> Tuple[list[Conversation], int]:
         """
         查询应用日志会话列表
@@ -43,6 +44,7 @@ class AppLogService:
             pagesize: 每页数量
             is_draft: 是否草稿会话（None表示返回全部）
             keyword: 搜索关键词（匹配消息内容）
+            app_type: 应用类型（WORKFLOW 时关键词将从 workflow_executions 搜索）
 
         Returns:
             Tuple[list[Conversation], int]: (会话列表，总数)
@@ -55,7 +57,8 @@ class AppLogService:
                 "page": page,
                 "pagesize": pagesize,
                 "is_draft": is_draft,
-                "keyword": keyword
+                "keyword": keyword,
+                "app_type": app_type,
             }
         )
 
@@ -66,7 +69,8 @@ class AppLogService:
             is_draft=is_draft,
             keyword=keyword,
             page=page,
-            pagesize=pagesize
+            pagesize=pagesize,
+            app_type=app_type,
         )
 
         logger.info(
@@ -368,8 +372,16 @@ def _build_nodes_from_output_data(output_data: Optional[dict]) -> list[AppLogNod
     if not output_data:
         return []
     node_outputs: dict = output_data.get("node_outputs") or {}
+    # 按 execution_order（节点执行时写入的单调递增序号）排序。
+    # PostgreSQL JSONB 不保证 key 顺序，不能依赖 dict 插入顺序；
+    # 缺失 execution_order 的历史数据退化到 0，保持在最前。
+    ordered_items = sorted(
+        node_outputs.items(),
+        key=lambda kv: (kv[1] or {}).get("execution_order", 0)
+        if isinstance(kv[1], dict) else 0
+    )
     result = []
-    for node_id, node_data in node_outputs.items():
+    for node_id, node_data in ordered_items:
         if not isinstance(node_data, dict):
             continue
         output = dict(node_data)
@@ -382,6 +394,8 @@ def _build_nodes_from_output_data(output_data: Optional[dict]) -> list[AppLogNod
         inp = output.pop("input", None)
         elapsed_time = output.pop("elapsed_time", None)
         token_usage = output.pop("token_usage", None)
+        # execution_order 仅用于排序，不返回给前端
+        output.pop("execution_order", None)
         result.append(AppLogNodeExecution(
             node_id=node_id,
             node_type=node_type,

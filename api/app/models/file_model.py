@@ -15,4 +15,5 @@ class File(Base):
     file_ext = Column(String, index=True, nullable=False, comment="file extension:folder|pdf")
     file_size = Column(Integer, default=0, comment="file size(byte)")
     file_url = Column(String, index=True, nullable=True, comment="file comes from a website url")
+    file_key = Column(String(512), nullable=True, index=True, comment="storage file key for FileStorageService")
     created_at = Column(DateTime, default=datetime.datetime.now)

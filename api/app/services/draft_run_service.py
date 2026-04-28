@@ -754,7 +754,7 @@ class AgentRunService:
                 ) if not sub_agent else [],
                 "citations": filtered_citations,
                 "audio_url": audio_url,
-                "audio_status": "pending"
+                "audio_status": "pending" if audio_url else None
             }
 
             logger.info(

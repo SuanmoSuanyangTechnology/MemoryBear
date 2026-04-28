@@ -11,6 +11,7 @@ class FileBase(BaseModel):
     file_ext: str
     file_size: int
     file_url: str | None = None
+    file_key: str | None = None
     created_at: datetime.datetime | None = None
 
 

@@ -82,19 +82,32 @@ async def get_preview_chunks(
             detail="The file does not exist or you do not have permission to access it"
         )
 
-    # 5. Construct file path：/files/{kb_id}/{parent_id}/{file.id}{file.file_ext}
-    file_path = os.path.join(
-        settings.FILE_PATH,
-        str(db_file.kb_id),
-        str(db_file.parent_id),
-        f"{db_file.id}{db_file.file_ext}"
-    )
-
-    # 6. Check if the file exists
-    if not os.path.exists(file_path):
+    # 5. Get file content from storage backend
+    if not db_file.file_key:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="File not found (possibly deleted)"
+            detail="File has no storage key (legacy data not migrated)"
+        )
+
+    from app.services.file_storage_service import FileStorageService
+    import asyncio
+    storage_service = FileStorageService()
+
+    async def _download():
+        return await storage_service.download_file(db_file.file_key)
+
+    try:
+        file_binary = asyncio.run(_download())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            file_binary = loop.run_until_complete(_download())
+        finally:
+            loop.close()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File not found in storage: {e}"
         )
 
     # 7. Document parsing & segmentation
@@ -104,11 +117,12 @@ async def get_preview_chunks(
     vision_model = QWenCV(
             key=db_knowledge.image2text.api_keys[0].api_key,
             model_name=db_knowledge.image2text.api_keys[0].model_name,
-            lang="Chinese",  # Default to Chinese
+            lang="Chinese",
             base_url=db_knowledge.image2text.api_keys[0].api_base
         )
     from app.core.rag.app.naive import chunk
-    res = chunk(filename=file_path,
+    res = chunk(filename=db_file.file_name,
+                binary=file_binary,
                 from_page=0,
                 to_page=5,
                 callback=progress_callback,

@@ -317,7 +317,7 @@ class AppChatService:
             "suggested_questions": suggested_questions,
             "citations": filtered_citations,
             "audio_url": audio_url,
-            "audio_status": "pending"
+            "audio_status": "pending" if audio_url else None
         }
 
     async def agnet_chat_stream(
