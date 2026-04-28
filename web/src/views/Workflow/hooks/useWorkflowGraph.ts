@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-27 16:30:30
+ * @Last Modified time: 2026-04-28 13:49:11
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, type Edge } from '@antv/x6';
 import { register } from '@antv/x6-react-shape';
@@ -16,7 +16,7 @@ import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application';
 import { useUser } from '@/store/user';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
 import { conditionNodeHeight, conditionNodeItemHeight, conditionNodePortItemArgsY, defaultAbsolutePortGroups, defaultPortItems, edgeAttrs, edgeHoverTool, edge_color, edge_selected_color, edge_width, graphNodeLibrary, nodeLibrary, nodeRegisterLibrary, nodeWidth, notesConfig, portAttrs, portItemArgsY, portMarkup, portTextAttrs, unknownNode } from '../constant';
-import type { ChatVariable, NodeProperties, WorkflowConfig } from '../types';
+import type { ChatVariable, HistoryRecord, NodeProperties, WorkflowConfig } from '../types';
 import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils';
 import { useWorkflowStore } from '@/store/workflow';
 
@@ -85,6 +85,10 @@ export interface UseWorkflowGraphReturn {
   /** Get start node output variable list (user-defined + system variables) */
   getStartNodeVariables: () => Array<{ name: string; type: string; readonly?: boolean }>;
   nodeClick: ({ node }: { node: Node }) => void;
+  /** All recorded history operations */
+  historyRecords: HistoryRecord[];
+  /** Clear history records */
+  clearHistoryRecords: () => void;
 }
 
 /**
@@ -118,7 +122,12 @@ export const useWorkflowGraph = ({
   const featuresRef = useRef<FeaturesConfigForm | undefined>(undefined)
   const [canUndo, setCanUndo] = useState(false)
   const [canRedo, setCanRedo] = useState(false)
-
+  const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([])
+  const lastHistoryRef = useRef<{ cellIds: string[]; timestamp: number; type: string } | null>(null)
+  const undoRef = useRef<() => void>(() => {})
+  const redoRef = useRef<() => void>(() => {})
+  const syncChildRelationshipsRef = useRef<() => void>(() => {})
+  const isSyncingRef = useRef(false)
   useEffect(() => {
     if (!graphRef.current) return
     graphRef.current.getNodes().forEach(node => {
@@ -342,7 +351,7 @@ export const useWorkflowGraph = ({
           if (parentNode) {
             const addedChild = graphRef.current?.addNode(childNode)
             if (addedChild) {
-              parentNode.addChild(addedChild)
+              parentNode.addChild(addedChild, { silent: true })
             }
           }
         }
@@ -372,8 +381,6 @@ export const useWorkflowGraph = ({
 
               const newWidth = Math.max(parentBBox.width, maxX - minX + padding * 2)
               const newHeight = Math.max(parentBBox.height, maxY - minY + padding * 2 + headerHeight)
-
-              console.log('newWidth', newHeight, newWidth)
 
               parentNode.prop('size', { width: newWidth, height: newHeight })
 
@@ -523,30 +530,28 @@ export const useWorkflowGraph = ({
   const syncChildRelationships = () => {
     if (!graphRef.current) return
     const graph = graphRef.current
-    // Re-establish parent-child relationships based on cycle data
+    graph.disableHistory()
     graph.getNodes().forEach(node => {
       const cycleId = node.getData()?.cycle
       if (!cycleId) return
       const parentNode = graph.getCellById(cycleId) as Node | null
       if (!parentNode) return
       if (!parentNode.getChildren()?.some(c => c.id === node.id)) {
-        parentNode.addChild(node)
+        parentNode.addChild(node, { silent: true })
       }
     })
-    // Remove stale parent-child links (parent exists but child's cycle no longer points to it)
     graph.getNodes().forEach(node => {
       const children = node.getChildren()
       if (!children?.length) return
       children.forEach(child => {
+        if (!child.isNode()) return
         const childCycleId = (child as Node).getData?.()?.cycle
         if (childCycleId !== node.id && childCycleId !== node.getData?.()?.id) {
-          node.removeChild(child)
+          node.removeChild(child, { silent: true })
         }
       })
     })
-    // Recalculate group node size based on current children
     resizeGroupNodes(graph)
-    // Bring child edges and nodes to front
     graph.getEdges().forEach(edge => {
       const src = graph.getCellById(edge.getSourceCellId())
       const tgt = graph.getCellById(edge.getTargetCellId())
@@ -557,7 +562,9 @@ export const useWorkflowGraph = ({
     graph.getNodes().forEach(node => {
       if (node.getData()?.cycle) node.toFront()
     })
+    graph.enableHistory()
   }
+  syncChildRelationshipsRef.current = syncChildRelationships
   /**
    * Setup X6 graph plugins (MiniMap, Snapline, Clipboard, Keyboard)
    */
@@ -593,19 +600,44 @@ export const useWorkflowGraph = ({
       new History({
         enabled: false,
         beforeAddCommand(_event, args: any) {
-          const event = args?.key ? `cell:change:${args.key}` : _event;
-          const allowed = ['cell:added', 'cell:removed', 'cell:change:position', 'cell:change:source', 'cell:change:target'];
-          if (!allowed.includes(event)) return false;
+          const key = args?.key
+          if (key === 'attrs' || key === 'tools') return false
         },
       }),
     );
-    graphRef.current.on('history:change', () => {
+    const MERGE_INTERVAL = 1000
+    graphRef.current.on('history:change', ({ cmds, options }: { cmds: any[]; options: any }) => {
       setCanUndo(graphRef.current?.canUndo() ?? false)
       setCanRedo(graphRef.current?.canRedo() ?? false)
+      console.log('history:change', cmds, options)
+      const batchName: string | undefined = options?.name
+      const actionType = batchName === 'undo' ? 'undo' : batchName === 'redo' ? 'redo' : batchName ? 'batch' : 'change'
+      const cellIds = [...new Set(cmds?.map((cmd: any) => cmd.data?.id).filter(Boolean))]
+      const now = Date.now()
+      const last = lastHistoryRef.current
+      const canMerge =
+        actionType === 'change' &&
+        last?.type === 'change' &&
+        now - last.timestamp < MERGE_INTERVAL &&
+        cellIds.length > 0 &&
+        cellIds.length === last.cellIds.length &&
+        cellIds.every((id, i) => id === last.cellIds[i])
+      if (canMerge) {
+        lastHistoryRef.current!.timestamp = now
+        setHistoryRecords(prev => {
+          const next = [...prev]
+          next[next.length - 1] = { ...next[next.length - 1], timestamp: now }
+          return next
+        })
+      } else {
+        const record: HistoryRecord = { type: actionType, timestamp: now, batchName, cellIds }
+        lastHistoryRef.current = { cellIds, timestamp: now, type: actionType }
+        setHistoryRecords(prev => [...prev, record])
+      }
     })
 
-    graphRef.current.on('history:undo', syncChildRelationships)
-    graphRef.current.on('history:redo', syncChildRelationships)
+    graphRef.current.on('history:undo', () => { if (!isSyncingRef.current) syncChildRelationshipsRef.current() })
+    graphRef.current.on('history:redo', () => { if (!isSyncingRef.current) syncChildRelationshipsRef.current() })
   };
   // 显示/隐藏连接桩
   // const showPorts = (show: boolean) => {
@@ -638,13 +670,13 @@ export const useWorkflowGraph = ({
           vo.setData({
             ...data,
             isSelected: false,
-          });
+          }, { silent: true });
         }
       });
       node.setData({
         ...nodeData,
         isSelected: true,
-      });
+      }, { silent: true });
       clearEdgeSelect()
       if (nodeData.type !== 'notes') {
         setSelectedNode(node);
@@ -658,7 +690,7 @@ export const useWorkflowGraph = ({
   const edgeClick = ({ edge }: { edge: Edge }) => {
     clearEdgeSelect();
     edge.setAttrByPath('line/stroke', edge_selected_color);
-    edge.setData({ ...edge.getData(), isSelected: true });
+    edge.setData({ ...edge.getData(), isSelected: true }, { silent: true });
     clearNodeSelect();
   };
   /**
@@ -673,7 +705,7 @@ export const useWorkflowGraph = ({
         node.setData({
           ...data,
           isSelected: false,
-        });
+        }, { silent: true });
       }
     });
     setSelectedNode(null);
@@ -683,7 +715,7 @@ export const useWorkflowGraph = ({
    */
   const clearEdgeSelect = () => {
     graphRef.current?.getEdges().forEach(e => {
-      e.setData({ ...e.getData(), isSelected: false, isNodeHover: false });
+      e.setData({ ...e.getData(), isSelected: false, isNodeHover: false }, { silent: true });
       e.setAttrByPath('line/stroke', edge_color);
       e.setAttrByPath('line/strokeWidth', edge_width);
     });
@@ -885,7 +917,7 @@ export const useWorkflowGraph = ({
           y: bbox.y + 4,
           data: { type: 'add-node', parentId: parentNode.id, cycle: parentData.id, label: t('workflow.addNode'), icon: '+' },
         });
-        parentNode.addChild(addNode);
+        parentNode.addChild(addNode, { silent: true });
         graphRef.current!.addEdge({
           source: { cell: cycleStartNode.id, port: cycleStartNode.getPorts().find(p => p.group === 'right')?.id || 'right' },
           target: { cell: addNode.id, port: addNode.getPorts().find(p => p.group === 'left')?.id || 'left' },
@@ -1112,7 +1144,7 @@ export const useWorkflowGraph = ({
       graphRef.current?.getConnectedEdges(node).forEach(edge => {
         if (!edge.getData()?.isSelected) {
           edge.setAttrByPath('line/stroke', edge_selected_color);
-          edge.setData({ ...edge.getData(), isNodeHover: true });
+          edge.setData({ ...edge.getData(), isNodeHover: true }, { silent: true });
         }
       });
     });
@@ -1120,7 +1152,7 @@ export const useWorkflowGraph = ({
       graphRef.current?.getConnectedEdges(node).forEach(edge => {
         if (!edge.getData()?.isSelected) {
           edge.setAttrByPath('line/stroke', edge_color);
-          edge.setData({ ...edge.getData(), isNodeHover: false });
+          edge.setData({ ...edge.getData(), isNodeHover: false }, { silent: true });
         }
       });
     });
@@ -1202,8 +1234,8 @@ export const useWorkflowGraph = ({
     // Delete selected nodes and edges
     graphRef.current.bindKey(['ctrl+d', 'cmd+d', 'delete', 'backspace'], deleteEvent);
     // Undo / Redo
-    graphRef.current.bindKey(['ctrl+z', 'cmd+z'], () => { graphRef.current?.undo(); return false; });
-    graphRef.current.bindKey(['ctrl+y', 'cmd+y', 'ctrl+shift+z', 'cmd+shift+z'], () => { graphRef.current?.redo(); return false; });
+    graphRef.current.bindKey(['ctrl+z', 'cmd+z'], () => { undo(); return false; });
+    graphRef.current.bindKey(['ctrl+y', 'cmd+y', 'ctrl+shift+z', 'cmd+shift+z'], () => { redo(); return false; });
 
   };
 
@@ -1269,14 +1301,14 @@ export const useWorkflowGraph = ({
     };
 
     if (dragData.type === 'loop' || dragData.type === 'iteration') {
-      graphRef.current.startBatch('add-group')
+      graph.disableHistory()
       const parentNode = graphRef.current.addNode({
         ...graphNodeLibrary[dragData.type],
         x: point.x - 150,
         y: point.y - 100,
         id: cleanNodeData.id,
         data: { ...cleanNodeData, isGroup: true },
-      });
+      })
       const parentBBox = parentNode.getBBox()
       const cycleStartId = `cycle_start_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
       const cycleStartNode = graphRef.current.addNode({
@@ -1292,16 +1324,28 @@ export const useWorkflowGraph = ({
         y: parentBBox.y + 70 + 4,
         data: { type: 'add-node', label: t('workflow.addNode'), icon: '+', parentId: cleanNodeData.id, cycle: cleanNodeData.id },
       })
-      parentNode.addChild(cycleStartNode)
-      parentNode.addChild(addNode)
-      graphRef.current.addEdge({
+      parentNode.addChild(cycleStartNode, { silent: true })
+      parentNode.addChild(addNode, { silent: true })
+      const newEdge = graphRef.current.addEdge({
         source: { cell: cycleStartNode.id, port: cycleStartNode.getPorts().find(p => p.group === 'right')?.id || 'right' },
         target: { cell: addNode.id, port: addNode.getPorts().find(p => p.group === 'left')?.id || 'left' },
         ...edgeAttrs,
       })
       cycleStartNode.toFront()
       addNode.toFront()
-      graphRef.current.stopBatch('add-group')
+      graph.enableHistory()
+      // Manually push a single batch frame covering all 4 cells into undoStack
+      const history = graph.getPlugin('history') as History
+      const makeBatchCmd = (cell: any) => ({
+        batch: true,
+        event: 'cell:added',
+        data: { id: cell.id, node: cell.isNode(), edge: cell.isEdge(), props: cell.toJSON() },
+        options: {},
+      })
+      const batchFrame = [parentNode, cycleStartNode, addNode, newEdge].map(makeBatchCmd)
+      ;(history as any).undoStack.push(batchFrame)
+      ;(history as any).redoStack = []
+      graph.trigger('history:change', { cmds: batchFrame, options: { name: 'add-group' } })
     } else if (dragData.type === 'if-else') {
       // Create condition node
       graphRef.current.addNode({
@@ -1548,8 +1592,80 @@ export const useWorkflowGraph = ({
     return userVars
   }
 
-  const undo = () => graphRef.current?.undo()
-  const redo = () => graphRef.current?.redo()
+  const clearHistoryRecords = () => {
+    setHistoryRecords([])
+    lastHistoryRef.current = null
+  }
+
+  const getStackCellIds = (cmds: any): string[] => {
+    const arr = Array.isArray(cmds) ? cmds : [cmds]
+    return [...new Set(arr.map((c: any) => c.data?.id).filter(Boolean))]
+  }
+
+  const isSkippableFrame = (frame: any): boolean => {
+    const arr = Array.isArray(frame) ? frame : [frame]
+    return arr.every((c: any) => ['zIndex', 'attrs', 'tools'].includes(c.data?.key))
+  }
+
+  const undo = () => {
+    const history = graphRef.current?.getPlugin('history') as History | undefined
+    if (!history || history.getUndoSize() === 0) return
+    const undoStack = (history as any).undoStack as any[]
+    isSyncingRef.current = true
+    while (undoStack.length > 0 && isSkippableFrame(undoStack[undoStack.length - 1])) {
+      graphRef.current!.undo()
+    }
+    if (undoStack.length === 0) {
+      isSyncingRef.current = false
+      return
+    }
+    const topIds = getStackCellIds(undoStack[undoStack.length - 1])
+    graphRef.current!.undo()
+    while (undoStack.length > 0) {
+      if (isSkippableFrame(undoStack[undoStack.length - 1])) {
+        graphRef.current!.undo()
+        continue
+      }
+      const nextIds = getStackCellIds(undoStack[undoStack.length - 1])
+      if (nextIds.length === topIds.length && nextIds.every((id, i) => id === topIds[i])) {
+        graphRef.current!.undo()
+      } else {
+        break
+      }
+    }
+    isSyncingRef.current = false
+    syncChildRelationships()
+  }
+
+  const redo = () => {
+    const history = graphRef.current?.getPlugin('history') as History | undefined
+    if (!history || history.getRedoSize() === 0) return
+    const redoStack = (history as any).redoStack as any[]
+    isSyncingRef.current = true
+    while (redoStack.length > 0 && isSkippableFrame(redoStack[redoStack.length - 1])) {
+      graphRef.current!.redo()
+    }
+    if (redoStack.length === 0) {
+      isSyncingRef.current = false
+      return
+    }
+    const topIds = getStackCellIds(redoStack[redoStack.length - 1])
+    graphRef.current!.redo()
+    while (redoStack.length > 0) {
+      if (isSkippableFrame(redoStack[redoStack.length - 1])) {
+        graphRef.current!.redo()
+        continue
+      }
+      const nextIds = getStackCellIds(redoStack[redoStack.length - 1])
+      if (nextIds.length === topIds.length && nextIds.every((id, i) => id === topIds[i])) {
+        graphRef.current!.redo()
+      } else {
+        break
+      }
+    }
+    isSyncingRef.current = false
+    syncChildRelationships()
+  }
 
   const handleSaveFeaturesConfig = (value?: FeaturesConfigForm) => {
     const { statement = '' } = value?.opening_statement || {}
@@ -1593,7 +1709,7 @@ export const useWorkflowGraph = ({
     // Reset all node execution status on every chatHistory change
     nodes.forEach(node => {
       const data = node.getData();
-      node.setData({ ...data, executionStatus: '' });
+      node.setData({ ...data, executionStatus: '' }, { silent: true });
     });
 
     const lastAssistant = [...chatHistory].reverse().find(item => item.role === 'assistant');
@@ -1602,7 +1718,7 @@ export const useWorkflowGraph = ({
       if (typeof sub.status === 'string') {
         const node = nodes.find(n => n.getData()?.id === sub.node_id);
         if (node) {
-          node.setData({ ...node.getData(), executionStatus: sub.status });
+          node.setData({ ...node.getData(), executionStatus: sub.status }, { silent: true });
         }
       }
     });
@@ -1635,5 +1751,7 @@ export const useWorkflowGraph = ({
     canRedo,
     undo,
     redo,
+    historyRecords,
+    clearHistoryRecords,
   };
 };

@@ -43,71 +43,52 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
     };
   }, []);
 
-  // Handle node selection from popover menu and create new node with edge connection
   const handleNodeSelect = (selectedNodeType: any) => {
     if (!sourceNode || !graph) return;
-    graph.startBatch('add-node');
 
     const sourceNodeData = sourceNode.getData();
     const sourceNodeType = sourceNodeData?.type;
-    
-    // If it's a cycle-start node, handle the add-node placeholder
+    const isCycleSubNode = !!sourceNodeData.cycle;
+    const isCycleContainer = (type: string) => type === 'loop' || type === 'iteration';
+    const newNodeType = selectedNodeType.type;
+
+    // Save add-node placeholder position before disabling history
     let addNodePosition = null;
-    const isCycleSubNode = sourceNodeData.cycle
     if (isCycleSubNode && sourceNodeType === 'cycle-start') {
       const cycleId = sourceNodeData.cycle;
-      const addNodes = graph.getNodes().filter((n: any) => 
+      const addNodes = graph.getNodes().filter((n: any) =>
         n.getData()?.type === 'add-node' && n.getData()?.cycle === cycleId
       );
-      
-      if (addNodes.length > 0) {
-        const addNode = addNodes[0];
-        addNodePosition = addNode.getBBox();
-        addNode.remove();
-      }
+      if (addNodes.length > 0) addNodePosition = addNodes[0].getBBox();
     }
-    
-    // Calculate new node position to avoid overlapping
+
+    // Calculate position
     const sourceBBox = sourceNode.getBBox();
-    const nodeWidth = graphNodeLibrary[selectedNodeType.type]?.width || 120;
-    const nodeHeight = graphNodeLibrary[selectedNodeType.type]?.height || 88;
-    const horizontalSpacing = isCycleSubNode ? 48 : 80;
-    const verticalSpacing = 10;
-    
-    // Get source port group information
+    const nw = graphNodeLibrary[newNodeType]?.width || 120;
+    const nh = graphNodeLibrary[newNodeType]?.height || 88;
+    const hSpacing = isCycleSubNode ? 48 : 80;
+    const vSpacing = 10;
     const sourcePortInfo = sourceNode.getPorts().find((p: any) => p.id === sourcePort);
     const sourcePortGroup = sourcePortInfo?.group || sourcePort;
-    
-    // Calculate new node position
-    let newX, newY;
+
+    let newX: number, newY: number;
     if (edgeInsertion) {
-      // Edge insertion: place new node on the same row as target, between source and target
       const targetBBox = edgeInsertion.targetCell.getBBox();
       const gap = targetBBox.x - (sourceBBox.x + sourceBBox.width);
-      const requiredSpace = nodeWidth + horizontalSpacing * 4;
-
-      // New node x: right after source + spacing
-      newX = sourceBBox.x + sourceBBox.width + horizontalSpacing;
-      // Same row as target node
-      newY = targetBBox.y + (targetBBox.height - nodeHeight) / 2;
-
-      // If not enough space, shift target and all downstream nodes to the right
+      const requiredSpace = nw + hSpacing * 4;
+      newX = sourceBBox.x + sourceBBox.width + hSpacing;
+      newY = targetBBox.y + (targetBBox.height - nh) / 2;
       if (gap < requiredSpace) {
         const shiftX = requiredSpace - gap;
         const visited = new Set<string>();
         const shiftDownstream = (cell: any) => {
-          const cellId = cell.id;
-          if (visited.has(cellId)) return;
-          visited.add(cellId);
+          if (visited.has(cell.id)) return;
+          visited.add(cell.id);
           const pos = cell.getPosition();
           cell.setPosition(pos.x + shiftX, pos.y);
-          // Recursively shift nodes connected from right ports
           graph.getConnectedEdges(cell, { outgoing: true }).forEach((e: any) => {
-            const tId = e.getTargetCellId();
-            if (tId && !visited.has(tId)) {
-              const tCell = graph.getCellById(tId);
-              if (tCell?.isNode()) shiftDownstream(tCell);
-            }
+            const tCell = graph.getCellById(e.getTargetCellId());
+            if (tCell?.isNode()) shiftDownstream(tCell);
           });
         };
         shiftDownstream(edgeInsertion.targetCell);
@@ -115,209 +96,170 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
     } else if (addNodePosition) {
       newX = addNodePosition.x;
       newY = addNodePosition.y;
+    } else if (sourcePortGroup === 'left') {
+      newX = sourceBBox.x - nw * 2 - hSpacing;
+      newY = sourceBBox.y;
     } else {
-      // Determine node placement direction based on port position
-      if (sourcePortGroup === 'left') {
-      // Left port: add node to the left
-        newX = sourceBBox.x - nodeWidth*2 - horizontalSpacing;
-        newY = sourceBBox.y;
-      } else {
-        // Right port: add node to the right
-        newX = sourceBBox.x + sourceBBox.width + horizontalSpacing;
-        newY = sourceBBox.y;
-      }
-      
-      // Check if position overlaps with existing nodes (only consider connected nodes)
-      const checkOverlap = (x: number, y: number) => {
-      // Get nodes connected to the source node
-        const connectedNodes = new Set();
-        graph.getConnectedEdges(sourceNode).forEach((edge: any) => {
-          const sourceId = edge.getSourceCellId();
-          const targetId = edge.getTargetCellId();
-          if (sourceId !== sourceNode.id) connectedNodes.add(sourceId);
-          if (targetId !== sourceNode.id) connectedNodes.add(targetId);
+      newX = sourceBBox.x + sourceBBox.width + hSpacing;
+      newY = sourceBBox.y;
+      const connectedNodes = new Set<string>();
+      graph.getConnectedEdges(sourceNode).forEach((e: any) => {
+        [e.getSourceCellId(), e.getTargetCellId()].forEach((cid: string) => {
+          if (cid !== sourceNode.id) connectedNodes.add(cid);
         });
-        
-        return graph.getNodes().some((node: any) => {
-          if (node.id === sourceNode.id) return false;
-          if (!connectedNodes.has(node.id)) return false; // Only consider connected nodes
-          const bbox = node.getBBox();
-          return !(x + nodeWidth < bbox.x || x > bbox.x + bbox.width || 
-                  y + nodeHeight < bbox.y || y > bbox.y + bbox.height);
+      });
+      const checkOverlap = (x: number, y: number) =>
+        graph.getNodes().some((n: any) => {
+          if (n.id === sourceNode.id || !connectedNodes.has(n.id)) return false;
+          const b = n.getBBox();
+          return !(x + nw < b.x || x > b.x + b.width || y + nh < b.y || y > b.y + b.height);
         });
-      };
-
-      // If position is occupied, search downward for empty space
-      while (checkOverlap(newX, newY)) {
-        newY += nodeHeight + verticalSpacing;
-      }
+      while (checkOverlap(newX, newY)) newY += nh + vSpacing;
     }
-    
-    // Create new node
-    const id = `${selectedNodeType.type.replace(/-/g, '_')}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+
+    // Disable history for all graph mutations
+    graph.disableHistory();
+
+    // Remove add-node placeholder
+    if (isCycleSubNode && sourceNodeType === 'cycle-start') {
+      const cycleId = sourceNodeData.cycle;
+      graph.getNodes()
+        .filter((n: any) => n.getData()?.type === 'add-node' && n.getData()?.cycle === cycleId)
+        .forEach((n: any) => n.remove());
+    }
+
+    const id = `${newNodeType.replace(/-/g, '_')}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const newNode = graph.addNode({
-      ...(graphNodeLibrary[selectedNodeType.type] || graphNodeLibrary.default),
+      ...(graphNodeLibrary[newNodeType] || graphNodeLibrary.default),
       x: newX,
       y: newY - (isCycleSubNode && sourceNodeType === 'cycle-start' ? 12 : 0),
       id,
       data: {
         id,
-        type: selectedNodeType.type,
+        type: newNodeType,
         icon: selectedNodeType.icon,
-        name: t(`workflow.${selectedNodeType.type}`),
-        cycle: sourceNodeData.cycle, // Inherit cycle from source node
+        name: t(`workflow.${newNodeType}`),
+        cycle: sourceNodeData.cycle,
         config: selectedNodeType.config || {}
       },
     });
 
-    // Add new node as child of parent node
     if (sourceNodeData.cycle) {
       const parentNode = graph.getNodes().find((n: any) => n.getData()?.id === sourceNodeData.cycle);
-      if (parentNode) {
-        parentNode.addChild(newNode);
-      }
+      if (parentNode) parentNode.addChild(newNode, { silent: true });
     }
 
-    // Edge insertion: remove old edge immediately before creating new edges
     if (edgeInsertion) {
       const { edge: oldEdge } = edgeInsertion;
-      if (oldEdge.id && graph.getCellById(oldEdge.id)) {
-        graph.removeCell(oldEdge.id);
-      } else {
-        graph.removeEdge(oldEdge);
-      }
+      if (oldEdge.id && graph.getCellById(oldEdge.id)) graph.removeCell(oldEdge.id);
+      else graph.removeEdge(oldEdge);
     }
 
-    // Create edge connection
-    setTimeout(() => {
-      const newPorts = newNode.getPorts();
+    const newPorts = newNode.getPorts();
+    const addedCells: any[] = [newNode];
 
-      const addedEdges: any[] = [];
-      if (edgeInsertion) {
-        // Edge insertion: create source→new and new→target edges
-        const { targetCell, targetPort: origTargetPort } = edgeInsertion;
-        const newLeftPort = newPorts.find((p: any) => p.group === 'left')?.id || 'left';
-        const newRightPort = newPorts.find((p: any) => p.group === 'right')?.id || 'right';
-        addedEdges.push(graph.addEdge({
-          source: { cell: sourceNode.id, port: sourcePort },
-          target: { cell: newNode.id, port: newLeftPort },
-          ...edgeAttrs
-        }));
-        addedEdges.push(graph.addEdge({
-          source: { cell: newNode.id, port: newRightPort },
-          target: { cell: targetCell.id, port: origTargetPort },
-          ...edgeAttrs
-        }));
-        setEdgeInsertion(null);
-      } else if (sourcePortGroup === 'left') {
-        // Connect from left port to new node's right side
-        const targetPort = newPorts.find((port: any) => port.group === 'right')?.id || 'right';
-        addedEdges.push(graph.addEdge({
-          source: { cell: newNode.id, port: targetPort },
-          target: { cell: sourceNode.id, port: sourcePort },
-          ...edgeAttrs
-        }));
-      } else {
-        // Connect from right port to new node's left side
-        const targetPort = newPorts.find((port: any) => port.group === 'left')?.id || 'left';
-        addedEdges.push(graph.addEdge({
-          source: { cell: sourceNode.id, port: sourcePort },
-          target: { cell: newNode.id, port: targetPort },
-          ...edgeAttrs
-        }));
-      }
-      
-      // Adjust loop node size when child node is added via port within loop node
-      const cycleId = sourceNodeData.cycle;
-      if (cycleId) {
-        const parentNode = graph.getNodes().find((n: any) => n.getData()?.id === cycleId);
+    if (edgeInsertion) {
+      const { targetCell, targetPort: origTargetPort } = edgeInsertion;
+      const newLeftPort = newPorts.find((p: any) => p.group === 'left')?.id || 'left';
+      const newRightPort = newPorts.find((p: any) => p.group === 'right')?.id || 'right';
+      addedCells.push(graph.addEdge({ source: { cell: sourceNode.id, port: sourcePort }, target: { cell: newNode.id, port: newLeftPort }, ...edgeAttrs }));
+      addedCells.push(graph.addEdge({ source: { cell: newNode.id, port: newRightPort }, target: { cell: targetCell.id, port: origTargetPort }, ...edgeAttrs }));
+      setEdgeInsertion(null);
+    } else if (sourcePortGroup === 'left') {
+      const tp = newPorts.find((p: any) => p.group === 'right')?.id || 'right';
+      addedCells.push(graph.addEdge({ source: { cell: newNode.id, port: tp }, target: { cell: sourceNode.id, port: sourcePort }, ...edgeAttrs }));
+    } else {
+      const tp = newPorts.find((p: any) => p.group === 'left')?.id || 'left';
+      addedCells.push(graph.addEdge({ source: { cell: sourceNode.id, port: sourcePort }, target: { cell: newNode.id, port: tp }, ...edgeAttrs }));
+    }
 
-        if (parentNode) {
-          const adjustLoopSize = () => {
-            const childNodes = graph.getNodes().filter((n: any) => n.getData()?.cycle === cycleId);
-            if (childNodes.length > 0) {
-              const bounds = childNodes.reduce((acc: any, child: any) => {
-                const bbox = child.getBBox();
-                return {
-                  minX: Math.min(acc.minX, bbox.x),
-                  minY: Math.min(acc.minY, bbox.y),
-                  maxX: Math.max(acc.maxX, bbox.x + bbox.width),
-                  maxY: Math.max(acc.maxY, bbox.y + bbox.height)
-                };
-              }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+    // If adding a loop/iteration node, create cycle-start, add-node and inner edge regardless of source type
+    if (isCycleContainer(newNodeType)) {
+      const parentBBox = newNode.getBBox();
+      const cycleStartId = `cycle_start_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const cycleStartNode = graph.addNode({
+        ...graphNodeLibrary.cycleStart,
+        x: parentBBox.x + 24,
+        y: parentBBox.y + 70,
+        id: cycleStartId,
+        data: { id: cycleStartId, type: 'cycle-start', parentId: id, isDefault: true, cycle: id },
+      });
+      const addNodePlaceholder = graph.addNode({
+        ...graphNodeLibrary.addStart,
+        x: parentBBox.x + 24 + 84,
+        y: parentBBox.y + 70 + 4,
+        data: { type: 'add-node', label: t('workflow.addNode'), icon: '+', parentId: id, cycle: id },
+      });
+      newNode.addChild(cycleStartNode, { silent: true });
+      newNode.addChild(addNodePlaceholder, { silent: true });
+      const innerEdge = graph.addEdge({
+        source: { cell: cycleStartNode.id, port: cycleStartNode.getPorts().find((p: any) => p.group === 'right')?.id || 'right' },
+        target: { cell: addNodePlaceholder.id, port: addNodePlaceholder.getPorts().find((p: any) => p.group === 'left')?.id || 'left' },
+        ...edgeAttrs,
+      });
+      addedCells.push(cycleStartNode, addNodePlaceholder, innerEdge);
+    }
 
-              const padding = 50;
-              const newWidth = Math.max(nodeWidth, bounds.maxX - bounds.minX + padding * 2);
-              const newHeight = Math.max(120, bounds.maxY - bounds.minY + padding * 2);
-
-              parentNode.prop('size', { width: newWidth, height: newHeight });
-              
-              // Update right port x position
-              const ports = parentNode.getPorts();
-              ports.forEach((port: any) => {
-                if (port.group === 'right' && port.args) {
-                  parentNode.portProp(port.id!, 'args/x', newWidth);
-                }
-              });
-            }
-          }; 
-          
-          adjustLoopSize();
-          
-          // Listen to child node movement events
-          const childNodes = graph.getNodes().filter((n: any) => n.getData()?.cycle === cycleId);
-          childNodes.forEach((childNode: any) => {
-            childNode.on('change:position', adjustLoopSize);
+    // Adjust parent size if adding inside a cycle container
+    const cycleId = sourceNodeData.cycle;
+    if (cycleId) {
+      const parentNode = graph.getNodes().find((n: any) => n.getData()?.id === cycleId);
+      if (parentNode) {
+        const childNodes = graph.getNodes().filter((n: any) => n.getData()?.cycle === cycleId);
+        if (childNodes.length > 0) {
+          const bounds = childNodes.reduce((acc: any, child: any) => {
+            const b = child.getBBox();
+            return { minX: Math.min(acc.minX, b.x), minY: Math.min(acc.minY, b.y), maxX: Math.max(acc.maxX, b.x + b.width), maxY: Math.max(acc.maxY, b.y + b.height) };
+          }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+          const padding = 50;
+          const newWidth = Math.max(nodeWidth, bounds.maxX - bounds.minX + padding * 2);
+          const newHeight = Math.max(120, bounds.maxY - bounds.minY + padding * 2);
+          parentNode.prop('size', { width: newWidth, height: newHeight });
+          parentNode.getPorts().forEach((port: any) => {
+            if (port.group === 'right' && port.args) parentNode.portProp(port.id!, 'args/x', newWidth);
           });
         }
       }
+    }
 
-      const isCycleContainer = (type: string) => type === 'loop' || type === 'iteration';
-      const newNodeType = selectedNodeType.type;
+    // toFront
+    const bringCycleChildrenToFront = (cycleContainerId: string) => {
+      graph.getEdges().forEach((e: any) => {
+        const src = graph.getCellById(e.getSourceCellId());
+        const tgt = graph.getCellById(e.getTargetCellId());
+        if (src?.getData()?.cycle === cycleContainerId || tgt?.getData()?.cycle === cycleContainerId) e.toFront();
+      });
+      graph.getNodes().forEach((n: any) => { if (n.getData()?.cycle === cycleContainerId) n.toFront(); });
+    };
 
-      // Helper: bring all child nodes and their edges of a cycle container to front
-      const bringCycleChildrenToFront = (cycleContainerId: string) => {
-        
-        graph.getEdges().forEach((e: any) => {
-          const src = graph.getCellById(e.getSourceCellId());
-          const tgt = graph.getCellById(e.getTargetCellId());
-          if (src?.getData()?.cycle === cycleContainerId || tgt?.getData()?.cycle === cycleContainerId) e.toFront();
-        });
-        graph.getNodes().forEach((n: any) => {
-          if (n.getData()?.cycle === cycleContainerId) n.toFront();
-        });
-      };
+    if (isCycleContainer(sourceNodeType)) {
+      newNode.toFront(); sourceNode.toFront(); bringCycleChildrenToFront(sourceNodeData.id);
+      if (isCycleContainer(newNodeType)) bringCycleChildrenToFront(id);
+    } else if (isCycleContainer(newNodeType)) {
+      newNode.toFront(); sourceNode.toFront(); bringCycleChildrenToFront(id);
+    } else {
+      addedCells.forEach(c => { if (c.isNode?.()) c.toFront(); });
+    }
 
-      if (isCycleContainer(sourceNodeType)) {
-        console.log('isCycleContainer(sourceNodeType)')
-        // Case 4: source is a loop/iteration node — bring new node to front, then its children
-        newNode.toFront();
-        sourceNode.toFront();
-        bringCycleChildrenToFront(sourceNodeData.id);
-      } else if (isCycleContainer(newNodeType)) {
-        console.log('isCycleContainer(newNodeType)')
-        // Case 3: adding a loop/iteration node from a normal node — bring new node to front, then its children
-        newNode.toFront();
-        sourceNode.toFront()
-        bringCycleChildrenToFront(id);
-      } else {
-        // Case 2: normal node → normal node
-        addedEdges.forEach(e => {
-          const src = graph.getCellById(e.getSourceCellId());
-          const tgt = graph.getCellById(e.getTargetCellId());
-          if (src?.isNode()) src.toFront();
-          if (tgt?.isNode()) tgt.toFront();
-        });
-      }
-      graph.stopBatch('add-node');
-    }, 50);
+    // Re-enable history and manually push one batch frame for all added cells
+    graph.enableHistory();
+    const history = graph.getPlugin('history') as any;
+    if (history) {
+      const batchFrame = addedCells.map((cell: any) => ({
+        batch: true,
+        event: 'cell:added',
+        data: { id: cell.id, node: cell.isNode(), edge: cell.isEdge(), props: cell.toJSON() },
+        options: {},
+      }));
+      history.undoStack.push(batchFrame);
+      history.redoStack = [];
+      graph.trigger('history:change', { cmds: batchFrame, options: { name: 'add-node' } });
+    }
 
-    // Clean up temporary element
     if (tempElement) {
       document.body.removeChild(tempElement);
       setTempElement(null);
     }
-    
     setPopoverVisible(false);
   };
 
