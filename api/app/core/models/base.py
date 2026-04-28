@@ -216,7 +216,7 @@ class RedBearModelFactory:
             # 深度思考模式：Claude 3.7 Sonnet 等支持思考的模型
             # 通过 additional_model_request_fields 传递 thinking 块，关闭时不传（Bedrock 无 disabled 选项）
             if config.deep_thinking:
-                budget = config.thinking_budget_tokens or 10000
+                budget = config.thinking_budget_tokens or 1024
                 params["additional_model_request_fields"] = {
                     "thinking": {"type": "enabled", "budget_tokens": budget}
                 }
