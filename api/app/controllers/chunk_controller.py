@@ -271,6 +271,9 @@ async def create_chunk(
         "sort_id": sort_id,
         "status": 1,
     }
+    # QA chunk: 注入 chunk_type/question/answer 到 metadata
+    if create_data.is_qa:
+        metadata.update(create_data.qa_metadata)
     chunk = DocumentChunk(page_content=content, metadata=metadata)
     # 3. Segmented vector storage
     vector_service.add_chunks([chunk])
@@ -342,6 +345,9 @@ async def update_chunk(
     if total:
         chunk = items[0]
         chunk.page_content = content
+        # QA chunk: 更新 metadata 中的 question/answer
+        if update_data.is_qa:
+            chunk.metadata.update(update_data.qa_metadata)
         vector_service.update_by_segment(chunk)
         return success(data=jsonable_encoder(chunk), msg="The document chunk has been successfully updated")
     else:

@@ -30,7 +30,7 @@ from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.llm.embedding_model import OpenAIEmbed
 from app.core.rag.llm.sequence2txt_model import QWenSeq2txt
 from app.core.rag.models.chunk import DocumentChunk
-from app.core.rag.prompts.generator import question_proposal
+from app.core.rag.prompts.generator import question_proposal, qa_proposal
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
 )
@@ -323,57 +323,96 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             all_batch_chunks: list[list[DocumentChunk]] = []
 
             if auto_questions_topn:
-                # auto_questions 开启：先并发生成所有 chunk 的问题，再按 batch 分组
-                # 构建 (global_idx, item) 列表
+                # QA 模式（FastGPT 方案）：
+                # 1. 原 chunk 标记为 source（保留供 GraphRAG 使用，不参与检索）
+                # 2. LLM 生成 QA 对，每个 QA 对独立存储为 qa chunk
                 indexed_items = list(enumerate(res))
 
-                def _generate_question(idx_item: tuple[int, dict]) -> tuple[int, str]:
-                    """为单个 chunk 生成问题（带缓存），返回 (global_idx, question_text)"""
+                def _generate_qa(idx_item: tuple[int, dict]) -> tuple[int, list]:
+                    """为单个 chunk 生成 QA 对（带缓存），返回 (global_idx, qa_pairs)"""
                     global_idx, item = idx_item
                     content = item["content_with_weight"]
-                    cached = get_llm_cache(chat_model.model_name, content, "question",
+                    cached = get_llm_cache(chat_model.model_name, content, "qa",
                                            {"topn": auto_questions_topn})
                     if not cached:
-                        cached = question_proposal(chat_model, content, auto_questions_topn)
-                        set_llm_cache(chat_model.model_name, content, cached, "question",
+                        pairs = qa_proposal(chat_model, content, auto_questions_topn)
+                        cached = pairs
+                        set_llm_cache(chat_model.model_name, content, cached, "qa",
                                       {"topn": auto_questions_topn})
+                    elif isinstance(cached, str):
+                        # 兼容旧缓存格式（纯文本问题）
+                        from app.core.rag.prompts.generator import parse_qa_pairs
+                        cached = parse_qa_pairs(cached) if cached else []
                     return global_idx, cached
 
-                # 并发调用 LLM 生成问题
-                question_map: dict[int, str] = {}
+                # 并发调用 LLM 生成 QA 对
+                qa_map: dict[int, list] = {}
                 with ThreadPoolExecutor(max_workers=AUTO_QUESTIONS_MAX_WORKERS) as q_executor:
-                    futures = {q_executor.submit(_generate_question, item): item[0]
+                    futures = {q_executor.submit(_generate_qa, item): item[0]
                                for item in indexed_items}
                     for future in futures:
-                        global_idx, cached = future.result()
-                        question_map[global_idx] = cached
+                        global_idx, pairs = future.result()
+                        qa_map[global_idx] = pairs
 
                 progress_lines.append(
-                    f"{datetime.now().strftime('%H:%M:%S')} Auto questions generated for {total_chunks} chunks "
+                    f"{datetime.now().strftime('%H:%M:%S')} QA pairs generated for {total_chunks} chunks "
                     f"(workers={AUTO_QUESTIONS_MAX_WORKERS}).")
 
-                # 按 batch 分组组装 DocumentChunk
-                for batch_start in range(0, total_chunks, EMBEDDING_BATCH_SIZE):
-                    batch_end = min(batch_start + EMBEDDING_BATCH_SIZE, total_chunks)
-                    chunks = []
-                    for global_idx in range(batch_start, batch_end):
-                        item = res[global_idx]
-                        metadata = {
+                # 组装 chunks：source chunks + qa chunks
+                source_chunks = []
+                qa_chunks = []
+                qa_sort_id = 0
+
+                for global_idx in range(total_chunks):
+                    item = res[global_idx]
+                    source_chunk_id = uuid.uuid4().hex
+
+                    # source chunk：保留原文，供 GraphRAG 使用，不参与向量检索
+                    source_meta = {
+                        "doc_id": source_chunk_id,
+                        "file_id": str(db_document.file_id),
+                        "file_name": db_document.file_name,
+                        "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                        "document_id": str(db_document.id),
+                        "knowledge_id": str(db_document.kb_id),
+                        "sort_id": global_idx,
+                        "status": 1,
+                        "chunk_type": "source",
+                    }
+                    source_chunks.append(
+                        DocumentChunk(page_content=item["content_with_weight"], metadata=source_meta))
+
+                    # qa chunks：每个 QA 对独立存储
+                    pairs = qa_map.get(global_idx, [])
+                    for pair in pairs:
+                        qa_meta = {
                             "doc_id": uuid.uuid4().hex,
                             "file_id": str(db_document.file_id),
                             "file_name": db_document.file_name,
                             "file_created_at": int(db_document.created_at.timestamp() * 1000),
                             "document_id": str(db_document.id),
                             "knowledge_id": str(db_document.kb_id),
-                            "sort_id": global_idx,
+                            "sort_id": qa_sort_id,
                             "status": 1,
+                            "chunk_type": "qa",
+                            "question": pair["question"],
+                            "answer": pair["answer"],
+                            "source_chunk_id": source_chunk_id,
                         }
-                        cached = question_map[global_idx]
-                        chunks.append(
-                            DocumentChunk(
-                                page_content=f"question: {cached} answer: {item['content_with_weight']}",
-                                metadata=metadata))
-                    all_batch_chunks.append(chunks)
+                        # page_content 存 question，用于向量索引
+                        qa_chunks.append(
+                            DocumentChunk(page_content=pair["question"], metadata=qa_meta))
+                        qa_sort_id += 1
+
+                # 按 batch 分组（source + qa 一起）
+                all_chunks = source_chunks + qa_chunks
+                for batch_start in range(0, len(all_chunks), EMBEDDING_BATCH_SIZE):
+                    batch_end = min(batch_start + EMBEDDING_BATCH_SIZE, len(all_chunks))
+                    all_batch_chunks.append(all_chunks[batch_start:batch_end])
+
+                progress_lines.append(
+                    f"{datetime.now().strftime('%H:%M:%S')} QA mode: {len(source_chunks)} source chunks + "
+                    f"{len(qa_chunks)} QA chunks prepared.")
             else:
                 # 无 auto_questions：直接构建 chunks
                 for batch_start in range(0, total_chunks, EMBEDDING_BATCH_SIZE):
