@@ -44,6 +44,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
+      'x6-html-shape': resolve(__dirname, 'src/vendor/x6-html-shape/index.js'),
+      'x6-html-shape/dist/react': resolve(__dirname, 'src/vendor/x6-html-shape/react.js'),
+      'x6-html-shape/dist/utils.js': resolve(__dirname, 'src/vendor/x6-html-shape/utils.js'),
     },
   },
   base: './', // 使用相对路径，确保资源能正确加载

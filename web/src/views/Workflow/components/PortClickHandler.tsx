@@ -2,12 +2,43 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:30:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-30 15:14:02
+ * @Last Modified time: 2026-04-28 11:41:17
  */
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Flex, Popover } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { nodeLibrary, graphNodeLibrary, edgeAttrs, nodeWidth } from '../constant';
+
+// Shared helper: adjust loop/iteration container size to fit child nodes
+export const adjustCycleContainerSize = (graph: any, cycleId: string) => {
+  const parentNode = graph.getNodes().find((n: any) => n.getData()?.id === cycleId);
+  if (!parentNode) return;
+  const childNodes = graph.getNodes().filter((n: any) => n.getData()?.cycle === cycleId);
+  if (childNodes.length === 0) return;
+  const bounds = childNodes.reduce((acc: any, child: any) => {
+    const bbox = child.getBBox();
+    return {
+      minX: Math.min(acc.minX, bbox.x),
+      minY: Math.min(acc.minY, bbox.y),
+      maxX: Math.max(acc.maxX, bbox.x + bbox.width),
+      maxY: Math.max(acc.maxY, bbox.y + bbox.height),
+    };
+  }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+  const padding = 50;
+  const newWidth = Math.max(nodeWidth, bounds.maxX - bounds.minX + padding * 2);
+  const newHeight = Math.max(120, bounds.maxY - bounds.minY + padding * 2);
+  parentNode.prop('size', { width: newWidth, height: newHeight });
+  parentNode.getPorts().forEach((port: any) => {
+    if (port.group === 'right' && port.args) {
+      parentNode.portProp(port.id!, 'args/x', newWidth);
+    }
+  });
+  childNodes.forEach((childNode: any) => {
+    childNode.off('change:position');
+    childNode.on('change:position', () => adjustCycleContainerSize(graph, cycleId));
+  });
+};
 
 interface PortClickHandlerProps {
   graph: any;
@@ -16,7 +47,6 @@ interface PortClickHandlerProps {
 const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
   const { t } = useTranslation();
   const [popoverVisible, setPopoverVisible] = useState(false);
-  const [popoverPosition, setPopoverPosition] = useState({ x: 0, y: 0 });
   const [sourceNode, setSourceNode] = useState<any>(null);
   const [sourcePort, setSourcePort] = useState<string>('');
   const [tempElement, setTempElement] = useState<HTMLElement | null>(null);
@@ -24,12 +54,11 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
 
   useEffect(() => {
     const handlePortClick = (event: CustomEvent) => {
-      const { node, port, element, rect, edgeInsertion } = event.detail;
+      const { node, port, element, edgeInsertion } = event.detail;
       setSourceNode(node);
       setSourcePort(port);
       setTempElement(element);
       setEdgeInsertion(edgeInsertion || null);
-      setPopoverPosition({ x: rect.left, y: rect.top });
       setPopoverVisible(true);
     };
 
@@ -49,6 +78,66 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
 
     const sourceNodeData = sourceNode.getData();
     const sourceNodeType = sourceNodeData?.type;
+
+    // AddNode placeholder mode: replace the add-node placeholder with the selected node
+    if (sourceNodeType === 'add-node') {
+      const placeholderBBox = sourceNode.getBBox();
+      const cycleId = sourceNodeData.cycle;
+      const id = `${selectedNodeType.type.replace(/-/g, '_')}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const newNode = graph.addNode({
+        ...(graphNodeLibrary[selectedNodeType.type] || graphNodeLibrary.default),
+        x: placeholderBBox.x,
+        y: placeholderBBox.y - 12,
+        id,
+        data: {
+          id,
+          type: selectedNodeType.type,
+          icon: selectedNodeType.icon,
+          name: t(`workflow.${selectedNodeType.type}`),
+          cycle: cycleId,
+          parentId: sourceNodeData.parentId,
+          config: selectedNodeType.config || {},
+        },
+      });
+      if (cycleId) {
+        const parentNode = graph.getNodes().find((n: any) => n.getData()?.id === cycleId);
+        if (parentNode) parentNode.addChild(newNode);
+      }
+      const incomingEdges = graph.getIncomingEdges(sourceNode);
+      const outgoingEdges = graph.getOutgoingEdges(sourceNode);
+      const addedEdges: any[] = [];
+      incomingEdges?.forEach((edge: any) => {
+        addedEdges.push(graph.addEdge({
+          source: { cell: edge.getSourceCellId(), port: edge.getSourcePortId() },
+          target: { cell: newNode.id, port: newNode.getPorts().find((p: any) => p.group === 'left')?.id || 'left' },
+          ...edgeAttrs,
+        }));
+      });
+      outgoingEdges?.forEach((edge: any) => {
+        const targetCell = graph.getCellById(edge.getTargetCellId()) as any;
+        const targetPortId = targetCell?.getPorts?.()?.find((p: any) => p.group === 'left')?.id || edge.getTargetPortId();
+        addedEdges.push(graph.addEdge({
+          source: { cell: newNode.id, port: newNode.getPorts().find((p: any) => p.group === 'right')?.id || 'right' },
+          target: { cell: edge.getTargetCellId(), port: targetPortId },
+          ...edgeAttrs,
+        }));
+      });
+      graph.getNodes().forEach((n: any) => {
+        if (n.getData()?.type === 'add-node' && n.getData()?.cycle === cycleId) n.remove();
+      });
+      setTimeout(() => {
+        addedEdges.forEach(e => {
+          const src = graph.getCellById(e.getSourceCellId());
+          const tgt = graph.getCellById(e.getTargetCellId());
+          if (src?.isNode()) src.toFront();
+          if (tgt?.isNode()) tgt.toFront();
+        });
+      }, 50);
+      if (cycleId) adjustCycleContainerSize(graph, cycleId);
+      if (tempElement) { document.body.removeChild(tempElement); setTempElement(null); }
+      setPopoverVisible(false);
+      return;
+    }
     
     // If it's a cycle-start node, handle the add-node placeholder
     let addNodePosition = null;
@@ -228,48 +317,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
       
       // Adjust loop node size when child node is added via port within loop node
       const cycleId = sourceNodeData.cycle;
-      if (cycleId) {
-        const parentNode = graph.getNodes().find((n: any) => n.getData()?.id === cycleId);
-
-        if (parentNode) {
-          const adjustLoopSize = () => {
-            const childNodes = graph.getNodes().filter((n: any) => n.getData()?.cycle === cycleId);
-            if (childNodes.length > 0) {
-              const bounds = childNodes.reduce((acc: any, child: any) => {
-                const bbox = child.getBBox();
-                return {
-                  minX: Math.min(acc.minX, bbox.x),
-                  minY: Math.min(acc.minY, bbox.y),
-                  maxX: Math.max(acc.maxX, bbox.x + bbox.width),
-                  maxY: Math.max(acc.maxY, bbox.y + bbox.height)
-                };
-              }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
-
-              const padding = 50;
-              const newWidth = Math.max(nodeWidth, bounds.maxX - bounds.minX + padding * 2);
-              const newHeight = Math.max(120, bounds.maxY - bounds.minY + padding * 2);
-
-              parentNode.prop('size', { width: newWidth, height: newHeight });
-              
-              // Update right port x position
-              const ports = parentNode.getPorts();
-              ports.forEach((port: any) => {
-                if (port.group === 'right' && port.args) {
-                  parentNode.portProp(port.id!, 'args/x', newWidth);
-                }
-              });
-            }
-          }; 
-          
-          adjustLoopSize();
-          
-          // Listen to child node movement events
-          const childNodes = graph.getNodes().filter((n: any) => n.getData()?.cycle === cycleId);
-          childNodes.forEach((childNode: any) => {
-            childNode.on('change:position', adjustLoopSize);
-          });
-        }
-      }
+      if (cycleId) adjustCycleContainerSize(graph, cycleId);
 
       const isCycleContainer = (type: string) => type === 'loop' || type === 'iteration';
       const newNodeType = selectedNodeType.type;
@@ -372,22 +420,18 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
 
   if (!tempElement) return null;
 
-  return (
+  return createPortal(
     <Popover
       content={content}
       open={popoverVisible}
-      onOpenChange={(visible) => {
-        if (!visible) handlePopoverClose();
-      }}
+      onOpenChange={(visible) => { if (!visible) handlePopoverClose(); }}
       placement="right"
-      overlayStyle={{
-        position: 'fixed',
-        left: popoverPosition.x + 10,
-        top: popoverPosition.y - 10,
-      }}
+      autoAdjustOverflow
+      getPopupContainer={() => document.body}
     >
-      <div />
-    </Popover>
+      <div style={{ width: '1px', height: '1px' }} />
+    </Popover>,
+    tempElement
   );
 };
 
