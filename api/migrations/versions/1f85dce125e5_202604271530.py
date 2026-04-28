@@ -28,6 +28,11 @@ def upgrade() -> None:
                existing_comment="模型能力列表（如['vision', 'audio', 'video']）",
                existing_nullable=False)
     # ### end Alembic commands ###
+    op.execute("""
+        UPDATE files
+        SET file_key = 'kb/' || kb_id::text || '/' || parent_id::text || '/' || id::text || file_ext
+        WHERE file_ext != 'folder' AND file_key IS NULL
+    """)
 
 
 def downgrade() -> None:
