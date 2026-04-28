@@ -342,20 +342,24 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                         cache_params["prompt_hash"] = hashlib.md5(qa_prompt.encode()).hexdigest()[:8]
                     cached = get_llm_cache(chat_model.model_name, content, "qa", cache_params)
                     if not cached:
+                        logger.info(f"[QA] Cache miss for chunk {global_idx}, calling LLM. cache_params={cache_params}")
                         try:
                             pairs = qa_proposal(chat_model, content, auto_questions_topn, custom_prompt=qa_prompt)
                         except Exception as e:
                             logger.error(f"[QA] LLM call failed: model={chat_model.model_name}, base_url={getattr(chat_model, 'base_url', 'N/A')}, error={e}")
                             return global_idx, []
+                        logger.info(f"[QA] Chunk {global_idx} generated {len(pairs)} QA pairs")
                         # 缓存存 JSON 字符串
                         set_llm_cache(chat_model.model_name, content, json.dumps(pairs, ensure_ascii=False), "qa",
                                       cache_params)
                         return global_idx, pairs
+                    logger.info(f"[QA] Cache hit for chunk {global_idx}, cache_params={cache_params}, cached_type={type(cached).__name__}")
                     # 从缓存读取：可能是 JSON 字符串或旧格式纯文本
                     if isinstance(cached, str):
                         try:
                             parsed = json.loads(cached)
                             if isinstance(parsed, list):
+                                logger.info(f"[QA] Chunk {global_idx} loaded {len(parsed)} QA pairs from cache")
                                 return global_idx, parsed
                         except (json.JSONDecodeError, TypeError):
                             pass
