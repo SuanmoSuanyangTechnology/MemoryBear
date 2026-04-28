@@ -86,7 +86,7 @@ class SearchService:
 
     def __init__(self):
         """Initialize the search service."""
-        logger.info("SearchService initialized")
+        logger.debug("SearchService initialized")
 
     def extract_content_from_result(self, result: dict, node_type: str = "") -> str:
         """

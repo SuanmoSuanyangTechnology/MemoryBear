@@ -53,7 +53,7 @@ class DialogueChunker:
             )
         
         self.chunker_strategy = chunker_strategy
-        logger.info(f"Initializing DialogueChunker with strategy: {chunker_strategy}")
+        logger.debug(f"Initializing DialogueChunker with strategy: {chunker_strategy}")
         
         try:
             # Load and validate configuration
@@ -71,7 +71,7 @@ class DialogueChunker:
             else:
                 self.chunker_client = ChunkerClient(self.chunker_config)
             
-            logger.info(f"DialogueChunker initialized successfully with strategy: {chunker_strategy}")
+            logger.debug(f"DialogueChunker initialized successfully with strategy: {chunker_strategy}")
             
         except Exception as e:
             logger.error(f"Failed to initialize DialogueChunker: {e}", exc_info=True)
@@ -101,7 +101,7 @@ class DialogueChunker:
                 f"Messages: {len(dialogue.context.msgs) if dialogue.context else 0}"
             )
         
-        logger.info(
+        logger.debug(
             f"Processing dialogue {dialogue.ref_id} with {len(dialogue.context.msgs)} messages "
             f"using strategy: {self.chunker_strategy}"
         )
@@ -121,7 +121,7 @@ class DialogueChunker:
                 )
 
             logger.info(
-                f"Successfully generated {len(chunks)} chunks for dialogue {dialogue.ref_id}. "
+                f"Successfully generated {len(chunks)} chunks for dialogue_id: {dialogue.ref_id}. "
                 f"Total characters processed: {len(dialogue.content) if dialogue.content else 0}"
             )
             

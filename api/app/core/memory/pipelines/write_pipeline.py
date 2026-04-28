@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 import uuid
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
+
+from app.core.memory.utils.log.bear_logger import BearLogger
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -40,6 +41,7 @@ from app.core.memory.models.graph_models import (
 )
 
 logger = logging.getLogger(__name__)
+bear = BearLogger("memory.pipeline")
 
 
 # ──────────────────────────────────────────────
@@ -165,112 +167,82 @@ class WritePipeline:
             is_pilot_run: 试运行模式（只萃取不写入）
 
         Returns:
-            WriteResult 包含状态和统计信息 
+            WriteResult 包含状态和统计信息
         """
         if not ref_id:
             ref_id = uuid.uuid4().hex
 
         mode = "试运行" if is_pilot_run else "正式"
-        pipeline_start = time.time()
-
-        logger.info(
-            f"[WritePipeline] 开始 ({mode}) "
-            f"config={self.memory_config.config_name}, "
-            f"end_user={self.end_user_id}"
-        )
+        extraction_result = None
 
         try:
-            # 初始化客户端和连接
-            self._init_clients()
-            self._init_neo4j_connector()
+            async with bear.pipeline(
+                "WritePipeline",
+                mode=mode,
+                config_name=self.memory_config.config_name,
+                end_user_id=self.end_user_id,
+            ):
+                # 初始化客户端和连接
+                self._init_clients()
+                self._init_neo4j_connector()
 
-            # 初始化 Snapshot（提前创建，供预处理阶段的剪枝使用）
-            from app.core.memory.utils.debug.pipeline_snapshot import PipelineSnapshot
-            self._snapshot = PipelineSnapshot("new")
+                # 初始化 Snapshot（提前创建，供预处理阶段的剪枝使用）
+                from app.core.memory.utils.debug.pipeline_snapshot import PipelineSnapshot
+                self._snapshot = PipelineSnapshot("new")
 
-            # Step 1: 预处理 - 消息分块 + AI消息语义剪枝
-            step_start = time.time()
-            chunked_dialogs = await self._preprocess(messages, ref_id)
-            chunks_count = sum(len(d.chunks) for d in chunked_dialogs)
-            logger.info(
-                f"[WritePipeline] [1/5] 预处理：消息分块 "
-                f"✔ {time.time() - step_start:.2f}s  chunks={chunks_count}"
-            )
+                # Step 1: 预处理 - 消息分块 + AI消息语义剪枝
+                async with bear.step(1, 5, "预处理", "消息分块") as s:
+                    chunked_dialogs = await self._preprocess(messages, ref_id)
+                    s.metadata(chunks=sum(len(d.chunks) for d in chunked_dialogs))
 
-            # Step 2: 萃取 - 知识提取
-            step_start = time.time()
-            extraction_result = await self._extract(chunked_dialogs, is_pilot_run)
-            stats = extraction_result.stats
-            logger.info(
-                f"[WritePipeline] [2/5] 萃取：知识提取 "
-                f"✔ {time.time() - step_start:.2f}s  "
-                f"entities={stats['entity_count']}, "
-                f"statements={stats['statement_count']}, "
-                f"relations={stats['relation_count']}"
-            )
+                # Step 2: 萃取 - 知识提取
+                async with bear.step(2, 5, "萃取", "知识提取") as s:
+                    extraction_result = await self._extract(chunked_dialogs, is_pilot_run)
+                    stats = extraction_result.stats
+                    s.metadata(
+                        entities=stats["entity_count"],
+                        statements=stats["statement_count"],
+                        relations=stats["relation_count"],
+                    )
 
-            # 试运行模式到此结束
-            if is_pilot_run:
-                elapsed = time.time() - pipeline_start
-                logger.info(f"[WritePipeline] 完成（试运行） ✔ {elapsed:.2f}s")
+                # 试运行模式到此结束
+                if is_pilot_run:
+                    return WriteResult(
+                        status="pilot_complete",
+                        extraction=extraction_result.stats,
+                        elapsed_seconds=0.0,
+                    )
+
+                # Step 3: 存储 - 写入 Neo4j
+                async with bear.step(3, 5, "存储", "写入 Neo4j"):
+                    await self._store(extraction_result)
+
+                # Step 3.2: 别名归并
+                async with bear.step(3, 5, "别名归并", "处理别名属于关系"):
+                    await self._merge_alias_belongs_to(extraction_result)
+
+                # Step 3.5: 异步情绪提取（fire-and-forget，需在 _store 之后确保 Statement 节点已存在）
+                await self._extract_emotion(getattr(self, "_emotion_statements", []))
+
+                # Step 4: 聚类 - 增量更新社区（异步，不阻塞）
+                async with bear.step(4, 5, "聚类", "增量更新社区") as s:
+                    await self._cluster(extraction_result)
+                    s.metadata(mode="async")
+
+                # Step 5: 摘要 - 生成情景记忆摘要
+                async with bear.step(5, 5, "摘要", "生成情景记忆"):
+                    await self._summarize(chunked_dialogs)
+
+                # 更新活动统计缓存
+                await self._update_stats_cache(extraction_result)
+
                 return WriteResult(
-                    status="pilot_complete",
+                    status="success",
                     extraction=extraction_result.stats,
-                    elapsed_seconds=elapsed,
+                    elapsed_seconds=0.0,
                 )
 
-            # Step 3: 存储 - 写入 Neo4j
-            step_start = time.time()
-            await self._store(extraction_result)
-            logger.info(
-                f"[WritePipeline] [3/5] 存储：写入 Neo4j "
-                f"✔ {time.time() - step_start:.2f}s"
-            )
-
-            # Step 3.2: 别名归并 - 处理 predicate="别名属于" 的关系
-            step_start = time.time()
-            await self._merge_alias_belongs_to(extraction_result)
-            logger.info(
-                f"[WritePipeline] [3.2] 别名归并：处理别名属于关系 "
-                f"✔ {time.time() - step_start:.2f}s"
-            )
-
-            # Step 3.5: 异步情绪提取（fire-and-forget，需在 _store 之后确保 Statement 节点已存在）
-            await self._extract_emotion(getattr(self, "_emotion_statements", []))
-
-            # Step 4: 聚类 - 增量更新社区（异步，不阻塞）
-            step_start = time.time()
-            await self._cluster(extraction_result)
-            logger.info(
-                f"[WritePipeline] [4/5] 聚类：增量更新社区 "
-                f"✔ {time.time() - step_start:.2f}s  mode=async"
-            )
-
-            # Step 5: 摘要 - 生成情景记忆摘要
-            step_start = time.time()
-            await self._summarize(chunked_dialogs)
-            logger.info(
-                f"[WritePipeline] [5/5] 摘要：生成情景记忆 "
-                f"✔ {time.time() - step_start:.2f}s"
-            )
-
-            # 更新活动统计缓存
-            await self._update_stats_cache(extraction_result)
-
-            elapsed = time.time() - pipeline_start
-            logger.info(f"[WritePipeline] 完成 ✔ {elapsed:.2f}s")
-            return WriteResult(
-                status="success",
-                extraction=extraction_result.stats,
-                elapsed_seconds=elapsed,
-            )
-
-        except Exception as e:
-            elapsed = time.time() - pipeline_start
-            logger.error(
-                f"[WritePipeline] 失败 ✘ {elapsed:.2f}s  error={e}",
-                exc_info=True,
-            )
+        except Exception:
             raise
 
         finally:
@@ -300,6 +272,7 @@ class WritePipeline:
             messages=messages,
             ref_id=ref_id,
             config_id=str(self.memory_config.config_id),
+            workspace_id=self.memory_config.workspace_id,
             snapshot=snapshot,
         )
 
@@ -409,7 +382,7 @@ class WritePipeline:
                     ]
                 snapshot.save_stage("5_embedding_outputs", emb_data)
 
-        # step2: 构建图节点和边 
+        # step2: 构建图节点和边
         graph = await build_graph_nodes_and_edges(
             dialog_data_list=dialog_data_list,
             embedder_client=self._embedder_client,
@@ -445,7 +418,7 @@ class WritePipeline:
             },
         )
 
-        # step3: 两阶段去重消歧 
+        # step3: 两阶段去重消歧
         dedup_result = await run_dedup(
             entity_nodes=graph.entity_nodes,
             statement_entity_edges=graph.stmt_entity_edges,
@@ -482,7 +455,7 @@ class WritePipeline:
                 ],
             },
         )
-    
+
         # step4: 构造最终结果
         result = ExtractionResult(
             dialogue_nodes=graph.dialogue_nodes,
@@ -501,7 +474,7 @@ class WritePipeline:
             dialog_data_list=dialog_data_list,
         )
 
-        snapshot.save_summary(result.stats) #  TODO 乐力齐 snapshot需要改
+        snapshot.save_summary(result.stats)  #  TODO 乐力齐 snapshot需要改
         return result
 
     # ──────────────────────────────────────────────
@@ -545,7 +518,7 @@ class WritePipeline:
                     assistant_dialog_edges=result.assistant_dialog_edges,
                 )
                 if success:
-                    logger.info("Successfully saved all data to Neo4j")
+                    logger.debug("Successfully saved all data to Neo4j")
                     return
                 # 写入返回 False（部分失败）
                 if attempt < max_retries - 1:
@@ -584,7 +557,8 @@ class WritePipeline:
 
         # 筛选出所有 predicate="别名属于" 的边
         alias_edges = [
-            e for e in result.entity_entity_edges
+            e
+            for e in result.entity_entity_edges
             if getattr(e, "relation_type", "") == ALIAS_PREDICATE
             or getattr(e, "predicate", "") == ALIAS_PREDICATE
         ]
@@ -608,14 +582,18 @@ class WritePipeline:
                 if source_name:
                     existing_lower = {a.lower() for a in (target_node.aliases or [])}
                     if source_name.lower() not in existing_lower:
-                        target_node.aliases = list(target_node.aliases or []) + [source_name]
+                        target_node.aliases = list(target_node.aliases or []) + [
+                            source_name
+                        ]
 
                 # 将 source.description append 进 target.description（追加，分号分隔）
                 src_desc = (source_node.description or "").strip()
                 if src_desc:
                     tgt_desc = (target_node.description or "").strip()
                     if src_desc not in tgt_desc:
-                        target_node.description = f"{tgt_desc}；{src_desc}" if tgt_desc else src_desc
+                        target_node.description = (
+                            f"{tgt_desc}；{src_desc}" if tgt_desc else src_desc
+                        )
 
             logger.info(
                 f"[AliasMerge] 内存同步完成，处理 {len(alias_edges)} 条 '别名属于' 边"
@@ -627,12 +605,12 @@ class WritePipeline:
                 end_user_id=self.end_user_id,
             )
             merged_count = len(records) if records else 0
-            logger.info(
-                f"[AliasMerge] Neo4j 别名归并完成，影响 {merged_count} 条记录"
-            )
+            logger.info(f"[AliasMerge] Neo4j 别名归并完成，影响 {merged_count} 条记录")
 
         except Exception as e:
-            logger.warning(f"[AliasMerge] 别名归并失败（不影响主流程）: {e}", exc_info=True)
+            logger.warning(
+                f"[AliasMerge] 别名归并失败（不影响主流程）: {e}", exc_info=True
+            )
 
     # ──────────────────────────────────────────────
     # Step 4: 聚类
@@ -675,8 +653,8 @@ class WritePipeline:
             )
             logger.info(
                 f"[Clustering] 增量聚类任务已提交 - "
-                f"task_id={task.id}, "
-                f"entity_count={len(new_entity_ids)}, "
+                f"task_id = {task.id}, "
+                f"entity_count = {len(new_entity_ids)}, "
                 f"source=dedup"
             )
         except Exception as e:
@@ -734,9 +712,9 @@ class WritePipeline:
             )
             logger.info(
                 f"[Emotion] 异步情绪提取任务已提交 - "
-                f"task_id={result.id}, "
-                f"statement_count={len(emotion_statements)}, "
-                f"snapshot_dir={snapshot_dir}, "
+                f"task_id = {result.id}, "
+                f"statement_count = {len(emotion_statements)}, "
+                f"snapshot_dir = {snapshot_dir}, "
                 f"source=async"
             )
         except Exception as e:
@@ -749,7 +727,7 @@ class WritePipeline:
     # Step 5: 摘要
     # （+ entity_description）+ meta_data部分在此提取
     # ──────────────────────────────────────────────
-# TODO 乐力齐 需要做成异步celery任务
+    # TODO 乐力齐 需要做成异步celery任务
     async def _summarize(self, chunked_dialogs: List[DialogData]) -> None:
         """
         摘要：生成情景记忆摘要 → 写入 Neo4j。
@@ -877,8 +855,7 @@ class WritePipeline:
                 external_assistant_aliases=neo4j_assistant_aliases,
             )
             logger.info(
-                f"别名清洗完成，AI助手别名排除集大小: "
-                f"{len(neo4j_assistant_aliases)}"
+                f"别名清洗完成，AI助手别名排除集大小: {len(neo4j_assistant_aliases)}"
             )
         except Exception as e:
             logger.warning(f"别名清洗失败（不影响主流程）: {e}")
@@ -911,8 +888,7 @@ class WritePipeline:
                 stats=stats,
             )
             logger.info(
-                f"活动统计已写入 Redis: "
-                f"workspace_id={self.memory_config.workspace_id}"
+                f"活动统计已写入 Redis: workspace_id={self.memory_config.workspace_id}"
             )
         except Exception as e:
             logger.warning(f"写入活动统计缓存失败（不影响主流程）: {e}")

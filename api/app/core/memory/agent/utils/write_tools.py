@@ -390,7 +390,7 @@ async def write(
             workspace_id=str(memory_config.workspace_id),
             stats=stats_to_cache,
         )
-        logger.info(f"[WRITE] 活动统计已写入 Redis: workspace_id={memory_config.workspace_id}")
+        logger.info(f"[WRITE] 活动统计已写入 Redis: workspace_id = {memory_config.workspace_id}")
     except Exception as cache_err:
         logger.warning(f"[WRITE] 写入活动统计缓存失败（不影响主流程）: {cache_err}", exc_info=True)
 

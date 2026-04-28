@@ -105,7 +105,7 @@ class NewExtractionOrchestrator:
             SidecarTiming.AFTER_TRIPLET
         ]
 
-        logger.info(
+        logger.debug(
             "NewExtractionOrchestrator initialised — "
             "after_statement sidecars: %d, after_triplet sidecars: %d",
             len(self.after_statement_sidecars),
@@ -274,11 +274,11 @@ class NewExtractionOrchestrator:
     ) -> List[DialogData]:
         """Pilot mode: statement + triplet extraction only, no sidecars or embeddings."""
         # Phase 1: Statement extraction (chunk-level parallel)
-        logger.info("Pilot phase 1/2: Statement extraction")
+        logger.debug("Pilot phase 1/2: Statement extraction")
         all_stmt_results = await self._extract_all_statements(dialog_data_list)
 
         # Phase 2: Triplet extraction (statement-level parallel)
-        logger.info("Pilot phase 2/2: Triplet extraction")
+        logger.debug("Pilot phase 2/2: Triplet extraction")
         all_triplet_results = await self._extract_all_triplets(
             dialog_data_list, all_stmt_results
         )
@@ -327,7 +327,7 @@ class NewExtractionOrchestrator:
                 },
             )
 
-        logger.info("Pilot extraction complete")
+        logger.debug("Pilot extraction complete")
         return dialog_data_list
 
     # ── 3b. 正式模式：四阶段并发执行 ──
@@ -338,7 +338,7 @@ class NewExtractionOrchestrator:
         """Full mode: all four phases with concurrent sidecars and embeddings."""
 
         # ── Phase 1: Statement extraction + chunk/dialog embedding ──
-        logger.info("Phase 1/4: Statement extraction + chunk/dialog embedding")
+        logger.debug("Phase 1/4: Statement extraction + chunk/dialog embedding")
         chunk_dialog_emb_input = self._build_chunk_dialog_embedding_input(
             dialog_data_list
         )
@@ -367,7 +367,7 @@ class NewExtractionOrchestrator:
             logger.warning("Chunk/dialog embedding failed: %s", phase1_results[1])
 
         # ── Phase 2: Triplet extraction + after_statement sidecars + statement embedding ──
-        logger.info(
+        logger.debug(
             "Phase 2/4: Triplet extraction + sidecars + statement embedding"
         )
         stmt_emb_input = self._build_statement_embedding_input(
@@ -403,7 +403,7 @@ class NewExtractionOrchestrator:
         )
 
         # ── Phase 3: Entity embedding + after_triplet sidecars ──
-        logger.info("Phase 3/4: Entity embedding + after_triplet sidecars")
+        logger.debug("Phase 3/4: Entity embedding + after_triplet sidecars")
         entity_emb_input = self._build_entity_embedding_input(all_triplet_results)
 
         after_triplet_pairs: List[Tuple[ExtractionStep, Any]] = []
@@ -430,7 +430,7 @@ class NewExtractionOrchestrator:
         merged_emb = self._merge_embeddings(chunk_dialog_emb, stmt_emb, entity_emb)
 
         # ── Phase 4: Data assignment ──
-        logger.info("Phase 4/4: Data assignment")
+        logger.debug("Phase 4/4: Data assignment")
 
         self._assign_results(
             dialog_data_list,
@@ -453,7 +453,7 @@ class NewExtractionOrchestrator:
             "embedding_output": merged_emb,
         }
 
-        logger.info("Full extraction pipeline complete")
+        logger.debug("Full extraction pipeline complete")
         return dialog_data_list
 
     @property

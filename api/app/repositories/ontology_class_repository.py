@@ -227,7 +227,7 @@ class OntologyClassRepository:
             ).all()
             
             logger.info(
-                f"Found {len(classes)} ontology classes in scene {scene_id}"
+                f"Found {len(classes)} ontology classes in scene_id: {scene_id}"
             )
             
             return classes

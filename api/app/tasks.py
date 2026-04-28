@@ -1470,7 +1470,7 @@ def write_message_task(
         with get_db_context() as db:
             logger.info(
                 f"[CELERY WRITE] Executing MemoryAgentService.write_memory "
-                f"with config_id={actual_config_id} (type: {type(actual_config_id).__name__}), language={language}")
+                f"with config_id = {actual_config_id} (type: {type(actual_config_id).__name__}), language={language}")
             service = MemoryAgentService()
             result = await service.write_memory(
                 WriteMemoryRequest(

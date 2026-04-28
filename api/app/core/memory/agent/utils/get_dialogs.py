@@ -10,6 +10,7 @@ async def get_chunked_dialogs(
         messages: list = None,
         ref_id: str = "",
         config_id: str = None,
+        workspace_id=None,
         snapshot=None,
 ) -> List[DialogData]:
     """Generate chunks from structured messages using the specified chunker strategy.
@@ -76,6 +77,7 @@ async def get_chunked_dialogs(
                     config_service = MemoryConfigService(db)
                     memory_config = config_service.load_memory_config(
                         config_id=config_id,
+                        workspace_id=workspace_id,
                         service_name="semantic_pruning"
                     )
                     
@@ -107,6 +109,13 @@ async def get_chunked_dialogs(
                                 remaining_msg_count = len(dialog_data.context.msgs)
                                 deleted_count = original_msg_count - remaining_msg_count
                                 logger.info(f"[剪枝] 完成: 原始{original_msg_count}条 -> 保留{remaining_msg_count}条 (删除{deleted_count}条)")
+                                
+                                # 将剪枝记录挂到 metadata，供 graph_build_step 构建节点
+                                if pruner.pruning_records:
+                                    dialog_data.metadata["assistant_pruning_records"] = [
+                                        r.model_dump() for r in pruner.pruning_records
+                                    ]
+                                    logger.info(f"[剪枝] 收集到 {len(pruner.pruning_records)} 条剪枝记录")
                             else:
                                 logger.warning("[剪枝] prune_dataset 返回空列表")
                         else:

@@ -12,6 +12,7 @@ Extract entities and knowledge triplets from the given statement.
 - 命名关系中新出现的称呼、别名、昵称、产品名保持原样，不做替换。
 - `description` 使用中文。
 - `type`、`predicate`、`type_description`、`predicate_description` 一律使用中文。
+- 每个 `triplet` 都必须携带 `valid_at` 和 `invalid_at`，并直接复制输入中的同名字段，不要自行改写或推断新的时间边界。
   {% else %}
   Important:
 - Keep `name`, `subject_name`, and `object_name` in their original surface form from the source text by default.
@@ -22,6 +23,7 @@ Extract entities and knowledge triplets from the given statement.
 - Newly introduced names in naming or alias expressions must stay in their original form.
 - Generate `description` in English.
 - Always generate `type`, `predicate`, `type_description`, and `predicate_description` in Chinese.
+- Every `triplet` MUST include `valid_at` and `invalid_at`, copied directly from the input fields with the same names; do not rewrite or infer new temporal bounds.
   {% endif %}
 
 ===Inputs===
@@ -110,7 +112,8 @@ Primary statement to analyze:
 - 不要从 `supporting_context.msgs` 中单独抽取实体或关系。
 - 如果某条信息只出现在 `supporting_context.msgs` 中，而没有出现在 `statement_text` 中，就不要输出它。
 - 如果 `supporting_context.msgs` 中的 Assistant 消息包含总结、猜测、解释或改写，这些内容只能作为理解辅助，不能直接作为抽取来源。
-- `statement_type`、`temporal_type`、`valid_at`、`invalid_at` 是辅助理解字段，不是抽取目标。
+- `statement_type`、`temporal_type` 是辅助理解字段，不是抽取目标。
+- `valid_at`、`invalid_at` 不用于决定是否创建实体或关系，但如果产生 triplet，必须原样复制到每个 triplet 的同名字段中。
 - 对 `statement_text` 中的用户自指表达，要统一规范成实体 `用户`。
 - 对其他可稳定解析的代词或指示表达，要替换为具体指代实体名后再抽取。
 - 对命名关系中新出现的称呼、别名、昵称、产品名，不要因为上下文可推断其所指而直接改写，它们应保持原样作为实体名。
@@ -120,7 +123,8 @@ Primary statement to analyze:
 - Do not extract any standalone entity or relation from `supporting_context.msgs`.
 - If some information appears only in `supporting_context.msgs` but not in `statement_text`, do not include it in the output.
 - If Assistant messages in `supporting_context.msgs` contain summary, guess, interpretation, or rephrasing, use them only as interpretive support and never as a direct extraction source.
-- Treat `statement_type`, `temporal_type`, `valid_at`, and `invalid_at` as auxiliary context, not extraction targets.
+- Treat `statement_type` and `temporal_type` as auxiliary context, not extraction targets.
+- Do not use `valid_at` or `invalid_at` to decide whether to create entities or relations, but if any triplet is produced, copy them verbatim into every triplet field with the same names.
 - Normalize user self-reference in `statement_text` to the entity `用户`.
 - Replace other resolvable pronouns or demonstratives with their resolved entity names before extraction.
 - For newly introduced names in naming or alias expressions, do not rewrite them even if the context reveals who they refer to; keep them as entity names.
@@ -229,7 +233,7 @@ Primary statement to analyze:
 
 - unresolved 或边界不稳的表达，不因“看起来像名词”就创建实体。
 - 情绪、心理状态、金额、数量、普通时间、一次性动作短语，默认不作为独立实体类型抽取。
-- 抽象命题片段、泛化结果、价值判断，默认不创建实体；如有保留价值，应写入相关高价值实体的 `description`。
+- 抽象命题片段、泛化结果、价值判断，默认不创建实体；如有保留价值且适合作为实体的稳定描述，可写入相关高价值实体的 `description`。
 
 实体类型选择原则：
 
@@ -445,9 +449,9 @@ Do not let auxiliary fields drive the extraction process.
 - 不要为了表达一句带时间或地点的行动，而额外创造“任务”“计划”“事件”实体。
 - 但如果动作明确把主体和某个稳定实体连接起来，可以保留该稳定实体，并抽取轻关系。例如“我去图书馆”“我去公司开会”“我去上课”“我去看演唱会”可以抽取 `前往`。
 - 当句子只是在讨论一般道理、抽象规律、空泛结果或非个体化概念，而这些概念本身不构成可复用记忆时，不要创建实体。
-- 如果句子表达的是用户的观点、信念、判断、愿望或目标倾向，但其中抽象对象不值得作为独立实体保留，则只保留相关高价值实体，不要再创建这些低价值对象实体，并把未抽取的抽象内容压缩写入相关实体的 `description`；例如“用户认为努力就会有回报”应只保留 `用户`，并在 `description` 中体现“用户认为努力就会有回报”。
-- 对于未抽取的抽象实体、抽象命题片段或泛化结果，只要它们对理解该高价值实体有帮助，就应优先写入该实体的 `description`，而不是改用宽泛关系或补造弱实体。
-- 当前阶段同样不要把情绪或心理状态抽成实体；如果句子里出现“紧张”“开心”“难过”“焦虑”“放松”等，应写入相关高价值实体的 `description`，而不是把它们标成 `知识能力`、`偏好习惯目标` 或其他近似类型。
+- 如果句子表达的是用户的观点、信念、判断、愿望或目标倾向，但其中抽象对象不值得作为独立实体保留，则只保留相关高价值实体，不要再创建这些低价值对象实体；只有当未抽取内容适合作为该实体的稳定描述时，才写入相关实体的 `description`。例如“用户认为努力就会有回报”可只保留 `用户`，并在 `description` 中体现这一较稳定认知倾向。
+- 对于未抽取的抽象实体、抽象命题片段或泛化结果，不要默认全部写入 `description`；只有当它们适合作为该实体的稳定描述、且对后续区分或理解该实体有帮助时，才写入 `description`。
+- 当前阶段同样不要把情绪或心理状态抽成实体；如果句子里出现“紧张”“开心”“难过”“焦虑”“放松”等，只有在它们能被稳定概括为较持久的认知或态度时，才可间接体现在相关高价值实体的 `description` 中；短期情绪状态本身不要写入 `description`。
 - 如果陈述里有值得保留的实体信息，但没有有效关系，可以只返回 `entities`，并把 `triplets` 设为 `[]`。
 - `name` 默认保持原文中的表面形式，但用户自指必须写成 `用户`，可稳定解析的其他代词必须替换为具体指代实体名。
 - `description` 必须使用中文。
@@ -461,9 +465,9 @@ Do not let auxiliary fields drive the extraction process.
 - Do not create extra "task", "plan", or "event" entities just to represent an action with time or location modifiers.
 - But if an action clearly connects the subject to a stable entity, keep that stable entity and use a light relation. For example, statements like "I go to the library", "I go to the office", "I go to class", or "I go to a concert" can use `前往`.
 - If the sentence is only about a generic principle, abstract outcome, or non-personalized concept that is not worth remembering on its own, do not create an entity for it.
-- If a statement expresses the user's belief, judgment, opinion, wish, or goal tendency but the referenced abstract concepts are not worth keeping as standalone entities, keep only the relevant high-value entities, do not create those low-value concept entities, and compress the unextracted abstract content into the relevant entity `description`. For example, "the user believes effort brings reward" should keep only `用户` and reflect that belief in `description`.
-- For abstract entities, proposition fragments, or generic outcomes that are not extracted, prefer writing them into the relevant retained entity's `description` when they help preserve the memory, instead of switching to a broad relation or inventing a weak entity.
-- In the current stage, do not extract emotional or psychological states as entities. States such as nervousness, happiness, sadness, anxiety, or relief should be written into the relevant retained entity's `description` rather than mapped to `知识能力`, `偏好习惯目标`, or any other approximate type.
+- If a statement expresses the user's belief, judgment, opinion, wish, or goal tendency but the referenced abstract concepts are not worth keeping as standalone entities, keep only the relevant high-value entities and do not create those low-value concept entities; write the unextracted content into an entity `description` only when it is suitable as a stable description of that entity. For example, "the user believes effort brings reward" may keep only `用户` and reflect that relatively stable belief in `description`.
+- For abstract entities, proposition fragments, or generic outcomes that are not extracted, do not automatically write them into `description`; only do so when they are suitable as a stable description of the retained entity and help identify or understand it.
+- In the current stage, do not extract emotional or psychological states as entities. States such as nervousness, happiness, sadness, anxiety, or relief should not be mapped to `知识能力`, `偏好习惯目标`, or any other approximate type, and short-lived emotional states should not be written into `description`.
 - If the statement contains entity-worthy content but no valid relation, it is acceptable to return `entities` with `triplets: []`.
 - Keep `name` in its original surface form by default, but write user self-reference as `用户` and replace other stably resolvable references with their resolved entity names.
 - `description` must be in English.
@@ -487,11 +491,17 @@ Do not let auxiliary fields drive the extraction process.
 
 - `description` 应短、直白、与当前上下文相关，并能帮助区分实体。
 - 优先描述实体在当前陈述和必要上下文中的身份、作用或关系。
+- `description` 只保留适合长期附着在该实体上的描述，例如稳定身份、稳定关系、长期偏好/兴趣/习惯、较稳定认知倾向或可用于区分实体的持久特征。
+- 不要把短期状态、一次性事件、临时计划、当前情绪、具体时间锚点，或只在当前句子里短暂成立的信息写进 `description`。
+- 如果实体应保留，但当前 statement 中没有适合长期附着在该实体上的稳定描述，则 `description` 允许为空字符串 `""`；不要为了填充 `description` 而写入短期状态或临时信息。
 - 避免使用“陈述中提到的人物”“陈述中提到的组织”“陈述中提到的物品”这类低信息量模板。
 - 不要补充识别实体所不需要的外部知识。
   {% else %}
 - `description` should be short, context-grounded, and discriminative.
 - Prefer describing the entity's role, identity, or relation in the current statement and necessary supporting context.
+- `description` should keep only information suitable to remain attached to the entity over time, such as stable identity, stable relations, long-term preferences/interests/habits, relatively stable beliefs, or persistent distinguishing traits.
+- Do not put short-lived states, one-off events, temporary plans, current emotions, concrete time anchors, or information that only briefly holds in the current sentence into `description`.
+- If an entity should be retained but the current statement does not provide any suitable stable description for it, `description` may be the empty string `""`; do not fill it with short-lived states or temporary information just to avoid emptiness.
 - Avoid low-information templates such as "the person mentioned in the statement" or "the organization mentioned in the statement".
 - Do not add extra world knowledge that is not needed for identifying the entity in context.
   {% endif %}
@@ -518,6 +528,7 @@ Do not let auxiliary fields drive the extraction process.
 - 如果 `has_unsolved_reference` 是 `true`，不要抽取实体或 triplets。
 - `subject_name` 和 `object_name` 默认保持原文中的表面形式，但用户自指必须写成 `用户`，可稳定解析的其他代词必须替换为具体指代实体名。
 - `predicate_description` 必须直接复用对应 `predicate` 的中文定义。
+- 每个 triplet 都必须包含 `valid_at` 和 `invalid_at`，并直接复用输入中的同名字段值；如果输入是 `NULL`，这里也写 `NULL`。
 - 不要把普通时间表达作为 triplet 的宾语。
 - 不要为了表达一次性计划、安排、日程而强行构造关系。
 - 当句子表达主体去某个地点、场所、组织、课程或活动时，只要该对象本身有记忆价值，就可以抽取 `前往`，即使句中同时带有时间信息。
@@ -537,6 +548,7 @@ Do not let auxiliary fields drive the extraction process.
 - If `has_unsolved_reference` is `true`, do not extract entities or triplets.
 - Keep `subject_name` and `object_name` in their original surface form by default, but write user self-reference as `用户` and replace other stably resolvable references with their resolved entity names.
 - `predicate_description` must directly reuse the corresponding Chinese definition of `predicate`.
+- Every triplet must include `valid_at` and `invalid_at`, copied directly from the input fields with the same names; if the input is `NULL`, write `NULL` here as well.
 - Do not use ordinary time expressions as triplet objects.
 - Do not force relations just to encode one-off plans, schedules, or actions.
 - When the statement says that the subject goes to a place, venue, organization, class, or activity, you may extract `前往` as long as that destination itself is worth remembering, even if the statement also includes time information.
@@ -589,10 +601,14 @@ Do not let auxiliary fields drive the extraction process.
 
 - 每个 triplet 中的 `subject_name` 必须与 `subject_id` 指向实体的 `name` 完全一致。
 - 每个 triplet 中的 `object_name` 必须与 `object_id` 指向实体的 `name` 完全一致。
+- 每个 triplet 中的 `valid_at` 必须与输入中的 `valid_at` 完全一致。
+- 每个 triplet 中的 `invalid_at` 必须与输入中的 `invalid_at` 完全一致。
 - 不要在 triplet 里使用与实体名不同的表面形式。
   {% else %}
 - `subject_name` in each triplet MUST exactly match the `name` of the entity referenced by `subject_id`.
 - `object_name` in each triplet MUST exactly match the `name` of the entity referenced by `object_id`.
+- `valid_at` in each triplet MUST exactly match the input `valid_at`.
+- `invalid_at` in each triplet MUST exactly match the input `invalid_at`.
 - Do not use alternative surface forms inside triplets.
   {% endif %}
 
@@ -603,7 +619,7 @@ Statement: "我住在巴黎。"
 Output:
 {
   "triplets": [
-    {"subject_name": "用户", "subject_id": 0, "predicate": "居住于", "predicate_description": "人物居住在某地点", "object_name": "巴黎", "object_id": 1}
+    {"subject_name": "用户", "subject_id": 0, "predicate": "居住于", "predicate_description": "人物居住在某地点", "object_name": "巴黎", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
     {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "居住在巴黎的说话者", "is_explicit_memory": false},
@@ -618,7 +634,7 @@ Input condition: supporting context has already made it clear that “他” ref
 Output:
 {
   "triplets": [
-    {"subject_name": "张明", "subject_id": 0, "predicate": "任职于", "predicate_description": "主体在某组织中工作或任职", "object_name": "腾讯", "object_id": 1}
+    {"subject_name": "张明", "subject_id": 0, "predicate": "任职于", "predicate_description": "主体在某组织中工作或任职", "object_name": "腾讯", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
     {"entity_idx": 0, "name": "张明", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "在腾讯工作的人员", "is_explicit_memory": false},
@@ -632,11 +648,11 @@ Statement: "我常去图书馆学微积分。"
 Output:
 {
   "triplets": [
-    {"subject_name": "用户", "subject_id": 0, "predicate": "前往", "predicate_description": "主体前往某个地点、场所、组织、课程或活动", "object_name": "图书馆", "object_id": 1},
-    {"subject_name": "用户", "subject_id": 0, "predicate": "学习", "predicate_description": "主体正在学习某知识主题或技能", "object_name": "微积分", "object_id": 2}
+    {"subject_name": "用户", "subject_id": 0, "predicate": "前往", "predicate_description": "主体前往某个地点、场所、组织、课程或活动", "object_name": "图书馆", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"},
+    {"subject_name": "用户", "subject_id": 0, "predicate": "学习", "predicate_description": "主体正在学习某知识主题或技能", "object_name": "微积分", "object_id": 2, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "经常去图书馆学习微积分的说话者", "is_explicit_memory": false},
+    {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "经常在图书馆学习微积分的说话者", "is_explicit_memory": false},
     {"entity_idx": 1, "name": "图书馆", "type": "地点设施", "type_description": "具有地理意义或功能性空间意义的位置与场所。", "description": "用户经常前往学习的地点", "is_explicit_memory": false},
     {"entity_idx": 2, "name": "微积分", "type": "知识能力", "type_description": "可学习、掌握、使用或讨论的知识主题、技能、学科或语言。", "description": "用户经常学习的主题", "is_explicit_memory": true}
   ]
@@ -658,8 +674,8 @@ Statement: "我的朋友都叫我山哥。"
 Output:
 {
   "triplets": [
-    {"subject_name": "山哥", "subject_id": 2, "predicate": "别名属于", "predicate_description": "别名指向其对应的规范实体", "object_name": "用户", "object_id": 0},
-    {"subject_name": "我的朋友", "subject_id": 1, "predicate": "使用称呼", "predicate_description": "主体使用某个名字来称呼另一实体", "object_name": "山哥", "object_id": 2}
+    {"subject_name": "山哥", "subject_id": 2, "predicate": "别名属于", "predicate_description": "别名指向其对应的规范实体", "object_name": "用户", "object_id": 0, "valid_at": "NULL", "invalid_at": "NULL"},
+    {"subject_name": "我的朋友", "subject_id": 1, "predicate": "使用称呼", "predicate_description": "主体使用某个名字来称呼另一实体", "object_name": "山哥", "object_id": 2, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
     {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "被朋友称作山哥的说话者", "is_explicit_memory": false},
@@ -697,7 +713,7 @@ Output:
 {
   "triplets": [],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "最近有些紧张并认为这很正常的说话者", "is_explicit_memory": false}
+    {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "", "is_explicit_memory": false}
   ]
 }
 
@@ -707,7 +723,7 @@ Statement: "王教授是导师。"
 Output:
 {
   "triplets": [
-    {"subject_name": "王教授", "subject_id": 0, "predicate": "担任角色", "predicate_description": "主体承担某个角色", "object_name": "导师", "object_id": 1}
+    {"subject_name": "王教授", "subject_id": 0, "predicate": "担任角色", "predicate_description": "主体承担某个角色", "object_name": "导师", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
     {"entity_idx": 0, "name": "王教授", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "承担导师角色的具体个人", "is_explicit_memory": false},
@@ -721,8 +737,8 @@ Statement: "我的GitHub账号用户名是chen4。"
 Output:
 {
   "triplets": [
-    {"subject_name": "用户", "subject_id": 0, "predicate": "拥有账号", "predicate_description": "实体具有某账号", "object_name": "GitHub账号", "object_id": 1},
-    {"subject_name": "GitHub账号", "subject_id": 1, "predicate": "标识为", "predicate_description": "实体由某标识符标识", "object_name": "chen4", "object_id": 2}
+    {"subject_name": "用户", "subject_id": 0, "predicate": "拥有账号", "predicate_description": "实体具有某账号", "object_name": "GitHub账号", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"},
+    {"subject_name": "GitHub账号", "subject_id": 1, "predicate": "标识为", "predicate_description": "实体由某标识符标识", "object_name": "chen4", "object_id": 2, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
     {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "拥有该 GitHub 账号的说话者", "is_explicit_memory": false},
@@ -737,7 +753,7 @@ Statement: "机器人查票员和我沟通。"
 Output:
 {
   "triplets": [
-    {"subject_name": "机器人查票员", "subject_id": 0, "predicate": "沟通于", "predicate_description": "两个实体之间发生沟通或交流", "object_name": "用户", "object_id": 1}
+    {"subject_name": "机器人查票员", "subject_id": 0, "predicate": "沟通于", "predicate_description": "两个实体之间发生沟通或交流", "object_name": "用户", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
     {"entity_idx": 0, "name": "机器人查票员", "type": "智能体", "type_description": "具有行动、交互或执行能力的非人主体，如机器人、AI 或其他智慧体。", "description": "与用户发生沟通的机器人主体", "is_explicit_memory": false},
@@ -757,6 +773,7 @@ JSON 要求：
 - `name`、`subject_name`、`object_name` 默认保持原文中的表面形式，但用户自指必须规范成 `用户`，可稳定解析的其他代词必须替换为具体指代实体名
 - `description` 必须使用中文
 - `type`、`predicate`、`type_description`、`predicate_description` 必须使用上方预定义的中文标签和中文说明
+- 每个 triplet 都必须包含 `valid_at` 和 `invalid_at`，并与输入中的同名字段完全一致
 - 如果 `has_unsolved_reference` 是 `true`，输出必须是 `{"entities": [], "triplets": []}`
 - 如果存在无法稳定解析的代词或指示表达，输出也必须是 `{"entities": [], "triplets": []}`
 - 如果没有有效 triplet，返回 `"triplets": []`
@@ -769,6 +786,7 @@ JSON 要求：
 - `name`, `subject_name`, and `object_name` keep their original surface forms by default, but user self-reference must be normalized to `用户` and other stably resolvable references must be replaced by their resolved entity names
 - `description` must be in English
 - `type`, `predicate`, `type_description`, and `predicate_description` must use the predefined Chinese labels and Chinese definitions above
+- Every triplet must include `valid_at` and `invalid_at`, exactly matching the input fields with the same names
 - If `has_unsolved_reference` is `true`, the output must be `{"entities": [], "triplets": []}`
 - If unresolved references still remain, the output must also be `{"entities": [], "triplets": []}`
 - If no valid triplet exists, return `"triplets": []`
@@ -799,7 +817,9 @@ Output JSON structure:
       "predicate": "string",
       "predicate_description": "string",
       "object_name": "string",
-      "object_id": 0
+      "object_id": 0,
+      "valid_at": "ISO 8601 | NULL",
+      "invalid_at": "ISO 8601 | NULL"
     }
   ]
 }

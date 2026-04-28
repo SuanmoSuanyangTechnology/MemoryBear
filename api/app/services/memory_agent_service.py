@@ -64,7 +64,7 @@ class MemoryAgentService:
     def writer_messages_deal(self, messages, start_time, end_user_id, config_id, message, context):
         duration = time.time() - start_time
         if str(messages) == 'success':
-            logger.info(f"Write operation successful for group {end_user_id} with config_id {config_id}")
+            logger.info(f"Write operation successful for end_id: {end_user_id} with config_id： {config_id}")
             # 记录成功的操作
             audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id,
                                        success=True,
@@ -360,10 +360,21 @@ class MemoryAgentService:
         workspace_id = None
         try:
             connected_config = get_end_user_connected_config(end_user_id, db)
-            workspace_id = connected_config.get("workspace_id")
+            # get_end_user_connected_config 返回字符串，需转为 UUID
+            workspace_id_raw = connected_config.get("workspace_id")
+            if workspace_id_raw and workspace_id_raw != "None":
+                try:
+                    workspace_id = uuid.UUID(str(workspace_id_raw))
+                except (ValueError, AttributeError):
+                    workspace_id = None
             if config_id is None:
-                config_id = connected_config.get("memory_config_id")
-            logger.info(f"Resolved config from end_user: config_id={config_id}, workspace_id={workspace_id}")
+                config_id_raw = connected_config.get("memory_config_id")
+                if config_id_raw and config_id_raw != "None":
+                    try:
+                        config_id = uuid.UUID(str(config_id_raw))
+                    except (ValueError, AttributeError):
+                        config_id = None
+            logger.info(f"Resolved config from end_user: config_id = {config_id}, workspace_id = {workspace_id}")
             if config_id is None and workspace_id is None:
                 raise ValueError(
                     f"No memory configuration found for end_user {end_user_id}. "
@@ -517,7 +528,7 @@ class MemoryAgentService:
             workspace_id = connected_config.get("workspace_id")
             if config_id is None:
                 config_id = connected_config.get("memory_config_id")
-            logger.info(f"Resolved config from end_user: config_id={config_id}, workspace_id={workspace_id}")
+            logger.info(f"Resolved config from end_user: config_id = {config_id}, workspace_id = {workspace_id}")
             if config_id is None and workspace_id is None:
                 raise ValueError(
                     f"No memory configuration found for end_user {end_user_id}. Please ensure the user has a connected memory configuration.")
@@ -529,7 +540,7 @@ class MemoryAgentService:
                 raise ValueError(f"Unable to determine memory configuration for end_user {end_user_id}: {e}")
             # If config_id was provided, continue without workspace_id fallback
 
-        logger.info(f"Read operation for group {end_user_id} with config_id {config_id}")
+        logger.info(f"Read operation for end_user_id: {end_user_id} with config_id: {config_id}")
 
         config_load_start = time.time()
         try:
@@ -840,16 +851,16 @@ class MemoryAgentService:
             workspace_id = connected_config.get('workspace_id')
             if config_id is None:
                 config_id = connected_config.get('memory_config_id')
-            logger.info(f"Resolved config from end_user: config_id={config_id}, workspace_id={workspace_id}")
+            logger.info(f"Resolved config from end_user: config_id = {config_id}, workspace_id = {workspace_id}")
             if config_id is None and workspace_id is None:
                 raise ValueError(
-                    f"No memory configuration found for end_user {end_user_id}. Please ensure the user has a connected memory configuration.")
+                    f"No memory configuration found for end_user_id {end_user_id}. Please ensure the user has a connected memory configuration.")
         except Exception as e:
             if "No memory configuration found" in str(e):
                 raise  # Re-raise our specific error
-            logger.error(f"Failed to get connected config for end_user {end_user_id}: {e}")
+            logger.error(f"Failed to get connected config for end_user_id {end_user_id}: {e}")
             if config_id is None:
-                raise ValueError(f"Unable to determine memory configuration for end_user {end_user_id}: {e}")
+                raise ValueError(f"Unable to determine memory configuration for end_user_id {end_user_id}: {e}")
             # If config_id was provided, continue without workspace_id fallback
 
         logger.info(f"Generating summary from retrieve info for query: {query[:50]}...")
@@ -1250,7 +1261,7 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     from app.models.end_user_model import EndUser
     from app.services.memory_config_service import MemoryConfigService
 
-    logger.info(f"Getting connected config for end_user: {end_user_id}")
+    logger.info(f"Getting connected config for end_user_id: {end_user_id}")
 
     # TODO: check sources for enduserid, should be one of these three: chat, draft, apikey
     # 1. 获取 end_user 及其 app_id
@@ -1351,7 +1362,7 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     }
 
     logger.info(
-        f"Successfully retrieved connected config: memory_config_id={memory_config_id}, workspace_id={end_user.workspace_id}")
+        f"Successfully retrieved connected config: memory_config_id = {memory_config_id}, workspace_id = {end_user.workspace_id}")
     return result
 
 

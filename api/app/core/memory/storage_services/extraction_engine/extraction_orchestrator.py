@@ -1303,6 +1303,7 @@ class ExtractionOrchestrator:
 
                             # 只有当两个实体ID都存在时才创建边
                             if subject_entity_id and object_entity_id:
+                                _tv = getattr(statement, "temporal_validity", None)
                                 entity_entity_edge = EntityEntityEdge(
                                     source=subject_entity_id,
                                     target=object_entity_id,
@@ -1314,6 +1315,8 @@ class ExtractionOrchestrator:
                                     run_id=dialog_data.run_id,  # 使用 dialog_data 的 run_id
                                     created_at=dialog_data.created_at,
                                     expired_at=dialog_data.expired_at,
+                                    valid_at=_tv.valid_at if _tv else None,
+                                    invalid_at=_tv.invalid_at if _tv else None,
                                 )
                                 entity_entity_edges.append(entity_entity_edge)
 
