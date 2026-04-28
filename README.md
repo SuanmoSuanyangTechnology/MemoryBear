@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/suanmosuanyangtechnology-memorybear-badge.png)](https://mseep.ai/app/suanmosuanyangtechnology-memorybear)
+
 <img width="2346" height="1310" alt="image" src="https://github.com/user-attachments/assets/bc73a64d-cd1e-4d22-be3e-04ce40423a20" />
 
 # MemoryBear empowers AI with human-like memory capabilities
