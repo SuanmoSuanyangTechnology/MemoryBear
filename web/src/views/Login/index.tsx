@@ -37,8 +37,10 @@ const inputClassName = "login-input rb:rounded-[8px]! rb:p-[12px]! rb:h-[44px]! 
   const { clearUserInfo, updateLoginInfo, getUserInfo } = useUser();
   const { language } = useI18n()
   const [loading, setLoading] = useState(false);
-  const [canLogin, setCanLogin] = useState(false);
   const [form] = Form.useForm<LoginForm>();
+  const emailVal = Form.useWatch('email', form);
+  const passwordVal = Form.useWatch('password', form);
+  const canLogin = !!(emailVal && passwordVal);
   const { message } = App.useApp();
 
   useEffect(() => {
@@ -99,7 +101,6 @@ const inputClassName = "login-input rb:rounded-[8px]! rb:p-[12px]! rb:h-[44px]! 
           <Form
             form={form}
             onFinish={handleLogin}
-            onValuesChange={(_, all) => setCanLogin(!!(all.email && all.password))}
           >
             <Form.Item name="email" className="rb:mb-6!">
               <Input
