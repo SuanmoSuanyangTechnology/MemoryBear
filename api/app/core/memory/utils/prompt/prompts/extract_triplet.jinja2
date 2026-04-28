@@ -5,13 +5,21 @@ Extract entities and knowledge triplets from the given statement.
 重要：
 
 - `name`、`subject_name`、`object_name` 默认保持原文中的表面形式，不要翻译。
-- 但对用户自指表达，如“我”“我的”“我自己”，统一规范为 `用户`。
+- 但在抽取前，必须先做指代解析。
+- 用户自指表达，如“我”“我的”“我自己”，一律规范为 `用户`。
+- 非用户自指代词或指示表达，如“他”“她”“它”“这个”“那个”“这家”“那家”“这里”“那里”，如果能从 `supporting_context` 中稳定解析出具体指代，则必须替换为具体指代实体名。
+- 如果上述代词或指示表达不能稳定解析，则整条跳过。
+- 命名关系中新出现的称呼、别名、昵称、产品名保持原样，不做替换。
 - `description` 使用中文。
 - `type`、`predicate`、`type_description`、`predicate_description` 一律使用中文。
   {% else %}
   Important:
-- Keep `name`, `subject_name`, and `object_name` in their original surface form from the source text. Do not translate them.
-- Exception: normalize user self-reference such as "I", "me", and "myself" to `用户`.
+- Keep `name`, `subject_name`, and `object_name` in their original surface form from the source text by default.
+- But you MUST resolve references before extraction.
+- Normalize user self-reference such as "I", "me", and "myself" to `用户`.
+- For non-user pronouns or demonstratives such as "he", "she", "it", "this", "that", "this company", "that place", if a stable referent can be resolved from `supporting_context`, replace them with the resolved entity name.
+- If such references cannot be resolved stably, skip the entire statement.
+- Newly introduced names in naming or alias expressions must stay in their original form.
 - Generate `description` in English.
 - Always generate `type`, `predicate`, `type_description`, and `predicate_description` in Chinese.
   {% endif %}
@@ -69,11 +77,13 @@ Primary statement to analyze:
 开始抽取前，先检查 `has_unsolved_reference`。
 
 - 如果 `has_unsolved_reference` 是 `true`，不要抽取任何内容。
-- 此时必须返回：
+- 如果 `statement_text` 中仍存在无法稳定解析的代词、指示词或省略主体，也应视为 unresolved reference。
+- 这两种情况下都必须返回：
   {% else %}
   Before any extraction, check `has_unsolved_reference`.
 - If `has_unsolved_reference` is `true`, do not extract anything.
-- In that case, return exactly:
+- If unresolved pronouns, demonstratives, or omitted subjects still remain in `statement_text`, treat the statement as unresolved as well.
+- In either case, return exactly:
   {% endif %}
 
 ```json
@@ -86,8 +96,10 @@ Primary statement to analyze:
 {% if language == "zh" %}
 
 - 不要在引用未解析时尝试部分抽取。
+- 不要保留“他”“这个”“那个”这类原代词继续输出实体或关系。
   {% else %}
 - Do not attempt partial extraction when the reference is unresolved.
+- Do not keep unresolved forms such as "he", "this", or "that" as extracted entities or relation arguments.
   {% endif %}
 
 ===Input Boundary===
@@ -100,6 +112,8 @@ Primary statement to analyze:
 - 如果 `supporting_context.msgs` 中的 Assistant 消息包含总结、猜测、解释或改写，这些内容只能作为理解辅助，不能直接作为抽取来源。
 - `statement_type`、`temporal_type`、`valid_at`、`invalid_at` 是辅助理解字段，不是抽取目标。
 - 对 `statement_text` 中的用户自指表达，要统一规范成实体 `用户`。
+- 对其他可稳定解析的代词或指示表达，要替换为具体指代实体名后再抽取。
+- 对命名关系中新出现的称呼、别名、昵称、产品名，不要因为上下文可推断其所指而直接改写，它们应保持原样作为实体名。
   {% else %}
 - Treat `statement_text` as the only direct extraction target.
 - Use `supporting_context.msgs` only to interpret references, ellipsis, subject identity, and necessary background in `statement_text`.
@@ -108,41 +122,253 @@ Primary statement to analyze:
 - If Assistant messages in `supporting_context.msgs` contain summary, guess, interpretation, or rephrasing, use them only as interpretive support and never as a direct extraction source.
 - Treat `statement_type`, `temporal_type`, `valid_at`, and `invalid_at` as auxiliary context, not extraction targets.
 - Normalize user self-reference in `statement_text` to the entity `用户`.
+- Replace other resolvable pronouns or demonstratives with their resolved entity names before extraction.
+- For newly introduced names in naming or alias expressions, do not rewrite them even if the context reveals who they refer to; keep them as entity names.
   {% endif %}
 
 ===预定义实体类型===
 只能使用以下中文实体类型。如果没有完全匹配的类型，请选择最接近的一项，不要发明新类型。
 
-- `人物`: 现实中的具体个人
-- `组织`: 公司、机构、团队、社群等组织性主体
-- `群体`: 未具名或泛指的一组人
-- `地点`: 具有地理或空间意义的位置
-- `设施`: 建筑、场馆、房间、实验室等功能性空间
-- `地址`: 具体地址或位置描述
-- `物品`: 一般具体物体
-- `设备`: 具有明确用途的工具或器材
-- `产品`: 可被制造、购买、使用的产品
-- `交通工具`: 用于出行或运输的工具
-- `文档`: 文章、报告、表格、说明等文档
-- `媒体`: 图片、音频、视频等媒体对象
-- `网站`: 网站、网页或互联网平台
-- `软件`: 软件、应用、系统或数字服务
-- `账号`: 账号、账户、用户档案
-- `标识符`: ID、编号、用户名、工号等标识
-- `联系方式`: 电话、邮箱、社交账号等联系方式
-- `角色`: 某实体承担的社会或功能角色
-- `职业`: 工作或职业身份
-- `技能`: 可学习或掌握的能力
-- `知识主题`: 主题、领域、方法、理论或知识概念
-- `目标`: 希望达成的结果
-- `偏好`: 稳定的喜欢、倾向或偏爱
-- `习惯`: 重复出现的行为模式
-- `语言`: 自然语言或编程语言
-- `金额`: 金额或货币数值
-- `数量`: 带或不带单位的数量值
-- `货币`: 货币单位
-- `组织部门`: 组织内部的部门或业务单元
-- `称呼`: 用于指代或称呼实体的名字
+- `人物`
+  - definition: 可稳定指向、可被当作具体个体区分和归并的个人实体。
+  - positive_examples: `用户`、`张三`、`王教授`、`小林`
+  - negative_examples: `老师`、`导师`、`学生`、`他们`
+  - notes: 强调“这个人是谁”，不强调他承担的社会身份；用户自指统一归为 `用户`。
+
+- `组织`
+  - definition: 公司、机构、学校、实验室、团队、社群等组织性主体。
+  - positive_examples: `腾讯`、`清华大学`、`机器人公司`、`实验室`
+  - negative_examples: `人事部`、`教研组`、`办公室`
+  - notes: 如果表达的是组织内部单元，当前一级仍优先并入 `组织`，除非后续单独扩展子类。
+
+- `群体`
+  - definition: 边界相对稳定、可被当作整体引用的一组人。
+  - positive_examples: `我的朋友`、`同事们`、`实验室成员`
+  - negative_examples: `他们`、`一些人`、`一个朋友`
+  - notes: 只用于边界相对稳定的人群；边界不稳或 unresolved 的表达不要归入 `群体`。
+
+- `智能体`
+  - definition: 具有行动、交互或执行能力的非人主体，如机器人、AI 或其他智慧体。
+  - positive_examples: `机器人查票员`、`家务机器人`、`智能助手`
+  - negative_examples: `手机`、`电脑`、`机器人公司`
+  - notes: 如果对象只是普通设备，不归入 `智能体`；只有在叙述中被当作主体行动或交互时才使用。
+
+- `角色职业`
+  - definition: 人物承担的社会角色、功能身份或职业身份。
+  - positive_examples: `导师`、`老师`、`学生`、`医生`、`程序员`
+  - negative_examples: `张三`、`王教授`、`我的朋友`
+  - notes: 强调“这个人是什么身份”，不强调“这个人是谁”；如果文本落到具体个人，优先用 `人物`。
+
+- `地点设施`
+  - definition: 具有地理意义或功能性空间意义的位置与场所。
+  - positive_examples: `北京`、`巴黎`、`图书馆`、`办公室`、`教室`
+  - negative_examples: `这里`、`那里`、`朝这边`、`明天去的地方`
+  - notes: 地理地点和功能场所当前一级合并；未稳定解析的位置指代表达不要抽取。
+
+- `物品设备`
+  - definition: 可被持有、使用、携带的具体物体、设备、工具或交通工具。
+  - positive_examples: `手机`、`电脑`、`相机`、`自行车`
+  - negative_examples: `微信`、`GitHub`、`会员服务`
+  - notes: 交通工具当前并入此类；数字服务不归入本类。
+
+- `产品服务`
+  - definition: 可被购买、使用、消费或订阅的产品或服务。
+  - positive_examples: `iPhone`、`健身课`、`会员服务`
+  - negative_examples: `微信`、`GitHub`、`手机`
+  - notes: 具体商品和服务当前一级合并；纯软件平台优先归入 `软件平台`。
+
+- `软件平台`
+  - definition: 软件、应用、网站、在线平台或数字服务系统。
+  - positive_examples: `微信`、`GitHub`、`ChatGPT`、`飞书`
+  - negative_examples: `iPhone`、`会员服务`、`手机号`
+  - notes: 软件、网站、平台当前一级合并；如果语境强调的是账号本身，改用 `账号`。
+
+- `账号`
+  - definition: 账户、账号、用户档案类实体。
+  - positive_examples: `GitHub账号`、`微信号`
+  - negative_examples: `用户名`、`工号`、`邮箱`
+  - notes: 与 `标识符`、`联系方式` 分开；账号是主体可持有的账户对象。
+
+- `标识符`
+  - definition: 用于识别实体的编号、ID、用户名、学号、工号等标识。
+  - positive_examples: `学号`、`工号`、`用户名`
+  - negative_examples: `GitHub账号`、`手机号`
+  - notes: 当前允许保留，但通常只有在存在明确识别关系时才值得抽取。
+
+- `联系方式`
+  - definition: 可用于联系实体的电话、邮箱、社交联系地址。
+  - positive_examples: `手机号`、`邮箱`、`微信联系方式`
+  - negative_examples: `用户名`、`GitHub账号`
+  - notes: 当前允许保留，但通常只有在存在明确联系关系时才值得抽取。
+
+- `文档媒体`
+  - definition: 文章、报告、表格、图片、音频、视频等内容载体。
+  - positive_examples: `简历`、`论文`、`照片`、`录音`
+  - negative_examples: `微积分`、`微信`、`学号`
+  - notes: 文档与媒体当前一级合并；如果只是内容主题，不归入本类。
+
+- `知识能力`
+  - definition: 可学习、掌握、使用或讨论的知识主题、技能、学科或语言。
+  - positive_examples: `微积分`、`机器学习`、`写作`、`Python`、`中文`
+  - negative_examples: `紧张`、`成功`、`意义`
+  - notes: 不包含情绪、心理状态、抽象结果或价值判断；这些应写入 `description`。
+
+- `偏好习惯目标`
+  - definition: 用户稳定的偏好、重复习惯，以及具体、明确、用户特异且值得长期保留的目标。
+  - positive_examples: `喜欢安静环境`、`晨跑`、`通过雅思`
+  - negative_examples: `紧张`、`开心`、`成功`、`回报`
+  - notes: 这是高风险类型；只允许稳定偏好、重复习惯、具体目标，不允许抽象愿望或情绪状态。
+
+- `称呼别名`
+  - definition: 用于指代或称呼实体的名字。
+  - positive_examples: `山哥`、`老张`、`X1`
+  - negative_examples: `导师`、`程序员`、`好人`
+  - notes: 只用于名字性表达，不用于角色、职业、评价词。
+
+实体类型总规则：
+
+- unresolved 或边界不稳的表达，不因“看起来像名词”就创建实体。
+- 情绪、心理状态、金额、数量、普通时间、一次性动作短语，默认不作为独立实体类型抽取。
+- 抽象命题片段、泛化结果、价值判断，默认不创建实体；如有保留价值，应写入相关高价值实体的 `description`。
+
+实体类型选择原则：
+
+- 优先保留对用户画像、偏好、长期身份、稳定关系或持续兴趣有记忆价值的实体类型。
+- 对于“努力”“回报”“意义”“成功”这类泛化概念、抽象命题片段或价值判断，默认不要仅因句中出现就创建实体。
+- `群体` 只用于边界相对稳定、可被当作整体引用的人群；像“他们”“一些人”“一个朋友”这类边界不稳或 unresolved 的表达不要归入 `群体`。
+- `偏好习惯目标` 只能用于稳定偏好、重复习惯或具体明确的用户目标，不能把抽象结果、泛因果终点、空泛愿望或情绪状态强行归入其中。
+- 当前阶段不抽取情绪状态实体；像“紧张”“开心”“难过”“焦虑”“放松”这类情绪或心理状态，不要归入 `知识能力`、`偏好习惯目标` 或其他现有类型。
+
+===关系本体大类===
+以下大类是当前 `predicate` 本体树的第一层，用于帮助理解和约束后面的具体关系白名单。输出具体 `predicate` 时仍然必须使用后文列出的细关系，而不是直接输出这些大类名称。
+
+- `命名关系`
+  - definition: 表达实体名称、别名、称呼之间的对应或使用关系。
+  - covered_predicates: `别名属于`、`使用称呼`
+  - positive_examples: `山哥 -> 别名属于 -> 用户`、`我的朋友 -> 使用称呼 -> 山哥`
+  - negative_examples: `导师 -> 别名属于 -> 用户`、`好人 -> 使用称呼 -> 用户`
+  - notes: 只处理名字性表达，不处理角色、职业、评价词。
+  - status: `enabled`
+
+- `类型归属关系`
+  - definition: 表达实体属于某种类别，或主体承担某种角色/职业身份的关系。
+  - covered_predicates: `属于类型`、`担任角色`、`从事职业`
+  - positive_examples: `王教授 -> 担任角色 -> 导师`、`张三 -> 从事职业 -> 程序员`
+  - negative_examples: `张三 -> 担任角色 -> 山哥`、`用户 -> 从事职业 -> 紧张`
+  - notes: 用于“是什么”，不用于“叫什么”。
+  - status: `enabled`
+
+- `成员隶属关系`
+  - definition: 表达主体属于某个组织、群体或集合的成员归属关系。
+  - covered_predicates: `成员属于`
+  - positive_examples: `张三 -> 成员属于 -> 实验室成员`、`用户 -> 成员属于 -> 社群`
+  - negative_examples: `他们 -> 成员属于 -> 学校`、`一个朋友 -> 成员属于 -> 班级`
+  - notes: 前提是主体和归属对象都足够稳定；边界不稳的人群不要硬抽。
+  - status: `enabled`
+
+- `任职服务关系`
+  - definition: 表达人物或主体在组织中的工作、任职或服务关系。
+  - covered_predicates: `任职于`
+  - positive_examples: `张明 -> 任职于 -> 腾讯`、`王教授 -> 任职于 -> 清华大学`
+  - negative_examples: `张明 -> 任职于 -> 导师`、`用户 -> 任职于 -> 明天的面试`
+  - notes: 优先用于人物到组织的稳定供职关系。
+  - status: `enabled`
+
+- `空间位置关系`
+  - definition: 表达实体与地点、场所、空间位置之间的稳定位置关系。
+  - covered_predicates: `位于`、`拥有位置`、`居住于`
+  - positive_examples: `用户 -> 居住于 -> 巴黎`、`办公室 -> 位于 -> 北京`
+  - negative_examples: `用户 -> 位于 -> 明天下午三点`、`这里 -> 位于 -> 学校`
+  - notes: 普通时间表达和未解析位置指代不进入此类。
+  - status: `enabled`
+
+- `前往到访关系`
+  - definition: 表达主体前往、到访某地点、场所、组织、课程或活动对象的关系。
+  - covered_predicates: `前往`
+  - positive_examples: `用户 -> 前往 -> 图书馆`、`用户 -> 前往 -> 公司`
+  - negative_examples: `用户 -> 前往 -> 明天下午三点`、`用户 -> 前往 -> 复习微积分任务`
+  - notes: 当前应优先用于稳定倾向或有记忆价值的到访对象，不鼓励因一次性日程而过抽。
+  - status: `enabled`
+
+- `组成包含关系`
+  - definition: 表达部分与整体、包含与被包含之间的结构关系。
+  - covered_predicates: `组成部分`、`包含部分`
+  - positive_examples: `教研组 -> 组成部分 -> 学院`、`学院 -> 包含部分 -> 教研组`
+  - negative_examples: `用户 -> 组成部分 -> 图书馆`、`微积分 -> 包含部分 -> 用户`
+  - notes: 只用于结构性组成关系，不用于临时搭配或抽象联系。
+  - status: `enabled`
+
+- `拥有持有关系`
+  - definition: 表达主体拥有、持有、配有某对象、账号、联系方式或标识的关系。
+  - covered_predicates: `拥有`、`拥有账号`、`拥有联系方式`、`标识为`
+  - positive_examples: `用户 -> 拥有账号 -> GitHub账号`、`用户 -> 拥有联系方式 -> 邮箱`、`用户 -> 标识为 -> 学号`
+  - negative_examples: `用户 -> 拥有 -> 紧张`、`努力 -> 拥有 -> 回报`
+  - notes: 不用于抽象命题、情绪状态或口号式表达。
+  - status: `enabled`
+
+- `使用采用关系`
+  - definition: 表达主体使用、采用某工具、产品、平台、语言或资源的关系。
+  - covered_predicates: `使用`、`使用语言`
+  - positive_examples: `用户 -> 使用 -> 微信`、`用户 -> 使用语言 -> 中文`
+  - negative_examples: `用户 -> 使用 -> 成功`、`用户 -> 使用语言 -> 紧张`
+  - notes: 以后若扩展“采用方法”，也可挂在本大类下。
+  - status: `enabled`
+
+- `创建生产关系`
+  - definition: 表达主体创建、撰写、生产某对象或结果的关系。
+  - covered_predicates: `创建了`、`由…创建`、`撰写了`
+  - positive_examples: `用户 -> 撰写了 -> 简历`、`简历 -> 由…创建 -> 用户`
+  - negative_examples: `用户 -> 创建了 -> 明天下午三点`、`努力 -> 由…创建 -> 用户`
+  - notes: 只用于明确的生产、创作、撰写关系。
+  - status: `enabled`
+
+- `知识学习关系`
+  - definition: 表达主体与知识、技能、学科、语言等知识能力对象之间的认知、学习或兴趣关系。
+  - covered_predicates: `了解`、`学习`、`感兴趣于`
+  - positive_examples: `用户 -> 学习 -> 微积分`、`用户 -> 了解 -> 机器学习`、`用户 -> 感兴趣于 -> 心理学`
+  - negative_examples: `用户 -> 学习 -> 紧张`、`用户 -> 感兴趣于 -> 成功`
+  - notes: 关系对象应是 `知识能力` 类，而不是情绪、价值判断或抽象结果。
+  - status: `enabled`
+
+- `偏好目标关系`
+  - definition: 表达主体对对象的稳定偏好、厌恶，或对具体明确目标的指向关系。
+  - covered_predicates: `偏好`、`不喜欢`、`想要`
+  - positive_examples: `用户 -> 偏好 -> 安静环境`、`用户 -> 不喜欢 -> 辛辣食物`、`用户 -> 想要 -> 通过雅思`
+  - negative_examples: `用户 -> 想要 -> 成功`、`用户 -> 偏好 -> 紧张`、`用户 -> 不喜欢 -> 努力就会有回报`
+  - notes: 这是高风险大类；`想要` 只用于具体、明确、用户特异的目标，不用于抽象愿望。
+  - status: `enabled`
+
+- `职责责任关系`
+  - definition: 表达主体负责某项工作、职责、事务或领域的关系。
+  - covered_predicates: `负责`
+  - positive_examples: `张三 -> 负责 -> 招聘工作`、`王教授 -> 负责 -> 实验室项目`
+  - negative_examples: `张三 -> 负责 -> 紧张`、`用户 -> 负责 -> 成功`
+  - notes: 关系对象应是具体职责或事务，不应是情绪或抽象结果。
+  - status: `enabled`
+
+- `沟通交互关系`
+  - definition: 表达两个主体之间发生沟通、交流或交互的关系。
+  - covered_predicates: `沟通于`
+  - positive_examples: `用户 -> 沟通于 -> 张三`、`导师 -> 沟通于 -> 学生`
+  - negative_examples: `用户 -> 沟通于 -> 紧张`、`图书馆 -> 沟通于 -> 微积分`
+  - notes: 两端通常都应是可作为交互主体的实体。
+  - status: `enabled`
+
+- `提及关系`
+  - definition: 表达主体或文本明确提到某实体的关系。
+  - covered_predicates: `提到`
+  - positive_examples: `用户 -> 提到 -> 腾讯`、`文档 -> 提到 -> 张三`
+  - negative_examples: `用户 -> 提到 -> 努力`、`用户 -> 提到 -> 回报`、`用户 -> 提到 -> 紧张`
+  - notes: 受限大类；不用于保留泛化概念、抽象命题片段、情绪状态或仅在句面上出现但没有记忆价值的对象。
+  - status: `restricted`
+
+- `一般关联关系`
+  - definition: 表达两个实体之间存在明确、稳定、值得保留，但当前无更精确谓词可用的关联关系。
+  - covered_predicates: `关联于`、`相关于`
+  - positive_examples: `项目 -> 关联于 -> 实验室`、`账号 -> 相关于 -> 平台`
+  - negative_examples: `努力 -> 相关于 -> 回报`、`用户 -> 关联于 -> 紧张`、`成功 -> 相关于 -> 意义`
+  - notes: 受限大类；不能作为失败兜底关系，不能用来连接抽象概念、口号式表达或无法成立的关系。
+  - status: `restricted`
 
 ===预定义关系类型===
 只能使用以下中文关系类型。如果没有完全匹配的关系，请选择最接近的一项，不要发明新关系。
@@ -172,60 +398,90 @@ Primary statement to analyze:
 - `感兴趣于`: 主体对某主题感兴趣
 - `偏好`: 主体偏好某对象、方式或主题
 - `不喜欢`: 主体不喜欢某对象、方式或主题
-- `想要`: 主体想获得、达成或拥有某对象或结果
+- `想要`: 主体想获得、达成或拥有具体、明确、用户特异且值得保留的对象或目标，不用于抽象结果、泛化愿望或口号式表达
 - `负责`: 主体负责某项工作、职责或领域
 - `沟通于`: 两个实体之间发生沟通或交流
 - `拥有联系方式`: 实体具有某联系方式
 - `拥有账号`: 实体具有某账号
 - `标识为`: 实体由某标识符标识
 - `使用语言`: 主体使用某语言
-- `相关于`: 当存在明确联系但无更精确关系时使用的弱关系
+- `相关于`: 当存在明确、稳定且具有记忆价值的联系，但无更精确关系时使用的弱关系；不得用于泛化概念、抽象命题片段、口号式表达或仅为补全结构的联系
 
 ===Extraction Order===
 {% if language == "zh" %}
 按以下顺序执行：
 
 0. 先检查 `has_unsolved_reference`；如果为 `true`，直接返回空结果。
-1. 识别 `statement_text` 中值得抽取的稳定实体。
-2. 判断这些实体之间是否存在可由预定义关系类型表达的有效关系。
-3. 最后补充实体字段和关系字段。
+1. 先做指代解析：用户自指统一替换为 `用户`；其他可稳定解析的代词或指示表达替换为具体指代实体名。
+2. 如果仍存在无法稳定解析的代词、指示词或省略主体，直接返回空结果。
+3. 识别 `statement_text` 中值得抽取的稳定实体。
+4. 判断这些实体之间是否存在可由预定义关系类型表达的有效关系。
+5. 最后补充实体字段和关系字段。
 
 不要让附加字段主导整个抽取过程。
 {% else %}
 Follow this order:
 
 0. First check `has_unsolved_reference`; if it is `true`, immediately return the empty result.
-1. Identify stable entities worth extracting from `statement_text`.
-2. Determine whether any valid relations between those entities can be expressed using the predefined Chinese predicates.
-3. Finally fill auxiliary entity and predicate fields.
+1. Resolve references first: normalize user self-reference to `用户`; replace other stably resolvable pronouns or demonstratives with their resolved entity names.
+2. If unresolved pronouns, demonstratives, or omitted subjects still remain, immediately return the empty result.
+3. Identify stable entities worth extracting from `statement_text`.
+4. Determine whether any valid relations between those entities can be expressed using the predefined Chinese predicates.
+5. Finally fill auxiliary entity and predicate fields.
 
 Do not let auxiliary fields drive the extraction process.
 {% endif %}
 
 ===Guidelines===
 
+**Reference Resolution:**
+{% if language == "zh" %}
+
+- 指代解析优先于实体抽取和关系抽取。
+- 所有用户自指表达都必须规范成 `用户`，包括“我”“我的”“我自己”等。
+- 对“他”“她”“它”“这个”“那个”“这家”“那家”“这里”“那里”等非用户自指表达，若上下文可稳定解析，则必须用解析后的具体实体名替换。
+- 若非用户自指表达无法稳定解析，则整条跳过，不输出部分结果。
+- 新出现的称呼、别名、昵称、产品名不是待消解代词，应保持原样。
+  {% else %}
+- Reference resolution happens before entity or relation extraction.
+- All user self-reference must be normalized to `用户`, including forms such as "I", "me", "my", and "myself".
+- For non-user references such as "he", "she", "it", "this", "that", "this company", "that place", "here", or "there", if the context supports a stable resolution, replace them with the resolved entity name.
+- If a non-user reference cannot be resolved stably, skip the entire statement and do not output partial results.
+- Newly introduced names, aliases, nicknames, and product names are not pronouns to be resolved; keep them in their original form.
+  {% endif %}
+
 **Entity Extraction:**
 {% if language == "zh" %}
 
 - 只有当某个名字、概念、对象、群体或地点在当前陈述中承担明确语义角色，或是理解有效关系所必需时，才创建实体。
 - 不要因为表面上出现了名词、修饰词或短语，就机械地创建实体。
+- 不要把完整命题、因果链、价值判断或口号式表达拆成多个低价值实体；例如“努力就会有回报”默认不应抽取出“努力”或“回报”作为实体。
 - 普通时间表达默认不抽取为实体，包括日期、时刻、明天、下周、今晚八点等。
 - 一次性动作短语默认不抽取为实体，例如“复习微积分”“去图书馆学习”“参观卢浮宫”。
 - 不要为了表达一句带时间或地点的行动，而额外创造“任务”“计划”“事件”实体。
 - 但如果动作明确把主体和某个稳定实体连接起来，可以保留该稳定实体，并抽取轻关系。例如“我去图书馆”“我去公司开会”“我去上课”“我去看演唱会”可以抽取 `前往`。
+- 当句子只是在讨论一般道理、抽象规律、空泛结果或非个体化概念，而这些概念本身不构成可复用记忆时，不要创建实体。
+- 如果句子表达的是用户的观点、信念、判断、愿望或目标倾向，但其中抽象对象不值得作为独立实体保留，则只保留相关高价值实体，不要再创建这些低价值对象实体，并把未抽取的抽象内容压缩写入相关实体的 `description`；例如“用户认为努力就会有回报”应只保留 `用户`，并在 `description` 中体现“用户认为努力就会有回报”。
+- 对于未抽取的抽象实体、抽象命题片段或泛化结果，只要它们对理解该高价值实体有帮助，就应优先写入该实体的 `description`，而不是改用宽泛关系或补造弱实体。
+- 当前阶段同样不要把情绪或心理状态抽成实体；如果句子里出现“紧张”“开心”“难过”“焦虑”“放松”等，应写入相关高价值实体的 `description`，而不是把它们标成 `知识能力`、`偏好习惯目标` 或其他近似类型。
 - 如果陈述里有值得保留的实体信息，但没有有效关系，可以只返回 `entities`，并把 `triplets` 设为 `[]`。
-- `name` 默认保持原文中的表面形式，不要翻译；但用户自指要统一写成 `用户`。
+- `name` 默认保持原文中的表面形式，但用户自指必须写成 `用户`，可稳定解析的其他代词必须替换为具体指代实体名。
 - `description` 必须使用中文。
 - `type` 和 `type_description` 必须使用上方预定义的中文标签与中文定义。
   {% else %}
 - Extract entities only when they play a clear semantic role in the statement or are necessary for understanding a valid relation.
 - Do not mechanically create entities for every noun, modifier, or surface mention.
+- Do not split generic propositions, causal slogans, or value judgments into low-value abstract entities. For example, "effort brings reward" should not create standalone entities for "effort" or "reward" by default.
 - Do not extract ordinary time expressions as entities, including dates, timestamps, "tomorrow", "next week", or "8 PM tonight".
 - Do not extract one-off action phrases as entities, such as "review calculus", "study in the library", or "visit the Louvre".
 - Do not create extra "task", "plan", or "event" entities just to represent an action with time or location modifiers.
 - But if an action clearly connects the subject to a stable entity, keep that stable entity and use a light relation. For example, statements like "I go to the library", "I go to the office", "I go to class", or "I go to a concert" can use `前往`.
+- If the sentence is only about a generic principle, abstract outcome, or non-personalized concept that is not worth remembering on its own, do not create an entity for it.
+- If a statement expresses the user's belief, judgment, opinion, wish, or goal tendency but the referenced abstract concepts are not worth keeping as standalone entities, keep only the relevant high-value entities, do not create those low-value concept entities, and compress the unextracted abstract content into the relevant entity `description`. For example, "the user believes effort brings reward" should keep only `用户` and reflect that belief in `description`.
+- For abstract entities, proposition fragments, or generic outcomes that are not extracted, prefer writing them into the relevant retained entity's `description` when they help preserve the memory, instead of switching to a broad relation or inventing a weak entity.
+- In the current stage, do not extract emotional or psychological states as entities. States such as nervousness, happiness, sadness, anxiety, or relief should be written into the relevant retained entity's `description` rather than mapped to `知识能力`, `偏好习惯目标`, or any other approximate type.
 - If the statement contains entity-worthy content but no valid relation, it is acceptable to return `entities` with `triplets: []`.
-- Keep `name` in its original surface form from the source text; exception: normalize user self-reference to `用户`.
+- Keep `name` in its original surface form by default, but write user self-reference as `用户` and replace other stably resolvable references with their resolved entity names.
 - `description` must be in English.
 - `type` and `type_description` must use the predefined Chinese labels and Chinese definitions above.
   {% endif %}
@@ -233,11 +489,11 @@ Do not let auxiliary fields drive the extraction process.
 **Semantic Memory (`is_explicit_memory`):**
 {% if language == "zh" %}
 
-- 只有当实体明显属于语义知识记忆中的抽象概念时，才设为 `true`，例如概念、定义、理论、方法和知识主题。
+- 只有当实体明显属于语义知识记忆中的抽象知识对象时，才设为 `true`，例如概念、定义、理论、方法以及 `知识能力` 中的知识类对象。
 - 对人、组织、地点、具体物体以及大多数实例级实体，一律设为 `false`。
 - 除非非常明确，否则默认设为 `false`。
   {% else %}
-- Use `true` only for abstract conceptual entities that belong in semantic knowledge memory, such as concepts, definitions, theories, methods, and knowledge topics.
+- Use `true` only for abstract knowledge-oriented entities that belong in semantic knowledge memory, such as concepts, definitions, theories, methods, and knowledge-oriented members of `知识能力`.
 - Use `false` for people, organizations, locations, concrete objects, and most instance-level entities.
 - Default to `false` unless the entity is clearly an abstract knowledge concept.
   {% endif %}
@@ -269,8 +525,14 @@ Do not let auxiliary fields drive the extraction process.
 - 如果没有任何预定义关系适用，返回 `triplets: []`。
 - 排除语气词、模糊情绪、孤立名词和缺乏明确关系结构的片段。
 - 如果陈述不支持有效关系，不要强行构造 triplet。
+- 不要为了保留一句抽象判断或泛因果命题，而强行构造“用户-拥有-努力”“努力-导致-回报”这类低价值 triplet。
+- `提到` 不用于保留泛化概念、抽象命题片段、口号式表达或仅在句面上出现但无记忆价值的对象。
+- `相关于` 不用于补救无法成立的关系，也不用于连接“努力”“回报”“成功”“意义”这类抽象概念。
+- `想要` 只用于具体、明确、用户特异且值得保留的对象或目标；如果想要的内容过于抽象或空泛，不要抽取 `想要`，应改写进相关实体的 `description`。
+- 不要为了保留情绪或心理状态而创建实体或弱关系；像“紧张”“开心”“难过”“焦虑”默认应写入相关实体的 `description`。
+- 对于这类观点句，如果相关概念本身不值得保留，也不要只为了补全结构而额外创建对应实体；允许输出仅包含 `用户` 的 `entities` 和空的 `triplets`。
 - 如果 `has_unsolved_reference` 是 `true`，不要抽取实体或 triplets。
-- `subject_name` 和 `object_name` 默认保持原文中的表面形式，不要翻译；但用户自指要统一写成 `用户`。
+- `subject_name` 和 `object_name` 默认保持原文中的表面形式，但用户自指必须写成 `用户`，可稳定解析的其他代词必须替换为具体指代实体名。
 - `predicate_description` 必须直接复用对应 `predicate` 的中文定义。
 - 不要把普通时间表达作为 triplet 的宾语。
 - 不要为了表达一次性计划、安排、日程而强行构造关系。
@@ -282,8 +544,14 @@ Do not let auxiliary fields drive the extraction process.
 - If no predefined relation fits, return `triplets: []`.
 - Exclude fillers, vague emotions, standalone nouns, and fragments without a clear relational structure.
 - If the statement does not support a valid relation, do not force a triplet.
+- Do not force low-value triplets such as "user-has-effort" or "effort-causes-reward" just to preserve a generic causal belief or slogan-like proposition.
+- Do not use `提到` to preserve generic concepts, proposition fragments, slogan-like expressions, or surface mentions that have no memory value.
+- Do not use `相关于` as a rescue relation when no real relation exists, and do not connect abstract concepts such as "effort", "reward", "success", or "meaning" with it.
+- Use `想要` only for concrete, specific, user-grounded objects or goals worth retaining; if the desired content is too abstract or generic, do not extract `想要` and instead rewrite it into the relevant entity `description`.
+- Do not create entities or weak relations just to preserve emotional or psychological states; states such as nervousness, happiness, sadness, or anxiety should normally be written into the relevant retained entity `description`.
+- For such opinion statements, if the referenced concepts are not worth keeping, do not create extra entities just to complete a structure; it is valid to return only the `用户` entity with empty `triplets`.
 - If `has_unsolved_reference` is `true`, do not extract entities or triplets.
-- Keep `subject_name` and `object_name` in their original surface form; exception: normalize user self-reference to `用户`.
+- Keep `subject_name` and `object_name` in their original surface form by default, but write user self-reference as `用户` and replace other stably resolvable references with their resolved entity names.
 - `predicate_description` must directly reuse the corresponding Chinese definition of `predicate`.
 - Do not use ordinary time expressions as triplet objects.
 - Do not force relations just to encode one-off plans, schedules, or actions.
@@ -320,6 +588,7 @@ Do not let auxiliary fields drive the extraction process.
   1. `alias -> 别名属于 -> canonical entity`
   2. `caller -> 使用称呼 -> alias`
 - 如果施称方在句中明确出现且对语义重要，不要省略它。
+- 在命名关系中，新出现的称呼、别名、昵称、产品名必须保持原样，不要被替换成其所指实体名。
   {% else %}
 - Distinguish between a naming fact and a naming act when the statement expresses both.
 - If the statement says that some entity or group calls or addresses another entity by a name, and the caller is explicitly mentioned in `statement_text`, extract the caller as an entity.
@@ -328,6 +597,7 @@ Do not let auxiliary fields drive the extraction process.
   1. `alias -> 别名属于 -> canonical entity`
   2. `caller -> 使用称呼 -> alias`
 - Do not drop the caller entity if it is explicitly stated and semantically important to the naming relation.
+- In naming relations, newly introduced names, aliases, nicknames, or product names must stay in their original form rather than being replaced by their referent.
   {% endif %}
 
 **subject_name / object_name Consistency:**
@@ -352,29 +622,28 @@ Output:
     {"subject_name": "用户", "subject_id": 0, "predicate": "居住于", "predicate_description": "人物居住在某地点", "object_name": "巴黎", "object_id": 1}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "现实中的具体个人", "description": "居住在巴黎的说话者", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "巴黎", "type": "地点", "type_description": "具有地理或空间意义的位置", "description": "用户居住的城市", "is_explicit_memory": false}
+    {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "居住在巴黎的说话者", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "巴黎", "type": "地点设施", "type_description": "具有地理意义或功能性空间意义的位置与场所", "description": "用户居住的城市", "is_explicit_memory": false}
   ]
 }
 
 **示例 2**
-Statement: "张明在腾讯工作，负责 AI 产品开发。"
+Statement: "他在腾讯工作。"
+Input condition: supporting context has already made it clear that “他” refers to “张明”.
 
 Output:
 {
   "triplets": [
-    {"subject_name": "张明", "subject_id": 0, "predicate": "任职于", "predicate_description": "主体在某组织中工作或任职", "object_name": "腾讯", "object_id": 1},
-    {"subject_name": "张明", "subject_id": 0, "predicate": "负责", "predicate_description": "主体负责某项工作、职责或领域", "object_name": "AI 产品开发", "object_id": 2}
+    {"subject_name": "张明", "subject_id": 0, "predicate": "任职于", "predicate_description": "主体在某组织中工作或任职", "object_name": "腾讯", "object_id": 1}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "张明", "type": "人物", "type_description": "现实中的具体个人", "description": "在腾讯负责 AI 产品开发的人员", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "腾讯", "type": "组织", "type_description": "公司、机构、团队、社群等组织性主体", "description": "张明任职的公司", "is_explicit_memory": false},
-    {"entity_idx": 2, "name": "AI 产品开发", "type": "知识主题", "type_description": "主题、领域、方法、理论或知识概念", "description": "张明负责的工作方向", "is_explicit_memory": true}
+    {"entity_idx": 0, "name": "张明", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "在腾讯工作的人员", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "腾讯", "type": "组织", "type_description": "公司、机构、学校、实验室、团队、社群等组织性主体。", "description": "张明任职的公司", "is_explicit_memory": false}
   ]
 }
 
 **示例 3**
-Statement: "我明天下午三点去图书馆复习微积分。"
+Statement: "我常去图书馆学微积分。"
 
 Output:
 {
@@ -383,9 +652,9 @@ Output:
     {"subject_name": "用户", "subject_id": 0, "predicate": "学习", "predicate_description": "主体正在学习某知识主题或技能", "object_name": "微积分", "object_id": 2}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "现实中的具体个人", "description": "提到自己安排的说话者", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "图书馆", "type": "设施", "type_description": "建筑、场馆、房间、实验室等功能性空间", "description": "用户提到要去的地点", "is_explicit_memory": false},
-    {"entity_idx": 2, "name": "微积分", "type": "知识主题", "type_description": "主题、领域、方法、理论或知识概念", "description": "用户提到的学习主题", "is_explicit_memory": true}
+    {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "经常去图书馆学习微积分的说话者", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "图书馆", "type": "地点设施", "type_description": "具有地理意义或功能性空间意义的位置与场所。", "description": "用户经常前往学习的地点", "is_explicit_memory": false},
+    {"entity_idx": 2, "name": "微积分", "type": "知识能力", "type_description": "可学习、掌握、使用或讨论的知识主题、技能、学科或语言。", "description": "用户经常学习的主题", "is_explicit_memory": true}
   ]
 }
 
@@ -409,9 +678,86 @@ Output:
     {"subject_name": "我的朋友", "subject_id": 1, "predicate": "使用称呼", "predicate_description": "主体使用某个名字来称呼另一实体", "object_name": "山哥", "object_id": 2}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "现实中的具体个人", "description": "被朋友称作山哥的说话者", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "我的朋友", "type": "群体", "type_description": "未具名或泛指的一组人", "description": "使用山哥这一称呼的人群", "is_explicit_memory": false},
-    {"entity_idx": 2, "name": "山哥", "type": "称呼", "type_description": "用于指代或称呼实体的名字", "description": "朋友用来称呼用户的昵称", "is_explicit_memory": false}
+    {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "被朋友称作山哥的说话者", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "我的朋友", "type": "群体", "type_description": "边界相对稳定、可被当作整体引用的一组人。", "description": "使用山哥这一称呼的人群", "is_explicit_memory": false},
+    {"entity_idx": 2, "name": "山哥", "type": "称呼别名", "type_description": "用于指代或称呼实体的名字。", "description": "朋友用来称呼用户的昵称", "is_explicit_memory": false}
+  ]
+}
+
+**示例 6**
+Statement: "我认为努力就会有回报。"
+
+Output:
+{
+  "triplets": [],
+  "entities": [
+    {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "认为努力就会有回报的说话者", "is_explicit_memory": false}
+  ]
+}
+
+**示例 7**
+Statement: "我想要成功。"
+
+Output:
+{
+  "triplets": [],
+  "entities": [
+    {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "想要成功的说话者", "is_explicit_memory": false}
+  ]
+}
+
+**示例 8**
+Statement: "我最近有点紧张，不过这很正常。"
+
+Output:
+{
+  "triplets": [],
+  "entities": [
+    {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "最近有些紧张并认为这很正常的说话者", "is_explicit_memory": false}
+  ]
+}
+
+**示例 9**
+Statement: "王教授是导师。"
+
+Output:
+{
+  "triplets": [
+    {"subject_name": "王教授", "subject_id": 0, "predicate": "担任角色", "predicate_description": "主体承担某个角色", "object_name": "导师", "object_id": 1}
+  ],
+  "entities": [
+    {"entity_idx": 0, "name": "王教授", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "承担导师角色的具体个人", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "导师", "type": "角色职业", "type_description": "人物承担的社会角色、功能身份或职业身份。", "description": "王教授承担的角色身份", "is_explicit_memory": false}
+  ]
+}
+
+**示例 10**
+Statement: "我的GitHub账号用户名是chen4。"
+
+Output:
+{
+  "triplets": [
+    {"subject_name": "用户", "subject_id": 0, "predicate": "拥有账号", "predicate_description": "实体具有某账号", "object_name": "GitHub账号", "object_id": 1},
+    {"subject_name": "GitHub账号", "subject_id": 1, "predicate": "标识为", "predicate_description": "实体由某标识符标识", "object_name": "chen4", "object_id": 2}
+  ],
+  "entities": [
+    {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "拥有该 GitHub 账号的说话者", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "GitHub账号", "type": "账号", "type_description": "账户、账号、用户档案类实体。", "description": "用户拥有的 GitHub 账号", "is_explicit_memory": false},
+    {"entity_idx": 2, "name": "chen4", "type": "标识符", "type_description": "用于识别实体的编号、ID、用户名、学号、工号等标识。", "description": "该 GitHub 账号对应的用户名标识", "is_explicit_memory": false}
+  ]
+}
+
+**示例 11**
+Statement: "机器人查票员和我沟通。"
+
+Output:
+{
+  "triplets": [
+    {"subject_name": "机器人查票员", "subject_id": 0, "predicate": "沟通于", "predicate_description": "两个实体之间发生沟通或交流", "object_name": "用户", "object_id": 1}
+  ],
+  "entities": [
+    {"entity_idx": 0, "name": "机器人查票员", "type": "智能体", "type_description": "具有行动、交互或执行能力的非人主体，如机器人、AI 或其他智慧体。", "description": "与用户发生沟通的机器人主体", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "用户", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "与机器人查票员沟通的说话者", "is_explicit_memory": false}
   ]
 }
 ===End of Examples===
@@ -424,10 +770,11 @@ JSON 要求：
 - 字符串内部引号必须转义为 `\"`
 - 不要使用中文引号
 - 字符串值中不要换行
-- `name`、`subject_name`、`object_name` 默认保持原文中的表面形式，不要翻译；但用户自指必须规范成 `用户`
+- `name`、`subject_name`、`object_name` 默认保持原文中的表面形式，但用户自指必须规范成 `用户`，可稳定解析的其他代词必须替换为具体指代实体名
 - `description` 必须使用中文
 - `type`、`predicate`、`type_description`、`predicate_description` 必须使用上方预定义的中文标签和中文说明
 - 如果 `has_unsolved_reference` 是 `true`，输出必须是 `{"entities": [], "triplets": []}`
+- 如果存在无法稳定解析的代词或指示表达，输出也必须是 `{"entities": [], "triplets": []}`
 - 如果没有有效 triplet，返回 `"triplets": []`
   {% else %}
   JSON Requirements:
@@ -435,10 +782,11 @@ JSON 要求：
 - Escape internal quotes using `\"`
 - No Chinese quotation marks
 - No line breaks inside string values
-- `name`, `subject_name`, and `object_name` must keep the original surface form from the source text, except user self-reference which must be normalized to `用户`
+- `name`, `subject_name`, and `object_name` keep their original surface forms by default, but user self-reference must be normalized to `用户` and other stably resolvable references must be replaced by their resolved entity names
 - `description` must be in English
 - `type`, `predicate`, `type_description`, and `predicate_description` must use the predefined Chinese labels and Chinese definitions above
 - If `has_unsolved_reference` is `true`, the output must be `{"entities": [], "triplets": []}`
+- If unresolved references still remain, the output must also be `{"entities": [], "triplets": []}`
 - If no valid triplet exists, return `"triplets": []`
   {% endif %}
 

@@ -46,6 +46,12 @@ async def create_fulltext_indexes():
             OPTIONS { indexConfig: { `fulltext.analyzer`: 'cjk' } }
         """)
 
+        # 创建 AssistantPruned 剪枝文本全文索引
+        await connector.execute_query("""
+            CREATE FULLTEXT INDEX assistantPrunedFulltext IF NOT EXISTS FOR (p:AssistantPruned) ON EACH [p.text]
+            OPTIONS { indexConfig: { `fulltext.analyzer`: 'cjk' } }
+        """)
+
     finally:
         await connector.close()
 
@@ -135,6 +141,17 @@ async def create_vector_indexes():
               `vector.similarity_function`: 'cosine'
             }}
         """)
+
+        # AssistantPruned text embedding index (optional, for semantic search on pruned hints)
+        await connector.execute_query("""
+            CREATE VECTOR INDEX assistant_pruned_embedding_index IF NOT EXISTS
+            FOR (p:AssistantPruned)
+            ON p.text_embedding
+            OPTIONS {indexConfig: {
+              `vector.dimensions`: 1024,
+              `vector.similarity_function`: 'cosine'
+            }}
+        """)
     finally:
         await connector.close()
 
@@ -176,6 +193,22 @@ async def create_unique_constraints():
             """
             CREATE CONSTRAINT chunk_id_unique IF NOT EXISTS
             FOR (c:Chunk) REQUIRE c.id IS UNIQUE
+            """
+        )
+
+        # AssistantOriginal.id unique
+        await connector.execute_query(
+            """
+            CREATE CONSTRAINT assistant_original_id_unique IF NOT EXISTS
+            FOR (o:AssistantOriginal) REQUIRE o.id IS UNIQUE
+            """
+        )
+
+        # AssistantPruned.id unique
+        await connector.execute_query(
+            """
+            CREATE CONSTRAINT assistant_pruned_id_unique IF NOT EXISTS
+            FOR (p:AssistantPruned) REQUIRE p.id IS UNIQUE
             """
         )
 

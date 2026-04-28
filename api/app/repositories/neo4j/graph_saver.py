@@ -24,6 +24,10 @@ from app.core.memory.models.graph_models import (
     EntityEntityEdge,
     PerceptualNode,
     PerceptualEdge,
+    AssistantOriginalNode,
+    AssistantPrunedNode,
+    AssistantPrunedEdge,
+    AssistantDialogEdge,
 )
 import logging
 
@@ -166,6 +170,10 @@ async def save_dialog_and_statements_to_neo4j(
         statement_entity_edges: List[StatementEntityEdge],
         perceptual_edges: List[PerceptualEdge],
         connector: Neo4jConnector,
+        assistant_original_nodes: Optional[List[AssistantOriginalNode]] = None,
+        assistant_pruned_nodes: Optional[List[AssistantPrunedNode]] = None,
+        assistant_pruned_edges: Optional[List[AssistantPrunedEdge]] = None,
+        assistant_dialog_edges: Optional[List[AssistantDialogEdge]] = None,
 ) -> bool:
     """Save dialogue nodes, chunk nodes, statement nodes, entities, and all relationships to Neo4j using graph models.
 
@@ -367,6 +375,55 @@ async def save_dialog_and_statements_to_neo4j(
             perceptual_edges_uuids = [record["uuid"] async for record in result]
             results['perceptual_chunk_edges'] = perceptual_edges_uuids
             logger.info(f"Successfully saved {len(perceptual_edges_uuids)} perceptual-chunk edges to Neo4j")
+
+        # 8. Save assistant original nodes
+        if assistant_original_nodes:
+            from app.repositories.neo4j.cypher_queries import ASSISTANT_ORIGINAL_NODE_SAVE
+            original_data = [node.model_dump() for node in assistant_original_nodes]
+            result = await tx.run(ASSISTANT_ORIGINAL_NODE_SAVE, originals=original_data)
+            original_uuids = [record["uuid"] async for record in result]
+            results['assistant_originals'] = original_uuids
+            logger.info(f"Successfully saved {len(original_uuids)} assistant original nodes to Neo4j")
+
+        # 9. Save assistant pruned nodes
+        if assistant_pruned_nodes:
+            from app.repositories.neo4j.cypher_queries import ASSISTANT_PRUNED_NODE_SAVE
+            pruned_data = [node.model_dump() for node in assistant_pruned_nodes]
+            result = await tx.run(ASSISTANT_PRUNED_NODE_SAVE, pruneds=pruned_data)
+            pruned_uuids = [record["uuid"] async for record in result]
+            results['assistant_pruneds'] = pruned_uuids
+            logger.info(f"Successfully saved {len(pruned_uuids)} assistant pruned nodes to Neo4j")
+
+        # 10. Save PRUNED_TO edges (Original → Pruned)
+        if assistant_pruned_edges:
+            from app.repositories.neo4j.cypher_queries import ASSISTANT_PRUNED_EDGE_SAVE
+            edge_data = [{
+                "source": edge.source,
+                "target": edge.target,
+                "pair_id": edge.pair_id,
+                "end_user_id": edge.end_user_id,
+                "run_id": edge.run_id,
+                "created_at": edge.created_at.isoformat() if edge.created_at else None,
+            } for edge in assistant_pruned_edges]
+            result = await tx.run(ASSISTANT_PRUNED_EDGE_SAVE, edges=edge_data)
+            pruned_edge_uuids = [record["uuid"] async for record in result]
+            results['assistant_pruned_edges'] = pruned_edge_uuids
+            logger.info(f"Successfully saved {len(pruned_edge_uuids)} PRUNED_TO edges to Neo4j")
+
+        # 11. Save BELONGS_TO_DIALOG edges (Original → Dialogue)
+        if assistant_dialog_edges:
+            from app.repositories.neo4j.cypher_queries import ASSISTANT_DIALOG_EDGE_SAVE
+            edge_data = [{
+                "source": edge.source,
+                "target": edge.target,
+                "end_user_id": edge.end_user_id,
+                "run_id": edge.run_id,
+                "created_at": edge.created_at.isoformat() if edge.created_at else None,
+            } for edge in assistant_dialog_edges]
+            result = await tx.run(ASSISTANT_DIALOG_EDGE_SAVE, edges=edge_data)
+            dialog_edge_uuids = [record["uuid"] async for record in result]
+            results['assistant_dialog_edges'] = dialog_edge_uuids
+            logger.info(f"Successfully saved {len(dialog_edge_uuids)} BELONGS_TO_DIALOG edges to Neo4j")
 
         return results
 

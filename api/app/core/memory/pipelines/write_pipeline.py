@@ -77,6 +77,10 @@ class ExtractionResult(BaseModel):
     stmt_entity_edges: List[StatementEntityEdge]
     entity_entity_edges: List[EntityEntityEdge]
     perceptual_edges: List[PerceptualEdge]
+    assistant_original_nodes: List[Any] = Field(default_factory=list)
+    assistant_pruned_nodes: List[Any] = Field(default_factory=list)
+    assistant_pruned_edges: List[Any] = Field(default_factory=list)
+    assistant_dialog_edges: List[Any] = Field(default_factory=list)
     dialog_data_list: List[Any] = Field(
         default_factory=list,
         description="原始 DialogData 列表，类型为 Any 以避免循环依赖",
@@ -482,6 +486,10 @@ class WritePipeline:
             stmt_entity_edges=dedup_result.statement_entity_edges,
             entity_entity_edges=dedup_result.entity_entity_edges,
             perceptual_edges=graph.perceptual_edges,
+            assistant_original_nodes=graph.assistant_original_nodes,
+            assistant_pruned_nodes=graph.assistant_pruned_nodes,
+            assistant_pruned_edges=graph.assistant_pruned_edges,
+            assistant_dialog_edges=graph.assistant_dialog_edges,
             dialog_data_list=dialog_data_list,
         )
 
@@ -523,6 +531,10 @@ class WritePipeline:
                     entity_edges=result.entity_entity_edges,
                     perceptual_edges=result.perceptual_edges,
                     connector=self._neo4j_connector,
+                    assistant_original_nodes=result.assistant_original_nodes,
+                    assistant_pruned_nodes=result.assistant_pruned_nodes,
+                    assistant_pruned_edges=result.assistant_pruned_edges,
+                    assistant_dialog_edges=result.assistant_dialog_edges,
                 )
                 if success:
                     logger.info("Successfully saved all data to Neo4j")

@@ -28,6 +28,10 @@ from app.core.memory.models.graph_models import (
     StatementChunkEdge,
     StatementEntityEdge,
     StatementNode,
+    AssistantOriginalNode,
+    AssistantPrunedNode,
+    AssistantPrunedEdge,
+    AssistantDialogEdge,
 )
 from app.core.memory.models.message_models import DialogData, TemporalInfo
 
@@ -47,6 +51,10 @@ class GraphBuildResult:
         "stmt_entity_edges",
         "entity_entity_edges",
         "perceptual_edges",
+        "assistant_original_nodes",
+        "assistant_pruned_nodes",
+        "assistant_pruned_edges",
+        "assistant_dialog_edges",
     )
 
     def __init__(
@@ -60,6 +68,10 @@ class GraphBuildResult:
         stmt_entity_edges: List[StatementEntityEdge],
         entity_entity_edges: List[EntityEntityEdge],
         perceptual_edges: List[PerceptualEdge],
+        assistant_original_nodes: Optional[List[AssistantOriginalNode]] = None,
+        assistant_pruned_nodes: Optional[List[AssistantPrunedNode]] = None,
+        assistant_pruned_edges: Optional[List[AssistantPrunedEdge]] = None,
+        assistant_dialog_edges: Optional[List[AssistantDialogEdge]] = None,
     ):
         self.dialogue_nodes = dialogue_nodes
         self.chunk_nodes = chunk_nodes
@@ -70,6 +82,10 @@ class GraphBuildResult:
         self.stmt_entity_edges = stmt_entity_edges
         self.entity_entity_edges = entity_entity_edges
         self.perceptual_edges = perceptual_edges
+        self.assistant_original_nodes = assistant_original_nodes or []
+        self.assistant_pruned_nodes = assistant_pruned_nodes or []
+        self.assistant_pruned_edges = assistant_pruned_edges or []
+        self.assistant_dialog_edges = assistant_dialog_edges or []
 
 
 async def build_graph_nodes_and_edges(
@@ -343,6 +359,77 @@ async def build_graph_nodes_and_edges(
         f"实体-实体边: {len(entity_entity_edges)}"
     )
 
+    # ── Assistant 剪枝节点和边 ──
+    assistant_original_nodes: List[AssistantOriginalNode] = []
+    assistant_pruned_nodes: List[AssistantPrunedNode] = []
+    assistant_pruned_edges: List[AssistantPrunedEdge] = []
+    assistant_dialog_edges: List[AssistantDialogEdge] = []
+
+    for dialog_data in dialog_data_list:
+        pruning_records = dialog_data.metadata.get("assistant_pruning_records", [])
+        for record in pruning_records:
+            pair_id = record["pair_id"]
+            original_id = f"ao_{pair_id}"
+            pruned_id = f"ap_{pair_id}"
+
+            # AssistantOriginal 始终创建（记录原始对话）
+            original_node = AssistantOriginalNode(
+                id=original_id,
+                name=f"AssistantOriginal_{pair_id[:8]}",
+                end_user_id=dialog_data.end_user_id,
+                run_id=dialog_data.run_id,
+                created_at=dialog_data.created_at,
+                expired_at=dialog_data.expired_at,
+                pair_id=pair_id,
+                dialog_id=dialog_data.id,
+                text=record["original_text"],
+            )
+            assistant_original_nodes.append(original_node)
+
+            # BELONGS_TO_DIALOG: Original → Dialogue
+            assistant_dialog_edges.append(AssistantDialogEdge(
+                source=original_id,
+                target=dialog_data.id,
+                end_user_id=dialog_data.end_user_id,
+                run_id=dialog_data.run_id,
+                created_at=dialog_data.created_at,
+            ))
+
+            # pruned_text 为 NULL 时不创建 AssistantPruned 节点和 PRUNED_TO 边
+            if record["pruned_text"] == "NULL":
+                continue
+
+            pruned_node = AssistantPrunedNode(
+                id=pruned_id,
+                name=f"AssistantPruned_{pair_id[:8]}",
+                end_user_id=dialog_data.end_user_id,
+                run_id=dialog_data.run_id,
+                created_at=dialog_data.created_at,
+                expired_at=dialog_data.expired_at,
+                pair_id=pair_id,
+                dialog_id=dialog_data.id,
+                text=record["pruned_text"],
+                memory_type=record["memory_type"],
+            )
+            assistant_pruned_nodes.append(pruned_node)
+
+            # PRUNED_TO: Original → Pruned
+            assistant_pruned_edges.append(AssistantPrunedEdge(
+                source=original_id,
+                target=pruned_id,
+                end_user_id=dialog_data.end_user_id,
+                run_id=dialog_data.run_id,
+                created_at=dialog_data.created_at,
+                pair_id=pair_id,
+            ))
+
+    if assistant_original_nodes:
+        logger.info(
+            f"Assistant 剪枝节点创建完成 - "
+            f"原始节点: {len(assistant_original_nodes)}, "
+            f"剪枝节点: {len(assistant_pruned_nodes)}"
+        )
+
     if progress_callback:
         nodes_edges_stats = {
             "dialogue_nodes_count": len(dialogue_nodes),
@@ -365,4 +452,8 @@ async def build_graph_nodes_and_edges(
         stmt_entity_edges=stmt_entity_edges,
         entity_entity_edges=entity_entity_edges,
         perceptual_edges=perceptual_edges,
+        assistant_original_nodes=assistant_original_nodes,
+        assistant_pruned_nodes=assistant_pruned_nodes,
+        assistant_pruned_edges=assistant_pruned_edges,
+        assistant_dialog_edges=assistant_dialog_edges,
     )

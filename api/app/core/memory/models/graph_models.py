@@ -578,3 +578,47 @@ class PerceptualNode(Node):
     domain: str
     file_type: str
     summary_embedding: list[float] | None
+
+
+class AssistantOriginalNode(Node):
+    """Node storing the original text of an Assistant message before pruning.
+
+    Attributes:
+        pair_id: Shared ID with the corresponding AssistantPrunedNode for pairing
+        dialog_id: ID of the parent dialogue this message belongs to
+        text: The full original Assistant response text
+    """
+    pair_id: str = Field(..., description="Shared pairing ID with the corresponding pruned node")
+    dialog_id: str = Field(..., description="ID of the parent dialogue")
+    text: str = Field(..., description="Original Assistant message text")
+
+
+class AssistantPrunedNode(Node):
+    """Node storing the pruned (compressed) text of an Assistant message.
+
+    Attributes:
+        pair_id: Shared ID with the corresponding AssistantOriginalNode for pairing
+        dialog_id: ID of the parent dialogue this message belongs to
+        text: The pruned memory hint text (or "NULL" if no memory value)
+        memory_type: Type of the memory hint (comfort|suggestion|recommendation|warning|instruction|NULL)
+        text_embedding: Optional embedding vector for semantic search on pruned text
+    """
+    pair_id: str = Field(..., description="Shared pairing ID with the corresponding original node")
+    dialog_id: str = Field(..., description="ID of the parent dialogue")
+    text: str = Field(..., description="Pruned assistant memory hint text")
+    memory_type: str = Field(..., description="Memory type: comfort|suggestion|recommendation|warning|instruction|NULL")
+    text_embedding: Optional[List[float]] = Field(None, description="Embedding vector for semantic search")
+
+
+class AssistantPrunedEdge(Edge):
+    """Edge connecting an AssistantOriginal node to its AssistantPruned node (PRUNED_TO).
+
+    Attributes:
+        pair_id: Shared pairing ID for traceability
+    """
+    pair_id: str = Field(..., description="Shared pairing ID for traceability")
+
+
+class AssistantDialogEdge(Edge):
+    """Edge connecting an AssistantOriginal node to its parent Dialogue node (BELONGS_TO_DIALOG)."""
+    pass

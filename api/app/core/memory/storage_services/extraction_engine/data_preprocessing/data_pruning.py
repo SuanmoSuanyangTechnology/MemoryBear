@@ -15,7 +15,9 @@ import hashlib
 import json
 import logging
 from collections import OrderedDict
+from datetime import datetime
 from typing import List, Optional, Dict
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -37,6 +39,16 @@ logger = logging.getLogger(__name__)
 def message_has_files(message: "ConversationMessage") -> bool:
     """检查消息是否包含文件。"""
     return message.files and len(message.files) > 0
+
+
+class AssistantPruningRecord(BaseModel):
+    """单个 User-Assistant 消息对的剪枝记录，用于后续写入 Neo4j。"""
+
+    pair_id: str = Field(..., description="唯一配对 ID，Original 和 Pruned 节点共享")
+    original_text: str = Field(..., description="Assistant 原始回复全文")
+    pruned_text: str = Field(..., description="剪枝后文本（assistant_memory_hint），或 'NULL'")
+    memory_type: str = Field(..., description="comfort|suggestion|recommendation|warning|instruction|NULL")
+    created_at: str = Field(..., description="ISO 时间戳")
 
 
 class AssistantPruningResponse(BaseModel):
@@ -94,6 +106,9 @@ class SemanticPruner:
 
         # Snapshot 数据收集：每个消息对的 input + gold
         self._snapshot_records: List[Dict] = []
+
+        # 剪枝记录：用于后续写入 Neo4j（AssistantOriginal + AssistantPruned 节点）
+        self.pruning_records: List[AssistantPruningRecord] = []
 
         # 运行日志
         self.run_logs: List[str] = []
@@ -245,6 +260,15 @@ class SemanticPruner:
                         "assistant_memory_type": result.assistant_memory_type,
                     },
                 })
+
+                # 收集剪枝记录（用于后续写入 Neo4j）
+                self.pruning_records.append(AssistantPruningRecord(
+                    pair_id=uuid4().hex,
+                    original_text=asst_msg.msg,
+                    pruned_text=result.assistant_memory_hint,
+                    memory_type=result.assistant_memory_type,
+                    created_at=datetime.now().isoformat(),
+                ))
 
                 if result.assistant_memory_hint == "NULL":
                     self._log(

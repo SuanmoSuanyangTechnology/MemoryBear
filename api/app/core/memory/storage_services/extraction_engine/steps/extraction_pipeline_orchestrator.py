@@ -855,6 +855,7 @@ class NewExtractionOrchestrator:
                                 entity_idx=e.entity_idx,
                                 name=e.name,
                                 type=e.type,
+                                type_description=getattr(e, "type_description", ""),
                                 description=e.description,
                                 is_explicit_memory=e.is_explicit_memory,
                             )
@@ -865,6 +866,7 @@ class NewExtractionOrchestrator:
                                 subject_name=t.subject_name,
                                 subject_id=t.subject_id,
                                 predicate=t.predicate,
+                                predicate_description=getattr(t, "predicate_description", ""),
                                 object_name=t.object_name,
                                 object_id=t.object_id,
                             )
