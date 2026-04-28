@@ -221,7 +221,7 @@ def update_workspace_members(
 
 @router.delete("/members/{member_id}", response_model=ApiResponse)
 @cur_workspace_access_guard()
-def delete_workspace_member(
+async def delete_workspace_member(
     member_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -230,7 +230,7 @@ def delete_workspace_member(
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求删除工作空间 {workspace_id} 的成员 {member_id}")
 
-    workspace_service.delete_workspace_member(
+    await workspace_service.delete_workspace_member(
         db=db,
         workspace_id=workspace_id,
         member_id=member_id,
