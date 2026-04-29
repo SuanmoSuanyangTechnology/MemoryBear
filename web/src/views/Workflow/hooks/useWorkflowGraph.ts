@@ -134,7 +134,7 @@ export const useWorkflowGraph = ({
       const data = node.getData()
       if (data?.type === 'if-else' || data?.type === 'question-classifier') {
         console.log('chatVariables', chatVariables)
-        node.setData({ ...data, chatVariables }, { silent: true })
+        node.setData({ ...data, chatVariables })
       }
     })
   }, [chatVariables])
@@ -1709,7 +1709,7 @@ export const useWorkflowGraph = ({
     // Reset all node execution status on every chatHistory change
     nodes.forEach(node => {
       const data = node.getData();
-      node.setData({ ...data, executionStatus: '' }, { silent: true });
+      node.setData({ ...data, executionStatus: '' });
     });
 
     const lastAssistant = [...chatHistory].reverse().find(item => item.role === 'assistant');
@@ -1718,7 +1718,7 @@ export const useWorkflowGraph = ({
       if (typeof sub.status === 'string') {
         const node = nodes.find(n => n.getData()?.id === sub.node_id);
         if (node) {
-          node.setData({ ...node.getData(), executionStatus: sub.status }, { silent: true });
+          node.setData({ ...node.getData(), executionStatus: sub.status });
         }
       }
     });
