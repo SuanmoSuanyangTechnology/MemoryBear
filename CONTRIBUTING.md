@@ -16,6 +16,7 @@
 3. 提交更改：遵循 [Conventional Commits](https://www.conventionalcommits.org/) 格式
 4. 推送分支：`git push origin feature/your-feature-name`
 5. 创建 Pull Request
+6. Pull Request合并的目标分支为develop
 
 ### Commit 格式
 
