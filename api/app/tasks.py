@@ -707,111 +707,111 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
     import csv as csv_module
     import io
 
-    db = SessionLocal()
+    db = None
     try:
-        db_document = db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
-        db_knowledge = db.query(Knowledge).filter(Knowledge.id == uuid.UUID(kb_id)).first()
-        if not db_document or not db_knowledge:
-            logger.error(f"[ImportQA] document={document_id} or knowledge={kb_id} not found")
-            return {"error": "document or knowledge not found", "imported": 0}
+        from app.db import get_db_context
+        with get_db_context() as db:
+            db_document = db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
+            db_knowledge = db.query(Knowledge).filter(Knowledge.id == uuid.UUID(kb_id)).first()
+            if not db_document or not db_knowledge:
+                logger.error(f"[ImportQA] document={document_id} or knowledge={kb_id} not found")
+                return {"error": "document or knowledge not found", "imported": 0}
 
-        # 1. 解析文件
-        qa_pairs = []
-        failed_rows = []
+            # 1. 解析文件
+            qa_pairs = []
+            failed_rows = []
 
-        if filename.endswith(".csv"):
-            try:
-                text = contents.decode("utf-8-sig")
-            except UnicodeDecodeError:
-                text = contents.decode("gbk", errors="ignore")
+            if filename.endswith(".csv"):
+                try:
+                    text = contents.decode("utf-8-sig")
+                except UnicodeDecodeError:
+                    text = contents.decode("gbk", errors="ignore")
 
-            sniffer = csv_module.Sniffer()
-            try:
-                dialect = sniffer.sniff(text[:2048])
-                delimiter = dialect.delimiter
-            except csv_module.Error:
-                delimiter = "," if "," in text[:500] else "\t"
+                sniffer = csv_module.Sniffer()
+                try:
+                    dialect = sniffer.sniff(text[:2048])
+                    delimiter = dialect.delimiter
+                except csv_module.Error:
+                    delimiter = "," if "," in text[:500] else "\t"
 
-            reader = csv_module.reader(io.StringIO(text), delimiter=delimiter)
-            for i, row in enumerate(reader):
-                if i == 0:
-                    continue
-                if len(row) >= 2 and row[0].strip() and row[1].strip():
-                    qa_pairs.append({"question": row[0].strip(), "answer": row[1].strip()})
-                elif len(row) >= 1 and row[0].strip():
-                    failed_rows.append(i + 1)
+                reader = csv_module.reader(io.StringIO(text), delimiter=delimiter)
+                for i, row in enumerate(reader):
+                    if i == 0:
+                        continue
+                    if len(row) >= 2 and row[0].strip() and row[1].strip():
+                        qa_pairs.append({"question": row[0].strip(), "answer": row[1].strip()})
+                    elif len(row) >= 1 and row[0].strip():
+                        failed_rows.append(i + 1)
 
-        elif filename.endswith(".xlsx") or filename.endswith(".xls"):
-            try:
-                import openpyxl
-                wb = openpyxl.load_workbook(io.BytesIO(contents), read_only=True)
-                for sheet in wb.worksheets:
-                    for i, row in enumerate(sheet.iter_rows(values_only=True)):
-                        if i == 0:
-                            continue
-                        if len(row) >= 2 and row[0] and row[1]:
-                            q = str(row[0]).strip()
-                            a = str(row[1]).strip()
-                            if q and a:
-                                qa_pairs.append({"question": q, "answer": a})
-                        elif len(row) >= 1 and row[0]:
-                            failed_rows.append(i + 1)
-                wb.close()
-            except Exception as e:
-                logger.error(f"[ImportQA] Excel parse failed: {e}")
-                return {"error": f"Excel parse failed: {e}", "imported": 0}
+            elif filename.endswith(".xlsx") or filename.endswith(".xls"):
+                try:
+                    import openpyxl
+                    wb = openpyxl.load_workbook(io.BytesIO(contents), read_only=True)
+                    for sheet in wb.worksheets:
+                        for i, row in enumerate(sheet.iter_rows(values_only=True)):
+                            if i == 0:
+                                continue
+                            if len(row) >= 2 and row[0] and row[1]:
+                                q = str(row[0]).strip()
+                                a = str(row[1]).strip()
+                                if q and a:
+                                    qa_pairs.append({"question": q, "answer": a})
+                            elif len(row) >= 1 and row[0]:
+                                failed_rows.append(i + 1)
+                    wb.close()
+                except Exception as e:
+                    logger.error(f"[ImportQA] Excel parse failed: {e}")
+                    return {"error": f"Excel parse failed: {e}", "imported": 0}
 
-        if not qa_pairs:
-            logger.warning(f"[ImportQA] No valid QA pairs found in {filename}")
-            return {"error": "No valid QA pairs found", "imported": 0}
+            if not qa_pairs:
+                logger.warning(f"[ImportQA] No valid QA pairs found in {filename}")
+                return {"error": "No valid QA pairs found", "imported": 0}
 
-        logger.info(f"[ImportQA] Parsed {len(qa_pairs)} QA pairs from {filename}, failed_rows={failed_rows}")
+            logger.info(f"[ImportQA] Parsed {len(qa_pairs)} QA pairs from {filename}, failed_rows={failed_rows}")
 
-        # 2. 写入 ES
-        vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+            # 2. 写入 ES
+            vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
-        sort_id = 0
-        total, items = vector_service.search_by_segment(document_id=document_id, pagesize=1, page=1, asc=False)
-        if items:
-            sort_id = items[0].metadata["sort_id"]
+            sort_id = 0
+            total, items = vector_service.search_by_segment(document_id=document_id, pagesize=1, page=1, asc=False)
+            if items:
+                sort_id = items[0].metadata["sort_id"]
 
-        chunks = []
-        for pair in qa_pairs:
-            sort_id += 1
-            doc_id = uuid.uuid4().hex
-            metadata = {
-                "doc_id": doc_id,
-                "file_id": str(db_document.file_id),
-                "file_name": db_document.file_name,
-                "file_created_at": int(db_document.created_at.timestamp() * 1000),
-                "document_id": document_id,
-                "knowledge_id": kb_id,
-                "sort_id": sort_id,
-                "status": 1,
-                "chunk_type": "qa",
-                "question": pair["question"],
-                "answer": pair["answer"],
-            }
-            chunks.append(DocumentChunk(page_content=pair["question"], metadata=metadata))
+            chunks = []
+            for pair in qa_pairs:
+                sort_id += 1
+                doc_id = uuid.uuid4().hex
+                metadata = {
+                    "doc_id": doc_id,
+                    "file_id": str(db_document.file_id),
+                    "file_name": db_document.file_name,
+                    "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                    "document_id": document_id,
+                    "knowledge_id": kb_id,
+                    "sort_id": sort_id,
+                    "status": 1,
+                    "chunk_type": "qa",
+                    "question": pair["question"],
+                    "answer": pair["answer"],
+                }
+                chunks.append(DocumentChunk(page_content=pair["question"], metadata=metadata))
 
-        batch_size = 50
-        for i in range(0, len(chunks), batch_size):
-            batch = chunks[i:i + batch_size]
-            vector_service.add_chunks(batch)
+            batch_size = 50
+            for i in range(0, len(chunks), batch_size):
+                batch = chunks[i:i + batch_size]
+                vector_service.add_chunks(batch)
 
-        # 3. 更新 chunk_num
-        db_document.chunk_num += len(chunks)
-        db.commit()
+            # 3. 更新 chunk_num
+            db_document.chunk_num += len(chunks)
+            db.commit()
 
-        result = {"imported": len(chunks), "failed_rows": failed_rows}
-        logger.info(f"[ImportQA] Done: imported={len(chunks)}, failed={len(failed_rows)}")
-        return result
+            result = {"imported": len(chunks), "failed_rows": failed_rows}
+            logger.info(f"[ImportQA] Done: imported={len(chunks)}, failed={len(failed_rows)}")
+            return result
 
     except Exception as e:
         logger.error(f"[ImportQA] Failed: {e}", exc_info=True)
         return {"error": str(e), "imported": 0}
-    finally:
-        db.close()
 
 
 @celery_app.task(name="app.core.rag.tasks.sync_knowledge_for_kb")

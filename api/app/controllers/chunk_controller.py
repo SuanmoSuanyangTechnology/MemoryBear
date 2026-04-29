@@ -348,6 +348,69 @@ async def create_chunks_batch(
     return success(data=jsonable_encoder(chunks), msg=f"Batch created {len(chunks)} chunks successfully")
 
 
+@router.post("/{kb_id}/import_qa", response_model=ApiResponse)
+async def import_qa_new_doc(
+        kb_id: uuid.UUID,
+        file: UploadFile = File(..., description="CSV 或 Excel 文件（第一行标题跳过，第一列问题，第二列答案）"),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """
+    导入 QA 问答对并新建文档（CSV/Excel），异步处理
+    """
+    api_logger.info(f"Import QA (new doc): kb_id={kb_id}, file={file.filename}, username: {current_user.username}")
+
+    # 1. 校验文件格式
+    filename = file.filename or ""
+    if not (filename.endswith(".csv") or filename.endswith(".xlsx") or filename.endswith(".xls")):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持 CSV (.csv) 或 Excel (.xlsx) 格式")
+
+    # 2. 校验知识库
+    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    if not db_knowledge:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在或无权访问")
+
+    # 3. 创建 File 记录
+    from app.schemas import file_schema, document_schema
+    _, file_extension = os.path.splitext(filename)
+    file_ext = file_extension.lower()
+    contents = await file.read()
+    file_size = len(contents)
+
+    file_data = file_schema.FileCreate(
+        kb_id=kb_id, created_by=current_user.id,
+        parent_id=uuid.UUID("00000000-0000-0000-0000-000000000000"),
+        file_name=filename, file_ext=file_ext, file_size=file_size,
+    )
+    db_file = file_service.create_file(db=db, file=file_data, current_user=current_user)
+
+    # 4. 创建 Document 记录
+    doc_data = document_schema.DocumentCreate(
+        kb_id=kb_id, created_by=current_user.id, file_id=db_file.id,
+        file_name=filename, file_ext=file_ext, file_size=file_size,
+        file_meta={}, parser_id="naive",
+        parser_config={"layout_recognize": "DeepDOC", "chunk_token_num": 128,
+                       "delimiter": "\n", "auto_keywords": 0, "auto_questions": 0, "html4excel": "false"}
+    )
+    db_document = document_service.create_document(db=db, document=doc_data, current_user=current_user)
+
+    api_logger.info(f"Created doc for QA import: file_id={db_file.id}, document_id={db_document.id}")
+
+    # 5. 派发异步任务
+    from app.celery_app import celery_app
+    task = celery_app.send_task(
+        "app.core.rag.tasks.import_qa_chunks",
+        args=[str(kb_id), str(db_document.id), filename, contents],
+        queue="qa_import"
+    )
+
+    return success(data={
+        "task_id": task.id,
+        "document_id": str(db_document.id),
+        "file_id": str(db_file.id),
+    }, msg="QA 导入任务已提交，后台处理中")
+
+
 @router.post("/{kb_id}/{document_id}/import_qa", response_model=ApiResponse)
 async def import_qa_chunks(
         kb_id: uuid.UUID,
