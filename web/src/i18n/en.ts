@@ -1281,13 +1281,13 @@ export const en = {
       hybrid: 'Hybrid Retrieval',
       graph: 'Graph Retrieval',
 
-      similarity_threshold: 'Semantic similarity threshold',
-      similarity_threshold_desc: 'Only return results with semantic similarity higher than this threshold',
-      similarity_threshold_desc1: 'The minimum similarity threshold for semantic retrieval',
+      vector_similarity_weight: 'Semantic similarity threshold',
+      vector_similarity_weight_desc: 'Only return results with semantic similarity higher than this threshold',
+      vector_similarity_weight_desc1: 'The minimum similarity threshold for semantic retrieval',
 
-      vector_similarity_weight: 'Vector Similarity Weight',
-      vector_similarity_weight_desc: 'Only return results with BM25 scores above this threshold',
-      vector_similarity_weight_desc1: 'The minimum BM25 score threshold for word segmentation retrieval',
+      similarity_threshold: 'Vector Similarity Weight',
+      similarity_threshold_desc: 'Only return results with BM25 scores above this threshold',
+      similarity_threshold_desc1: 'The minimum BM25 score threshold for word segmentation retrieval',
 
       description: 'Description',
       shareVersion: 'Share Version',

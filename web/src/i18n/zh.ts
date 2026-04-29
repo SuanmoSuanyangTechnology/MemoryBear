@@ -663,13 +663,13 @@ export const zh = {
       hybrid: '混合检索',
       graph: '图谱检索',
 
-      similarity_threshold: '语义相似度阈值',
-      similarity_threshold_desc: '仅返回语义相似度高于此阈值的结果',
-      similarity_threshold_desc1: '语义检索的最小相似度阈值',
+      similarity_threshold: '向量相似度权重',
+      similarity_threshold_desc: '仅返回BM25分数高于此阈值的结果',
+      similarity_threshold_desc1: '分词检索的最小BM25分数阈值',
 
-      vector_similarity_weight: '向量相似度权重',
-      vector_similarity_weight_desc: '仅返回BM25分数高于此阈值的结果',
-      vector_similarity_weight_desc1: '分词检索的最小BM25分数阈值',
+      vector_similarity_weight: '语义相似度阈值',
+      vector_similarity_weight_desc: '仅返回语义相似度高于此阈值的结果',
+      vector_similarity_weight_desc1: '语义检索的最小相似度阈值',
 
       description: '描述',
       shareVersion: '分享版本',
