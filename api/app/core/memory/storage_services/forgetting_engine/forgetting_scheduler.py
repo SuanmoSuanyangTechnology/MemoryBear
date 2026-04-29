@@ -353,7 +353,7 @@ class ForgettingScheduler:
             return results[0]['total']
         return 0
     
-    async def _sync_memory_count_to_mysql(
+    async def _sync_memory_count_to_db(
         self,
         end_user_id: Optional[str] = None,
     ) -> None:
