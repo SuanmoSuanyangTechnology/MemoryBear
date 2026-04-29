@@ -3,14 +3,14 @@ import { Popover, type PopoverProps } from 'antd'
 import Tag, { type TagProps } from '@/components/Tag'
 
 interface OverflowTagsProps {
-  items: ReactNode[];
+  items?: ReactNode[];
   gap?: number;
   numTagColor?: TagProps['color'];
   numTag?: (num?: number) => ReactNode;
   popoverProps?: PopoverProps | false;
 }
 
-const OverflowTags = ({ items, gap = 8, numTagColor = 'default', numTag, popoverProps }: OverflowTagsProps) => {
+const OverflowTags = ({ items = [], gap = 8, numTagColor = 'default', numTag, popoverProps }: OverflowTagsProps) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const measureRef = useRef<HTMLDivElement>(null)
   const [visibleCount, setVisibleCount] = useState(items.length)
@@ -20,7 +20,7 @@ const OverflowTags = ({ items, gap = 8, numTagColor = 'default', numTag, popover
     if (!measure || containerWidth === 0) return
 
     const children = Array.from(measure.children) as HTMLElement[]
-    if (!children.length) return
+    if (!children.length) { setVisibleCount(0); return }
 
     // last child is the sample +N tag
     const extraTagWidth = (children[children.length - 1] as HTMLElement).offsetWidth
