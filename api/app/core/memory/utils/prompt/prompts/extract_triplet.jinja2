@@ -39,6 +39,7 @@ Extract entities and knowledge triplets from the given statement.
 - `supporting_context.msgs[].role`: `User` / `Assistant`
 - `supporting_context.msgs[].msg`: 消息文本
 - `speaker`: `user` / `assistant`
+- `dialog_at`: 会话时间，ISO 8601 时间点；可用于在 `description` 中标注实体的时间背景
 - `valid_at`: ISO 8601 时间点，或 `NULL`
 - `invalid_at`: ISO 8601 时间点，或 `NULL`
 - `has_unsolved_reference`: 布尔值
@@ -53,6 +54,7 @@ Extract entities and knowledge triplets from the given statement.
 - `supporting_context.msgs[].role`: `User` / `Assistant`
 - `supporting_context.msgs[].msg`: message text
 - `speaker`: `user` / `assistant`
+- `dialog_at`: session time as an ISO 8601 timestamp; may be used to anchor temporal context in entity `description`
 - `valid_at`: ISO 8601 timestamp or `NULL`
 - `invalid_at`: ISO 8601 timestamp or `NULL`
 - `has_unsolved_reference`: boolean
@@ -113,6 +115,7 @@ Primary statement to analyze:
 - 如果某条信息只出现在 `supporting_context.msgs` 中，而没有出现在 `statement_text` 中，就不要输出它。
 - 如果 `supporting_context.msgs` 中的 Assistant 消息包含总结、猜测、解释或改写，这些内容只能作为理解辅助，不能直接作为抽取来源。
 - `statement_type`、`temporal_type` 是辅助理解字段，不是抽取目标。
+- `dialog_at` 是辅助时间上下文字段，不是抽取目标。
 - `valid_at`、`invalid_at` 不用于决定是否创建实体或关系，但如果产生 triplet，必须原样复制到每个 triplet 的同名字段中。
 - 对 `statement_text` 中的用户自指表达，要统一规范成实体 `用户`。
 - 对其他可稳定解析的代词或指示表达，要替换为具体指代实体名后再抽取。
@@ -124,6 +127,7 @@ Primary statement to analyze:
 - If some information appears only in `supporting_context.msgs` but not in `statement_text`, do not include it in the output.
 - If Assistant messages in `supporting_context.msgs` contain summary, guess, interpretation, or rephrasing, use them only as interpretive support and never as a direct extraction source.
 - Treat `statement_type` and `temporal_type` as auxiliary context, not extraction targets.
+- Treat `dialog_at` as auxiliary session-time context, not an extraction target.
 - Do not use `valid_at` or `invalid_at` to decide whether to create entities or relations, but if any triplet is produced, copy them verbatim into every triplet field with the same names.
 - Normalize user self-reference in `statement_text` to the entity `用户`.
 - Replace other resolvable pronouns or demonstratives with their resolved entity names before extraction.
@@ -493,6 +497,8 @@ Do not let auxiliary fields drive the extraction process.
 - 优先描述实体在当前陈述和必要上下文中的身份、作用或关系。
 - `description` 只保留适合长期附着在该实体上的描述，例如稳定身份、稳定关系、长期偏好/兴趣/习惯、较稳定认知倾向或可用于区分实体的持久特征。
 - 不要把短期状态、一次性事件、临时计划、当前情绪、具体时间锚点，或只在当前句子里短暂成立的信息写进 `description`。
+- 但如果第一步已经把相对时间稳定改写成具体日期、月份或日期区间，且这段具体时间对识别当前实体有帮助，可以在 `description` 中沿用这段已经出现在 `statement_text` 里的具体时间表达。
+- triplet 这一步不要自己新增时间推理；只允许复用 `statement_text` 中已经具体化的时间表述，不要把“上周三”“上个月”再次自行展开。
 - 如果实体应保留，但当前 statement 中没有适合长期附着在该实体上的稳定描述，则 `description` 允许为空字符串 `""`；不要为了填充 `description` 而写入短期状态或临时信息。
 - 避免使用“陈述中提到的人物”“陈述中提到的组织”“陈述中提到的物品”这类低信息量模板。
 - 不要补充识别实体所不需要的外部知识。
@@ -501,6 +507,8 @@ Do not let auxiliary fields drive the extraction process.
 - Prefer describing the entity's role, identity, or relation in the current statement and necessary supporting context.
 - `description` should keep only information suitable to remain attached to the entity over time, such as stable identity, stable relations, long-term preferences/interests/habits, relatively stable beliefs, or persistent distinguishing traits.
 - Do not put short-lived states, one-off events, temporary plans, current emotions, concrete time anchors, or information that only briefly holds in the current sentence into `description`.
+- But if step 1 has already rewritten a relative time into a concrete date, month, or date range, and that concrete time phrase helps identify the current entity, you may reuse that already-grounded phrase in `description`.
+- Do not perform new temporal inference in the triplet step; only reuse time wording that is already concretized in `statement_text`, and do not independently expand phrases like "last Wednesday" or "last month" again here.
 - If an entity should be retained but the current statement does not provide any suitable stable description for it, `description` may be the empty string `""`; do not fill it with short-lived states or temporary information just to avoid emptiness.
 - Avoid low-information templates such as "the person mentioned in the statement" or "the organization mentioned in the statement".
 - Do not add extra world knowledge that is not needed for identifying the entity in context.
@@ -659,7 +667,7 @@ Output:
 }
 
 **示例 4**
-Statement: "他上个月加入了这家公司。"
+Statement: "他2026年3月加入了这家公司。"
 Input condition: `"has_unsolved_reference": true`
 
 Output:

@@ -98,7 +98,7 @@ class SemanticPruner:
         self._snapshot = snapshot  # PipelineSnapshot 实例，用于输出剪枝快照
 
         # 加载 Jinja2 模板
-        self.template = prompt_env.get_template("extracat_Pruning.jinja2")
+        self.template = prompt_env.get_template("extracat_pruning.jinja2")
 
         # LRU 缓存：避免对相同消息对重复调用 LLM
         self._cache: OrderedDict[str, AssistantPruningResponse] = OrderedDict()
@@ -360,7 +360,7 @@ class SemanticPruner:
     ) -> AssistantPruningResponse:
         """调用 LLM 从 User-Assistant 消息对中提取 Assistant 记忆摘要。
 
-        使用 extracat_Pruning.jinja2 模板，输入格式：
+        使用 extracat_pruning.jinja2 模板，输入格式：
         {"msgs": [{"role": "User", "msg": "..."}, {"role": "Assistant", "msg": "..."}]}
         """
         # 构建模板输入
@@ -387,7 +387,7 @@ class SemanticPruner:
 
         # 渲染模板
         rendered = self.template.render(dialog_text=dialog_text)
-        log_template_rendering("extracat_Pruning.jinja2", {
+        log_template_rendering("extracat_pruning.jinja2", {
             "language": self.language,
         })
         log_prompt_rendering("pruning-assistant-hint", rendered)

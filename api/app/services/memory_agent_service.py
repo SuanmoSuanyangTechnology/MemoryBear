@@ -34,7 +34,6 @@ from app.core.memory.agent.utils.messages_tools import (
     reorder_output_results,
 )
 from app.core.memory.agent.utils.type_classifier import status_typle
-from app.core.memory.agent.utils.write_tools import write as write_neo4j
 from app.core.memory.analytics.hot_memory_tags import get_interest_distribution
 from app.core.memory.memory_service import MemoryService
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
@@ -447,32 +446,20 @@ class MemoryAgentService:
             memory_config,
             language: Language | str,
     ) -> None:
-        """根据 NEW_PIPELINE_ENABLED 选择新旧流水线写入 Neo4j。"""
-        # 统一转换为 dict，下游流水线期望 list[dict]
+        """使用新流水线（MemoryService → WritePipeline）写入 Neo4j。"""
         messages_dict = [
             msg if isinstance(msg, dict) else msg.model_dump(exclude_none=True)
             for msg in messages
         ]
-        use_new_pipeline = os.getenv("NEW_PIPELINE_ENABLED", "false").lower() == "true"
-
-        if use_new_pipeline:
-            service = MemoryService(memory_config=memory_config, end_user_id=end_user_id)
-            result = await service.write(
-                messages=messages_dict, language=language, ref_id='',
-            )
-            logger.info(
-                f"[NewPipeline] 完成: status={result.status}, "
-                f"elapsed={result.elapsed_seconds:.2f}s, "
-                f"extraction={result.extraction}"
-            )
-        else:
-            await write_neo4j(
-                end_user_id=end_user_id,
-                messages=messages_dict,
-                memory_config=memory_config,
-                ref_id='',
-                language=language,
-            )
+        service = MemoryService(memory_config=memory_config, end_user_id=end_user_id)
+        result = await service.write(
+            messages=messages_dict, language=language, ref_id='',
+        )
+        logger.info(
+            f"[WritePipeline] 完成: status={result.status}, "
+            f"elapsed={result.elapsed_seconds:.2f}s, "
+            f"extraction={result.extraction}"
+        )
 
     async def _invalidate_interest_cache(self, end_user_id: str) -> None:
         """写入完成后失效兴趣分布缓存。"""

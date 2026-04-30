@@ -34,6 +34,7 @@ class StatementStepInput(BaseModel):
     end_user_id: str
     target_content: str
     target_message_date: str
+    dialog_at: str = ""   # ISO 8601 timestamp of the source message; used as "now" for relative time resolution
     supporting_context: SupportingContext
 
 
@@ -50,6 +51,7 @@ class StatementStepOutput(BaseModel):
     valid_at: str         # ISO 8601 or "NULL"
     invalid_at: str       # ISO 8601 or "NULL"
     has_unsolved_reference: bool = False  # Whether the statement has unresolved references
+    dialog_at: str = ""   # Passed through from input; carried into TripletStepInput
 
 
 # ── Triplet extraction ──
@@ -62,6 +64,7 @@ class TripletStepInput(BaseModel):
     temporal_type: str
     supporting_context: SupportingContext
     speaker: str
+    dialog_at: str = ""   # ISO 8601 timestamp of the source message; helps LLM ground entity descriptions in time
     valid_at: str
     invalid_at: str
     has_unsolved_reference: bool = False  # From upstream statement extraction

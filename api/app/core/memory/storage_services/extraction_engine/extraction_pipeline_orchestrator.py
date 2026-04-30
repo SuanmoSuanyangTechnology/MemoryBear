@@ -223,6 +223,7 @@ class NewExtractionOrchestrator:
             temporal_type=stmt_out.temporal_type,
             supporting_context=supporting_context,
             speaker=stmt_out.speaker,
+            dialog_at=stmt_out.dialog_at or "",
             valid_at=stmt_out.valid_at,
             invalid_at=stmt_out.invalid_at,
             has_unsolved_reference=stmt_out.has_unsolved_reference,
@@ -494,10 +495,9 @@ class NewExtractionOrchestrator:
                 else None
             )
             for chunk in dialog.chunks:
-                # 仅对 speaker="user" 的 chunk 进行陈述句抽取；assistant 内容交给
-                # 上游预处理/剪枝阶段处理，避免浪费 LLM 调用。
-                chunk_speaker = getattr(chunk, "speaker", "user")
-                if chunk_speaker != "user":
+                # 仅跳过明确标记为 assistant 的 chunk；speaker=None（混合分块）正常处理。
+                chunk_speaker = getattr(chunk, "speaker", None)
+                if chunk_speaker == "assistant":
                     continue
                 inp = StatementStepInput(
                     chunk_id=chunk.id,
@@ -506,6 +506,7 @@ class NewExtractionOrchestrator:
                     target_message_date=str(
                         getattr(dialog, "created_at", "") or ""
                     ),
+                    dialog_at=getattr(chunk, "dialog_at", "") or "",
                     supporting_context=ctx,
                 )
                 tasks.append(self.statement_temporal_step.run(inp))
@@ -561,10 +562,9 @@ class NewExtractionOrchestrator:
             chunk_stmts = all_stmt_results.get(dialog.id, {})
             for _chunk_id, stmts in chunk_stmts.items():
                 for stmt in stmts:
-                    # 防御性过滤：三元组抽取仅针对 user statement。
-                    # 上游 _extract_all_statements 已过滤 chunk.speaker，此处再做
-                    # 一次 statement.speaker 的二次校验，防止外部注入或 legacy 数据脱漏。
-                    if getattr(stmt, "speaker", "user") != "user":
+                    # 防御性过滤：跳过明确标记为 assistant 的 statement。
+                    # speaker=None（混合分块）正常处理。
+                    if getattr(stmt, "speaker", None) == "assistant":
                         continue
                     inp = self._convert_to_triplet_input(stmt, ctx)
                     tasks.append(self.triplet_step.run(inp))

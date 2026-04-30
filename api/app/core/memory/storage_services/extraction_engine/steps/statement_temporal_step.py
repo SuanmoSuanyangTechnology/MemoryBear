@@ -38,6 +38,7 @@ class _ExtractedStatement(BaseModel):
         False,
         description="Whether the statement reflects user's emotional state",
     )
+    dialog_at: str = Field("", description="ISO 8601 session timestamp, copied verbatim from input")
     valid_at: str = Field("NULL", description="ISO 8601 or NULL")
     invalid_at: str = Field("NULL", description="ISO 8601 or NULL")
     has_unsolved_reference: bool = Field(False, description="Whether the statement has unresolved references")
@@ -106,6 +107,7 @@ class StatementTemporalExtractionStep(ExtractionStep[StatementStepInput, List[St
         input_json = {
             "chunk_id": input_data.chunk_id,
             "end_user_id": input_data.end_user_id,
+            "dialog_at": input_data.dialog_at or "",
             "target_content": input_data.target_content,
             "target_message_date": input_data.target_message_date,
             "supporting_context": {
@@ -160,6 +162,7 @@ class StatementTemporalExtractionStep(ExtractionStep[StatementStepInput, List[St
                     # relevance=stmt.relevance.strip().upper(),
                     speaker="user",  # default; orchestrator overrides from chunk metadata
                     has_emotional_state=getattr(stmt, "has_emotional_state", False),
+                    dialog_at=input_data.dialog_at or "",  # carry through from input
                     valid_at=stmt.valid_at or "NULL",
                     invalid_at=stmt.invalid_at or "NULL",
                     has_unsolved_reference=getattr(stmt, "has_unsolved_reference", False),

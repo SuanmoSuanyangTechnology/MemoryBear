@@ -68,6 +68,7 @@ class TripletExtractionStep(ExtractionStep[TripletStepInput, TripletStepOutput])
                 ]
             },
             "speaker": input_data.speaker,
+            "dialog_at": input_data.dialog_at or "",
             "valid_at": input_data.valid_at,
             "invalid_at": input_data.invalid_at,
             "has_unsolved_reference": input_data.has_unsolved_reference,

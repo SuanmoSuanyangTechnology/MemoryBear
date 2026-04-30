@@ -13,6 +13,7 @@
 - temporal_type
 - has_emotional_state
 - has_unsolved_reference
+- dialog_at
 - valid_at
 - invalid_at
 
@@ -26,6 +27,7 @@ Your task is to identify and extract declarative statements from the provided ta
 - temporal_type
 - has_emotional_state
 - has_unsolved_reference
+- dialog_at
 - valid_at
 - invalid_at
 
@@ -37,15 +39,19 @@ Each output item should be a structured candidate memory statement.
 
 - chunk_id: chunk 唯一 ID
 - end_user_id: 终端用户 ID
+- dialog_at: 会话时间，必须是 ISO 8601 时间点
 - target_content: 当前要处理的对话片段文本，也是唯一允许被抽取的目标文本
-- target_message_date: 目标文本对应的时间，用于解析相对时间表达
+- dialog_at: 会话时间，优先作为解析相对时间表达的参考时间
+- target_message_date: 目标文本对应的时间，可作为辅助时间背景；当与 dialog_at 同时存在时，优先使用 dialog_at 解析相对时间表达
 - supporting_context: 完整对话上下文，仅用于辅助理解 target_content，不能单独贡献新的可抽取事实
 - supporting_context.msgs: 按顺序提供的上下文消息，可包含 User 和 Assistant
   {% else %}
 - chunk_id: unique chunk identifier
 - end_user_id: end-user identifier
+- dialog_at: session time, which must be an ISO 8601 timestamp
 - target_content: the current dialogue fragment to process, and the only text span that may be extracted from
-- target_message_date: the reference time for the target content, used for resolving relative temporal expressions
+- dialog_at: session time, used as the primary reference for resolving relative temporal expressions
+- target_message_date: the time associated with the target content and may serve as supporting temporal context; when both exist, prefer `dialog_at` for resolving relative expressions
 - supporting_context: full dialogue context used only to help interpret target_content and must not independently contribute new extractable facts
 - supporting_context.msgs: ordered contextual messages, which may include User and Assistant messages
   {% endif %}
@@ -114,9 +120,18 @@ statement_type：
 时间规则：
 
 - 仅使用目标文本中明确陈述或可由 `target_message_date` 直接解析的时间信息；不要使用外部知识补时间。
-- 使用 `target_message_date` 作为“现在”来解释相对时间，例如“昨天”“上周五”“下个月”。
+- 优先使用 `dialog_at` 作为“现在”来解释相对时间，例如“昨天”“上周五”“下个月”；只有在 `dialog_at` 缺失时才退回 `target_message_date`。
+- 如果相对时间可以稳定落到更具体的中文时间表达，就应直接改写进 `statement_text`，而不要保留原始模糊表达。
+- 可稳定具体化的示例包括：
+  - “昨天” -> “2026年4月29日”
+  - “前天晚上” -> “2026年4月28日晚上”
+  - “上周三” -> “2026年4月22日”
+  - “上个月” -> “2026年3月”
+  - “下周” -> “2026年5月4日至2026年5月10日”
+- 如果相对时间只能粗粒度定位，保留该粗粒度但仍尽量具体化；例如“去年冬天”可以保留为“去年冬天”，不要强行伪精确到具体日期。
 - `valid_at` 表示陈述开始成立或生效的时间。
 - `invalid_at` 表示陈述结束或不再成立的时间；如果仍在持续，填 `"NULL"`。
+- `dialog_at` 表示当前会话时间，每条 statement 都必须原样复制输入中的 `dialog_at`。
 - 时间格式优先使用 ISO 8601。
 - 对于只有日期没有时分秒的时间，默认使用整天边界，便于后续检索。
 - 如果没有明确时间，不要编造时间。
@@ -185,10 +200,19 @@ statement_type:
 
 Temporal rules:
 
-- Use only temporal information explicitly stated in the target text or directly resolvable from `target_message_date`; do not add dates from external knowledge.
-- Use `target_message_date` as “now” when interpreting relative expressions such as “yesterday,” “last Friday,” or “next month.”
+- Use only temporal information explicitly stated in the target text or directly resolvable from `dialog_at` / `target_message_date`; do not add dates from external knowledge.
+- Prefer `dialog_at` as “now” when interpreting relative expressions such as “yesterday,” “last Friday,” or “next month”; only fall back to `target_message_date` when `dialog_at` is unavailable.
+- If a relative time can be stably grounded to a more concrete Chinese time phrase, rewrite it directly into `statement_text` rather than keeping the vague source phrase.
+- Examples of stable concretization:
+  - “yesterday” -> “2026年4月29日”
+  - “the night before last” -> “2026年4月28日晚上”
+  - “last Wednesday” -> “2026年4月22日”
+  - “last month” -> “2026年3月”
+  - “next week” -> “2026年5月4日至2026年5月10日”
+- If the relative time can only be grounded coarsely, keep that coarse granularity while still making it as concrete as reasonably possible; for example, “last winter” may stay as “去年冬天” instead of being forced into fake exact dates.
 - `valid_at` means when the statement became valid or started to hold.
 - `invalid_at` means when the statement ended or stopped being valid; use `"NULL"` if it is still ongoing.
+- `dialog_at` is the session timestamp, and every statement must copy the input `dialog_at` verbatim.
 - Prefer ISO 8601 for time values.
 - When only a date can be resolved, default to full-day boundaries for retrieval use.
 - If no explicit time is available, do not invent one.
@@ -213,6 +237,9 @@ temporal_type:
 Rewrite boundary:
 
 - Minimal rewriting is allowed only to resolve reference, ellipsis, and temporal ambiguity.
+- For resolvable relative time expressions, rewrite them into grounded Chinese time phrases directly inside `statement_text`.
+- Do not keep both the vague source phrase and the grounded phrase together; output only the rewritten concrete form.
+- Do not fake precision for time expressions that cannot be grounded reliably from `dialog_at`.
 - Do not introduce unsupported facts, extra inference, or stylistic summarization.
   {% endif %}
 
@@ -222,6 +249,7 @@ Rewrite boundary:
 示例输入: {
   "chunk_id": "chunk_a1b2c3d4",
   "end_user_id": "eu_12345678",
+  "dialog_at": "2023-09-04T18:00:00Z",
   "target_content": "老李这学期要求还是一如既往地严，不过他讲课确实清晰透彻，而且每节课的结构都特别清楚。就是气场实在太吓人了，我每次被他点名都有点发怵。",
   "target_message_date": "2023-09-04T18:00:00",
   "supporting_context": {
@@ -247,6 +275,7 @@ Rewrite boundary:
       "temporal_type": "DYNAMIC",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "2023-09-04T18:00:00",
       "invalid_at": "NULL"
     },
@@ -257,6 +286,7 @@ Rewrite boundary:
       "temporal_type": "ATEMPORAL",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
     },
@@ -267,6 +297,7 @@ Rewrite boundary:
       "temporal_type": "DYNAMIC",
       "has_emotional_state": true,
       "has_unsolved_reference": false,
+      "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "2023-09-04T18:00:00",
       "invalid_at": "NULL"
     }
@@ -277,6 +308,7 @@ Rewrite boundary:
 示例输入: {
   "chunk_id": "chunk_b2c3d4e5",
   "end_user_id": "eu_12345678",
+  "dialog_at": "2026-04-01T00:00:00Z",
   "target_content": "我最近在学Python，每天晚上都会练一个小时。这周还打算先把基础语法和函数部分过一遍。",
   "target_message_date": "2026-04-01T00:00:00",
   "supporting_context": {
@@ -302,6 +334,7 @@ Rewrite boundary:
       "temporal_type": "DYNAMIC",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-04-01T00:00:00",
       "invalid_at": "NULL"
     },
@@ -312,16 +345,18 @@ Rewrite boundary:
       "temporal_type": "DYNAMIC",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-04-01T00:00:00",
       "invalid_at": "NULL"
     },
     {
       "statement_id": "stmt_u1v2w3x4",
-      "statement_text": "用户这周打算先复习Python的基础语法和函数部分。",
+      "statement_text": "用户计划在2026年3月30日至2026年4月5日先复习Python的基础语法和函数部分。",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-04-01T00:00:00",
       "invalid_at": "NULL"
     }
@@ -332,6 +367,7 @@ Rewrite boundary:
 示例输入: {
   "chunk_id": "chunk_c3d4e5f6",
   "end_user_id": "eu_12345678",
+  "dialog_at": "2026-04-01T00:00:00Z",
   "target_content": "这周老师新布置的那两个我觉得有点难，而且我昨晚看了半天还是没太搞明白。要是周末再弄不出来，我可能就得去问助教了。",
   "target_message_date": "2026-04-01T00:00:00",
   "supporting_context": {
@@ -352,31 +388,34 @@ Rewrite boundary:
   "statements": [
     {
       "statement_id": "stmt_y5z6a7b8",
-      "statement_text": "用户觉得那两个有点难。",
+      "statement_text": "用户觉得2026年3月30日至2026年4月5日老师新布置的那两个内容有点难。",
       "statement_type": "OPINION",
       "temporal_type": "DYNAMIC",
       "has_emotional_state": true,
       "has_unsolved_reference": true,
+      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-04-01T00:00:00",
       "invalid_at": "NULL"
     },
     {
       "statement_id": "stmt_c9d0e1f2",
-      "statement_text": "用户昨晚看了半天那两个还是没太搞明白。",
+      "statement_text": "用户2026年3月31日晚上看了半天那两个内容还是没太搞明白。",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
       "has_emotional_state": false,
       "has_unsolved_reference": true,
+      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-03-31T00:00:00",
       "invalid_at": "2026-03-31T23:59:59"
     },
     {
       "statement_id": "stmt_g3h4i5j6",
-      "statement_text": "如果周末还弄不出来，用户可能会去问助教。",
+      "statement_text": "如果到2026年4月4日至2026年4月5日还弄不出来，用户可能会去问助教。",
       "statement_type": "OTHER",
       "temporal_type": "DYNAMIC",
       "has_emotional_state": false,
       "has_unsolved_reference": true,
+      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-04-01T00:00:00",
       "invalid_at": "NULL"
     }
@@ -387,6 +426,7 @@ Example 1:
 Example Input: {
   "chunk_id": "chunk_a1b2c3d4",
   "end_user_id": "eu_12345678",
+  "dialog_at": "2023-09-04T18:00:00Z",
   "target_content": "Old Li is just as strict as ever this semester, but he really explains things clearly and the structure of every class is extremely clear. His presence is honestly kind of intimidating, and I get nervous every time he calls on me.",
   "target_message_date": "2023-09-04T18:00:00",
   "supporting_context": {
@@ -412,6 +452,7 @@ Example Output: {
       "temporal_type": "DYNAMIC",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "2023-09-04T18:00:00",
       "invalid_at": "NULL"
     },
@@ -422,6 +463,7 @@ Example Output: {
       "temporal_type": "ATEMPORAL",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
     },
@@ -432,6 +474,7 @@ Example Output: {
       "temporal_type": "DYNAMIC",
       "has_emotional_state": true,
       "has_unsolved_reference": false,
+      "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "2023-09-04T18:00:00",
       "invalid_at": "NULL"
     }
@@ -442,6 +485,7 @@ Example 2:
 Example Input: {
   "chunk_id": "chunk_b2c3d4e5",
   "end_user_id": "eu_12345678",
+  "dialog_at": "2026-04-01T00:00:00Z",
   "target_content": "I've been learning Python recently, and I practice for an hour every night. This week I also plan to review basic syntax and functions first.",
   "target_message_date": "2026-04-01T00:00:00",
   "supporting_context": {
@@ -467,6 +511,7 @@ Example Output: {
       "temporal_type": "DYNAMIC",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-04-01T00:00:00",
       "invalid_at": "NULL"
     },
@@ -477,16 +522,18 @@ Example Output: {
       "temporal_type": "DYNAMIC",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-04-01T00:00:00",
       "invalid_at": "NULL"
     },
     {
       "statement_id": "stmt_u1v2w3x4",
-      "statement_text": "The user plans to review Python basic syntax and functions first this week.",
+      "statement_text": "The user plans to review Python basic syntax and functions first during 2026-03-30 to 2026-04-05.",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-04-01T00:00:00",
       "invalid_at": "NULL"
     }
@@ -497,6 +544,7 @@ Example 3:
 Example Input: {
   "chunk_id": "chunk_c3d4e5f6",
   "end_user_id": "eu_12345678",
+  "dialog_at": "2026-04-01T00:00:00Z",
   "target_content": "The two things the teacher assigned this week seem hard to me, and even after looking at them for a long time last night I still didn't really understand them. If I still can't finish them by the weekend, I may have to ask the TA.",
   "target_message_date": "2026-04-01T00:00:00",
   "supporting_context": {
@@ -517,31 +565,34 @@ Example Output: {
   "statements": [
     {
       "statement_id": "stmt_y5z6a7b8",
-      "statement_text": "The user thinks those two things are difficult.",
+      "statement_text": "The user thinks the two items assigned during 2026-03-30 to 2026-04-05 are difficult.",
       "statement_type": "OPINION",
       "temporal_type": "DYNAMIC",
       "has_emotional_state": true,
       "has_unsolved_reference": true,
+      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-04-01T00:00:00",
       "invalid_at": "NULL"
     },
     {
       "statement_id": "stmt_c9d0e1f2",
-      "statement_text": "The user spent a long time last night looking at those two things but still did not really understand them.",
+      "statement_text": "The user spent a long time on the evening of 2026-03-31 looking at those two items but still did not really understand them.",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
       "has_emotional_state": false,
       "has_unsolved_reference": true,
+      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-03-31T00:00:00",
       "invalid_at": "2026-03-31T23:59:59"
     },
     {
       "statement_id": "stmt_g3h4i5j6",
-      "statement_text": "If the user still cannot finish them by the weekend, the user may ask the TA.",
+      "statement_text": "If the user still cannot finish them by 2026-04-04 to 2026-04-05, the user may ask the TA.",
       "statement_type": "OTHER",
       "temporal_type": "DYNAMIC",
       "has_emotional_state": false,
       "has_unsolved_reference": true,
+      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-04-01T00:00:00",
       "invalid_at": "NULL"
     }
@@ -557,6 +608,7 @@ Example Output: {
 - 如果主语是用户，是否统一写“用户”
 - 非用户主体是否尽量写成具体名称；若无法做到，是否已正确标记 `has_unsolved_reference = true`
 - 如果最终 `statement_text` 已经落到具体实体名，`has_unsolved_reference` 是否已经改为 `false`
+- 如果 `statement_text` 中出现可由 `dialog_at` 稳定解析的相对时间，是否已经改写成更具体的日期、月份或日期区间表达
 - statement_type 是否合法，且没有把一般事实机械标成 `OPINION`
 - `has_emotional_state` 是否仅用于判断是否存在情感状态，而没有被当作情绪分类字段
 - temporal_type 是否与 valid_at / invalid_at 一致
@@ -567,6 +619,7 @@ Example Output: {
 - If the subject is the user, render it as “the user”
 - Render non-user subjects as concrete names when possible; otherwise mark `has_unsolved_reference = true`
 - If the final `statement_text` already resolves the reference to a concrete named entity, ensure `has_unsolved_reference = false`
+- If `statement_text` contains relative time expressions that can be stably resolved from `dialog_at`, rewrite them into more concrete date, month, or date-range expressions
 - Ensure statement_type is valid and do not mechanically label ordinary facts as `OPINION`
 - Ensure `has_emotional_state` is used only for emotional-state presence detection, not emotion classification
 - Ensure temporal_type is consistent with valid_at and invalid_at
@@ -584,6 +637,7 @@ Example Output: {
 
 **ISO 8601 HARD CONSTRAINT:**
 
+- `dialog_at` must be ISO 8601.
 - `target_message_date` must be ISO 8601.
 - `valid_at` and `invalid_at` must be ISO 8601, or `"NULL"` when no time is available.
 - Do not output non-ISO values such as `2026/04/01`, `2026-04-01 00:00:00`, `yesterday evening`, or `下周三`.
@@ -615,6 +669,7 @@ Return only a JSON object matching the schema below:
       "temporal_type": "STATIC | DYNAMIC | ATEMPORAL",
       "has_emotional_state": "boolean",
       "has_unsolved_reference": "boolean",
+      "dialog_at": "string",
       "valid_at": "string | NULL",
       "invalid_at": "string | NULL"
     }
