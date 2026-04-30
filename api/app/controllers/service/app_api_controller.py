@@ -296,7 +296,7 @@ async def chat(
                 }
             )
 
-        # 多 Agent 非流式返回
+        # workflow 非流式返回
         result = await app_chat_service.workflow_chat(
 
             message=payload.message,

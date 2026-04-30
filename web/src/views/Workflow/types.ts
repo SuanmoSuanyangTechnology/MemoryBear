@@ -114,3 +114,12 @@ export interface ChatVariable {
 export interface AddChatVariableRef {
   handleOpen: (value?: ChatVariable) => void;
 }
+
+export type HistoryActionType = 'add' | 'remove' | 'change' | 'undo' | 'redo' | 'batch'
+
+export interface HistoryRecord {
+  type: HistoryActionType;
+  timestamp: number;
+  batchName?: string;
+  cellIds?: string[];
+}

@@ -57,7 +57,6 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
             }
           }}
           labelRender={(props) => {
-            console.log('props', props)
             return `${props.value}%`
           }}
           className="rb:w-20 rb:h-4!"

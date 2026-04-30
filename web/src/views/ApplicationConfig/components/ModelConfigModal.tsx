@@ -49,6 +49,8 @@ const configFields = [
   { key: 'n', max: 10, min: 1, step: 1, defaultValue: 1 },
 ]
 
+const minThinkingBudgetTokens = 128;
+const defaultThinkingBudgetTokens = 1000;
 const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(({
   refresh,
   data,
@@ -108,7 +110,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
     const newValues: ModelConfig = {
       capability: (option as Model).capability,
       deep_thinking: false,
-      thinking_budget_tokens: undefined,
+      thinking_budget_tokens: defaultThinkingBudgetTokens,
       json_output: false,
     }
     if (source === 'chat') {
@@ -127,6 +129,12 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
     const { deep_thinking: _, json_output: __, ...rest } = data?.model_parameters || {}
     form.setFieldsValue({ ...rest })
   }, [data?.default_model_config_id])
+
+  useEffect(() => {
+    if (values?.deep_thinking && !values?.thinking_budget_tokens) {
+      form.setFieldValue('thinking_budget_tokens', defaultThinkingBudgetTokens)
+    }
+  }, [values?.deep_thinking])
 
   const handleReset = () => {
     if (!id) return
@@ -178,15 +186,20 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
           name="thinking_budget_tokens"
           label={t('application.thinking_budget_tokens')}
           hidden={!['model', 'chat'].includes(source) || !(values?.deep_thinking || values?.capability?.includes('thinking'))}
-          extra={<>{t('application.range')}: [{0}, {t(`application.max_tokens`)}: {values?.max_tokens}]</>}
+          extra={<>{t('application.range')}: [{minThinkingBudgetTokens}, {t(`application.max_tokens`)}: {values?.max_tokens}]</>}
           rules={[
             { required: values?.deep_thinking, message: t('common.pleaseEnter') },
             {
               validator: (_, value) => {
                 const maxTokens = values?.max_tokens
                 const deep_thinking = values?.deep_thinking;
-                if (deep_thinking && value !== undefined && maxTokens !== undefined && value > maxTokens) {
-                  return Promise.reject(t('application.thinking_budget_tokens_max_error', { max: maxTokens }))
+                if (deep_thinking && value !== undefined) {
+                  if (value < minThinkingBudgetTokens) {
+                    return Promise.reject(t('application.thinking_budget_tokens_min_error', { min: minThinkingBudgetTokens }))
+                  }
+                  if (maxTokens !== undefined && value > maxTokens) {
+                    return Promise.reject(t('application.thinking_budget_tokens_max_error', { max: maxTokens }))
+                  }
                 }
                 return Promise.resolve()
               }
@@ -195,7 +208,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
         >
           <RbSlider
             step={1}
-            min={0}
+            min={minThinkingBudgetTokens}
             max={32000}
             isInput={true}
             disabled={!values?.deep_thinking}

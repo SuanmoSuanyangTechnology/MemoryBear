@@ -18,6 +18,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
 
   // Handle node selection from popover and create new node replacing the add-node placeholder
   const handleNodeSelect = (selectedNodeType: any) => {
+    graph.startBatch('add-node');
     const parentBBox = node.getBBox();
     const cycleId = data.cycle;
     const horizontalSpacing = 0;
@@ -43,7 +44,7 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
     if (cycleId) {
       const parentNode = graph.getNodes().find((n: any) => n.getData()?.id === cycleId);
       if (parentNode) {
-        parentNode.addChild(newNode);
+        parentNode.addChild(newNode, { silent: true });
       }
     }
 
@@ -76,55 +77,40 @@ const AddNode: ReactShapeConfig['component'] = ({ node, graph }) => {
       }
     });
 
-    setTimeout(() => {
-      addedEdges.forEach(e => {
-        const src = graph.getCellById(e.getSourceCellId());
-        const tgt = graph.getCellById(e.getTargetCellId());
-        if (src?.isNode()) src.toFront();
-        if (tgt?.isNode()) tgt.toFront();
-      });
-    }, 50);
-
     // Automatically adjust loop node size
     const loopNode = graph.getNodes().find((n: any) => n.getData()?.id === cycleId);
     if (loopNode) {
-      const adjustLoopSize = () => {
-        const childNodes = graph.getNodes().filter((n: any) => n.getData()?.cycle === cycleId);
-        if (childNodes.length > 0) {
-          const bounds = childNodes.reduce((acc, child) => {
-            const bbox = child.getBBox();
-            return {
-              minX: Math.min(acc.minX, bbox.x),
-              minY: Math.min(acc.minY, bbox.y),
-              maxX: Math.max(acc.maxX, bbox.x + bbox.width),
-              maxY: Math.max(acc.maxY, bbox.y + bbox.height)
-            };
-          }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
-          
-          const padding = 50;
-          const newWidth = Math.max(nodeWidth, bounds.maxX - bounds.minX + padding * 2);
-          const newHeight = Math.max(120, bounds.maxY - bounds.minY + padding * 2);
-          
-          loopNode.prop('size', { width: newWidth, height: newHeight });
-          
-          // Update right port x position
-          const ports = loopNode.getPorts();
-          ports.forEach(port => {
-            if (port.group === 'right' && port.args) {
-              loopNode.portProp(port.id!, 'args/x', newWidth);
-            }
-          });
-        }
-      };
-      
-      adjustLoopSize();
-      
-      // Listen to child node movement events
       const childNodes = graph.getNodes().filter((n: any) => n.getData()?.cycle === cycleId);
-      childNodes.forEach((childNode: any) => {
-        childNode.on('change:position', adjustLoopSize);
-      });
+      if (childNodes.length > 0) {
+        const bounds = childNodes.reduce((acc, child) => {
+          const bbox = child.getBBox();
+          return {
+            minX: Math.min(acc.minX, bbox.x),
+            minY: Math.min(acc.minY, bbox.y),
+            maxX: Math.max(acc.maxX, bbox.x + bbox.width),
+            maxY: Math.max(acc.maxY, bbox.y + bbox.height)
+          };
+        }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+        const padding = 50;
+        const newWidth = Math.max(nodeWidth, bounds.maxX - bounds.minX + padding * 2);
+        const newHeight = Math.max(120, bounds.maxY - bounds.minY + padding * 2);
+        loopNode.prop('size', { width: newWidth, height: newHeight });
+        loopNode.getPorts().forEach(port => {
+          if (port.group === 'right' && port.args) {
+            loopNode.portProp(port.id!, 'args/x', newWidth);
+          }
+        });
+      }
     }
+
+    addedEdges.forEach(e => {
+      const src = graph.getCellById(e.getSourceCellId());
+      const tgt = graph.getCellById(e.getTargetCellId());
+      if (src?.isNode()) src.toFront();
+      if (tgt?.isNode()) tgt.toFront();
+    });
+
+    graph.stopBatch('add-node');
     setOpen(false);
   };
 

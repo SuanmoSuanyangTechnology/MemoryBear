@@ -14,6 +14,7 @@ from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes import BaseNode
 from app.core.workflow.nodes.code.config import CodeNodeConfig
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ class CodeNode(BaseNode):
 
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
-                "http://sandbox:8194/v1/sandbox/run",
+                f"{settings.SANDBOX_URL}:8194/v1/sandbox/run",
                 headers={
                     "x-api-key": 'redbear-sandbox'
                 },
