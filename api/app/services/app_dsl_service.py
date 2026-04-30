@@ -102,6 +102,11 @@ class AppDslService:
                     {**r, "_ref": self._agent_ref(r.get("target_agent_id"))} for r in (cfg["routing_rules"] or [])
                 ]
             return enriched
+        if app_type == AppType.WORKFLOW:
+            enriched = {**cfg}
+            if "nodes" in cfg:
+                enriched["nodes"] = self._enrich_workflow_nodes(cfg["nodes"])
+            return enriched
         return cfg
 
     def _export_draft(self, app: App, meta: dict, app_meta: dict) -> tuple[str, str]:
@@ -110,7 +115,7 @@ class AppDslService:
             config_data = {
                 "variables": config.variables if config else [],
                 "edges": config.edges if config else [],
-                "nodes": config.nodes if config else [],
+                "nodes": self._enrich_workflow_nodes(config.nodes) if config else [],
                 "features": config.features if config else {},
                 "execution_config": config.execution_config if config else {},
                 "triggers": config.triggers if config else [],
@@ -189,6 +194,23 @@ class AppDslService:
 
     def _enrich_tools(self, tools: list) -> list:
         return [{**t, "_ref": self._tool_ref(t.get("tool_id"))} for t in (tools or [])]
+
+    def _enrich_workflow_nodes(self, nodes: list) -> list:
+        """enrich 工作流节点中的模型引用，添加 name、provider、type 信息"""
+        from app.core.workflow.nodes.enums import NodeType
+        enriched_nodes = []
+        for node in (nodes or []):
+            node_type = node.get("type")
+            config = dict(node.get("config") or {})
+            
+            if node_type in (NodeType.LLM.value, NodeType.QUESTION_CLASSIFIER.value, NodeType.PARAMETER_EXTRACTOR.value):
+                model_id = config.get("model_id")
+                if model_id:
+                    config["model_ref"] = self._model_ref(model_id)
+                    del config["model_id"]
+            
+            enriched_nodes.append({**node, "config": config})
+        return enriched_nodes
 
     def _skill_ref(self, skill_id) -> Optional[dict]:
         if not skill_id:
@@ -620,16 +642,16 @@ class AppDslService:
                         warnings.append(f"[{node_label}] 知识库 '{kb_id}' 未匹配，已移除，请导入后手动配置")
                 config["knowledge_bases"] = resolved_kbs
             elif node_type in (NodeType.LLM.value, NodeType.QUESTION_CLASSIFIER.value, NodeType.PARAMETER_EXTRACTOR.value):
-                model_ref = config.get("model_id")
+                model_ref = config.get("model_ref") or config.get("model_id")
                 if model_ref:
                     ref_dict = None
                     if isinstance(model_ref, dict):
-                        ref_id = model_ref.get("id")
-                        ref_name = model_ref.get("name")
-                        if ref_id:
-                            ref_dict = {"id": ref_id}
-                        elif ref_name is not None:
-                            ref_dict = {"name": ref_name, "provider": model_ref.get("provider"), "type": model_ref.get("type")}
+                        ref_dict = {
+                            "id": model_ref.get("id"),
+                            "name": model_ref.get("name"),
+                            "provider": model_ref.get("provider"),
+                            "type": model_ref.get("type")
+                        }
                     elif isinstance(model_ref, str):
                         try:
                             uuid.UUID(model_ref)
@@ -640,12 +662,18 @@ class AppDslService:
                         resolved_model_id = self._resolve_model(ref_dict, tenant_id, warnings)
                         if resolved_model_id:
                             config["model_id"] = resolved_model_id
+                            if "model_ref" in config:
+                                del config["model_ref"]
                         else:
                             warnings.append(f"[{node_label}] 模型未匹配，已置空，请导入后手动配置")
                             config["model_id"] = None
+                            if "model_ref" in config:
+                                del config["model_ref"]
                     else:
                         warnings.append(f"[{node_label}] 模型未匹配，已置空，请导入后手动配置")
                         config["model_id"] = None
+                        if "model_ref" in config:
+                            del config["model_ref"]
             resolved_nodes.append({**node, "config": config})
         return resolved_nodes
 

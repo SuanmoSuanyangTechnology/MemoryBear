@@ -121,7 +121,10 @@ class DocExtractorNode(BaseNode):
         return business_result
 
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
-        return {"file_selector": self.config.get("file_selector")}
+        file_selector = self.config.get("file_selector", "")
+        # 将变量选择器（如 sys.files）解析为实际值
+        resolved = self.get_variable(file_selector, variable_pool, strict=False, default=file_selector)
+        return {"file_selector": resolved}
 
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         config = DocExtractorNodeConfig(**self.config)
