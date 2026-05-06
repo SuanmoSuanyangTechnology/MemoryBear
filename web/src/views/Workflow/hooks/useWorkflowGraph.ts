@@ -124,9 +124,7 @@ export const useWorkflowGraph = ({
   const [canRedo, setCanRedo] = useState(false)
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([])
   const lastHistoryRef = useRef<{ cellIds: string[]; timestamp: number; type: string } | null>(null)
-  const undoRef = useRef<() => void>(() => {})
-  const redoRef = useRef<() => void>(() => {})
-  const syncChildRelationshipsRef = useRef<() => void>(() => {})
+  const syncChildRelationshipsRef = useRef<() => void>(() => { })
   const isSyncingRef = useRef(false)
   useEffect(() => {
     if (!graphRef.current) return
@@ -532,24 +530,82 @@ export const useWorkflowGraph = ({
     const graph = graphRef.current
     graph.disableHistory()
     graph.getNodes().forEach(node => {
-      const cycleId = node.getData()?.cycle
-      if (!cycleId) return
-      const parentNode = graph.getCellById(cycleId) as Node | null
-      if (!parentNode) return
-      if (!parentNode.getChildren()?.some(c => c.id === node.id)) {
-        parentNode.addChild(node, { silent: true })
-      }
-    })
-    graph.getNodes().forEach(node => {
+      const nodeData = node.getData()
       const children = node.getChildren()
-      if (!children?.length) return
-      children.forEach(child => {
-        if (!child.isNode()) return
-        const childCycleId = (child as Node).getData?.()?.cycle
-        if (childCycleId !== node.id && childCycleId !== node.getData?.()?.id) {
-          node.removeChild(child, { silent: true })
+
+      const cycleId = nodeData?.cycle
+
+      if (cycleId) {
+        const parentNode = graph.getCellById(cycleId) as Node | null
+        if (!parentNode) return
+        if (!parentNode.getChildren()?.some(c => c.id === node.id)) {
+          parentNode.addChild(node, { silent: true })
         }
-      })
+      }
+
+      if (nodeData.type === 'if-else') {
+        const rightPorts = node.getPorts().filter(p => p.group === 'right')
+        const caseCount = rightPorts.length - 1 // last port is ELSE
+        const currentCases: any[] = nodeData.config?.cases?.defaultValue ?? []
+        const newCases = caseCount !== currentCases.length
+          ? Array.from({ length: caseCount }, (_, i) => currentCases[i] ?? { logical_operator: 'and', expressions: [] })
+          : currentCases
+        if (caseCount !== currentCases.length) {
+          node.setData({
+            ...nodeData,
+            config: { ...nodeData.config, cases: { ...nodeData.config.cases, defaultValue: newCases } }
+          }, { deep: false, silent: true })
+        }
+        // Sync node height and port Y positions
+        node.prop('size', { width: nodeWidth, height: calcConditionNodeTotalHeight(newCases) })
+        newCases.forEach((_c: any, i: number) => {
+          node.portProp(`CASE${i + 1}`, 'args/y', getConditionNodeCasePortY(newCases, i))
+        })
+        node.portProp(`CASE${newCases.length + 1}`, 'args/y', getConditionNodeCasePortY(newCases, newCases.length))
+        node.toFront()
+        graph.getEdges().filter(e => e.getSourceCellId() === node.id).forEach(e => {
+          const tgt = graph.getCellById(e.getTargetCellId())
+          tgt?.toFront()
+        })
+      } else if (nodeData.type === 'question-classifier') {
+        const rightPorts = node.getPorts().filter(p => p.group === 'right')
+        const currentCategories: any[] = nodeData.config?.categories?.defaultValue ?? []
+        const categoryCount = rightPorts.length
+        const newCategories = categoryCount !== currentCategories.length
+          ? rightPorts.map((port, i) => {
+            if (currentCategories[i]) return currentCategories[i]
+            const edge = graph.getEdges().find(e => e.getSourceCellId() === node.id && e.getSourcePortId() === port.id)
+            return edge ? { name: '' } : {}
+          })
+          : currentCategories
+        if (categoryCount !== currentCategories.length) {
+          node.setData({
+            ...nodeData,
+            config: { ...nodeData.config, categories: { ...nodeData.config.categories, defaultValue: [...newCategories] } }
+          }, { deep: false, silent: true })
+        }
+        // Sync node height and port Y positions
+        const newHeight = conditionNodeHeight + (categoryCount - 2) * conditionNodeItemHeight
+        node.prop('size', { width: nodeWidth, height: Math.max(newHeight, conditionNodeHeight) })
+        rightPorts.forEach((_p, i) => {
+          node.portProp(`CASE${i + 1}`, 'args/y', portItemArgsY * i + conditionNodePortItemArgsY)
+        })
+        node.toFront()
+        graph.getEdges().filter(e => e.getSourceCellId() === node.id).forEach(e => {
+          const tgt = graph.getCellById(e.getTargetCellId())
+          tgt?.toFront()
+        })
+      }
+
+      if (children?.length) {
+        children.forEach(child => {
+          if (!child.isNode()) return
+          const childCycleId = (child as Node).getData?.()?.cycle
+          if (childCycleId !== node.id && childCycleId !== node.getData?.()?.id) {
+            node.removeChild(child, { silent: true })
+          }
+        })
+      }
     })
     resizeGroupNodes(graph)
     graph.getEdges().forEach(edge => {
