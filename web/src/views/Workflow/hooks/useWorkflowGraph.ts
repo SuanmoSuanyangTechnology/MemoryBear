@@ -1,14 +1,16 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-28 13:49:11
+ * @Last Modified by: mikey.zhaopeng
+ * @Last Modified time: 2026-05-06 11:44:06
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, type Edge } from '@antv/x6';
-import { register } from '@antv/x6-react-shape';
+import { register as registerReactShape } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 import { App } from 'antd';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, createElement } from 'react';
+import type { RefObject, Dispatch, SetStateAction, MutableRefObject, DragEvent } from 'react';
+import { createRoot } from 'react-dom/client';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 
@@ -20,14 +22,16 @@ import type { ChatVariable, HistoryRecord, NodeProperties, WorkflowConfig } from
 import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils';
 import { useWorkflowStore } from '@/store/workflow';
 
+const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+
 /**
  * Props for useWorkflowGraph hook
  */
 export interface UseWorkflowGraphProps {
   /** Reference to the main graph container element */
-  containerRef: React.RefObject<HTMLDivElement>;
+  containerRef: RefObject<HTMLDivElement>;
   /** Reference to the minimap container element */
-  miniMapRef: React.RefObject<HTMLDivElement>;
+  miniMapRef: RefObject<HTMLDivElement>;
   /** Callback when features config is loaded */
   onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void;
 }
@@ -39,23 +43,23 @@ export interface UseWorkflowGraphReturn {
   /** Current workflow configuration */
   config: WorkflowConfig | null;
   /** Function to update workflow configuration */
-  setConfig: React.Dispatch<React.SetStateAction<WorkflowConfig | null>>;
+  setConfig: Dispatch<SetStateAction<WorkflowConfig | null>>;
   /** Reference to the X6 graph instance */
-  graphRef: React.MutableRefObject<Graph | undefined>;
+  graphRef: MutableRefObject<Graph | undefined>;
   /** Currently selected node */
   selectedNode: Node | null;
   /** Function to update selected node */
-  setSelectedNode: React.Dispatch<React.SetStateAction<Node | null>>;
+  setSelectedNode: Dispatch<SetStateAction<Node | null>>;
   /** Current zoom level of the graph */
   zoomLevel: number;
   /** Function to update zoom level */
-  setZoomLevel: React.Dispatch<React.SetStateAction<number>>;
+  setZoomLevel: Dispatch<SetStateAction<number>>;
   /** Whether hand/pan mode is enabled */
   isHandMode: boolean;
   /** Function to toggle hand mode */
-  setIsHandMode: React.Dispatch<React.SetStateAction<boolean>>;
+  setIsHandMode: Dispatch<SetStateAction<boolean>>;
   /** Handler for dropping nodes onto canvas */
-  onDrop: (event: React.DragEvent) => void;
+  onDrop: (event: DragEvent) => void;
   /** Handler for clicking blank canvas area */
   blankClick: () => void;
   /** Handler for delete keyboard event */
@@ -77,7 +81,7 @@ export interface UseWorkflowGraphReturn {
   /** Chat variables for workflow */
   chatVariables: ChatVariable[];
   /** Function to update chat variables */
-  setChatVariables: React.Dispatch<React.SetStateAction<ChatVariable[]>>;
+  setChatVariables: Dispatch<SetStateAction<ChatVariable[]>>;
 
   handleAddNotes: () => void;
   handleSaveFeaturesConfig: (value: FeaturesConfigForm) => void;
@@ -165,6 +169,21 @@ export const useWorkflowGraph = ({
   useEffect(() => {
     initWorkflow()
   }, [config, graphRef.current])
+
+  /**
+   * Assign explicit zIndex values to enforce layer order:
+   *   parent nodes (loop/iteration) → child edges → child nodes
+   * Ports live inside each node's SVG container and are always above
+   * edges once the node zIndex is higher than the edge zIndex.
+   */
+  const reorderCells = (graph: Graph) => {
+    // Safari uses x6-html-shape (dual HTML layer architecture).
+    // zIndex controls order within each HTML layer and SVG layer.
+    graph.getEdges().forEach(edge => edge.setZIndex(0));
+    graph.getNodes().forEach(node => {
+      node.setZIndex(node.getData()?.cycle ? 2 : 1);
+    });
+  };
 
   /**
    * Initialize workflow graph with nodes and edges from configuration
@@ -474,24 +493,28 @@ export const useWorkflowGraph = ({
     if (nodes.length > 0 || edges.length > 0) {
       setTimeout(() => {
         if (graphRef.current) {
-          graphRef.current.getNodes().forEach(node => {
-            if (!node.getData()?.cycle) node.toFront();
-          });
-          // Bring edges to front first, then child nodes above edges; parent nodes stay behind
-          graphRef.current.getEdges().forEach(edge => {
-            const sourceCell = graphRef.current?.getCellById(edge.getSourceCellId());
-            const targetCell = graphRef.current?.getCellById(edge.getTargetCellId());
-            if (sourceCell?.getData()?.cycle || targetCell?.getData()?.cycle) {
-              edge.toFront();
-            }
-          });
-          graphRef.current.getNodes().forEach(node => {
-            if (node.getData()?.cycle) node.toFront();
-          });
+          if (isSafari) {
+            reorderCells(graphRef.current)
+          } else {
+            graphRef.current.getNodes().forEach(node => {
+              if (!node.getData()?.cycle) node.toFront();
+            });
+            // Bring edges to front first, then child nodes above edges; parent nodes stay behind
+            graphRef.current.getEdges().forEach(edge => {
+              const sourceCell = graphRef.current?.getCellById(edge.getSourceCellId());
+              const targetCell = graphRef.current?.getCellById(edge.getTargetCellId());
+              if (sourceCell?.getData()?.cycle || targetCell?.getData()?.cycle) {
+                edge.toFront();
+              }
+            });
+            graphRef.current.getNodes().forEach(node => {
+              if (node.getData()?.cycle) node.toFront();
+            });
+          }
           graphRef.current.enableHistory()
           graphRef.current.cleanHistory()
         }
-      }, 200)
+      }, isSafari ? 0 : 200)
     } else {
       graphRef.current.enableHistory()
       graphRef.current.cleanHistory()
@@ -708,12 +731,33 @@ export const useWorkflowGraph = ({
    * @param node - Clicked node
    */
   const nodeClick = ({ node }: { node: Node }) => {
+    // add-node type: dispatch port:click to open node selection popover
+    // Must handle before blankClick() to avoid blank:click closing the popover immediately
+    const nodeData = node.getData()
+    if (nodeData?.type === 'add-node') {
+      const b = node.getBBox();
+      const screenPos = graphRef.current!.localToClient(b.x + b.width, b.y + b.height / 2);
+      const tempDiv = document.createElement('div');
+      tempDiv.style.cssText = `position:fixed;left:${screenPos.x}px;top:${screenPos.y}px;width:1px;height:1px;z-index:9999;`;
+      document.body.appendChild(tempDiv);
+      window.dispatchEvent(new CustomEvent('port:click', {
+        detail: {
+          node,
+          port: 'right',
+          element: tempDiv,
+          rect: { left: screenPos.x, top: screenPos.y },
+          edgeInsertion: null,
+        },
+      }));
+      return;
+    }
+
     blankClick()
 
     setTimeout(() => {
-      // Ignore add-node type node clicks
+    // Ignore add-node type node clicks
       const nodeData = node.getData()
-      if (nodeData?.type === 'add-node' || nodeData.type === 'break' || nodeData.type === 'cycle-start') {
+      if (nodeData.type === 'break' || nodeData.type === 'cycle-start') {
         setSelectedNode(null)
         return;
       }
@@ -801,7 +845,8 @@ export const useWorkflowGraph = ({
     const cycle = node.getData()?.cycle;
     if (cycle) {
       const parentNode = graphRef.current!.getNodes().find(n => n.id === cycle);
-      if (parentNode?.getData()?.isGroup) {
+      const parentType = parentNode?.getData()?.type;
+      if (parentNode?.getData()?.isGroup || (parentNode && (parentType === 'loop' || parentType === 'iteration'))) {
         // Get parent node and child node bounding boxes
         const parentBBox = parentNode.getBBox();
         const childBBox = node.getBBox();
@@ -1021,13 +1066,37 @@ export const useWorkflowGraph = ({
   /**
    * Initialize X6 graph with configuration and event listeners
    */
-  const init = () => {
+  const init = async () => {
     if (!containerRef.current || !miniMapRef.current) return;
 
     // Register React shapes
-    nodeRegisterLibrary.forEach((item) => {
-      register(item);
-    });
+    // Safari: use x6-html-shape to avoid foreignObject rendering issues
+    if (isSafari) {
+      const { register: registerHtmlShape } = await import('x6-html-shape');
+      nodeRegisterLibrary.forEach(({ shape, width, height, component }) => {
+        registerHtmlShape({
+          shape,
+          width,
+          height,
+          render(node: Node, _graph: unknown, container: HTMLElement) {
+            const root = createRoot(container);
+            const doRender = () => {
+              root.render(createElement(component as any, { node, graph: node.model?.graph, data: node.getData() }));
+            };
+            doRender();
+            node.on('change:data', doRender);
+            return () => {
+              node.off('change:data', doRender);
+              root.unmount();
+            };
+          },
+        });
+      });
+    } else {
+      nodeRegisterLibrary.forEach((item) => {
+        registerReactShape(item);
+      });
+    }
 
     const container = containerRef.current;
     graphRef.current = new Graph({
@@ -1217,10 +1286,71 @@ export const useWorkflowGraph = ({
     // Listen to node move event
     graphRef.current.on('node:moved', nodeMoved);
 
+    if (isSafari) {
+      // When a parent (loop/iteration) node moves, keep child nodes in sync.
+      // Store each child's offset relative to the parent at drag start, then
+      // reapply it every frame to avoid cumulative delta errors.
+      const dragOffsets = new Map<string, { dx: number; dy: number }>();
+
+      graphRef.current.on('node:moving', ({ node }: { node: Node }) => {
+        const data = node.getData();
+        if (data?.type !== 'loop' && data?.type !== 'iteration') return;
+        const pos = node.getPosition();
+        const PORT_RADIUS = 6;
+
+        // Update parent componentContainer directly
+        const parentView = graphRef.current?.findViewByCell(node) as any;
+        if (parentView?.componentContainer) {
+          parentView.componentContainer.style.transform =
+            `translate(${pos.x + PORT_RADIUS}px, ${pos.y}px)`;
+        }
+
+        const children = graphRef.current?.getNodes().filter(child => {
+          const cycle = child.getData()?.cycle;
+          return cycle === data.id || cycle === node.id;
+        }) ?? [];
+
+        // First event for this drag: record offsets
+        if (!dragOffsets.has(node.id)) {
+          children.forEach(child => {
+            const cp = child.getPosition();
+            dragOffsets.set(child.id, { dx: cp.x - pos.x, dy: cp.y - pos.y });
+          });
+        }
+
+        // Apply stored offsets to keep children in place relative to parent
+        children.forEach(child => {
+          const off = dragOffsets.get(child.id);
+          if (!off) return;
+          const nx = pos.x + off.dx;
+          const ny = pos.y + off.dy;
+          child.setPosition(nx, ny);
+          const childView = graphRef.current?.findViewByCell(child) as any;
+          if (childView?.componentContainer) {
+            childView.componentContainer.style.transform =
+              `translate(${nx + PORT_RADIUS}px, ${ny}px)`;
+          }
+        });
+      });
+
+      graphRef.current.on('node:moved', ({ node }: { node: Node }) => {
+        // Clear offsets for this parent and all its children
+        const data = node.getData();
+        graphRef.current?.getNodes().forEach(child => {
+          const cycle = child.getData()?.cycle;
+          if (cycle === data?.id || cycle === node.id) dragOffsets.delete(child.id);
+        });
+        dragOffsets.delete(node.id);
+        nodeMoved({ node });
+      });
+    }
+
     graphRef.current.on('node:removed', blankClick)
-    // When edge connected, bring connected nodes' ports to front
+    // When edge connected, reorder all cells to maintain correct layer order
     graphRef.current.on('edge:connected', ({ isNew, edge }) => {
-      if (isNew) {
+      if (isSafari && isNew && graphRef.current) {
+        reorderCells(graphRef.current);
+      } else if (!isSafari && isNew) {
         const sourceCellId = edge.getSourceCellId()
         const targetCellId = edge.getTargetCellId()
         const sourceCell = graphRef.current?.getCellById(sourceCellId);
@@ -1334,7 +1464,7 @@ export const useWorkflowGraph = ({
    * Creates new node at drop position
    * @param event - React drag event
    */
-  const onDrop = (event: React.DragEvent) => {
+  const onDrop = (event: DragEvent) => {
     if (!graphRef.current) return;
     event.preventDefault();
     const dragData = JSON.parse(event.dataTransfer.getData('application/json'));
