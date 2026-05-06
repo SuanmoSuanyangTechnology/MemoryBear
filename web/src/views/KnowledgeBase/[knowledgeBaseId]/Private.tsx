@@ -458,29 +458,35 @@ const Private: FC = () => {
 
   }
   // Generate dropdown menu items (based on current row)
-  const getOptMenuItems = (row: KnowledgeBaseListItem): MenuProps['items'] => [
-    {
-      key: '1',
-      label: t('knowledgeBase.rechunking'),
-      onClick: () => {
-        handleRechunking(row);
+  const getOptMenuItems = (row: KnowledgeBaseListItem): MenuProps['items'] => {
+    const options = [{
+        key: '2',
+        label: t('knowledgeBase.download'),
+        onClick: () => {
+          handleDownload(row);
+        },
       },
-    },
-    {
-      key: '2',
-      label: t('knowledgeBase.download'),
-      onClick: () => {
-        handleDownload(row);
-      },
-    },
-    {
-      key: '3',
-      label: t('knowledgeBase.delete'),
-      onClick: () => {
-        handleDelete(row);
-      },
+      {
+        key: '3',
+        label: t('knowledgeBase.delete'),
+        onClick: () => {
+          handleDelete(row);
+        },
+      }]
+    if (row.parser_config?.doc_type === 'qa') {
+      return options
     }
-  ];
+    return [
+      {
+        key: '1',
+        label: t('knowledgeBase.rechunking'),
+        onClick: () => {
+          handleRechunking(row);
+        },
+      },
+      ...options
+    ]
+  };
   const handleRechunking = (item: KnowledgeBaseListItem) => {
     if (!knowledgeBaseId) return;
     const document = item as unknown as KnowledgeBaseDocumentData;
