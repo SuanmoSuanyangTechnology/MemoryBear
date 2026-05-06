@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
- * @Last Modified by: mikey.zhaopeng
- * @Last Modified time: 2026-05-06 11:44:06
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-05-06 14:30:46
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, type Edge } from '@antv/x6';
 import { register as registerReactShape } from '@antv/x6-react-shape';
@@ -1035,6 +1035,12 @@ export const useWorkflowGraph = ({
     e.preventDefault();
     const portElement = e.target as HTMLElement;
     const rect = portElement.getBoundingClientRect();
+    const clickPort = node.getPorts().find(p => p.id === port)
+    const portGroup = clickPort?.group
+
+    if (portGroup === 'left') {
+      return
+    }
 
     // Create temporary popover trigger element
     const tempDiv = document.createElement('div');
