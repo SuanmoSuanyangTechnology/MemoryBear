@@ -32,10 +32,12 @@ class Memory(BaseModel):
 
 class MemorySearchResult(BaseModel):
     memories: list[Memory]
+    content_str: str = Field(default="")
 
-    @computed_field
     @property
     def content(self) -> str:
+        if self.content_str:
+            return self.content_str
         return "\n".join([memory.content for memory in self.memories])
 
     @computed_field

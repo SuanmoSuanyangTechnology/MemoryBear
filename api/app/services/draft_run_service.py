@@ -108,6 +108,7 @@ def create_long_term_memory_tool(
         try:
             with get_db_context() as db:
                 memory_service = MemoryService(db, config_id, end_user_id)
+                # TODO: Historical Messages -> Used to refer to coreference resolution
                 search_result = asyncio.run(memory_service.read(question, SearchStrategy.QUICK))
 
             #     memory_content = asyncio.run(

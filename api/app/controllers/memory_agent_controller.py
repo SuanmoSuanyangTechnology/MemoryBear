@@ -27,6 +27,7 @@ from app.services import task_service, workspace_service
 from app.services.memory_agent_service import MemoryAgentService
 from app.services.memory_agent_service import get_end_user_connected_config as get_config
 from app.services.model_service import ModelConfigService
+from app.utils.tmp_session import ChatSessionCache
 
 load_dotenv()
 api_logger = get_api_logger()
@@ -300,60 +301,39 @@ async def read_server(
         if knowledge:
             user_rag_memory_id = str(knowledge.id)
 
+    session_id = user_input.session_id.hex
+
     api_logger.info(
-        f"Read service: group={user_input.end_user_id}, storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}, workspace_id={workspace_id}")
+        f"Read service: group={user_input.end_user_id}, storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}, workspace_id={workspace_id}, session_id={session_id}")
     try:
-        # result = await memory_agent_service.read_memory(
-        #     user_input.end_user_id,
-        #     user_input.message,
-        #     user_input.history,
-        #     user_input.search_switch,
-        #     config_id,
-        #     db,
-        #     storage_type,
-        #     user_rag_memory_id
-        # )
-        # if str(user_input.search_switch) == "2":
-        #     retrieve_info = result['answer']
-        #     history = await SessionService(store).get_history(user_input.end_user_id, user_input.end_user_id,
-        #                                                       user_input.end_user_id)
-        #     query = user_input.message
-        #
-        #     # 调用 memory_agent_service 的方法生成最终答案
-        #     result['answer'] = await memory_agent_service.generate_summary_from_retrieve(
-        #         end_user_id=user_input.end_user_id,
-        #         retrieve_info=retrieve_info,
-        #         history=history,
-        #         query=query,
-        #         config_id=config_id,
-        #         db=db
-        #     )
-        #     if "信息不足，无法回答" in result['answer']:
-        #         result['answer'] = retrieve_info
         memory_config = get_config(user_input.end_user_id, db)
         service = MemoryService(
             db,
             memory_config["memory_config_id"],
             end_user_id=user_input.end_user_id
         )
+        session_cache = ChatSessionCache(session_id)
         search_result = await service.read(
             user_input.message,
-            SearchStrategy(user_input.search_switch)
+            SearchStrategy(user_input.search_switch),
+            history=await session_cache.get_history(),
         )
         intermediate_outputs = []
         sub_queries = set()
         for memory in search_result.memories:
             sub_queries.add(str(memory.query))
+        idx = 0
         if user_input.search_switch in [SearchStrategy.DEEP, SearchStrategy.NORMAL]:
             intermediate_outputs.append({
                 "type": "problem_split",
                 "title": "问题拆分",
                 "data": [
                     {
-                        "id": f"Q{idx+1}",
+                        "id": f"Q{(idx := idx + 1)}",
                         "question": question
                     }
-                    for idx, question in enumerate(sub_queries)
+                    for question in sub_queries
+                    if question
                 ]
             })
         perceptual_data = [
@@ -375,16 +355,24 @@ async def read_server(
             "raw_result": search_result.memories,
             "total": len(search_result.memories),
         })
+        answer = await memory_agent_service.generate_summary_from_retrieve(
+            end_user_id=user_input.end_user_id,
+            retrieve_info=search_result.content,
+            history=[],
+            query=user_input.message,
+            config_id=config_id,
+            db=db
+        )
+        await session_cache.append_many(
+            [
+                {"role": "user", "content": user_input.message},
+                {"role": "assistant", "content": answer}
+            ]
+        )
         result = {
-            'answer': await memory_agent_service.generate_summary_from_retrieve(
-                end_user_id=user_input.end_user_id,
-                retrieve_info=search_result.content,
-                history=[],
-                query=user_input.message,
-                config_id=config_id,
-                db=db
-            ),
-            "intermediate_outputs": intermediate_outputs
+            'answer': answer,
+            "intermediate_outputs": intermediate_outputs,
+            "session_id": session_id,
         }
 
         return success(data=result, msg="回复对话消息成功")
@@ -480,9 +468,11 @@ async def read_server_async(
         if knowledge: user_rag_memory_id = str(knowledge.id)
     api_logger.info(f"Async read: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
     try:
+        session_id = user_input.session_id.hex
+        session_cache = ChatSessionCache(session_id)
         task = celery_app.send_task(
             "app.core.memory.agent.read_message",
-            args=[user_input.end_user_id, user_input.message, user_input.history, user_input.search_switch,
+            args=[user_input.end_user_id, user_input.message, await session_cache.get_history(), user_input.search_switch,
                   config_id, storage_type, user_rag_memory_id]
         )
         api_logger.info(f"Read task queued: {task.id}")

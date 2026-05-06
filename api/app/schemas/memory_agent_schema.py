@@ -1,14 +1,15 @@
+import uuid
 from abc import ABC
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class UserInput(BaseModel):
     message: str
-    history: list[dict]
     search_switch: str
     end_user_id: str
+    session_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     config_id: Optional[str] = None
 
 

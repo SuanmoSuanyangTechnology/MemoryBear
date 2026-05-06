@@ -17,7 +17,7 @@ async def handle_response(response: type[BaseModel]) -> dict:
 
 
 class StructResponse:
-    def __init__(self, mode: Literal["json", "pydantic"], model: Type[BaseModel] = None):
+    def __init__(self, mode: Literal["json", "pydantic", "str"], model: Type[BaseModel] = None):
         self.mode = mode
         if mode == "pydantic" and model is None:
             raise ValueError("Pydantic model is required")
@@ -31,6 +31,8 @@ class StructResponse:
         for block in other.content_blocks:
             if block.get("type") == "text":
                 text += block.get("text", "")
+        if self.mode == "str":
+            return text
         fixed_json = json_repair.repair_json(text, return_objects=True)
         if self.mode == "json":
             return fixed_json

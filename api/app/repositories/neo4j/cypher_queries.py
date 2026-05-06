@@ -1296,6 +1296,7 @@ RETURN e.id AS id,
        e.name AS name,
        e.end_user_id AS end_user_id,
        e.entity_type AS entity_type,
+       e.description AS description,
        COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
        COALESCE(e.importance_score, 0.5) AS importance_score,
        e.last_access_time AS last_access_time,
@@ -1477,6 +1478,21 @@ RETURN c.community_id AS id,
        score
 ORDER BY score DESC
 LIMIT $limit
+"""
+
+SEARCH_USER_METADATA = """
+MATCH (n:ExtractedEntity)
+WHERE (n.end_user_id = $end_user_id AND n.entity_type ='用户')
+RETURN n.description AS description,
+       n.aliases AS aliases,
+       n.anchors AS anchors,
+       n.beliefs_or_stances AS beliefs_or_stances,
+       n.core_facts AS core_facts,
+       n.events AS events,
+       n.goals AS goals,
+       n.interests AS interests,
+       n.relations AS relations,
+       n.traits AS traits
 """
 
 FULLTEXT_QUERY_CYPHER_MAPPING = {

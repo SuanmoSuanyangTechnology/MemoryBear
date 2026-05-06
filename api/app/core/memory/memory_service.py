@@ -43,10 +43,13 @@ class MemoryService:
             self,
             query: str,
             search_switch: SearchStrategy,
+            history: list | None = None,
             limit: int = 10,
     ) -> MemorySearchResult:
+        if history is None:
+            history = []
         with get_db_context() as db:
-            return await ReadPipeLine(self.ctx, db).run(query, search_switch, limit)
+            return await ReadPipeLine(self.ctx, db).run(query, search_switch, history, limit)
 
     async def forget(self, max_batch: int = 100, min_days: int = 30) -> dict:
         raise NotImplementedError

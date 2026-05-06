@@ -27,9 +27,9 @@ from app.repositories.neo4j.cypher_queries import (
     SEARCH_PERCEPTUAL_BY_USER_ID,
     FULLTEXT_QUERY_CYPHER_MAPPING,
     USER_ID_QUERY_CYPHER_MAPPING,
-    NODE_ID_QUERY_CYPHER_MAPPING
+    NODE_ID_QUERY_CYPHER_MAPPING,
+    SEARCH_USER_METADATA
 )
-
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 logger = logging.getLogger(__name__)
@@ -513,7 +513,7 @@ async def search_graph_by_embedding(
     task_keys = []
 
     for node_type in include:
-        tasks.append(search_by_embedding(connector, node_type, end_user_id, embedding, limit*2))
+        tasks.append(search_by_embedding(connector, node_type, end_user_id, embedding, limit * 2))
         task_keys.append(node_type.value)
 
     task_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -555,6 +555,17 @@ async def search_graph_by_embedding(
         logger.info("[PERF] Skipping activation updates (only summaries)")
 
     return results
+
+
+async def search_user_metadata(
+        connector: Neo4jConnector,
+        end_user_id: str
+) -> dict:
+    user_info = await connector.execute_query(
+        SEARCH_USER_METADATA,
+        end_user_id=end_user_id
+    )
+    return user_info[0] if user_info else {}
 
 
 async def get_dedup_candidates_for_entities(  # 适配新版查询：使用全文索引按名称检索候选实体
