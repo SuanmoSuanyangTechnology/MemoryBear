@@ -1,192 +1,311 @@
-<img width="2346" height="1310" alt="image" src="https://github.com/user-attachments/assets/bc73a64d-cd1e-4d22-be3e-04ce40423a20" />
+<img width="2346" height="1310" alt="MemoryBear Hero Banner" src="https://github.com/user-attachments/assets/77f3e31a-3a20-4f17-8d2d-d88d85acf19e" />
 
-# MemoryBear 让AI拥有如同人类一样的记忆
+<div align="center">
+
+# MemoryBear — 让 AI 拥有如同人类一样的记忆
+
+**新一代 AI 记忆管理系统 · 感知 · 提炼 · 关联 · 遗忘**
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.12+-green?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-teal?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Neo4j](https://img.shields.io/badge/Neo4j-4.4+-blue?logo=neo4j&logoColor=white)](https://neo4j.com/)
 [![Gitee Sync](https://img.shields.io/github/actions/workflow/status/SuanmoSuanyangTechnology/MemoryBear/sync-to-gitee.yml?label=Gitee%20Sync&logo=gitee&logoColor=white)](https://github.com/SuanmoSuanyangTechnology/MemoryBear/actions/workflows/sync-to-gitee.yml)
 
 中文 | [English](./README.md)
 
-### [安装教程](#memorybear安装教程)
-### 论文：<a href="https://memorybear.ai/pdf/memoryBear" target="_blank" rel="noopener noreferrer">《Memory Bear AI: 从记忆到认知的突破》</a>
+[快速开始](#快速开始) · [安装教程](#安装教程) · [核心特性](#核心特性) · [架构总览](#架构总览) · [实验室指标](#实验室指标) · [论文](#论文)
+
+</div>
+
+---
+
 ## 项目简介
-MemoryBear是红熊AI自主研发的新一代AI记忆系统，其核心突破在于跳出传统知识“静态存储”的局限，以生物大脑认知机制为原型，构建了具备“感知-提炼-关联-遗忘”全生命周期的智能知识处理体系。该系统致力于让机器摆脱“信息堆砌”的困境，实现对知识的深度理解与自主进化，成为人类认知协作的核心伙伴。
 
-## MemoryBear是从解决这些问题来的
-### 一、单模型知识遗忘的核心原因</br>
-上下文窗口限制：主流大模型上下文窗口通常为 8k-32k tokens，长对话中早期信息会被 “挤出”，导致后续回复脱离历史语境：如用户第 1 轮说 “我对海鲜过敏”，第 5 轮问 “推荐今晚的菜品” 时模型可能遗忘过敏信息。</br>
-静态知识库与动态数据割裂：大模型训练时的静态知识库如截止 2023 年数据，无法实时吸收用户对话中的个性化信息如用户偏好、历史订单，需依赖外部记忆模块补充。</br>
-模型注意力机制缺陷：Transformer 的自注意力对长距离依赖的捕捉能力随序列长度下降，出现 “近因效应”更关注最新输入，忽略早期关键信息。</br>
+MemoryBear 是红熊 AI 自主研发的新一代 AI 记忆系统，核心突破在于跳出传统知识"静态存储"的局限，以生物大脑认知机制为原型，构建了具备**感知 → 提炼 → 关联 → 遗忘**全生命周期的智能知识处理体系。
 
-### 二、多 Agent 协作的记忆断层问题</br>
-Agent 数据孤岛：不同 Agent如咨询 Agent、售后 Agent、推荐 Agent各自维护独立记忆，未建立跨模块的共享机制，导致用户重复提供信息如用户向咨询 Agent 说明地址后，售后 Agent 仍需再次询问。</br>
-对话状态不一致：多轮交互中 Agent 切换时，对话状态如用户当前意图、历史问题标签传递不完整，引发服务断层如用户从 “产品咨询” 转 “投诉” 时，新 Agent 未继承前期投诉细节。</br>
-决策冲突：不同 Agent 基于局部记忆做出的响应可能矛盾如推荐 Agent 推荐用户过敏的产品，因未获取健康禁忌的历史记录。</br>
+与传统记忆管理工具将知识视为"待检索的静态数据"不同，MemoryBear 通过复刻大脑海马体的记忆编码、新皮层的知识固化及突触修剪的遗忘机制，让知识具备动态演化的"生命特征"，将 AI 与用户的交互关系从**被动查询**升级为**主动辅助认知**。
 
-### 三、模型推理过程中的 “语义歧义” 引发理解偏差</br>
-用户对话中的个性化信息如行业术语、口语化表达、上下文指代未被准确编码，导致模型对记忆内容的语义解析失真，比如对用户历史对话中的模糊表述如 “上次说的那个方案”无法准确定位具体内容。</br>
-多语言、方言场景中，跨语种记忆关联失效如用户混用中英描述需求时，模型无法整合多语言信息。</br>
-典型案例：用户说之前客服说可以‘加急处理’现在进度如何？模型因未记录 “加急” 对应的具体服务等级，回复笼统模糊。</br>
+## 论文
 
-## MemoryBear核心定位
-与传统记忆管理工具将知识视为“待检索的静态数据”不同，MemoryBear以“模拟人类大脑知识处理逻辑”为核心目标，构建了从知识摄入到智能输出的闭环体系。系统通过复刻大脑海马体的记忆编码、新皮层的知识固化及突触修剪的遗忘机制，让知识具备动态演化的“生命特征”，彻底重构了知识与使用者之间的交互关系——从“被动查询”升级为“主动辅助记忆认知”
+| 论文 | 描述 |
+|------|------|
+| 📄 [Memory Bear AI: A Breakthrough from Memory to Cognition](https://memorybear.ai/pdf/memoryBear) | MemoryBear 核心技术报告 |
+| 📄 [Memory Bear AI Memory Science Engine for Multimodal Affective Intelligence](https://arxiv.org/abs/2603.22306) | 多模态情感智能记忆科学引擎技术报告 |
+| 📄 [A-MBER: Affective Memory Benchmark for Emotion Recognition](https://arxiv.org/abs/2604.07017) | 情感记忆基准测试集 |
 
-## MemoryBear核心哲学
-MemoryBear的设计哲学源于对人类认知本质的深刻洞察：知识的价值不在于存量积累，而在于动态流转中的价值升华。传统系统中，知识一旦存储便陷入“静止状态”，难以形成跨领域关联，更无法主动适配使用者的认知需求；而MemoryBear坚信，只有让知识经历“原始信息提炼为结构化规则、孤立规则关联为知识网络、冗余信息智能遗忘”的完整过程，才能实现从“信息记忆”到“认知理解”的跨越，最终涌现出真正的智能。
+## 为什么需要 MemoryBear
 
-## MemoryBear核心特性
-MemoryBear作为模仿生物大脑认知过程的智能记忆管理系统，其核心特性围绕“记忆知识全生命周期管理”与“智能认知进化”两大维度构建，覆盖记忆从摄入提炼到存储检索、动态优化的完整链路，同时通过标准化服务架构实现高效集成与调用。
+### 单模型的知识遗忘
 
-### 一、记忆萃取引擎：多维度结构化提炼，夯实认知基础</br>
-记忆萃取是MemoryBear实现“认知化管理”的起点，区别于传统数据提取的“机械转换”，其核心优势在于对非结构化信息的“语义级解析”与“多格式标准化输出”，精准适配后续图谱构建与智能检索需求。具体能力包括：</br>
-多类型信息精准解析：可自动识别并提取文本中的陈述句核心信息，剥离冗余修饰成分，保留“主体-行为-对象”核心逻辑；同时精准抽取三元组数据（如“MemoryBear-核心功能-知识萃取”），为图谱存储提供基础数据单元，保障知识关联的准确性。</br>
-时序信息锚定：针对含有时效性的知识（如事件记录、政策文件、实验数据），自动提取并标记时间戳信息，支持“时间维度”的知识追溯与关联，解决传统知识管理中“时序混乱”导致的认知偏差问题。</br>
-智能剪枝生成：基于上下文语义理解，生成“关键信息全覆盖+逻辑连贯性强”的摘要内容，支持自定义摘要长度（50-500字）与侧重点（如技术型、业务型），适配不同场景的知识快速获取需求。例如对10页技术文档处理时，可在3秒内生成含核心参数、实现逻辑与应用场景的精简摘要。</br>
+- **上下文窗口限制**：主流大模型上下文窗口通常为 8k–32k tokens，长对话中早期信息会被"挤出"，导致后续回复脱离历史语境
+- **静态知识库割裂**：训练数据是静态快照，无法实时吸收用户对话中的个性化信息（偏好、历史记录等）
+- **注意力近因效应**：Transformer 自注意力对长距离依赖的捕捉能力随序列长度下降，过度关注最新输入而忽略早期关键信息
 
-### 二、图谱存储：对接Neo4j，构建可视化知识网络</br>
-存储层采用“图数据库优先”的架构设计，通过对接业界成熟的Neo4j图数据库，实现知识实体与关系的高效管理，突破传统关系型数据库“关联弱、查询繁”的局限，契合生物大脑“神经元关联”的认知模式。</br>
-该特性核心价值体现在：一是支持海量实体与多元关系的灵活存储，可管理百万级知识实体及千万级关联关系，涵盖“上下位、因果、时序、逻辑”等12种核心关系类型，适配多领域知识场景；二是与知识萃取模块深度联动，萃取的三元组数据可直接同步至Neo4j，自动构建初始知识图谱，无需人工二次映射；三是支持图谱可视化交互，用户可直观查看实体关联路径，手动调整关系权重，实现“机器构建+人工优化”的协同管理。</br>
+### 多 Agent 协作的记忆断层
 
-### 三、混合搜索：关键词+语义向量，兼顾精准与智能</br>
-为解决传统搜索“要么精准但僵化，要么模糊但失准”的痛点，MemoryBear采用“关键词检索+语义向量检索”的混合搜索架构，实现“精准匹配”与“意图理解”的双重目标。</br>
-其中，关键词检索基于Lucene引擎优化，针对知识中的核心实体、关键参数等结构化信息实现毫秒级精准定位，保障“明确需求”下的高效检索；语义向量检索则通过BERT模型对查询语句进行语义编码，将其转化为高维向量后与知识库中的向量数据比对，可识别同义词、近义词及隐含意图，例如用户查询“如何优化记忆衰减效率”时，系统可关联到“遗忘机制参数调整”“记忆强度评估方法”等相关知识。两种检索方式智能融合：先通过语义检索扩大候选范围，再通过关键词检索精准筛选，使检索准确率提升至92%，较单一检索方式平均提升35%。</br>
+- **数据孤岛**：不同 Agent（咨询、售后、推荐）各自维护独立记忆，用户需重复提供相同信息
+- **对话状态不一致**：Agent 切换时，用户意图、历史问题标签传递不完整，引发服务断层
+- **决策冲突**：基于局部记忆的 Agent 可能给出矛盾响应（如推荐用户过敏的产品）
 
-### 四、记忆遗忘引擎：基于强度与时效的动态衰减，模拟生物记忆特性</br>
-遗忘是MemoryBear区别于传统静态知识管理工具的核心特性之一，其灵感源于生物大脑“突触修剪”机制，通过“记忆强度+时效”双维度模型实现知识的逐步衰减，避免冗余知识占用资源，保障核心知识的“认知优先级”。</br>
-具体实现逻辑为：系统为每条知识分配“初始记忆强度”（由萃取质量、人工标注重要性决定），并结合“调用频率、关联活跃度”实时更新强度值；同时设定“时效衰减周期”，根据知识类型（如核心规则、临时数据）差异化配置衰减速率。当知识强度低于阈值且超过设定时效后，将进入“休眠-衰减-清除”三阶段流程：休眠阶段保留数据但降低检索优先级，衰减阶段逐步压缩存储体积，清除阶段则彻底删除并备份至冷存储。该机制使系统冗余知识占比控制在8%以内，较传统无遗忘机制系统降低60%以上。</br>
+### 语义歧义导致的理解偏差
 
-### 五、自我反思引擎：定期回顾优化，实现记忆自主进化</br>
-自我反思机制是MemoryBear实现“智能升级”的关键，通过定期对已有记忆进行回顾、校验与优化，模拟人类“复盘总结”的认知行为，持续提升知识体系的准确性与有效性。</br>
-系统默认每日凌晨触发自动反思流程，核心动作包括：一是“一致性校验”，对比关联知识间的逻辑冲突（如同一实体的矛盾属性），标记可疑知识并推送人工审核；二是“价值评估”，统计知识的调用频次、关联贡献度，将高价值知识强化记忆强度，低价值知识加速衰减；三是“关联优化”，基于近期检索与使用行为，调整知识间的关联权重，强化高频关联路径。此外，支持人工触发专项反思（如新增核心知识后），并提供反思报告可视化展示优化结果，实现“自主进化+人工监督”的双重保障。</br>
+- 行业术语、口语化表达、上下文指代未被准确编码，导致模型对记忆内容的语义解析失真
+- 多语言混用场景中，跨语种记忆关联失效
 
-### 六、FastAPI服务：标准化API输出，实现高效集成与管理</br>
-为保障系统与外部业务场景的高效对接，MemoryBear采用FastAPI构建统一服务架构，实现管理端与服务端API的集中暴露，具备“高性能、易集成、强规范”的核心优势。服务端API涵盖知识萃取、图谱操作、搜索查询、遗忘控制等全功能模块，支持JSON/XML多格式数据交互，响应延迟平均低于50ms，单实例可支撑1000QPS并发请求；管理端API则提供系统配置、权限管理、日志查询等运维功能，支持通过API实现批量知识导入导出、反思周期调整等操作。同时，系统自动生成Swagger API文档，包含接口参数说明、请求示例与返回格式定义，开发者可快速完成集成调试。该架构已适配企业级微服务体系，支持Docker容器化部署，可灵活对接CRM、OA、研发管理等各类业务系统。</br>
+<img width="2294" height="1154" alt="Why MemoryBear" src="https://github.com/user-attachments/assets/62453bc9-8422-4480-9645-e2abb57f0204" />
 
-## MemoryBear架构总览
-<img width="2294" height="1154" alt="image" src="https://github.com/user-attachments/assets/3afd3b49-20ea-4847-b9ed-38b646a4ad89" />
-</br>
-- 记忆萃取引擎（Extraction Engine）：预处理、去重、结构化提取</br>
-- 记忆遗忘引擎（Forgetting Engine）：记忆强度模型与衰减策略</br>
-- 记忆自我反思引擎（Reflection Engine）：评价与重写记忆</br>
-- 检索服务：关键词、语义与混合检索</br>
-- Agent 与 MCP：提供多工具协作的智能体能力</br>
+---
+
+## 核心特性
+
+<img width="2294" height="1154" alt="MemoryBear Core Features" src="https://github.com/user-attachments/assets/e90153d3-378f-47e8-a367-622121621566" />
+
+### 记忆萃取引擎
+
+从非结构化对话和文档中进行**语义级解析**，精准提取：
+
+- **陈述句核心信息**：剥离冗余修饰，保留"主体-行为-对象"核心逻辑
+- **三元组数据**：自动抽取实体关系（如 `MemoryBear → 核心功能 → 知识萃取`），为图谱存储提供基础数据单元
+- **时序信息锚定**：自动提取并标记时间戳，支持时间维度的知识追溯
+- **智能摘要生成**：支持自定义摘要长度（50–500 字）与侧重点，10 页技术文档 3 秒内生成精简摘要
+
+### 图谱存储（Neo4j）
+
+采用**图数据库优先**架构，对接 Neo4j，突破传统关系型数据库"关联弱、查询繁"的局限：
+
+- 支持百万级知识实体及千万级关联关系
+- 涵盖上下位、因果、时序、逻辑等 12 种核心关系类型
+- 萃取的三元组直接同步至 Neo4j，自动构建初始知识图谱
+- 支持图谱可视化交互，实现"机器构建 + 人工优化"协同管理
+
+### 混合搜索
+
+**关键词检索 + 语义向量检索**双引擎融合：
+
+- 关键词检索基于 Elasticsearch，毫秒级精准定位结构化信息
+- 语义向量检索通过 BERT 模型编码，识别同义词、近义词及隐含意图
+- 先语义扩大候选范围，再关键词精准筛选，检索准确率达 **92%**，较单一方式提升 **35%**
+
+### 记忆遗忘引擎
+
+灵感源于生物大脑**突触修剪**机制，通过"记忆强度 + 时效"双维度模型实现知识动态衰减：
+
+- 每条知识分配初始记忆强度，结合调用频率和关联活跃度实时更新
+- 知识强度低于阈值后进入**休眠 → 衰减 → 清除**三阶段流程
+- 系统冗余知识占比控制在 **8%** 以内，较无遗忘机制系统降低 **60%** 以上
+
+### 自我反思引擎
+
+每日定时触发自动反思流程，模拟人类"复盘总结"认知行为：
+
+- **一致性校验**：检测关联知识间的逻辑冲突，标记可疑知识推送人工审核
+- **价值评估**：统计调用频次和关联贡献度，高价值知识强化，低价值知识加速衰减
+- **关联优化**：基于近期检索行为调整知识间关联权重，强化高频关联路径
+
+### FastAPI 服务层
+
+统一服务架构，暴露两套 API：
+
+| API 类型 | 路径前缀 | 认证方式 | 用途 |
+|----------|----------|----------|------|
+| 管理端 API | `/api` | JWT | 系统配置、权限管理、日志查询 |
+| 服务端 API | `/v1` | API Key | 知识萃取、图谱操作、搜索查询、遗忘控制 |
+
+- 平均响应延迟低于 **50ms**，单实例支撑 **1000 QPS** 并发
+- 自动生成 Swagger 文档，支持 Docker 容器化部署
+- 兼容企业级微服务体系，可对接 CRM、OA、研发管理等业务系统
+
+---
+
+## 架构总览
+
+<img src="https://github.com/user-attachments/assets/bc356ed3-9159-41c5-bd73-125a67e06ced" alt="MemoryBear System Architecture" width="100%"/>
+
+**Celery 三队列异步架构：**
+
+| 队列 | Worker 类型 | 并发 | 用途 |
+|------|-------------|------|------|
+| `memory_tasks` | threads | 100 | 记忆读写（asyncio 友好） |
+| `document_tasks` | prefork | 4 | 文档解析（CPU 密集） |
+| `periodic_tasks` | prefork | 2 | 定时任务、反思引擎 |
+
+---
 
 ## 实验室指标
-我们采用不同问题的数据集中，通过具备记忆功能的系统，进行性能对比。评估指标包括F1分数（F1）、BLEU-1（B1）以及LLM-as-a-Judge分数（J），数值越高表示表现越好，性能更高。
-MemoryBear 在 “单跳场景” 的精准度、结果匹配度与任务特异性表现上，均处于领先，“多跳”更强的信息连贯性与推理准确性，“开放泛化”对多样，无边界信息的处理质量与泛化能力更优，“时序”对时效性信息的匹配与处理表现更出色，四大任务的核心指标中，均优于 行业内的其他海外竞争对手Mem O、Zep、Lang Mem 等现有方法，整体性能更突出。
-<img width="2256" height="890" alt="image" src="https://github.com/user-attachments/assets/5ff86c1f-53ac-4816-976d-95b48a4a10c0" />
-Memory Bear 基于向量的知识记忆非图谱版本，成功在保持高准确性的同时，极大地优化了检索效率。该方法在总体准确性上的表现已明显高于现有最高全文检索方法（72.90 ± 0.19%）。更重要的是，它在关键的延迟指标（包括 Search Latency 和 Total Latency 的 p50/p95）上也保持了较低水平，充分体现出 “性能更优且延迟更高效” 的特点，解决了全文检索方法的高准确性伴随的高延迟瓶颈。
-<img width="2248" height="498" alt="image" src="https://github.com/user-attachments/assets/2759ea19-0b71-4082-8366-e8023e3b28fe" />
-Memory Bear 通过集成知识图谱架构，在需要复杂推理和关系感知的任务上进一步释放了潜力。虽然图谱的遍历和推理可能会引入轻微的检索开销，但该版本通过优化图检索策略和决策流，成功将延迟控制在高效范围。更关键的是，基于图谱的 Memory Bear 将总体准确性推至新的高度（75.00 ± 0.20%），在保持准确性的同时，整体指标显著优于其他所有方法，证明了“结构化记忆带来的性能决定性优势”。
-<img width="2238" height="342" alt="image" src="https://github.com/user-attachments/assets/c928e094-45a2-414b-831a-6990b711ed07" />
 
-# MemoryBear安装教程
-## 一、前期准备
+评估指标包括 F1 分数（F1）、BLEU-1（B1）以及 LLM-as-a-Judge 分数（J），数值越高表示性能越好。
 
-### 1.环境要求
+MemoryBear 在四大任务类型的核心指标中，均优于行业内竞争对手 Mem0、Zep、LangMem 等现有方法：
 
-* Node.js 20.19+ 或 22.12+  前端运行环境
+<img width="2256" height="890" alt="Benchmark Results" src="https://github.com/user-attachments/assets/163ea5b5-b51d-4941-9f6c-7ee80977cdbc" />
 
-* Python 3.12  后端运行环境
+**向量版本（非图谱）**：在保持高准确性的同时极大优化了检索效率，总体准确性明显高于现有最高全文检索方法（72.90 ± 0.19%），且在 Search Latency 和 Total Latency 的 p50/p95 上保持较低水平。
 
-* PostgreSQL 13+ 主数据库
+<img width="2248" height="498" alt="Vector Version Metrics" src="https://github.com/user-attachments/assets/5e5dae2c-1dde-4f69-88ca-95a9b665b5b2" />
 
-* Neo4j 4.4+ 图数据库（存储知识图谱）
+**图谱版本**：通过集成知识图谱架构，将总体准确性推至新高度（**75.00 ± 0.20%**），在保持准确性的同时整体指标显著优于所有其他方法。
 
-* Redis 6.0+ 缓存和消息队列
+<img width="2238" height="342" alt="Graph Version Metrics" src="https://github.com/user-attachments/assets/b1eb1c05-da9b-4074-9249-7a9bbb40e9d2" />
 
-## 二、项目获取
+---
 
-### 1.获取方式
+## 快速开始
 
-Git克隆（推荐）：
+### Docker Compose 一键启动（推荐）
 
-```plain&#x20;text
+**前提条件**：已安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/)。
+
+```bash
+# 1. 克隆项目
+git clone https://github.com/SuanmoSuanyangTechnology/MemoryBear.git
+cd MemoryBear/api
+
+# 2. 启动基础服务（PostgreSQL / Neo4j / Redis / Elasticsearch）
+# 请先通过 Docker Desktop 拉取并启动以下镜像（详见安装教程 3.2 节）
+
+# 3. 配置环境变量
+cp env.example .env
+# 编辑 .env，填写数据库连接信息和 LLM API Key
+
+# 4. 初始化数据库
+pip install uv && uv sync
+alembic upgrade head
+
+# 5. 启动 API + Celery Workers + Beat 调度器
+docker-compose up -d
+
+# 6. 初始化系统，获取超级管理员账号
+curl -X POST http://127.0.0.1:8002/api/setup
+```
+
+> **注意**：`docker-compose.yml` 包含 API 服务和 Celery Workers，基础服务（PostgreSQL、Neo4j、Redis、Elasticsearch）需要单独启动。
+>
+> **端口说明**：Docker Compose 部署默认端口为 `8002`，手动启动默认端口为 `8000`。下文安装教程以手动启动（`8000`）为例。
+
+服务启动后访问：
+- API 文档：http://localhost:8002/docs
+- 管理后台：http://localhost:3000（启动前端后）
+
+**默认管理员账号：**
+- 账号：`admin@example.com`
+- 密码：`admin_password`
+
+### 手动启动
+
+> 以下为精简命令，详细步骤请参考 [安装教程](#安装教程)。
+
+```bash
+# 后端
+cd api
+pip install uv && uv sync
+alembic upgrade head
+uv run -m app.main
+
+# 前端（新终端）
+cd web
+npm install && npm run dev
+```
+
+---
+
+## 安装教程
+
+### 一、环境要求
+
+| 组件 | 版本要求 | 用途 |
+|------|----------|------|
+| Python | 3.12+ | 后端运行环境 |
+| Node.js | 20.19+ 或 22.12+ | 前端运行环境 |
+| PostgreSQL | 13+ | 主数据库 |
+| Neo4j | 4.4+ | 知识图谱存储 |
+| Redis | 6.0+ | 缓存与消息队列 |
+| Elasticsearch | 8.x | 混合搜索引擎 |
+
+### 二、项目获取
+
+```bash
 git clone https://github.com/SuanmoSuanyangTechnology/MemoryBear.git
 ```
 
-### 2.目录说明
+<img src="https://github.com/SuanmoSuanyangTechnology/MemoryBear/releases/download/assets-v1.0/assets__directory-structure.svg" alt="Directory Structure" width="100%"/>
 
-<img width="5238" height="1626" alt="diagram" src="https://github.com/user-attachments/assets/416d6079-3f34-40c3-9bcf-8760d186741a" />
+### 三、后端 API 服务启动
 
-
-## 三、安装步骤
-
-### 1.后端API服务启动
-
-#### 1.1 安装python依赖
-
-```python
-# 0.安装依赖管理工具uv
-pip install uv
-
-# 1.终端切换API目录
-cd api
-
-# 2.安装依赖
-uv sync 
-
-# 3.激活虚拟环境 (Windows)
-.venv\Scripts\Activate.ps1  （powershell，在api目录下）
-api\.venv\Scripts\activate （powershell，在根目录下）
-.venv\Scripts\activate.bat （cmd，在api目录下）
-
-```
-
-#### 1.2 安装必备基础服务（docker镜像）
-
-使用docker desktop安装所需的docker镜像
-
-* **docker desktop安装地址：**&#x68;ttps://www.docker.com/products/docker-desktop/
-
-* **PostgreSQL**
-
-  **拉取镜像**
-
-  search——select——pull
-
-  <img width="1280" height="731" alt="image-9" src="https://github.com/user-attachments/assets/0609eb5f-e259-4f24-8a7b-e354da6bae4d" />
-
-
-**创建容器**
-
-<img width="1280" height="731" alt="image-8" src="https://github.com/user-attachments/assets/d57b3206-1df1-42a4-80fd-e71f37201a25" />
-
-
-**服务启动成功**
-
-<img width="1280" height="731" alt="image" src="https://github.com/user-attachments/assets/76e04c54-7a36-46ec-a68e-241ad268e427" />
-
-
-* **Neo4j**
-
-**拉取镜像**，与PostgreSQL一样从docker desktop中拉取镜像
-
-**创建容器**，Neo4j 默认需要映射**2 个关键端口**（7474 对应 Browser，7687 对应 Bolt 协议），同时需设置初始密码
-
-<img width="1280" height="731" alt="image-1" src="https://github.com/user-attachments/assets/6bfb0c27-74e8-45f7-b381-189325d516bd" />
-
-
-**服务成功启动**
-
-<img width="1280" height="731" alt="image-2" src="https://github.com/user-attachments/assets/0d28b4fa-e8ed-4c05-8983-7a47f0a892d1" />
-
-
-* **Redis**
-
-同上
-
-#### 1.3 配置环境变量
-
-复制 env.example 为 .env 并填写配置
+#### 3.1 安装 Python 依赖
 
 ```bash
-# Neo4j 图数据库 
+# 安装依赖管理工具 uv
+pip install uv
+
+# 切换到 API 目录
+cd api
+
+# 安装依赖
+uv sync
+
+# 激活虚拟环境
+# Windows (PowerShell，在 api 目录下)
+.venv\Scripts\Activate.ps1
+# Windows (cmd，在 api 目录下)
+.venv\Scripts\activate.bat
+# macOS / Linux
+source .venv/bin/activate
+```
+
+#### 3.2 安装基础服务（Docker 镜像）
+
+使用 Docker Desktop 安装所需镜像：[下载 Docker Desktop](https://www.docker.com/products/docker-desktop/)
+
+**PostgreSQL**
+
+拉取镜像：search → select → pull
+
+<img width="1280" height="731" alt="PostgreSQL Pull" src="https://github.com/user-attachments/assets/96272efe-50ca-4a32-9686-5f23bc3f6c93" />
+
+创建容器：
+
+<img width="1280" height="731" alt="PostgreSQL Container" src="https://github.com/user-attachments/assets/074ea9da-9a3d-401b-b14b-89b81e05487e" />
+
+<img width="1280" height="731" alt="PostgreSQL Running" src="https://github.com/user-attachments/assets/a14744cd-9350-4a2f-87dd-6105b072487d" />
+
+**Neo4j**
+
+拉取镜像方式同上。创建容器时需映射两个关键端口，并设置初始密码：
+- `7474`：Neo4j Browser
+- `7687`：Bolt 协议
+
+<img width="1280" height="731" alt="Neo4j Container" src="https://github.com/user-attachments/assets/881dca96-aec0-4d43-82d0-bb0402eadaf8" />
+
+<img width="1280" height="731" alt="Neo4j Running" src="https://github.com/user-attachments/assets/87423c90-22e8-44a9-a00a-df5d4dce4909" />
+
+**Redis**：同上步骤拉取并创建容器。
+
+**Elasticsearch**
+
+拉取 Elasticsearch 8.x 镜像并创建容器，映射端口 `9200`（HTTP API）和 `9300`（集群通信）。首次启动建议关闭安全认证以简化配置：
+
+```bash
+docker run -d --name elasticsearch \
+  -p 9200:9200 -p 9300:9300 \
+  -e "discovery.type=single-node" \
+  -e "xpack.security.enabled=false" \
+  elasticsearch:8.15.0
+```
+
+#### 3.3 配置环境变量
+
+```bash
+cp env.example .env
+```
+
+编辑 `.env` 填写以下核心配置：
+
+```bash
+# Neo4j 图数据库
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USERNAME=neo4j
 NEO4J_PASSWORD=your-password
-# Neo4j Browser访问地址
 
 # PostgreSQL 数据库
 DB_HOST=127.0.0.1
@@ -195,133 +314,165 @@ DB_USER=postgres
 DB_PASSWORD=your-password
 DB_NAME=redbear-mem
 
-# Database Migration Configuration
-# Set to true to automatically upgrade database schema on startup
-DB_AUTO_UPGRADE=true  # 首次启动设为true自动迁移数据库 在空白数据库创建表结构
+# 首次启动设为 true，自动迁移数据库
+DB_AUTO_UPGRADE=true
 
 # Redis
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
-REDIS_DB=1 
+REDIS_DB=1
 
-# Celery (使用Redis作为broker)
+# Celery
 REDIS_DB_CELERY_BROKER=1
 REDIS_DB_CELERY_BACKEND=2
 
-# JWT密钥 (生成方式: openssl rand -hex 32)
+# Elasticsearch
+ELASTICSEARCH_HOST=127.0.0.1
+ELASTICSEARCH_PORT=9200
+
+# JWT 密钥（生成方式：openssl rand -hex 32）
 SECRET_KEY=your-secret-key-here
 ```
 
-#### 1.4 PostgreSQL数据库建立
+#### 3.4 初始化 PostgreSQL 数据库
 
-通过项目中已有的 alembic 数据库迁移文件，为全新创建的空白 PostgreSQL 数据库创建对应的表结构。
+确认 `alembic.ini` 中的数据库连接配置：
 
-**（1）配置数据库连接**
-
-确认项目中`alembic.ini`文件的`sqlalchemy.url`配置指向你的空白 PostgreSQL 数据库，格式示例：
-
-```bash
-sqlalchemy.url = postgresql://用户名:密码@数据库地址:端口/空白数据库名
+```ini
+sqlalchemy.url = postgresql://用户名:密码@数据库地址:端口/数据库名
 ```
 
-同时检查 migrations`/env.py`中`target_metadata`是否正确关联到 ORM 模型的`metadata`（确保迁移脚本和模型一致）
-
-**（2）执行迁移文件**
-
-在API目录执行以下命令，alembic 会自动识别空白数据库，并执行所有未应用的迁移脚本，创建完整表结构：
+执行迁移，创建完整表结构：
 
 ```bash
 alembic upgrade head
 ```
 
-<img width="1076" height="341" alt="image-3" src="https://github.com/user-attachments/assets/9edda79d-4637-46e3-bee3-2eec39975d59" />
+<img width="1076" height="341" alt="Alembic Migration" src="https://github.com/user-attachments/assets/6970a8e6-712b-4f49-937a-f5870a2d1a2a" />
 
+<img width="1280" height="680" alt="Database Tables" src="https://github.com/user-attachments/assets/8bbec421-de0c-472b-a7ce-8b89cc1e2efd" />
 
-通过Navicat查看迁移创建的数据库表结构
+#### 3.5 启动 API 服务
 
-<img width="1280" height="680" alt="image-4" src="https://github.com/user-attachments/assets/aa5c1d98-bdc3-4d25-acb2-5c8cf6ecd3f5" />
-
-
-#### API服务启动
-
-```python
+```bash
 uv run -m app.main
 ```
 
 访问 API 文档：http://localhost:8000/docs
 
-<img width="1280" height="675" alt="image-5" src="https://github.com/user-attachments/assets/68fa62b4-2c4f-4cf0-896c-41d59aa7d712" />
+<img width="1280" height="675" alt="API Docs" src="https://github.com/user-attachments/assets/6d1c71b7-9ee8-4f80-9bed-19c410d6e85f" />
 
+#### 3.6 启动 Celery Worker（可选，用于异步任务）
 
-### 2.前端web应用启动
+```bash
+# 记忆任务 Worker（线程池，支持高并发 asyncio）
+celery -A app.celery_worker.celery_app worker --loglevel=info --pool=threads --concurrency=100 --queues=memory_tasks
 
-#### 2.1安装依赖
+# 文档解析 Worker（进程池，CPU 密集型）
+celery -A app.celery_worker.celery_app worker --loglevel=info --pool=prefork --concurrency=4 --queues=document_tasks
 
-```python
-# 切换web目录下
+# 定时任务 Worker（反思引擎等）
+celery -A app.celery_worker.celery_app worker --loglevel=info --pool=prefork --concurrency=2 --queues=periodic_tasks
+
+# Beat 调度器
+celery -A app.celery_worker.celery_app beat --loglevel=info
+```
+
+### 四、前端 Web 应用启动
+
+#### 4.1 安装依赖
+
+```bash
 cd web
-
-# 下载依赖
 npm install
 ```
 
-#### 2.2 修改API代理配置
+#### 4.2 修改 API 代理配置
 
-编辑 web/vite.config.ts，将代理目标改为后端地址
+编辑 `web/vite.config.ts`：
 
-```python
+```typescript
 proxy: {
   '/api': {
-    target: 'http://127.0.0.1:8000',  // 改为后端地址，win用户127.0.0.1  mac用户0.0.0.0
+    target: 'http://127.0.0.1:8000',  // Windows 用 127.0.0.1，macOS 用 0.0.0.0
     changeOrigin: true,
   },
 }
-
 ```
 
-#### 2.3 启动服务
+#### 4.3 启动前端服务
 
-```python
-# 启动web服务
+```bash
 npm run dev
-
 ```
 
-服务启动会输出可访问的前端界面
+<img width="935" height="311" alt="Frontend Start" src="https://github.com/user-attachments/assets/8b08fc46-01d0-458b-ab4d-f5ac04bc2510" />
 
-<img width="935" height="311" alt="image-6" src="https://github.com/user-attachments/assets/cba1074a-440c-4866-8a94-7b6d1c911a93" />
+<img width="1280" height="652" alt="Frontend UI" src="https://github.com/user-attachments/assets/542dbee3-8cd4-4b16-a8e5-36f8d6153820" />
 
+### 五、初始化系统
 
-<img width="1280" height="652" alt="image-7" src="https://github.com/user-attachments/assets/a719dc0a-cbdd-4ba1-9b21-123d5eac32eb" />
+```bash
+# 初始化数据库，获取超级管理员账号
+curl -X POST http://127.0.0.1:8000/api/setup
+```
 
+**超级管理员账号：**
+- 账号：`admin@example.com`
+- 密码：`admin_password`
 
-## 四、用户操作
+### 六、完整启动流程
 
-step1：项目获取
+```
+Step 1  克隆项目
+Step 2  启动基础服务（PostgreSQL / Neo4j / Redis / Elasticsearch）
+Step 3  配置 .env 环境变量
+Step 4  执行 alembic upgrade head 初始化数据库
+Step 5  uv run -m app.main 启动后端 API
+Step 6  npm run dev 启动前端
+Step 7  curl -X POST http://127.0.0.1:8000/api/setup 初始化系统
+Step 8  使用管理员账号登录前端页面
+```
 
-step2：后端API服务启动
+---
 
-step3：前端web应用启动
+## 技术栈
 
-step4： 终端输入 curl.exe -X POST http://127.0.0.1:8000/api/setup ，访问接口初始化数据库获得超级管理员账号
+| 层级 | 技术 |
+|------|------|
+| 后端框架 | FastAPI + Uvicorn |
+| 异步任务 | Celery（三队列：memory / document / periodic） |
+| 主数据库 | PostgreSQL 13+ |
+| 图数据库 | Neo4j 4.4+ |
+| 搜索引擎 | Elasticsearch 8.x（关键词 + 语义向量混合） |
+| 缓存/队列 | Redis 6.0+ |
+| ORM | SQLAlchemy 2.0 + Alembic |
+| LLM 集成 | LangChain / OpenAI / DashScope / AWS Bedrock |
+| MCP 集成 | fastmcp + langchain-mcp-adapters |
+| 前端框架 | React 18 + TypeScript + Vite |
+| UI 组件库 | Ant Design 5.x |
+| 图可视化 | AntV X6 + ECharts + D3.js |
+| 包管理 | uv（后端）/ npm（前端） |
 
-step5：超级管理员&#x20;
-
-账号：admin@example.com
-
-密码：admin\_password
-
-step6：登陆前端页面
-
-
-
+---
 
 ## 许可证
 
-本项目采用 Apache License 2.0 开源协议，详情见 `LICENSE`。
+本项目采用 [Apache License 2.0](LICENSE) 开源协议。
+
+---
 
 ## 致谢与交流
 
-- 问题反馈与讨论：请提交 Issue 到代码仓库
-- 欢迎贡献：提交 PR 前请先创建功能分支并遵循常规提交信息格式
-- 如感兴趣需要联络：tianyou_hubm@redbearai.com
+- **问题反馈**：请提交 [Issue](https://github.com/SuanmoSuanyangTechnology/MemoryBear/issues)
+- **贡献代码**：请阅读 [贡献指南](CONTRIBUTING.md)，提交 [Pull Request](https://github.com/SuanmoSuanyangTechnology/MemoryBear/pulls) 前请先创建功能分支并遵循 Conventional Commits 格式
+- **社区讨论**：[GitHub Discussions](https://github.com/SuanmoSuanyangTechnology/MemoryBear/discussions)
+- **微信社群**：扫描下方二维码加入微信交流群
+
+![WeChat QR](https://github.com/user-attachments/assets/8c81885c-4134-40d5-96e2-7f78cc082dc6)
+
+- **Star 历史**：
+
+[![Star History Chart](https://api.star-history.com/svg?repos=SuanmoSuanyangTechnology/MemoryBear&type=Date)](https://star-history.com/#SuanmoSuanyangTechnology/MemoryBear&Date)
+
+- **联系我们**：tianyou_hubm@redbearai.com
