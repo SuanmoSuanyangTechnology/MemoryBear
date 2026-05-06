@@ -21,7 +21,7 @@ from app.dependencies import cur_workspace_access_guard, get_current_user
 from app.models import ModelApiKey
 from app.models.user_model import User
 from app.repositories import knowledge_repository
-from app.schemas.memory_agent_schema import UserInput, Write_UserInput
+from app.schemas.memory_agent_schema import StorageType, UserInput, Write_UserInput, WriteMemoryRequest
 from app.schemas.response_schema import ApiResponse
 from app.services import task_service, workspace_service
 from app.services.memory_agent_service import MemoryAgentService
@@ -852,7 +852,7 @@ async def get_end_user_connected_config(
         包含 memory_config_id 和相关信息的响应
     """
 
-    api_logger.info(f"Getting connected config for end_user: {end_user_id}")
+    api_logger.info(f"Getting connected config for end_user_id: {end_user_id}")
 
     try:
         result = get_config(end_user_id, db)

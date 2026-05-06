@@ -155,12 +155,6 @@ Primary statement to analyze:
   - negative_examples: `他们`、`一些人`、`一个朋友`
   - notes: 只用于边界相对稳定的人群；边界不稳或 unresolved 的表达不要归入 `群体`。
 
-- `智能体`
-  - definition: 具有行动、交互或执行能力的非人主体，如机器人、AI 或其他智慧体。
-  - positive_examples: `机器人查票员`、`家务机器人`、`智能助手`
-  - negative_examples: `手机`、`电脑`、`机器人公司`
-  - notes: 如果对象只是普通设备，不归入 `智能体`；只有在叙述中被当作主体行动或交互时才使用。
-
 - `角色职业`
   - definition: 人物承担的社会角色、功能身份或职业身份。
   - positive_examples: `导师`、`老师`、`学生`、`医生`、`程序员`
@@ -175,39 +169,21 @@ Primary statement to analyze:
 
 - `物品设备`
   - definition: 可被持有、使用、携带的具体物体、设备、工具或交通工具。
-  - positive_examples: `手机`、`电脑`、`相机`、`自行车`
+  - positive_examples: `手机`、`电脑`、`相机`、`自行车`、`机器人查票员`、`智能助手`
   - negative_examples: `微信`、`GitHub`、`会员服务`
-  - notes: 交通工具当前并入此类；数字服务不归入本类。
-
-- `产品服务`
-  - definition: 可被购买、使用、消费或订阅的产品或服务。
-  - positive_examples: `iPhone`、`健身课`、`会员服务`
-  - negative_examples: `微信`、`GitHub`、`手机`
-  - notes: 具体商品和服务当前一级合并；纯软件平台优先归入 `软件平台`。
+  - notes: 交通工具当前并入此类；数字服务不归入本类。极简版中，原本可单列为 `智能体` 的非人行动主体也暂并入本类。
 
 - `软件平台`
   - definition: 软件、应用、网站、在线平台或数字服务系统。
   - positive_examples: `微信`、`GitHub`、`ChatGPT`、`飞书`
-  - negative_examples: `iPhone`、`会员服务`、`手机号`
-  - notes: 软件、网站、平台当前一级合并；如果语境强调的是账号本身，改用 `账号`。
+  - negative_examples: `iPhone`、`手机号`、`邮箱`
+  - notes: 软件、网站、平台当前一级合并；如果语境强调的是登录、识别或联系信息本身，改用 `识别联系信息`。
 
-- `账号`
-  - definition: 账户、账号、用户档案类实体。
-  - positive_examples: `GitHub账号`、`微信号`
-  - negative_examples: `用户名`、`工号`、`邮箱`
-  - notes: 与 `标识符`、`联系方式` 分开；账号是主体可持有的账户对象。
-
-- `标识符`
-  - definition: 用于识别实体的编号、ID、用户名、学号、工号等标识。
-  - positive_examples: `学号`、`工号`、`用户名`
-  - negative_examples: `GitHub账号`、`手机号`
-  - notes: 当前允许保留，但通常只有在存在明确识别关系时才值得抽取。
-
-- `联系方式`
-  - definition: 可用于联系实体的电话、邮箱、社交联系地址。
-  - positive_examples: `手机号`、`邮箱`、`微信联系方式`
-  - negative_examples: `用户名`、`GitHub账号`
-  - notes: 当前允许保留，但通常只有在存在明确联系关系时才值得抽取。
+- `识别联系信息`
+  - definition: 账号、用户名、编号、邮箱、手机号等与识别、联系或登录相关的信息对象。
+  - positive_examples: `GitHub账号`、`微信号`、`学号`、`工号`、`用户名`、`手机号`、`邮箱`
+  - negative_examples: `微信`、`张三`、`简历`
+  - notes: 极简版中将原先的 `账号`、`标识符`、`联系方式` 合并为一类；如后续需要更细的图谱结构，可在下一层再拆分。
 
 - `文档媒体`
   - definition: 文章、报告、表格、图片、音频、视频等内容载体。
@@ -221,11 +197,17 @@ Primary statement to analyze:
   - negative_examples: `紧张`、`成功`、`意义`
   - notes: 不包含情绪、心理状态、抽象结果或价值判断；这些应写入 `description`。
 
-- `偏好习惯目标`
-  - definition: 用户稳定的偏好、重复习惯，以及具体、明确、用户特异且值得长期保留的目标。
-  - positive_examples: `喜欢安静环境`、`晨跑`、`通过雅思`
-  - negative_examples: `紧张`、`开心`、`成功`、`回报`
-  - notes: 这是高风险类型；只允许稳定偏好、重复习惯、具体目标，不允许抽象愿望或情绪状态。
+- `偏好习惯`
+  - definition: 用户稳定的偏好、重复习惯或长期行为倾向。
+  - positive_examples: `喜欢安静环境`、`晨跑`、`偏好黑咖啡`、`每天记笔记`
+  - negative_examples: `紧张`、`开心`、`成功`、`通过雅思`
+  - notes: 只保留稳定偏好与重复习惯，不包含情绪状态，也不包含具体目标结果。
+
+- `具体目标`
+  - definition: 用户具体、明确、可验证、可长期追踪的目标结果或目标性安排。
+  - positive_examples: `通过雅思`、`完成毕业论文`、`每周读两篇论文`
+  - negative_examples: `成功`、`更有意义`、`迎接新的挑战`、`紧张`
+  - notes: 只保留具体目标，不保留宽泛愿望、抽象追求或价值判断；宽泛内容应写入 `description`。
 
 - `称呼别名`
   - definition: 用于指代或称呼实体的名字。
@@ -244,8 +226,8 @@ Primary statement to analyze:
 - 优先保留对用户画像、偏好、长期身份、稳定关系或持续兴趣有记忆价值的实体类型。
 - 对于“努力”“回报”“意义”“成功”这类泛化概念、抽象命题片段或价值判断，默认不要仅因句中出现就创建实体。
 - `群体` 只用于边界相对稳定、可被当作整体引用的人群；像“他们”“一些人”“一个朋友”这类边界不稳或 unresolved 的表达不要归入 `群体`。
-- `偏好习惯目标` 只能用于稳定偏好、重复习惯或具体明确的用户目标，不能把抽象结果、泛因果终点、空泛愿望或情绪状态强行归入其中。
-- 当前阶段不抽取情绪状态实体；像“紧张”“开心”“难过”“焦虑”“放松”这类情绪或心理状态，不要归入 `知识能力`、`偏好习惯目标` 或其他现有类型。
+- `偏好习惯` 只保留稳定偏好、重复习惯或长期行为倾向；`具体目标` 只保留具体、明确、可验证的目标结果。都不允许吸纳抽象愿望、泛因果终点或情绪状态。
+- 当前阶段不抽取情绪状态实体；像“紧张”“开心”“难过”“焦虑”“放松”这类情绪或心理状态，不要归入 `知识能力`、`偏好习惯`、`具体目标` 或其他现有类型。
 
 ===关系本体大类===
 以下大类是当前 `predicate` 本体树的第一层，用于帮助理解和约束后面的具体关系白名单。输出具体 `predicate` 时仍然必须使用后文列出的细关系，而不是直接输出这些大类名称。
@@ -346,20 +328,12 @@ Primary statement to analyze:
   - notes: 两端通常都应是可作为交互主体的实体。
   - status: `enabled`
 
-- `提及关系`
-  - definition: 表达主体或文本明确提到某实体的关系。
-  - covered_predicates: `提到`
-  - positive_examples: `用户 -> 提到 -> 腾讯`、`文档 -> 提到 -> 张三`
-  - negative_examples: `用户 -> 提到 -> 努力`、`用户 -> 提到 -> 回报`、`用户 -> 提到 -> 紧张`
-  - notes: 受限大类；不用于保留泛化概念、抽象命题片段、情绪状态或仅在句面上出现但没有记忆价值的对象。
-  - status: `restricted`
-
-- `一般关联关系`
-  - definition: 表达两个实体之间存在明确、稳定、值得保留，但当前无更精确谓词可用的关联关系。
-  - covered_predicates: `关联于`、`相关于`
-  - positive_examples: `项目 -> 关联于 -> 实验室`、`账号 -> 相关于 -> 平台`
-  - negative_examples: `努力 -> 相关于 -> 回报`、`用户 -> 关联于 -> 紧张`、`成功 -> 相关于 -> 意义`
-  - notes: 受限大类；不能作为失败兜底关系，不能用来连接抽象概念、口号式表达或无法成立的关系。
+- `弱关联关系`
+  - definition: 表达两个实体之间存在明确、稳定、值得保留，但当前缺少更精确谓词可用的弱关联关系。
+  - covered_predicates: `提到`、`关联于`、`相关于`
+  - positive_examples: `项目 -> 关联于 -> 实验室`、`账号 -> 相关于 -> 平台`、`文档 -> 提到 -> 张三`
+  - negative_examples: `努力 -> 相关于 -> 回报`、`用户 -> 提到 -> 紧张`、`成功 -> 关联于 -> 意义`
+  - notes: 受限大类；不能作为失败兜底关系，不能用来连接抽象概念、口号式表达、情绪状态或无法成立的关系。
   - status: `restricted`
 
 ===预定义关系类型===
@@ -750,8 +724,8 @@ Output:
   ],
   "entities": [
     {"entity_idx": 0, "name": "用户", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "拥有该 GitHub 账号的说话者", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "GitHub账号", "type": "账号", "type_description": "账户、账号、用户档案类实体。", "description": "用户拥有的 GitHub 账号", "is_explicit_memory": false},
-    {"entity_idx": 2, "name": "chen4", "type": "标识符", "type_description": "用于识别实体的编号、ID、用户名、学号、工号等标识。", "description": "该 GitHub 账号对应的用户名标识", "is_explicit_memory": false}
+    {"entity_idx": 1, "name": "GitHub账号", "type": "识别联系信息", "type_description": "账号、用户名、编号、邮箱、手机号等与识别、联系或登录相关的信息对象。", "description": "用户拥有的 GitHub 账号", "is_explicit_memory": false},
+    {"entity_idx": 2, "name": "chen4", "type": "识别联系信息", "type_description": "账号、用户名、编号、邮箱、手机号等与识别、联系或登录相关的信息对象。", "description": "该 GitHub 账号对应的用户名标识", "is_explicit_memory": false}
   ]
 }
 
@@ -764,7 +738,7 @@ Output:
     {"subject_name": "机器人查票员", "subject_id": 0, "predicate": "沟通于", "predicate_description": "两个实体之间发生沟通或交流", "object_name": "用户", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "机器人查票员", "type": "智能体", "type_description": "具有行动、交互或执行能力的非人主体，如机器人、AI 或其他智慧体。", "description": "与用户发生沟通的机器人主体", "is_explicit_memory": false},
+    {"entity_idx": 0, "name": "机器人查票员", "type": "物品设备", "type_description": "可被持有、使用、携带的具体物体、设备、工具或交通工具。", "description": "与用户发生沟通的机器人主体", "is_explicit_memory": false},
     {"entity_idx": 1, "name": "用户", "type": "人物", "type_description": "可稳定指向、可被当作具体个体区分和归并的个人实体。", "description": "与机器人查票员沟通的说话者", "is_explicit_memory": false}
   ]
 }
