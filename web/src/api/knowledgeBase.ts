@@ -307,7 +307,7 @@ export const updateDocumentChunk = async (kb_id:string, document_id:string, doc_
   return response as any;
 };
 export const deleteDocumentChunk = async (kb_id: string, document_id: string, doc_id: string) => {
-  const response = await request.delete(`${apiPrefix}/chunks/${kb_id}/${document_id}/${doc_id}`);
+  const response = await request.delete(`${apiPrefix}/chunks/${kb_id}/${document_id}/${doc_id}?force_refresh=true`);
   return response as any;
 };
 // 文档块儿创建
