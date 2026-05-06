@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:25:37 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 22:35:08
+ * @Last Modified time: 2026-04-29 17:21:46
  */
 /**
  * Knowledge Configuration Modal
@@ -91,10 +91,14 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
 
   useEffect(() => {
     if (values?.retrieve_type) {
-      const fieldsToReset = Object.keys(values).filter(key => 
+      const resetValues: KnowledgeConfigForm = {}
+      const fieldsToReset = Object.keys(values).filter(key =>
         key !== 'kb_id' && key !== 'retrieve_type' && key !== 'top_k'
       ) as (keyof KnowledgeConfigForm)[];
-      form.resetFields(fieldsToReset);
+      fieldsToReset.forEach(key => {
+        resetValues[key] = undefined
+      })
+      form.setFieldsValue(resetValues);
     }
   }, [values?.retrieve_type])
 
