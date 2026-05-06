@@ -11,7 +11,7 @@ import { useNavigate, useParams, useLocation, useSearchParams } from 'react-rout
 import { useTranslation } from 'react-i18next';
 import { useBreadcrumbManager, type BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
 import { Button, Spin, message, Switch, App } from 'antd';
-import { getDocumentDetail, getDocumentChunkList, downloadFile, updateDocument, updateDocumentChunk, createDocumentChunk, getFileUrl } from '@/api/knowledgeBase';
+import { getDocumentDetail, getDocumentChunkList, downloadFile, updateDocument, updateDocumentChunk, createDocumentChunk } from '@/api/knowledgeBase';
 import type { KnowledgeBaseDocumentData, RecallTestData } from '@/views/KnowledgeBase/types';
 import { formatDateTime } from '@/utils/format';
 import InfoPanel, { type InfoItem } from '../components/InfoPanel';
@@ -20,7 +20,6 @@ import SearchInput from '@/components/SearchInput';
 import DocumentPreview from '@/components/DocumentPreview';
 import InsertModal, { type InsertModalRef } from '../components/InsertModal';
 import exitIcon from '@/assets/images/knowledgeBase/exit.png';
-const imagePath = 'https://devapi.mem.redbearai.com'
 import copy from 'copy-to-clipboard'
 const DocumentDetails: FC = () => {
   const { t } = useTranslation();
@@ -228,6 +227,11 @@ const DocumentDetails: FC = () => {
     }
   };
 
+  const refreshChunks = () => {
+    let nextPage = 1;
+    setPage(nextPage);
+    ChunkList(nextPage);
+  }
   const loadMoreChunks = () => {
     const nextPage = page + 1;
     setPage(nextPage);
@@ -363,8 +367,8 @@ const DocumentDetails: FC = () => {
                 fileName={document?.file_name}
                 fileExt={document?.file_ext}
                 height="calc(100% - 40px)"
-                mode="google"
-                showModeSwitch={true}
+                // mode="google"
+                // showModeSwitch={true}
               />
             </div>
           )}
@@ -425,7 +429,7 @@ const DocumentDetails: FC = () => {
             {t('knowledgeBase.chunkList') || '分块列表'}
           </h2>
           <RecallTestResult 
-            
+            refresh={refreshChunks}
             data={chunkList} 
             showEmpty={false}
             hasMore={hasMore}

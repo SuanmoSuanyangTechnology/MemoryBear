@@ -16,6 +16,7 @@ import RbCard from '@/components/RbCard/Card'
 import SearchInput from '@/components/SearchInput'
 import Empty from '@/components/Empty'
 import { getKnowledgeBaseList, getModelList, getModelTypeList, deleteKnowledgeBase, getKnowledgeBaseTypeList } from '@/api/knowledgeBase'
+import copy from 'copy-to-clipboard'
 
 import InfiniteScroll from 'react-infinite-scroll-component';
 
@@ -527,6 +528,10 @@ const KnowledgeBaseManagement: FC = () => {
       fetchData(1, false);
     }
   }, [modelTypes, query.parent_id, query.keywords, query.orderby, query.desc])
+  const handleCopy = (value: string) => {
+    copy(value)
+    messageApi.success(t('common.copySuccess'))
+  }
 
   return (
     <>
@@ -595,6 +600,13 @@ const KnowledgeBaseManagement: FC = () => {
                               </Tooltip>
                           </div>
                           <Flex vertical gap={4} className='rb:min-h-15 rb:py-2.5! rb:px-3! rb:bg-[#F6F6F6] rb:rounded-lg rb:mb-3'>
+                            <div className="rb:cursor-pointer rb:mb-3 rb:w-full" onClick={() => handleCopy(item.id)}>
+                              <div className="rb:text-gray-800 rb:font-medium">ID:</div>
+                              <Flex align="center" className="rb:text-[#5B6167]">
+                                {item.id}
+                                <span className="rb:ml-1 rb:inline-block rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"></span>
+                              </Flex>
+                            </div>
                             {item.descriptionItems?.map((description: Record<string, unknown>) => (
                               <div 
                                 key={description.key as string}

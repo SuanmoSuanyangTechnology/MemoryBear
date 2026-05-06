@@ -10,7 +10,7 @@ import type { ColumnsType } from 'antd/es/table';
 import type { UploadFile } from 'antd';
 import UploadFiles from '@/components/Upload/UploadFiles';
 import type { UploadRequestOption } from 'rc-upload/lib/interface';
-import { uploadFile, getDocumentList, parseDocument, updateDocument, deleteDocument, createDocumentAndUpload } from '@/api/knowledgeBase';
+import { uploadFile, uploadQaFile, getDocumentList, parseDocument, updateDocument, deleteDocument, createDocumentAndUpload } from '@/api/knowledgeBase';
 import exitIcon from '@/assets/images/knowledgeBase/exit.png';
 
 import SliderInput from '@/components/SliderInput';
@@ -38,7 +38,7 @@ const { TextArea } = Input;
   });
 
 
-type SourceType = 'local' | 'link' | 'text';
+type SourceType = 'local' | 'link' | 'text' | 'csv';
 type ProcessingMethod = 'directBlock' | 'qaExtract';
 type ParameterSettings = 'defaultSettings' | 'customSettings';
 const stepKeys = ['selectFile', 'parameterSettings', 'dataPreview', 'confirmUpload'] as const;
@@ -63,6 +63,8 @@ interface ContentFormData {
   title: string;
   content: string;
 }
+const fileType = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'htm', 'html', 'json', 'ppt', 'pptx', 'txt', 'png', 'jpg', 'mp3', 'mp4', 'mov', 'wav']
+const csvFileType = ['csv']
 const CreateDataset = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -91,11 +93,12 @@ const CreateDataset = () => {
   const pollingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [delimiter, setDelimiter] = useState<string | undefined>(undefined);
   const [blockSize, setBlockSize] = useState<number>(130);
+  const [qaPrompt, setQaPrompt] = useState<string | undefined>()
+  console.log('qaPrompt', qaPrompt)
   const [processingMethod, setProcessingMethod] = useState<ProcessingMethod>('directBlock');
   const [parameterSettings, setParameterSettings] = useState<ParameterSettings>('defaultSettings');
   const [pdfEnhancementEnabled, setPdfEnhancementEnabled] = useState<boolean>(true);
   const [pdfEnhancementMethod, setPdfEnhancementMethod] = useState<string>('mineru');
-  const fileType = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'htm', 'html', 'json', 'ppt', 'pptx', 'txt','png','jpg','mp3','mp4','mov','wav']
   const steps = useMemo(
     () => [
       { title: t('knowledgeBase.selectFile') },
@@ -112,8 +115,11 @@ const CreateDataset = () => {
   const handleNext = async () => {
     // Temporarily hide step 3: adjust step index (0->1->2 corresponds to select file->parameter settings->confirm upload)
     let nextStep = current + 1;
+    if (current === 0 && source === 'csv') {
+      return
+    }
     
-    if(nextStep === 1 && source === 'local') {
+    if((nextStep === 1 && source === 'local') || (nextStep === 2 && source === 'csv')) {
       // Check if files have been uploaded
       if (rechunkFileIds.length === 0) {
         // If no files, prompt user to upload first
@@ -159,6 +165,7 @@ const CreateDataset = () => {
                       delimiter: delimiter,
                       chunk_token_num: blockSize,
                       auto_questions: processingMethod === 'directBlock' ? 0 : 1,
+                      qa_prompt: qaPrompt
                   }
                 }
                 updateDocument(id, params)
@@ -378,40 +385,67 @@ const CreateDataset = () => {
       formData.append('parent_id', parentId);
     }
 
-    uploadFile(formData, {
-      kb_id: knowledgeBaseId,
-      parent_id: parentId,
-      signal: abortController.signal,
-      onUploadProgress: (event) => {
-        if (!event.total) return;
-        const percent = Math.round((event.loaded / event.total) * 100);
-        onProgress?.({ percent }, file);
-      },
-    })
-      .then((res: UploadFileResponse) => {
-        // Upload successful, remove AbortController
-        abortControllersRef.current.delete(fileUid);
-        
-        onSuccess?.(res, new XMLHttpRequest());
-        if (res?.id) {
-          setRechunkFileIds((prev) => {
-            if (prev.includes(res.id)) return prev;
-            const next = [...prev, res.id];
-            return next;
-          });
-        }
+    if (source === 'csv') {
+      uploadQaFile(formData, {
+        kb_id: knowledgeBaseId,
+        parent_id: parentId,
+        signal: abortController.signal,
       })
-      .catch((error) => {
-        // Remove AbortController
-        abortControllersRef.current.delete(fileUid);
-        
-        // If user actively cancelled, don't show error message
-        if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
-          console.log('Upload cancelled:', (file as File).name);
-          return;
-        }
-        onError?.(error as Error);
-      });
+        .then((res: UploadFileResponse) => {
+          // Upload successful, remove AbortController
+          abortControllersRef.current.delete(fileUid);
+          
+          onSuccess?.(res, new XMLHttpRequest());
+          messageApi.success(t('knowledgeBase.uploadSuccess'))
+          handleBack()
+        })
+        .catch((error) => {
+          // Remove AbortController
+          abortControllersRef.current.delete(fileUid);
+          
+          // If user actively cancelled, don't show error message
+          if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
+            console.log('Upload cancelled:', (file as File).name);
+            return;
+          }
+          onError?.(error as Error);
+        });
+    } else {
+      uploadFile(formData, {
+        kb_id: knowledgeBaseId,
+        parent_id: parentId,
+        signal: abortController.signal,
+        onUploadProgress: (event) => {
+          if (!event.total) return;
+          const percent = Math.round((event.loaded / event.total) * 100);
+          onProgress?.({ percent }, file);
+        },
+      })
+        .then((res: UploadFileResponse) => {
+          // Upload successful, remove AbortController
+          abortControllersRef.current.delete(fileUid);
+          
+          onSuccess?.(res, new XMLHttpRequest());
+          if (res?.id) {
+            setRechunkFileIds((prev) => {
+              if (prev.includes(res.id)) return prev;
+              const next = [...prev, res.id];
+              return next;
+            });
+          }
+        })
+        .catch((error) => {
+          // Remove AbortController
+          abortControllersRef.current.delete(fileUid);
+          
+          // If user actively cancelled, don't show error message
+          if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
+            console.log('Upload cancelled:', (file as File).name);
+            return;
+          }
+          onError?.(error as Error);
+        });
+    }
   };
 
 
@@ -557,21 +591,21 @@ const CreateDataset = () => {
           <img src={exitIcon} alt='exit' className='rb:w-4 rb:h-4' />
           <span className='rb:text-gray-500 rb:text-sm'>{t('common.exit')}</span>
       </div>
-      <div className='rb:px-24 rb:py-5  rb:bg-white rb:rounded-xl'>
+      {source !== 'csv' && <div className='rb:px-24 rb:py-5  rb:bg-white rb:rounded-xl'>
           <Steps current={current} items={steps} className="custom-steps" />
-      </div>  
+      </div> } 
       <div className='rb:bg-white rb:rounded-xl rb:flex-1 rb:mt-3'>
 
         {current === 0 && (
           <div className='rb:flex rb:w-full rb:p-6'>
-              {source && source === 'local' && (
+              {source && (source === 'local' || source === 'csv') && (
                   <UploadFiles 
                     ref={uploadRef}
                     isCanDrag={true} 
                     fileSize={100} 
-                    multiple={true} 
-                    maxCount={99} 
-                    fileType={fileType} 
+                    multiple={source !== 'csv'} 
+                    maxCount={source === 'csv' ? 1 : 99}
+                    fileType={source === 'csv' ? csvFileType : fileType} 
                     customRequest={handleUpload}
                     onChange={(fileList) => {
                       console.log('File list changed:', fileList);
@@ -765,18 +799,23 @@ const CreateDataset = () => {
                       </Flex>
                   </Radio>
               </Radio.Group>
-              {parameterSettings === 'customSettings' && ( 
+              {parameterSettings === 'customSettings' && (<>
                 <div className='rb:grid rb:grid-cols-2 rb:mt-5 rb-border rb:rounded-xl rb:px-6 rb:py-4 rb:gap-10'> 
-                <div>
-                  <div className='rb:w-full rb:text-[#5B6167] rb:leading-5 rb:mb-2'>
-                    {t('knowledgeBase.delimiter')}
-                  </div>
-                  <DelimiterSelector value={delimiter} onChange={setDelimiter} />
+                  <div>
+                    <div className='rb:w-full rb:text-[#5B6167] rb:leading-5 rb:mb-2'>
+                      {t('knowledgeBase.delimiter')}
+                    </div>
+                    <DelimiterSelector value={delimiter} onChange={setDelimiter} />
                   </div>
                   <SliderInput label={t('knowledgeBase.suggestedBlockSize')} max={1024} min={1} step={1} value={blockSize} onChange={handleChange} />
                 </div>
-                
-              )}
+                <div>
+                  <div className='rb:w-full rb:text-[#5B6167] rb:leading-5 rb:mb-2 rb:mt-4'>
+                    {t('knowledgeBase.qaPrompt')}
+                  </div>
+                  <Input.TextArea value={qaPrompt} rows={6} onChange={(e) => setQaPrompt(e.target.value)} />
+                </div>
+              </>)}
           </div>
         )}
 
@@ -853,7 +892,7 @@ const CreateDataset = () => {
               {t('common.previous') || 'Prev'}
               </Button>
           )}
-          <Button 
+          {source !== 'csv' && <Button 
             type='primary' 
             onClick={current === 2 ? handleStartUpload : handleNext}
             disabled={
@@ -863,7 +902,7 @@ const CreateDataset = () => {
             }
           >
             {current === 2 ? t('knowledgeBase.startUploading') || 'Start Upload' : t('common.next') || 'Next'}
-          </Button>
+          </Button>}
         </div>
       </div>
     </div>

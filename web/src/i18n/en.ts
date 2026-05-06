@@ -709,6 +709,8 @@ export const en = {
       localFile: 'Local File',
       uploadFileTypes: 'Upload PDF, TXT, DOCX, IMAGE, MEDIA and other format files',
       webLink: 'Web Link',
+      csvFile: 'Tabular Dataset',
+      csvUploadFileTypes: 'Upload files in CSV format',
       webLinkPlaceholder:'Please enter',
       webLinkDesc: 'Only static links are supported. If the uploaded data shows as empty, the link may not be readable. One per line, with a maximum of {{count}} links at a time',
       selectorTutorial: 'Selector Usage Tutorial',
