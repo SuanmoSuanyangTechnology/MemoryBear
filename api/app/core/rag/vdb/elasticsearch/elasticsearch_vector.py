@@ -5,7 +5,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
-from elasticsearch import Elasticsearch, helpers
+from elasticsearch import Elasticsearch, helpers, NotFoundError
 from elasticsearch.helpers import BulkIndexError
 from packaging.version import parse as parse_version
 # langchain-community
@@ -225,6 +225,8 @@ class ElasticSearchVector(BaseVector):
             List of DocumentChunk objects that match the query.
         """
         indices = kwargs.get("indices", self._collection_name)  # Default single index, multiple indexes are also supported, such as "index1, index2, index3"
+        if not self._client.indices.exists(index=indices):
+            return 0, []
 
         # Calculate the start position for the current page
         from_ = pagesize * (page-1)
@@ -259,12 +261,15 @@ class ElasticSearchVector(BaseVector):
             })
 
         # For simplicity, we use from/size here which has a limit (usually up to 10,000).
-        result = self._client.search(
-            index=indices,
-            from_=from_,  # Only use from_ for the first page (simplified)
-            size=pagesize,
-            body=query_str,
-        )
+        try:
+            result = self._client.search(
+                index=indices,
+                from_=from_,  # Only use from_ for the first page (simplified)
+                size=pagesize,
+                body=query_str,
+            )
+        except NotFoundError:
+            return 0, []
 
         if "errors" in result:
             raise ValueError(f"Error during query: {result['errors']}")
@@ -309,13 +314,18 @@ class ElasticSearchVector(BaseVector):
             List of DocumentChunk objects that match the query.
         """
         indices = kwargs.get("indices", self._collection_name)  # Default single index, multi-index available，etc "index1,index2,index3"
+        if not self._client.indices.exists(index=indices):
+            return 0, []
         query_str = {"query": {"term": {f"{Field.DOC_ID.value}": doc_id}}}
-        result = self._client.search(
-            index=indices,
-            from_=0,  # Only use from_ for the first page (simplified)
-            size=1,
-            body=query_str,
-        )
+        try:
+            result = self._client.search(
+                index=indices,
+                from_=0,  # Only use from_ for the first page (simplified)
+                size=1,
+                body=query_str,
+            )
+        except NotFoundError:
+            return 0, []
         # print(result)
         if "errors" in result:
             raise ValueError(f"Error during query: {result['errors']}")
