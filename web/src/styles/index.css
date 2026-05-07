@@ -468,3 +468,28 @@ input:-webkit-autofill:active {
   animation-duration: 1ms;
 }
 @keyframes onAutoFillStart { from {} to {} }
+/* Login input placeholder */
+.login-input input::placeholder {
+  color: #A8A9AA !important;
+}
+
+.login-input {
+  border-color: #A8A9AA;
+}
+
+/* Login input hover/focus border */
+.login-input:hover,
+.login-input:focus-within {
+  border-color: #FFFFFF !important;
+  box-shadow: none !important;
+}
+
+/* Override browser autofill styles */
+.login-input input:-webkit-autofill,
+.login-input input:-webkit-autofill:hover,
+.login-input input:-webkit-autofill:focus,
+.login-input input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0px 1000px #0A0A0A inset !important;
+  -webkit-text-fill-color: #FFFFFF !important;
+  transition: background-color 5000s ease-in-out 0s !important;
+}

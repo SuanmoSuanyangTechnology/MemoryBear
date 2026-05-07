@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-21 18:23:31
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-05-06 11:53:21 
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -948,6 +948,15 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     width: nodeWidth,
     height: 120,
     shape: 'notes-node',
+  },
+  output: {
+    width: nodeWidth,
+    height: 76,
+    shape: 'normal-node',
+    ports: {
+      groups: { left: leftPortGroup },
+      items: [defaultPortItems[0]],
+    },
   }
 }
 

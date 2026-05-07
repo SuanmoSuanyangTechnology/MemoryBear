@@ -66,8 +66,6 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   const [fileList, setFileList] = useState<any[]>([])
   const [message, setMessage] = useState<string | undefined>(undefined)
 
-  console.log('abortRef', abortRef, chatList)
-
   /**
    * Opens the chat drawer and loads workflow variables from the start node
    */

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:25:37 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 22:35:08
+ * @Last Modified time: 2026-04-29 17:21:46
  */
 /**
  * Knowledge Configuration Modal
@@ -91,10 +91,14 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
 
   useEffect(() => {
     if (values?.retrieve_type) {
-      const fieldsToReset = Object.keys(values).filter(key => 
+      const resetValues: KnowledgeConfigForm = {}
+      const fieldsToReset = Object.keys(values).filter(key =>
         key !== 'kb_id' && key !== 'retrieve_type' && key !== 'top_k'
       ) as (keyof KnowledgeConfigForm)[];
-      form.resetFields(fieldsToReset);
+      fieldsToReset.forEach(key => {
+        resetValues[key] = undefined
+      })
+      form.setFieldsValue(resetValues);
     }
   }, [values?.retrieve_type])
 
@@ -127,7 +131,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
           extra={t('application.retrieve_type_desc')}
           rules={[{ required: true, message: t('common.pleaseSelect') }]}
         >
-          
+
           <Select
             options={retrieveTypes.map(key => ({
               label: t(`application.${key}`),
@@ -150,33 +154,35 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
             onChange={(value) => form.setFieldValue('top_k', value)}
           />
         </FormItem>
-        {/* Semantic similarity threshold */}
+        {/* Vector similarity weight */}
         {values?.retrieve_type === 'semantic' && (
-          <FormItem
-            name="similarity_threshold"
-            label={t('application.similarity_threshold')}
-            extra={t('application.similarity_threshold_desc')}
-            initialValue={0.5}
-          >
-            <RbSlider 
-              max={1.0}
-              step={0.1}
-              min={0.0}
-            />
-          </FormItem>
-        )}
-        {/* Word segmentation matching threshold */}
-        {values?.retrieve_type === 'participle' && (
           <FormItem
             name="vector_similarity_weight"
             label={t('application.vector_similarity_weight')}
             extra={t('application.vector_similarity_weight_desc')}
             initialValue={0.5}
           >
-            <RbSlider 
+            <RbSlider
               max={1.0}
               step={0.1}
               min={0.0}
+              isInput={true}
+            />
+          </FormItem>
+        )}
+        {/* Semantic similarity threshold */}
+        {values?.retrieve_type === 'participle' && (
+          <FormItem
+            name="similarity_threshold"
+            label={t('application.similarity_threshold')}
+            extra={t('application.similarity_threshold_desc')}
+            initialValue={0.5}
+          >
+            <RbSlider
+              max={1.0}
+              step={0.1}
+              min={0.0}
+              isInput={true}
             />
           </FormItem>
         )}
@@ -189,10 +195,11 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
               extra={t('application.similarity_threshold_desc1')}
               initialValue={0.5}
             >
-              <RbSlider 
+              <RbSlider
                 max={1.0}
                 step={0.1}
                 min={0.0}
+                isInput={true}
               />
             </FormItem>
             <FormItem
@@ -201,10 +208,11 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
               extra={t('application.vector_similarity_weight_desc1')}
               initialValue={0.5}
             >
-              <RbSlider 
+              <RbSlider
                 max={1.0}
                 step={0.1}
                 min={0.0}
+                isInput={true}
               />
             </FormItem>
           </>

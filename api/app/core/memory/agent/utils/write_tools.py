@@ -20,6 +20,7 @@ from app.core.memory.storage_services.extraction_engine.knowledge_extraction.mem
     memory_summary_generation
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.memory.utils.log.logging_utils import log_time
+from app.core.memory.utils.memory_count_utils import sync_end_user_memory_count_from_neo4j
 from app.db import get_db_context
 from app.repositories.neo4j.add_edges import add_memory_summary_statement_edges
 from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
@@ -313,6 +314,28 @@ async def write(
     except Exception as cache_err:
         logger.warning(f"[WRITE] 写入活动统计缓存失败（不影响主流程）: {cache_err}", exc_info=True)
 
+    # 同步 Neo4j 记忆节点总数到 PostgreSQL end_users.memory_count
+    if end_user_id:
+        try:
+            memory_count_connector = Neo4jConnector()
+            try:
+                node_count = await sync_end_user_memory_count_from_neo4j(
+                    end_user_id,
+                    memory_count_connector,
+                )
+            finally:
+                await memory_count_connector.close()
+
+            logger.info(
+                f"[MemoryCount] 写入后同步 memory_count: "
+                f"end_user_id={end_user_id}, count={node_count}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[MemoryCount] 写入后同步 memory_count 失败（不影响主流程）: {e}",
+                exc_info=True,
+            )
+    
     # Close LLM/Embedder underlying httpx clients to prevent
     # 'RuntimeError: Event loop is closed' during garbage collection
     for client_obj in (llm_client, embedder_client):
@@ -331,3 +354,4 @@ async def write(
 
     logger.info("=== Pipeline Complete ===")
     logger.info(f"Total execution time: {total_time:.2f} seconds")
+

@@ -361,7 +361,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
               )}
             </Flex>
             <div>
-              <div className="rb:font-[MiSans Bold] rb:font-bold rb:text-[16px] rb:leading-5.5">{source.name}</div>
+              <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5">{source.name}</div>
               <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{t('tool.availableMcp')} ({mcpTotal})</div>
             </div>
           </Flex>

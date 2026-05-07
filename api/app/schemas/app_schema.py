@@ -250,7 +250,7 @@ class ModelParameters(BaseModel):
     n: int = Field(default=1, ge=1, le=10, description="生成的回复数量")
     stop: Optional[List[str]] = Field(default=None, description="停止序列")
     deep_thinking: bool = Field(default=False, description="是否启用深度思考模式（需模型支持，如 DeepSeek-R1、QwQ 等）")
-    thinking_budget_tokens: Optional[int] = Field(default=None, ge=1024, le=131072, description="深度思考 token 预算（仅部分模型支持）")
+    thinking_budget_tokens: Optional[int] = Field(default=None, ge=1, le=131072, description="深度思考 token 预算（仅部分模型支持）")
     json_output: bool = Field(default=False, description="是否强制 JSON 格式输出（需模型支持 json_output 能力）")
 
 

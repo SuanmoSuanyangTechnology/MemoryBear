@@ -42,109 +42,73 @@ const CategoryList: FC<CategoryListProps> = ({ parentName, selectedNode, graphRe
   // Update node ports based on category count changes (add/remove categories)
   const updateNodePorts = (caseCount: number, removedCaseIndex?: number) => {
     if (!selectedNode || !graphRef?.current) return;
+    const graph = graphRef.current;
 
-    // Save existing edge connections (including left-side port connections)
-    const existingEdges = graphRef.current.getEdges().filter((edge: any) =>
+    const existingEdges = graph.getEdges().filter((edge: any) =>
       edge.getSourceCellId() === selectedNode.id || edge.getTargetCellId() === selectedNode.id
     );
     const edgeConnections = existingEdges.map((edge: any) => ({
-      edge,
       sourcePortId: edge.getSourcePortId(),
       targetCellId: edge.getTargetCellId(),
       targetPortId: edge.getTargetPortId(),
       sourceCellId: edge.getSourceCellId(),
-      isIncoming: edge.getTargetCellId() === selectedNode.id
+      isIncoming: edge.getTargetCellId() === selectedNode.id,
     }));
 
-    // Remove all existing right-side ports
-    const existingPorts = selectedNode.getPorts();
-    existingPorts.forEach((port: any) => {
-      if (port.group === 'right') {
-        selectedNode.removePort(port.id);
-      }
-    });
+    graph.startBatch('update-ports');
 
-    // Calculate new node height: base height 88px + 30px for each additional port
+    existingEdges.forEach((edge: any) => graph.removeCell(edge));
+    // Replace all ports in one prop call — produces a single cell:change:ports command
+    const leftPorts = selectedNode.getPorts().filter((p: any) => p.group !== 'right');
+    const newRightPorts = Array.from({ length: caseCount }, (_, i) => ({
+      id: `CASE${i + 1}`,
+      group: 'right',
+      args: { x: nodeWidth, y: portItemArgsY * i + conditionNodePortItemArgsY },
+    }));
+    selectedNode.prop('ports/items', [...leftPorts, ...newRightPorts], { rewrite: true });
+
     const newHeight = conditionNodeHeight + (caseCount - 2) * conditionNodeItemHeight;
+    selectedNode.prop('size', { width: nodeWidth, height: newHeight < conditionNodeHeight ? conditionNodeHeight : newHeight });
 
-    selectedNode.prop('size', { width: nodeWidth, height: newHeight < conditionNodeHeight ? conditionNodeHeight : newHeight })
-
-    // Update right port x position
-    const currentPorts = selectedNode.getPorts();
-    currentPorts.forEach(port => {
-      if (port.group === 'right' && port.args) {
-        selectedNode.portProp(port.id!, 'args/x', nodeWidth);
+    edgeConnections.forEach(({ sourcePortId, targetCellId, targetPortId, sourceCellId, isIncoming }: any) => {
+      if (isIncoming) {
+        const sourceCell = graph.getCellById(sourceCellId);
+        if (sourceCell) {
+          graph.addEdge({
+            source: { cell: sourceCellId, port: sourcePortId },
+            target: { cell: selectedNode.id, port: targetPortId },
+            ...edgeAttrs
+          });
+          sourceCell.toFront();
+          bringLoopChildrenToFront(sourceCell);
+          selectedNode.toFront();
+          bringLoopChildrenToFront(selectedNode);
+        }
+        return;
+      }
+      const originalCaseNumber = parseInt(sourcePortId.match(/CASE(\d+)/)?.[1] || '0');
+      if (removedCaseIndex !== undefined && originalCaseNumber === removedCaseIndex + 1) return;
+      let newPortId = sourcePortId;
+      if (removedCaseIndex !== undefined && originalCaseNumber > removedCaseIndex + 1) {
+        newPortId = `CASE${originalCaseNumber - 1}`;
+      }
+      if (newRightPorts.find((p) => p.id === newPortId)) {
+        const targetCell = graph.getCellById(targetCellId);
+        if (targetCell) {
+          graph.addEdge({
+            source: { cell: selectedNode.id, port: newPortId },
+            target: { cell: targetCellId, port: targetPortId },
+            ...edgeAttrs
+          });
+          selectedNode.toFront();
+          bringLoopChildrenToFront(selectedNode);
+          targetCell.toFront();
+          bringLoopChildrenToFront(targetCell);
+        }
       }
     });
 
-    // Add category ports
-    for (let i = 0; i < caseCount; i++) {
-      selectedNode.addPort({
-        id: `CASE${i + 1}`,
-        group: 'right',
-        args: {
-          x: nodeWidth,
-          y: portItemArgsY * i + conditionNodePortItemArgsY,
-        },
-      });
-    }
-    // Restore edge connections
-    setTimeout(() => {
-      edgeConnections.forEach(({ edge, sourcePortId, targetCellId, targetPortId, sourceCellId, isIncoming }: any) => {
-        graphRef.current?.removeCell(edge);
-        
-        // If it's an incoming connection (left-side port), restore directly
-        if (isIncoming) {
-          const sourceCell = graphRef.current?.getCellById(sourceCellId);
-          if (sourceCell) {
-            graphRef.current?.addEdge({
-              source: { cell: sourceCellId, port: sourcePortId },
-              target: { cell: selectedNode.id, port: targetPortId },
-              ...edgeAttrs
-            });
-            sourceCell.toFront()
-            bringLoopChildrenToFront(sourceCell)
-            selectedNode.toFront()
-            bringLoopChildrenToFront(selectedNode)
-          }
-          return;
-        }
-
-        // Handle right-side port connections
-        const originalCaseNumber = parseInt(sourcePortId.match(/CASE(\d+)/)?.[1] || '0');
-
-        // If it's a removed port, don't recreate the connection
-        if (removedCaseIndex !== undefined && originalCaseNumber === removedCaseIndex + 1) {
-          return;
-        }
-
-        let newPortId = sourcePortId;
-
-        // If a port was removed, remap subsequent port IDs
-        if (removedCaseIndex !== undefined && originalCaseNumber > removedCaseIndex + 1) {
-          newPortId = `CASE${originalCaseNumber - 1}`;
-        }
-
-        // Check if the new port exists
-        const newPorts = selectedNode.getPorts();
-        const matchingPort = newPorts.find((port: any) => port.id === newPortId);
-
-        if (matchingPort) {
-          const targetCell = graphRef.current?.getCellById(targetCellId);
-          if (targetCell) {
-            graphRef.current?.addEdge({
-              source: { cell: selectedNode.id, port: newPortId },
-              target: { cell: targetCellId, port: targetPortId },
-              ...edgeAttrs
-            });
-            selectedNode.toFront()
-            bringLoopChildrenToFront(selectedNode)
-            targetCell.toFront()
-            bringLoopChildrenToFront(targetCell)
-          }
-        }
-      });
-    }, 50);
+    graph.stopBatch('update-ports');
   };
 
   const handleAddCategory = (addFunc: Function) => {

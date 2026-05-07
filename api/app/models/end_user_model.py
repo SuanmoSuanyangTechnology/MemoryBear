@@ -1,7 +1,7 @@
 import datetime
 import uuid
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -38,6 +38,15 @@ class EndUser(Base):
         comment="关联的记忆配置ID"
     )
     
+    memory_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        index=True,
+        comment="记忆节点总数",
+    )
+
     # 用户摘要四个维度 - User Summary Four Dimensions
     user_summary = Column(Text, nullable=True, comment="缓存的用户摘要（基本介绍）")
     personality_traits = Column(Text, nullable=True, comment="性格特点")

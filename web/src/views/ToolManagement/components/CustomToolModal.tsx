@@ -101,6 +101,7 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
       });
   };
   const formatSchema = (value: string) => {
+    if (!value || value.trim() === '') return
     setParseSchemaData({} as ParseSchemaData)
     parseSchema({ schema_content: value })
       .then(res => {
