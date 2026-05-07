@@ -2,13 +2,13 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-21 20:27:33
+ * @Last Modified time: 2026-05-07 18:36:31
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { Graph, Node } from '@antv/x6';
-import { Form, Input, Select, InputNumber, Switch, Flex, Space, Dropdown, type MenuProps, Button } from 'antd';
+import { Form, Input, Select, InputNumber, Switch, Flex, Space, Dropdown, type MenuProps, Button, App, Popover } from 'antd';
 
 import type { NodeConfig, NodeProperties, ChatVariable } from '../../types'
 import CustomSelect from "@/components/CustomSelect";
@@ -28,6 +28,7 @@ import ToolConfig from './ToolConfig'
 import MemoryConfig from './MemoryConfig'
 import VariableList from './VariableList'
 import { useVariableList, getCurrentNodeVariables, getChildNodeVariables } from './hooks/useVariableList'
+import { useWorkflowStore } from '@/store/workflow'
 import styles from './properties.module.css'
 import Editor, { type LexicalEditorProps } from "../Editor";
 import RbSlider from '@/components/RbSlider'
@@ -39,6 +40,8 @@ import ModelConfig from './ModelConfig'
 import ModelSelect from '@/components/ModelSelect'
 import ListOperator from './ListOperator'
 import MappingList from "./MappingList";
+import SingleNodeRun from '../SingleNodeRun'
+import { cannotRunNodes } from '../../constant'
 
 /**
  * Props for Properties component
@@ -58,8 +61,12 @@ interface PropertiesProps {
   parseEvent: () => void;
   /** Workflow configuration */
   config?: any;
+  /** App ID for node run */
+  appId?: string;
   /** Chat variables */
   chatVariables: ChatVariable[];
+  /** Function to save workflow configuration */
+  handleSave: (flag?: boolean) => Promise<unknown>;
 }
 
 /**
@@ -71,9 +78,13 @@ const Properties: FC<PropertiesProps> = ({
   selectedNode,
   graphRef,
   chatVariables,
-  blankClick
+  blankClick,
+  config,
+  appId,
+  handleSave,
 }) => {
   const { t } = useTranslation()
+  const { message } = App.useApp()
   const [form] = Form.useForm<NodeConfig>();
   const [configs, setConfigs] = useState<Record<string, NodeConfig>>({} as Record<string, NodeConfig>)
   const values = Form.useWatch([], form);
@@ -530,11 +541,35 @@ const Properties: FC<PropertiesProps> = ({
     }
   }
 
+  const [isRun, setIsRun] = useState(false);
+  const { getCheckResults } = useWorkflowStore()
+  const handleRun = () => {
+    handleSave?.(false)
+      .then(() => {
+        if (appId) {
+          const nodeResult = getCheckResults(appId).find(r => r.id === selectedNode.id)
+          const configErrors = nodeResult?.errors.filter(e => e.key !== 'notConnected') ?? []
+          if (configErrors.length) {
+            message.error(configErrors[0].message)
+            return
+          }
+        }
+        setIsRun(true)
+      })
+  }
+
   return (
+    <>
     <div className={clsx("rb:h-[calc(100vh-88px)] rb:w-90 rb:fixed rb:right-2.5 rb:top-18.5 rb:bottom-2.5 rb:z-1000", styles.properties)}>
       <RbCard
         title={t('workflow.nodeProperties')}
         extra={<Space>
+          {!cannotRunNodes.includes(selectedNode?.data?.type) && <Popover content={t('workflow.singleRun')} classNames={{ body: 'rb:py-0.5! rb:px-1! rb:rounded-[6px]! rb:text-[12px]!' }}>
+            <div
+              className="rb:cursor-pointer rb:size-4 rb:hover:bg-[#F6F6F6] rb:rounded-sm rb:bg-cover rb:bg-[url('@/assets/images/workflow/run.svg')]"
+              onClick={handleRun}
+            ></div>
+          </Popover>}
           <Dropdown
             menu={{
               items: [
@@ -986,7 +1021,18 @@ const Properties: FC<PropertiesProps> = ({
           </div>
         }
       </RbCard>
+
+      {isRun && (
+        <SingleNodeRun
+          open={isRun}
+          onClose={() => setIsRun(false)}
+          selectedNode={selectedNode}
+          appId={appId || config?.app_id || ''}
+          variableList={variableList}
+        />
+      )}
     </div>
+    </>
   );
 };
 export default Properties;

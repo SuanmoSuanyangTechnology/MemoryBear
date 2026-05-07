@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-05-06 11:53:21 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-05-07 18:17:40
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -16,6 +16,12 @@ import NoteNode from './components/Nodes/NoteNode';
 import { memoryConfigListUrl } from '@/api/memory';
 import type { NodeLibrary } from './types';
 
+
+export const cannotRunNodes = [
+  'start',
+  'end',
+  'output',
+]
 /**
  * Workflow node library configuration
  * Defines all available node types, their icons, and configuration schemas

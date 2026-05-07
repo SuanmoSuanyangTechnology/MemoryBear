@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:30:28 
- * @Last Modified by: mikey.zhaopeng
- * @Last Modified time: 2026-05-06 11:46:02
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-05-07 18:38:06
  */
 import { useEffect, useState } from 'react';
 import { Flex, Popover } from 'antd';
@@ -176,17 +176,30 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
       if (gap < requiredSpace) {
         const shiftX = requiredSpace - gap;
         const visited = new Set<string>();
-        const shiftDownstream = (cell: any) => {
+        const isCycleContainer = (type: string) => type === 'loop' || type === 'iteration';
+        const shiftDownstream = (cell: any, shiftChildren: boolean = false) => {
           if (visited.has(cell.id)) return;
           visited.add(cell.id);
           const pos = cell.getPosition();
           cell.setPosition(pos.x + shiftX, pos.y);
+          if (shiftChildren) {
+            const cellType = cell.getData()?.type;
+            if (isCycleContainer(cellType)) {
+              const cycleId = cell.getData()?.id;
+              const childNodes = graph.getNodes().filter((n: any) => n.getData()?.cycle === cycleId);
+              childNodes.forEach((child: any) => {
+                const childPos = child.getPosition();
+                child.setPosition(childPos.x + shiftX, childPos.y);
+              });
+            }
+          }
           graph.getConnectedEdges(cell, { outgoing: true }).forEach((e: any) => {
             const tCell = graph.getCellById(e.getTargetCellId());
-            if (tCell?.isNode()) shiftDownstream(tCell);
+            if (tCell?.isNode()) shiftDownstream(tCell, shiftChildren);
           });
         };
-        shiftDownstream(edgeInsertion.targetCell);
+        const targetCellType = edgeInsertion.targetCell.getData()?.type;
+        shiftDownstream(edgeInsertion.targetCell, isCycleContainer(targetCellType));
       }
     } else if (addNodePosition) {
       newX = addNodePosition.x;
@@ -241,7 +254,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
 
     if (sourceNodeData.cycle) {
       const parentNode = graph.getNodes().find((n: any) => n.getData()?.id === sourceNodeData.cycle);
-      if (parentNode) parentNode.addChild(newNode, { silent: true });
+      if (parentNode) parentNode.addChild(newNode);
     }
 
     if (edgeInsertion) {
@@ -285,8 +298,8 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
         y: parentBBox.y + 70 + 4,
         data: { type: 'add-node', label: t('workflow.addNode'), icon: '+', parentId: id, cycle: id },
       });
-      newNode.addChild(cycleStartNode, { silent: true });
-      newNode.addChild(addNodePlaceholder, { silent: true });
+      newNode.addChild(cycleStartNode);
+      newNode.addChild(addNodePlaceholder);
       const innerEdge = graph.addEdge({
         source: { cell: cycleStartNode.id, port: cycleStartNode.getPorts().find((p: any) => p.group === 'right')?.id || 'right' },
         target: { cell: addNodePlaceholder.id, port: addNodePlaceholder.getPorts().find((p: any) => p.group === 'left')?.id || 'left' },
@@ -295,11 +308,11 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
       addedCells.push(cycleStartNode, addNodePlaceholder, innerEdge);
     }
 
-      // Adjust loop node size when child node is added via port within loop node
-      const cycleId = sourceNodeData.cycle;
-      if (cycleId) {
-        adjustCycleContainerSize(graph, cycleId);
-      }
+    // Adjust loop node size when child node is added via port within loop node
+    const cycleId = sourceNodeData.cycle;
+    if (cycleId) {
+      adjustCycleContainerSize(graph, cycleId);
+    }
 
     // toFront
     const bringCycleChildrenToFront = (cycleContainerId: string) => {
