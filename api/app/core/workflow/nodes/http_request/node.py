@@ -385,6 +385,7 @@ class HttpRequestNode(BaseNode):
                     logger.info(f"Node {self.node_id}: HTTP request succeeded")
                     response = HttpResponse(resp)
                     # Build raw request summary for process_data
+                    await resp.request.aread()
                     raw_request = (
                         f"{self.typed_config.method.upper()} {resp.request.url} HTTP/1.1\r\n"
                         + "".join(f"{k}: {v}\r\n" for k, v in resp.request.headers.items())

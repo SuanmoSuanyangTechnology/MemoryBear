@@ -703,6 +703,24 @@ class ModelCompareItem(BaseModel):
     )
 
 
+class NodeRunRequest(BaseModel):
+    """单节点试运行请求"""
+    # 扁平格式，支持:
+    #   节点变量:  {"node_id.var_name": value}
+    #   系统变量:  {"sys.message": "hello", "sys.files": [...]}
+    inputs: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="节点输入变量，格式: {'node_id.var_name': value} 或 {'sys.message': 'hello'}",
+        examples=[{
+            "sys.message": "帮我写一首诗",
+            "sys.user_id": "user-123",
+            "sys.files": [],
+            "llm_node_abc.output": "上游输出内容",
+        }]
+    )
+    stream: bool = Field(default=False, description="是否流式返回")
+
+
 class DraftRunCompareRequest(BaseModel):
     """多模型对比试运行请求"""
     message: str = Field(..., description="用户消息")

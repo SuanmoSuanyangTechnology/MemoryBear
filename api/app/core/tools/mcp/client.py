@@ -87,11 +87,11 @@ class SimpleMCPClient:
         headers = self._build_headers()
         timeout = aiohttp.ClientTimeout(total=self.timeout)
         self._session = aiohttp.ClientSession(headers=headers, timeout=timeout)
-        
+
         if self.is_sse:
             await self._initialize_sse_session()
-        elif "modelscope.net" in self.server_url:
-            await self._initialize_modelscope_session()
+        else:
+            await self._initialize_streamable_session()
     
     async def _initialize_sse_session(self):
         """初始化 SSE MCP 会话 - 参考 Dify 实现"""
@@ -208,41 +208,41 @@ class SimpleMCPClient:
             if not (200 <= response.status < 300):
                 logger.warning(f"通知发送失败: {response.status}")
     
-    async def _initialize_modelscope_session(self):
-        """初始化 ModelScope MCP 会话"""
+    async def _initialize_streamable_session(self):
+        """初始化 Streamable HTTP MCP 会话（MCP 2025-03-26 规范）"""
         init_request = {
             "jsonrpc": "2.0",
             "id": self._get_request_id(),
             "method": "initialize",
             "params": {
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": "2025-03-26",
                 "capabilities": {"tools": {}},
                 "clientInfo": {"name": "MemoryBear", "version": "1.0.0"}
             }
         }
-        
+
         try:
             async with self._session.post(self.server_url, json=init_request) as response:
                 if not (200 <= response.status < 300):
                     error_text = await response.text()
                     raise MCPConnectionError(f"初始化失败 {response.status}: {error_text}")
-                
-                init_response = await response.json()
-                if "error" in init_response:
-                    raise MCPConnectionError(f"初始化失败: {init_response['error']}")
-                
+
+                # 提取 session id（Streamable HTTP 规范要求后续请求携带）
                 session_id = response.headers.get("Mcp-Session-Id") or response.headers.get("mcp-session-id")
                 if session_id:
                     self._session.headers.update({"Mcp-Session-Id": session_id})
-                    
-                    initialized_notification = {
-                        "jsonrpc": "2.0",
-                        "method": "notifications/initialized"
-                    }
-                    
-                    async with self._session.post(self.server_url, json=initialized_notification):
-                        pass
-                    
+
+                init_response = await self._parse_streamable_response(response)
+                if "error" in init_response:
+                    raise MCPConnectionError(f"初始化失败: {init_response['error']}")
+
+                self._server_capabilities = init_response.get("result", {}).get("capabilities", {})
+
+            # 发送 initialized 通知
+            notification = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+            async with self._session.post(self.server_url, json=notification):
+                pass
+
         except aiohttp.ClientError as e:
             raise MCPConnectionError(f"初始化连接失败: {e}")
     
@@ -310,6 +310,21 @@ class SimpleMCPClient:
             "method": "notifications/initialized"
         }))
     
+    async def _parse_streamable_response(self, response) -> Dict[str, Any]:
+        """解析 Streamable HTTP 响应（支持 JSON 和 SSE 两种格式）"""
+        content_type = response.headers.get("Content-Type", "")
+        if "text/event-stream" in content_type:
+            # 服务端返回 SSE 流，读取第一条 data 消息
+            async for line in response.content:
+                line = line.decode("utf-8").strip()
+                if line.startswith("data:"):
+                    data = line[5:].strip()
+                    if data and data != "[DONE]":
+                        return json.loads(data)
+            raise MCPConnectionError("SSE 流中未收到有效响应")
+        else:
+            return await response.json()
+
     async def list_tools(self) -> List[Dict[str, Any]]:
         """获取工具列表"""
         request = {
@@ -326,7 +341,7 @@ class SimpleMCPClient:
             response_data = await self._send_sse_request(request)
         else:
             async with self._session.post(self.server_url, json=request) as response:
-                response_data = await response.json()
+                response_data = await self._parse_streamable_response(response)
         
         if "error" in response_data:
             raise MCPConnectionError(f"获取工具列表失败: {response_data['error']}")
@@ -351,7 +366,7 @@ class SimpleMCPClient:
             response_data = await self._send_sse_request(request)
         else:
             async with self._session.post(self.server_url, json=request) as response:
-                response_data = await response.json()
+                response_data = await self._parse_streamable_response(response)
         
         if "error" in response_data:
             error = response_data["error"]
