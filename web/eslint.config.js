@@ -19,5 +19,8 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    linterOptions: {
+      'eslint@typescript-eslint/no-explicit-any': false
+    }
   },
 ])

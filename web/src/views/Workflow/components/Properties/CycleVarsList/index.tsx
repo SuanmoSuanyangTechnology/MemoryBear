@@ -133,7 +133,7 @@ const CycleVarsList: FC<CycleVarsListProps> = ({
 
                               return option.dataType === currentType
                             })}
-                            variant="borderless"
+                            variant="filled"
                             size="small"
                             className="select"
                           />

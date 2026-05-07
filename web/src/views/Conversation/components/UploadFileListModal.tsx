@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:09:47 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-23 17:49:42
+ * @Last Modified time: 2026-04-21 10:22:45
  */
 /**
  * Upload File List Modal Component
@@ -31,7 +31,7 @@ const FormItem = Form.Item;
 interface UploadFileListModalProps {
   /** Callback to refresh parent component with new file list */
   refresh: (fileList?: any[]) => void;
-  featureConfig: FeaturesConfigForm['file_upload']
+  featureConfig?: FeaturesConfigForm['file_upload']
 }
 
 /**
