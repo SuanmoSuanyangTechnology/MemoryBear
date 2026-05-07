@@ -30,7 +30,7 @@ from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.llm.embedding_model import OpenAIEmbed
 from app.core.rag.llm.sequence2txt_model import QWenSeq2txt
 from app.core.rag.models.chunk import DocumentChunk
-from app.core.rag.prompts.generator import question_proposal
+from app.core.rag.prompts.generator import question_proposal, qa_proposal
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
 )
@@ -311,6 +311,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
             # 2.2 Vectorize and import batch documents
             auto_questions_topn = db_document.parser_config.get("auto_questions", 0)
+            qa_prompt = db_document.parser_config.get("qa_prompt", None)
             chat_model = None
             if auto_questions_topn:
                 chat_model = Base(
@@ -318,62 +319,123 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                     model_name=db_knowledge.llm.api_keys[0].model_name,
                     base_url=db_knowledge.llm.api_keys[0].api_base,
                 )
+                logger.info(f"[QA] LLM model: {db_knowledge.llm.api_keys[0].model_name}, base_url: {db_knowledge.llm.api_keys[0].api_base}")
+                if qa_prompt:
+                    logger.info(f"[QA] Using custom prompt ({len(qa_prompt)} chars)")
 
             # 预先构建所有 batch 的 chunks，保证 sort_id 全局有序
             all_batch_chunks: list[list[DocumentChunk]] = []
 
             if auto_questions_topn:
-                # auto_questions 开启：先并发生成所有 chunk 的问题，再按 batch 分组
-                # 构建 (global_idx, item) 列表
+                # QA 模式（FastGPT 方案）：
+                # 1. 原 chunk 标记为 source（保留供 GraphRAG 使用，不参与检索）
+                # 2. LLM 生成 QA 对，每个 QA 对独立存储为 qa chunk
                 indexed_items = list(enumerate(res))
 
-                def _generate_question(idx_item: tuple[int, dict]) -> tuple[int, str]:
-                    """为单个 chunk 生成问题（带缓存），返回 (global_idx, question_text)"""
+                def _generate_qa(idx_item: tuple[int, dict]) -> tuple[int, list]:
+                    """为单个 chunk 生成 QA 对（带缓存），返回 (global_idx, qa_pairs)"""
                     global_idx, item = idx_item
                     content = item["content_with_weight"]
-                    cached = get_llm_cache(chat_model.model_name, content, "question",
-                                           {"topn": auto_questions_topn})
+                    cache_params = {"topn": auto_questions_topn}
+                    if qa_prompt:
+                        import hashlib
+                        cache_params["prompt_hash"] = hashlib.md5(qa_prompt.encode()).hexdigest()[:8]
+                    cached = get_llm_cache(chat_model.model_name, content, "qa", cache_params)
                     if not cached:
-                        cached = question_proposal(chat_model, content, auto_questions_topn)
-                        set_llm_cache(chat_model.model_name, content, cached, "question",
-                                      {"topn": auto_questions_topn})
-                    return global_idx, cached
+                        logger.info(f"[QA] Cache miss for chunk {global_idx}, calling LLM. cache_params={cache_params}")
+                        try:
+                            pairs = qa_proposal(chat_model, content, auto_questions_topn, custom_prompt=qa_prompt)
+                        except Exception as e:
+                            logger.error(f"[QA] LLM call failed: model={chat_model.model_name}, base_url={getattr(chat_model, 'base_url', 'N/A')}, error={e}")
+                            return global_idx, []
+                        logger.info(f"[QA] Chunk {global_idx} generated {len(pairs)} QA pairs")
+                        # 缓存存 JSON 字符串
+                        set_llm_cache(chat_model.model_name, content, json.dumps(pairs, ensure_ascii=False), "qa",
+                                      cache_params)
+                        return global_idx, pairs
+                    logger.info(f"[QA] Cache hit for chunk {global_idx}, cache_params={cache_params}, cached_type={type(cached).__name__}")
+                    # 从缓存读取：可能是 JSON 字符串或旧格式纯文本
+                    if isinstance(cached, str):
+                        try:
+                            parsed = json.loads(cached)
+                            if isinstance(parsed, list):
+                                logger.info(f"[QA] Chunk {global_idx} loaded {len(parsed)} QA pairs from cache")
+                                return global_idx, parsed
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                        # 旧缓存格式（纯文本问题），尝试解析
+                        from app.core.rag.prompts.generator import parse_qa_pairs
+                        return global_idx, parse_qa_pairs(cached) if cached else []
+                    return global_idx, cached if isinstance(cached, list) else []
 
-                # 并发调用 LLM 生成问题
-                question_map: dict[int, str] = {}
+                # 并发调用 LLM 生成 QA 对
+                qa_map: dict[int, list] = {}
                 with ThreadPoolExecutor(max_workers=AUTO_QUESTIONS_MAX_WORKERS) as q_executor:
-                    futures = {q_executor.submit(_generate_question, item): item[0]
+                    futures = {q_executor.submit(_generate_qa, item): item[0]
                                for item in indexed_items}
                     for future in futures:
-                        global_idx, cached = future.result()
-                        question_map[global_idx] = cached
+                        global_idx, pairs = future.result()
+                        qa_map[global_idx] = pairs
 
                 progress_lines.append(
-                    f"{datetime.now().strftime('%H:%M:%S')} Auto questions generated for {total_chunks} chunks "
+                    f"{datetime.now().strftime('%H:%M:%S')} QA pairs generated for {total_chunks} chunks "
                     f"(workers={AUTO_QUESTIONS_MAX_WORKERS}).")
 
-                # 按 batch 分组组装 DocumentChunk
-                for batch_start in range(0, total_chunks, EMBEDDING_BATCH_SIZE):
-                    batch_end = min(batch_start + EMBEDDING_BATCH_SIZE, total_chunks)
-                    chunks = []
-                    for global_idx in range(batch_start, batch_end):
-                        item = res[global_idx]
-                        metadata = {
+                # 组装 chunks：source chunks + qa chunks
+                source_chunks = []
+                qa_chunks = []
+                qa_sort_id = 0
+
+                for global_idx in range(total_chunks):
+                    item = res[global_idx]
+                    source_chunk_id = uuid.uuid4().hex
+
+                    # source chunk：保留原文，供 GraphRAG 使用，不参与向量检索
+                    source_meta = {
+                        "doc_id": source_chunk_id,
+                        "file_id": str(db_document.file_id),
+                        "file_name": db_document.file_name,
+                        "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                        "document_id": str(db_document.id),
+                        "knowledge_id": str(db_document.kb_id),
+                        "sort_id": global_idx,
+                        "status": 1,
+                        "chunk_type": "source",
+                    }
+                    source_chunks.append(
+                        DocumentChunk(page_content=item["content_with_weight"], metadata=source_meta))
+
+                    # qa chunks：每个 QA 对独立存储
+                    pairs = qa_map.get(global_idx, [])
+                    for pair in pairs:
+                        qa_meta = {
                             "doc_id": uuid.uuid4().hex,
                             "file_id": str(db_document.file_id),
                             "file_name": db_document.file_name,
                             "file_created_at": int(db_document.created_at.timestamp() * 1000),
                             "document_id": str(db_document.id),
                             "knowledge_id": str(db_document.kb_id),
-                            "sort_id": global_idx,
+                            "sort_id": qa_sort_id,
                             "status": 1,
+                            "chunk_type": "qa",
+                            "question": pair["question"],
+                            "answer": pair["answer"],
+                            "source_chunk_id": source_chunk_id,
                         }
-                        cached = question_map[global_idx]
-                        chunks.append(
-                            DocumentChunk(
-                                page_content=f"question: {cached} answer: {item['content_with_weight']}",
-                                metadata=metadata))
-                    all_batch_chunks.append(chunks)
+                        # page_content 存 question，用于向量索引
+                        qa_chunks.append(
+                            DocumentChunk(page_content=pair["question"], metadata=qa_meta))
+                        qa_sort_id += 1
+
+                # 按 batch 分组（source + qa 一起）
+                all_chunks = source_chunks + qa_chunks
+                for batch_start in range(0, len(all_chunks), EMBEDDING_BATCH_SIZE):
+                    batch_end = min(batch_start + EMBEDDING_BATCH_SIZE, len(all_chunks))
+                    all_batch_chunks.append(all_chunks[batch_start:batch_end])
+
+                progress_lines.append(
+                    f"{datetime.now().strftime('%H:%M:%S')} QA mode: {len(source_chunks)} source chunks + "
+                    f"{len(qa_chunks)} QA chunks prepared.")
             else:
                 # 无 auto_questions：直接构建 chunks
                 for batch_start in range(0, total_chunks, EMBEDDING_BATCH_SIZE):
@@ -633,6 +695,136 @@ def build_graphrag_for_document(document_id: str, knowledge_id: str):
         except Exception as e:
             logger.error(f"[GraphRAG] doc={document_id} failed: {e}", exc_info=True)
             return f"build_graphrag_for_document '{document_id}' failed: {e}"
+
+
+@celery_app.task(name="app.core.rag.tasks.import_qa_chunks", queue="qa_import")
+def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: bytes):
+    """
+    异步导入 QA 问答对（CSV/Excel）
+    
+    文件格式：第一行标题（跳过），第一列问题，第二列答案
+    """
+    import csv as csv_module
+    import io
+
+    db = None
+    try:
+        from app.db import get_db_context
+        with get_db_context() as db:
+            db_document = db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
+            db_knowledge = db.query(Knowledge).filter(Knowledge.id == uuid.UUID(kb_id)).first()
+            if not db_document or not db_knowledge:
+                logger.error(f"[ImportQA] document={document_id} or knowledge={kb_id} not found")
+                return {"error": "document or knowledge not found", "imported": 0}
+
+            # 1. 解析文件
+            qa_pairs = []
+            failed_rows = []
+
+            if filename.endswith(".csv"):
+                try:
+                    text = contents.decode("utf-8-sig")
+                except UnicodeDecodeError:
+                    text = contents.decode("gbk", errors="ignore")
+
+                sniffer = csv_module.Sniffer()
+                try:
+                    dialect = sniffer.sniff(text[:2048])
+                    delimiter = dialect.delimiter
+                except csv_module.Error:
+                    delimiter = "," if "," in text[:500] else "\t"
+
+                reader = csv_module.reader(io.StringIO(text), delimiter=delimiter)
+                for i, row in enumerate(reader):
+                    if i == 0:
+                        continue
+                    if len(row) >= 2 and row[0].strip() and row[1].strip():
+                        qa_pairs.append({"question": row[0].strip(), "answer": row[1].strip()})
+                    elif len(row) >= 1 and row[0].strip():
+                        failed_rows.append(i + 1)
+
+            elif filename.endswith(".xlsx") or filename.endswith(".xls"):
+                try:
+                    import openpyxl
+                    wb = openpyxl.load_workbook(io.BytesIO(contents), read_only=True)
+                    for sheet in wb.worksheets:
+                        for i, row in enumerate(sheet.iter_rows(values_only=True)):
+                            if i == 0:
+                                continue
+                            if len(row) >= 2 and row[0] and row[1]:
+                                q = str(row[0]).strip()
+                                a = str(row[1]).strip()
+                                if q and a:
+                                    qa_pairs.append({"question": q, "answer": a})
+                            elif len(row) >= 1 and row[0]:
+                                failed_rows.append(i + 1)
+                    wb.close()
+                except Exception as e:
+                    logger.error(f"[ImportQA] Excel parse failed: {e}")
+                    return {"error": f"Excel parse failed: {e}", "imported": 0}
+
+            if not qa_pairs:
+                logger.warning(f"[ImportQA] No valid QA pairs found in {filename}")
+                return {"error": "No valid QA pairs found", "imported": 0}
+
+            logger.info(f"[ImportQA] Parsed {len(qa_pairs)} QA pairs from {filename}, failed_rows={failed_rows}")
+
+            # 2. 写入 ES
+            vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+
+            sort_id = 0
+            total, items = vector_service.search_by_segment(document_id=document_id, pagesize=1, page=1, asc=False)
+            if items:
+                sort_id = items[0].metadata["sort_id"]
+
+            chunks = []
+            for pair in qa_pairs:
+                sort_id += 1
+                doc_id = uuid.uuid4().hex
+                metadata = {
+                    "doc_id": doc_id,
+                    "file_id": str(db_document.file_id),
+                    "file_name": db_document.file_name,
+                    "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                    "document_id": document_id,
+                    "knowledge_id": kb_id,
+                    "sort_id": sort_id,
+                    "status": 1,
+                    "chunk_type": "qa",
+                    "question": pair["question"],
+                    "answer": pair["answer"],
+                }
+                chunks.append(DocumentChunk(page_content=pair["question"], metadata=metadata))
+
+            batch_size = 50
+            for i in range(0, len(chunks), batch_size):
+                batch = chunks[i:i + batch_size]
+                vector_service.add_chunks(batch)
+
+            # 3. 更新 chunk_num 和 progress
+            db_document.chunk_num += len(chunks)
+            db_document.progress = 1.0
+            db_document.progress_msg = f"QA 导入完成: {len(chunks)} 条"
+            db.commit()
+
+            result = {"imported": len(chunks), "failed_rows": failed_rows}
+            logger.info(f"[ImportQA] Done: imported={len(chunks)}, failed={len(failed_rows)}")
+            return result
+
+    except Exception as e:
+        logger.error(f"[ImportQA] Failed: {e}", exc_info=True)
+        # 尝试更新文档状态为失败
+        try:
+            from app.db import get_db_context
+            with get_db_context() as err_db:
+                doc = err_db.query(Document).filter(Document.id == uuid.UUID(document_id)).first()
+                if doc:
+                    doc.progress = -1.0
+                    doc.progress_msg = f"QA 导入失败: {str(e)[:200]}"
+                    err_db.commit()
+        except Exception:
+            pass
+        return {"error": str(e), "imported": 0}
 
 
 @celery_app.task(name="app.core.rag.tasks.sync_knowledge_for_kb")
