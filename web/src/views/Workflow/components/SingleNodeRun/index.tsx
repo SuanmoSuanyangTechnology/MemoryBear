@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-05-07 18:37:31 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-05-07 18:37:31 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-05-07 18:51:58
  */
 import { type FC, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -148,8 +148,6 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
     }
   }, [isAutoRun])
 
-  console.log('isAutoRun', isAutoRun)
-
   if (!open) return null
 
   return (
@@ -291,7 +289,7 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
 
               {/* Input / Output code blocks */}
               {result && (['inputs', 'process', 'outputs'] as const).map(key => {
-                if (nodeData.node_type !== 'http-request' && key === 'process') return null
+                if (nodeData.type !== 'http-request' && key === 'process') return null
                 const content = typeof result[key as keyof RunResult] === 'object' && result[key as keyof RunResult] ? JSON.stringify(result[key as keyof RunResult], null, 2) : result[key as keyof RunResult] ? result[key as keyof RunResult] : '{}'
                 return (
                   <div key={key} className="rb:bg-[#EBEBEB] rb:rounded-lg">
