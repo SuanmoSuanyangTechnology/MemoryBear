@@ -31,7 +31,7 @@ class NodeType(StrEnum):
     NOTES = "notes"
 
 
-BRANCH_NODES = frozenset({NodeType.IF_ELSE, NodeType.HTTP_REQUEST, NodeType.QUESTION_CLASSIFIER})
+BRANCH_NODES = frozenset({NodeType.IF_ELSE, NodeType.HTTP_REQUEST, NodeType.QUESTION_CLASSIFIER, NodeType.LLM})
 
 
 class ComparisonOperator(StrEnum):

@@ -141,9 +141,10 @@ class GraphBuilder:
 
         for node_info in source_nodes:
             if self.get_node_type(node_info["id"]) in BRANCH_NODES:
-                branch_nodes.append(
-                    (node_info["id"], node_info["branch"])
-                )
+                if node_info.get("branch") is not None:
+                    branch_nodes.append(
+                        (node_info["id"], node_info["branch"])
+                    )
             else:
                 if self.get_node_type(node_info["id"]) in (NodeType.END, NodeType.OUTPUT):
                     output_nodes.append(node_info["id"])
@@ -314,9 +315,10 @@ class GraphBuilder:
                 for idx in range(len(related_edge)):
                     # Generate a condition expression for each edge
                     # Used later to determine which branch to take based on the node's output
-                    # Assumes node output `node.<node_id>.output` matches the edge's label
-                    # For example, if node.123.output == 'CASE1', take the branch labeled 'CASE1'
-                    related_edge[idx]['condition'] = f"node['{node_id}']['output'] == '{related_edge[idx]['label']}'"
+                    # For LLM nodes, use branch_signal field for routing (output is dynamic text)
+                    # For other branch nodes (e.g. HTTP), use output field
+                    route_field = "branch_signal" if node_type == NodeType.LLM else "output"
+                    related_edge[idx]['condition'] = f"node['{node_id}']['{route_field}'] == '{related_edge[idx]['label']}'"
 
             if node_instance:
                 # Wrap node's run method to avoid closure issues
