@@ -149,13 +149,12 @@ def qa_proposal(chat_mdl, content, topn=3, custom_prompt=None):
     """
     if custom_prompt:
         template = PROMPT_JINJA_ENV.from_string(custom_prompt)
+        sys_prompt = template.render(topn=topn)
     else:
-        template = PROMPT_JINJA_ENV.from_string(QUESTION_PROMPT_TEMPLATE)
-    rendered_prompt = template.render(content=content, topn=topn)
-
-    msg = [{"role": "system", "content": rendered_prompt}, {"role": "user", "content": "Output: "}]
+        sys_prompt = QUESTION_PROMPT_TEMPLATE
+    msg = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": content}]
     _, msg = message_fit_in(msg, getattr(chat_mdl, 'max_length', 8096))
-    raw = chat_mdl.chat(rendered_prompt, msg[1:], {"temperature": 0.2})
+    raw = chat_mdl.chat(sys_prompt, msg[1:], {"temperature": 0.2})
     if isinstance(raw, tuple):
         raw = raw[0]
     raw = re.sub(r"^.*</think>", "", raw, flags=re.DOTALL)
