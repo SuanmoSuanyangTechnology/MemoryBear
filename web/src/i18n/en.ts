@@ -951,7 +951,8 @@ export const en = {
         feishuFolderToken: 'Folder Token',
         feishuFolderTokenRequired: 'Please enter Folder Token',
         feishuFolderTokenPlaceholder: 'Enter your Feishu Folder Token',
-      }
+      },
+      csvTemplate: 'Click to download CSV template',
     },
     api: {
       pageTitle: 'Memory library IAP document',

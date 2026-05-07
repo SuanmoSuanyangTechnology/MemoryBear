@@ -596,111 +596,121 @@ const CreateDataset = () => {
       </div> } 
       <div className='rb:bg-white rb:rounded-xl rb:flex-1 rb:mt-3'>
 
-        {current === 0 && (
+        {current === 0 && (<>
           <div className='rb:flex rb:w-full rb:p-6'>
-              {source && (source === 'local' || source === 'csv') && (
-                  <UploadFiles 
-                    ref={uploadRef}
-                    isCanDrag={true} 
-                    fileSize={100} 
-                    multiple={source !== 'csv'} 
-                    maxCount={source === 'csv' ? 1 : 99}
-                    fileType={source === 'csv' ? csvFileType : fileType} 
-                    customRequest={handleUpload}
-                    onChange={(fileList) => {
-                      console.log('File list changed:', fileList);
-                    }}
-                    onRemove={async (file) => {
-                        // 如果文件正在上传，取消上传
-                        const fileUid = file.uid;
-                        const abortController = abortControllersRef.current.get(fileUid);
-                        if (abortController) {
-                          abortController.abort();
-                          abortControllersRef.current.delete(fileUid);
-                          console.log('Upload cancelled:', (file as any).name);
-                          // 取消上传后直接返回 true，允许移除文件
-                          return true;
-                        }
-                        
-                        // Only delete server file when file upload was successful (has response.id)
-                        if (file.response?.id) {
-                          try {
-                            await deleteDocument(file.response.id);
-                            setRechunkFileIds(prev => prev.filter(id => id !== file.response.id));
-                            console.log('Server file deleted:', file.response.id);
-                            return true;
-                          } catch (error) {
-                            console.error('Failed to delete file:', error);
-                            messageApi.error(t('common.deleteFailed') || 'Failed to delete file');
-                            return false; // Don't remove file when deletion fails
-                          }
-                        }
-                        
-                        // Also allow removal in other cases (such as failed uploads)
-                        return true;
-                      }} />
-              )}
-              {source && source === 'link' && (
-                  <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-40'>
+            {source && (source === 'local' || source === 'csv') && (
+              <UploadFiles 
+                ref={uploadRef}
+                isCanDrag={true} 
+                fileSize={100} 
+                multiple={source !== 'csv'} 
+                maxCount={source === 'csv' ? 1 : 99}
+                fileType={source === 'csv' ? csvFileType : fileType} 
+                customRequest={handleUpload}
+                onChange={(fileList) => {
+                  console.log('File list changed:', fileList);
+                }}
+                onRemove={async (file) => {
+                  // 如果文件正在上传，取消上传
+                  const fileUid = file.uid;
+                  const abortController = abortControllersRef.current.get(fileUid);
+                  if (abortController) {
+                    abortController.abort();
+                    abortControllersRef.current.delete(fileUid);
+                    console.log('Upload cancelled:', (file as any).name);
+                    // 取消上传后直接返回 true，允许移除文件
+                    return true;
+                  }
+                  
+                  // Only delete server file when file upload was successful (has response.id)
+                  if (file.response?.id) {
+                    try {
+                      await deleteDocument(file.response.id);
+                      setRechunkFileIds(prev => prev.filter(id => id !== file.response.id));
+                      console.log('Server file deleted:', file.response.id);
+                      return true;
+                    } catch (error) {
+                      console.error('Failed to delete file:', error);
+                      messageApi.error(t('common.deleteFailed') || 'Failed to delete file');
+                      return false; // Don't remove file when deletion fails
+                    }
+                  }
+                  
+                  // Also allow removal in other cases (such as failed uploads)
+                  return true;
+                }}
+              />
+            )}
+            {source && source === 'link' && (
+              <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-40'>
 
-                    <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
-                        {t('knowledgeBase.webLink')}
-                    </div>
-                    <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} />
-                    <div className='rb:text-sm rb:text-gray-500 rb:mt-3'>
-                        {t('knowledgeBase.webLinkDesc',{count: 5})}
-                    </div>
-                    <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
-                        {t('knowledgeBase.selectorTutorial')}
-                    </div>
-                    <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
+                <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
+                    {t('knowledgeBase.webLink')}
                 </div>
+                <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} />
+                <div className='rb:text-sm rb:text-gray-500 rb:mt-3'>
+                    {t('knowledgeBase.webLinkDesc',{count: 5})}
+                </div>
+                <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
+                    {t('knowledgeBase.selectorTutorial')}
+                </div>
+                <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
+              </div>
             )}
             {source && source === 'text' && (
-                <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-20'>
-                    <Form 
-                      form={form} 
-                      layout="vertical"
-                      onValuesChange={() => {
-                        // 检查表单字段是否都已填写
-                        const values = form.getFieldsValue();
-                        const isValid = !!(values.title?.trim() && values.content?.trim());
-                        setTextFormValid(isValid);
-                      }}
+              <div className='rb:flex rb:w-full rb:flex-col rb:mt-10 rb:px-20'>
+                <Form 
+                  form={form} 
+                  layout="vertical"
+                  onValuesChange={() => {
+                    // 检查表单字段是否都已填写
+                    const values = form.getFieldsValue();
+                    const isValid = !!(values.title?.trim() && values.content?.trim());
+                    setTextFormValid(isValid);
+                  }}
+                >
+                    <Form.Item
+                      name="title"
+                      label={t('knowledgeBase.title')}
+                      rules={[{ required: true, message: t('knowledgeBase.pleaseEnterTitle') }]}
                     >
-                        <Form.Item
-                          name="title"
-                          label={t('knowledgeBase.title')}
-                          rules={[{ required: true, message: t('knowledgeBase.pleaseEnterTitle') }]}
-                        >
-                          <Input placeholder={t('knowledgeBase.pleaseEnterTitle')} />
-                        </Form.Item>
+                      <Input placeholder={t('knowledgeBase.pleaseEnterTitle')} />
+                    </Form.Item>
 
-                        <Form.Item
-                          name="content"
-                          label={t('knowledgeBase.customContent')}
-                          rules={[{ required: true, message: t('knowledgeBase.pleaseEnterContent') }]}
-                        >
-                          <Input.TextArea
-                            placeholder={t('knowledgeBase.pleaseEnterContent')}
-                            rows={8}
-                            showCount
-                            maxLength={5000}
-                          />
-                        </Form.Item>
-                      </Form>
-                    {/* <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
-                        {t('knowledgeBase.customText')}
-                    </div>
-                    <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
-                    <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
-                        {t('knowledgeBase.customContent')}
-                    </div>
-                    <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} /> */}
+                    <Form.Item
+                      name="content"
+                      label={t('knowledgeBase.customContent')}
+                      rules={[{ required: true, message: t('knowledgeBase.pleaseEnterContent') }]}
+                    >
+                      <Input.TextArea
+                        placeholder={t('knowledgeBase.pleaseEnterContent')}
+                        rows={8}
+                        showCount
+                        maxLength={5000}
+                      />
+                    </Form.Item>
+                  </Form>
+                {/* <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mb-3'>
+                    {t('knowledgeBase.customText')}
                 </div>
+                <Input className='rb:w-full' placeholder={t('knowledgeBase.webLinkPlaceholder')}/>
+                <div className='rb:text-sm rb:font-medium rb:text-gray-800 rb:mt-10 rb:mb-3'>
+                    {t('knowledgeBase.customContent')}
+                </div>
+                <TextArea  rows={6} placeholder={t('knowledgeBase.webLinkPlaceholder')} /> */}
+              </div>
             )}
-        </div>
-        )}
+          </div>
+          {source === 'csv' &&
+            <a
+              href="@/assets/csv_template.csv"
+              download="csv_template.csv"
+              className='rb:mx-6 rb:text-sm rb:font-medium rb:text-gray-800 rb:-mt-6!'
+            >
+                {t('knowledgeBase.csvTemplate')}
+            </a>
+          }
+        </>)}
 
         {current === 1 && (
           <div className='rb:flex rb:flex-col rb:mt-10 rb:px-40'>
