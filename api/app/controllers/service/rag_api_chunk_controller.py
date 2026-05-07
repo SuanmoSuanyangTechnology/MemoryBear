@@ -113,6 +113,33 @@ async def create_chunk(
                                                current_user=current_user)
 
 
+@router.post("/{kb_id}/{document_id}/chunk/batch", response_model=ApiResponse)
+@require_api_key(scopes=["rag"])
+async def create_chunks_batch(
+    kb_id: uuid.UUID,
+    document_id: uuid.UUID,
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+    items: list = Body(..., description="chunk items list"),
+):
+    """
+    Batch create chunks (max 8)
+    """
+    body = await request.json()
+    batch_data = chunk_schema.ChunkBatchCreate(**body)
+    # 0. Obtain the creator of the api key
+    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    current_user = api_key.creator
+    current_user.current_workspace_id = api_key_auth.workspace_id
+
+    return await chunk_controller.create_chunks_batch(kb_id=kb_id,
+                                                      document_id=document_id,
+                                                      batch_data=batch_data,
+                                                      db=db,
+                                                      current_user=current_user)
+
+
 @router.get("/{kb_id}/{document_id}/{doc_id}", response_model=ApiResponse)
 @require_api_key(scopes=["rag"])
 async def get_chunk(
