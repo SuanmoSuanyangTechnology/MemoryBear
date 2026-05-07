@@ -205,6 +205,7 @@ class CitationConfig(BaseModel):
 
 class Citation(BaseModel):
     document_id: str
+    doc_id: str
     file_name: str
     knowledge_id: str
     score: float

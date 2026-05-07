@@ -242,11 +242,12 @@ def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collec
                     seen_doc_ids = {c.get("document_id") for c in citations_collector}
                     for chunk in retrieve_chunks_result:
                         meta = chunk.metadata or {}
-                        doc_id = meta.get("document_id") or meta.get("doc_id")
-                        if doc_id and doc_id not in seen_doc_ids:
-                            seen_doc_ids.add(doc_id)
+                        document_id = meta.get("document_id")
+                        if document_id and document_id not in seen_doc_ids:
+                            seen_doc_ids.add(document_id)
                             citations_collector.append(Citation(
-                                document_id=doc_id,
+                                document_id=str(document_id),
+                                doc_id=meta.get("doc_id", ""),
                                 file_name=meta.get("file_name", ""),
                                 knowledge_id=str(meta.get("knowledge_id", "")),
                                 score=meta.get("score", 0)
