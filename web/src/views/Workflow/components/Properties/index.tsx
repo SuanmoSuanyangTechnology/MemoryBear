@@ -39,6 +39,7 @@ import ModelConfig from './ModelConfig'
 import ModelSelect from '@/components/ModelSelect'
 import ListOperator from './ListOperator'
 import MappingList from "./MappingList";
+import ErrorHandle from './ErrorHandle'
 
 /**
  * Props for Properties component
@@ -816,6 +817,16 @@ const Properties: FC<PropertiesProps> = ({
                           options={variableList}
                           isNeedType={config.isNeedType as boolean}
                         />
+                      }
+                      if (config.type === 'errorHandle') {
+                        return (
+                          <Form.Item key={key} name={key}>
+                            <ErrorHandle
+                              selectedNode={selectedNode}
+                              graphRef={graphRef}
+                            />
+                          </Form.Item>
+                        )
                       }
 
                       if (key === 'vision_input' && !values?.vision) {
