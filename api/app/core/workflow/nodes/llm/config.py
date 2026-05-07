@@ -6,6 +6,7 @@ import uuid
 from pydantic import BaseModel, Field, field_validator
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig, VariableDefinition
+from app.core.workflow.nodes.enums import HttpErrorHandle
 from app.core.workflow.variable.base_variable import VariableType
 
 
@@ -46,6 +47,20 @@ class MemoryWindowSetting(BaseModel):
     window_size: int = Field(
         default=20,
         description="记忆窗口大小"
+    )
+
+
+class LLMErrorHandleConfig(BaseModel):
+    """LLM 异常处理配置"""
+
+    method: HttpErrorHandle = Field(
+        default=HttpErrorHandle.NONE,
+        description="异常处理策略：'none' 抛出异常, 'default' 返回默认值, 'branch' 走异常分支",
+    )
+
+    output: str = Field(
+        default="",
+        description="LLM 异常时返回的默认输出文本（method=default 时生效）",
     )
 
 
@@ -150,6 +165,11 @@ class LLMNodeConfig(BaseNodeConfig):
             )
         ],
         description="输出变量定义（自动生成，通常不需要修改）"
+    )
+
+    error_handle: LLMErrorHandleConfig = Field(
+        default_factory=LLMErrorHandleConfig,
+        description="LLM 异常处理配置",
     )
 
     @field_validator("messages", "prompt")
