@@ -303,7 +303,9 @@ class Base(ABC):
 
         assert False, "Shouldn't be here."
 
-    def chat(self, system, history, gen_conf={}, **kwargs):
+    def chat(self, system, history, gen_conf=None, **kwargs):
+        if gen_conf is None:
+            gen_conf = {}
         if system and history and history[0].get("role") != "system":
             history.insert(0, {"role": "system", "content": system})
         gen_conf = self._clean_conf(gen_conf)

@@ -24,7 +24,7 @@ logger.info(f"Seccomp Env: python3, "
 try:
     with open(RELEASE_LIB_PATH, "rb") as f:
         _PYTHON_LIB = f.read()
-except:
+except Exception:
     logger.critical("failed to load python lib")
     raise
 

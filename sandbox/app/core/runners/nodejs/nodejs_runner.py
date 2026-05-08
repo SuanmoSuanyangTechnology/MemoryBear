@@ -124,7 +124,7 @@ class NodejsRunner(CodeExecutor):
                 try:
                     process.kill()
                     await process.wait()
-                except:
+                except Exception:
                     pass
 
                 return ExecutionResult(
