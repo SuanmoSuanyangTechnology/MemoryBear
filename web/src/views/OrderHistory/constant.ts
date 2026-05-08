@@ -15,3 +15,10 @@ export const STATUS: Record<Order['status'], { status: StatusTagProps['status'];
     status: 'error'
   },
 }
+
+export const typeMap: Record<string, string> = {
+  'FREE': 'personal',
+  'TEAM': 'team',
+  'ENTERPRISE': 'biz',
+  'OEM': 'commerce'
+};

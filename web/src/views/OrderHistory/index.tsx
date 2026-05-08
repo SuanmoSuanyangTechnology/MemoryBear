@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:35:41 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-08 16:52:35
+ * @Last Modified time: 2026-05-08 17:36:40
  */
 /**
  * Order History Page
@@ -23,7 +23,7 @@ import OrderDetail from './components/OrderDetail'
 import { orderListUrl } from '@/api/package'
 import { useI18n } from '@/store/locale'
 import type { Package } from '@/views/Package/types'
-import { STATUS } from './constant'
+import { STATUS, typeMap } from './constant'
 
 const OrderHistory: React.FC = () => {
   const { t } = useTranslation();
@@ -39,13 +39,18 @@ const OrderHistory: React.FC = () => {
   const productTypeOptions = [
     { label: t('pricing.allType'), value: null },
     { label: t('package.saas_personal'), value: 'saas_personal' },
-    { label: t('package.commercial_deployment'), value: 'commercial_deployment' }
+    { label: t('package.commercial_deployment'), value: 'commercial_deployment' },
+    ...Object.keys(typeMap).map(type => ({
+      label: t(`pricing.${typeMap[type] || 'ENTERPRISE'}.type`),
+      value: type
+    }))
   ]
 
   const businessTypeOptions = [
     { label: t('pricing.allBusinessType'), value: null },
     { label: t('pricing.purchase'), value: 'purchase' },
     { label: t('pricing.renewal'), value: 'renewal' },
+    { label: t('pricing.upgrade'), value: 'upgrade' },
     { label: t('pricing.recharge'), value: 'recharge' },
     { label: t('pricing.free'), value: 'free' }
   ]

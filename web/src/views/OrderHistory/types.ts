@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:35:32 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:35:32 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-05-08 17:35:57
  */
 
 import type { Package } from '@/views/Package/types';
@@ -32,7 +32,7 @@ export interface Order {
   package_version: string;
   product_type: string;
   package_snapshot: Package;
-  business_type: 'purchase' | 'renewal';
+  business_type: 'purchase' | 'renewal' | 'upgrade' | 'recharge' | 'downgrade' | 'free';
   multiplier: number;
   payable_amount: string;
   payment_method: 'bank_transfer' | 'paypal';
