@@ -15,7 +15,7 @@ import logging
 import os
 from typing import Optional
 from uuid import UUID
-
+from app.core.memory.models.ontology_extraction_models import OntologyTypeList
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,6 @@ def load_ontology_types_for_scene(
         return None
     
     try:
-        from app.core.memory.models.ontology_extraction_models import OntologyTypeList
         from app.repositories.ontology_class_repository import OntologyClassRepository
         
         # 查询场景的本体类型

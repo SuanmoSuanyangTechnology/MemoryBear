@@ -42,7 +42,6 @@ async def add_dialogue_nodes(dialogues: List[DialogueNode], connector: Neo4jConn
                 "ref_id": dialogue.ref_id,
                 "name": dialogue.name,
                 "created_at": dialogue.created_at.isoformat() if dialogue.created_at else None,
-                "expired_at": dialogue.expired_at.isoformat() if dialogue.expired_at else None,
                 "content": dialogue.content,
                 "dialog_embedding": dialogue.dialog_embedding
             })
@@ -87,7 +86,6 @@ async def add_statement_nodes(statements: List[StatementNode], connector: Neo4jC
                 "chunk_id": statement.chunk_id,
                 # "created_at": statement.created_at.isoformat(),
                 "created_at": statement.created_at.isoformat() if statement.created_at else None,
-                "expired_at": statement.expired_at.isoformat() if statement.expired_at else None,
                 "stmt_type": statement.stmt_type,
                 "temporal_info": statement.temporal_info.value,
                 "statement": statement.statement,
@@ -115,7 +113,8 @@ async def add_statement_nodes(statements: List[StatementNode], connector: Neo4jC
                 "activation_value": statement.activation_value,
                 "access_history": statement.access_history if statement.access_history else [],
                 "last_access_time": statement.last_access_time,
-                "access_count": statement.access_count
+                "access_count": statement.access_count,
+                "dialog_at": statement.dialog_at.isoformat() if statement.dialog_at else None,
             }
             flattened_statements.append(flattened_statement)
 
@@ -159,7 +158,6 @@ async def add_chunk_nodes(chunks: List[ChunkNode], connector: Neo4jConnector) ->
                 "end_user_id": chunk.end_user_id,
                 "run_id": chunk.run_id,
                 "created_at": chunk.created_at.isoformat() if chunk.created_at else None,
-                "expired_at": chunk.expired_at.isoformat() if chunk.expired_at else None,
                 "dialog_id": chunk.dialog_id,
                 "content": chunk.content,
                 "chunk_embedding": chunk.chunk_embedding if chunk.chunk_embedding else None,
@@ -211,7 +209,6 @@ async def add_memory_summary_nodes(
                 "end_user_id": s.end_user_id,
                 "run_id": s.run_id,
                 "created_at": s.created_at.isoformat() if s.created_at else None,
-                "expired_at": s.expired_at.isoformat() if s.expired_at else None,
                 "dialog_id": s.dialog_id,
                 "chunk_ids": s.chunk_ids,
                 "content": s.content,

@@ -421,6 +421,9 @@ class MemoryConfig:
     pruning_scene: Optional[str] = "education"
     pruning_threshold: float = 0.5
     
+    # Pipeline config: Emotion extraction
+    emotion_enabled: bool = False
+    
     # Ontology scene association
     scene_id: Optional[UUID] = None
     ontology_class_infos: list[dict] = field(default_factory=list)

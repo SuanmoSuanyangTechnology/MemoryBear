@@ -34,15 +34,15 @@ from app.core.memory.agent.utils.messages_tools import (
     reorder_output_results,
 )
 from app.core.memory.agent.utils.type_classifier import status_typle
-from app.core.memory.agent.utils.write_tools import write as write_neo4j
 from app.core.memory.analytics.hot_memory_tags import get_interest_distribution
+from app.core.memory.memory_service import MemoryService
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.memory.utils.log.audit_logger import audit_logger
 from app.db import get_db_context
 from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas import FileInput
-from app.schemas.memory_agent_schema import Write_UserInput
+from app.schemas.memory_agent_schema import Language, MessageItem, StorageType, Write_UserInput, WriteMemoryRequest
 from app.schemas.memory_config_schema import ConfigurationError
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_konwledges_server import (
@@ -63,7 +63,7 @@ class MemoryAgentService:
     def writer_messages_deal(self, messages, start_time, end_user_id, config_id, message, context):
         duration = time.time() - start_time
         if str(messages) == 'success':
-            logger.info(f"Write operation successful for group {end_user_id} with config_id {config_id}")
+            logger.info(f"Write operation successful for end_id: {end_user_id} with config_id： {config_id}")
             # 记录成功的操作
             audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id,
                                        success=True,
@@ -267,25 +267,15 @@ class MemoryAgentService:
 
     async def write_memory(
             self,
-            end_user_id: str,
-            messages: list[dict],
-            config_id: Optional[uuid.UUID] | int,
+            request: WriteMemoryRequest,
             db: Session,
-            storage_type: str,
-            user_rag_memory_id: str,
-            language: str = "zh"
     ) -> str:
         """
-        Process write operation with config_id
+        长期记忆写入
 
         Args:
-            end_user_id: Group identifier (also used as end_user_id)
-            messages: Message to write
-            config_id: Configuration ID from database
+            request: 写入请求参数（end_user_id、messages、config_id、storage_type、language 等）
             db: SQLAlchemy database session
-            storage_type: Storage type (neo4j or rag)
-            user_rag_memory_id: User RAG memory ID
-            language: 语言类型 ("zh" 中文, "en" 英文)
 
         Returns:
             Write operation result status
@@ -293,96 +283,50 @@ class MemoryAgentService:
         Raises:
             ValueError: If config loading fails or write operation fails
         """
-        # Resolve config_id and workspace_id
-        # Always get workspace_id from end_user for fallback, even if config_id is provided
-        workspace_id = None
-        try:
-            connected_config = get_end_user_connected_config(end_user_id, db)
-            workspace_id = connected_config.get("workspace_id")
-            if config_id is None:
-                config_id = connected_config.get("memory_config_id")
-            logger.info(f"Resolved config from end_user: config_id={config_id}, workspace_id={workspace_id}")
-            if config_id is None and workspace_id is None:
-                raise ValueError(f"No memory configuration found for end_user {end_user_id}. "
-                                 f"Please ensure the user has a connected memory configuration.")
-        except Exception as e:
-            if "No memory configuration found" in str(e):
-                raise  # Re-raise our specific error
-            logger.error(f"Failed to get connected config for end_user {end_user_id}: {e}")
-            if config_id is None:
-                raise ValueError(f"Unable to determine memory configuration for end_user {end_user_id}: {e}")
-            # If config_id was provided, continue without workspace_id fallback
-
-        import time
+        end_user_id = request.end_user_id
+        messages = request.messages
+        config_id = request.config_id
+        storage_type = request.storage_type
+        user_rag_memory_id = request.user_rag_memory_id
+        language = request.language
         start_time = time.time()
 
-        # Load configuration from database with workspace fallback
-        # Use a separate database session to avoid transaction failures
+        # ── Step 1: 解析配置 ── 通过 end_user_id 查找关联的 config_id / workspace_id，并从数据库加载完整 memory_config
+        memory_config = await self._resolve_and_load_config(
+            end_user_id, config_id, db, start_time
+        )
+
+        # ── Step 2: 文件预处理 ── 将消息中附带的文件转换为感知记忆对象，挂载到 message["file_content"]
+        messages = await self._preprocess_files(messages, end_user_id, memory_config, db)
+        message_text = "\n".join([
+            f"{(msg['role'] if isinstance(msg, dict) else msg.role)}: {(msg['content'] if isinstance(msg, dict) else msg.content)}"
+            for msg in messages
+        ])
+
+        # ── Step 3: 写入存储 ── 根据 storage_type 分流到 RAG 或 Neo4j 流水线
         try:
-            from app.db import get_db_context
-            with get_db_context() as config_db:
-                config_service = MemoryConfigService(config_db)
-                memory_config = config_service.load_memory_config(
-                    config_id=config_id,
-                    workspace_id=workspace_id,
-                    service_name="MemoryAgentService"
-                )
-            logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
-        except ConfigurationError as e:
-            error_msg = f"Failed to load configuration for config_id: {config_id}: {e}"
-            logger.error(error_msg)
-
-            # Log failed operation
-            duration = time.time() - start_time
-            audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id,
-                                       success=False, duration=duration, error=error_msg)
-
-            raise ValueError(error_msg)
-
-        perceptual_serivce = MemoryPerceptualService(db)
-        for message in messages:
-            message["file_content"] = []
-            for file in (message.get("files") or []):
-                file_object = await perceptual_serivce.generate_perceptual_memory(
-                    end_user_id=end_user_id,
-                    memory_config=memory_config,
-                    file=FileInput(**file)
-                )
-                if file_object is None:
-                    continue
-                message["file_content"].append((file_object, file["type"]))
-        logger.info(messages)
-
-        message_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
-        try:
-            if storage_type == "rag":
-                # For RAG storage, convert messages to single string
+            if storage_type == StorageType.RAG:
                 await write_rag(end_user_id, message_text, user_rag_memory_id)
                 return "success"
             else:
-                await write_neo4j(
-                    end_user_id=end_user_id,
-                    messages=messages,
-                    memory_config=memory_config,
-                    ref_id='',
-                    language=language
-                )
-                for lang in ["zh", "en"]:
-                    deleted = await InterestMemoryCache.delete_interest_distribution(
-                        end_user_id, lang
-                    )
-                    if deleted:
-                        logger.info(
-                            f"Invalidated interest distribution cache: end_user_id={end_user_id}, language={lang}")
+                await self._write_neo4j(end_user_id, messages, memory_config, language)
+
+                # ── Step 4: 后处理 ── 失效缓存、序列化文件路径、记录审计日志并返回结果
+                await self._invalidate_interest_cache(end_user_id)
                 for message in messages:
-                    message["file_content"] = [
-                        perceptual[0].file_path for perceptual in message["file_content"]
-                    ]
+                    if isinstance(message, dict):
+                        message["file_content"] = [
+                            perceptual[0].file_path for perceptual in (message["file_content"] or [])
+                        ]
+                    else:
+                        message.file_content = [
+                            perceptual[0].file_path for perceptual in (message.file_content or [])
+                        ]
                 return self.writer_messages_deal(
                     "success",
                     start_time,
                     end_user_id,
-                    config_id,
+                    memory_config.config_id,
                     message_text,
                     {
                         "status": "success",
@@ -392,14 +336,139 @@ class MemoryAgentService:
                     }
                 )
         except Exception as e:
-            # Ensure proper error handling and logging
             error_msg = f"Write operation failed: {str(e)}"
             logger.error(error_msg)
-
-            duration = time.time() - start_time
-            audit_logger.log_operation(operation="WRITE", config_id=config_id, end_user_id=end_user_id,
-                                       success=False, duration=duration, error=error_msg)
+            audit_logger.log_operation(
+                operation="WRITE",
+                config_id=memory_config.config_id,
+                end_user_id=end_user_id,
+                success=False,
+                duration=time.time() - start_time,
+                error=error_msg,
+            )
             raise ValueError(error_msg)
+
+    async def _resolve_and_load_config(
+            self,
+            end_user_id: str,
+            config_id: Optional[uuid.UUID] | int,
+            db: Session,
+            start_time: float,
+    ):
+        """解析 end_user 关联配置并从数据库加载完整 memory_config。"""
+        workspace_id = None
+        try:
+            connected_config = get_end_user_connected_config(end_user_id, db)
+            # get_end_user_connected_config 返回字符串，需转为 UUID
+            workspace_id_raw = connected_config.get("workspace_id")
+            if workspace_id_raw and workspace_id_raw != "None":
+                try:
+                    workspace_id = uuid.UUID(str(workspace_id_raw))
+                except (ValueError, AttributeError):
+                    workspace_id = None
+            if config_id is None:
+                config_id_raw = connected_config.get("memory_config_id")
+                if config_id_raw and config_id_raw != "None":
+                    try:
+                        config_id = uuid.UUID(str(config_id_raw))
+                    except (ValueError, AttributeError):
+                        config_id = None
+            logger.info(f"Resolved config from end_user: config_id = {config_id}, workspace_id = {workspace_id}")
+            if config_id is None and workspace_id is None:
+                raise ValueError(
+                    f"No memory configuration found for end_user {end_user_id}. "
+                    f"Please ensure the user has a connected memory configuration."
+                )
+        except Exception as e:
+            if "No memory configuration found" in str(e):
+                raise
+            logger.error(f"Failed to get connected config for end_user {end_user_id}: {e}")
+            if config_id is None:
+                raise ValueError(f"Unable to determine memory configuration for end_user {end_user_id}: {e}")
+
+        try:
+            with get_db_context() as config_db:
+                memory_config = MemoryConfigService(config_db).load_memory_config(
+                    config_id=config_id,
+                    workspace_id=workspace_id,
+                    service_name="MemoryAgentService",
+                )
+            logger.info(f"Configuration loaded successfully: {memory_config.config_name}")
+            return memory_config
+        except ConfigurationError as e:
+            error_msg = f"Failed to load configuration for config_id: {config_id}: {e}"
+            logger.error(error_msg)
+            audit_logger.log_operation(
+                operation="WRITE",
+                config_id=config_id,
+                end_user_id=end_user_id,
+                success=False,
+                duration=time.time() - start_time,
+                error=error_msg,
+            )
+            raise ValueError(error_msg)
+
+    async def _preprocess_files(
+            self,
+            messages: list[MessageItem] | list[dict],
+            end_user_id: str,
+            memory_config,
+            db: Session,
+    ) -> list[dict]:
+        """处理消息中附带的文件，生成感知记忆对象并挂载到 message['file_content']。"""
+        perceptual_service = MemoryPerceptualService(db)
+        for message in messages:
+            if isinstance(message, dict):
+                message["file_content"] = []
+                files = message.get("files") or []
+            else:
+                message.file_content = []
+                files = message.files or []
+            for file in files:
+                file_object = await perceptual_service.generate_perceptual_memory(
+                    end_user_id=end_user_id,
+                    memory_config=memory_config,
+                    file=FileInput(**file),
+                )
+                if file_object is None:
+                    continue
+                if isinstance(message, dict):
+                    message["file_content"].append((file_object, file["type"]))
+                else:
+                    message.file_content.append((file_object, file["type"]))
+        logger.info(messages)
+        return messages
+
+    async def _write_neo4j(
+            self,
+            end_user_id: str,
+            messages: list[MessageItem] | list[dict],
+            memory_config,
+            language: Language | str,
+    ) -> None:
+        """使用新流水线（MemoryService → WritePipeline）写入 Neo4j。"""
+        messages_dict = [
+            msg if isinstance(msg, dict) else msg.model_dump(exclude_none=True)
+            for msg in messages
+        ]
+        service = MemoryService(memory_config=memory_config, end_user_id=end_user_id)
+        result = await service.write(
+            messages=messages_dict, language=language, ref_id='',
+        )
+        logger.info(
+            f"[WritePipeline] 完成: status={result.status}, "
+            f"elapsed={result.elapsed_seconds:.2f}s, "
+            f"extraction={result.extraction}"
+        )
+
+    async def _invalidate_interest_cache(self, end_user_id: str) -> None:
+        """写入完成后失效兴趣分布缓存。"""
+        for lang in ["zh", "en"]:
+            deleted = await InterestMemoryCache.delete_interest_distribution(end_user_id, lang)
+            if deleted:
+                logger.info(
+                    f"Invalidated interest distribution cache: end_user_id={end_user_id}, language={lang}"
+                )
 
     async def read_memory(
             self,
@@ -448,7 +517,7 @@ class MemoryAgentService:
             workspace_id = connected_config.get("workspace_id")
             if config_id is None:
                 config_id = connected_config.get("memory_config_id")
-            logger.info(f"Resolved config from end_user: config_id={config_id}, workspace_id={workspace_id}")
+            logger.info(f"Resolved config from end_user: config_id = {config_id}, workspace_id = {workspace_id}")
             if config_id is None and workspace_id is None:
                 raise ValueError(
                     f"No memory configuration found for end_user {end_user_id}. Please ensure the user has a connected memory configuration.")
@@ -460,7 +529,7 @@ class MemoryAgentService:
                 raise ValueError(f"Unable to determine memory configuration for end_user {end_user_id}: {e}")
             # If config_id was provided, continue without workspace_id fallback
 
-        logger.info(f"Read operation for group {end_user_id} with config_id {config_id}")
+        logger.info(f"Read operation for end_user_id: {end_user_id} with config_id: {config_id}")
 
         config_load_start = time.time()
         try:
@@ -771,16 +840,16 @@ class MemoryAgentService:
             workspace_id = connected_config.get('workspace_id')
             if config_id is None:
                 config_id = connected_config.get('memory_config_id')
-            logger.info(f"Resolved config from end_user: config_id={config_id}, workspace_id={workspace_id}")
+            logger.info(f"Resolved config from end_user: config_id = {config_id}, workspace_id = {workspace_id}")
             if config_id is None and workspace_id is None:
                 raise ValueError(
-                    f"No memory configuration found for end_user {end_user_id}. Please ensure the user has a connected memory configuration.")
+                    f"No memory configuration found for end_user_id {end_user_id}. Please ensure the user has a connected memory configuration.")
         except Exception as e:
             if "No memory configuration found" in str(e):
                 raise  # Re-raise our specific error
-            logger.error(f"Failed to get connected config for end_user {end_user_id}: {e}")
+            logger.error(f"Failed to get connected config for end_user_id {end_user_id}: {e}")
             if config_id is None:
-                raise ValueError(f"Unable to determine memory configuration for end_user {end_user_id}: {e}")
+                raise ValueError(f"Unable to determine memory configuration for end_user_id {end_user_id}: {e}")
             # If config_id was provided, continue without workspace_id fallback
 
         logger.info(f"Generating summary from retrieve info for query: {query[:50]}...")
@@ -1004,7 +1073,7 @@ class MemoryAgentService:
             # 查询该用户的热门实体
             entity_query = (
                 "MATCH (e:ExtractedEntity) "
-                "WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id) AND e.entity_type <> '人物' AND e.name IS NOT NULL "
+                "WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id) AND e.entity_type <> '生命体' AND e.name IS NOT NULL "
                 "RETURN e.name AS name, count(e) AS frequency "
                 "ORDER BY frequency DESC LIMIT 20"
             )
@@ -1062,7 +1131,7 @@ class MemoryAgentService:
             names_to_exclude = ['AI', 'Caroline', 'Melanie', 'Jon', 'Gina', '用户', 'AI助手', 'John', 'Maria']
             hot_tag_query = (
                 "MATCH (e:ExtractedEntity) "
-                "WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id) AND e.entity_type <> '人物' "
+                "WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id) AND e.entity_type <> '生命体' "
                 "AND e.name IS NOT NULL AND NOT e.name IN $names_to_exclude "
                 "RETURN e.name AS name, count(e) AS frequency "
                 "ORDER BY frequency DESC LIMIT 4"
@@ -1181,7 +1250,7 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     from app.models.end_user_model import EndUser
     from app.services.memory_config_service import MemoryConfigService
 
-    logger.info(f"Getting connected config for end_user: {end_user_id}")
+    logger.info(f"Getting connected config for end_user_id: {end_user_id}")
 
     # TODO: check sources for enduserid, should be one of these three: chat, draft, apikey
     # 1. 获取 end_user 及其 app_id
@@ -1282,7 +1351,7 @@ def get_end_user_connected_config(end_user_id: str, db: Session) -> Dict[str, An
     }
 
     logger.info(
-        f"Successfully retrieved connected config: memory_config_id={memory_config_id}, workspace_id={end_user.workspace_id}")
+        f"Successfully retrieved connected config: memory_config_id = {memory_config_id}, workspace_id = {end_user.workspace_id}")
     return result
 
 

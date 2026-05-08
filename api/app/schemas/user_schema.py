@@ -1,5 +1,5 @@
 from dataclasses import field
-from pydantic import BaseModel, EmailStr, Field, field_validator, validator, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List
 import datetime
 import uuid
@@ -90,7 +90,8 @@ class User(UserBase):
     permissions: Optional[List[str]] = None  # 用户权限列表，由 external_source 的 permissions 控制
 
     # 将 datetime 转换为毫秒时间戳
-    @validator("created_at", pre=True)
+    @field_validator("created_at", mode="before")
+    @classmethod
     def _created_at_to_ms(cls, v):
         if isinstance(v, datetime.datetime):
             return int(v.timestamp() * 1000)
@@ -98,7 +99,8 @@ class User(UserBase):
             return int(v)
         return v
 
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True
 
     @field_validator("last_login_at", mode="before")
     @classmethod

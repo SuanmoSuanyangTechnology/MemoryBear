@@ -242,6 +242,7 @@ class ChunkerClient:
                     chunk = Chunk(
                         content=f"{msg.role}: {sub_chunk_text}",
                         speaker=msg.role,  # 直接继承角色
+                        dialog_at=getattr(msg, "dialog_at", None),
                         metadata={
                             "message_index": msg_idx,
                             "message_role": msg.role,
@@ -257,6 +258,7 @@ class ChunkerClient:
                 chunk = Chunk(
                     content=f"{msg.role}: {msg_content}",
                     speaker=msg.role,  # 直接继承角色
+                    dialog_at=getattr(msg, "dialog_at", None),
                     metadata={
                         "message_index": msg_idx,
                         "message_role": msg.role,

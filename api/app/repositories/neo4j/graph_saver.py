@@ -24,6 +24,10 @@ from app.core.memory.models.graph_models import (
     EntityEntityEdge,
     PerceptualNode,
     PerceptualEdge,
+    AssistantOriginalNode,
+    AssistantPrunedNode,
+    AssistantPrunedEdge,
+    AssistantDialogEdge,
 )
 import logging
 
@@ -44,13 +48,13 @@ async def save_entities_and_relationships(
             'source_id': edge.source,
             'target_id': edge.target,
             'predicate': edge.relation_type,
+            'predicate_description': edge.relation_type_description,
             'statement_id': edge.source_statement_id,
             'value': edge.relation_value,
             'statement': edge.statement,
             'valid_at': edge.valid_at.isoformat() if edge.valid_at else None,
             'invalid_at': edge.invalid_at.isoformat() if edge.invalid_at else None,
             'created_at': edge.created_at.isoformat() if edge.created_at else None,
-            'expired_at': edge.expired_at.isoformat() if edge.expired_at else None,
             'run_id': edge.run_id,
             'end_user_id': edge.end_user_id,
         }
@@ -110,7 +114,6 @@ async def save_statement_chunk_edges(
             "end_user_id": edge.end_user_id,
             "run_id": edge.run_id,
             "created_at": edge.created_at.isoformat() if edge.created_at else None,
-            "expired_at": edge.expired_at.isoformat() if edge.expired_at else None,
         })
 
     try:
@@ -140,7 +143,6 @@ async def save_statement_entity_edges(
             "run_id": edge.run_id,
             "connect_strength": edge.connect_strength,
             "created_at": edge.created_at.isoformat() if edge.created_at else None,
-            "expired_at": edge.expired_at.isoformat() if edge.expired_at else None,
         }
         all_se_edges.append(edge_data)
 
@@ -165,6 +167,10 @@ async def save_dialog_and_statements_to_neo4j(
         statement_entity_edges: List[StatementEntityEdge],
         perceptual_edges: List[PerceptualEdge],
         connector: Neo4jConnector,
+        assistant_original_nodes: Optional[List[AssistantOriginalNode]] = None,
+        assistant_pruned_nodes: Optional[List[AssistantPrunedNode]] = None,
+        assistant_pruned_edges: Optional[List[AssistantPrunedEdge]] = None,
+        assistant_dialog_edges: Optional[List[AssistantDialogEdge]] = None,
 ) -> bool:
     """Save dialogue nodes, chunk nodes, statement nodes, entities, and all relationships to Neo4j using graph models.
 
@@ -251,7 +257,7 @@ async def save_dialog_and_statements_to_neo4j(
             result = await tx.run(DIALOGUE_NODE_SAVE, dialogues=dialogue_data)
             dialogue_uuids = [record["uuid"] async for record in result]
             results['dialogues'] = dialogue_uuids
-            logger.info(f"Dialogues saved to Neo4j with UUIDs: {dialogue_uuids}")
+            logger.debug(f"Dialogues saved to Neo4j with UUIDs: {dialogue_uuids}")
 
         # 2. Save all chunk nodes in batch
         if chunk_nodes:
@@ -260,7 +266,7 @@ async def save_dialog_and_statements_to_neo4j(
             result = await tx.run(CHUNK_NODE_SAVE, chunks=chunk_data)
             chunk_uuids = [record["uuid"] async for record in result]
             results['chunks'] = chunk_uuids
-            logger.info(f"Successfully saved {len(chunk_uuids)} chunk nodes to Neo4j")
+            logger.debug(f"Successfully saved {len(chunk_uuids)} chunk nodes to Neo4j")
 
         if perceptual_nodes:
             from app.repositories.neo4j.cypher_queries import PERCEPTUAL_NODE_SAVE
@@ -268,7 +274,7 @@ async def save_dialog_and_statements_to_neo4j(
             result = await tx.run(PERCEPTUAL_NODE_SAVE, perceptuals=perceptual_data)
             perceptual_uuids = [record["uuid"] async for record in result]
             results["perceptuals"] = perceptual_uuids
-            logger.info(f"Successfully saved {len(perceptual_uuids)} perceptual nodes to Neo4j")
+            logger.debug(f"Successfully saved {len(perceptual_uuids)} perceptual nodes to Neo4j")
 
         # 3. Save all statement nodes in batch
         if statement_nodes:
@@ -277,7 +283,7 @@ async def save_dialog_and_statements_to_neo4j(
             result = await tx.run(STATEMENT_NODE_SAVE, statements=statement_data)
             statement_uuids = [record["uuid"] async for record in result]
             results['statements'] = statement_uuids
-            logger.info(f"Successfully saved {len(statement_uuids)} statement nodes to Neo4j")
+            logger.debug(f"Successfully saved {len(statement_uuids)} statement nodes to Neo4j")
 
         # 4. Save entities
         if entity_nodes:
@@ -286,7 +292,7 @@ async def save_dialog_and_statements_to_neo4j(
             result = await tx.run(EXTRACTED_ENTITY_NODE_SAVE, entities=entity_data)
             entity_uuids = [record["uuid"] async for record in result]
             results['entities'] = entity_uuids
-            logger.info(f"Successfully saved {len(entity_uuids)} entity nodes to Neo4j")
+            logger.debug(f"Successfully saved {len(entity_uuids)} entity nodes to Neo4j")
 
         # 5. Create entity relationships
         if entity_edges:
@@ -297,20 +303,20 @@ async def save_dialog_and_statements_to_neo4j(
                     'source_id': edge.source,
                     'target_id': edge.target,
                     'predicate': edge.relation_type,
+                    'predicate_description': edge.relation_type_description,
                     'statement_id': edge.source_statement_id,
                     'value': edge.relation_value,
                     'statement': edge.statement,
                     'valid_at': edge.valid_at.isoformat() if edge.valid_at else None,
                     'invalid_at': edge.invalid_at.isoformat() if edge.invalid_at else None,
                     'created_at': edge.created_at.isoformat() if edge.created_at else None,
-                    'expired_at': edge.expired_at.isoformat() if edge.expired_at else None,
                     'run_id': edge.run_id,
                     'end_user_id': edge.end_user_id,
                 })
             result = await tx.run(ENTITY_RELATIONSHIP_SAVE, relationships=relationship_data)
             rel_uuids = [record["uuid"] async for record in result]
             results['entity_relationships'] = rel_uuids
-            logger.info(f"Successfully saved {len(rel_uuids)} entity relationships to Neo4j")
+            logger.debug(f"Successfully saved {len(rel_uuids)} entity relationships to Neo4j")
 
         # 6. Save statement-chunk edges
         if statement_chunk_edges:
@@ -322,14 +328,13 @@ async def save_dialog_and_statements_to_neo4j(
                     "source": edge.source,
                     "target": edge.target,
                     "created_at": edge.created_at.isoformat() if edge.created_at else None,
-                    "expired_at": edge.expired_at.isoformat() if edge.expired_at else None,
                     "run_id": edge.run_id,
                     "end_user_id": edge.end_user_id,
                 })
             result = await tx.run(CHUNK_STATEMENT_EDGE_SAVE, chunk_statement_edges=sc_edge_data)
             sc_uuids = [record["uuid"] async for record in result]
             results['statement_chunk_edges'] = sc_uuids
-            logger.info(f"Successfully saved {len(sc_uuids)} statement-chunk edges to Neo4j")
+            logger.debug(f"Successfully saved {len(sc_uuids)} statement-chunk edges to Neo4j")
 
         # 7. Save statement-entity edges
         if statement_entity_edges:
@@ -340,7 +345,6 @@ async def save_dialog_and_statements_to_neo4j(
                     "source": edge.source,
                     "target": edge.target,
                     "created_at": edge.created_at.isoformat() if edge.created_at else None,
-                    "expired_at": edge.expired_at.isoformat() if edge.expired_at else None,
                     "run_id": edge.run_id,
                     "end_user_id": edge.end_user_id,
                     "connect_strength": getattr(edge, "connect_strength", "strong"),
@@ -348,7 +352,7 @@ async def save_dialog_and_statements_to_neo4j(
             result = await tx.run(STATEMENT_ENTITY_EDGE_SAVE, relationships=se_edge_data)
             se_uuids = [record["uuid"] async for record in result]
             results['statement_entity_edges'] = se_uuids
-            logger.info(f"Successfully saved {len(se_uuids)} statement-entity edges to Neo4j")
+            logger.debug(f"Successfully saved {len(se_uuids)} statement-entity edges to Neo4j")
 
         if perceptual_edges:
             from app.repositories.neo4j.cypher_queries import PERCEPTUAL_CHUNK_EDGE_SAVE
@@ -364,7 +368,56 @@ async def save_dialog_and_statements_to_neo4j(
             result = await tx.run(PERCEPTUAL_CHUNK_EDGE_SAVE, edges=perceptual_edge_data)
             perceptual_edges_uuids = [record["uuid"] async for record in result]
             results['perceptual_chunk_edges'] = perceptual_edges_uuids
-            logger.info(f"Successfully saved {len(perceptual_edges_uuids)} perceptual-chunk edges to Neo4j")
+            logger.debug(f"Successfully saved {len(perceptual_edges_uuids)} perceptual-chunk edges to Neo4j")
+
+        # 8. Save assistant original nodes
+        if assistant_original_nodes:
+            from app.repositories.neo4j.cypher_queries import ASSISTANT_ORIGINAL_NODE_SAVE
+            original_data = [node.model_dump() for node in assistant_original_nodes]
+            result = await tx.run(ASSISTANT_ORIGINAL_NODE_SAVE, originals=original_data)
+            original_uuids = [record["uuid"] async for record in result]
+            results['assistant_originals'] = original_uuids
+            logger.debug(f"Successfully saved {len(original_uuids)} assistant original nodes to Neo4j")
+
+        # 9. Save assistant pruned nodes
+        if assistant_pruned_nodes:
+            from app.repositories.neo4j.cypher_queries import ASSISTANT_PRUNED_NODE_SAVE
+            pruned_data = [node.model_dump() for node in assistant_pruned_nodes]
+            result = await tx.run(ASSISTANT_PRUNED_NODE_SAVE, pruneds=pruned_data)
+            pruned_uuids = [record["uuid"] async for record in result]
+            results['assistant_pruneds'] = pruned_uuids
+            logger.debug(f"Successfully saved {len(pruned_uuids)} assistant pruned nodes to Neo4j")
+
+        # 10. Save PRUNED_TO edges (Original → Pruned)
+        if assistant_pruned_edges:
+            from app.repositories.neo4j.cypher_queries import ASSISTANT_PRUNED_EDGE_SAVE
+            edge_data = [{
+                "source": edge.source,
+                "target": edge.target,
+                "pair_id": edge.pair_id,
+                "end_user_id": edge.end_user_id,
+                "run_id": edge.run_id,
+                "created_at": edge.created_at.isoformat() if edge.created_at else None,
+            } for edge in assistant_pruned_edges]
+            result = await tx.run(ASSISTANT_PRUNED_EDGE_SAVE, edges=edge_data)
+            pruned_edge_uuids = [record["uuid"] async for record in result]
+            results['assistant_pruned_edges'] = pruned_edge_uuids
+            logger.debug(f"Successfully saved {len(pruned_edge_uuids)} PRUNED_TO edges to Neo4j")
+
+        # 11. Save BELONGS_TO_DIALOG edges (Original → Dialogue)
+        if assistant_dialog_edges:
+            from app.repositories.neo4j.cypher_queries import ASSISTANT_DIALOG_EDGE_SAVE
+            edge_data = [{
+                "source": edge.source,
+                "target": edge.target,
+                "end_user_id": edge.end_user_id,
+                "run_id": edge.run_id,
+                "created_at": edge.created_at.isoformat() if edge.created_at else None,
+            } for edge in assistant_dialog_edges]
+            result = await tx.run(ASSISTANT_DIALOG_EDGE_SAVE, edges=edge_data)
+            dialog_edge_uuids = [record["uuid"] async for record in result]
+            results['assistant_dialog_edges'] = dialog_edge_uuids
+            logger.debug(f"Successfully saved {len(dialog_edge_uuids)} BELONGS_TO_DIALOG edges to Neo4j")
 
         return results
 

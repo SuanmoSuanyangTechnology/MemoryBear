@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 import redis
 from redis.exceptions import RedisError
+from fastapi.encoders import jsonable_encoder
 
 # Import a unified Celery instance
 from app.celery_app import celery_app
@@ -39,6 +40,7 @@ from app.models import Document, File, Knowledge
 from app.models.end_user_model import EndUser
 from app.schemas import document_schema, file_schema
 from app.services.memory_agent_service import MemoryAgentService, get_end_user_connected_config
+from app.schemas.memory_agent_schema import WriteMemoryRequest
 from app.services.memory_forget_service import MemoryForgetService
 from app.utils.config_utils import resolve_config_id
 from app.utils.redis_lock import RedisFairLock
@@ -1469,10 +1471,19 @@ def write_message_task(
         with get_db_context() as db:
             logger.info(
                 f"[CELERY WRITE] Executing MemoryAgentService.write_memory "
-                f"with config_id={actual_config_id} (type: {type(actual_config_id).__name__}), language={language}")
+                f"with config_id = {actual_config_id} (type: {type(actual_config_id).__name__}), language={language}")
             service = MemoryAgentService()
-            result = await service.write_memory(end_user_id, message, actual_config_id, db, storage_type,
-                                                user_rag_memory_id, language)
+            result = await service.write_memory(
+                WriteMemoryRequest(
+                    end_user_id=end_user_id,
+                    messages=message,
+                    config_id=actual_config_id,
+                    storage_type=storage_type,
+                    user_rag_memory_id=user_rag_memory_id,
+                    language=language,
+                ),
+                db,
+            )
             logger.info(f"[CELERY WRITE] Write completed successfully: {result}")
             return result
 
@@ -1520,12 +1531,18 @@ def write_message_task(
                 )
         except Exception as _e:
             logger.warning(f"[CELERY WRITE] 写入 last_done 时间戳失败（不影响主流程）: {_e}")
+        # 将 result 转为 JSON 安全结构，避免 Celery JSON 序列化 pydantic BaseModel / UUID 失败
+        try:
+            safe_result = jsonable_encoder(result)
+        except Exception as _enc_e:
+            logger.warning(f"[CELERY WRITE] jsonable_encoder 失败，回退为字符串: {_enc_e}")
+            safe_result = str(result)
         return {
             "status": "SUCCESS",
-            "result": result,
+            "result": safe_result,
             "start_at": task_start_time,
             "end_user_id": end_user_id,
-            "config_id": config_id,
+            "config_id": str(config_id) if config_id is not None else None,
             "elapsed_time": elapsed_time,
             "task_id": self.request.id
         }
@@ -1561,9 +1578,736 @@ def write_message_task(
             _shutdown_loop_gracefully(loop)
 
 
+@celery_app.task(
+    bind=True,
+    name="app.tasks.extract_emotion_batch",
+    max_retries=2,
+    default_retry_delay=30,
+)
+def extract_emotion_batch_task(
+    self,
+    statements: List[Dict[str, str]],
+    llm_model_id: str,
+    language: str = "zh",
+    emotion_config: Optional[Dict[str, Any]] = None,
+    snapshot_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Celery task: batch emotion extraction + Neo4j backfill.
+
+    Runs asynchronously after the main write pipeline completes.
+    Each statement is processed independently; individual failures
+    degrade gracefully without affecting other statements.
+
+    Args:
+        statements: List of dicts with keys: statement_id, statement_text, speaker.
+        llm_model_id: UUID string of the LLM model to use.
+        language: Language code ("zh" / "en").
+        emotion_config: Optional dict with emotion step config overrides
+                        (emotion_extract_keywords, emotion_enable_subject).
+        snapshot_dir: Optional absolute path of the current run's snapshot directory.
+                      When provided (only in debug mode), emotion outputs will be
+                      dumped to <snapshot_dir>/4_emotion_outputs.json for offline
+                      comparison between the legacy / new pipelines.
+    """
+    task_id = self.request.id
+    total = len(statements)
+    logger.info(
+        f"[Emotion] 开始批量情绪提取: "
+        f"statements={total}, llm_model_id={llm_model_id}, "
+        f"language={language}, task_id={task_id}"
+    )
+    start_time = time.time()
+
+    if not statements:
+        return {"status": "SUCCESS", "total": 0, "extracted": 0, "failed": 0, "task_id": task_id}
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.memory.models.variate_config import ExtractionPipelineConfig
+        from app.core.memory.storage_services.extraction_engine.steps.base import StepContext
+        from app.core.memory.storage_services.extraction_engine.steps.emotion_step import EmotionExtractionStep
+        from app.core.memory.storage_services.extraction_engine.steps.schema import (
+            EmotionStepInput,
+            EmotionStepOutput,
+        )
+        from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+        from app.db import get_db_context
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+        from app.repositories.neo4j.cypher_queries import STATEMENT_EMOTION_UPDATE
+
+        # Build LLM client
+        with get_db_context() as db:
+            factory = MemoryClientFactory(db)
+            llm_client = factory.get_llm_client(llm_model_id)
+
+        # Build minimal pipeline config with emotion enabled
+        pipeline_config = ExtractionPipelineConfig(emotion_enabled=True)
+        # Apply optional config overrides
+        emo_cfg = emotion_config or {}
+        for key in ("emotion_extract_keywords", "emotion_enable_subject"):
+            if key in emo_cfg:
+                setattr(pipeline_config, key, emo_cfg[key])
+
+        context = StepContext(
+            llm_client=llm_client,
+            language=language,
+            config=pipeline_config,
+        )
+        step = EmotionExtractionStep(context)
+
+        # Concurrent extraction for all statements
+        extracted = 0
+        failed = 0
+        update_items = []
+        # 快照用：收集每条 statement 的 EmotionStepOutput（仅当 snapshot_dir 非空时使用）
+        snapshot_outputs: Dict[str, Any] = {} if snapshot_dir else None  # type: ignore[assignment]
+
+        async def _extract_one(stmt_dict: Dict[str, str]):
+            nonlocal extracted, failed
+            inp = EmotionStepInput(
+                statement_id=stmt_dict["statement_id"],
+                statement_text=stmt_dict["statement_text"],
+                speaker=stmt_dict.get("speaker", "user"),
+            )
+            try:
+                result: EmotionStepOutput = await step.run(inp)
+                update_items.append({
+                    "statement_id": stmt_dict["statement_id"],
+                    "emotion_type": result.emotion_type,
+                    "emotion_intensity": result.emotion_intensity,
+                    "emotion_keywords": result.emotion_keywords,
+                })
+                if snapshot_outputs is not None:
+                    snapshot_outputs[stmt_dict["statement_id"]] = result.model_dump()
+                extracted += 1
+                logger.debug(
+                    f"[Emotion] 单条提取完成: stmt={stmt_dict['statement_id']}, "
+                    f"type={result.emotion_type}, intensity={result.emotion_intensity}"
+                )
+            except Exception as e:
+                failed += 1
+                if snapshot_outputs is not None:
+                    snapshot_outputs[stmt_dict["statement_id"]] = {"error": str(e)}
+                logger.warning(
+                    f"[Emotion] 单条提取失败 stmt={stmt_dict['statement_id']}: {e}"
+                )
+
+        await asyncio.gather(*[_extract_one(s) for s in statements])
+
+        # 快照落盘（worker 端）：不影响 Neo4j 写入流程，失败只打日志
+        if snapshot_outputs is not None:
+            try:
+                from pathlib import Path as _Path
+                import json as _json
+
+                _dir = _Path(snapshot_dir)
+                _dir.mkdir(parents=True, exist_ok=True)
+                _path = _dir / "4_emotion_outputs.json"
+                with open(_path, "w", encoding="utf-8") as _f:
+                    _json.dump(snapshot_outputs, _f, ensure_ascii=False, indent=2, default=str)
+                logger.info(
+                    f"[Emotion][Snapshot] 已落盘 {len(snapshot_outputs)} 条情绪结果 → {_path}"
+                )
+            except Exception as _e:
+                logger.warning(
+                    f"[Emotion][Snapshot] 快照落盘失败（不影响主流程）: {_e}"
+                )
+
+        # Batch update Neo4j via write transaction
+        if update_items:
+            connector = Neo4jConnector()
+            try:
+                async def _write_emotions(tx):
+                    result = await tx.run(STATEMENT_EMOTION_UPDATE, items=update_items)
+                    records = [record async for record in result]
+                    return records
+
+                records = await connector.execute_write_transaction(_write_emotions)
+                logger.info(
+                    f"[Emotion] Neo4j 回写完成: "
+                    f"更新 {len(records)}/{len(update_items)} 条 Statement 节点"
+                )
+            except Exception as e:
+                logger.error(f"[Emotion] Neo4j 回写失败: {e}")
+                raise
+            finally:
+                await connector.close()
+
+        return {"extracted": extracted, "failed": failed}
+
+    loop = None
+    try:
+        loop = set_asyncio_event_loop()
+        result = loop.run_until_complete(_run())
+        elapsed = time.time() - start_time
+        logger.info(
+            f"[Emotion] 任务完成: 提取={result['extracted']}, "
+            f"失败={result['failed']}, 耗时={elapsed:.2f}s, task_id={task_id}"
+        )
+        return {
+            "status": "SUCCESS",
+            "total": total,
+            **result,
+            "elapsed_time": elapsed,
+            "task_id": task_id,
+        }
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.error(
+            f"[Emotion] 任务失败: {e}, 耗时={elapsed:.2f}s",
+            exc_info=True,
+        )
+        raise self.retry(exc=e)
+    finally:
+        if loop:
+            _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(
+    bind=True,
+    name="app.tasks.post_store_dedup_and_alias_merge",
+    max_retries=1,
+    default_retry_delay=30,
+)
+def post_store_dedup_and_alias_merge_task(
+    self,
+    end_user_id: str,
+    entity_ids: List[str],
+    llm_model_id: Optional[str] = None,
+    snapshot_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Celery task: 写入后异步执行 Neo4j 别名归并 + 第二层去重。
+
+    在主写入流水线将第一层去重结果写入 Neo4j 之后执行：
+    1. Neo4j 别名归并：将 "别名属于" 边的 source.name 合并到 target.aliases
+    2. Neo4j 边重定向：将指向别名节点的边重定向到目标节点
+    3. 第二层去重：与 Neo4j 中已有的同组实体做联合去重
+
+    Args:
+        end_user_id: 终端用户 ID
+        entity_ids: 本轮写入的实体 ID 列表（用于第二层去重的候选检索）
+        llm_model_id: LLM 模型 UUID（用于第二层去重的 LLM 兜底判定）
+    """
+    task_id = self.request.id
+    logger.info(
+        f"[PostStore] 开始异步别名归并+第二层去重: "
+        f"end_user_id={end_user_id}, entity_count={len(entity_ids)}, "
+        f"task_id={task_id}"
+    )
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+        from app.repositories.neo4j.cypher_queries import (
+            MERGE_ALIAS_BELONGS_TO,
+            REDIRECT_ALIAS_EDGES,
+            DELETE_ALIAS_NODES,
+            REMOVE_INVALID_ALIASES,
+        )
+
+        connector = Neo4jConnector()
+        result_info: Dict[str, Any] = {}
+
+        try:
+            # ── 1. Neo4j 别名归并（追加新别名） ──
+            try:
+                records = await connector.execute_query(
+                    MERGE_ALIAS_BELONGS_TO,
+                    end_user_id=end_user_id,
+                )
+                merged_count = len(records) if records else 0
+                result_info["alias_merged"] = merged_count
+                logger.info(f"[PostStore] Neo4j 别名归并完成，影响 {merged_count} 条记录")
+            except Exception as e:
+                logger.warning(f"[PostStore] Neo4j 别名归并失败: {e}")
+                result_info["alias_merge_error"] = str(e)
+
+            # ── 1.5 Neo4j 失效别名移除（从 aliases 中删除旧别名） ──
+            try:
+                invalid_records = await connector.execute_query(
+                    REMOVE_INVALID_ALIASES,
+                    end_user_id=end_user_id,
+                )
+                invalid_count = len(invalid_records) if invalid_records else 0
+                result_info["invalid_aliases_removed"] = invalid_count
+                logger.info(f"[PostStore] 失效别名移除完成，影响 {invalid_count} 条记录")
+
+                # 同步删除 PostgreSQL end_user_info.aliases 中的失效别名
+                if invalid_records:
+                    removed_names = [
+                        r.get("removed_alias") for r in invalid_records
+                        if r.get("removed_alias")
+                    ]
+                    if removed_names:
+                        _remove_invalid_aliases_pg(end_user_id, removed_names)
+            except Exception as e:
+                logger.warning(f"[PostStore] 失效别名移除失败: {e}")
+                result_info["invalid_alias_error"] = str(e)
+
+            # ── 2. Neo4j 边重定向 ──
+            try:
+                redirect_records = await connector.execute_query(
+                    REDIRECT_ALIAS_EDGES,
+                    end_user_id=end_user_id,
+                )
+                redirect_count = len(redirect_records) if redirect_records else 0
+                result_info["edges_redirected"] = redirect_count
+                logger.info(f"[PostStore] Neo4j 边重定向完成，影响 {redirect_count} 条记录")
+            except Exception as e:
+                logger.warning(f"[PostStore] Neo4j 边重定向失败: {e}")
+                result_info["redirect_error"] = str(e)
+
+            # ── 3. 删除别名节点及"别名属于"关系 ──
+            try:
+                delete_records = await connector.execute_query(
+                    DELETE_ALIAS_NODES,
+                    end_user_id=end_user_id,
+                )
+                deleted_count = delete_records[0].get("deleted_count", 0) if delete_records else 0
+                result_info["alias_nodes_deleted"] = deleted_count
+                logger.info(f"[PostStore] 别名节点删除完成，删除 {deleted_count} 个节点")
+            except Exception as e:
+                logger.warning(f"[PostStore] 别名节点删除失败: {e}")
+                result_info["alias_delete_error"] = str(e)
+
+            # ── 3.5 Snapshot: 别名归并+删除后的实体状态 ──
+            if snapshot_dir:
+                try:
+                    snapshot_query = """
+                    UNWIND $entity_ids AS eid
+                    MATCH (e:ExtractedEntity {id: eid})
+                    RETURN e.id AS id, e.name AS name,
+                           e.entity_type AS entity_type,
+                           e.description AS description,
+                           coalesce(e.aliases, []) AS aliases
+                    """
+                    snap_records = await connector.execute_query(
+                        snapshot_query, entity_ids=entity_ids
+                    )
+                    entity_rows = [dict(r) for r in snap_records] if snap_records else []
+                    from app.core.memory.utils.debug.write_snapshot_recorder import WriteSnapshotRecorder
+                    WriteSnapshotRecorder.save_alias_merge_result(snapshot_dir, entity_rows)
+                    logger.info(f"[PostStore] Snapshot 8_after_alias_merge 已写入，实体数={len(entity_rows)}")
+                except Exception as e:
+                    logger.warning(f"[PostStore] Snapshot 写入失败（不影响主流程）: {e}")
+
+            # ── 4. 第二层去重（与 Neo4j 已有实体联合去重） ──
+            try:
+                from app.core.memory.storage_services.extraction_engine.deduplication.second_layer_dedup import (
+                    second_layer_dedup_and_merge_with_neo4j,
+                )
+                from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
+                    clean_cross_role_aliases,
+                )
+                from app.repositories.neo4j.cypher_queries import EXTRACTED_ENTITY_NODE_SAVE
+
+                # 从 Neo4j 加载本轮写入的实体（第一层去重后的结果）
+                load_query = """
+                UNWIND $entity_ids AS eid
+                MATCH (e:ExtractedEntity {id: eid})
+                RETURN e {.*} AS entity
+                """
+                entity_records = await connector.execute_query(
+                    load_query, entity_ids=entity_ids
+                )
+
+                if entity_records:
+                    from app.core.memory.storage_services.extraction_engine.deduplication.second_layer_dedup import (
+                        _row_to_entity,
+                    )
+
+                    current_entities = []
+                    for rec in entity_records:
+                        try:
+                            entity_data = rec.get("entity") or rec
+                            current_entities.append(_row_to_entity(entity_data))
+                        except Exception:
+                            pass
+
+                    if current_entities:
+                        # 构建 LLM client（如果有 llm_model_id）
+                        llm_client = None
+                        if llm_model_id:
+                            try:
+                                from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+                                from app.db import get_db_context
+                                with get_db_context() as db:
+                                    factory = MemoryClientFactory(db)
+                                    llm_client = factory.get_llm_client(llm_model_id)
+                            except Exception as e:
+                                logger.warning(f"[PostStore] 构建 LLM client 失败，跳过 LLM 兜底: {e}")
+
+                        fused_entities, _, _ = await second_layer_dedup_and_merge_with_neo4j(
+                            connector=connector,
+                            end_user_id=end_user_id,
+                            entity_nodes=current_entities,
+                            statement_entity_edges=[],
+                            entity_entity_edges=[],
+                            llm_client=llm_client,
+                        )
+
+                        # 清洗跨角色别名污染
+                        clean_cross_role_aliases(fused_entities)
+
+                        # 将融合后的实体回写 Neo4j
+                        if fused_entities:
+                            entity_data = [e.model_dump() for e in fused_entities]
+                            await connector.execute_query(
+                                EXTRACTED_ENTITY_NODE_SAVE, entities=entity_data
+                            )
+
+                        result_info["layer2_input"] = len(current_entities)
+                        result_info["layer2_output"] = len(fused_entities)
+                        logger.info(
+                            f"[PostStore] 第二层去重完成: "
+                            f"{len(current_entities)} → {len(fused_entities)} 个实体"
+                        )
+                    else:
+                        result_info["layer2_skipped"] = "no entities loaded"
+                else:
+                    result_info["layer2_skipped"] = "no entity records found"
+
+            except Exception as e:
+                logger.warning(f"[PostStore] 第二层去重失败（不影响主流程）: {e}", exc_info=True)
+                result_info["layer2_error"] = str(e)
+
+        finally:
+            await connector.close()
+
+        return result_info
+
+    loop = None
+    try:
+        loop = set_asyncio_event_loop()
+        result = loop.run_until_complete(_run())
+        elapsed = time.time() - start_time
+        logger.info(
+            f"[PostStore] 任务完成: {result}, 耗时={elapsed:.2f}s, task_id={task_id}"
+        )
+        return {
+            "status": "SUCCESS",
+            **result,
+            "elapsed_time": elapsed,
+            "task_id": task_id,
+        }
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.error(
+            f"[PostStore] 任务失败: {e}, 耗时={elapsed:.2f}s",
+            exc_info=True,
+        )
+        raise self.retry(exc=e)
+    finally:
+        if loop:
+            _shutdown_loop_gracefully(loop)
+
+
+def _sync_end_user_info_pg(
+    end_user_id: str,
+    aliases: List[str],
+    extracted_metadata: Optional[Dict[str, Any]],
+) -> None:
+    """将别名和元数据增量同步到 PostgreSQL end_user_info 表。
+
+    - aliases 合并到 end_user_info.aliases（去重）
+    - end_user_info.other_name 若为空则取 aliases[0]
+    - end_user.other_name 与 end_user_info.other_name 保持同步
+    - extracted_metadata 各字段列表合并到 end_user_info.meta_data（去重）
+
+    失败只记日志，不抛异常，不影响主流程。
+    """
+    try:
+        import uuid as _uuid
+        from app.db import get_db_context
+        from app.repositories.end_user_info_repository import EndUserInfoRepository
+        from app.repositories.end_user_repository import EndUserRepository
+
+        eu_uuid = _uuid.UUID(end_user_id)
+
+        with get_db_context() as db:
+            info_repo = EndUserInfoRepository(db)
+            info = info_repo.update_aliases_and_metadata(
+                end_user_id=eu_uuid,
+                new_aliases=aliases or [],
+                new_metadata=extracted_metadata,
+            )
+            if info is None:
+                logger.warning(
+                    f"[Metadata][PG] end_user_info 记录不存在，跳过同步: end_user_id={end_user_id}"
+                )
+                return
+
+            # 同步 end_user.other_name（与 end_user_info.other_name 保持一致）
+            new_other_name = (info.other_name or "").strip()
+            if new_other_name:
+                eu_repo = EndUserRepository(db)
+                end_user = eu_repo.get_end_user_by_id(eu_uuid)
+                if end_user and not (end_user.other_name or "").strip():
+                    end_user.other_name = new_other_name
+                    db.commit()
+                    logger.info(
+                        f"[Metadata][PG] 同步 end_user.other_name={new_other_name}: "
+                        f"end_user_id={end_user_id}"
+                    )
+
+        logger.info(
+            f"[Metadata][PG] end_user_info 同步完成: end_user_id={end_user_id}, "
+            f"aliases_count={len(aliases or [])}"
+        )
+    except Exception as e:
+        logger.warning(
+            f"[Metadata][PG] 同步 end_user_info 失败（不影响主流程）: "
+            f"end_user_id={end_user_id}, error={e}",
+            exc_info=True,
+        )
+
+
+def _remove_invalid_aliases_pg(
+    end_user_id: str,
+    aliases_to_remove: List[str],
+) -> None:
+    """将失效别名从 PostgreSQL end_user_info.aliases 中移除。
+
+    失败只记日志，不抛异常，不影响主流程。
+    """
+    try:
+        import uuid as _uuid
+        from app.db import get_db_context
+        from app.repositories.end_user_info_repository import EndUserInfoRepository
+
+        eu_uuid = _uuid.UUID(end_user_id)
+        with get_db_context() as db:
+            info_repo = EndUserInfoRepository(db)
+            info_repo.remove_aliases(
+                end_user_id=eu_uuid,
+                aliases_to_remove=aliases_to_remove,
+            )
+        logger.info(
+            f"[PostStore][PG] 失效别名已从 end_user_info 移除: "
+            f"end_user_id={end_user_id}, removed={aliases_to_remove}"
+        )
+    except Exception as e:
+        logger.warning(
+            f"[PostStore][PG] 移除失效别名失败（不影响主流程）: "
+            f"end_user_id={end_user_id}, error={e}",
+            exc_info=True,
+        )
+
+
+@celery_app.task(
+    bind=True,
+    name="app.tasks.extract_metadata_batch",
+    max_retries=2,
+    default_retry_delay=30,
+)
+def extract_metadata_batch_task(
+    self,
+    user_entities: List[Dict[str, Any]],
+    llm_model_id: str,
+    language: str = "zh",
+    snapshot_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Celery task: 用户实体元数据提取 + Neo4j 回写 + PostgreSQL 同步。
+
+    在主写入流水线完成后异步执行。从用户实体的 description 中提取
+    结构化元数据（core_facts、traits、relations 等），增量回写到 Neo4j，
+    同时将 aliases 和 extracted_metadata 同步到 PostgreSQL end_user_info 表。
+
+    Args:
+        user_entities: 用户实体列表，每项包含:
+            - entity_id: 实体 ID
+            - entity_name: 实体名称
+            - descriptions: description 文本列表
+            - aliases: 实体别名列表（来自 "别名属于" 关系归并后的结果）
+            - end_user_id: 终端用户 ID（用于写入 PostgreSQL）
+        llm_model_id: LLM 模型 UUID 字符串
+        language: 语言 ("zh" / "en")
+        snapshot_dir: 可选的快照目录路径（调试模式下使用）
+    """
+    task_id = self.request.id
+    total = len(user_entities)
+    logger.info(
+        f"[Metadata] 开始用户元数据提取: "
+        f"entities={total}, llm_model_id={llm_model_id}, "
+        f"language={language}, task_id={task_id}"
+    )
+    start_time = time.time()
+
+    if not user_entities:
+        return {"status": "SUCCESS", "total": 0, "extracted": 0, "failed": 0, "task_id": task_id}
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.memory.models.variate_config import ExtractionPipelineConfig
+        from app.core.memory.storage_services.extraction_engine.steps.base import StepContext
+        from app.core.memory.storage_services.extraction_engine.steps.metadata_step import MetadataExtractionStep
+        from app.core.memory.storage_services.extraction_engine.steps.schema import (
+            MetadataStepInput,
+        )
+        from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+        from app.db import get_db_context
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+        from app.repositories.neo4j.cypher_queries import ENTITY_METADATA_UPDATE, ENTITY_METADATA_QUERY
+
+        # Build LLM client
+        with get_db_context() as db:
+            factory = MemoryClientFactory(db)
+            llm_client = factory.get_llm_client(llm_model_id)
+
+        pipeline_config = ExtractionPipelineConfig()
+        context = StepContext(
+            llm_client=llm_client,
+            language=language,
+            config=pipeline_config,
+        )
+        step = MetadataExtractionStep(context)
+
+        extracted = 0
+        failed = 0
+        snapshot_outputs: Dict[str, Any] = {} if snapshot_dir else None  # type: ignore[assignment]
+
+        connector = Neo4jConnector()
+        try:
+            for entity_dict in user_entities:
+                entity_id = entity_dict["entity_id"]
+                entity_name = entity_dict.get("entity_name", "")
+                descriptions = entity_dict.get("descriptions", [])
+                aliases = entity_dict.get("aliases", [])
+                end_user_id = entity_dict.get("end_user_id", "")
+
+                if not descriptions:
+                    logger.debug(f"[Metadata] 跳过无 description 的实体: {entity_id}")
+                    continue
+
+                try:
+                    # 查询已有元数据用于增量去重
+                    existing_metadata = {}
+                    try:
+                        records = await connector.execute_query(
+                            ENTITY_METADATA_QUERY, entity_id=entity_id
+                        )
+                        if records:
+                            rec = records[0]
+                            for field in (
+                                "core_facts", "traits", "relations", "goals",
+                                "interests", "beliefs_or_stances", "anchors", "events",
+                            ):
+                                val = rec.get(field)
+                                existing_metadata[field] = val if val else []
+                    except Exception as e:
+                        logger.warning(f"[Metadata] 查询已有元数据失败: {e}")
+
+                    inp = MetadataStepInput(
+                        entity_id=entity_id,
+                        entity_name=entity_name,
+                        descriptions=descriptions,
+                        existing_metadata=existing_metadata,
+                    )
+                    result = await step.run(inp)
+
+                    if result.has_any():
+                        # 回写 Neo4j
+                        await connector.execute_query(
+                            ENTITY_METADATA_UPDATE,
+                            entity_id=entity_id,
+                            core_facts=result.core_facts,
+                            traits=result.traits,
+                            relations=result.relations,
+                            goals=result.goals,
+                            interests=result.interests,
+                            beliefs_or_stances=result.beliefs_or_stances,
+                            anchors=result.anchors,
+                            events=result.events,
+                        )
+                        extracted += 1
+                        logger.info(
+                            f"[Metadata] 实体 {entity_name}({entity_id}) 元数据提取并回写成功"
+                        )
+
+                        # 同步写入 PostgreSQL end_user_info
+                        if end_user_id:
+                            _sync_end_user_info_pg(
+                                end_user_id=end_user_id,
+                                aliases=aliases,
+                                extracted_metadata=result.model_dump(),
+                            )
+                    else:
+                        # 即使无新增元数据，也同步 aliases 到 PostgreSQL
+                        if end_user_id and aliases:
+                            _sync_end_user_info_pg(
+                                end_user_id=end_user_id,
+                                aliases=aliases,
+                                extracted_metadata=None,
+                            )
+                        logger.debug(
+                            f"[Metadata] 实体 {entity_name}({entity_id}) 无新增元数据"
+                        )
+
+                    if snapshot_outputs is not None:
+                        snapshot_outputs[entity_id] = {
+                            "entity_name": entity_name,
+                            "descriptions": descriptions,
+                            "extracted_metadata": result.model_dump(),
+                        }
+
+                except Exception as e:
+                    failed += 1
+                    if snapshot_outputs is not None:
+                        snapshot_outputs[entity_id] = {"error": str(e)}
+                    logger.warning(
+                        f"[Metadata] 实体 {entity_id} 元数据提取失败: {e}"
+                    )
+        finally:
+            await connector.close()
+
+        # 快照落盘
+        if snapshot_outputs is not None and snapshot_dir:
+            try:
+                from pathlib import Path as _Path
+                import json as _json
+
+                _dir = _Path(snapshot_dir)
+                _dir.mkdir(parents=True, exist_ok=True)
+                _path = _dir / "9_metadata_outputs.json"
+                with open(_path, "w", encoding="utf-8") as _f:
+                    _json.dump(snapshot_outputs, _f, ensure_ascii=False, indent=2, default=str)
+                logger.info(
+                    f"[Metadata][Snapshot] 已落盘 {len(snapshot_outputs)} 条元数据结果 → {_path}"
+                )
+            except Exception as _e:
+                logger.warning(
+                    f"[Metadata][Snapshot] 快照落盘失败（不影响主流程）: {_e}"
+                )
+
+        return {"extracted": extracted, "failed": failed}
+
+    loop = None
+    try:
+        loop = set_asyncio_event_loop()
+        result = loop.run_until_complete(_run())
+        elapsed = time.time() - start_time
+        logger.info(
+            f"[Metadata] 任务完成: 提取={result['extracted']}, "
+            f"失败={result['failed']}, 耗时={elapsed:.2f}s, task_id={task_id}"
+        )
+        return {
+            "status": "SUCCESS",
+            "total": total,
+            **result,
+            "elapsed_time": elapsed,
+            "task_id": task_id,
+        }
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.error(
+            f"[Metadata] 任务失败: {e}, 耗时={elapsed:.2f}s",
+            exc_info=True,
+        )
+        raise self.retry(exc=e)
+    finally:
+        if loop:
+            _shutdown_loop_gracefully(loop)
+
+
 # unused task
-# @celery_app.task(name="app.core.memory.agent.health.check_read_service")
-# def check_read_service_task() -> Dict[str, str]:
 #     """Call read_service and write latest status to Redis.
 
 #     Returns status data dict that gets written to Redis.
@@ -3217,301 +3961,6 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
 
 
 # ─── User Metadata Extraction Task ───────────────────────────────────────────
-
-
-def _update_timestamps(existing: dict, new: dict, updated_at: dict, now: str, prefix: str = "") -> None:
-    """对比新旧元数据，更新变更字段的 _updated_at 时间戳。"""
-    for key, new_val in new.items():
-        if key == "_updated_at":
-            continue
-        path = f"{prefix}.{key}" if prefix else key
-        old_val = existing.get(key)
-
-        if isinstance(new_val, dict) and isinstance(old_val, dict):
-            _update_timestamps(old_val, new_val, updated_at, now, prefix=path)
-        elif old_val != new_val:
-            updated_at[path] = now
-
-@celery_app.task(
-    bind=True,
-    name='app.tasks.extract_user_metadata',
-    ignore_result=False,
-    max_retries=0,
-    acks_late=True,
-    time_limit=300,
-    soft_time_limit=240,
-)
-def extract_user_metadata_task(
-    self,
-    end_user_id: str,
-    statements: List[str],
-    config_id: Optional[str] = None,
-    language: str = "zh",
-) -> Dict[str, Any]:
-    """异步提取用户元数据并写入数据库。
-
-    在去重消歧完成后由编排器触发，使用独立 LLM 调用提取元数据。
-    LLM 配置优先使用 config_id 对应的应用配置，失败时回退到工作空间默认配置。
-
-    Args:
-        end_user_id: 终端用户 ID
-        statements: 用户相关的 statement 文本列表
-        config_id: 应用配置 ID（可选）
-        language: 语言类型 ("zh" 中文, "en" 英文)
-
-    Returns:
-        包含任务执行结果的字典
-    """
-    start_time = time.time()
-    logger.info(
-        f"[CELERY METADATA] Starting metadata extraction - end_user_id={end_user_id}, "
-        f"statements_count={len(statements)}, config_id={config_id}, language={language}"
-    )
-
-    async def _run() -> Dict[str, Any]:
-        from app.core.memory.storage_services.extraction_engine.knowledge_extraction.metadata_extractor import MetadataExtractor
-        from app.repositories.end_user_info_repository import EndUserInfoRepository
-        from app.repositories.end_user_repository import EndUserRepository
-        from app.services.memory_config_service import MemoryConfigService
-
-        # 1. 获取 LLM 配置（应用配置 → 工作空间配置兜底）并创建 LLM client
-        with get_db_context() as db:
-            end_user_uuid = uuid.UUID(end_user_id)
-
-            # 获取 workspace_id from end_user
-            end_user = EndUserRepository(db).get_by_id(end_user_uuid)
-            if not end_user:
-                return {"status": "FAILURE", "error": f"End user not found: {end_user_id}"}
-
-            workspace_id = end_user.workspace_id
-
-            config_service = MemoryConfigService(db)
-            memory_config = config_service.get_config_with_fallback(
-                memory_config_id=uuid.UUID(config_id) if config_id else None,
-                workspace_id=workspace_id,
-            )
-            if not memory_config:
-                return {"status": "FAILURE", "error": "No LLM config available (app + workspace fallback failed)"}
-
-            # 2. 创建 LLM client
-            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-            factory = MemoryClientFactory(db)
-            if not memory_config.llm_id:
-                return {"status": "FAILURE", "error": "Memory config has no LLM model configured"}
-            llm_client = factory.get_llm_client(memory_config.llm_id)
-
-            # 2.5 读取已有元数据和别名，传给 extractor 作为上下文
-            existing_metadata = None
-            existing_aliases = None
-            try:
-                info = EndUserInfoRepository(db).get_by_end_user_id(end_user_uuid)
-                if info:
-                    if info.meta_data:
-                        existing_metadata = info.meta_data
-                    existing_aliases = info.aliases if info.aliases else []
-                    logger.info(f"[CELERY METADATA] 已读取已有元数据和别名（aliases={existing_aliases}）")
-            except Exception as e:
-                logger.warning(f"[CELERY METADATA] 读取已有数据失败（继续无上下文提取）: {e}")
-
-        # 3. 提取元数据和别名（传入已有数据作为上下文）
-        extractor = MetadataExtractor(llm_client=llm_client, language=language)
-        extract_result = await extractor.extract_metadata(
-            statements,
-            existing_metadata=existing_metadata,
-            existing_aliases=existing_aliases,
-        )
-
-        if not extract_result:
-            logger.info(f"[CELERY METADATA] No metadata extracted for end_user_id={end_user_id}")
-            return {"status": "SUCCESS", "result": "no_metadata_extracted"}
-
-        metadata_changes, aliases_to_add, aliases_to_remove = extract_result
-        logger.info(
-            f"[CELERY METADATA] LLM 元数据变更: {[c.model_dump() for c in metadata_changes]}, "
-            f"别名新增: {aliases_to_add}, 移除: {aliases_to_remove}"
-        )
-
-        from datetime import datetime as dt, timezone as tz
-        now = dt.now(tz.utc).isoformat()
-
-        # 过滤别名中的占位名称，执行增量增删
-        _PLACEHOLDER_NAMES = {"用户", "我", "user", "i"}
-
-        def _filter_aliases(aliases_list):
-            seen = set()
-            result = []
-            for a in aliases_list:
-                a_stripped = a.strip()
-                if a_stripped and a_stripped.lower() not in _PLACEHOLDER_NAMES and a_stripped.lower() not in seen:
-                    result.append(a_stripped)
-                    seen.add(a_stripped.lower())
-            return result
-
-        filtered_add = _filter_aliases(aliases_to_add)
-        filtered_remove = _filter_aliases(aliases_to_remove)
-        remove_lower = {a.lower() for a in filtered_remove}
-
-        with get_db_context() as db:
-            end_user_uuid = uuid.UUID(end_user_id)
-            info = EndUserInfoRepository(db).get_by_end_user_id(end_user_uuid)
-            end_user = EndUserRepository(db).get_by_id(end_user_uuid)
-
-            if info:
-                # 4. 元数据增量更新（按 LLM 输出的变更操作逐条执行，所有字段均为列表类型）
-                if metadata_changes:
-                    # 深拷贝，确保 SQLAlchemy 能检测到变更
-                    import copy
-                    existing_meta = copy.deepcopy(info.meta_data) if info.meta_data else {}
-                    updated_at = dict(existing_meta.get("_updated_at", {}))
-
-                    for change in metadata_changes:
-                        field_path = change.field_path
-                        action = change.action
-                        value = change.value
-
-                        if not value or not value.strip():
-                            continue
-
-                        # 定位到目标字段的父级节点
-                        parts = field_path.split(".")
-                        target = existing_meta
-                        for part in parts[:-1]:
-                            target = target.setdefault(part, {})
-                        leaf = parts[-1]
-
-                        current_list = target.get(leaf, [])
-
-                        if action == "set":
-                            if value not in current_list:
-                                # 新值插入列表头部，保证按时间从新到旧排序
-                                current_list.insert(0, value)
-                                target[leaf] = current_list
-                            logger.info(f"[CELERY METADATA] set {field_path} = {value}")
-
-                        elif action == "remove":
-                            if value in current_list:
-                                current_list.remove(value)
-                                target[leaf] = current_list
-                            logger.info(f"[CELERY METADATA] remove {value} from {field_path}")
-
-                        updated_at[field_path] = now
-
-                    existing_meta["_updated_at"] = updated_at
-                    # 赋值深拷贝后的新对象，SQLAlchemy 会检测到字段变更并写入
-                    info.meta_data = existing_meta
-                    logger.info(f"[CELERY METADATA] 增量更新元数据完成: {json.dumps(existing_meta, ensure_ascii=False)}")
-
-                # 别名增量增删：(已有 - remove) + add
-                old_aliases = info.aliases if info.aliases else []
-                # 先移除
-                merged = [a for a in old_aliases if a.strip().lower() not in remove_lower]
-                # 再追加（去重）
-                existing_lower = {a.strip().lower() for a in merged}
-                for a in filtered_add:
-                    if a.lower() not in existing_lower:
-                        merged.append(a)
-                        existing_lower.add(a.lower())
-
-                if merged != old_aliases:
-                    info.aliases = merged
-                    # other_name 更新逻辑
-                    if merged and (
-                        not info.other_name
-                        or info.other_name.strip().lower() in _PLACEHOLDER_NAMES
-                        or info.other_name.strip().lower() in remove_lower
-                    ):
-                        info.other_name = merged[0]
-                    if end_user and merged and (
-                        not end_user.other_name
-                        or end_user.other_name.strip().lower() in _PLACEHOLDER_NAMES
-                        or end_user.other_name.strip().lower() in remove_lower
-                    ):
-                        end_user.other_name = merged[0]
-                    logger.info(
-                        f"[CELERY METADATA] 别名增量更新: {old_aliases} - {filtered_remove} + {filtered_add} → {merged}"
-                    )
-            else:
-                # 没有 end_user_info 记录，创建一条
-                from app.models.end_user_info_model import EndUserInfo
-                initial_aliases = filtered_add  # 新记录只有 add，没有 remove
-                first_alias = initial_aliases[0] if initial_aliases else ""
-
-                # 从变更操作构建初始元数据（所有字段均为列表类型）
-                initial_meta = {}
-                for change in metadata_changes:
-                    if change.action == "set" and change.value is not None and change.value.strip():
-                        parts = change.field_path.split(".")
-                        target = initial_meta
-                        for part in parts[:-1]:
-                            target = target.setdefault(part, {})
-                        leaf = parts[-1]
-                        current_list = target.get(leaf, [])
-                        if change.value not in current_list:
-                            # 新值插入列表头部，保证按时间从新到旧排序
-                            current_list.insert(0, change.value)
-                        target[leaf] = current_list
-
-                if first_alias or initial_meta:
-                    new_info = EndUserInfo(
-                        end_user_id=end_user_uuid,
-                        other_name=first_alias or "",
-                        aliases=initial_aliases,
-                        meta_data=initial_meta if initial_meta else None,
-                    )
-                    db.add(new_info)
-                    if end_user and first_alias and (
-                        not end_user.other_name or end_user.other_name.strip().lower() in _PLACEHOLDER_NAMES
-                    ):
-                        end_user.other_name = first_alias
-                    logger.info(f"[CELERY METADATA] 创建 end_user_info: other_name={first_alias}, aliases={initial_aliases}")
-                else:
-                    return {"status": "SUCCESS", "result": "no_data_to_write"}
-
-            db.commit()
-
-            # 同步 PgSQL aliases 到 Neo4j 用户实体（PgSQL 为权威源）
-            final_aliases = info.aliases if info else initial_aliases
-            if final_aliases:
-                try:
-                    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-                    neo4j_connector = Neo4jConnector()
-                    cypher = """
-                    MATCH (e:ExtractedEntity)
-                    WHERE e.end_user_id = $end_user_id AND e.name IN ['用户', '我', 'User', 'I']
-                    SET e.aliases = $aliases
-                    """
-                    await neo4j_connector.execute_query(
-                        cypher, end_user_id=end_user_id, aliases=final_aliases
-                    )
-                    await neo4j_connector.close()
-                    logger.info(f"[CELERY METADATA] Neo4j 用户实体 aliases 已同步: {final_aliases}")
-                except Exception as neo4j_err:
-                    logger.warning(f"[CELERY METADATA] Neo4j aliases 同步失败（不影响主流程）: {neo4j_err}")
-
-        return {"status": "SUCCESS", "result": "metadata_and_aliases_written"}
-
-    loop = None
-    try:
-        loop = set_asyncio_event_loop()
-        result = loop.run_until_complete(_run())
-        elapsed = time.time() - start_time
-        result["elapsed_time"] = elapsed
-        result["task_id"] = self.request.id
-        logger.info(f"[CELERY METADATA] Task completed - elapsed={elapsed:.2f}s, result={result.get('result')}")
-        return result
-
-    except Exception as e:
-        elapsed = time.time() - start_time
-        logger.error(f"[CELERY METADATA] Task failed - elapsed={elapsed:.2f}s, error={e}", exc_info=True)
-        return {
-            "status": "FAILURE",
-            "error": str(e),
-            "elapsed_time": elapsed,
-            "task_id": self.request.id,
-        }
-    finally:
-        if loop:
-            _shutdown_loop_gracefully(loop)
 
 
 # unused task

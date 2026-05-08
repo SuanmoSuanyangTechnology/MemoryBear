@@ -12,24 +12,27 @@ Mode: {{ 'Disambiguation Mode' if disambiguation_mode else 'Deduplication Mode' 
 ===Input===
 {% if language == "zh" %}
 实体A:
+
 - 名称: "{{ entity_a.name | default('') }}"
 - 类型: "{{ entity_a.entity_type | default('') }}"
 - 描述: "{{ entity_a.description | default('') }}"
 - 别名: {{ entity_a.aliases | default([]) }}
-{# TODO: fact_summary 功能暂时禁用，待后续开发完善后启用 #}
-{# - 摘要: "{{ entity_a.fact_summary | default('') }}" #}
+  {# TODO: fact_summary 功能暂时禁用，待后续开发完善后启用 #}
+  {# - 摘要: "{{ entity_a.fact_summary | default('') }}" #}
 - 连接强弱: "{{ entity_a.connect_strength | default('') }}"
 
 实体B:
+
 - 名称: "{{ entity_b.name | default('') }}"
 - 类型: "{{ entity_b.entity_type | default('') }}"
 - 描述: "{{ entity_b.description | default('') }}"
 - 别名: {{ entity_b.aliases | default([]) }}
-{# TODO: fact_summary 功能暂时禁用，待后续开发完善后启用 #}
-{# - 摘要: "{{ entity_b.fact_summary | default('') }}" #}
+  {# TODO: fact_summary 功能暂时禁用，待后续开发完善后启用 #}
+  {# - 摘要: "{{ entity_b.fact_summary | default('') }}" #}
 - 连接强弱: "{{ entity_b.connect_strength | default('') }}"
 
 上下文：
+
 - 同组: {{ same_group | default(false) }}
 - 类型一致或未知类型: {{ type_ok | default(false) }}
 - 类型相似度(0-1): {{ type_similarity | default(0.0) }}
@@ -38,29 +41,31 @@ Mode: {{ 'Disambiguation Mode' if disambiguation_mode else 'Deduplication Mode' 
 - 名称包含关系: {{ name_contains | default(false) }}
 - 上下文同源(同一语句指向两者): {{ co_occurrence | default(false) }}
 - 两者相关的关系陈述(来自实体-实体边):
-{% for s in relation_statements %}
+  {% for s in relation_statements %}
   - {{ s }}
-{% endfor %}
-{% else %}
-Entity A:
+    {% endfor %}
+    {% else %}
+    Entity A:
 - Name: "{{ entity_a.name | default('') }}"
 - Type: "{{ entity_a.entity_type | default('') }}"
 - Description: "{{ entity_a.description | default('') }}"
 - Aliases: {{ entity_a.aliases | default([]) }}
-{# TODO: fact_summary feature temporarily disabled, to be enabled after future development #}
-{# - Summary: "{{ entity_a.fact_summary | default('') }}" #}
+  {# TODO: fact_summary feature temporarily disabled, to be enabled after future development #}
+  {# - Summary: "{{ entity_a.fact_summary | default('') }}" #}
 - Connection Strength: "{{ entity_a.connect_strength | default('') }}"
 
 Entity B:
+
 - Name: "{{ entity_b.name | default('') }}"
 - Type: "{{ entity_b.entity_type | default('') }}"
 - Description: "{{ entity_b.description | default('') }}"
 - Aliases: {{ entity_b.aliases | default([]) }}
-{# TODO: fact_summary feature temporarily disabled, to be enabled after future development #}
-{# - Summary: "{{ entity_b.fact_summary | default('') }}" #}
+  {# TODO: fact_summary feature temporarily disabled, to be enabled after future development #}
+  {# - Summary: "{{ entity_b.fact_summary | default('') }}" #}
 - Connection Strength: "{{ entity_b.connect_strength | default('') }}"
 
 Context:
+
 - Same Group: {{ same_group | default(false) }}
 - Type Consistent or Unknown: {{ type_ok | default(false) }}
 - Type Similarity (0-1): {{ type_similarity | default(0.0) }}
@@ -69,14 +74,15 @@ Context:
 - Name Contains Relationship: {{ name_contains | default(false) }}
 - Context Co-occurrence (same statement refers to both): {{ co_occurrence | default(false) }}
 - Related Relationship Statements (from entity-entity edges):
-{% for s in relation_statements %}
+  {% for s in relation_statements %}
   - {{ s }}
-{% endfor %}
-{% endif %}
+    {% endfor %}
+    {% endif %}
 
 ===Guidelines===
 {% if language == "zh" %}
 {% if disambiguation_mode %}
+
 - 这是"同名但类型不同"的消歧场景。请判断两者是否指向同一真实世界实体。
 - 综合名称文本/向量相似度、别名、描述、摘要与上下文关系（同源与关系陈述）进行判断。
 - **别名处理（高优先级）**: 
@@ -93,7 +99,7 @@ Context:
   * 建议类型必须与上下文和实体描述一致
 - 规范实体优先级：连接强度（strong/both）更高者；其余相同则保留描述/摘要更丰富者；再相同时保留实体A（canonical_idx=0）。
 - **注意**：别名（aliases）已在三元组提取阶段获取，合并时会自动整合，无需在此阶段提取。
-{% else %}
+  {% else %}
 - 若实体类型相同或任一为UNKNOWN/空，可放行作为候选；若类型明显冲突（如人 vs 物品），除非别名与描述高度一致，否则判定不同实体。
 - **别名匹配优先（最高优先级）**: 
   * 如果实体A的名称与实体B的某个别名完全匹配，应视为高置信度匹配
@@ -107,9 +113,9 @@ Context:
 - 若需要合并，选择"保留的规范实体"(canonical_idx)为更合适的一个：
   - 优先保留连接强度更强(strong/both)者；其余相同则保留描述/摘要更丰富者；再相同时保留实体A（canonical_idx=0）。
 - **注意**：别名（aliases）已在三元组提取阶段获取，合并时会自动整合，无需在此阶段提取。
-{% endif %}
-{% else %}
-{% if disambiguation_mode %}
+  {% endif %}
+  {% else %}
+  {% if disambiguation_mode %}
 - This is a disambiguation scenario for "same name but different types". Please determine whether they refer to the same real-world entity.
 - Make judgments based on name text/vector similarity, aliases, descriptions, summaries, and contextual relationships (co-occurrence and relationship statements).
 - **Alias Handling (High Priority)**: 
@@ -126,7 +132,7 @@ Context:
   * Suggested type must be consistent with context and entity description
 - Canonical entity priority: higher connection strength (strong/both); if equal, retain the one with richer description/summary; if still equal, retain Entity A (canonical_idx=0).
 - **Note**: Aliases are already obtained during triplet extraction and will be automatically integrated during merging; no need to extract at this stage.
-{% else %}
+  {% else %}
 - If entity types are the same or either is UNKNOWN/empty, can proceed as candidates; if types clearly conflict (e.g., person vs. item), unless aliases and descriptions are highly consistent, determine as different entities.
 - **Alias Matching Priority (Highest Priority)**: 
   * If Entity A's name exactly matches any of Entity B's aliases, it should be considered a high-confidence match
@@ -140,8 +146,8 @@ Context:
 - If merging is needed, select the "canonical entity to retain" (canonical_idx) as the more appropriate one:
   - Prioritize retaining the one with stronger connection strength (strong/both); if equal, retain the one with richer description/summary; if still equal, retain Entity A (canonical_idx=0).
 - **Note**: Aliases are already obtained during triplet extraction and will be automatically integrated during merging; no need to extract at this stage.
-{% endif %}
-{% endif %}
+  {% endif %}
+  {% endif %}
 
 **Output format**
 {% if language == "zh" %}
@@ -157,64 +163,69 @@ Context:
 }
 
 **字段说明**:
+
 - should_merge: 是否应该合并这两个实体（true/false）
 - canonical_idx: 规范实体的索引，0表示实体A，1表示实体B
 - confidence: 决策的置信度，范围0.0-1.0
 - block_pair: 是否阻断该对在其他模糊/启发式合并中出现（true/false）
 - suggested_type: 建议的统一类型（字符串或null）
 - reason: 决策理由的简短说明
-{% else %}
-返回JSON格式，必须包含以下字段：
-{
+  {% else %}
+  返回JSON格式，必须包含以下字段：
+  {
   "same_entity": boolean,
   "canonical_idx": 0 or 1,
   "confidence": float (0.0-1.0),
   "reason": "string"
-}
+  }
 
 **字段说明**:
+
 - same_entity: 两个实体是否指向同一真实世界实体（true/false）
 - canonical_idx: 规范实体的索引，0表示实体A，1表示实体B
 - confidence: 决策的置信度，范围0.0-1.0
 - reason: 决策理由的简短说明
-{% endif %}
-{% else %}
-{% if disambiguation_mode %}
-Return JSON format with the following required fields:
-{
+  {% endif %}
+  {% else %}
+  {% if disambiguation_mode %}
+  Return JSON format with the following required fields:
+  {
   "should_merge": boolean,
   "canonical_idx": 0 or 1,
   "confidence": float (0.0-1.0),
   "block_pair": boolean,
   "suggested_type": "string or null",
   "reason": "string"
-}
+  }
 
 **Field Descriptions**:
+
 - should_merge: Whether these two entities should be merged (true/false)
 - canonical_idx: Index of the canonical entity, 0 for Entity A, 1 for Entity B
 - confidence: Confidence level of the decision, range 0.0-1.0
 - block_pair: Whether to block this pair in other fuzzy/heuristic merges (true/false)
 - suggested_type: Suggested unified type (string or null)
 - reason: Brief explanation of the decision
-{% else %}
-Return JSON format with the following required fields:
-{
+  {% else %}
+  Return JSON format with the following required fields:
+  {
   "same_entity": boolean,
   "canonical_idx": 0 or 1,
   "confidence": float (0.0-1.0),
   "reason": "string"
-}
+  }
 
 **Field Descriptions**:
+
 - same_entity: Whether the two entities refer to the same real-world entity (true/false)
 - canonical_idx: Index of the canonical entity, 0 for Entity A, 1 for Entity B
 - confidence: Confidence level of the decision, range 0.0-1.0
 - reason: Brief explanation of the decision
-{% endif %}
-{% endif %}
+  {% endif %}
+  {% endif %}
 
 **CRITICAL JSON FORMATTING REQUIREMENTS:**
+
 1. Use only standard ASCII double quotes (") for JSON structure - never use Chinese quotation marks ("") or other Unicode quotes
 2. Ensure all JSON strings are properly closed and comma-separated
 3. Do not include line breaks within JSON string values

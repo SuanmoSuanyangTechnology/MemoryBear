@@ -135,16 +135,17 @@ async def term_memory_save(end_user_id, strategy_type, scope):
             chunk_data = data[:scope]
             if len(chunk_data) == scope:
                 repo.upsert(end_user_id, chunk_data)
-                logger.info(f'---------写入短长期-----------')
+                logger.info('---------写入短长期-----------')
         else:
             long_time_data = write_store.find_user_recent_sessions(end_user_id, 5)
             long_messages = await messages_parse(long_time_data)
             repo.upsert(end_user_id, long_messages)
-            logger.info(f'写入短长期：')
+            logger.info('写入短长期：')
 
 
 async def window_dialogue(end_user_id, langchain_messages, memory_config, scope):
     """
+    TODO 考虑作为滑动窗口写入的函数
     Process dialogue based on window size and write to Neo4j
 
     Manages conversation data based on a sliding window approach. When the window

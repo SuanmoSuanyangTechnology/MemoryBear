@@ -156,5 +156,5 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-# 使用 anyio 作为异步测试后端
-anyio_backends = ["asyncio"]
+# 使用 asyncio 作为异步测试后端
+asyncio_mode = "auto"

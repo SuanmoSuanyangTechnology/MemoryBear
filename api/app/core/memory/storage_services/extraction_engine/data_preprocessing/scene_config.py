@@ -1,7 +1,7 @@
 """
 场景特定配置 - 统一填充词库
 
-重要性判断已完全交由 extracat_Pruning.jinja2 提示词 + LLM preserve_tokens 机制承担。
+重要性判断已完全交由 extract_pruning.jinja2 提示词 + LLM preserve_tokens 机制承担。
 本模块仅保留统一填充词库（filler_phrases），用于识别无意义寒暄/表情/口头禅。
 所有场景共用同一份词库，场景差异由 LLM 语义判断处理。
 """

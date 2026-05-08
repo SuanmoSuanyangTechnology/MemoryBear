@@ -6,7 +6,7 @@ import uuid
 from neo4j import Session
 
 from app.core.memory.enums import Neo4jNodeType
-from app.core.memory.memory_service import MemoryContext
+from app.core.memory.models.service_models import MemoryContext
 from app.core.memory.models.service_models import Memory, MemorySearchResult
 from app.core.memory.read_services.search_engine.result_builder import data_builder_factory
 from app.core.models import RedBearEmbeddings

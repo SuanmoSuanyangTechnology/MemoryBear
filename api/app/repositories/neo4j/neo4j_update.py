@@ -232,8 +232,6 @@ async def neo4j_data(solved_data):
     updata_entity = {}
     ori_edge = {}
     updata_edge = {}
-    ori_expired_at={}
-    updat_expired_at={}
     for i in solved_data:
         databasets = i['data']
         for key, values in databasets.items():
@@ -247,12 +245,9 @@ async def neo4j_data(solved_data):
                     key = 'name'
                     ori_entity[key] = values[0]
                     updata_entity[key] = values[1]
-                    ori_expired_at[key] = values[0]
                 if key == 'statement':
                     ori_edge[key] = values[0]
                     updata_edge[key] = values[1]
-                if key=='expired_at':
-                    updat_expired_at[key] = values[1]
 
             elif key == 'id':
                 ori_edge[key] = values
@@ -260,8 +255,6 @@ async def neo4j_data(solved_data):
 
                 ori_entity[key] = values
                 updata_entity[key] = values
-
-                ori_expired_at[key] = values
             elif key == 'rel_id':
                 key='id'
                 ori_edge[key] = values
@@ -270,18 +263,12 @@ async def neo4j_data(solved_data):
                 ori_entity[key] = values
                 updata_entity[key] = values
 
-                ori_expired_at[key] = values
-
 
         print(ori_entity)
         print(updata_entity)
         print(100*'-')
         print(ori_edge)
         print(updata_edge)
-        expired_at_ = updat_expired_at.get('expired_at', None)
-        if expired_at_ is not None:
-            await update_neo4j_data(ori_expired_at, updat_expired_at)
-            success_count += 1
         if ori_entity != updata_entity:
             await update_neo4j_data(ori_entity, updata_entity)
             success_count += 1

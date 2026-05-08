@@ -15,7 +15,7 @@ class ParameterBuilder:
     
     def __init__(self):
         """Initialize the parameter builder."""
-        logger.info("ParameterBuilder initialized")
+        logger.debug("ParameterBuilder initialized")
     
     def build_tool_args(
         self,

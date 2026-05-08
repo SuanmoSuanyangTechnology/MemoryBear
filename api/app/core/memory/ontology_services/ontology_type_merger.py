@@ -23,15 +23,12 @@ from app.core.memory.models.ontology_extraction_models import OntologyTypeInfo, 
 
 logger = logging.getLogger(__name__)
 
-# 默认核心通用类型
+# 默认核心通用类型 —— 与 ontology.md Entity Ontology 对齐的 13 类
 DEFAULT_CORE_GENERAL_TYPES: Set[str] = {
-    "Person", "Organization", "Company", "GovernmentAgency",
-    "Place", "Location", "City", "Country", "Building",
-    "Event", "SportsEvent", "MusicEvent", "SocialEvent",
-    "Work", "Book", "Film", "Software", "Album",
-    "Concept", "TopicalConcept", "AcademicSubject",
-    "Device", "Food", "Drug", "ChemicalSubstance",
-    "TimePeriod", "Year",
+    "生命体", "组织", "群体", "角色职业",
+    "地点设施", "物品设备", "软件平台", "识别联系信息",
+    "文档媒体", "知识能力", "偏好习惯", "具体目标",
+    "称呼别名",
 }
 
 
@@ -129,10 +126,12 @@ class OntologyTypeMerger:
             if type_name not in seen_names and remaining_slots > 0:
                 general_type = self.general_registry.get_type(type_name)
                 if general_type:
+                    # 优先使用 rdfs:comment（完整定义），其次才是 label；
+                    # 对中文 13 类本体，label 与 class_name 相同，单独展示无增益。
                     description = (
-                        general_type.labels.get("zh") or 
-                        general_type.description or 
-                        general_type.get_label("en") or 
+                        general_type.description or
+                        general_type.labels.get("zh") or
+                        general_type.get_label("en") or
                         type_name
                     )
                     core_types_added.append(OntologyTypeInfo(
@@ -157,8 +156,8 @@ class OntologyTypeMerger:
                         parent_type = self.general_registry.get_type(parent_name)
                         if parent_type:
                             description = (
-                                parent_type.labels.get("zh") or 
-                                parent_type.description or 
+                                parent_type.description or
+                                parent_type.labels.get("zh") or
                                 parent_name
                             )
                             related_types_added.append(OntologyTypeInfo(

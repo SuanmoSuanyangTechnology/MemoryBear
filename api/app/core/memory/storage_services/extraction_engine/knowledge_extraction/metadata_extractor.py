@@ -1,176 +1,71 @@
 """
-Metadata extractor module.
+Metadata extractor utilities.
 
-Collects user-related statements from post-dedup graph data and
-extracts user metadata via an independent LLM call.
+Provides helper functions for identifying user entities from post-dedup
+graph data. The actual LLM extraction logic lives in MetadataExtractionStep.
 """
 
 import logging
-from typing import List, Optional
+from typing import Dict, List
 
-from app.core.memory.models.graph_models import (
-    ExtractedEntityNode,
-    StatementEntityEdge,
-    StatementNode,
-)
+from app.core.memory.models.graph_models import ExtractedEntityNode
 
 logger = logging.getLogger(__name__)
 
-# Reuse the same user-entity detection logic from dedup module
-_USER_NAMES = {"用户", "我", "user", "i"}
-_CANONICAL_USER_TYPE = "用户"
+# 用户实体判定常量
+USER_NAMES = {"用户", "我", "user", "i"}
+CANONICAL_USER_TYPE = "用户"
 
 
-def _is_user_entity(ent: ExtractedEntityNode) -> bool:
-    """判断实体是否为用户实体"""
-    name = (getattr(ent, "name", "") or "").strip().lower()
-    etype = (getattr(ent, "entity_type", "") or "").strip()
-    return name in _USER_NAMES or etype == _CANONICAL_USER_TYPE
+def is_user_entity(entity: ExtractedEntityNode) -> bool:
+    """判断实体是否为用户实体。"""
+    name = (getattr(entity, "name", "") or "").strip().lower()
+    etype = (getattr(entity, "entity_type", "") or "").strip()
+    return name in USER_NAMES or etype == CANONICAL_USER_TYPE
 
 
-class MetadataExtractor:
-    """Extracts user metadata from post-dedup graph data via independent LLM call."""
+def collect_user_entities_for_metadata(
+    entity_nodes: List[ExtractedEntityNode],
+) -> List[Dict]:
+    """从去重后的实体列表中筛选用户实体，构造元数据提取的输入。
 
-    def __init__(self, llm_client, language: Optional[str] = None):
-        self.llm_client = llm_client
-        self.language = language
+    将每个用户实体的 description 按分号拆分为列表，
+    作为 Celery 异步元数据提取任务的输入。
 
-    @staticmethod
-    def detect_language(statements: List[str]) -> str:
-        """根据 statement 文本内容检测语言。
-        如果文本中包含中文字符则返回 "zh"，否则返回 "en"。
-        """
-        import re
+    Args:
+        entity_nodes: 去重后的实体节点列表
 
-        combined = " ".join(statements)
-        if re.search(r"[\u4e00-\u9fff]", combined):
-            return "zh"
-        return "en"
+    Returns:
+        用户实体字典列表，每项包含 entity_id、entity_name、descriptions
+    """
+    user_entities = []
+    for entity in entity_nodes:
+        if not is_user_entity(entity):
+            continue
 
-    def collect_user_related_statements(
-        self,
-        entity_nodes: List[ExtractedEntityNode],
-        statement_nodes: List[StatementNode],
-        statement_entity_edges: List[StatementEntityEdge],
-    ) -> List[str]:
-        """
-        从去重后的数据中筛选与用户直接相关且由用户发言的 statement 文本。
+        desc = (getattr(entity, "description", "") or "").strip()
+        if not desc:
+            continue
 
-        筛选逻辑：
-        1. 用户实体 → StatementEntityEdge → statement（直接关联）
-        2. 只保留 speaker="user" 的 statement（过滤 assistant 回复的噪声）
+        # 将分号分隔的 description 拆分为列表
+        descriptions = [
+            d.strip() for d in desc.replace("；", ";").split(";")
+            if d.strip()
+        ]
+        if descriptions:
+            user_entities.append({
+                "entity_id": entity.id,
+                "entity_name": entity.name,
+                "descriptions": descriptions,
+                "aliases": list(entity.aliases or []),
+                "end_user_id": entity.end_user_id,
+            })
 
-        Returns:
-            用户发言的 statement 文本列表
-        """
-        # Find user entity IDs
-        user_entity_ids = set()
-        for ent in entity_nodes:
-            if _is_user_entity(ent):
-                user_entity_ids.add(ent.id)
-
-        if not user_entity_ids:
-            logger.debug("未找到用户实体节点，跳过 statement 收集")
-            return []
-
-        # 用户实体 → StatementEntityEdge → statement
-        target_stmt_ids = set()
-        for edge in statement_entity_edges:
-            if edge.target in user_entity_ids:
-                target_stmt_ids.add(edge.source)
-
-        # Collect: only speaker="user" statements, preserving order
-        result = []
-        seen = set()
-        total_associated = 0
-        skipped_non_user = 0
-        for stmt_node in statement_nodes:
-            if stmt_node.id in target_stmt_ids and stmt_node.id not in seen:
-                total_associated += 1
-                speaker = getattr(stmt_node, "speaker", None) or "unknown"
-                if speaker == "user":
-                    text = (stmt_node.statement or "").strip()
-                    if text:
-                        result.append(text)
-                else:
-                    skipped_non_user += 1
-                seen.add(stmt_node.id)
-
+    if user_entities:
         logger.info(
-            f"收集到 {len(result)} 条用户发言 statement "
-            f"(直接关联: {total_associated}, speaker=user: {len(result)}, "
-            f"跳过非user: {skipped_non_user})"
+            f"收集到 {len(user_entities)} 个用户实体用于元数据提取"
         )
-        if result:
-            for i, text in enumerate(result):
-                logger.info(f"  [user statement {i + 1}] {text}")
-        if total_associated > 0 and len(result) == 0:
-            logger.warning(
-                f"有 {total_associated} 条直接关联 statement 但全部被 speaker 过滤，"
-                f"可能本次写入不包含 user 消息"
-            )
-        return result
+    else:
+        logger.debug("未找到用户实体，跳过元数据提取")
 
-    async def extract_metadata(
-        self,
-        statements: List[str],
-        existing_metadata: Optional[dict] = None,
-        existing_aliases: Optional[List[str]] = None,
-    ) -> Optional[tuple]:
-        """
-        对筛选后的 statement 列表调用 LLM 提取元数据增量变更和用户别名。
-
-        Args:
-            statements: 用户发言的 statement 文本列表
-            existing_metadata: 数据库已有的元数据（可选）
-            existing_aliases: 数据库已有的用户别名列表（可选）
-
-        Returns:
-            (List[MetadataFieldChange], List[str], List[str]) tuple:
-            (metadata_changes, aliases_to_add, aliases_to_remove) on success, None on failure
-        """
-        if not statements:
-            return None
-
-        try:
-            from app.core.memory.utils.prompt.prompt_utils import prompt_env
-
-            if self.language:
-                detected_language = self.language
-                logger.info(f"元数据提取使用显式指定语言: {detected_language}")
-            else:
-                detected_language = self.detect_language(statements)
-                logger.info(f"元数据提取语言自动检测结果: {detected_language}")
-
-            template = prompt_env.get_template("extract_user_metadata.jinja2")
-            prompt = template.render(
-                statements=statements,
-                language=detected_language,
-                existing_metadata=existing_metadata,
-                existing_aliases=existing_aliases,
-                json_schema="",
-            )
-
-            from app.core.memory.models.metadata_models import (
-                MetadataExtractionResponse,
-            )
-
-            response = await self.llm_client.response_structured(
-                messages=[{"role": "user", "content": prompt}],
-                response_model=MetadataExtractionResponse,
-            )
-
-            if response:
-                changes = response.metadata_changes if response.metadata_changes else []
-                to_add = response.aliases_to_add if response.aliases_to_add else []
-                to_remove = (
-                    response.aliases_to_remove if response.aliases_to_remove else []
-                )
-                return changes, to_add, to_remove
-
-            logger.warning("LLM 返回的响应为空")
-            return None
-
-        except Exception as e:
-            logger.error(f"元数据提取 LLM 调用失败: {e}", exc_info=True)
-            return None
+    return user_entities
