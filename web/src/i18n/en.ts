@@ -1610,10 +1610,10 @@ export const en = {
       created_at: 'Created At',
       updated_at: 'Last Updated',
       fullScreen: 'Full Screen',
-      role: 'Role',
-      domain: 'Domain',
-      expertise: 'Expertise',
+      goals: 'Goals',
+      traits: 'Traits',
       interests: 'Interests',
+      core_facts: 'Core Facts',
 
       memoryWindow: "{{name}}'s Memory Overview",
       memory_insight: 'Overall Overview',

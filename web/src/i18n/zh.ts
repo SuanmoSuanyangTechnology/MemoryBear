@@ -1572,10 +1572,10 @@ export const zh = {
       created_at: '创建时间',
       updated_at: '最后更新时间',
       fullScreen: '全屏',
-      role: '角色',
-      domain: '领域',
-      expertise: '专业擅长',
+      goals: '目标',
+      traits: '性格特点',
       interests: '兴趣爱好',
+      core_facts: '核心事实',
 
       memoryWindow: "{{name}} 的记忆之窗",
       memory_insight: '总体概述',

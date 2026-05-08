@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-17 17:57:00
+ * @Last Modified time: 2026-05-08 13:38:11
  */
 /**
  * User Memory Detail Types
@@ -169,31 +169,18 @@ export interface NodeStatisticsItem {
  * End user profile
  */
 export interface EndUser {
-  other_name: string;
-  aliases: string | null;
-  meta_data: Record<string, string>;
-  id?: string;
   end_user_info_id: string;
   end_user_id: string;
-  created_at: string;
-  updated_at: string;
-  profile: {
-    role: string[] | string;
-    domain: string[];
-    expertise: string[];
+  other_name: string;
+  aliases: string[];
+  meta_data: {
+    goals: string[];
+    traits: string[];
     interests: string[];
+    core_facts: string[];
   };
-  _updated_at: {
-    profile: string;
-    knowledge_tags: string;
-    behavioral_hints: string;
-  };
-  knowledge_tags: string[];
-  behavioral_hints: {
-    learning_stage: string;
-    preferred_depth: string;
-    tone_preference: string;
-  };
+  created_at: number;
+  updated_at: number;
 }
 /**
  * End user profile modal ref
