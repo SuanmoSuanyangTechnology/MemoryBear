@@ -18,7 +18,7 @@ import { Tag, Flex } from 'antd';
 import clsx from 'clsx';
 
 /** Props interface for StatusTag component */
-interface StatusTagProps {
+export interface StatusTagProps {
   /** Status type determining the indicator color */
   status: 'success' | 'error' | 'warning' | 'default' | 'lightBlue' | 'purple',
   /** Text to display in the tag */

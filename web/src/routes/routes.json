@@ -8,6 +8,7 @@
       { "path": "/space", "element": "SpaceManagement" },
       { "path": "/tool", "element": "ToolManagement" },
       { "path": "/pricing", "element": "Package" },
+      { "path": "/upgrade", "element": "Package" },
       { "path": "/order-pay", "element": "OrderPayment" },
       { "path": "/orders", "element": "OrderHistory" },
       { "path": "/skills", "element": "Skills" },

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:25:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-21 17:56:09
+ * @Last Modified time: 2026-05-08 16:21:25
  */
 /**
  * SiderMenu Component
@@ -34,6 +34,7 @@ import { useUser } from '@/store/user';
 import styles from './index.module.css';
 import SubscriptionDetailModal, { type SubscriptionDetailModalRef } from './SubscriptionDetailModal';
 import SwitchSpaceModal, { type SwitchSpaceModalRef } from './SwitchSpaceModal';
+import { formatDateTime } from '@/utils/format'
 
 // Import SVG files
 // space
@@ -281,7 +282,7 @@ const Menu: FC<{
   /** Load menus on component mount */
   useEffect(() => {
     loadMenus(source);
-  }, [])
+  }, [loadMenus, source])
 
   /** Handle current path matching and update selected keys */
   useEffect(() => {
@@ -428,7 +429,18 @@ const Menu: FC<{
       }
       {source === 'manage' && subscription && !collapsed &&
         <div className="rb:mb-3 rb:ml-3 rb:mr-3 rb:py-3 rb:bg-cover rb:bg-[url('@/assets/images/menuNew/package_bg.png')] rb:overflow-hidden rb:rounded-xl">
-          <div className="rb:h-4.5 rb:flex-1 rb:truncate rb:px-3 rb:text-[13px] rb:font-medium rb:leading-4.5">{subscription.package_plan?.[getKeyWithLanguage('name')]}</div>
+          <Flex align="center" justify="space-between" className="rb:px-3!">
+            <div className="rb:h-4.5 rb:flex-1 rb:truncate rb:text-[13px] rb:font-medium rb:leading-4.5">
+              {subscription.package_plan?.[getKeyWithLanguage('name')]}
+            </div>
+
+            {subscription.expired_at &&
+              <div className="rb:text-[10px] rb:text-[#5B6167]">
+                {formatDateTime(subscription.expired_at, 'YYYY-MM-DD')}
+                {t('package.expired')}
+              </div>
+            }
+          </Flex>
 
           <div className="rb:grid rb:grid-cols-4 rb:mt-4">
             {['workspace_quota', 'skill_quota', 'app_quota', 'model_quota'].map(key => (
@@ -449,6 +461,7 @@ const Menu: FC<{
 
       <SubscriptionDetailModal
         ref={subscriptionDetailRef}
+        currentPackage={subscription}
       />
       <SwitchSpaceModal
         ref={switchSpaceModalRef}

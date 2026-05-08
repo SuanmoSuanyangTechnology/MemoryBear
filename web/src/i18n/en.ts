@@ -125,6 +125,7 @@ export const en = {
       promptHistory: 'My history',
       platformManagement: 'Platform Management',
       systemSettings: 'System Settings',
+      upgradePackage: 'Upgrade Package',
     },
     dashboard: {
       total_models: 'Available Models',
@@ -2844,6 +2845,20 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       orderInfo: 'Order Information',
       orderPayInfo: 'Payment Information',
       create_time: 'Creation Time',
+      allBusinessType: 'All Business Types',
+      purchase: 'Purchase',
+      renewal: 'Renewal',
+      upgrade: 'Upgrade Package',
+      recharge: 'Recharge',
+      free: 'Free',
+      package_snapshot: 'Package Name',
+      created_at: 'Creation Time',
+      business_type: 'Business Type',
+      upgradeTip: 'Upgrade from the current package to 「{{name}}」, which takes effect immediately. The validity period will be recalculated from the payment date {{cycle}}.',
+      currentExpiredAt: 'Current Expiration Date',
+      upgradeExpiredAt: 'Upgrade Expiration Date',
+      renewalExpiredAt: 'Renewal Expiration Date',
+      renewalTip: 'Renew the current package, extending the validity period by {{cycle}}.',
     },
     forgetDetail: {
       title: 'The forgetting management system helps AI intelligently manage memory lifecycle by automatically identifying low-value memories, setting forgetting strategies, and executing regular cleanup to optimize memory storage space and improve retrieval efficiency.',
@@ -3119,6 +3134,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
 
       viewDetail: 'View full package details',
       noLimit: 'Infinite',
+      expired: 'Expired',
     },
   },
 };

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-04-14 11:35:01 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-16 16:44:19
+ * @Last Modified time: 2026-05-08 16:32:52
  */
 export interface Package {
     id: string;
@@ -58,4 +58,5 @@ export interface Package {
     updated_at: number;
     created_by: string | null;
     updated_by: string | null;
+    expired_at?: number | null;
 }
