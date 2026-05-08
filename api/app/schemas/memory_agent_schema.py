@@ -1,8 +1,10 @@
 import uuid
 from abc import ABC
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseModel, Field
+
+from app.schemas.app_schema import FileInput
 
 
 class UserInput(BaseModel):
@@ -13,8 +15,15 @@ class UserInput(BaseModel):
     config_id: Optional[str] = None
 
 
+class WriteMessageItem(BaseModel):
+    """写入记忆的单条消息"""
+    role: str = Field(..., description="消息角色: user 或 assistant")
+    content: str = Field(..., description="消息内容")
+    files: Optional[List[FileInput]] = Field(default=None, description="附带的文件列表（图片/文档/音频/视频）")
+
+
 class Write_UserInput(BaseModel):
-    messages: list[dict]
+    messages: List[WriteMessageItem] = Field(..., description="消息列表")
     end_user_id: str
     config_id: Optional[str] = None
 
