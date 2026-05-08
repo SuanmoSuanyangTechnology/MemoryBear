@@ -125,6 +125,7 @@ export const zh = {
       promptHistory: '我的历史',
       platformManagement: '平台管理',
       systemSettings: '系统设置',
+      upgradePackage: '套餐升级',
     },
     knowledgeBase: {
       home: '首页',
@@ -2820,6 +2821,20 @@ export const zh = {
       orderInfo: '订单信息',
       orderPayInfo: '支付信息',
       create_time: '创建时间',
+      allBusinessType: '全部业务类型',
+      purchase: '购买',
+      renewal: '续费',
+      upgrade: '升级套餐',
+      recharge: '充值',
+      free: '免费',
+      package_snapshot: '套餐名称',
+      created_at: '创建时间',
+      business_type: '业务类型',
+      upgradeTip: '从当前套餐升级到「{{name}}」，升级后立即生效，有效期从支付日起重新计算 {{cycle}}。',
+      currentExpiredAt: '当前有效期至',
+      upgradeExpiredAt: '升级后有效期至',
+      renewalExpiredAt: '续费后有效期至',
+      renewalTip: '续费当前套餐，有效期将在原到期日基础上延长 {{cycle}}。续费期间服务不中断。',
     },
     forgetDetail: {
       title: '遗忘管理系统帮助AI智能管理记忆生命周期，通过自动识别低价值记忆、设置遗忘策略和执行定期清理，优化记忆库存储空间，提升检索效率。',
@@ -3095,6 +3110,7 @@ export const zh = {
 
       viewDetail: '查看完整套餐详情',
       noLimit: '无限',
+      expired: '到期',
     },
   },
 }
