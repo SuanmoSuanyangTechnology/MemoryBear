@@ -4,7 +4,7 @@ Order Schema
 Defines request and response models for order operations.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 from typing import Any, Optional
 
 
@@ -17,8 +17,8 @@ class CreateOrderRequest(BaseModel):
     customer_email: Optional[str] = Field(None, description="Customer email")
     notes: Optional[str] = Field(None, description="Order notes")
     
-    model_config = ConfigDict(
-        json_schema_extra={
+    class Config:
+        json_schema_extra = {
             "example": {
                 "product_id": "PROD-001",
                 "quantity": 2,
@@ -27,7 +27,6 @@ class CreateOrderRequest(BaseModel):
                 "notes": "Please deliver before 5pm"
             }
         }
-    )
 
 
 class OrderResponse(BaseModel):
@@ -41,8 +40,8 @@ class OrderResponse(BaseModel):
     created_at: Optional[str] = Field(None, description="Creation timestamp")
     message: Optional[str] = Field(None, description="Response message")
     
-    model_config = ConfigDict(
-        json_schema_extra={
+    class Config:
+        json_schema_extra = {
             "example": {
                 "order_id": "ORD-20231224-001",
                 "status": "pending",
@@ -53,7 +52,6 @@ class OrderResponse(BaseModel):
                 "message": "Order created successfully"
             }
         }
-    )
 
 
 class ExternalOrderResponse(BaseModel):
