@@ -671,7 +671,7 @@ class WorkflowService:
             **({"message_id": message_id} if message_id else {}),
             conversation_id=conversation_id,
             role="assistant",
-            content=error,
+            content="",
             meta_data={"error": error},
         )
 
