@@ -25,7 +25,7 @@ logger.info(f"Seccomp Env: nodejs, "
 try:
     with open(RELEASE_LIB_PATH, "rb") as f:
         _NODEJS_LIB = f.read()
-except:
+except Exception:
     logger.critical("failed to load nodejs lib")
     raise
 

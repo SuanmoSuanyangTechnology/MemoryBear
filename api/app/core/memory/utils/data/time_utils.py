@@ -153,7 +153,7 @@ def normalize_date_safe(date_str: str, default: str = None) -> str:
             return result
         else:
             return default if default is not None else date_str
-    except:
+    except Exception:
         return default if default is not None else date_str
 
 if __name__ == "__main__":
