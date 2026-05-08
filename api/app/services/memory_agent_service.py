@@ -350,6 +350,7 @@ class MemoryAgentService:
                 )
                 if file_object is None:
                     continue
+                message["content"] = f"<input-file-summary>{file_object.summary}</input-file-summary>" + message["content"]
                 message["file_content"].append((file_object, file["type"]))
         logger.info(messages)
 
