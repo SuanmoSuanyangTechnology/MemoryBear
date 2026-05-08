@@ -39,6 +39,7 @@
   3. 必要的限定条件
 - 对 `question` 类型，不要只保留寒暄式前缀，例如"听起来不错""如果方便的话"；应保留真正要用户回答的部分。
 - 只输出严格 JSON，不要输出解释。
+- `assistant_memory_hint` 的语言必须与输入 `Assistant.msg` 的主要语言一致。如果 Assistant 回复是中文，hint 用中文输出；如果是英文，hint 用英文输出。不要为了统一而翻译。
 
 压缩原则：
 
@@ -211,6 +212,7 @@ Hard constraints:
   3. the necessary constraints
 - For `question`, do not keep only social softeners such as "that sounds nice" or "if that's convenient"; keep the actual part that requires an answer.
 - Return strict JSON only. Do not output explanations.
+- The language of `assistant_memory_hint` MUST match the primary language of the input `Assistant.msg`. If the assistant reply is in Chinese, output the hint in Chinese; if in English, output in English. Do not translate for normalization.
 
 Compression principles:
 
