@@ -15,6 +15,14 @@ logger.info("Celery worker logging initialized")
 # 导入任务模块以注册任务
 import app.tasks
 
+# 导入企业版订阅任务（仅在企业版环境下可用）
+try:
+    from premium.platform_admin.subscription_tasks import (  # noqa: F401
+        process_expired_subscriptions_task,
+    )
+except ImportError:
+    pass  # 社区版无 premium 模块，静默跳过
+
 
 @worker_process_init.connect
 def _reinit_db_pool(**kwargs):
