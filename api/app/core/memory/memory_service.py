@@ -79,7 +79,7 @@ class MemoryService:
             progress_callback: Optional[
                 Callable[[str, str, Optional[Dict[str, Any]]], Awaitable[None]]
             ] = None,
-    ) -> WriteResult:
+    ) -> "WriteResult":
         """写入记忆：对话 → 萃取 → 存储 → 聚类 → 摘要
 
         Args:
@@ -108,12 +108,12 @@ class MemoryService:
 
     async def pilot_write(
             self,
-            chunked_dialogs: List[DialogData],
+            chunked_dialogs: List["DialogData"],
             language: str = "zh",
             progress_callback: Optional[
                 Callable[[str, str, Optional[Dict[str, Any]]], Awaitable[None]]
             ] = None,
-    ) -> PilotWriteResult:
+    ) -> "PilotWriteResult":
         """试运行写入：只执行萃取链路，不写入 Neo4j
 
         Args:
