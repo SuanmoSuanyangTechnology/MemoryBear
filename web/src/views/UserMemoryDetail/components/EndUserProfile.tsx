@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:33:30 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-17 17:57:15
+ * @Last Modified time: 2026-05-08 13:39:06
  */
 /**
  * End User Profile Component
@@ -95,20 +95,20 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
             <div className="rb:mt-0.5">{data?.other_name || '-'}</div>
           </div>
           <div>
-            <div className="rb:text-[#7B8085]">{t('userMemory.role')}</div>
-            <div className="rb:mt-0.5">{formatValue(data?.profile?.role)}</div>
+            <div className="rb:text-[#7B8085]">{t('userMemory.goals')}</div>
+            <div className="rb:mt-0.5">{formatValue(data?.meta_data?.goals?.join(' | ') || '-')}</div>
           </div>
           <div>
-            <div className="rb:text-[#7B8085]">{t('userMemory.domain')}</div>
-            <div className="rb:mt-0.5">{formatValue(data?.profile?.domain)}</div>
+            <div className="rb:text-[#7B8085]">{t('userMemory.traits')}</div>
+            <div className="rb:mt-0.5">{formatValue(data?.meta_data?.traits?.join(' | ') || '-')}</div>
           </div>
           <div>
-            <div className="rb:text-[#7B8085]">{t('userMemory.expertise')}</div>
-            <div className="rb:mt-0.5">{formatValue(data?.profile?.expertise)}</div>
+            <div className="rb:text-[#7B8085]">{t('userMemory.core_facts')}</div>
+            <div className="rb:mt-0.5">{formatValue(data?.meta_data?.core_facts?.join(' | ') || '-')}</div>
           </div>
           <div>
             <div className="rb:text-[#7B8085]">{t('userMemory.interests')}</div>
-            <div className="rb:mt-0.5">{formatValue(data?.profile?.interests)}</div>
+            <div className="rb:mt-0.5">{formatValue(data?.meta_data?.interests?.join(' | ') || '-')}</div>
           </div>
 
           <div className="rb:text-[#7B8085] rb:text-[12px] rb:leading-4.5">

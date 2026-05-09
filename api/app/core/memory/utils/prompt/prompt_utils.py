@@ -1,3 +1,4 @@
+import json
 import os
 from jinja2 import Environment, FileSystemLoader
 from app.core.memory.models.ontology_extraction_models import OntologyTypeList
@@ -46,6 +47,7 @@ async def render_statement_extraction_prompt(
     dialogue_content: str | None = None,
     max_dialogue_chars: int | None = None,
     language: str = "zh",
+    input_json: dict | None = None,
 ) -> str:
     """
     Renders the statement extraction prompt using the extract_statement.jinja2 template.
@@ -63,7 +65,7 @@ async def render_statement_extraction_prompt(
     Returns:
         Rendered prompt content as string
     """
-    template = prompt_env.get_template("extract_statement.jinja2")
+    template = prompt_env.get_template("extract_statement_temporal.jinja2")
     # Optional clipping of dialogue context
     ctx = None
     if include_dialogue_context and dialogue_content:
@@ -77,6 +79,7 @@ async def render_statement_extraction_prompt(
 
     rendered_prompt = template.render(
         inputs={"chunk": chunk_content},
+        input_json=json.dumps(input_json, ensure_ascii=False) if input_json else "{}",
         definitions=definitions,
         json_schema=json_schema,
         granularity=granularity,
@@ -87,7 +90,7 @@ async def render_statement_extraction_prompt(
     # 记录渲染结果到提示日志（与示例日志结构一致）
     log_prompt_rendering('statement extraction', rendered_prompt)
     # 可选：记录模板渲染信息
-    log_template_rendering('extract_statement.jinja2', {
+    log_template_rendering('extract_statement_temporal.jinja2', {
         'inputs': 'chunk',
         'definitions': 'LABEL_DEFINITIONS',
         'json_schema': 'StatementExtractionResponse.schema',
@@ -97,7 +100,7 @@ async def render_statement_extraction_prompt(
     })
 
     return rendered_prompt
-
+# TODO temporal与statement prompt合并在一起，以下代码不需要
 async def render_temporal_extraction_prompt(
     ref_dates: dict,
     statement: dict,
@@ -198,6 +201,7 @@ def render_entity_dedup_prompt(
 
 #     Args:
 #         entity_a: Dict of entity A attributes
+
 async def render_triplet_extraction_prompt(
     statement: str,
     chunk_content: str,
@@ -206,6 +210,8 @@ async def render_triplet_extraction_prompt(
     language: str = "zh",
     ontology_types: "OntologyTypeList | None" = None,
     speaker: str = None,
+    input_json: dict = None,
+    has_unsolved_reference: bool = False,
 ) -> str:
     """
     Renders the triplet extraction prompt using the extract_triplet.jinja2 template.
@@ -218,10 +224,14 @@ async def render_triplet_extraction_prompt(
         language: The language to use for entity descriptions ("zh" for Chinese, "en" for English)
         ontology_types: Optional OntologyTypeList containing predefined ontology types for entity classification
         speaker: Speaker role ("user" or "assistant") for the current statement
+        input_json: Full input JSON for the template
+        has_unsolved_reference: Whether the statement has unresolved references
 
     Returns:
         Rendered prompt content as string
     """
+    import json
+    
     template = prompt_env.get_template("extract_triplet.jinja2")
     
     # 准备本体类型数据
@@ -233,8 +243,13 @@ async def render_triplet_extraction_prompt(
         ontology_type_names = ontology_types.get_type_names()
         type_hierarchy_hints = ontology_types.get_type_hierarchy_hints()
     
+    # 准备 input_json 如果没有提供
+    if input_json is None:
+        input_json = {}
+    
     rendered_prompt = template.render(
         statement=statement,
+        statement_text=statement,  # 兼容模板中的 statement_text 变量
         chunk_content=chunk_content,
         json_schema=json_schema,
         predicate_instructions=predicate_instructions,
@@ -243,6 +258,8 @@ async def render_triplet_extraction_prompt(
         ontology_type_names=ontology_type_names,
         type_hierarchy_hints=type_hierarchy_hints,
         speaker=speaker,
+        input_json=json.dumps(input_json, ensure_ascii=False) if input_json else "{}",
+        has_unsolved_reference=has_unsolved_reference,
     )
     # 记录渲染结果到提示日志（与示例日志结构一致）
     log_prompt_rendering('triplet extraction', rendered_prompt)

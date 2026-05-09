@@ -149,3 +149,16 @@ class ExtractionPipelineConfig(BaseModel):
     temporal_extraction: TemporalExtractionConfig = Field(default_factory=TemporalExtractionConfig)
     deduplication: DedupConfig = Field(default_factory=DedupConfig)
     forgetting_engine: ForgettingEngineConfig = Field(default_factory=ForgettingEngineConfig)
+    # 情绪引擎（旁路模块，SidecarStepFactory 通过此字段判断是否启用）
+    emotion_enabled: bool = Field(default=False, description="是否启用情绪提取旁路")
+    
+    # TODO 设置控制并发数量以适配LLM的QPM限流 
+    # # 流水线 LLM 并发上限（statement + triplet 共享），防止 QPM 爆掉
+    # # 可通过环境变量 MAX_CONCURRENT_LLM_CALLS 覆盖
+    # max_concurrent_llm_calls: int = Field(
+    #     default_factory=lambda: int(
+    #         __import__("os").environ.get("MAX_CONCURRENT_LLM_CALLS", "5")
+    #     ),
+    #     ge=1, le=64,
+    #     description="Maximum concurrent LLM calls in the extraction pipeline",
+    # )

@@ -1,5 +1,9 @@
 import os
 import subprocess
+
+# 必须在导入任何使用 DashScope SDK 的模块之前应用补丁
+import app.utils.dashscope_patch  # noqa: F401
+
 from app.repositories.neo4j.create_indexes import create_all_indexes
 from contextlib import asynccontextmanager
 

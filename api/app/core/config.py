@@ -98,6 +98,7 @@ class Settings:
     # File Upload
     MAX_FILE_SIZE: int = int(os.getenv("MAX_FILE_SIZE", "52428800"))
     MAX_FILE_COUNT: int = int(os.getenv("MAX_FILE_COUNT", "20"))
+    MAX_CHUNK_BATCH_SIZE: int = int(os.getenv("MAX_CHUNK_BATCH_SIZE", "8"))
     FILE_PATH: str = os.getenv("FILE_PATH", "/files")
     FILE_URL_EXPIRES: int = int(os.getenv("FILE_URL_EXPIRES", "3600"))
 
@@ -301,11 +302,11 @@ class Settings:
     # Prompt 中最大类型数量
     MAX_ONTOLOGY_TYPES_IN_PROMPT: int = int(os.getenv("MAX_ONTOLOGY_TYPES_IN_PROMPT", "50"))
 
-    # 核心通用类型列表（逗号分隔）
+    # 核心通用类型列表（逗号分隔）—— 与 ontology.md Entity Ontology 保持一致的 13 类
     CORE_GENERAL_TYPES: str = os.getenv(
         "CORE_GENERAL_TYPES",
-        "Person,Organization,Company,GovernmentAgency,Place,Location,City,Country,Building,"
-        "Event,SportsEvent,SocialEvent,Work,Book,Film,Software,Concept,TopicalConcept,AcademicSubject"
+        "生命体,组织,群体,角色职业,地点设施,物品设备,软件平台,识别联系信息,"
+        "文档媒体,知识能力,偏好习惯,具体目标,称呼别名"
     )
 
     # 实验模式开关（允许通过 API 动态切换本体配置）

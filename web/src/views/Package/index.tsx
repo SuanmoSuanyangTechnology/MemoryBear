@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-04-14 11:34:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-21 15:45:30
+ * @Last Modified time: 2026-05-08 17:11:58
  */
 /**
  * Package Component
@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next';
 import { Flex, Tooltip, Divider, Button, type SegmentedProps } from 'antd';
 import clsx from 'clsx';
 import Icon from '@ant-design/icons'
+import { useNavigate, useLocation } from 'react-router-dom';
 
 import type { Package } from './types'
 import { getPackageList } from '@/api/package';
@@ -28,6 +29,7 @@ import { billingUnits } from './constant'
 import RbCard from '@/components/RbCard/Card'
 import BodyWrapper from '@/components/Empty/BodyWrapper'
 import { useI18n } from '@/store/locale'
+import { useUser } from '@/store/user'
 
 import SpaceSvg from '@/assets/images/package/space.svg?react'
 import SkillSvg from '@/assets/images/package/skill.svg?react'
@@ -86,7 +88,10 @@ export const UnitWrapper = ({ titleKey, value, icon, unit, theme_color = '#17171
 
 const Package: FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const location = useLocation();
   const { language } = useI18n()
+  const { user } = useUser();
   const [data, setData] = useState<Package[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
   const CARD_WIDTH = 360
@@ -137,7 +142,7 @@ const Package: FC = () => {
     if (categories.length > 0 && !categories.includes(activeTab as Package['category'])) {
       setActiveTab(categories[0])
     }
-  }, [categories])
+  }, [categories, activeTab])
 
   const getKeyWithLanguage = (key: string) => {
     return (language === 'en' ? `${key}_en` : key) as keyof Package
@@ -154,21 +159,44 @@ const Package: FC = () => {
     setCurrentPage(0)
   }, [activeTab, visibleCount, filteredData])
 
-  const handleChoosePlan = () => {
-    window.open(`https://docs.redbearai.com/s/${language || 'en'}-memorybear`, '_blank')
+  const handleChoosePlan = (pkg: Package) => {
+    switch(pkg.billing_cycle) {
+      case 'permanent_free':
+        navigate(user.current_workspace_id ? '/' : '/space');
+        break
+      default:
+        navigate(`/order-pay`, {
+          state: {
+            ...pkg,
+            jumpFrom: location.pathname
+          }
+        });
+        break
+    }
+    // window.open(`https://docs.redbearai.com/s/${language || 'en'}-memorybear`, '_blank')
   };
+  /** Navigate to order history */
+  const goToHistory = () => {
+    navigate('/orders');
+  }
 
   return (
     <>
-      {showTabs && (
-        <Flex justify="space-between" className="rb:mb-4!">
+      <Flex justify={showTabs ? "space-between" : 'end'} className="rb:mb-4!">
+        {showTabs &&
           <PageTabs
             value={activeTab}
             options={formatTabItems}
             onChange={handleChangeTab}
           />
-        </Flex>
-      )}
+        }
+        <Button className={clsx("rb:group rb:text-[#212332] rb:font-medium!", { 'rb:mr-9': showArrows })} onClick={goToHistory}>
+          <div
+            className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/order/order.svg')] rb:group-hover:bg-[url('@/assets/images/order/order_hover.svg')]"
+          ></div>
+          {t('pricing.orderHistory')}
+        </Button>
+      </Flex>
       <BodyWrapper empty={filteredData.length < 1}>
         <div ref={scrollRef} className="rb:relative rb:mx-9">
           {showArrows && (
@@ -236,19 +264,16 @@ const Package: FC = () => {
                       type={pkg.billing_cycle !== 'permanent_free' ? 'primary' : 'default'}
                       block
                       className={btnClassNames[pkg.billing_cycle === 'permanent_free' ? 'permanent_free' : 'default']}
-                      onClick={handleChoosePlan}
+                      onClick={() => handleChoosePlan(pkg)}
                     >
-                      {t('pricing.contactBtn')}
+                      {pkg.billing_cycle === 'permanent_free' ? t('pricing.startedBtn') : t('pricing.choosePlanBtn')}
                     </Button>
 
                     <Divider className="rb:my-4" />
 
                     {/* Features */}
                     <Flex gap={12} vertical
-                      className={clsx("rb:space-y-3 rb:mb-4 rb:overflow-y-auto", {
-                        'rb:h-[calc(100vh-401px)]!': showTabs,
-                        'rb:h-[calc(100vh-346px)]!': !showTabs
-                      })}
+                      className="rb:space-y-3 rb:mb-4 rb:overflow-y-auto rb:h-[calc(100vh-401px)]!"
                     >
                       {billingUnits.map(({ key, unit, icon }) => {
                         const value = pkg?.quotas?.[key as keyof Package['quotas']];

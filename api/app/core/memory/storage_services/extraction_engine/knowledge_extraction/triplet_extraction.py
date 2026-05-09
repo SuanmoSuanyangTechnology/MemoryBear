@@ -4,7 +4,7 @@ from typing import List, Dict, Optional
 from app.core.logging_config import get_memory_logger
 from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.memory.utils.prompt.prompt_utils import render_triplet_extraction_prompt
-from app.core.memory.utils.data.ontology import PREDICATE_DEFINITIONS, Predicate  # 引入枚举 Predicate 白名单过滤
+from app.core.memory.utils.data.ontology import PREDICATE_DEFINITIONS
 from app.core.memory.models.triplet_models import TripletExtractionResponse
 from app.core.memory.models.message_models import DialogData, Statement
 from app.core.memory.models.ontology_extraction_models import OntologyTypeList
@@ -73,15 +73,9 @@ class TripletExtractor:
         try:
             # Get structured response from LLM
             response = await self.llm_client.response_structured(messages, TripletExtractionResponse)
-            # Filter triplets to only allowed predicates from ontology
-            # 这里过滤掉了不在 Predicate 枚举中的谓语 但是容易造成谓语太严格，有点语句的谓语没有在枚举中，就被判断为弱关系
-            allowed_predicates = {p.value for p in Predicate}
-            filtered_triplets = [t for t in response.triplets if getattr(t, "predicate", "") in allowed_predicates]
-            # 仅保留predicate ∈ Predicate 的三元组，其余全部剔除
-
             # Create new triplets with statement_id set during creation
             updated_triplets = []
-            for triplet in filtered_triplets:  # 仅保留 predicate ∈ Predicate 的三元组
+            for triplet in response.triplets:
                 updated_triplet = triplet.model_copy(update={"statement_id": statement.id})
                 updated_triplets.append(updated_triplet)
 

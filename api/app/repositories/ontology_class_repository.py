@@ -7,11 +7,10 @@ Classes:
     OntologyClassRepository: 本体类型数据访问类
 """
 
-import logging
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_db_logger
 from app.models.ontology_class import OntologyClass
@@ -227,7 +226,7 @@ class OntologyClassRepository:
             ).all()
             
             logger.info(
-                f"Found {len(classes)} ontology classes in scene {scene_id}"
+                f"Found {len(classes)} ontology classes in scene_id: {scene_id}"
             )
             
             return classes

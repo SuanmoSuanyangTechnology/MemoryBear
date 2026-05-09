@@ -16,7 +16,7 @@ logger = get_agent_logger(__name__)
 # 需要从展开结果中过滤的字段（含 Neo4j DateTime，不可 JSON 序列化）
 _EXPAND_FIELDS_TO_REMOVE = {
     'invalid_at', 'valid_at', 'chunk_id_from_rel', 'entity_ids',
-    'expired_at', 'created_at', 'chunk_id', 'apply_id',
+    'created_at', 'chunk_id', 'apply_id',
     'user_id', 'statement_ids', 'updated_at', 'chunk_ids', 'fact_summary'
 }
 
@@ -86,7 +86,7 @@ class SearchService:
 
     def __init__(self):
         """Initialize the search service."""
-        logger.info("SearchService initialized")
+        logger.debug("SearchService initialized")
 
     def extract_content_from_result(self, result: dict, node_type: str = "") -> str:
         """

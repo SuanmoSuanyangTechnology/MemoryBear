@@ -18,9 +18,16 @@ class AssignerNode(BaseNode):
         super().__init__(node_config, workflow_config, down_stream_nodes)
         self.variable_updater = True
         self.typed_config: AssignerNodeConfig | None = None
+        self._input_data: dict[str, Any] | None = None
 
     def _output_types(self) -> dict[str, VariableType]:
         return {}
+
+    def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
+        """提取节点输入，如果有缓存的执行前数据则使用缓存"""
+        if self._input_data is not None:
+            return self._input_data
+        return {"config": self._resolve_config(self.config, variable_pool)}
 
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         """
@@ -34,6 +41,9 @@ class AssignerNode(BaseNode):
         Returns:
             None or the result of the assignment operation.
         """
+        # 在执行前提取并缓存输入数据（捕获执行前的变量值）
+        self._input_data = {"config": self._resolve_config(self.config, variable_pool)}
+        
         # Initialize a variable pool for accessing conversation, node, and system variables
         self.typed_config = AssignerNodeConfig(**self.config)
         logger.info(f"节点 {self.node_id} 开始执行")

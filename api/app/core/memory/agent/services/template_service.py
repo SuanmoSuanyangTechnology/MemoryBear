@@ -51,7 +51,7 @@ class TemplateService:
             loader=FileSystemLoader(template_root),
             autoescape=False  # Disable autoescape for prompt templates
         )
-        logger.info(f"TemplateService initialized with root: {template_root}")
+        logger.debug(f"TemplateService initialized with root: {template_root}")
     
     @lru_cache(maxsize=128)
     def _load_template(self, template_name: str) -> Template:

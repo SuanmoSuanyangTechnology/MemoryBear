@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-19 17:00:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-13 10:44:17
+ * @Last Modified time: 2026-05-07 18:36:58
  */
 /**
  * useVariableList Hook
@@ -97,14 +97,15 @@ const addVariable = (
   dataType: string,
   value: string,
   nodeData: any,
-  extra?: Partial<Suggestion>
+  extra?: Partial<Suggestion>,
+  defaultValue?: any
 ) => {
   if (!keys.has(key)) {
     keys.add(key);
     const children = dataType === 'file'
       ? buildFileChildren(key, value, nodeData, label)
       : undefined;
-    list.push({ key, label, type: 'variable', dataType, value, nodeData, children, ...extra });
+    list.push({ key, label, type: 'variable', dataType, value, nodeData, children, default: defaultValue, ...extra });
   }
 };
 
@@ -153,7 +154,7 @@ const processNodeVariables = (
     case 'start':
       // Add start node variables
       [...(config?.variables?.defaultValue ?? []), ...(config?.variables?.value ?? [])].forEach((v: any) => {
-        if (v?.name) addVariable(variableList, addedKeys, `${dataNodeId}_${v.name}`, v.name, v.type, `${dataNodeId}.${v.name}`, nodeData);
+        if (v?.name) addVariable(variableList, addedKeys, `${dataNodeId}_${v.name}`, v.name, v.type, `${dataNodeId}.${v.name}`, nodeData, undefined, v.defaultValue ?? v.default);
       });
       // Add system variables
       config?.variables?.sys?.forEach((v: any) => {
@@ -164,7 +165,7 @@ const processNodeVariables = (
     case 'parameter-extractor':
       // Add extracted parameters
       (config?.params?.defaultValue || []).forEach((p: any) => {
-        if (p?.name) addVariable(variableList, addedKeys, `${dataNodeId}_${p.name}`, p.name, p.type || 'string', `${dataNodeId}.${p.name}`, nodeData);
+        if (p?.name) addVariable(variableList, addedKeys, `${dataNodeId}_${p.name}`, p.name, p.type || 'string', `${dataNodeId}.${p.name}`, nodeData, undefined, p.defaultValue ?? p.default);
       });
       break;
     
@@ -178,7 +179,7 @@ const processNodeVariables = (
               const fv = variableList.find(v => `{{${v.value}}}` === gv.value[0]);
               if (fv) dt = fv.dataType;
             }
-            addVariable(variableList, addedKeys, `${dataNodeId}_${gv.key}`, gv.key, dt, `${dataNodeId}.${gv.key}`, nodeData);
+            addVariable(variableList, addedKeys, `${dataNodeId}_${gv.key}`, gv.key, dt, `${dataNodeId}.${gv.key}`, nodeData, undefined, gv.defaultValue ?? gv.default);
           }
         });
       } else {
@@ -205,14 +206,14 @@ const processNodeVariables = (
     case 'loop':
       // Add loop cycle variables
       (config.cycle_vars.defaultValue || []).forEach((cv: any) => {
-        if (cv.name?.trim()) addVariable(variableList, addedKeys, `${dataNodeId}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${dataNodeId}.${cv.name}`, nodeData);
+        if (cv.name?.trim()) addVariable(variableList, addedKeys, `${dataNodeId}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${dataNodeId}.${cv.name}`, nodeData, undefined, cv.defaultValue ?? cv.default);
       });
       break;
       
     case 'code':
       // Add code node output variables
       (config.output_variables.defaultValue || []).forEach((cv: any) => {
-        if (cv.name?.trim()) addVariable(variableList, addedKeys, `${dataNodeId}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${dataNodeId}.${cv.name}`, nodeData);
+        if (cv.name?.trim()) addVariable(variableList, addedKeys, `${dataNodeId}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${dataNodeId}.${cv.name}`, nodeData, undefined, cv.defaultValue ?? cv.default);
       });
       break;
   }
@@ -321,13 +322,13 @@ export const getChildNodeVariables = (
     // Add parameter-extractor variables
     if (type === 'parameter-extractor') {
       (nodeData.config?.params?.defaultValue || []).forEach((p: any) => {
-        if (p?.name) addVariable(list, keys, `${nodeId}_${p.name}`, p.name, p.type || 'string', `${nodeId}.${p.name}`, nodeData);
+        if (p?.name) addVariable(list, keys, `${nodeId}_${p.name}`, p.name, p.type || 'string', `${nodeId}.${p.name}`, nodeData, undefined, p.defaultValue ?? p.default);
       });
     }
     // Add code node variables
     if (type === 'code') {
       (nodeData.config?.output_variables?.defaultValue || []).forEach((p: any) => {
-        if (p?.name) addVariable(list, keys, `${nodeId}_${p.name}`, p.name, p.type || 'string', `${nodeId}.${p.name}`, nodeData);
+        if (p?.name) addVariable(list, keys, `${nodeId}_${p.name}`, p.name, p.type || 'string', `${nodeId}.${p.name}`, nodeData, undefined, p.defaultValue ?? p.default);
       });
     }
   });
@@ -393,7 +394,7 @@ export const useVariableList = (
     const relevantIds = [...getPreviousNodes(selectedNode.id), ...childIds, ...(parentLoop ? getPreviousNodes(parentLoop.id) : [])];
 
     // Add chat variables
-    chatVariables?.forEach(v => addVariable(list, keys, `CONVERSATION_${v.name}`, v.name, v.type, `conv.${v.name}`, { type: 'CONVERSATION', name: 'CONVERSATION', icon: '' }, { group: 'CONVERSATION' }));
+    chatVariables?.forEach(v => addVariable(list, keys, `CONVERSATION_${v.name}`, v.name, v.type, `conv.${v.name}`, { type: 'CONVERSATION', name: 'CONVERSATION', icon: '' }, { group: 'CONVERSATION' }, v.defaultValue ?? v.default));
 
     // Process each relevant node: deferred types last (they depend on prior variables)
     const deferredIds: string[] = [];

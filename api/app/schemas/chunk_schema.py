@@ -20,12 +20,25 @@ class ChunkCreate(BaseModel):
 
     @property
     def chunk_content(self) -> str:
-        """
-        Get the actual content string regardless of input type
-        """
+        """Get the actual content string regardless of input type"""
         if isinstance(self.content, QAChunk):
-            return f"question: {self.content.question} answer: {self.content.answer}"
+            return self.content.question  # QA 模式下 page_content 存 question
         return self.content
+
+    @property
+    def is_qa(self) -> bool:
+        return isinstance(self.content, QAChunk)
+
+    @property
+    def qa_metadata(self) -> dict:
+        """返回 QA 相关的 metadata 字段"""
+        if isinstance(self.content, QAChunk):
+            return {
+                "chunk_type": "qa",
+                "question": self.content.question,
+                "answer": self.content.answer,
+            }
+        return {}
 
 
 class ChunkUpdate(BaseModel):
@@ -35,12 +48,25 @@ class ChunkUpdate(BaseModel):
 
     @property
     def chunk_content(self) -> str:
-        """
-        Get the actual content string regardless of input type
-        """
+        """Get the actual content string regardless of input type"""
         if isinstance(self.content, QAChunk):
-            return f"question: {self.content.question} answer: {self.content.answer}"
+            return self.content.question  # QA 模式下 page_content 存 question
         return self.content
+
+    @property
+    def is_qa(self) -> bool:
+        return isinstance(self.content, QAChunk)
+
+    @property
+    def qa_metadata(self) -> dict:
+        """返回 QA 相关的 metadata 字段"""
+        if isinstance(self.content, QAChunk):
+            return {
+                "chunk_type": "qa",
+                "question": self.content.question,
+                "answer": self.content.answer,
+            }
+        return {}
 
 
 class ChunkRetrieve(BaseModel):
@@ -51,3 +77,8 @@ class ChunkRetrieve(BaseModel):
     vector_similarity_weight: float | None = Field(None)
     top_k: int | None = Field(None)
     retrieve_type: RetrieveType | None = Field(None)
+
+
+class ChunkBatchCreate(BaseModel):
+    """批量创建 chunk"""
+    items: list[ChunkCreate] = Field(..., min_length=1, description="chunk 列表")

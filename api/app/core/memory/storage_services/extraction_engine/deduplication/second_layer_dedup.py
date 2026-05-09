@@ -65,7 +65,6 @@ def _row_to_entity(row: Dict[str, Any]) -> ExtractedEntityNode:
         user_id=row.get("user_id") or "",
         apply_id=row.get("apply_id") or "",
         created_at=_parse_dt(row.get("created_at")),
-        expired_at=_parse_dt(row.get("expired_at")) if row.get("expired_at") else None,
         entity_idx=int(row.get("entity_idx") or 0),
         statement_id=row.get("statement_id") or "",
         entity_type=row.get("entity_type") or "",

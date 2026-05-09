@@ -142,7 +142,7 @@ class ConfigAuditLogger:
         result = "SUCCESS" if success else "FAILED"
         msg = (
             f"{operation.upper()} config_id={config_id} "
-            f"group={end_user_id} result={result}"
+            f"end_user_id={end_user_id} result={result}"
         )
         if duration is not None:
             msg += f" duration={duration:.2f}s"

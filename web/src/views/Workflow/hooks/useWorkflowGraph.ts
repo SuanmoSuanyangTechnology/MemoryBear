@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-06 14:30:46
+ * @Last Modified time: 2026-05-07 18:22:14
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, type Edge } from '@antv/x6';
 import { register as registerReactShape } from '@antv/x6-react-shape';
@@ -487,6 +487,36 @@ export const useWorkflowGraph = ({
       graphRef.current.addEdges(edgeList.filter(vo => vo !== null))
     }
 
+    // Check if loop/iteration nodes need add-node added
+    const parentNodes = graphRef.current.getNodes().filter(node => {
+      const type = node.getData()?.type;
+      return type === 'loop' || type === 'iteration';
+    });
+
+    parentNodes.forEach(parentNode => {
+      const parentData = parentNode.getData();
+      const allChildren = graphRef.current!.getNodes().filter(n => n.getData()?.cycle === parentData.id);
+      const cycleStartNodes = allChildren.filter(n => n.getData()?.type === 'cycle-start');
+
+      // If only cycle-start exists, add add-node
+      if (cycleStartNodes.length === 1 && allChildren.length === 1) {
+        const cycleStartNode = cycleStartNodes[0];
+        const bbox = cycleStartNode.getBBox();
+        const addNode = graphRef.current!.addNode({
+          ...graphNodeLibrary.addStart,
+          x: bbox.x + 84,
+          y: bbox.y + 4,
+          data: { type: 'add-node', parentId: parentNode.id, cycle: parentData.id, label: t('workflow.addNode'), icon: '+' },
+        });
+        parentNode.addChild(addNode, { silent: true });
+        graphRef.current!.addEdge({
+          source: { cell: cycleStartNode.id, port: cycleStartNode.getPorts().find(p => p.group === 'right')?.id || 'right' },
+          target: { cell: addNode.id, port: addNode.getPorts().find(p => p.group === 'left')?.id || 'left' },
+          ...edgeAttrs,
+        });
+      }
+    });
+
     graphRef.current.centerContent()
     // Initialize after completion, display nodes in visible area
     if (nodes.length > 0 || edges.length > 0) {
@@ -760,22 +790,11 @@ export const useWorkflowGraph = ({
         setSelectedNode(null)
         return;
       }
-
-      const nodes = graphRef.current?.getNodes();
-
-      nodes?.forEach(vo => {
-        const data = vo.getData();
-        if (data.isSelected) {
-          vo.setData({
-            ...data,
-            isSelected: false,
-          }, { silent: true });
-        }
-      });
+      clearNodeSelect()
       node.setData({
         ...nodeData,
         isSelected: true,
-      }, { silent: true });
+      });
       clearEdgeSelect()
       if (nodeData.type !== 'notes') {
         setSelectedNode(node);
@@ -804,7 +823,7 @@ export const useWorkflowGraph = ({
         node.setData({
           ...data,
           isSelected: false,
-        }, { silent: true });
+        });
       }
     });
     setSelectedNode(null);

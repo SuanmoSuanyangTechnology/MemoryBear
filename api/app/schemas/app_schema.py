@@ -205,6 +205,7 @@ class CitationConfig(BaseModel):
 
 class Citation(BaseModel):
     document_id: str
+    doc_id: str
     file_name: str
     knowledge_id: str
     score: float
@@ -701,6 +702,24 @@ class ModelCompareItem(BaseModel):
         None,
         description="会话ID，用于为每个模型指定独立的会话历史"
     )
+
+
+class NodeRunRequest(BaseModel):
+    """单节点试运行请求"""
+    # 扁平格式，支持:
+    #   节点变量:  {"node_id.var_name": value}
+    #   系统变量:  {"sys.message": "hello", "sys.files": [...]}
+    inputs: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="节点输入变量，格式: {'node_id.var_name': value} 或 {'sys.message': 'hello'}",
+        examples=[{
+            "sys.message": "帮我写一首诗",
+            "sys.user_id": "user-123",
+            "sys.files": [],
+            "llm_node_abc.output": "上游输出内容",
+        }]
+    )
+    stream: bool = Field(default=False, description="是否流式返回")
 
 
 class DraftRunCompareRequest(BaseModel):

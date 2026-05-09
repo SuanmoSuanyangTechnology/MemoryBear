@@ -70,7 +70,7 @@ class IterationRuntime:
         self.variable_pool = variable_pool
         self.cycle_nodes = cycle_nodes
         self.cycle_edges = cycle_edges
-        self.event_write = get_stream_writer()
+        self.event_write = get_stream_writer() if self.stream else (lambda x: None)
 
         self.output_value = None
         self.result: list = []
@@ -196,7 +196,7 @@ class IterationRuntime:
                         })
             result = graph.get_state(config=checkpoint).values
         else:
-            result = await graph.ainvoke(init_state)
+            result = await graph.ainvoke(init_state, config=checkpoint)
 
         output = child_pool.get_value(self.output_value)
         stopped = result["looping"] == 2

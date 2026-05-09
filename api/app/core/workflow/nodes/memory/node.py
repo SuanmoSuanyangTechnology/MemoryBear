@@ -40,6 +40,7 @@ class MemoryReadNode(BaseNode):
                 end_user_id=end_user_id,
                 user_rag_memory_id=state["user_rag_memory_id"],
             )
+            # TODO: Historical Messages -> Used to refer to coreference resolution
             search_result = await memory_service.read(
                 self._render_template(self.typed_config.message, variable_pool),
                 search_switch=SearchStrategy(self.typed_config.search_switch)
