@@ -575,7 +575,6 @@ async def draft_run(
     from app.services.multi_agent_service import MultiAgentService
     from app.models import AgentConfig, ModelConfig, AppRelease
     from sqlalchemy import select
-    from app.core.exceptions import BusinessException
     from app.services.draft_run_service import AgentRunService
 
     service = AppService(db)
@@ -938,8 +937,6 @@ async def draft_run_compare(
     # 1. 验证应用和权限
     app = service._get_app_or_404(app_id)
     if app.type != "agent":
-        from app.core.exceptions import BusinessException
-        from app.core.error_codes import BizCode
         raise BusinessException("只有 Agent 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
     service._validate_app_accessible(app, workspace_id)
 
@@ -959,8 +956,6 @@ async def draft_run_compare(
     stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
     agent_cfg = db.scalars(stmt).first()
     if not agent_cfg:
-        from app.core.exceptions import BusinessException
-        from app.core.error_codes import BizCode
         raise BusinessException("Agent 配置不存在", BizCode.AGENT_CONFIG_MISSING)
 
     # 3. 验证所有模型配置
