@@ -320,7 +320,7 @@ class GraphBuilder:
                     # For other branch nodes (e.g. HTTP), use output field
                     route_field = "branch_signal" if node_type == NodeType.LLM else "output"
                     related_edge[idx]['condition'] = (
-                        f"node[{json.dumps(node_id)}][{json.dumps(route_field)}] == {json.dumps(related_edge[idx]['label'])}"
+                        f"node['{node_id}']['{route_field}'] == '{related_edge[idx].get('label') or 'SUCCESS'}'"
                     )
 
             if node_instance:
