@@ -166,9 +166,9 @@ const OrderHistory: React.FC = () => {
           placeholder={t('common.select')}
           options={[
             { label: t('pricing.allStatus'), value: null },
-            ...Object.keys(STATUS).map(status => ({
+            ...(Object.keys(STATUS) as Array<keyof typeof STATUS>).map(status => ({
               value: status,
-              label: status
+              label: t(`pricing.${STATUS[status].key}`)
             }))
           ]}
           className="rb:w-40"

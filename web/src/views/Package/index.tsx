@@ -97,6 +97,7 @@ const Package: FC = () => {
   const CARD_WIDTH = 360
   const GAP = 12
   const [visibleCount, setVisibleCount] = useState(3)
+  const [dataReady, setDataReady] = useState(false)
 
   useEffect(() => {
     const calcVisible = () => {
@@ -104,10 +105,20 @@ const Package: FC = () => {
       const w = scrollRef.current.offsetWidth
       setVisibleCount(Math.floor((w + GAP) / (CARD_WIDTH + GAP)))
     }
-    calcVisible()
+    
+    if (!dataReady) return
+
+    // Use RAF to ensure DOM is rendered
+    const rafId = requestAnimationFrame(() => {
+      calcVisible()
+    })
+    
     window.addEventListener('resize', calcVisible)
-    return () => window.removeEventListener('resize', calcVisible)
-  }, [])
+    return () => {
+      cancelAnimationFrame(rafId)
+      window.removeEventListener('resize', calcVisible)
+    }
+  }, [dataReady])
 
   const [activeTab, setActiveTab] = useState('saas_personal');
 
@@ -131,6 +142,7 @@ const Package: FC = () => {
   const getList = () => {
     getPackageList({ status: true }).then(res => {
       setData(res as Package[] || [])
+      setDataReady(true)
     })
   }
 
