@@ -30,6 +30,8 @@ import RbCard from '@/components/RbCard/Card'
 import BodyWrapper from '@/components/Empty/BodyWrapper'
 import { useI18n } from '@/store/locale'
 import { useUser } from '@/store/user'
+import { getTenantSubscription } from '@/api/user';
+import type { Subscription } from '@/components/SiderMenu'
 
 import SpaceSvg from '@/assets/images/package/space.svg?react'
 import SkillSvg from '@/assets/images/package/skill.svg?react'
@@ -145,9 +147,17 @@ const Package: FC = () => {
       setDataReady(true)
     })
   }
+  const [curPkg, setCurPkg] = useState<Subscription | null>(null)
+  const getCurrentPackage = () => {
+    getTenantSubscription()
+      .then(res => {
+        setCurPkg(res as Subscription)
+      })
+  }
 
   useEffect(() => {
     getList()
+    getCurrentPackage()
   }, [])
 
   useEffect(() => {
@@ -177,15 +187,23 @@ const Package: FC = () => {
         navigate(user.current_workspace_id ? '/' : '/space');
         break
       default:
-        navigate(`/order-pay`, {
-          state: {
-            ...pkg,
-            jumpFrom: location.pathname
-          }
-        });
+        if (curPkg?.package_plan?.billing_cycle === 'permanent_free') {
+          navigate(`/order-pay`, {
+            state: {
+              ...pkg,
+              jumpFrom: location.pathname
+            }
+          });
+        } else {
+          navigate(`/order-pay`, {
+            state: {
+              ...pkg,
+              jumpFrom: curPkg?.package_plan_id === pkg.id ? 'renewal' : '/upgrade'
+            }
+          });
+        }
         break
     }
-    // window.open(`https://docs.redbearai.com/s/${language || 'en'}-memorybear`, '_blank')
   };
   /** Navigate to order history */
   const goToHistory = () => {

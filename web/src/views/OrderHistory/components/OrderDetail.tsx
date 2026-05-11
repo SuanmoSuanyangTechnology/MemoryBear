@@ -47,20 +47,34 @@ const OrderDetail = forwardRef<OrderDetailRef, { getProductType: (type: string) 
   /** Format order information items */
   const formatItems = useMemo(() => {
     if (!data) return []
-    return ['order_no', 'package_snapshot', 'payable_amount', 'status', 'pay_time', 'created_at'].map(key => {
+    const items: DescriptionsProps['items'] = [];
+    ['order_no', 'package_snapshot', 'payable_amount', 'status', 'reject_reason', 'pay_time', 'created_at'].forEach(key => {
       const value = data[key as keyof Order]
-      return {
-        key,
-        label: t(`pricing.${key}`),
-        children: ['pay_time', 'created_at'].includes(key) && value
-          ? dayjs(value as number).format('YYYY-MM-DD HH:mm:ss')
-          : key === 'status' && value
-            ? t(`pricing.${STATUS[value as keyof typeof STATUS].key}`)
-            : key === 'package_snapshot'
-              ? (data.from_view === 'platform' ? t(`pricing.${getProductType(data.product_type)}.type`) : (value as Package)[getKeyWithLanguage('name')])
-              : value
+
+      if (key === 'reject_reason' && !value) {
+        if (data.status === 'rejected') {
+        items.push({
+          key,
+          label: t(`pricing.${key}`),
+          children: value || '-'
+        })
+        }
+      } else {
+        items.push({
+          key,
+          label: t(`pricing.${key}`),
+          children: (['pay_time', 'created_at'].includes(key) && value
+            ? dayjs(value as number).format('YYYY-MM-DD HH:mm:ss')
+            : key === 'status' && value
+              ? t(`pricing.${STATUS[value as keyof typeof STATUS].key}`)
+              : key === 'package_snapshot'
+                ? (data.from_view === 'platform' && data.legacy_product_type ? t(`pricing.${getProductType(data.legacy_product_type)}.type`) : (value as Package)[getKeyWithLanguage('name')])
+                : value) as string
+        })
       }
     })
+
+    return items
   }, [data, t, getKeyWithLanguage, getProductType])
   /** Format payment information items */
   const formatPayItems = useMemo(() => {

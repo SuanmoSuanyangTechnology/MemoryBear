@@ -92,6 +92,7 @@ const OrderPayment: React.FC = () => {
 
   useEffect(() => {
     setUpgradePreview(null)
+    setPkg(null)
     if (location.state?.jumpFrom) {
       setJumpFrom(location.state?.jumpFrom)
 
@@ -125,6 +126,10 @@ const OrderPayment: React.FC = () => {
         setUpgradePreview(res as UpgradePreview)
       })
   }
+
+  useEffect(() => {
+    form.resetFields()
+  }, [pkg?.id])
 
   useEffect(() => {
     if (!multiplierValue || jumpFrom !== '/upgrade') return

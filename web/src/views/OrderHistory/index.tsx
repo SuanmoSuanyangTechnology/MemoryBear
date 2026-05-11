@@ -40,10 +40,6 @@ const OrderHistory: React.FC = () => {
     { label: t('pricing.allType'), value: null },
     { label: t('package.saas_personal'), value: 'saas_personal' },
     { label: t('package.commercial_deployment'), value: 'commercial_deployment' },
-    ...Object.keys(typeMap).map(type => ({
-      label: t(`pricing.${typeMap[type] || 'ENTERPRISE'}.type`),
-      value: type
-    }))
   ]
 
   const businessTypeOptions = [
@@ -87,13 +83,11 @@ const OrderHistory: React.FC = () => {
 
   /** Map product type to translation key */
   const getProductType = (type: string) => {
-    const typeMap: Record<string, string> = {
-      'FREE': 'personal',
-      'TEAM': 'team',
-      'ENTERPRISE': 'biz',
-      'OEM': 'commerce'
-    };
-    return typeMap[type] || 'ENTERPRISE';
+    // Check if type is a valid key in typeMap
+    if (type in typeMap) {
+      return typeMap[type as keyof typeof typeMap];
+    }
+    return 'ENTERPRISE';
   };
   
   const getKeyWithLanguage = useCallback((key: string) => {
@@ -112,7 +106,7 @@ const OrderHistory: React.FC = () => {
       dataIndex: 'package_snapshot',
       key: 'package_snapshot',
       render: (package_snapshot, record) => {
-        return record.from_view === 'platform' ? t(`pricing.${getProductType(record.product_type)}.type`) : package_snapshot[getKeyWithLanguage('name')] || '-'
+        return record.from_view === 'platform' && record.legacy_product_type ? t(`pricing.${getProductType(record.legacy_product_type)}.type`) : package_snapshot[getKeyWithLanguage('name')] || '-'
       }
     },
     {

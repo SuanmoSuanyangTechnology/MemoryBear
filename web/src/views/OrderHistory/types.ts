@@ -31,6 +31,7 @@ export interface Order {
   package_plan_id: string;
   package_version: string;
   product_type: string;
+  legacy_product_type?: string;
   package_snapshot: Package;
   business_type: 'purchase' | 'renewal' | 'upgrade' | 'recharge' | 'downgrade' | 'free';
   multiplier: number;
