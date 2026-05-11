@@ -2869,6 +2869,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       upgradeExpiredAt: 'Upgrade Expiration Date',
       renewalExpiredAt: 'Renewal Expiration Date',
       renewalTip: 'Renew the current package, extending the validity period by {{cycle}}.',
+      reject_reason: 'Reject Reason',
     },
     forgetDetail: {
       title: 'The forgetting management system helps AI intelligently manage memory lifecycle by automatically identifying low-value memories, setting forgetting strategies, and executing regular cleanup to optimize memory storage space and improve retrieval efficiency.',
