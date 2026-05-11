@@ -192,25 +192,8 @@ async def write_server(
 
         # ── 方案A：写入成功后同步 memory_count 到 PostgreSQL（仅 neo4j 模式）──
         if storage_type == "neo4j":
-            try:
-                from app.core.memory.utils.memory_count_utils import sync_end_user_memory_count_from_neo4j
-                from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-                connector = Neo4jConnector()
-                try:
-                    _new_count = await sync_end_user_memory_count_from_neo4j(
-                        user_input.end_user_id, connector
-                    )
-                    api_logger.info(
-                        f"[writer_service] memory_count 同步完成: "
-                        f"end_user_id={user_input.end_user_id}, count={_new_count}"
-                    )
-                finally:
-                    await connector.close()
-            except Exception as _sync_e:
-                api_logger.warning(
-                    f"[writer_service] memory_count 同步失败（不影响主流程）: "
-                    f"end_user_id={user_input.end_user_id}, error={_sync_e}"
-                )
+            from app.core.memory.utils.memory_count_utils import _async_sync_memory_count_neo4j
+            await _async_sync_memory_count_neo4j(end_user_id=user_input.end_user_id)
 
         return success(data=result, msg="写入成功")
     except BaseException as e:
