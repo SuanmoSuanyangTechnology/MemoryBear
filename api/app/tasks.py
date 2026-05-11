@@ -44,6 +44,7 @@ from app.schemas.memory_agent_schema import WriteMemoryRequest
 from app.services.memory_forget_service import MemoryForgetService
 from app.utils.config_utils import resolve_config_id
 from app.utils.redis_lock import RedisFairLock
+from app.core.memory.utils.memory_count_utils import sync_memory_count_neo4j
 
 logger = get_logger(__name__)
 
@@ -1983,6 +1984,10 @@ def post_store_dedup_and_alias_merge_task(
         logger.info(
             f"[PostStore] 任务完成: {result}, 耗时={elapsed:.2f}s, task_id={task_id}"
         )
+
+        # ── 第二层去重可能合并/删除节点，重新同步 memory_count ──
+        sync_memory_count_neo4j(end_user_id=end_user_id)
+
         return {
             "status": "SUCCESS",
             **result,

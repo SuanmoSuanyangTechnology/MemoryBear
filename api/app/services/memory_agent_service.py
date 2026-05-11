@@ -38,6 +38,7 @@ from app.core.memory.analytics.hot_memory_tags import get_interest_distribution
 from app.core.memory.memory_service import MemoryService
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.core.memory.utils.log.audit_logger import audit_logger
+from app.core.memory.utils.memory_count_utils import sync_end_user_memory_count_from_neo4j
 from app.db import get_db_context
 from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -313,6 +314,16 @@ class MemoryAgentService:
 
                 # ── Step 4: 后处理 ── 失效缓存、序列化文件路径、记录审计日志并返回结果
                 await self._invalidate_interest_cache(end_user_id)
+
+                # ── Step 5: 同步 memory_count 到 PostgreSQL（仅 neo4j 模式）──
+                _connector = Neo4jConnector()
+                try:
+                    await sync_end_user_memory_count_from_neo4j(end_user_id, _connector)
+                except Exception as _sync_e:
+                    logger.warning(f"[MEMORY_COUNT_SYNC] 同步失败（不影响主流程）: end_user_id={end_user_id}, error={_sync_e}")
+                finally:
+                    await _connector.close()
+
                 for message in messages:
                     if isinstance(message, dict):
                         message["file_content"] = [
