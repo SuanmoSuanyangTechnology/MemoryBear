@@ -60,5 +60,6 @@ def sync_memory_count_neo4j(end_user_id: str) -> None:
         asyncio.run(_run())
     except Exception as exc:
         _logger.warning(
-            f"{_LOG_PREFIX} 同步失败（不影响主流程）: end_user_id={end_user_id}, error={exc}"
+            f"{_LOG_PREFIX} 同步失败（不影响主流程）: end_user_id={end_user_id}, error={exc}",
+            exc_info=True,
         )
