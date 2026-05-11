@@ -185,10 +185,32 @@ async def write_server(
                 config_id=config_id,
                 storage_type=storage_type,
                 user_rag_memory_id=user_rag_memory_id,
-                language=language,
+                language=language
             ),
             db,
         )
+
+        # ── 方案A：写入成功后同步 memory_count 到 PostgreSQL（仅 neo4j 模式）──
+        if storage_type == "neo4j":
+            try:
+                from app.core.memory.utils.memory_count_utils import sync_end_user_memory_count_from_neo4j
+                from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+                connector = Neo4jConnector()
+                try:
+                    _new_count = await sync_end_user_memory_count_from_neo4j(
+                        user_input.end_user_id, connector
+                    )
+                    api_logger.info(
+                        f"[writer_service] memory_count 同步完成: "
+                        f"end_user_id={user_input.end_user_id}, count={_new_count}"
+                    )
+                finally:
+                    await connector.close()
+            except Exception as _sync_e:
+                api_logger.warning(
+                    f"[writer_service] memory_count 同步失败（不影响主流程）: "
+                    f"end_user_id={user_input.end_user_id}, error={_sync_e}"
+                )
 
         return success(data=result, msg="写入成功")
     except BaseException as e:
@@ -200,66 +222,66 @@ async def write_server(
             return fail(BizCode.INTERNAL_ERROR, "写入失败", detailed_error)
         api_logger.error(f"Write operation error: {str(e)}", exc_info=True)
         return fail(BizCode.INTERNAL_ERROR, "写入失败", str(e))
-
-
-@router.post("/writer_service_async", response_model=ApiResponse)
-@cur_workspace_access_guard()
-async def write_server_async(
-        user_input: Write_UserInput,
-        language_type: str = Header(default=None, alias="X-Language-Type"),
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
-):
-    """
-    Async write service endpoint - enqueues write processing to Celery
-
-    Args:
-        user_input: Write request containing message and end_user_id
-        language_type: 语言类型 ("zh" 中文, "en" 英文)，通过 X-Language-Type Header 传递
-
-    Returns:
-        Task ID for tracking async operation
-        Use GET /memory/write_result/{task_id} to check task status and get result
-    """
-    # 使用集中化的语言校验
-    language = get_language_from_header(language_type)
-
-    config_id = user_input.config_id
-    workspace_id = current_user.current_workspace_id
-    api_logger.info(
-        f"Async write service: workspace_id={workspace_id}, config_id={config_id}, language_type={language}")
-
-    # 获取 storage_type，如果为 None 则使用默认值
-    storage_type = workspace_service.get_workspace_storage_type(
-        db=db,
-        workspace_id=workspace_id,
-        user=current_user
-    )
-    if storage_type is None: storage_type = 'neo4j'
-    user_rag_memory_id = ''
-    if workspace_id:
-
-        knowledge = knowledge_repository.get_knowledge_by_name(
-            db=db,
-            name="USER_RAG_MERORY",
-            workspace_id=workspace_id
-        )
-        if knowledge: user_rag_memory_id = str(knowledge.id)
-    api_logger.info(f"Async write: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
-    try:
-        # 获取标准化的消息列表
-        messages_list = memory_agent_service.get_messages_list(user_input)
-
-        task = celery_app.send_task(
-            "app.core.memory.agent.write_message",
-            args=[user_input.end_user_id, messages_list, config_id, storage_type, user_rag_memory_id, language]
-        )
-        api_logger.info(f"Write task queued: {task.id}")
-
-        return success(data={"task_id": task.id}, msg="写入任务已提交")
-    except Exception as e:
-        api_logger.error(f"Async write operation failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "写入失败", str(e))
+#
+#
+# @router.post("/writer_service_async", response_model=ApiResponse)
+# @cur_workspace_access_guard()
+# async def write_server_async(
+#         user_input: Write_UserInput,
+#         language_type: str = Header(default=None, alias="X-Language-Type"),
+#         db: Session = Depends(get_db),
+#         current_user: User = Depends(get_current_user)
+# ):
+#     """
+#     Async write service endpoint - enqueues write processing to Celery
+#
+#     Args:
+#         user_input: Write request containing message and end_user_id
+#         language_type: 语言类型 ("zh" 中文, "en" 英文)，通过 X-Language-Type Header 传递
+#
+#     Returns:
+#         Task ID for tracking async operation
+#         Use GET /memory/write_result/{task_id} to check task status and get result
+#     """
+#     # 使用集中化的语言校验
+#     language = get_language_from_header(language_type)
+#
+#     config_id = user_input.config_id
+#     workspace_id = current_user.current_workspace_id
+#     api_logger.info(
+#         f"Async write service: workspace_id={workspace_id}, config_id={config_id}, language_type={language}")
+#
+#     # 获取 storage_type，如果为 None 则使用默认值
+#     storage_type = workspace_service.get_workspace_storage_type(
+#         db=db,
+#         workspace_id=workspace_id,
+#         user=current_user
+#     )
+#     if storage_type is None: storage_type = 'neo4j'
+#     user_rag_memory_id = ''
+#     if workspace_id:
+#
+#         knowledge = knowledge_repository.get_knowledge_by_name(
+#             db=db,
+#             name="USER_RAG_MERORY",
+#             workspace_id=workspace_id
+#         )
+#         if knowledge: user_rag_memory_id = str(knowledge.id)
+#     api_logger.info(f"Async write: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
+#     try:
+#         # 获取标准化的消息列表
+#         messages_list = memory_agent_service.get_messages_list(user_input)
+#
+#         task = celery_app.send_task(
+#             "app.core.memory.agent.write_message",
+#             args=[user_input.end_user_id, messages_list, config_id, storage_type, user_rag_memory_id, language]
+#         )
+#         api_logger.info(f"Write task queued: {task.id}")
+#
+#         return success(data={"task_id": task.id}, msg="写入任务已提交")
+#     except Exception as e:
+#         api_logger.error(f"Async write operation failed: {str(e)}")
+#         return fail(BizCode.INTERNAL_ERROR, "写入失败", str(e))
 
 
 @router.post("/read_service", response_model=ApiResponse)

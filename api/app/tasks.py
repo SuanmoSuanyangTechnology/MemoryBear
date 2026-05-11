@@ -1531,6 +1531,32 @@ def write_message_task(
                 )
         except Exception as _e:
             logger.warning(f"[CELERY WRITE] 写入 last_done 时间戳失败（不影响主流程）: {_e}")
+
+        # ── 方案A：写入成功后同步 memory_count 到 PostgreSQL（仅 neo4j 模式）──
+        if storage_type == "neo4j":
+            try:
+                from app.core.memory.utils.memory_count_utils import sync_end_user_memory_count_from_neo4j
+                from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+                async def _sync_count():
+                    connector = Neo4jConnector()
+                    try:
+                        return await sync_end_user_memory_count_from_neo4j(end_user_id, connector)
+                    finally:
+                        await connector.close()
+
+                _sync_loop = set_asyncio_event_loop()
+                _new_count = _sync_loop.run_until_complete(_sync_count())
+                logger.info(
+                    f"[CELERY WRITE] memory_count 同步完成: "
+                    f"end_user_id={end_user_id}, count={_new_count}"
+                )
+            except Exception as _sync_e:
+                logger.warning(
+                    f"[CELERY WRITE] memory_count 同步失败（不影响主流程）: "
+                    f"end_user_id={end_user_id}, error={_sync_e}"
+                )
+
         # 将 result 转为 JSON 安全结构，避免 Celery JSON 序列化 pydantic BaseModel / UUID 失败
         try:
             safe_result = jsonable_encoder(result)
@@ -1983,6 +2009,32 @@ def post_store_dedup_and_alias_merge_task(
         logger.info(
             f"[PostStore] 任务完成: {result}, 耗时={elapsed:.2f}s, task_id={task_id}"
         )
+
+        # ── 方案A：去重归并完成后同步 memory_count 到 PostgreSQL ──
+        # 第二层去重可能合并/删除节点，导致节点数减少，需要重新同步
+        try:
+            from app.core.memory.utils.memory_count_utils import sync_end_user_memory_count_from_neo4j
+            from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+            async def _sync_count_post():
+                connector = Neo4jConnector()
+                try:
+                    return await sync_end_user_memory_count_from_neo4j(end_user_id, connector)
+                finally:
+                    await connector.close()
+
+            _sync_loop = set_asyncio_event_loop()
+            _new_count = _sync_loop.run_until_complete(_sync_count_post())
+            logger.info(
+                f"[PostStore] memory_count 同步完成: "
+                f"end_user_id={end_user_id}, count={_new_count}"
+            )
+        except Exception as _sync_e:
+            logger.warning(
+                f"[PostStore] memory_count 同步失败（不影响主流程）: "
+                f"end_user_id={end_user_id}, error={_sync_e}"
+            )
+
         return {
             "status": "SUCCESS",
             **result,
