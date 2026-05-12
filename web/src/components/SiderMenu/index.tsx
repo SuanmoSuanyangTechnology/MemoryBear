@@ -334,20 +334,33 @@ const Menu: FC<{
   const [subscription, setSubscription] = useState<Subscription | null>(null)
   useEffect(() => {
     if (source === 'manage') {
-      getTenantSubscription()
-        .then(res => {
-          setSubscription(res as Subscription)
-        })
+      getSubscription()
     } else {
       setSubscription(null)
     }
   }, [source])
 
+  const getSubscription = () => {
+    return new Promise((resolve, reject) => {
+      getTenantSubscription()
+        .then(res => {
+          setSubscription(res as Subscription)
+          resolve(res)
+        })
+        .catch((error) => {
+          reject(error)
+        })
+    })
+  }
+
   const getKeyWithLanguage = (key: string) => {
     return (language === 'en' ? `${key}_en` : key) as keyof Subscription['package_plan']
   }
   const handleViewDetail = () => {
-    subscriptionDetailRef.current?.handleOpen(subscription)
+    getSubscription()
+      .finally(() => {
+        subscriptionDetailRef.current?.handleOpen(subscription)
+      })
   }
   const handleSwitchSpace = () => {
     switchSpaceModalRef.current?.handleOpen()

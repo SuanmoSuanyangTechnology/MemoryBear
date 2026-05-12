@@ -47,7 +47,7 @@ const OrderHistory: React.FC = () => {
     { label: t('pricing.purchase'), value: 'purchase' },
     { label: t('pricing.renewal'), value: 'renewal' },
     { label: t('pricing.upgrade'), value: 'upgrade' },
-    { label: t('pricing.recharge'), value: 'recharge' },
+    // { label: t('pricing.recharge'), value: 'recharge' },
     { label: t('pricing.free'), value: 'free' }
   ]
 
