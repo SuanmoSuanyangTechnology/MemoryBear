@@ -1289,7 +1289,7 @@ export const en = {
       vector_similarity_weight_desc: 'Only return results with semantic similarity higher than this threshold',
       vector_similarity_weight_desc1: 'The minimum similarity threshold for semantic retrieval',
 
-      similarity_threshold: 'Vector Similarity Weight',
+      similarity_threshold: 'Similarity Weight',
       similarity_threshold_desc: 'Only return results with BM25 scores above this threshold',
       similarity_threshold_desc1: 'The minimum BM25 score threshold for word segmentation retrieval',
 
