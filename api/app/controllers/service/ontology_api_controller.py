@@ -1,9 +1,9 @@
-"""Ontology 服务接口 — 基于 API Key 认证
+"""Ontology 服务接口 �?基于 API Key 认证
 
-包装 ontology_controller.py 中的内部接口，提供基于 API Key 认证的对外服务。
+包装 ontology_controller.py 中的内部接口，提供基�?API Key 认证的对外服务�?
 
 路由前缀: /memory/ontology
-最终路径: /v1/memory/ontology/...
+最终路�? /v1/memory/ontology/...
 认证方式: API Key (@require_api_key)
 """
 
@@ -11,6 +11,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, File, Form, Header, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
+from starlette.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.api_key_auth import require_api_key
@@ -32,6 +34,13 @@ from app.schemas.ontology_schemas import (
 
 router = APIRouter(prefix="/memory/ontology", tags=["V1 - Ontology API"])
 logger = get_business_logger()
+
+
+def _encode_result(result):
+    """Encode result for JSON serialization, preserving Response objects as-is."""
+    if isinstance(result, Response):
+        return result
+    return jsonable_encoder(result)
 
 
 # ==================== 本体提取 ====================
@@ -63,7 +72,7 @@ async def extract_ontology(
         db=db,
         current_user=current_user,
     )
-    return jsonable_encoder(result)
+    return _encode_result(result)
 
 
 # ==================== 场景管理 ====================
@@ -95,7 +104,7 @@ async def create_scene(
         current_user=current_user,
         x_language_type=x_language_type,
     )
-    return jsonable_encoder(result)
+    return _encode_result(result)
 
 
 @router.put("/scene/{scene_id}")
@@ -124,7 +133,7 @@ async def update_scene(
         db=db,
         current_user=current_user,
     )
-    return jsonable_encoder(result)
+    return _encode_result(result)
 
 
 @router.delete("/scene/{scene_id}")
@@ -148,7 +157,7 @@ async def delete_scene(
         db=db,
         current_user=current_user,
     )
-    return jsonable_encoder(result)
+    return _encode_result(result)
 
 
 @router.get("/scenes/simple")
@@ -170,7 +179,7 @@ async def get_scenes_simple(
         db=db,
         current_user=current_user,
     )
-    return jsonable_encoder(result)
+    return _encode_result(result)
 
 
 @router.get("/scenes")
@@ -199,7 +208,7 @@ async def get_scenes(
         db=db,
         current_user=current_user,
     )
-    return jsonable_encoder(result)
+    return _encode_result(result)
 
 
 # ==================== 类型管理 ====================
@@ -231,7 +240,7 @@ async def create_class(
         current_user=current_user,
         x_language_type=x_language_type,
     )
-    return jsonable_encoder(result)
+    return _encode_result(result)
 
 
 @router.put("/class/{class_id}")
@@ -260,7 +269,7 @@ async def update_class(
         db=db,
         current_user=current_user,
     )
-    return jsonable_encoder(result)
+    return _encode_result(result)
 
 
 @router.delete("/class/{class_id}")
@@ -284,7 +293,7 @@ async def delete_class(
         db=db,
         current_user=current_user,
     )
-    return jsonable_encoder(result)
+    return _encode_result(result)
 
 
 @router.get("/class/{class_id}")
@@ -308,7 +317,7 @@ async def get_class(
         db=db,
         current_user=current_user,
     )
-    return jsonable_encoder(result)
+    return _encode_result(result)
 
 
 @router.get("/classes")
@@ -334,7 +343,7 @@ async def get_classes(
         db=db,
         current_user=current_user,
     )
-    return jsonable_encoder(result)
+    return _encode_result(result)
 
 
 # ==================== OWL 导入/导出 ====================
@@ -365,7 +374,7 @@ async def import_owl_file(
         db=db,
         current_user=current_user,
     )
-    return jsonable_encoder(result)
+    return _encode_result(result)
 
 
 @router.post("/export")
