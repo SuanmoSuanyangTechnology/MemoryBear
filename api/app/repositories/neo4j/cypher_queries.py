@@ -1354,18 +1354,18 @@ WHERE r.predicate = '别名属于'
 WITH target,
      coalesce(target.aliases, []) AS existing_aliases,
      coalesce(target.description, '') AS tgt_desc,
-     collect(source.name) AS source_names,
-     collect(coalesce(source.description, '')) AS source_descs
+     collect(DISTINCT source.name) AS source_names,
+     collect(DISTINCT coalesce(source.description, '')) AS source_descs
 
 // 1. 合并 aliases：将所有 source.name 追加到 target.aliases（去重，忽略空值）
-WITH target, tgt_desc, source_names, source_descs,
+WITH target, tgt_desc, source_names, source_descs, existing_aliases,
      existing_aliases + [n IN source_names WHERE n IS NOT NULL AND n <> '' AND NOT n IN existing_aliases] AS new_aliases
 
 // 2. 合并 description：将所有 source.description 逐一追加（去重，分号分隔）
-WITH target, new_aliases, source_descs,
+WITH target, new_aliases, existing_aliases, source_descs,
      reduce(desc = tgt_desc, src IN source_descs |
          CASE
-             WHEN src <> '' AND NOT src IN desc
+             WHEN src <> '' AND NOT desc CONTAINS src
              THEN CASE WHEN desc = '' THEN src ELSE desc + '；' + src END
              ELSE desc
          END
@@ -1374,7 +1374,7 @@ WITH target, new_aliases, source_descs,
 SET target.aliases = new_aliases,
     target.description = new_description
 
-RETURN target.name AS target_name, new_aliases AS updated_aliases, size(new_aliases) - size(coalesce(target.aliases, [])) AS added_count
+RETURN target.name AS target_name, new_aliases AS updated_aliases, size(new_aliases) - size(existing_aliases) AS added_count
 """
 
 # 边重定向：将指向别名节点（"别名属于"关系的 source）的所有其他边，重定向到用户节点（target）。
