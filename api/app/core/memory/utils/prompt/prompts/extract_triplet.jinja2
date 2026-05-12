@@ -496,8 +496,9 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - 方向始终是 `alias -> 别名属于 -> canonical entity`。
 - 规范实体必须是“被命名的那个实体”，而不是与它相关的拥有者、施事者、使用者或上位对象。
 - 例如，如果句子表达“某个对象叫某个名字”，则这个名字应连向该对象本身；不要因为所有者更显眼，就把名字误连到所有者身上。
-- 对“X 的 Y 叫 Z / 名字是 Z”这类所有格命名表达，如果 `X 的 Y` 是稳定、清晰且类型允许的实体，则抽取 `Z -> 别名属于 -> X 的 Y`；不要抽取 `Z -> 别名属于 -> X`。
-- 如果所有格同时明确表达持有关系，也应抽取 `X -> 拥有 -> X 的 Y`。
+- 对“X 的 Y 叫 Z / 名字是 Z”这类所有格命名表达，如果 `X 的 Y` 是稳定、清晰且类型允许的实体，则抽取 `Z -> 别名属于 -> X 的 Y`；不要只抽取 `Z`，也不要抽取 `Z -> 别名属于 -> X`。
+- 对稳定人际关系命名表达同样适用，例如“我的老婆叫林小雨”应先规范为 `用户的老婆`，再抽取 `林小雨 -> 别名属于 -> 用户的老婆`。
+- 如果所有格表达的是持有、配有或所有关系，应抽取 `X -> 拥有 -> X 的 Y`；如果表达的是配偶、亲属、朋友、同事、导师等稳定人际关系，且没有更精确 predicate，则抽取 `X -> 关联于 -> X 的 Y`，不要使用 `拥有`。
 - 在用户自指场景中，规范实体应为已经规范化后的 `用户`。
 - 不要把角色、职业、身份、类别、夸赞、评价或其他非名字性描述抽成 `别名属于`。
   {% else %}
@@ -505,8 +506,9 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - Direction is always `alias -> 别名属于 -> canonical entity`.
 - The canonical entity must be the entity being named itself, not its owner, caller, user, or parent object.
 - For example, if the statement says that some object has a name, the alias should point to that object itself rather than a more salient owner.
-- For possessive naming patterns such as "X's Y is called Z" or "X's Y's name is Z", if `X's Y` is a stable, clear, and type-allowed entity, extract `Z -> 别名属于 -> X's Y`; do not extract `Z -> 别名属于 -> X`.
-- If the possessive phrase also explicitly expresses possession, also extract `X -> 拥有 -> X's Y`.
+- For possessive naming patterns such as "X's Y is called Z" or "X's Y's name is Z", if `X's Y` is a stable, clear, and type-allowed entity, extract `Z -> 别名属于 -> X's Y`; do not extract only `Z`, and do not extract `Z -> 别名属于 -> X`.
+- The same rule applies to stable interpersonal-relation naming expressions. For example, "my wife is called Lin Xiaoyu" should first normalize the named entity to `the user's wife`, then extract `Lin Xiaoyu -> 别名属于 -> the user's wife`.
+- If the possessive phrase expresses possession, equipment, or ownership, extract `X -> 拥有 -> X's Y`; if it expresses a stable interpersonal relation such as spouse, relative, friend, colleague, or advisor, and no more precise predicate exists, extract `X -> 关联于 -> X's Y`, not `拥有`.
 - In user self-reference cases, the canonical entity should be the normalized user entity `用户`.
 - Do not use `别名属于` for roles, occupations, identities, categories, compliments, evaluations, or other non-name descriptions.
   {% endif %}
