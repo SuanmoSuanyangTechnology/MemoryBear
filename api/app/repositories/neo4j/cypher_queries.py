@@ -99,8 +99,6 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
     END,
     e.statement_id = CASE WHEN entity.statement_id IS NOT NULL AND entity.statement_id <> '' THEN entity.statement_id ELSE e.statement_id END,
     e.aliases = CASE
-        // 用户实体的 aliases 由 PgSQL end_user_info 作为唯一权威源，知识抽取完全不写入
-        WHEN entity.name IN ['用户', '我', 'User', 'I'] THEN e.aliases
         WHEN entity.aliases IS NOT NULL AND size(entity.aliases) > 0
         THEN CASE 
             WHEN e.aliases IS NULL THEN entity.aliases 
