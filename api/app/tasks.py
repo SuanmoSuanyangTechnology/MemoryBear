@@ -1802,7 +1802,6 @@ def post_store_dedup_and_alias_merge_task(
             MERGE_ALIAS_BELONGS_TO,
             REDIRECT_ALIAS_EDGES,
             DELETE_ALIAS_NODES,
-            REMOVE_INVALID_ALIASES,
         )
 
         connector = Neo4jConnector()
@@ -1821,28 +1820,6 @@ def post_store_dedup_and_alias_merge_task(
             except Exception as e:
                 logger.warning(f"[PostStore] Neo4j 别名归并失败: {e}")
                 result_info["alias_merge_error"] = str(e)
-
-            # ── 1.5 Neo4j 失效别名移除（从 aliases 中删除旧别名） ──
-            try:
-                invalid_records = await connector.execute_query(
-                    REMOVE_INVALID_ALIASES,
-                    end_user_id=end_user_id,
-                )
-                invalid_count = len(invalid_records) if invalid_records else 0
-                result_info["invalid_aliases_removed"] = invalid_count
-                logger.info(f"[PostStore] 失效别名移除完成，影响 {invalid_count} 条记录")
-
-                # 同步删除 PostgreSQL end_user_info.aliases 中的失效别名
-                if invalid_records:
-                    removed_names = [
-                        r.get("removed_alias") for r in invalid_records
-                        if r.get("removed_alias")
-                    ]
-                    if removed_names:
-                        _remove_invalid_aliases_pg(end_user_id, removed_names)
-            except Exception as e:
-                logger.warning(f"[PostStore] 失效别名移除失败: {e}")
-                result_info["invalid_alias_error"] = str(e)
 
             # ── 2. Neo4j 边重定向 ──
             try:
@@ -2069,38 +2046,6 @@ def _sync_end_user_info_pg(
     except Exception as e:
         logger.warning(
             f"[Metadata][PG] 同步 end_user_info 失败（不影响主流程）: "
-            f"end_user_id={end_user_id}, error={e}",
-            exc_info=True,
-        )
-
-
-def _remove_invalid_aliases_pg(
-    end_user_id: str,
-    aliases_to_remove: List[str],
-) -> None:
-    """将失效别名从 PostgreSQL end_user_info.aliases 中移除。
-
-    失败只记日志，不抛异常，不影响主流程。
-    """
-    try:
-        import uuid as _uuid
-        from app.db import get_db_context
-        from app.repositories.end_user_info_repository import EndUserInfoRepository
-
-        eu_uuid = _uuid.UUID(end_user_id)
-        with get_db_context() as db:
-            info_repo = EndUserInfoRepository(db)
-            info_repo.remove_aliases(
-                end_user_id=eu_uuid,
-                aliases_to_remove=aliases_to_remove,
-            )
-        logger.info(
-            f"[PostStore][PG] 失效别名已从 end_user_info 移除: "
-            f"end_user_id={end_user_id}, removed={aliases_to_remove}"
-        )
-    except Exception as e:
-        logger.warning(
-            f"[PostStore][PG] 移除失效别名失败（不影响主流程）: "
             f"end_user_id={end_user_id}, error={e}",
             exc_info=True,
         )
