@@ -13,7 +13,8 @@ import uuid
 from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 from fastapi import Depends
-from sqlalchemy import and_, delete, func, or_, select, update as sa_update
+from sqlalchemy import and_, column, delete, exists, func, or_, select, update as sa_update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -1158,7 +1159,7 @@ class AppService:
             type: 应用类型过滤
             visibility: 可见性过滤
             status: 状态过滤
-            search: 搜索关键词
+            search: 搜索关键词（同时匹配应用名称和标签）
             include_shared: 是否包含分享的应用
             page: 页码（从1开始）
             pagesize: 每页数量
@@ -1187,8 +1188,19 @@ class AppService:
         if status:
             filters.append(App.status == status)
         if search:
-            filters.append(func.lower(App.name).like(f"%{search.lower()}%"))
-
+            search_pattern = f"%{search.lower()}%"
+            filters.append(
+                or_(
+                    func.lower(App.name).like(search_pattern),
+                    exists(
+                        select(1).select_from(
+                            func.jsonb_array_elements_text(App.tags.cast(JSONB))
+                        ).where(
+                            func.lower(column('value')).like(search_pattern)
+                        )
+                    )
+                )
+            )
         # shared_only implies include_shared; enforce to avoid confusing API usage
         if shared_only:
             include_shared = True
