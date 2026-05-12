@@ -1347,30 +1347,34 @@ RETURN (
 # 别名归并：将 predicate="别名属于" 的 EXTRACTED_RELATIONSHIP 边的 source.name
 # 合并进 target.aliases（去重），并将 source.description 追加到 target.description（分号分隔）
 MERGE_ALIAS_BELONGS_TO = """
+// 先按 target 分组，将所有 source.name 和 source.description 聚合，
+// 再一次性 SET，避免多条 别名属于 边对同一 target 反复覆盖。
 MATCH (source:ExtractedEntity {end_user_id: $end_user_id})-[r:EXTRACTED_RELATIONSHIP]->(target:ExtractedEntity {end_user_id: $end_user_id})
 WHERE r.predicate = '别名属于'
-WITH source, target,
+WITH target,
      coalesce(target.aliases, []) AS existing_aliases,
-     source.name AS source_name,
-     coalesce(source.description, '') AS src_desc,
-     coalesce(target.description, '') AS tgt_desc
+     coalesce(target.description, '') AS tgt_desc,
+     collect(DISTINCT source.name) AS source_names,
+     collect(DISTINCT coalesce(source.description, '')) AS source_descs
 
-// 1. 合并 aliases：将 source.name 追加到 target.aliases（去重）
-WITH source, target, src_desc, tgt_desc,
-     CASE
-         WHEN source_name IS NOT NULL AND source_name <> '' AND NOT source_name IN existing_aliases
-         THEN existing_aliases + source_name
-         ELSE existing_aliases
-     END AS new_aliases
+// 1. 合并 aliases：将所有 source.name 追加到 target.aliases（去重，忽略空值）
+WITH target, tgt_desc, source_names, source_descs, existing_aliases,
+     existing_aliases + [n IN source_names WHERE n IS NOT NULL AND n <> '' AND NOT n IN existing_aliases] AS new_aliases
+
+// 2. 合并 description：将所有 source.description 逐一追加（去重，分号分隔）
+WITH target, new_aliases, existing_aliases, source_descs,
+     reduce(desc = tgt_desc, src IN source_descs |
+         CASE
+             WHEN src <> '' AND NOT desc CONTAINS src
+             THEN CASE WHEN desc = '' THEN src ELSE desc + '；' + src END
+             ELSE desc
+         END
+     ) AS new_description
 
 SET target.aliases = new_aliases,
-    target.description = CASE
-        WHEN src_desc <> '' AND NOT src_desc IN tgt_desc
-        THEN CASE WHEN tgt_desc = '' THEN src_desc ELSE tgt_desc + '；' + src_desc END
-        ELSE tgt_desc
-    END
+    target.description = new_description
 
-RETURN source.name AS merged_alias, target.name AS target_name, new_aliases AS updated_aliases
+RETURN target.name AS target_name, new_aliases AS updated_aliases, size(new_aliases) - size(existing_aliases) AS added_count
 """
 
 # 边重定向：将指向别名节点（"别名属于"关系的 source）的所有其他边，重定向到用户节点（target）。
@@ -1379,16 +1383,16 @@ RETURN source.name AS merged_alias, target.name AS target_name, new_aliases AS u
 #   2. STATEMENT_ENTITY：陈述句 → 别名节点
 # 对于每条需要重定向的边，创建一条指向用户节点的新边（复制所有属性），然后删除旧边。
 REDIRECT_ALIAS_EDGES = """
-// 找到所有 别名→用户 的映射（包含 别名属于 和 别名失效 两种 predicate）
+// 找到所有 别名→用户 的映射
 MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[ar:EXTRACTED_RELATIONSHIP]->(user:ExtractedEntity {end_user_id: $end_user_id})
-WHERE ar.predicate IN ['别名属于', '别名失效']
+WHERE ar.predicate = '别名属于'
 WITH collect({alias_id: elementId(alias), user_id: elementId(user), alias_eid: alias.id, user_eid: user.id}) AS mappings
 
 // 1. 重定向 EXTRACTED_RELATIONSHIP 边：别名节点作为 target 的情况
 UNWIND mappings AS m
 MATCH (other)-[r:EXTRACTED_RELATIONSHIP]->(alias:ExtractedEntity {end_user_id: $end_user_id})
 WHERE alias.id = m.alias_eid
-  AND NOT (r.predicate IN ['别名属于', '别名失效'])
+  AND r.predicate <> '别名属于'
   AND other.id <> m.user_eid
 WITH m, other, r, alias
 MATCH (user:ExtractedEntity {id: m.user_eid, end_user_id: $end_user_id})
@@ -1399,10 +1403,10 @@ WITH count(*) AS redirected_incoming
 
 // 2. 重定向 EXTRACTED_RELATIONSHIP 边：别名节点作为 source 的情况
 MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[ar2:EXTRACTED_RELATIONSHIP]->(user2:ExtractedEntity {end_user_id: $end_user_id})
-WHERE ar2.predicate IN ['别名属于', '别名失效']
+WHERE ar2.predicate = '别名属于'
 WITH alias, user2, redirected_incoming
 MATCH (alias)-[r:EXTRACTED_RELATIONSHIP]->(other)
-WHERE NOT (r.predicate IN ['别名属于', '别名失效'])
+WHERE r.predicate <> '别名属于'
   AND other.id <> user2.id
 WITH user2, other, r, redirected_incoming
 CREATE (user2)-[nr:EXTRACTED_RELATIONSHIP]->(other)
@@ -1412,7 +1416,7 @@ WITH redirected_incoming, count(*) AS redirected_outgoing
 
 // 3. 重定向 STATEMENT_ENTITY 边：陈述句 → 别名节点
 MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[ar3:EXTRACTED_RELATIONSHIP]->(user3:ExtractedEntity {end_user_id: $end_user_id})
-WHERE ar3.predicate IN ['别名属于', '别名失效']
+WHERE ar3.predicate = '别名属于'
 WITH alias, user3, redirected_incoming, redirected_outgoing
 MATCH (stmt)-[r:STATEMENT_ENTITY]->(alias)
 WITH user3, stmt, r, redirected_incoming, redirected_outgoing
@@ -1429,24 +1433,10 @@ RETURN redirected_incoming, redirected_outgoing, count(*) AS redirected_stmt
 # 使用 DETACH DELETE 一并删除节点和该关系。
 DELETE_ALIAS_NODES = """
 MATCH (alias:ExtractedEntity {end_user_id: $end_user_id})-[r:EXTRACTED_RELATIONSHIP]->(user:ExtractedEntity {end_user_id: $end_user_id})
-WHERE r.predicate IN ['别名属于', '别名失效']
+WHERE r.predicate = '别名属于'
 WITH alias, count(r) AS rel_count
 DETACH DELETE alias
 RETURN count(alias) AS deleted_count
-"""
-
-# 失效别名处理：将 predicate="别名失效" 的 source.name 从 target.aliases 中移除。
-# 在 MERGE_ALIAS_BELONGS_TO（追加新别名）之后、DELETE_ALIAS_NODES（删除节点）之前执行。
-REMOVE_INVALID_ALIASES = """
-MATCH (source:ExtractedEntity {end_user_id: $end_user_id})-[r:EXTRACTED_RELATIONSHIP]->(target:ExtractedEntity {end_user_id: $end_user_id})
-WHERE r.predicate = '别名失效'
-WITH source, target,
-     coalesce(target.aliases, []) AS existing_aliases,
-     source.name AS invalid_name
-
-SET target.aliases = [a IN existing_aliases WHERE toLower(a) <> toLower(invalid_name)]
-
-RETURN source.name AS removed_alias, target.name AS target_name
 """
 
 CHECK_COMMUNITY_IS_COMPLETE_WITH_EMBEDDING = """
