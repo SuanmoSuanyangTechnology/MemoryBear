@@ -2743,6 +2743,7 @@ export const zh = {
       comboName: '套餐名称',
       spAndTa: '方案定位与目标人群',
       versionInformation: '版本信息',
+      multiplier: '订购周期',
       orderCycle: '订购周期',
       orderAmount: '订单金额',
       personal: {
