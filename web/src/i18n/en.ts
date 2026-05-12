@@ -2777,6 +2777,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       comboName: 'Combo Name',
       spAndTa: 'Solution positioning and target audience',
       versionInformation: 'Version information',
+      multiplier: 'Order Cycle',
       orderCycle: 'Order Cycle',
       orderAmount: 'Order Amount',
       personal: {

@@ -48,7 +48,7 @@ const OrderDetail = forwardRef<OrderDetailRef, { getProductType: (type: string) 
   const formatItems = useMemo(() => {
     if (!data) return []
     const items: DescriptionsProps['items'] = [];
-    ['order_no', 'package_snapshot', 'payable_amount', 'status', 'reject_reason', 'pay_time', 'created_at'].forEach(key => {
+    ['order_no', 'package_snapshot', 'payable_amount', 'multiplier', 'business_type', 'status', 'reject_reason', 'pay_time', 'created_at'].forEach(key => {
       const value = data[key as keyof Order]
 
       if (key === 'reject_reason' && !value) {
@@ -65,6 +65,12 @@ const OrderDetail = forwardRef<OrderDetailRef, { getProductType: (type: string) 
           label: t(`pricing.${key}`),
           children: (['pay_time', 'created_at'].includes(key) && value
             ? dayjs(value as number).format('YYYY-MM-DD HH:mm:ss')
+            : key === 'multiplier' && data.package_snapshot?.billing_cycle === 'permanent_free'
+            ? t(`package.${data.package_snapshot?.billing_cycle}`)
+            : key === 'multiplier'
+            ? <>{value}{t(`package.${data.package_snapshot?.billing_cycle}`)}</>
+            : key === 'business_type' && value
+            ? t(`pricing.${value}`)
             : key === 'status' && value
               ? t(`pricing.${STATUS[value as keyof typeof STATUS].key}`)
               : key === 'package_snapshot'
