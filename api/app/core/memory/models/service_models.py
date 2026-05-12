@@ -7,9 +7,7 @@ from app.schemas.memory_config_schema import MemoryConfig
 
 
 class MemoryContext(BaseModel):
-    # Tell Pydantic v2 to skip coercion for the stdlib dataclass MemoryConfig
-    # while keeping the concrete type annotation for static analysis.
-    model_config = ConfigDict(frozen=True, ignored_types=(MemoryConfig,))
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     end_user_id: str
     memory_config: MemoryConfig

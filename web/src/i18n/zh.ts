@@ -2835,6 +2835,7 @@ export const zh = {
       upgradeExpiredAt: '升级后有效期至',
       renewalExpiredAt: '续费后有效期至',
       renewalTip: '续费当前套餐，有效期将在原到期日基础上延长 {{cycle}}。续费期间服务不中断。',
+      reject_reason: '拒绝原因',
     },
     forgetDetail: {
       title: '遗忘管理系统帮助AI智能管理记忆生命周期，通过自动识别低价值记忆、设置遗忘策略和执行定期清理，优化记忆库存储空间，提升检索效率。',

@@ -183,7 +183,7 @@ const processNodeVariables = (
           }
         });
       } else {
-        const fv = (config.group_variables.defaultValue || [])[0];
+        const fv = (config.group_variables?.defaultValue || [])[0];
         let dt = 'any';
         if (fv) {
           const found = variableList.find(v => `{{${v.value}}}` === fv);
@@ -205,14 +205,14 @@ const processNodeVariables = (
 
     case 'loop':
       // Add loop cycle variables
-      (config.cycle_vars.defaultValue || []).forEach((cv: any) => {
+      (config.cycle_vars?.defaultValue || []).forEach((cv: any) => {
         if (cv.name?.trim()) addVariable(variableList, addedKeys, `${dataNodeId}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${dataNodeId}.${cv.name}`, nodeData, undefined, cv.defaultValue ?? cv.default);
       });
       break;
       
     case 'code':
       // Add code node output variables
-      (config.output_variables.defaultValue || []).forEach((cv: any) => {
+      (config.output_variables?.defaultValue || []).forEach((cv: any) => {
         if (cv.name?.trim()) addVariable(variableList, addedKeys, `${dataNodeId}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${dataNodeId}.${cv.name}`, nodeData, undefined, cv.defaultValue ?? cv.default);
       });
       break;
@@ -258,7 +258,7 @@ export const getCurrentNodeVariables = (nodeData: any, values: any, upstreamVari
   
   // Special case: var-aggregator without group enabled returns no variables
   const result = list.filter(v => v.nodeData?.id === dataNodeId);
-  return nodeData.type === 'var-aggregator' && !nodeData.config.group.defaultValue ? [] : result;
+  return nodeData.type === 'var-aggregator' && !nodeData.config.group?.defaultValue ? [] : result;
 };
 
 /**

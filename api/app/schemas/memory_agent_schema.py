@@ -47,6 +47,10 @@ class WriteMessageItem(BaseModel):
     """写入记忆的单条消息"""
     role: str = Field(..., description="消息角色: user 或 assistant")
     content: str = Field(..., description="消息内容")
+    dialog_at: Optional[str] = Field(
+        None,
+        description="该条消息发生的绝对时间（ISO 8601 格式），不传则使用服务端当前时间",
+    )
     files: Optional[List[FileInput]] = Field(default=None, description="附带的文件列表（图片/文档/音频/视频）")
 
 

@@ -2,11 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-05-07 18:37:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-07 18:51:58
+ * @Last Modified time: 2026-05-09 11:40:18
  */
 import { type FC, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Button, Flex, Form, Input, InputNumber, Select, App, Checkbox } from 'antd'
+import { Button, Flex, Form, Input, InputNumber, Select, App, Checkbox, Skeleton } from 'antd'
 import { Node } from '@antv/x6'
 import copy from 'copy-to-clipboard'
 import clsx from 'clsx'
@@ -272,43 +272,48 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
                     <Flex vertical align="start" gap={2}>
                       <span className="rb:text-[11px] rb:text-[#5B6167]">{t('workflow.status')}</span>
                       <span className="rb:font-medium rb:text-[13px]" style={{ color: statusColor }}>
-                        {result.status?.toUpperCase()}
+                        {loading ? <Skeleton active paragraph={false} className="rb:w-20!" /> : result.status?.toUpperCase()}
                       </span>
                     </Flex>
                     <Flex vertical align="start" gap={2}>
                       <span className="rb:text-[11px] rb:text-[#5B6167]">{t('workflow.elapsedTime')}</span>
-                      {result.elapsed_time != null && <span className="rb:font-medium rb:text-[13px]">{result.elapsed_time?.toFixed(3)}ms</span>}
+                      {loading ? <Skeleton active paragraph={false} className="rb:w-20!" /> : result.elapsed_time != null && <span className="rb:font-medium rb:text-[13px]">{result.elapsed_time?.toFixed(3)}ms</span>}
                     </Flex>
                     <Flex vertical gap={2} align="start">
                       <span className="rb:text-[11px] rb:text-[#5B6167]">{t('workflow.totalTokens')}</span>
-                      {!loading && <span className="rb:font-medium rb:text-[13px]">{ result?.token_usage?.total_tokens || 0} Tokens</span>}
+                      {loading ? <Skeleton active paragraph={false} className="rb:w-20!" /> : <span className="rb:font-medium rb:text-[13px]">{ result?.token_usage?.total_tokens || 0} Tokens</span>}
                     </Flex>
                   </Flex>
                 </div>
               )}
 
               {/* Input / Output code blocks */}
-              {result && (['inputs', 'process', 'outputs'] as const).map(key => {
-                if (nodeData.type !== 'http-request' && key === 'process') return null
+              {result && (['inputs', 'outputs'] as const).map(key => {
+                // if (nodeData.type !== 'http-request' && key === 'process') return null
                 const content = typeof result[key as keyof RunResult] === 'object' && result[key as keyof RunResult] ? JSON.stringify(result[key as keyof RunResult], null, 2) : result[key as keyof RunResult] ? result[key as keyof RunResult] : '{}'
                 return (
                   <div key={key} className="rb:bg-[#EBEBEB] rb:rounded-lg">
                     <div className="rb:py-2 rb:px-3 rb:flex rb:justify-between rb:items-center rb:text-[12px]">
                       {t(`workflow.${key}_result`)}
-                      <Button
-                        className="rb:py-0! rb:px-1! rb:text-[12px]!"
-                        size="small"
-                        onClick={() => handleCopy(content)}
-                      >{t('common.copy')}</Button>
+                      {!loading &&
+                        <Button
+                          className="rb:py-0! rb:px-1! rb:text-[12px]!"
+                          size="small"
+                          onClick={() => handleCopy(content)}
+                        >{t('common.copy')}</Button>
+                      }
                     </div>
                     <div className="rb:max-h-40 rb:overflow-auto">
-                      <CodeBlock
-                        size="small"
-                        value={content}
-                        needCopy={false}
-                        showLineNumbers={true}
-                        background="#EBEBEB"
-                      />
+                      {loading
+                        ? <Skeleton active title={false} className="rb:m-3! rb:w-[calc(100%-24px)]!" />
+                        : <CodeBlock
+                            size="small"
+                            value={content}
+                            needCopy={false}
+                            showLineNumbers={true}
+                            background="#EBEBEB"
+                          />
+                      }
                     </div>
                   </div>
                 )

@@ -30,6 +30,8 @@ import RbCard from '@/components/RbCard/Card'
 import BodyWrapper from '@/components/Empty/BodyWrapper'
 import { useI18n } from '@/store/locale'
 import { useUser } from '@/store/user'
+import { getTenantSubscription } from '@/api/user';
+import type { Subscription } from '@/components/SiderMenu'
 
 import SpaceSvg from '@/assets/images/package/space.svg?react'
 import SkillSvg from '@/assets/images/package/skill.svg?react'
@@ -97,6 +99,7 @@ const Package: FC = () => {
   const CARD_WIDTH = 360
   const GAP = 12
   const [visibleCount, setVisibleCount] = useState(3)
+  const [dataReady, setDataReady] = useState(false)
 
   useEffect(() => {
     const calcVisible = () => {
@@ -104,10 +107,20 @@ const Package: FC = () => {
       const w = scrollRef.current.offsetWidth
       setVisibleCount(Math.floor((w + GAP) / (CARD_WIDTH + GAP)))
     }
-    calcVisible()
+    
+    if (!dataReady) return
+
+    // Use RAF to ensure DOM is rendered
+    const rafId = requestAnimationFrame(() => {
+      calcVisible()
+    })
+    
     window.addEventListener('resize', calcVisible)
-    return () => window.removeEventListener('resize', calcVisible)
-  }, [])
+    return () => {
+      cancelAnimationFrame(rafId)
+      window.removeEventListener('resize', calcVisible)
+    }
+  }, [dataReady])
 
   const [activeTab, setActiveTab] = useState('saas_personal');
 
@@ -131,11 +144,20 @@ const Package: FC = () => {
   const getList = () => {
     getPackageList({ status: true }).then(res => {
       setData(res as Package[] || [])
+      setDataReady(true)
     })
+  }
+  const [curPkg, setCurPkg] = useState<Subscription | null>(null)
+  const getCurrentPackage = () => {
+    getTenantSubscription()
+      .then(res => {
+        setCurPkg(res as Subscription)
+      })
   }
 
   useEffect(() => {
     getList()
+    getCurrentPackage()
   }, [])
 
   useEffect(() => {
@@ -165,15 +187,23 @@ const Package: FC = () => {
         navigate(user.current_workspace_id ? '/' : '/space');
         break
       default:
-        navigate(`/order-pay`, {
-          state: {
-            ...pkg,
-            jumpFrom: location.pathname
-          }
-        });
+        if (curPkg?.package_plan?.billing_cycle === 'permanent_free') {
+          navigate(`/order-pay`, {
+            state: {
+              ...pkg,
+              jumpFrom: location.pathname
+            }
+          });
+        } else {
+          navigate(`/order-pay`, {
+            state: {
+              ...pkg,
+              jumpFrom: curPkg?.package_plan_id === pkg.id ? 'renewal' : '/upgrade'
+            }
+          });
+        }
         break
     }
-    // window.open(`https://docs.redbearai.com/s/${language || 'en'}-memorybear`, '_blank')
   };
   /** Navigate to order history */
   const goToHistory = () => {

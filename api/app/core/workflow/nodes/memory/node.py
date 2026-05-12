@@ -122,7 +122,7 @@ class MemoryWriteNode(BaseNode):
                         upload_file_id=instence.value.file_id,
                         url=instence.value.url,
                         file_type=instence.value.origin_file_type
-                    ).model_dump())
+                    ).model_dump(mode="json"))
                 elif isinstance(instence, ArrayVariable) and instence.child_type == FileVariable:
                     for file_instence in instence.value:
                         file_info.append(FileInput(
@@ -131,7 +131,7 @@ class MemoryWriteNode(BaseNode):
                             upload_file_id=file_instence.value.file_id,
                             url=file_instence.value.url,
                             file_type=file_instence.value.origin_file_type
-                        ).model_dump())
+                        ).model_dump(mode="json"))
             messages.append({
                 "role": message.role,
                 "content": self._render_template(content, variable_pool),

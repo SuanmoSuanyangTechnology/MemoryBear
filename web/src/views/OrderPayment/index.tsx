@@ -56,6 +56,11 @@ const OrderPayment: React.FC = () => {
   /** Submit payment voucher */
   const submitPayment = (values: OrderForm) => {
     if (isSubmitting || !pkg?.id) return;
+
+    if (!values.multiplier) {
+      message.warning(t('common.inputPlaceholder', { title: t('pricing.orderCycle') }))
+      return
+    }
     
     setIsSubmitting(true);
     
@@ -87,6 +92,7 @@ const OrderPayment: React.FC = () => {
 
   useEffect(() => {
     setUpgradePreview(null)
+    setPkg(null)
     if (location.state?.jumpFrom) {
       setJumpFrom(location.state?.jumpFrom)
 
@@ -120,6 +126,10 @@ const OrderPayment: React.FC = () => {
         setUpgradePreview(res as UpgradePreview)
       })
   }
+
+  useEffect(() => {
+    form.resetFields()
+  }, [pkg?.id])
 
   useEffect(() => {
     if (!multiplierValue || jumpFrom !== '/upgrade') return
@@ -316,7 +326,7 @@ const OrderPayment: React.FC = () => {
                 [{ required: !(jumpFrom === '/upgrade' && !upgradePreview?.amount_due), message: t('common.pleaseEnter') }]
               }
             >
-              <Input placeholder={t('pricing.pay_txn_idPlaceholder')} />
+              <Input placeholder={t('pricing.pay_txn_idPlaceholder')} maxLength={9999} />
             </Form.Item>
             <Form.Item
               name="payer"
@@ -325,7 +335,7 @@ const OrderPayment: React.FC = () => {
                 [{ required: !(jumpFrom === '/upgrade' && !upgradePreview?.amount_due), message: t('common.pleaseEnter') }]
               }
             >
-              <Input placeholder={t('pricing.payerPlaceholder')} />
+              <Input placeholder={t('pricing.payerPlaceholder')} maxLength={9999} />
             </Form.Item>
             <Form.Item
               name="pay_time"

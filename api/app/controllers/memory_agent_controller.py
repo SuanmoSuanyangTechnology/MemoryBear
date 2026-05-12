@@ -26,7 +26,6 @@ from app.schemas.response_schema import ApiResponse
 from app.services import task_service, workspace_service
 from app.services.memory_agent_service import MemoryAgentService
 from app.services.memory_agent_service import get_end_user_connected_config as get_config
-from app.services.memory_config_service import MemoryConfigService
 from app.services.model_service import ModelConfigService
 from app.utils.tmp_session import ChatSessionCache
 
@@ -309,15 +308,11 @@ async def read_server(
     api_logger.info(
         f"Read service: group={user_input.end_user_id}, storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}, workspace_id={workspace_id}, session_id={session_id}")
     try:
-        config_info = get_config(user_input.end_user_id, db)
-        memory_config_service = MemoryConfigService(db)
-        memory_config = memory_config_service.load_memory_config(
-            config_id=config_info["memory_config_id"],
-            workspace_id=config_info["workspace_id"]
-        )
+        memory_config = get_config(user_input.end_user_id, db)
         service = MemoryService(
-            memory_config=memory_config,
-            end_user_id=user_input.end_user_id
+            db,
+            memory_config["memory_config_id"],
+            end_user_id=user_input.end_user_id,
         )
         session_cache = ChatSessionCache(session_id)
         search_result = await service.read(

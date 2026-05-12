@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-05-07 18:37:23 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-05-07 18:37:23 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-05-09 11:43:48
  */
 import { type FC, useState, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -20,15 +20,13 @@ interface FileVarInputProps {
   form: FormInstance
 }
 
-const FileVarInput: FC<FileVarInputProps> = ({ name, dataType, form }) => {
+const FileVarInput: FC<FileVarInputProps> = ({ name, form }) => {
   const { t } = useTranslation()
   const uploadFileListModalRef = useRef<UploadFileListModalRef>(null)
   const [fileList, setFileList] = useState<any[]>([])
 
-  const isSingle = dataType === 'file'
-
   const setFormFileValue = (updated: any[]) => {
-    form.setFieldValue(name, isSingle ? (updated[0] ?? null) : updated)
+    form.setFieldValue(name, updated)
   }
 
   const fileChange = (file?: any) => {
@@ -38,12 +36,6 @@ const FileVarInput: FC<FileVarInputProps> = ({ name, dataType, form }) => {
       transfer_method: 'local_file',
       upload_file_id: file.response?.data?.file_id,
     } : undefined
-    if (isSingle) {
-      const updated = [fileObj]
-      setFileList(updated)
-      setTimeout(() => setFormFileValue(updated), 0)
-      return
-    }
     setFileList(prev => {
       const index = prev.findIndex((item: any) => item.uid === fileObj.uid)
       const updated = index > -1
@@ -58,11 +50,11 @@ const FileVarInput: FC<FileVarInputProps> = ({ name, dataType, form }) => {
     if (!list?.length) return
     const uploadingList = list.map(f => ({ ...f, status: 'uploading' }))
     setFileList(prev => {
-      const updated = isSingle ? [uploadingList[0]] : [...prev, ...uploadingList]
+      const updated = [...prev, ...uploadingList]
       setTimeout(() => setFormFileValue(updated), 0)
       return updated
     });
-    (isSingle ? [uploadingList[0]] : uploadingList).forEach(file => {
+    uploadingList.forEach(file => {
       getFileInfoByUrl(file.url)
         .then((res) => {
           const { file_name, file_size, content_type } = res as { file_name: string; file_size: number; content_type: string }
@@ -112,12 +104,12 @@ const FileVarInput: FC<FileVarInputProps> = ({ name, dataType, form }) => {
               onChange={fileChange}
               block={true}
               textType="button"
-              disabled={isSingle && fileList.length > 0}
+              disabled={fileList.length > 0}
             />
           </Col>
           <Col span={12}>
             <Button block
-              disabled={isSingle && fileList.length > 0}
+              disabled={fileList.length > 0}
               onClick={() => uploadFileListModalRef.current?.handleOpen()}>
               {t('memoryConversation.addRemoteFile')}
             </Button>

@@ -1,9 +1,14 @@
+import asyncio
+import logging
 from uuid import UUID
 
 from app.db import get_db_context
 from app.models.end_user_model import EndUser
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+_logger = logging.getLogger(__name__)
+_LOG_PREFIX = "[MEMORY_COUNT_SYNC]"
 
 
 async def sync_end_user_memory_count_from_neo4j(
@@ -33,4 +38,28 @@ async def sync_end_user_memory_count_from_neo4j(
         )
         db.commit()
 
+    _logger.info(f"{_LOG_PREFIX} 同步完成: end_user_id={end_user_id}, count={node_count}")
     return node_count
+
+
+def sync_memory_count_neo4j(end_user_id: str) -> None:
+    """
+    Synchronous wrapper for use in Celery tasks and other sync contexts.
+
+    Uses asyncio.run() which creates a fresh event loop, runs the coroutine,
+    and closes the loop automatically — no resource leaks.
+    """
+    async def _run():
+        connector = Neo4jConnector()
+        try:
+            await sync_end_user_memory_count_from_neo4j(end_user_id, connector)
+        finally:
+            await connector.close()
+
+    try:
+        asyncio.run(_run())
+    except Exception as exc:
+        _logger.warning(
+            f"{_LOG_PREFIX} 同步失败（不影响主流程）: end_user_id={end_user_id}, error={exc}",
+            exc_info=True,
+        )

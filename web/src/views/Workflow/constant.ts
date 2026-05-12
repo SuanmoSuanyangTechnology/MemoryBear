@@ -150,6 +150,12 @@ export const nodeLibrary: NodeLibrary[] = [
           vision_input: {
             type: 'variableList',
             onFilterVariableType: ['array[file]', 'file']
+          },
+          error_handle: {
+            type: 'errorHandle',
+            defaultValue: {
+              method: 'none', // 'none' | 'branch' | 'default'
+            },
           }
         }
       },

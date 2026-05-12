@@ -19,7 +19,8 @@ from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.stream_output_coordinator import OutputContent, StreamOutputConfig
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes import NodeFactory
-from app.core.workflow.nodes.enums import NodeType, BRANCH_NODES
+from app.core.workflow.nodes.enums import NodeType, BRANCH_NODES, HttpErrorHandle
+from app.core.workflow.nodes.llm import LLMNodeConfig
 from app.core.workflow.utils.expression_evaluator import evaluate_condition
 from app.core.workflow.validator import WorkflowValidator
 from app.core.workflow.variable.base_variable import VariableType
@@ -141,7 +142,12 @@ class GraphBuilder:
         non_branch_nodes = []
 
         for node_info in source_nodes:
-            if self.get_node_type(node_info["id"]) in BRANCH_NODES:
+            if self.get_node_type(node_info["id"]) == NodeType.LLM and \
+                    LLMNodeConfig(**self.node_map[node_info["id"]]["config"]).error_handle.method in [
+                HttpErrorHandle.NONE, HttpErrorHandle.DEFAULT
+            ]:
+                non_branch_nodes.append(node_info["id"])
+            elif self.get_node_type(node_info["id"]) in BRANCH_NODES:
                 if node_info.get("branch") is not None:
                     branch_nodes.append(
                         (node_info["id"], node_info["branch"])
@@ -320,7 +326,7 @@ class GraphBuilder:
                     # For other branch nodes (e.g. HTTP), use output field
                     route_field = "branch_signal" if node_type == NodeType.LLM else "output"
                     related_edge[idx]['condition'] = (
-                        f"node[{json.dumps(node_id)}][{json.dumps(route_field)}] == {json.dumps(related_edge[idx]['label'])}"
+                        f"node['{node_id}']['{route_field}'] == '{related_edge[idx].get('label') or 'SUCCESS'}'"
                     )
 
             if node_instance:
@@ -535,7 +541,7 @@ class GraphBuilder:
         ]
         self._build_adj()
         self._find_upstream_activation_dep: Callable = lru_cache(
-            maxsize=len(self.nodes)*2
+            maxsize=len(self.nodes) * 2
         )(self._find_upstream_activation_dep)
 
         self.graph = StateGraph(WorkflowState)
