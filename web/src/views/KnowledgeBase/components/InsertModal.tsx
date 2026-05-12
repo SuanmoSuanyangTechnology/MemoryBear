@@ -11,7 +11,7 @@ export interface InsertModalRef {
 }
 
 interface InsertModalProps {
-  onInsert?: (documentId: string, content: string, chunkId?: string) => Promise<boolean>;
+  onInsert?: (documentId: string, content: string | Record<string, string>, chunkId?: string) => Promise<boolean>;
   onSuccess?: () => void;
 }
 
@@ -51,8 +51,10 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
   // 解析 QA 格式内容
   const parseQAContent = (content: string) => {
     if (!content) return null;
+
+    console.log('content', content)
     
-    const qaRegex = /question:\s*(.*?)\s*answer:\s*(.*?)$/s;
+    const qaRegex = /(?:question:|Q:)\s*(.*?)\s*(?:answer:|A:)\s*(.*?)$/s;
     const match = content.match(qaRegex);
     
     if (match) {
@@ -91,14 +93,18 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
   // 获取当前要提交的内容
   const getCurrentContent = () => {
     if (mode === 1) {
-      return `question: ${question}\n answer: ${answer}`;
+      // return `Q: ${question}\n A: ${answer}`;
+      return {
+      "question": question?.trim(),
+      "answer": answer?.trim()
     }
-    return content;
+    }
+    return content?.trim();
   };
 
   const handleOk = async () => {
     const currentContent = getCurrentContent();
-    if (!currentContent.trim()) {
+    if ((typeof currentContent === 'object' && !currentContent.question && !!currentContent.answer) || (typeof currentContent === 'string' && !currentContent)) {
       message.warning(t('knowledgeBase.pleaseEnterContent') || '请输入内容');
       return;
     }
@@ -111,7 +117,7 @@ const InsertModal = forwardRef<InsertModalRef, InsertModalProps>(({ onInsert, on
     setLoading(true);
     try {
       if (onInsert) {
-        const success = await onInsert(documentId, currentContent.trim(), chunkId);
+        const success = await onInsert(documentId, currentContent, chunkId);
         if (success) {
           const successMsg = isEditMode 
             ? (t('knowledgeBase.updateSuccess') || '更新成功')
