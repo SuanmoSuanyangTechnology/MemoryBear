@@ -358,7 +358,10 @@ const Menu: FC<{
   }
   const handleViewDetail = () => {
     getSubscription()
-      .finally(() => {
+      .then(res => {
+        subscriptionDetailRef.current?.handleOpen(res as Subscription)
+      })
+      .catch(() => {
         subscriptionDetailRef.current?.handleOpen(subscription)
       })
   }
