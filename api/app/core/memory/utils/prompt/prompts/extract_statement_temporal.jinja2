@@ -11,6 +11,7 @@
 - statement_text
 - statement_type
 - temporal_type
+- speaker
 - has_emotional_state
 - has_unsolved_reference
 - dialog_at
@@ -25,6 +26,7 @@ Your task is to identify and extract declarative statements from the provided ta
 - statement_text
 - statement_type
 - temporal_type
+- speaker
 - has_emotional_state
 - has_unsolved_reference
 - dialog_at
@@ -83,8 +85,10 @@ Each output item should be a structured candidate memory statement.
 
 用户主语归一化：
 
-- 如果陈述句的主语是用户本人，无论上下文中给出的用户名称、昵称、别名或真实姓名是什么，提取后的陈述句统一使用“用户”作为主语，不要使用用户的具体名字或别名。
-- 这是硬规则；如果用户主语没有统一成“用户”，则该 statement 视为不合格。
+- 如果陈述句的主语是用户本人，无论上下文中给出的用户名称、昵称、别名或真实姓名是什么，都必须使用与输出语言一致的用户锚点，不要使用用户的具体名字或别名。
+- 中文输出使用“用户”作为主语。
+- 英文输出使用 `the user` 作为主语。
+- 这是硬规则；如果用户主语没有按输出语言统一成对应锚点，则该 statement 视为不合格。
 
 共指消解：
 
@@ -107,6 +111,13 @@ Each output item should be a structured candidate memory statement.
 
 - 仅提取陈述句。
 - 不要提取问题、命令、问候语或对话填充词。
+
+speaker：
+
+- `speaker` 表示该 statement 在 `target_content` 中的直接说话来源。
+- 如果 statement 来自用户消息，填 `"user"`。
+- 如果 statement 来自助理消息，填 `"assistant"`。
+- 不要省略 `speaker`；每条 statement 都必须输出该字段。
 
 statement_type：
 
@@ -143,6 +154,7 @@ statement_type：
 - `valid_at` 表示陈述开始成立或生效的时间。
 - `invalid_at` 表示陈述结束或不再成立的时间；如果仍在持续，填 `"NULL"`。
 - `dialog_at` 表示当前会话时间，每条 statement 都必须原样复制输入中的 `dialog_at`。
+- 如果输入中缺少 `dialog_at`，则把 `target_message_date` 作为当前会话时间使用，并在每条 statement 的 `dialog_at` 字段中填入 `target_message_date` 的原值。
 - 时间格式优先使用 ISO 8601。
 - 对于只有日期没有时分秒的时间，默认使用整天边界，便于后续检索。
 - 如果没有明确时间，不要编造时间。
@@ -210,6 +222,13 @@ Filtering:
 - Extract only declarative statements.
 - Do not extract questions, commands, greetings, or conversational filler.
 
+speaker:
+
+- `speaker` is the direct speaking source of the statement in `target_content`.
+- If the statement comes from a user message, output `"user"`.
+- If the statement comes from an assistant message, output `"assistant"`.
+- Never omit `speaker`; every statement must include this field.
+
 statement_type:
 
 - `FACT`: user-stated facts, states, relationships, experiences, behaviors, events, or plans.
@@ -245,6 +264,7 @@ Temporal rules:
 - `valid_at` means when the statement became valid or started to hold.
 - `invalid_at` means when the statement ended or stopped being valid; use `"NULL"` if it is still ongoing.
 - `dialog_at` is the session timestamp, and every statement must copy the input `dialog_at` verbatim.
+- If `dialog_at` is missing from the input, use `target_message_date` as the session timestamp and copy the original `target_message_date` value into each statement's `dialog_at` field.
 - Prefer ISO 8601 for time values.
 - When only a date can be resolved, default to full-day boundaries for retrieval use.
 - If no explicit time is available, do not invent one.
@@ -306,6 +326,7 @@ Rewrite boundary:
       "statement_text": "李教授这学期要求很严。",
       "statement_type": "OPINION",
       "temporal_type": "DYNAMIC",
+      "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2023-09-04T18:00:00Z",
@@ -317,6 +338,7 @@ Rewrite boundary:
       "statement_text": "李教授讲课清晰透彻。",
       "statement_type": "OPINION",
       "temporal_type": "ATEMPORAL",
+      "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2023-09-04T18:00:00Z",
@@ -328,6 +350,7 @@ Rewrite boundary:
       "statement_text": "用户每次被李教授点名都有点发怵。",
       "statement_type": "OPINION",
       "temporal_type": "DYNAMIC",
+      "speaker": "user",
       "has_emotional_state": true,
       "has_unsolved_reference": false,
       "dialog_at": "2023-09-04T18:00:00Z",
@@ -365,6 +388,7 @@ Rewrite boundary:
       "statement_text": "用户截至2026年4月1日之前的最近一段时间在学Python。",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
+      "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2026-04-01T00:00:00Z",
@@ -376,6 +400,7 @@ Rewrite boundary:
       "statement_text": "用户截至2026年4月1日之前的最近一段时间每晚都会练一个小时Python。",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
+      "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2026-04-01T00:00:00Z",
@@ -387,6 +412,7 @@ Rewrite boundary:
       "statement_text": "用户计划在2026年3月30日至2026年4月5日先复习Python的基础语法和函数部分。",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
+      "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2026-04-01T00:00:00Z",
@@ -424,6 +450,7 @@ Rewrite boundary:
       "statement_text": "用户觉得2025年冬天老师布置的那两个项目有点难。",
       "statement_type": "OPINION",
       "temporal_type": "DYNAMIC",
+      "speaker": "user",
       "has_emotional_state": true,
       "has_unsolved_reference": true,
       "dialog_at": "2026-04-01T00:00:00Z",
@@ -435,6 +462,7 @@ Rewrite boundary:
       "statement_text": "用户2026年3月31日晚上看了半天那两个项目还是没太搞明白。",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
+      "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": true,
       "dialog_at": "2026-04-01T00:00:00Z",
@@ -446,6 +474,7 @@ Rewrite boundary:
       "statement_text": "如果到2026年4月4日至2026年4月5日还弄不出来，用户可能会去问助教。",
       "statement_type": "OTHER",
       "temporal_type": "DYNAMIC",
+      "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": true,
       "dialog_at": "2026-04-01T00:00:00Z",
@@ -483,6 +512,7 @@ Example Output: {
       "statement_text": "Professor Li is very strict this semester.",
       "statement_type": "OPINION",
       "temporal_type": "DYNAMIC",
+      "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2023-09-04T18:00:00Z",
@@ -494,6 +524,7 @@ Example Output: {
       "statement_text": "Professor Li explains things clearly.",
       "statement_type": "OPINION",
       "temporal_type": "ATEMPORAL",
+      "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2023-09-04T18:00:00Z",
@@ -505,6 +536,7 @@ Example Output: {
       "statement_text": "The user gets nervous every time Professor Li calls on the user.",
       "statement_type": "OPINION",
       "temporal_type": "DYNAMIC",
+      "speaker": "user",
       "has_emotional_state": true,
       "has_unsolved_reference": false,
       "dialog_at": "2023-09-04T18:00:00Z",
@@ -542,6 +574,7 @@ Example Output: {
       "statement_text": "The user has been learning Python recently before April 1, 2026.",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
+      "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2026-04-01T00:00:00Z",
@@ -553,6 +586,7 @@ Example Output: {
       "statement_text": "The user has been practicing Python for an hour every night recently before April 1, 2026.",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
+      "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2026-04-01T00:00:00Z",
@@ -564,6 +598,7 @@ Example Output: {
       "statement_text": "The user plans to review Python basic syntax and functions first during 2026-03-30 to 2026-04-05.",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
+      "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
       "dialog_at": "2026-04-01T00:00:00Z",
@@ -601,6 +636,7 @@ Example Output: {
       "statement_text": "The user thinks the two projects assigned in winter 2025 are difficult.",
       "statement_type": "OPINION",
       "temporal_type": "DYNAMIC",
+      "speaker": "user",
       "has_emotional_state": true,
       "has_unsolved_reference": true,
       "dialog_at": "2026-04-01T00:00:00Z",
@@ -612,6 +648,7 @@ Example Output: {
       "statement_text": "The user spent a long time on the evening of 2026-03-31 looking at those two projects but still did not really understand them.",
       "statement_type": "FACT",
       "temporal_type": "DYNAMIC",
+      "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": true,
       "dialog_at": "2026-04-01T00:00:00Z",
@@ -623,6 +660,7 @@ Example Output: {
       "statement_text": "If the user still cannot finish them by 2026-04-04 to 2026-04-05, the user may ask the TA.",
       "statement_type": "OTHER",
       "temporal_type": "DYNAMIC",
+      "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": true,
       "dialog_at": "2026-04-01T00:00:00Z",
@@ -631,6 +669,7 @@ Example Output: {
     }
   ]
 }
+
 {% endif %}
 === End of Examples ===
 
@@ -670,6 +709,37 @@ Example Output: {
 4. Do not include line breaks within JSON string values.
 5. Return only the JSON object. Do not add explanations before or after it.
 
+**STATEMENT_TEXT TEMPORAL NORMALIZATION HARD CONSTRAINT:**
+{% if language == "zh" %}
+
+- `statement_text` 是最终记忆文本，必须在文本本身包含已解析后的时间表达，不能只依赖 `valid_at` / `invalid_at` 表示时间。
+- 如果相对时间或开放区间时间可以根据 `dialog_at` 或 `target_message_date` 解析，必须直接改写进 `statement_text`。
+- 不要在 `statement_text` 中保留可解析的原始模糊时间表达。
+- 不要同时保留原始模糊时间表达和解析后的时间表达。
+- `statement_text` 中禁止残留未锚定、未解析的相对时间词，例如：`今天`、`昨天`、`前天`、`明天`、`后天`、`本周`、`这周`、`上周`、`下周`、`本月`、`这个月`、`上个月`、`下个月`、`去年`、`明年`、`最近`、`近来`、`这段时间`、`这些天`、`即将`、`接下来`、`很快`。
+- 如果开放区间词已经被明确锚定到参考时间，则允许保留在锚定表达中，例如 `截至2026年4月1日之前的最近一段时间`。
+- 正确示例：`用户2026年3月28日和小李一起去了咖啡馆。`
+- 错误示例：`用户上周六和小李一起去了咖啡馆。`
+- 正确示例：`用户截至2026年4月1日之前的最近一段时间拿到了腾讯公司的offer。`
+- 错误示例：`用户最近拿到了腾讯公司的offer。`
+  {% else %}
+- `statement_text` is the final memory text, so it must contain the resolved temporal expression itself, not only rely on `valid_at` / `invalid_at`.
+- If a relative or open-interval temporal expression can be resolved from `dialog_at` or `target_message_date`, rewrite it inside `statement_text`.
+- Do not leave a resolvable source temporal phrase in `statement_text`.
+- Do not keep both the vague phrase and the resolved phrase together.
+- `statement_text` must not contain unanchored, unresolved relative temporal words such as: `today`, `yesterday`, `the day before yesterday`, `tomorrow`, `the day after tomorrow`, `this week`, `last week`, `next week`, `this month`, `last month`, `next month`, `last year`, `next year`, `recently`, `lately`, `these days`, `upcoming`, `coming up`, or `soon`.
+- Open-interval words are allowed only when explicitly anchored to the reference time, such as `recently before April 1, 2026`.
+- Correct example: `The user went to the cafe with Xiao Li on March 28, 2026.`
+- Wrong example: `The user went to the cafe with Xiao Li last Saturday.`
+- Correct example: `The user received Tencent's offer recently before April 1, 2026.`
+- Wrong example: `The user recently received Tencent's offer.`
+  {% endif %}
+  {% if language == "zh" %}
+- 例外：如果时间表达确实无法可靠落地，保留最小可信粗粒度表达，但仍应尽量锚定到参考时间，例如写成 `2025年冬天`，而不是保留 `去年冬天`。
+  {% else %}
+- Exception: if the temporal phrase truly cannot be grounded reliably, keep the smallest trustworthy coarse-grained expression, but still anchor it when possible, for example `winter 2025` instead of `last winter`.
+  {% endif %}
+
 **ISO 8601 HARD CONSTRAINT:**
 
 - `dialog_at` must be ISO 8601.
@@ -677,6 +747,17 @@ Example Output: {
 - `valid_at` and `invalid_at` must be ISO 8601, or `"NULL"` when no time is available.
 - Do not output non-ISO values such as `2026/04/01`, `2026-04-01 00:00:00`, `yesterday evening`, or `下周三`.
 - When only a date is known, still output an ISO 8601 datetime boundary.
+
+**SCHEMA HARD CONSTRAINT:**
+
+- Every statement object must include exactly these fields: `statement_id`, `statement_text`, `statement_type`, `temporal_type`, `speaker`, `has_emotional_state`, `has_unsolved_reference`, `dialog_at`, `valid_at`, `invalid_at`.
+- Do not omit `speaker`, `dialog_at`, `valid_at`, or `invalid_at`.
+- Do not output extra fields.
+- `statement_type` must be one of `"FACT"`, `"OPINION"`, `"OTHER"`.
+- `temporal_type` must be one of `"STATIC"`, `"DYNAMIC"`, `"ATEMPORAL"`.
+- `speaker` must be one of `"user"`, `"assistant"`.
+- `has_emotional_state` and `has_unsolved_reference` must be JSON booleans, not strings.
+- Missing time must be the string `"NULL"`, not JSON null.
 
 **LANGUAGE REQUIREMENT:**
 {% if language == "zh" %}
@@ -694,19 +775,20 @@ Example Output: {
 
 现在处理下面这个输入：{{ render_input() }}
 
-Return only a JSON object matching the schema below:
+Return only a JSON object with this top-level shape:
 {
-  "statements": [
-    {
-      "statement_id": "string",
-      "statement_text": "string",
-      "statement_type": "FACT | OPINION | OTHER",
-      "temporal_type": "STATIC | DYNAMIC | ATEMPORAL",
-      "has_emotional_state": "boolean",
-      "has_unsolved_reference": "boolean",
-      "dialog_at": "string",
-      "valid_at": "string | NULL",
-      "invalid_at": "string | NULL"
-    }
-  ]
+  "statements": []
 }
+
+Each item in `statements` must be a JSON object with exactly these fields and value types:
+
+- `statement_id`: string
+- `statement_text`: string
+- `statement_type`: one of `"FACT"`, `"OPINION"`, `"OTHER"`
+- `temporal_type`: one of `"STATIC"`, `"DYNAMIC"`, `"ATEMPORAL"`
+- `speaker`: one of `"user"`, `"assistant"`
+- `has_emotional_state`: boolean, choose `true` or `false` according to the rules above
+- `has_unsolved_reference`: boolean, choose `true` or `false` according to the rules above
+- `dialog_at`: ISO 8601 datetime string
+- `valid_at`: ISO 8601 datetime string or `"NULL"`
+- `invalid_at`: ISO 8601 datetime string or `"NULL"`

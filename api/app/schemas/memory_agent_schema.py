@@ -1,12 +1,10 @@
 import uuid
 from abc import ABC
 from enum import Enum
-from typing import Any
-from typing import Optional, List
+from typing import Any, Optional
+from pydantic import Field
 
 from pydantic import BaseModel, Field
-
-from app.schemas.app_schema import FileInput
 
 
 class StorageType(str, Enum):
@@ -43,19 +41,8 @@ class UserInput(BaseModel):
     config_id: Optional[str] = None
 
 
-class WriteMessageItem(BaseModel):
-    """写入记忆的单条消息"""
-    role: str = Field(..., description="消息角色: user 或 assistant")
-    content: str = Field(..., description="消息内容")
-    dialog_at: Optional[str] = Field(
-        None,
-        description="该条消息发生的绝对时间（ISO 8601 格式），不传则使用服务端当前时间",
-    )
-    files: Optional[List[FileInput]] = Field(default=None, description="附带的文件列表（图片/文档/音频/视频）")
-
-
 class Write_UserInput(BaseModel):
-    messages: List[WriteMessageItem] = Field(..., description="消息列表")
+    messages: list[dict]
     end_user_id: str
     config_id: Optional[str] = None
 
