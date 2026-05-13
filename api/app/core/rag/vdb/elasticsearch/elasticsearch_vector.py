@@ -53,18 +53,18 @@ class ElasticSearchVector(BaseVector):
         return "elasticsearch"
 
     def add_chunks(self, chunks: list[DocumentChunk], **kwargs):
-        # QA chunks: embedding 只对 question 字段做；source chunks: 不做 embedding
+        # QA chunks: embedding 只对 question 字段做；source/parent chunks: 不做 embedding
         texts_for_embedding = []
         for chunk in chunks:
             chunk_type = (chunk.metadata or {}).get("chunk_type", "chunk")
-            if chunk_type == "source":
-                # source chunk 不需要向量索引
+            if chunk_type in ("source", "parent"):
+                # source 和 parent chunk 不需要向量索引
                 texts_for_embedding.append("")
             elif chunk_type == "qa":
                 # QA chunk: 用 question 字段做 embedding
                 texts_for_embedding.append((chunk.metadata or {}).get("question", chunk.page_content))
             else:
-                # 普通 chunk: 用 page_content 做 embedding
+                # 普通 chunk / child chunk: 用 page_content 做 embedding
                 texts_for_embedding.append(chunk.page_content)
 
         if self.is_multimodal_embedding:
@@ -72,9 +72,9 @@ class ElasticSearchVector(BaseVector):
         else:
             embeddings = self.embeddings.embed_documents(texts_for_embedding)
 
-        # source chunk 的向量置空
+        # source/parent chunk 的向量置空
         for i, chunk in enumerate(chunks):
-            if (chunk.metadata or {}).get("chunk_type") == "source":
+            if (chunk.metadata or {}).get("chunk_type") in ("source", "parent"):
                 embeddings[i] = None
 
         self.create(chunks, embeddings, **kwargs)
@@ -104,6 +104,8 @@ class ElasticSearchVector(BaseVector):
                 source[Field.ANSWER.value] = meta["answer"]
             if meta.get("source_chunk_id"):
                 source[Field.SOURCE_CHUNK_ID.value] = meta["source_chunk_id"]
+            if meta.get("parent_id"):
+                source[Field.PARENT_ID.value] = meta["parent_id"]
 
             action = {
                 "_index": self._collection_name,
@@ -111,8 +113,13 @@ class ElasticSearchVector(BaseVector):
             }
             actions.append(action)
         # using bulk mode
-        result = helpers.bulk(self._client, actions)
-        logger.info(f"add_texts result:{result}")
+        try:
+            result = helpers.bulk(self._client, actions)
+            logger.info(f"add_texts result:{result}")
+        except BulkIndexError as e:
+            for error in e.errors[:3]:
+                logger.error(f"ES bulk index error detail: {error}")
+            raise
         return uuids
 
     def text_exists(self, id: str) -> bool:
@@ -436,7 +443,7 @@ class ElasticSearchVector(BaseVector):
         # print(f"Update successful, number of affected documents: {result['updated']}")
         return result['updated']
 
-    def search_by_vector(self, query: str, **kwargs: Any) -> list[DocumentChunk]:
+    def search_by_vector(self, query: str, resolve_parents: bool = True, **kwargs: Any) -> list[DocumentChunk]:
         """Search the nearest neighbors to a vector."""
         if self.is_multimodal_embedding:
             # 火山引擎多模态 Embedding
@@ -465,7 +472,7 @@ class ElasticSearchVector(BaseVector):
                     "filter": [
                         {"term": {"metadata.status": 1}},
                         # 排除 source chunk（仅供 GraphRAG 使用，不参与检索）
-                        {"bool": {"must_not": {"term": {Field.CHUNK_TYPE.value: "source"}}}}
+                        {"bool": {"must_not": {"terms": {Field.CHUNK_TYPE.value: ["source", "parent"]}}}}
                     ]
                 }
             }
@@ -487,7 +494,7 @@ class ElasticSearchVector(BaseVector):
                     "filter": [
                         {"term": {"metadata.status": 1}},
                         {"terms": {"metadata.file_name": file_names_filter}},
-                        {"bool": {"must_not": {"term": {Field.CHUNK_TYPE.value: "source"}}}}
+                        {"bool": {"must_not": {"terms": {Field.CHUNK_TYPE.value: ["source", "parent"]}}}}
                     ],
                 }
             }
@@ -531,9 +538,9 @@ class ElasticSearchVector(BaseVector):
                     doc.metadata["score"] = score
                     docs.append(doc)
 
-        return docs
+        return self.resolve_parent_chunks(docs) if resolve_parents else docs
 
-    def search_by_full_text(self, query: str, **kwargs: Any) -> list[DocumentChunk]:
+    def search_by_full_text(self, query: str, resolve_parents: bool = True, **kwargs: Any) -> list[DocumentChunk]:
         """Return docs using BM25F.
 
         Args:
@@ -561,7 +568,7 @@ class ElasticSearchVector(BaseVector):
                 },
                 "filter": [
                     {"term": {"metadata.status": 1}},
-                    {"bool": {"must_not": {"term": {Field.CHUNK_TYPE.value: "source"}}}}
+                    {"bool": {"must_not": {"terms": {Field.CHUNK_TYPE.value: ["source", "parent"]}}}}
                 ]
             }
         }
@@ -581,7 +588,7 @@ class ElasticSearchVector(BaseVector):
                     "filter": [
                         {"term": {"metadata.status": 1}},
                         {"terms": {"metadata.file_name": file_names_filter}},
-                        {"bool": {"must_not": {"term": {Field.CHUNK_TYPE.value: "source"}}}}
+                        {"bool": {"must_not": {"terms": {Field.CHUNK_TYPE.value: ["source", "parent"]}}}}
                     ],
                 }
             }
@@ -626,7 +633,86 @@ class ElasticSearchVector(BaseVector):
                     doc.metadata["score"] = score
                     docs.append(doc)
 
-        return docs
+        return self.resolve_parent_chunks(docs) if resolve_parents else docs
+
+    def resolve_parent_chunks(self, chunks: list[DocumentChunk]) -> list[DocumentChunk]:
+        """
+        For child chunks (chunk_type == "child"), replace page_content with the
+        parent chunk's page_content. Deduplicate when multiple children share
+        the same parent.
+
+        Non-child chunks (regular "chunk", "qa") pass through unchanged.
+        """
+        child_results = []
+        other_results = []
+        for doc in chunks:
+            if (doc.metadata or {}).get("chunk_type") == "child":
+                child_results.append(doc)
+            else:
+                other_results.append(doc)
+
+        if not child_results:
+            return chunks
+
+        # Collect unique parent IDs
+        parent_ids = list({doc.metadata.get("parent_id", "") for doc in child_results if doc.metadata.get("parent_id")})
+        if not parent_ids:
+            return chunks
+
+        # Batch-fetch parent chunks from ES by doc_id
+        parent_map = {}
+        try:
+            result = self._client.search(
+                index=self._collection_name,
+                body={
+                    "query": {
+                        "bool": {
+                            "must": [
+                                {"terms": {"metadata.doc_id": parent_ids}}
+                            ]
+                        }
+                    }
+                },
+                size=len(parent_ids),
+            )
+            for hit in result.get("hits", {}).get("hits", []):
+                source = hit["_source"]
+                parent_doc_id = source.get("metadata", {}).get("doc_id", "")
+                parent_map[parent_doc_id] = DocumentChunk(
+                    page_content=source.get(Field.CONTENT_KEY.value, ""),
+                    metadata=source.get(Field.METADATA_KEY.value, {}),
+                )
+        except Exception as e:
+            logger.warning(f"Failed to resolve parent chunks: {e}")
+            return chunks
+
+        # Replace child content with parent content, dedup by parent_id
+        seen_parents: dict[str, DocumentChunk] = {}
+        for doc in child_results:
+            parent_id = doc.metadata.get("parent_id", "")
+            if parent_id in seen_parents:
+                existing = seen_parents[parent_id]
+                if doc.metadata.get("score", 0) > existing.metadata.get("score", 0):
+                    seen_parents[parent_id] = DocumentChunk(
+                        page_content=existing.page_content,
+                        metadata={**existing.metadata, "score": doc.metadata.get("score", 0)},
+                    )
+                continue
+
+            parent = parent_map.get(parent_id)
+            if parent:
+                # Replace page_content with parent's, preserve child's score
+                score = doc.metadata.get("score", 0)
+                merged_metadata = {**parent.metadata, "score": score, "chunk_type": "parent"}
+                seen_parents[parent_id] = DocumentChunk(
+                    page_content=parent.page_content,
+                    metadata=merged_metadata,
+                )
+            else:
+                # Parent not found, keep child as-is
+                seen_parents[parent_id] = doc
+
+        return list(seen_parents.values()) + other_results
 
     def rerank(self, query: str, docs: list[DocumentChunk], top_k: int) -> list[DocumentChunk]:
         """
@@ -718,6 +804,9 @@ class ElasticSearchVector(BaseVector):
                                 },
                                 "status": {
                                     "type": "integer"
+                                },
+                                "parent_id": {
+                                    "type": "keyword"
                                 }
                             }
                         },
@@ -726,6 +815,23 @@ class ElasticSearchVector(BaseVector):
                             "dims": len(next((e for e in embeddings if e is not None), [0]*768)),  # 跳过 None 获取向量维度，fallback 768
                             "index": True,
                             "similarity": "cosine"
+                        },
+                        Field.CHUNK_TYPE.value: {
+                            "type": "keyword"
+                        },
+                        Field.QUESTION.value: {
+                            "type": "text",
+                            "analyzer": "ik_max_word"
+                        },
+                        Field.ANSWER.value: {
+                            "type": "text",
+                            "analyzer": "ik_max_word"
+                        },
+                        Field.SOURCE_CHUNK_ID.value: {
+                            "type": "keyword"
+                        },
+                        Field.PARENT_ID.value: {
+                            "type": "keyword"
                         }
                     }
                 }
@@ -813,12 +919,51 @@ class ElasticSearchVectorFactory:
         if knowledge.reranker is None:
             raise ValueError(f"reranker_id config error: {str(knowledge.reranker_id)}")
 
+        # 确保存量索引包含 parent_id 字段映射（幂等操作）
+        cls._ensure_parent_id_mapping(client, collection_name)
+
         return ElasticSearchVector(
             index_name=collection_name,
             client=client,
             embedding_config=knowledge.embedding.api_keys[0],
             reranker_config=knowledge.reranker.api_keys[0],
         )
+
+    @classmethod
+    def _ensure_parent_id_mapping(cls, client: Elasticsearch, index_name: str):
+        """为已有索引补充缺失的字段映射（仅追加，非破坏性）"""
+        if not client.indices.exists(index=index_name):
+            return
+        try:
+            mapping = client.indices.get_mapping(index=index_name)
+            props = mapping[index_name]["mappings"].get("properties", {})
+            metadata_props = props.get("metadata", {}).get("properties", {})
+
+            update_body: dict[str, Any] = {"properties": {}}
+
+            # metadata.parent_id
+            if metadata_props.get("parent_id", {}).get("type") != "keyword":
+                update_body["properties"]["metadata"] = {
+                    "properties": {"parent_id": {"type": "keyword"}}
+                }
+
+            # top-level parent_id
+            if props.get(Field.PARENT_ID.value, {}).get("type") != "keyword":
+                update_body["properties"][Field.PARENT_ID.value] = {"type": "keyword"}
+
+            # top-level chunk_type
+            if Field.CHUNK_TYPE.value not in props:
+                update_body["properties"][Field.CHUNK_TYPE.value] = {"type": "keyword"}
+
+            # source_chunk_id
+            if Field.SOURCE_CHUNK_ID.value not in props:
+                update_body["properties"][Field.SOURCE_CHUNK_ID.value] = {"type": "keyword"}
+
+            if len(update_body["properties"]) > 0:
+                client.indices.put_mapping(index=index_name, body=update_body)
+                logger.info(f"Updated mapping for {index_name}: added {list(update_body['properties'].keys())}")
+        except Exception as e:
+            logger.warning(f"Failed to update mapping for {index_name}: {e}")
 
 
 

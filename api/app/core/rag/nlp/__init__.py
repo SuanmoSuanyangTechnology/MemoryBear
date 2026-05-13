@@ -606,6 +606,41 @@ def naive_merge(sections: str | list, chunk_token_num=128, delimiter="\n。；�
     return cks
 
 
+def map_children_to_parents(parent_chunks: list[str], child_chunks: list[str]) -> list[int]:
+    """
+    Map each child chunk to its containing parent chunk index using cumulative character offsets.
+
+    Both lists are produced from the same source text in the same order,
+    so each child's start position falls within exactly one parent's range.
+
+    Returns a list of parent chunk indices parallel to child_chunks.
+    """
+    if not parent_chunks or not child_chunks:
+        return [0] * len(child_chunks)
+
+    # Build cumulative character offset ranges for parents
+    parent_ranges: list[tuple[int, int, int]] = []  # (start, end, parent_idx)
+    offset = 0
+    for i, pc in enumerate(parent_chunks):
+        start = offset
+        end = offset + len(pc)
+        parent_ranges.append((start, end, i))
+        offset = end
+
+    # Map each child to its parent by character offset
+    result = []
+    child_offset = 0
+    parent_idx = 0
+    for cc in child_chunks:
+        child_start = child_offset
+        while parent_idx < len(parent_ranges) - 1 and parent_ranges[parent_idx][1] <= child_start:
+            parent_idx += 1
+        result.append(parent_ranges[parent_idx][2])
+        child_offset += len(cc)
+
+    return result
+
+
 def naive_merge_with_images(texts, images, chunk_token_num=128, delimiter="\n。；！？", overlapped_percent=0):
     from app.core.rag.deepdoc.parser.pdf_parser import RAGPdfParser
     if not texts or len(texts) != len(images):
