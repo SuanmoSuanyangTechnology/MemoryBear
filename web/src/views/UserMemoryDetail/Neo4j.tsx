@@ -10,7 +10,7 @@
  * Shows profile, interests, node statistics, relationships, and insights
  */
 
-import { type FC, useRef, useState, type MouseEvent, useEffect, lazy, Suspense } from 'react'
+import { type FC, useRef, useState, type MouseEvent, useEffect, Suspense } from 'react'
 import clsx from 'clsx'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Flex, Popover } from 'antd'
@@ -28,13 +28,12 @@ import {
 } from '@/api/memory'
 import { useI18n } from '@/store/locale'
 
-// 是否为 saas 环境（显示 Brain 入口）
+import PrivateWrap from '@/components/PrivateWrap'
+import { BrainView } from '@redbear/memory-brick'
+
+
 const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
 
-// 仅 saas 环境动态加载 BrainView 组件
-const BrainView = isSaas
-  ? lazy(() => import('@redbear/memory-brick').then(mod => ({ default: mod.BrainView })))
-  : null
 const Neo4j: FC = () => {
   const { id } = useParams()
   const { t } = useTranslation();
@@ -108,7 +107,7 @@ const Neo4j: FC = () => {
             >
               <div className="rb:mb-4.25! rb:size-12 rb:rounded-xl rb:bg-cover rb:bg-[url('@/assets/images/userMemory/logo.png')]"></div>
             </Popover>
-            {isSaas && (
+            {isSaas && BrainView && (
             <Flex
               align="center"
               justify="center"
@@ -203,9 +202,11 @@ const Neo4j: FC = () => {
         <EndUserProfile ref={ref} onDataLoaded={handleNameUpdate} className={selectedKey === 'userProfile' ? 'rb:block!' : 'rb:hidden!'} />
         <AboutMe ref={aboutMeRef} className={selectedKey === 'aboutMe' ? 'rb:block!' : 'rb:hidden!'} />
         {/* <Provider> */}
-        {isSaas && BrainView && (
+        {BrainView && (
           <Suspense fallback={null}>
-            <BrainView ref={brainViewRef} className={selectedKey === 'Brain' ? 'rb:block!' : 'rb:hidden!'} onMemoriesChange={handleBrainMemoriesChange} onClose={() => { setSelectedKey(null); setBrainMemories([]) }} />
+            <PrivateWrap>
+              <BrainView ref={brainViewRef} className={selectedKey === 'Brain' ? 'rb:block!' : 'rb:hidden!'} onMemoriesChange={handleBrainMemoriesChange} onClose={() => { setSelectedKey(null); setBrainMemories([]) }} />
+            </PrivateWrap>
           </Suspense>
         )}
         {/* </Provider> */}

@@ -3,14 +3,13 @@
  * @Version: 0.0.1
  * @Author: yujiangping
  * @Date: 2025-11-24 19:00:14
- * @LastEditors: yujiangping
- * @LastEditTime: 2026-05-13 14:51:20
+ * @LastEditors: zhaoying zhaoyingyz@126.com
+ * @LastEditTime: 2026-05-13 16:50:52
  */
 import { RouterProvider } from 'react-router-dom';
 import { 
   Suspense, 
   useEffect,
-  lazy,
   type FC,
   type ReactNode,
 } from 'react';
@@ -30,15 +29,13 @@ import 'dayjs/plugin/timezone'
 import 'dayjs/plugin/utc'
 import { cookieUtils } from './utils/request';
 import { useUser } from '@/store/user';
+import { Provider as PrivateProvider } from '@redbear/memory-brick'
 
 import menuJson from '@/store/menu.json';
 
+console.log('PrivateProvider', PrivateProvider)
 const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
 
-// saas 环境动态加载 Provider，非 saas 用 antd ConfigProvider 降级
-const PrivateProvider = isSaas
-  ? lazy(() => import('@redbear/memory-brick').then(mod => ({ default: mod.Provider })))
-  : null
 
 type MenuEntry = { path: string; i18nKey: string };
 

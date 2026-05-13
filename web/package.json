@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "install:private": "node install-private.js"
   },
   "dependencies": {
     "@antv/layout": "^1.2.14-beta.8",
@@ -31,7 +32,6 @@
     "@lexical/list": "^0.39.0",
     "@lexical/react": "^0.39.0",
     "@lexical/rich-text": "^0.39.0",
-    "@redbear/memory-brick": "^0.0.6",
     "antd": "^5.29.2",
     "axios": "^1.12.2",
     "clsx": "^2.1.1",
