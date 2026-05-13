@@ -303,6 +303,14 @@ class PromptOptimizerService:
                 parse_errors.append(f"Malformed output: {END_DESC_TAG} appears before {START_DESC_TAG}")
             else:
                 desc_text = buffer[d_start:d_end].strip()
+        elif has_desc_start and not has_desc_end:
+            # Stream ended before <END_DESC> — likely max_tokens truncation
+            # Use everything after <START_DESC> as desc (best effort)
+            d_start = buffer.index(START_DESC_TAG) + len(START_DESC_TAG)
+            desc_text = buffer[d_start:].strip()
+            logger.warning(
+                f"Desc end marker missing (likely truncated), using content after {START_DESC_TAG} as desc"
+            )
         else:
             missing = []
             if not has_desc_start:
