@@ -270,19 +270,67 @@ class PromptOptimizerService:
                 if END_DESC_TAG in buffer:
                     break
 
-        # Extract prompt and desc from buffer using tags
+        # Extract prompt and desc from buffer using tags with strict validation
         prompt_text = ""
         desc_text = ""
+        parse_errors = []
 
-        if START_PROMPT_TAG in buffer and END_PROMPT_TAG in buffer:
+        # Validate prompt tags
+        has_prompt_start = START_PROMPT_TAG in buffer
+        has_prompt_end = END_PROMPT_TAG in buffer
+        if has_prompt_start and has_prompt_end:
             p_start = buffer.index(START_PROMPT_TAG) + len(START_PROMPT_TAG)
             p_end = buffer.index(END_PROMPT_TAG)
-            prompt_text = buffer[p_start:p_end].strip()
+            if p_start > p_end:
+                parse_errors.append(f"Malformed output: {END_PROMPT_TAG} appears before {START_PROMPT_TAG}")
+            else:
+                prompt_text = buffer[p_start:p_end].strip()
+        else:
+            missing = []
+            if not has_prompt_start:
+                missing.append(START_PROMPT_TAG)
+            if not has_prompt_end:
+                missing.append(END_PROMPT_TAG)
+            parse_errors.append(f"Missing prompt markers: {', '.join(missing)}")
 
-        if START_DESC_TAG in buffer and END_DESC_TAG in buffer:
+        # Validate desc tags
+        has_desc_start = START_DESC_TAG in buffer
+        has_desc_end = END_DESC_TAG in buffer
+        if has_desc_start and has_desc_end:
             d_start = buffer.index(START_DESC_TAG) + len(START_DESC_TAG)
             d_end = buffer.index(END_DESC_TAG)
-            desc_text = buffer[d_start:d_end].strip()
+            if d_start > d_end:
+                parse_errors.append(f"Malformed output: {END_DESC_TAG} appears before {START_DESC_TAG}")
+            else:
+                desc_text = buffer[d_start:d_end].strip()
+        else:
+            missing = []
+            if not has_desc_start:
+                missing.append(START_DESC_TAG)
+            if not has_desc_end:
+                missing.append(END_DESC_TAG)
+            parse_errors.append(f"Missing desc markers: {', '.join(missing)}")
+
+        # If prompt is missing, this is a hard failure — user got no streamed content or garbage
+        if not prompt_text:
+            error_detail = "; ".join(parse_errors) if parse_errors else "Prompt content is empty"
+            logger.error(
+                f"Prompt optimization output parsing failed: {error_detail}. "
+                f"Raw buffer (first 500 chars): {buffer[:500]}"
+            )
+            raise BusinessException(
+                message=f"优化结果解析失败: {error_detail}",
+                code=BizCode.INTERNAL_ERROR
+            )
+
+        # Desc missing is non-fatal but should be visible
+        if not desc_text:
+            warning_detail = "; ".join(parse_errors) if parse_errors else "Desc content is empty"
+            logger.warning(
+                f"Prompt optimization desc parsing issue: {warning_detail}. "
+                f"Falling back to default desc."
+            )
+            desc_text = "Prompt optimized successfully."
 
         logger.info(f"Optimized prompt length: {len(prompt_text)}, desc: {desc_text}")
         ModelApiKeyService.record_api_key_usage(self.db, api_config.id)
