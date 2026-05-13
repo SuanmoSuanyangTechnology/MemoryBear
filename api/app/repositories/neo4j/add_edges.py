@@ -37,7 +37,6 @@ async def add_chunk_statement_edges(chunks: List[Chunk], connector: Neo4jConnect
                     "apply_id": getattr(stmt, 'apply_id', None),
                     "run_id": getattr(stmt, 'run_id', None) or getattr(chunk, 'run_id', None),
                     "created_at": getattr(stmt, 'created_at', None),
-                    "expired_at": getattr(stmt, 'expired_at', None),
                     # "created_at": getattr(statement, 'created_at', None),
                     # "expired_at": None  # Set to None or appropriate default
                 }
@@ -87,7 +86,6 @@ async def add_memory_summary_statement_edges(summaries: List[MemorySummaryNode],
                     "end_user_id": s.end_user_id,
                     "run_id": s.run_id,
                     "created_at": s.created_at.isoformat() if s.created_at else None,
-                    "expired_at": s.expired_at.isoformat() if s.expired_at else None,
                 })
 
         if not edges:

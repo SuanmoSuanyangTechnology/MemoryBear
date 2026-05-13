@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-24 15:48:30
+ * @Last Modified time: 2026-05-06 15:09:49
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
@@ -178,4 +178,8 @@ export const getAppLogDetail = (app_id: string, conversation_id: string) => {
 // Reset agent model config to default
 export const resetAppModelConfig = (app_id: string) => {
   return request.get(`/apps/${app_id}/model/parameters/default`)
+}
+// Single node test run
+export const nodeRun = (app_id: string, node_id: string, values: Record<string, unknown>) => {
+  return request.post(`/apps/${app_id}/workflow/nodes/${node_id}/run`, values)
 }

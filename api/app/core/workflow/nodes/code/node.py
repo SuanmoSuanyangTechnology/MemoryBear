@@ -132,7 +132,7 @@ class CodeNode(BaseNode):
 
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
-                f"{settings.SANDBOX_URL}:8194/v1/sandbox/run",
+                f"{settings.SANDBOX_URL}/v1/sandbox/run",
                 headers={
                     "x-api-key": 'redbear-sandbox'
                 },

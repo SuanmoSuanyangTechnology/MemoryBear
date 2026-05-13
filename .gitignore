@@ -43,3 +43,6 @@ cl100k_base.tiktoken
 libssl*.deb
 
 sandbox/lib/seccomp_redbear/target
+
+# Qoder repowiki generated content
+.qoder/repowiki/zh/

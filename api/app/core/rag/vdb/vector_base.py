@@ -27,14 +27,14 @@ class BaseVector(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def delete_by_ids(self, ids: list[str]):
+    def delete_by_ids(self, ids: list[str], *, refresh: bool = False):
         raise NotImplementedError
 
     def get_ids_by_metadata_field(self, key: str, value: str):
         raise NotImplementedError
 
     @abstractmethod
-    def delete_by_metadata_field(self, key: str, value: str):
+    def delete_by_metadata_field(self, key: str, value: str, *, refresh: bool = False):
         raise NotImplementedError
 
     @abstractmethod

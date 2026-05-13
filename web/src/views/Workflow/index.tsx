@@ -118,6 +118,8 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
           parseEvent={parseEvent}
           config={config}
           chatVariables={chatVariables}
+          appId={config?.app_id}
+          handleSave={handleSave}
         />
       }
       <Chat

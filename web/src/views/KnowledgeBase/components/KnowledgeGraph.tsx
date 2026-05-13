@@ -266,6 +266,8 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false }) => {
     }
   }, [nodes])
 
+  console.log('selectedNode', selectedNode)
+
   return (
     <Col span={24}>
       <RbCard 

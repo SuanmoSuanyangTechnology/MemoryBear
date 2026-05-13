@@ -1,5 +1,6 @@
 import uuid
 import io
+import json
 from typing import Optional, Annotated
 
 import yaml
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 from urllib.parse import quote
 
 from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import success, fail
 from app.db import get_db
@@ -573,7 +575,6 @@ async def draft_run(
     from app.services.multi_agent_service import MultiAgentService
     from app.models import AgentConfig, ModelConfig, AppRelease
     from sqlalchemy import select
-    from app.core.exceptions import BusinessException
     from app.services.draft_run_service import AgentRunService
 
     service = AppService(db)
@@ -936,8 +937,6 @@ async def draft_run_compare(
     # 1. 验证应用和权限
     app = service._get_app_or_404(app_id)
     if app.type != "agent":
-        from app.core.exceptions import BusinessException
-        from app.core.error_codes import BizCode
         raise BusinessException("只有 Agent 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
     service._validate_app_accessible(app, workspace_id)
 
@@ -957,8 +956,6 @@ async def draft_run_compare(
     stmt = select(AgentConfig).where(AgentConfig.app_id == app_id)
     agent_cfg = db.scalars(stmt).first()
     if not agent_cfg:
-        from app.core.exceptions import BusinessException
-        from app.core.error_codes import BizCode
         raise BusinessException("Agent 配置不存在", BizCode.AGENT_CONFIG_MISSING)
 
     # 3. 验证所有模型配置
@@ -1066,6 +1063,64 @@ async def draft_run_compare(
     )
 
     return success(data=app_schema.DraftRunCompareResponse(**result))
+
+
+@router.post("/{app_id}/workflow/nodes/{node_id}/run", summary="单节点试运行")
+@cur_workspace_access_guard()
+async def run_single_workflow_node(
+        app_id: uuid.UUID,
+        node_id: str,
+        payload: app_schema.NodeRunRequest,
+        db: Annotated[Session, Depends(get_db)],
+        current_user: Annotated[User, Depends(get_current_user)],
+        workflow_service: Annotated[WorkflowService, Depends(get_workflow_service)] = None,
+):
+    """单独执行工作流中的某个节点
+
+    inputs 支持以下 key 格式:
+    - 节点变量: "node_id.var_name"
+    - 系统变量: "sys.message"、"sys.files"
+    """
+    workspace_id = current_user.current_workspace_id
+    config = workflow_service.get_workflow_config(app_id)
+    if not config:
+        raise BusinessException("工作流配置不存在，无法运行", BizCode.CONFIG_MISSING)
+
+    raw_inputs = payload.inputs or {}
+    input_data = {
+        "message": raw_inputs.pop("sys.message", ""),
+        "files": raw_inputs.pop("sys.files", []),
+        "user_id": raw_inputs.pop("sys.user_id", str(current_user.id)),
+        "inputs": raw_inputs,
+        "conversation_id": "",
+        "conv_messages": [],
+    }
+
+    if payload.stream:
+        async def event_generator():
+            async for event in workflow_service.run_single_node_stream(
+                    app_id=app_id,
+                    node_id=node_id,
+                    config=config,
+                    workspace_id=workspace_id,
+                    input_data=input_data,
+            ):
+                yield f"event: {event['event']}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
+        )
+
+    result = await workflow_service.run_single_node(
+        app_id=app_id,
+        node_id=node_id,
+        config=config,
+        workspace_id=workspace_id,
+        input_data=input_data,
+    )
+    return success(data=result)
 
 
 @router.get("/{app_id}/workflow")

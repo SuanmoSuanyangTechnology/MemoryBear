@@ -2,16 +2,17 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 10:13:56
+ * @Last Modified time: 2026-05-08 14:32:15
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
-import Markdown from '@/components/Markdown'
-import type { ChatContentProps } from './types'
+
 import { Spin, Flex, Button } from 'antd'
 import { SoundOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 
+import Markdown from '@/components/Markdown'
+import type { ChatContentProps, ChatItem } from './types'
 import MessageFiles from './MessageFiles'
 
 const getFileUrl = (file: any) => {
@@ -126,6 +127,18 @@ const ChatContent: FC<ChatContentProps> = ({
   const onFormSubmit = (values: Record<string, any>) => {
     onSend?.(JSON.stringify(values))
   }
+
+  const formatContent = (item: ChatItem) => {
+    return renderRuntime && item.content && item.content.length > 0
+      ? item.content
+        : renderRuntime
+      ? ''
+        : item.meta_data?.error && item.meta_data?.error.length > 0
+      ? item.meta_data?.error
+        : item.content && item.content.length > 0
+      ? item.content
+        : errorDesc ?? ''
+  }
   return (
     <div ref={scrollContainerRef} className={clsx("rb:relative rb:overflow-y-auto", classNames)}>
       {data.length === 0 
@@ -139,7 +152,7 @@ const ChatContent: FC<ChatContentProps> = ({
             'rb:left-0 rb:text-left': item.role === 'assistant', // Assistant messages left-aligned
           })}>
             {/* Don't display if streaming and content is empty */}
-            {streamLoading && item.content === '' && !renderRuntime
+            {streamLoading && index === data.length - 1 && item.content === '' && !renderRuntime
               ? <Spin />
               : <>
                 {/* Top label (such as timestamp, username, etc.) */}
@@ -152,7 +165,7 @@ const ChatContent: FC<ChatContentProps> = ({
                 {/* Message bubble */}
                 <div className={clsx('rb:text-left rb:leading-5 rb:inline-block rb:wrap-break-word rb:relative', item.role === 'user' ? contentClassNames : '', {
                   // Error message style (content is null and not assistant message)
-                  'rb:text-[#FF5D34]': (item.status && item.status !== 'completed') || (errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime),
+                  'rb:text-[#FF5D34]': (item.status && item.status !== 'completed') || (errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime) || (item.role === 'assistant' && typeof item.meta_data?.error === 'string'),
                   // Assistant message style
                   'rb:bg-[#E3EBFD] rb:p-[10px_12px_2px_12px] rb:rounded-lg rb:max-w-130': item.role === 'user',
                   'rb:max-w-full rb:w-full': item.role === 'assistant',
@@ -160,6 +173,7 @@ const ChatContent: FC<ChatContentProps> = ({
                   'rb:text-[#212332]': item.role === 'assistant' && (item.content || item.content === '' || typeof renderRuntime === 'function'),
                   'rb:mt-1': labelPosition === 'top',
                   'rb:mb-1': labelPosition === 'bottom',
+                  'rb:pl-7': item.role === 'assistant' && typeof item.meta_data?.error === 'string',
                 })}>
                   {item.meta_data?.reasoning_content &&
                     <div className={clsx("rb:mb-4 rb-border rb:rounded-xl rb:px-4 rb:pt-4 rb:bg-white", {
@@ -190,10 +204,18 @@ const ChatContent: FC<ChatContentProps> = ({
                     {isReasoningExpanded(index) && <Markdown content={item.meta_data.reasoning_content} className="rb:text-[#5B6167] rb:text-[12px]" />}
                     </div>
                   }
-                  {item.status && <div className="rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/conversation/exclamation_circle.svg')] rb:absolute rb:-left-7"></div>}
+                  {(item.status || typeof item.meta_data?.error === 'string') &&
+                    <div className={clsx("rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/conversation/exclamation_circle.svg')] rb:absolute rb:-left-7", {
+                      'rb:-left-7': item.status && item.role === 'user',
+                      'rb:left-0': item.role === 'assistant' && typeof item.meta_data?.error === 'string',
+                    })}></div>
+                  }
                   {item.subContent && renderRuntime && renderRuntime(item, index)}
                   {/* Render message content using Markdown component */}
-                  <Markdown content={renderRuntime ? item.content ?? '' : item.content ?? errorDesc ?? ''} onFormSubmit={onFormSubmit} />
+                  <Markdown
+                    content={formatContent(item)}
+                    onFormSubmit={onFormSubmit}
+                  />
 
                   {item.meta_data?.suggested_questions && item.meta_data?.suggested_questions?.length > 0 && <Flex wrap className="rb:my-1!">
                     {item.meta_data?.suggested_questions?.map((question, idx) => (

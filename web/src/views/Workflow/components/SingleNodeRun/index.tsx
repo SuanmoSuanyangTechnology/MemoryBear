@@ -1,0 +1,346 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-05-07 18:37:31 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-05-09 11:40:18
+ */
+import { type FC, useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Button, Flex, Form, Input, InputNumber, Select, App, Checkbox, Skeleton } from 'antd'
+import { Node } from '@antv/x6'
+import copy from 'copy-to-clipboard'
+import clsx from 'clsx'
+
+import { nodeRun } from '@/api/application'
+import CodeBlock from '@/components/Markdown/CodeBlock'
+import RbCard from '@/components/RbCard/Card'
+import styles from '../Properties/properties.module.css'
+import ContextList from './ContextList'
+import FileVarInput from './FileVarInput'
+import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
+import Markdown from '@/components/Markdown'
+import RbAlert from '@/components/RbAlert'
+
+interface RunResult {
+  status: 'completed' | 'failed' | 'running';
+  node_id?: string;
+  node_type?: string;
+  inputs?: Record<string, any>;
+  outputs?: any;
+  token_usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+  elapsed_time?: number;
+  error?: string | null;
+}
+
+interface SingleNodeRunProps {
+  open: boolean;
+  onClose: () => void
+  selectedNode: Node
+  appId: string
+  variableList: Suggestion[]
+}
+
+const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, appId, variableList }) => {
+  const { t } = useTranslation()
+  const { message } = App.useApp()
+  const [form] = Form.useForm()
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<RunResult | null>(null)
+
+  const [isAutoRun, setIsAutoRun] = useState(false)
+
+  const nodeData = selectedNode?.getData() || {}
+  const nodeName = nodeData.name || t(`workflow.${nodeData.type}`)
+
+  const isLlm = nodeData.type === 'llm'
+  const hasContext = isLlm && nodeData.config.context.defaultValue
+
+  // Recursively collect all {{nodeId.var}} references from nodeData, excluding conv. vars
+  const extractVarRefs = (val: any, refs = new Set<string>()): Set<string> => {
+    if (typeof val === 'string') {
+      for (const m of val.matchAll(/\{\{([^}]+)\}\}/g))
+        if (!m[1].startsWith('conv.') && m[1] !== 'context') {
+          refs.add(m[1])
+        }
+    } else if (Array.isArray(val)) {
+      val.forEach(v => extractVarRefs(v, refs))
+    } else if (val && typeof val === 'object') {
+      Object.values(val).forEach(v => extractVarRefs(v, refs))
+    }
+    return refs
+  }
+
+  const varRefs = extractVarRefs(nodeData)
+  const visionInputRef = isLlm ? nodeData.config.vision_input?.defaultValue?.match(/\{\{([^}]+)\}\}/)?.[1] : undefined
+  const contextInputRef = isLlm ? nodeData.config.context?.defaultValue?.match(/\{\{([^}]+)\}\}/)?.[1] : undefined
+  const inputVars = variableList.filter(v => varRefs.has(v.value) && v.value !== visionInputRef && v.value !== contextInputRef)
+
+
+  const handleRun = () => {
+    form.validateFields()
+      .then((values) => {
+        const { inputs = {} } = values
+        console.log('values', values)
+        const params: Record<string, any> = {};
+        Object.keys(inputs).forEach(key => {
+          const value = inputs[key]
+
+          if (typeof value === 'object') {
+            params[key] = value.map((file: any) => {
+              if (file.url) {
+                return file
+              } else {
+                return {
+                  type: file.type,
+                  transfer_method: 'local_file',
+                  upload_file_id: file.response.data.file_id
+                }
+              }
+            })
+          } else {
+            params[key] = value;
+          }
+        })
+        setLoading(true)
+        setResult({ status: 'running' })
+
+        if (hasContext) {
+          const contextValues: string[] = form.getFieldValue('context') || []
+          if (contextValues.length > 0) {
+            params['context'] = contextValues.map(item => { try { return JSON.parse(item) } catch { return item } })
+          }
+        }
+
+        nodeRun(appId, nodeData.id, { inputs: params, stream: false })
+          .then(res => {
+            setResult(res as RunResult)
+          })
+          .catch(err => {
+            setResult({ status: 'failed', error: err.message })
+            setLoading(false)
+          })
+          .finally(() => setLoading(false))
+      })
+  }
+
+  const handleCopy = (val: string) => {
+    copy(val)
+    message.success(t('common.copySuccess'))
+  }
+
+  const statusColor = result?.status === 'completed' ? '#369F21' : result?.status === 'failed' ? '#FF5D34' : '#5B6167'
+
+  useEffect(() => {
+    if (open) {
+      if (nodeData?.type === 'iteration' || inputVars.length < 1 && !hasContext && !(isLlm && nodeData?.config?.vision?.defaultValue)) {
+        setIsAutoRun(true)
+      }
+    }
+  }, [open, inputVars, isLlm, hasContext, nodeData?.type, nodeData?.config?.vision?.defaultValue])
+
+  useEffect(() => {
+    if (isAutoRun) {
+      handleRun()
+    }
+  }, [isAutoRun])
+
+  if (!open) return null
+
+  return (
+    // 与 Properties 完全相同的定位容器
+    <div className={clsx('rb:h-[calc(100vh-88px)] rb:w-90 rb:absolute rb:right-0 rb:top-0 rb:bottom-2.5 rb:z-1002', styles.properties)}>
+      {/* mask：仅覆盖 header 以下的区域，header 保持透明露出节点名 */}
+      <div
+        className="rb:absolute rb:inset-x-0 rb:bottom-0 rb:top-0 rb:rounded-xl rb:bg-[rgba(0,0,0,0.3)] rb:z-1002"
+      />
+
+      {/* SingleNodeRun 卡片，z-index 高于 mask */}
+      <div className="rb:absolute rb:inset-x-0 rb:top-25.5 rb:bottom-0 rb:z-1003">
+        <RbCard
+          title={`${t('workflow.testRun')} ${nodeName}`}
+          extra={
+            <div
+              className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/close.svg')]"
+              onClick={onClose}
+            />
+          }
+          headerType="borderless"
+          headerClassName="rb:font-[MiSans-Bold] rb:font-bold rb:min-h-[48px]!"
+          className="rb:h-full! rb:hover:shadow-none!"
+          bodyClassName="rb:overflow-y-auto! rb:h-[calc(100%-48px)]! rb:px-3! rb:pt-0! rb:pb-3!"
+        >
+          <Form form={form} layout="vertical" size="small" className="rb:mb-0!">
+            <Flex vertical gap={12}>
+              {/* Variables */}
+              {nodeData?.type !== 'iteration' && inputVars.length > 0 && (
+                <Flex vertical gap={8}>
+                  <div className="rb:text-[12px] rb:font-medium rb:text-[#5B6167]">{t('workflow.variables')}</div>
+                  {inputVars.map(v => (
+                    <Form.Item
+                      key={v.value}
+                      name={['inputs', v.value.replace('{{', '').replace('}}', '')]}
+                      label={v.dataType.includes('boolean')
+                        ? null
+                        : <Flex gap={4} align="center" className="rb:text-[12px]">
+                          {v.nodeData?.icon && <div className={`rb:size-3.5 rb:bg-cover ${v.nodeData.icon}`} />}
+                          <span className="rb:font-medium">{v.nodeData?.name}</span>
+                          <span className="rb:text-[#5B6167]">/</span>
+                          <span className="rb:text-[#1677ff]">{v.label}</span>
+                        </Flex>
+                      }
+                      // rules={[{
+                      //   required: ['knowledge-retrieval', 'loop'].includes(nodeData.type) && !v.dataType.includes('boolean'),
+                      //   message: ['array[string]', 'array[number]'].includes(v.dataType) && Array.isArray(v.default) && v.default.length > 0 ? t('common.selectPlaceholder', { title: v.label }) : t('common.inputPlaceholder', { title: v.label })
+                      // }]}
+                      className="rb:mb-0!"
+                    >
+                      {['array[string]', 'array[number]'].includes(v.dataType) && Array.isArray(v.default) && v.default.length > 0
+                      ? <Select
+                        placeholder={t('common.pleaseSelect')}
+                        options={v.default.map((item: string) => ({ label: item, value: item }))}
+                      />
+                      : v.dataType.includes('string') && nodeData.type === 'knowledge-retrieval'
+                        ? <Input.TextArea
+                          placeholder={t('common.pleaseEnter')}
+                          size="small"
+                        />
+                      : v.dataType.includes('string')
+                        ? <Input
+                          placeholder={t('common.pleaseEnter')}
+                          size="small"
+                        />
+                      : v.dataType.includes('number')
+                        ? <InputNumber
+                          size="small"
+                          placeholder={t('common.pleaseEnter')}
+                          className="rb:w-full!"
+                          onChange={(value) => form.setFieldValue(['retry', 'retry_interval'], value)}
+                        />
+                      : v.dataType.includes('file')
+                        ? <FileVarInput name={['inputs', v.value.replace('{{', '').replace('}}', '')]} dataType={v.dataType} form={form} />
+                      : v.dataType.includes('boolean')
+                        ? <Checkbox>
+                          <Flex gap={4} align="center" className="rb:text-[12px]">
+                          {v.nodeData?.icon && <div className={`rb:size-3.5 rb:bg-cover ${v.nodeData.icon}`} />}
+                          <span className="rb:font-medium">{v.nodeData?.name}</span>
+                          <span className="rb:text-[#5B6167]">/</span>
+                          <span className="rb:text-[#1677ff]">{v.label}</span>
+                        </Flex>
+                        </Checkbox>
+                        : null
+                      }
+                    </Form.Item>
+                  ))}
+                </Flex>
+              )}
+              {/* Context */}
+              {hasContext && <ContextList />}
+
+              {isLlm && nodeData?.config?.vision?.defaultValue && (() => {
+                const ref = nodeData.config.vision_input?.defaultValue
+                const visionVar = ref ? variableList.find(v => v.value === ref) : undefined
+                const dataType = visionVar?.dataType ?? 'array[file]'
+
+                // if (!visionVar) return null
+                console.log('visionVar', ref)
+                return (
+                  <Form.Item
+                    name={['inputs', ref.replace('{{', '').replace('}}', '')]}
+                    label={t('workflow.config.llm.vision')}
+                    className="rb:mb-0!"
+                  >
+                    <FileVarInput name={['inputs', ref.replace('{{', '').replace('}}', '')]} dataType={dataType} form={form} />
+                  </Form.Item>
+                )
+              })()}
+
+              {/* Run button */}
+              {(!isAutoRun || result?.status) &&
+                <Button type="primary" block onClick={handleRun} loading={!result?.status && loading} disabled={loading}>
+                  {result?.status ? t('workflow.reStartRun') : t('workflow.startRun')}
+                </Button>
+              }
+
+              {/* Status row */}
+              {result && (
+                <div className="rb:rounded-lg rb:border rb:border-[#E8E8E8] rb:p-3 rb:bg-[#F6FFF4]">
+                  <Flex justify="space-between" align="start">
+                    <Flex vertical align="start" gap={2}>
+                      <span className="rb:text-[11px] rb:text-[#5B6167]">{t('workflow.status')}</span>
+                      <span className="rb:font-medium rb:text-[13px]" style={{ color: statusColor }}>
+                        {loading ? <Skeleton active paragraph={false} className="rb:w-20!" /> : result.status?.toUpperCase()}
+                      </span>
+                    </Flex>
+                    <Flex vertical align="start" gap={2}>
+                      <span className="rb:text-[11px] rb:text-[#5B6167]">{t('workflow.elapsedTime')}</span>
+                      {loading ? <Skeleton active paragraph={false} className="rb:w-20!" /> : result.elapsed_time != null && <span className="rb:font-medium rb:text-[13px]">{result.elapsed_time?.toFixed(3)}ms</span>}
+                    </Flex>
+                    <Flex vertical gap={2} align="start">
+                      <span className="rb:text-[11px] rb:text-[#5B6167]">{t('workflow.totalTokens')}</span>
+                      {loading ? <Skeleton active paragraph={false} className="rb:w-20!" /> : <span className="rb:font-medium rb:text-[13px]">{ result?.token_usage?.total_tokens || 0} Tokens</span>}
+                    </Flex>
+                  </Flex>
+                </div>
+              )}
+
+              {/* Input / Output code blocks */}
+              {result && (['inputs', 'outputs'] as const).map(key => {
+                // if (nodeData.type !== 'http-request' && key === 'process') return null
+                const content = typeof result[key as keyof RunResult] === 'object' && result[key as keyof RunResult] ? JSON.stringify(result[key as keyof RunResult], null, 2) : result[key as keyof RunResult] ? result[key as keyof RunResult] : '{}'
+                return (
+                  <div key={key} className="rb:bg-[#EBEBEB] rb:rounded-lg">
+                    <div className="rb:py-2 rb:px-3 rb:flex rb:justify-between rb:items-center rb:text-[12px]">
+                      {t(`workflow.${key}_result`)}
+                      {!loading &&
+                        <Button
+                          className="rb:py-0! rb:px-1! rb:text-[12px]!"
+                          size="small"
+                          onClick={() => handleCopy(content)}
+                        >{t('common.copy')}</Button>
+                      }
+                    </div>
+                    <div className="rb:max-h-40 rb:overflow-auto">
+                      {loading
+                        ? <Skeleton active title={false} className="rb:m-3! rb:w-[calc(100%-24px)]!" />
+                        : <CodeBlock
+                            size="small"
+                            value={content}
+                            needCopy={false}
+                            showLineNumbers={true}
+                            background="#EBEBEB"
+                          />
+                      }
+                    </div>
+                  </div>
+                )
+              })}
+
+              {/* Error */}
+              {result?.error && (
+                <RbAlert color="orange" className="rb:pb-0!">
+                  <Flex vertical className="rb:w-full!">
+                    <Flex align="center" justify="space-between">
+                      {t(`workflow.error`)}
+                      <Button
+                        className="rb:py-0! rb:px-1! rb:text-[12px]!"
+                        size="small"
+                        onClick={() => handleCopy(result?.error || '')}
+                      >{t('common.copy')}</Button>
+                    </Flex>
+                    <Markdown className="rb:wrap-break-word!" content={result?.error || ''} />
+                  </Flex>
+                </RbAlert>
+              )}
+            </Flex>
+          </Form>
+        </RbCard>
+      </div>
+    </div>
+  )
+}
+
+export default SingleNodeRun

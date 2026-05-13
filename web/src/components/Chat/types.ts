@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:45:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-02 16:05:08
+ * @Last Modified time: 2026-05-08 14:10:42
  */
 import { type ReactNode } from 'react'
 
@@ -36,6 +36,7 @@ export interface ChatItem {
       download_url?: string;
     }[];
     reasoning_content?: string;
+    error?: string;
   },
 }
 

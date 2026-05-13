@@ -40,7 +40,8 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
 
   useEffect(() => {
     if (values?.rerank_model) {
-      form.setFieldsValue({ ...data })
+      const { rerank_model, ...rest } = data;
+      form.setFieldsValue({ ...rest })
     } else {
       form.setFieldsValue({ reranker_id: undefined, reranker_top_k: undefined })
     }

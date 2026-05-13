@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:09:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-20 16:59:25
+ * @Last Modified time: 2026-05-06 18:01:59
  */
 /**
  * Memory Conversation Page
@@ -62,14 +62,13 @@ export interface TestParams {
   message: string;
   /** Search mode switch (0: deep thinking, 1: normal, 2: quick) */
   search_switch: string;
-  /** Conversation history */
-  history: { role: string; content: string }[];
   /** Enable web keyword */
   web_search?: boolean;
   /** Enable memory function */
   memory?: boolean;
   /** Conversation ID */
   conversation_id?: string;
+  session_id?: string;
 }
 /**
  * Data item in analysis logs
@@ -118,6 +117,7 @@ const MemoryConversation: FC = () => {
   const [search_switch, setSearchSwitch] = useState('0')
   const [msg, setMsg] = useState<string>('')
   const [expandedLogs, setExpandedLogs] = useState<Record<number, boolean>>({})
+  const [sessionId, setSessionId] = useState<string | undefined>(undefined)
 
   /** Handle message send */
   const handleSend = () => {
@@ -132,13 +132,14 @@ const MemoryConversation: FC = () => {
       message: msg,
       end_user_id: userId,
       search_switch: search_switch,
-      history: [],
+      session_id: sessionId
     })
       .then(res => {
-        const response = res as { answer: string; intermediate_outputs: LogItem[] }
+        const response = res as { answer: string; intermediate_outputs: LogItem[]; session_id?: string; }
         setChatData(prev => [...prev, { content: response.answer || '-', created_at: new Date().getTime(), role: 'assistant' }])
         setLogs(response.intermediate_outputs)
         setExpandedLogs(Object.fromEntries(response.intermediate_outputs.map((_, i) => [i, true])))
+        setSessionId(response.session_id)
       })
       .finally(() => {
         setLoading(false)
@@ -152,6 +153,12 @@ const MemoryConversation: FC = () => {
   const handleDownload = (file_path?: string) => {
     if (!file_path) return
     window.open(file_path, '_blank')
+  }
+  const handleChangeUser = (opt: DefaultOptionType) => {
+    setUserId(opt?.value as string)
+    setSessionId(undefined)
+    setChatData([])
+    setLogs([])
   }
 
   return (
@@ -169,7 +176,7 @@ const MemoryConversation: FC = () => {
             }))}
             placeholder={t('memoryConversation.searchPlaceholder')}
             style={{ width: '100%', marginBottom: '16px' }}
-            onChange={(opt: DefaultOptionType) => setUserId(opt?.value as string)}
+            onChange={handleChangeUser}
             variant="borderless"
             className="rb:bg-white rb:rounded-lg"
             showSearch

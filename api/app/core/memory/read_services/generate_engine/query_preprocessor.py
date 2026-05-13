@@ -21,14 +21,14 @@ class QueryPreprocessor:
         return text
 
     @staticmethod
-    async def split(query: str, llm_client: RedBearLLM):
+    async def split(query: str, history: list, llm_client: RedBearLLM):
         system_prompt = prompt_manager.render(
             name="problem_split",
             datetime=datetime.now().strftime("%Y-%m-%d"),
         )
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": query},
+            {"role": "user", "content": f"<history>{history}</history><query>{query}</query>"},
         ]
         try:
             sub_queries = await llm_client.ainvoke(messages) | StructResponse(mode='json')

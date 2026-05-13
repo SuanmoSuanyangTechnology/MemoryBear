@@ -55,6 +55,10 @@ const CreateDatasetModal = forwardRef<CreateDatasetModalRef,CreateDatasetModalRe
       title: t('knowledgeBase.customText'),
       description: t('knowledgeBase.manuallyInputText')
     },
+    {
+      title: t('knowledgeBase.csvFile'),
+      description: t('knowledgeBase.csvUploadFileTypes')
+    },
   ]
   // 封装取消方法，添加关闭弹窗逻辑
   const handleClose = () => {
@@ -86,7 +90,7 @@ const CreateDatasetModal = forwardRef<CreateDatasetModalRef,CreateDatasetModalRe
     //   description: selected.description,
     // });
     // 跳转到创建数据集页面并携带来源参数
-    const source = value === 0 ? 'local' : value === 1 ? 'link' : 'text';
+    const source = value === 3 ? 'csv' : value === 0 ? 'local' : value === 1 ? 'link' : 'text';
     if (knowledgeBaseId) {
       navigate(`/knowledge-base/${knowledgeBaseId}/create-dataset`,{
         state: {
@@ -138,6 +142,12 @@ const CreateDatasetModal = forwardRef<CreateDatasetModalRef,CreateDatasetModalRe
                   <Flex gap="small" align='start' justify='start' vertical>
                     <span className='rb:text-base rb:font-medium rb:text-gray-800'>{items[1].title}</span>
                     <span className='rb:text-xs rb:text-gray-500'>{items[1].description}</span>
+                  </Flex>
+                </Radio>
+                <Radio value={3} style={getActiveRadioStyle(value === 3)} className='rb:w-full'>
+                  <Flex gap="small" align='start' justify='start' vertical>
+                    <span className='rb:text-base rb:font-medium rb:text-gray-800'>{items[2].title}</span>
+                    <span className='rb:text-xs rb:text-gray-500'>{items[2].description}</span>
                   </Flex>
                 </Radio> 
               </Radio.Group>

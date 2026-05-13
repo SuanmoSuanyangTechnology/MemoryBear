@@ -418,6 +418,9 @@ class MemoryConfigService:
                 pruning_scene=memory_config.pruning_scene or "education",
                 pruning_threshold=float(
                     memory_config.pruning_threshold) if memory_config.pruning_threshold is not None else 0.5,
+                # Pipeline config: Emotion extraction
+                emotion_enabled=bool(
+                    memory_config.emotion_enabled) if memory_config.emotion_enabled is not None else False,
                 # Ontology scene association
                 scene_id=memory_config.scene_id,
                 ontology_class_infos=_load_ontology_class_infos(self.db, memory_config.scene_id),
@@ -573,6 +576,7 @@ class MemoryConfigService:
             statement_extraction=stmt_config,
             deduplication=dedup_config,
             forgetting_engine=forget_config,
+            emotion_enabled=getattr(memory_config, "emotion_enabled", False),
         )
 
     @staticmethod

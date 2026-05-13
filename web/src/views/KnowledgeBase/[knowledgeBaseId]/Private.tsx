@@ -39,6 +39,8 @@ import { formatDateTime } from '@/utils/format';
 import KnowledgeGraphCard from '../components/KnowledgeGraphCard';
 import { useBreadcrumbManager, type BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
 import './Private.css'
+import Tag from '@/components/Tag'
+import copy from 'copy-to-clipboard'
 // Tree node data type
 
 const Private: FC = () => {
@@ -456,29 +458,35 @@ const Private: FC = () => {
 
   }
   // Generate dropdown menu items (based on current row)
-  const getOptMenuItems = (row: KnowledgeBaseListItem): MenuProps['items'] => [
-    {
-      key: '1',
-      label: t('knowledgeBase.rechunking'),
-      onClick: () => {
-        handleRechunking(row);
+  const getOptMenuItems = (row: KnowledgeBaseListItem): MenuProps['items'] => {
+    const options = [{
+        key: '2',
+        label: t('knowledgeBase.download'),
+        onClick: () => {
+          handleDownload(row);
+        },
       },
-    },
-    {
-      key: '2',
-      label: t('knowledgeBase.download'),
-      onClick: () => {
-        handleDownload(row);
-      },
-    },
-    {
-      key: '3',
-      label: t('knowledgeBase.delete'),
-      onClick: () => {
-        handleDelete(row);
-      },
+      {
+        key: '3',
+        label: t('knowledgeBase.delete'),
+        onClick: () => {
+          handleDelete(row);
+        },
+      }]
+    if (row.parser_config?.doc_type === 'qa') {
+      return options
     }
-  ];
+    return [
+      {
+        key: '1',
+        label: t('knowledgeBase.rechunking'),
+        onClick: () => {
+          handleRechunking(row);
+        },
+      },
+      ...options
+    ]
+  };
   const handleRechunking = (item: KnowledgeBaseListItem) => {
     if (!knowledgeBaseId) return;
     const document = item as unknown as KnowledgeBaseDocumentData;
@@ -570,7 +578,7 @@ const Private: FC = () => {
         return (
           <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
             <span
-              className="rb:inline-block rb:w-[5px] rb:h-[5px] rb:mr-2 rb:rounded-full"
+              className="rb:inline-block rb:w-1.25 rb:h-1.25 rb:mr-2 rb:rounded-full"
               style={{ backgroundColor: value === 1 ? '#369F21' : value === 0 ? '#FF0000' : '#FF8A4C' }}
             ></span>
             <span>{value === 1 ? t('knowledgeBase.completed') : value === 0 ? t('knowledgeBase.pending') : t('knowledgeBase.processing')}</span>
@@ -613,6 +621,7 @@ const Private: FC = () => {
       title: t('knowledgeBase.processingMode'),
       dataIndex: 'parser_id',
       key: 'parser_id',
+      width: 100,
     },
     {
       title: t('knowledgeBase.dataSize'),
@@ -628,6 +637,11 @@ const Private: FC = () => {
           <span>{formatDateTime(value,'YYYY-MM-DD HH:mm:ss')}</span>
         )
       }
+    },
+    {
+      title: 'ID',
+      dataIndex: 'id',
+      key: 'id',
     },
 
     {
@@ -762,11 +776,16 @@ const Private: FC = () => {
     setIsSyncing(false);
   };
 
+  const handleCopy = (value: string) => {
+    copy(value)
+    messageApi.success(t('common.copySuccess'))
+  }
+
   return (
     <>
     <div className="rb:flex rb:h-full rb:bg-white rb:rounded-xl">
       {folder && (
-        <div className="rb:w-64 rb:py-4 rb:flex-shrink-0 rb:h-[calc(100%+40px)] rb:border-r rb:border-[#EAECEE] rb:p-4 rb:bg-transparent">
+        <div className="rb:w-64 rb:py-4 rb:shrink-0 rb:h-[calc(100%+40px)] rb:border-r rb:border-[#EAECEE] rb:p-4 rb:bg-transparent">
             <FolderTree
               multiple
               className="customTree"
@@ -791,11 +810,15 @@ const Private: FC = () => {
                 <div className="rb:flex rb:items-center rb:border rb:border-[rgba(33, 35, 50, 0.17)] rb:text-gray-500 rb:cursor-pointer rb:px-1 rb:py-0.5 rb:rounded"
                   onClick={handleEditFolder}
                 >
-                  <img src={editIcon} alt="edit" className="rb:w-[14px] rb:h-[14px" />
+                  <img src={editIcon} alt="edit" className="rb:w-3.5 rb:h-[14px" />
                   <span className='rb:text-[12px]'>{t('knowledgeBase.edit')} {t('knowledgeBase.name')}</span>
                 </div>
             </div>
-            <div className='rb:flex rb:items-center rb:gap-6 rb:text-gray-500 rb:mt-2 rb:text-xs'>
+              <div className='rb:flex rb:items-center rb:gap-6 rb:text-gray-500 rb:mt-2 rb:text-xs'>
+                <Tag variant="borderless" color="default" className="rb:cursor-pointer" onClick={() => handleCopy(knowledgeBase.id)}>
+                  ID: {knowledgeBase.id}
+                  <span className="rb:-mb-0.5 rb:ml-1 rb:inline-block rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"></span>
+                </Tag>
                 <span className='rb:text-[12px]'>{t('knowledgeBase.created')} {t('knowledgeBase.time')}: {formatDateTime(knowledgeBase.created_at) || '-'}</span>
                 <span className='rb:text-[12px]'>{t('knowledgeBase.updated')} {t('knowledgeBase.time')}: {formatDateTime(knowledgeBase.updated_at) || '-'}</span>
                 

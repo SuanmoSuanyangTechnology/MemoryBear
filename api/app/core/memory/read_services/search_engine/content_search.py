@@ -6,7 +6,7 @@ import uuid
 from neo4j import Session
 
 from app.core.memory.enums import Neo4jNodeType
-from app.core.memory.memory_service import MemoryContext
+from app.core.memory.models.service_models import MemoryContext
 from app.core.memory.models.service_models import Memory, MemorySearchResult
 from app.core.memory.read_services.search_engine.result_builder import data_builder_factory
 from app.core.models import RedBearEmbeddings
@@ -14,6 +14,8 @@ from app.core.rag.nlp.search import knowledge_retrieval
 from app.repositories import knowledge_repository
 from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.core.memory.read_services.search_engine.result_builder import MetadataBuilder
+from app.repositories.neo4j.graph_search import search_user_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +178,22 @@ class Neo4jSearchService:
                 ))
         memories.sort(key=lambda x: x.score, reverse=True)
         return MemorySearchResult(memories=memories[:limit])
+
+    async def memory_l0(self) -> Memory:
+        async with Neo4jConnector() as connector:
+            end_user_id = self.ctx.end_user_id
+            user_meta = await search_user_metadata(connector, end_user_id)
+            metadata = MetadataBuilder(user_meta)
+            memory = Memory(
+                score=1,
+                source=Neo4jNodeType.EXTRACTEDENTITY,
+                query='',
+                id=end_user_id,
+                content=metadata.content,
+                data=metadata.data,
+            )
+
+        return memory
 
 
 class RAGSearchService:

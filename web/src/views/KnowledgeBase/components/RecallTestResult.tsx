@@ -7,25 +7,28 @@
  * @LastEditTime: 2025-12-22 13:47:53
  */
 import { FileOutlined, FieldTimeOutlined, EditOutlined } from '@ant-design/icons';
-import { Skeleton } from 'antd';
+import { Skeleton, Flex, Space, App } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { RecallTestData } from '@/views/KnowledgeBase/types';
 import { NoData } from './noData';
 import { formatDateTime } from '@/utils/format';
 import InfiniteScroll from 'react-infinite-scroll-component';
 import RbMarkdown from '@/components/Markdown';
-import { useMemo } from 'react';
+import { useMemo, type MouseEvent } from 'react';
+import { deleteDocumentChunk } from '@/api/knowledgeBase'
 
 interface RecallTestResultProps {
   data: RecallTestData[];
   showEmpty?: boolean;
   hasMore?: boolean;
   loadMore?: () => void;
+  refresh?: () => void;
   loading?: boolean;
   scrollableTarget?: string;
   editable?: boolean; // Whether editable
   onItemClick?: (item: RecallTestData, index: number) => void; // Click item callback
   parserMode?: number; // Parser mode, 1 means QA format
+  handleCopy?: (text?: string) => void;
 }
 
 const RecallTestResult = ({ 
@@ -33,13 +36,17 @@ const RecallTestResult = ({
   showEmpty = true,
   hasMore = false,
   loadMore,
+  refresh,
   loading = false,
   scrollableTarget,
   editable = false,
   onItemClick,
   parserMode = 0,
+  handleCopy,
 }: RecallTestResultProps) => {
   const { t } = useTranslation();
+  const { modal, message } = App.useApp()
+  console.log('chunk data', data)
 
   // Parse QA format content
   const parseQAContent = (content: string) => {
@@ -130,6 +137,24 @@ const RecallTestResult = ({
       return 'rb:text-[#FF5D34]';
     }
   };
+  const handleDelete = (e: MouseEvent, item: RecallTestData) => {
+    e.preventDefault();
+    e.stopPropagation();
+    modal.confirm({
+      title: t('common.confirmDeleteDesc', { name: `chunk_${item.metadata?.sort_id}` }),
+      okText: t('common.delete'),
+      cancelText: t('common.cancel'),
+      okType: 'danger',
+      onOk: () => {
+        deleteDocumentChunk(item.metadata.knowledge_id, item.metadata.document_id, item.metadata.doc_id)
+          .then(() => {
+            message.success(t('common.deleteSuccess'));
+            refresh?.()
+          })
+      }
+    })
+    console.log('RecallTestData', item)
+  }
 
   // Show skeleton when initial loading
   if (loading && data.length === 0) {
@@ -183,17 +208,21 @@ const RecallTestResult = ({
                   {scorePercentage.toFixed(1)}% {t('knowledgeBase.similarity')}
                 </span>
               )}
-              <div className={`rb:flex rb:mt-2 rb:flex rb:items-end rb:justify-end rb:gap-4 ${!showScore ? 'rb:w-full' : ''}`}>
+              <div className={`rb:flex rb:mt-2 rb:items-end rb:justify-end rb:gap-4 ${!showScore ? 'rb:w-full' : ''}`}>
                 <span className='rb:text-gray-800'>
                   <FileOutlined /> {item.metadata?.file_name || '-'}
                 </span>
-                <span className='rb:text-gray-500 rb:text-xs rb:bg-[#DFDFDF] rb:px-1 rb:py-[2px] rb:rounded'>
+                <span className='rb:text-gray-500 rb:text-xs rb:bg-[#DFDFDF] rb:px-1 rb:py-0.5 rb:rounded'>
                   chunk_{item.metadata?.sort_id || index}
                 </span>
+                <div
+                  className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete.svg')] rb:hover:bg-[url('@/assets/images/common/delete_hover.svg')]"
+                  onClick={(e) => handleDelete(e, item)}
+                ></div>
               </div>
             </div>
             <div className='rb:flex rb:text-left rb:px-4 rb:py-3 rb:bg-white rb:rounded-lg rb:mt-2'>
-              <div className='rb:text-gray-800 rb:text-sm rb:whitespace-pre-wrap rb:break-words rb:w-full'>
+              <div className='rb:text-gray-800 rb:text-sm rb:whitespace-pre-wrap rb:wrap-break-word rb:w-full'>
                 {(() => {
                   const qaContent = parseQAContent(item.page_content);
                   if (qaContent) {
@@ -204,13 +233,21 @@ const RecallTestResult = ({
                 })()}
               </div>
             </div>
-            {item.metadata?.file_created_at && (
-              <div className='rb:flex rb:items-center rb:justify-start rb:mt-3'>
-                <span className='rb:text-gray-500 rb:text-xs'>
-                  <FieldTimeOutlined /> {formatDateTime(item.metadata.file_created_at)}
-                </span>
-              </div>
-            )}
+            <Flex align="center" justify={item.metadata?.file_created_at ? 'space-between' : 'end'} className="rb:mt-3!">
+              {item.metadata?.file_created_at && (
+                <div className='rb:flex rb:items-center rb:justify-start'>
+                  <span className='rb:text-gray-500 rb:text-xs'>
+                    <FieldTimeOutlined /> {formatDateTime(item.metadata.file_created_at)}
+                  </span>
+                </div>
+              )}
+              <Space align="center" className='rb:text-gray-500 rb:text-xs' onClick={() => handleCopy?.(item.metadata?.doc_id)}>
+                ID: {item.metadata?.doc_id}
+                <span
+                  className="rb:cursor-pointer rb:inline-block rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"
+                ></span>
+              </Space>
+            </Flex>
           </div>
         );
       })}
@@ -228,7 +265,7 @@ const RecallTestResult = ({
       <div className='rb:flex rb:h-full rb:flex-col'>
         <div className='rb:flex rb:items-center rb:justify-start rb:gap-2'>
           <span className='rb:text-lg rb:font-medium'>{t('knowledgeBase.recallResult')}</span>
-          <span className='rb:text-gray-500 rb:text-xs rb:pt-[2px]'>
+          <span className='rb:text-gray-500 rb:text-xs rb:pt-0.5'>
             (<span className='rb:text-[#155EEF]'>{data.length}</span> results)
           </span>
         </div>
@@ -245,12 +282,13 @@ const RecallTestResult = ({
     );
   }
 
+
   // Otherwise use normal rendering
   return (
     <div className='rb:flex rb:flex-col'>
       <div className='rb:flex rb:items-center rb:justify-start rb:gap-2'>
         <span className='rb:text-lg rb:font-medium'>{t('knowledgeBase.recallResult')}</span>
-        <span className='rb:text-gray-500 rb:text-xs rb:pt-[2px]'>
+        <span className='rb:text-gray-500 rb:text-xs rb:pt-0.5'>
           (<span className='rb:text-[#155EEF]'>{data.length}</span> results)
         </span>
       </div>

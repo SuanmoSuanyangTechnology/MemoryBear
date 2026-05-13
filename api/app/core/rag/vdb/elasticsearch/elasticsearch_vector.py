@@ -5,7 +5,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
-from elasticsearch import Elasticsearch, helpers
+from elasticsearch import Elasticsearch, helpers, NotFoundError
 from elasticsearch.helpers import BulkIndexError
 from packaging.version import parse as parse_version
 # langchain-community
@@ -53,13 +53,30 @@ class ElasticSearchVector(BaseVector):
         return "elasticsearch"
 
     def add_chunks(self, chunks: list[DocumentChunk], **kwargs):
-        # 实现 Elasticsearch 保存向量
-        texts = [chunk.page_content for chunk in chunks]
+        # QA chunks: embedding 只对 question 字段做；source chunks: 不做 embedding
+        texts_for_embedding = []
+        for chunk in chunks:
+            chunk_type = (chunk.metadata or {}).get("chunk_type", "chunk")
+            if chunk_type == "source":
+                # source chunk 不需要向量索引
+                texts_for_embedding.append("")
+            elif chunk_type == "qa":
+                # QA chunk: 用 question 字段做 embedding
+                texts_for_embedding.append((chunk.metadata or {}).get("question", chunk.page_content))
+            else:
+                # 普通 chunk: 用 page_content 做 embedding
+                texts_for_embedding.append(chunk.page_content)
+
         if self.is_multimodal_embedding:
-            # 火山引擎多模态 Embedding
-            embeddings = self.embeddings.embed_batch(texts)
+            embeddings = self.embeddings.embed_batch(texts_for_embedding)
         else:
-            embeddings = self.embeddings.embed_documents(list(texts))
+            embeddings = self.embeddings.embed_documents(texts_for_embedding)
+
+        # source chunk 的向量置空
+        for i, chunk in enumerate(chunks):
+            if (chunk.metadata or {}).get("chunk_type") == "source":
+                embeddings[i] = None
+
         self.create(chunks, embeddings, **kwargs)
 
     def create(self, chunks: list[DocumentChunk], embeddings: list[list[float]], **kwargs):
@@ -72,13 +89,25 @@ class ElasticSearchVector(BaseVector):
         uuids = self._get_uuids(chunks)
         actions = []
         for i, chunk in enumerate(chunks):
+            source = {
+                Field.CONTENT_KEY.value: chunk.page_content,
+                Field.METADATA_KEY.value: chunk.metadata or {},
+                Field.VECTOR.value: embeddings[i] or None
+            }
+            # 写入 QA 相关字段
+            meta = chunk.metadata or {}
+            if meta.get("chunk_type"):
+                source[Field.CHUNK_TYPE.value] = meta["chunk_type"]
+            if meta.get("question"):
+                source[Field.QUESTION.value] = meta["question"]
+            if meta.get("answer"):
+                source[Field.ANSWER.value] = meta["answer"]
+            if meta.get("source_chunk_id"):
+                source[Field.SOURCE_CHUNK_ID.value] = meta["source_chunk_id"]
+
             action = {
                 "_index": self._collection_name,
-                "_source": {
-                    Field.CONTENT_KEY.value: chunk.page_content,
-                    Field.METADATA_KEY.value: chunk.metadata or {},
-                    Field.VECTOR.value: embeddings[i] or None
-                }
+                "_source": source
             }
             actions.append(action)
         # using bulk mode
@@ -113,7 +142,7 @@ class ElasticSearchVector(BaseVector):
 
         return True
 
-    def delete_by_ids(self, ids: list[str]):
+    def delete_by_ids(self, ids: list[str], *, refresh: bool = False):
         if not ids:
             return
         if not self._client.indices.exists(index=self._collection_name):
@@ -134,6 +163,8 @@ class ElasticSearchVector(BaseVector):
             actions = [{"_op_type": "delete", "_index": self._collection_name, "_id": es_id} for es_id in actual_ids]
             try:
                 helpers.bulk(self._client, actions)
+                if refresh:
+                    self._client.indices.refresh(index=self._collection_name)
             except BulkIndexError as e:
                 for error in e.errors:
                     delete_error = error.get('delete', {})
@@ -153,7 +184,7 @@ class ElasticSearchVector(BaseVector):
         else:
             return None
 
-    def delete_by_metadata_field(self, key: str, value: str):
+    def delete_by_metadata_field(self, key: str, value: str, *, refresh: bool = False):
         if not self._client.indices.exists(index=self._collection_name):
             return False
         actual_ids = self.get_ids_by_metadata_field(key, value)
@@ -162,6 +193,8 @@ class ElasticSearchVector(BaseVector):
             actions = [{"_op_type": "delete", "_index": self._collection_name, "_id": es_id} for es_id in actual_ids]
             try:
                 helpers.bulk(self._client, actions)
+                if refresh:
+                    self._client.indices.refresh(index=self._collection_name)
             except BulkIndexError as e:
                 for error in e.errors:
                     delete_error = error.get('delete', {})
@@ -192,6 +225,8 @@ class ElasticSearchVector(BaseVector):
             List of DocumentChunk objects that match the query.
         """
         indices = kwargs.get("indices", self._collection_name)  # Default single index, multiple indexes are also supported, such as "index1, index2, index3"
+        if not self._client.indices.exists(index=indices):
+            return 0, []
 
         # Calculate the start position for the current page
         from_ = pagesize * (page-1)
@@ -226,12 +261,15 @@ class ElasticSearchVector(BaseVector):
             })
 
         # For simplicity, we use from/size here which has a limit (usually up to 10,000).
-        result = self._client.search(
-            index=indices,
-            from_=from_,  # Only use from_ for the first page (simplified)
-            size=pagesize,
-            body=query_str,
-        )
+        try:
+            result = self._client.search(
+                index=indices,
+                from_=from_,  # Only use from_ for the first page (simplified)
+                size=pagesize,
+                body=query_str,
+            )
+        except NotFoundError:
+            return 0, []
 
         if "errors" in result:
             raise ValueError(f"Error during query: {result['errors']}")
@@ -241,10 +279,19 @@ class ElasticSearchVector(BaseVector):
         for res in result["hits"]["hits"]:
             source = res["_source"]
             page_content = source.get(Field.CONTENT_KEY.value)
-            # vector = source.get(Field.VECTOR.value)
             vector = None
             metadata = source.get(Field.METADATA_KEY.value, {})
+            chunk_type = source.get(Field.CHUNK_TYPE.value)
             score = res["_score"]
+
+            # 将 QA 字段注入 metadata 供前端展示
+            if chunk_type:
+                metadata["chunk_type"] = chunk_type
+            if chunk_type == "qa":
+                metadata["question"] = source.get(Field.QUESTION.value, "")
+                metadata["answer"] = source.get(Field.ANSWER.value, "")
+                page_content = f"Q: {metadata['question']}\nA: {metadata['answer']}"
+
             docs_and_scores.append((DocumentChunk(page_content=page_content, vector=vector, metadata=metadata), score))
 
         docs = []
@@ -267,13 +314,18 @@ class ElasticSearchVector(BaseVector):
             List of DocumentChunk objects that match the query.
         """
         indices = kwargs.get("indices", self._collection_name)  # Default single index, multi-index available，etc "index1,index2,index3"
+        if not self._client.indices.exists(index=indices):
+            return 0, []
         query_str = {"query": {"term": {f"{Field.DOC_ID.value}": doc_id}}}
-        result = self._client.search(
-            index=indices,
-            from_=0,  # Only use from_ for the first page (simplified)
-            size=1,
-            body=query_str,
-        )
+        try:
+            result = self._client.search(
+                index=indices,
+                from_=0,  # Only use from_ for the first page (simplified)
+                size=1,
+                body=query_str,
+            )
+        except NotFoundError:
+            return 0, []
         # print(result)
         if "errors" in result:
             raise ValueError(f"Error during query: {result['errors']}")
@@ -308,27 +360,43 @@ class ElasticSearchVector(BaseVector):
         Returns:
             updated count.
         """
-        indices = kwargs.get("indices", self._collection_name)  # Default single index, multi-index available，etc "index1,index2,index3"
-        if self.is_multimodal_embedding:
-            # 火山引擎多模态 Embedding
-            chunk.vector = self.embeddings.embed_text(chunk.page_content)
+        indices = kwargs.get("indices", self._collection_name)
+        chunk_type = (chunk.metadata or {}).get("chunk_type")
+
+        # QA chunk: embedding 基于 question；source chunk: 不更新向量
+        if chunk_type == "source":
+            embed_text = ""
+        elif chunk_type == "qa":
+            embed_text = (chunk.metadata or {}).get("question", chunk.page_content)
         else:
-            chunk.vector = self.embeddings.embed_query(chunk.page_content)
+            embed_text = chunk.page_content
+
+        if chunk_type != "source":
+            if self.is_multimodal_embedding:
+                chunk.vector = self.embeddings.embed_text(embed_text)
+            else:
+                chunk.vector = self.embeddings.embed_query(embed_text)
+
+        script_source = "ctx._source.page_content = params.new_content; ctx._source.vector = params.new_vector;"
+        params = {
+            "new_content": chunk.page_content,
+            "new_vector": chunk.vector if chunk_type != "source" else None
+        }
+
+        # QA chunk: 同时更新 question/answer 字段
+        if chunk_type == "qa":
+            script_source += " ctx._source.question = params.new_question; ctx._source.answer = params.new_answer;"
+            params["new_question"] = (chunk.metadata or {}).get("question", "")
+            params["new_answer"] = (chunk.metadata or {}).get("answer", "")
 
         body = {
             "script": {
-                "source": """
-                        ctx._source.page_content = params.new_content;
-                        ctx._source.vector = params.new_vector;
-                    """,
-                "params": {
-                    "new_content": chunk.page_content,
-                    "new_vector": chunk.vector
-                }
+                "source": script_source,
+                "params": params
             },
             "query": {
                 "term": {
-                    Field.DOC_ID.value: chunk.metadata["doc_id"]  # exact match doc_id
+                    Field.DOC_ID.value: chunk.metadata["doc_id"]
                 }
             }
         }
@@ -336,9 +404,6 @@ class ElasticSearchVector(BaseVector):
             index=indices,
             body=body,
         )
-        # Remove debug printing and use logging instead
-        # print(result)
-        # print(f"Update successful, number of affected documents: {result['updated']}")
         return result['updated']
 
     def change_status_by_document_id(self, document_id: str, status: int, **kwargs) -> str:
@@ -397,11 +462,11 @@ class ElasticSearchVector(BaseVector):
                             }
                         }
                     },
-                    "filter": {  # Add the filter condition of status=1
-                        "term": {
-                            "metadata.status": 1
-                        }
-                    }
+                    "filter": [
+                        {"term": {"metadata.status": 1}},
+                        # 排除 source chunk（仅供 GraphRAG 使用，不参与检索）
+                        {"bool": {"must_not": {"term": {Field.CHUNK_TYPE.value: "source"}}}}
+                    ]
                 }
             }
         # If file_names_filter is passed in, merge the filtering conditions
@@ -415,22 +480,14 @@ class ElasticSearchVector(BaseVector):
                             },
                             "script": {
                                 "source": f"cosineSimilarity(params.query_vector, '{Field.VECTOR.value}') + 1.0",
-                                # The script_score query calculates the cosine similarity between the embedding field of each document and the query vector. The addition of +1.0 is to ensure that the scores returned by the script are non-negative, as the range of cosine similarity is [-1, 1]
                                 "params": {"query_vector": query_vector}
                             }
                         }
                     },
                     "filter": [
-                        {
-                            "term": {
-                                "metadata.status": 1
-                            }
-                        },
-                        {
-                            "terms": {
-                                "metadata.file_name": file_names_filter  # Additional file_name filtering
-                            }
-                        }
+                        {"term": {"metadata.status": 1}},
+                        {"terms": {"metadata.file_name": file_names_filter}},
+                        {"bool": {"must_not": {"term": {Field.CHUNK_TYPE.value: "source"}}}}
                     ],
                 }
             }
@@ -451,8 +508,19 @@ class ElasticSearchVector(BaseVector):
             source = res["_source"]
             page_content = source.get(Field.CONTENT_KEY.value)
             metadata = source.get(Field.METADATA_KEY.value, {})
+            chunk_type = source.get(Field.CHUNK_TYPE.value)
             score = res["_score"]
             score = score / 2  # Normalized [0-1]
+
+            # QA chunk: 返回 Q+A 拼接作为上下文
+            if chunk_type == "qa":
+                question = source.get(Field.QUESTION.value, "")
+                answer = source.get(Field.ANSWER.value, "")
+                page_content = f"Q: {question}\nA: {answer}"
+                metadata["chunk_type"] = "qa"
+                metadata["question"] = question
+                metadata["answer"] = answer
+
             docs_and_scores.append((DocumentChunk(page_content=page_content, metadata=metadata), score))
 
         docs = []
@@ -491,11 +559,10 @@ class ElasticSearchVector(BaseVector):
                         }
                     }
                 },
-                "filter": {  # Add the filter condition of status=1
-                    "term": {
-                        "metadata.status": 1
-                    }
-                }
+                "filter": [
+                    {"term": {"metadata.status": 1}},
+                    {"bool": {"must_not": {"term": {Field.CHUNK_TYPE.value: "source"}}}}
+                ]
             }
         }
 
@@ -512,16 +579,9 @@ class ElasticSearchVector(BaseVector):
                         }
                     },
                     "filter": [
-                        {
-                            "term": {
-                                "metadata.status": 1
-                            }
-                        },
-                        {
-                            "terms": {
-                                "metadata.file_name": file_names_filter  # Additional file_name filtering
-                            }
-                        }
+                        {"term": {"metadata.status": 1}},
+                        {"terms": {"metadata.file_name": file_names_filter}},
+                        {"bool": {"must_not": {"term": {Field.CHUNK_TYPE.value: "source"}}}}
                     ],
                 }
             }
@@ -543,6 +603,17 @@ class ElasticSearchVector(BaseVector):
             source = res["_source"]
             page_content = source.get(Field.CONTENT_KEY.value)
             metadata = source.get(Field.METADATA_KEY.value, {})
+            chunk_type = source.get(Field.CHUNK_TYPE.value)
+
+            # QA chunk: 返回 Q+A 拼接作为上下文
+            if chunk_type == "qa":
+                question = source.get(Field.QUESTION.value, "")
+                answer = source.get(Field.ANSWER.value, "")
+                page_content = f"Q: {question}\nA: {answer}"
+                metadata["chunk_type"] = "qa"
+                metadata["question"] = question
+                metadata["answer"] = answer
+
             # Normalize the score to the [0,1] interval
             normalized_score = res["_score"] / max_score
             docs_and_scores.append((DocumentChunk(page_content=page_content, metadata=metadata), normalized_score))
@@ -652,7 +723,7 @@ class ElasticSearchVector(BaseVector):
                         },
                         Field.VECTOR.value: {
                             "type": "dense_vector",
-                            "dims": len(embeddings[0]),  # Make sure the dimension is correct here,The dimension size of the vector. When index is true, it cannot exceed 1024; when index is false or not specified, it cannot exceed 2048, which can improve retrieval efficiency
+                            "dims": len(next((e for e in embeddings if e is not None), [0]*768)),  # 跳过 None 获取向量维度，fallback 768
                             "index": True,
                             "similarity": "cosine"
                         }

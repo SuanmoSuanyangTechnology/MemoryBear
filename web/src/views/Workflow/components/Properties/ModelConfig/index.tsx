@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-03-07 14:55:04 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-04-17 10:05:32 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-04-29 17:08:19
  */
 import { type FC, useEffect, useState } from "react";
 import { useTranslation } from 'react-i18next'
@@ -28,7 +28,6 @@ const ModelConfig: FC = () => {
     if (model_id && options) {
       const model = options.find(item => item.id === model_id)
       setSelectedModel(model || null)
-      form.setFieldValue('json_output', false)
     } else {
       setSelectedModel(null)
     }
@@ -47,6 +46,7 @@ const ModelConfig: FC = () => {
           params={{ type: 'llm,chat' }}
           className="rb:w-full!"
           size="small"
+          onChange={() => form.setFieldValue('json_output', false)}
           updateOptions={updateOptions}
         />
       </Form.Item>

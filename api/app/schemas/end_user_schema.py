@@ -20,3 +20,5 @@ class EndUser(BaseModel):
     # 用户摘要和洞察更新时间
     user_summary_updated_at: Optional[datetime.datetime] = Field(description="用户摘要最后更新时间", default=None)
     memory_insight_updated_at: Optional[datetime.datetime] = Field(description="洞察报告最后更新时间", default=None)
+    #用户记忆节点总数（Neo4j模式）
+    memory_count: int = Field(description="记忆节点总数", default=0)

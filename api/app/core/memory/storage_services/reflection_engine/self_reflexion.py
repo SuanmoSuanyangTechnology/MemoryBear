@@ -483,7 +483,7 @@ class ReflectionEngine:
         result_data['memory_verifies'] = memory_verifies
         result_data['quality_assessments'] = quality_assessments
         conflicts_found = 0  # Initialize as integer 0 instead of empty string
-        REMOVE_KEYS = {"created_at", "expired_at","relationship","predicate","statement_id","id","statement_id","relationship_statement_id"}
+        REMOVE_KEYS = {"created_at","relationship","predicate","statement_id","id","statement_id","relationship_statement_id"}
         # Clean conflict_data, and memory_verify and quality_assessment
         cleaned_conflict_data = []
         for item in conflict_data:

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:25:37 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 22:35:08
+ * @Last Modified time: 2026-04-29 17:21:46
  */
 /**
  * Knowledge Configuration Modal
@@ -10,7 +10,7 @@
  * Supports different retrieval modes: participle, semantic, and hybrid
  */
 
-import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
+import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Select, InputNumber, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
@@ -89,15 +89,6 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
     handleClose
   }));
 
-  useEffect(() => {
-    if (values?.retrieve_type) {
-      const fieldsToReset = Object.keys(values).filter(key => 
-        key !== 'kb_id' && key !== 'retrieve_type' && key !== 'top_k'
-      ) as (keyof KnowledgeConfigForm)[];
-      form.resetFields(fieldsToReset);
-    }
-  }, [values?.retrieve_type])
-
   return (
     <RbModal
       title={t('application.knowledgeConfig')}
@@ -127,7 +118,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
           extra={t('application.retrieve_type_desc')}
           rules={[{ required: true, message: t('common.pleaseSelect') }]}
         >
-          
+
           <Select
             options={retrieveTypes.map(key => ({
               label: t(`application.${key}`),
@@ -141,7 +132,6 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
           label={t('application.top_k')}
           rules={[{ required: true, message: t('common.pleaseEnter') }]}
           extra={t('application.top_k_desc')}
-          initialValue={5}
         >
           <InputNumber
             style={{ width: '100%' }}
@@ -150,65 +140,36 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
             onChange={(value) => form.setFieldValue('top_k', value)}
           />
         </FormItem>
-        {/* Semantic similarity threshold */}
-        {values?.retrieve_type === 'semantic' && (
+        {!['semantic', 'graph'].includes(values?.retrieve_type || '') &&
           <FormItem
             name="similarity_threshold"
             label={t('application.similarity_threshold')}
             extra={t('application.similarity_threshold_desc')}
             initialValue={0.5}
           >
-            <RbSlider 
+            <RbSlider
               max={1.0}
               step={0.1}
               min={0.0}
+              isInput={true}
             />
           </FormItem>
-        )}
-        {/* Word segmentation matching threshold */}
-        {values?.retrieve_type === 'participle' && (
+        }
+        {!['participle', 'graph'].includes(values?.retrieve_type || '') &&
           <FormItem
             name="vector_similarity_weight"
             label={t('application.vector_similarity_weight')}
-            extra={t('application.vector_similarity_weight_desc')}
+            extra={t('application.vector_similarity_weight_desc1')}
             initialValue={0.5}
           >
-            <RbSlider 
+            <RbSlider
               max={1.0}
               step={0.1}
               min={0.0}
+              isInput={true}
             />
           </FormItem>
-        )}
-        {/* Hybrid retrieval weight */}
-        {values?.retrieve_type === 'hybrid' && (
-          <>
-            <FormItem
-              name="similarity_threshold"
-              label={t('application.similarity_threshold')}
-              extra={t('application.similarity_threshold_desc1')}
-              initialValue={0.5}
-            >
-              <RbSlider 
-                max={1.0}
-                step={0.1}
-                min={0.0}
-              />
-            </FormItem>
-            <FormItem
-              name="vector_similarity_weight"
-              label={t('application.vector_similarity_weight')}
-              extra={t('application.vector_similarity_weight_desc1')}
-              initialValue={0.5}
-            >
-              <RbSlider 
-                max={1.0}
-                step={0.1}
-                min={0.0}
-              />
-            </FormItem>
-          </>
-        )}
+        }
       </Form>
     </RbModal>
   );

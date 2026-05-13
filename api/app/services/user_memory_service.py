@@ -399,25 +399,17 @@ class UserMemoryService:
                 }
             
             # 构建响应数据（转换时间为毫秒时间戳）
-            # 将 meta_data 中的 profile、knowledge_tags、behavioral_hints 平铺到顶层
-            meta = end_user_info_record.meta_data or {}
-
-            # profile 列表字段截断：只返回前 MAX_PROFILE_LIST_SIZE 条（按时间从新到旧）
-            MAX_PROFILE_LIST_SIZE = 5
-            profile = meta.get("profile")
-            if isinstance(profile, dict):
-                for key in ("role", "domain", "expertise", "interests"):
-                    if isinstance(profile.get(key), list):
-                        profile[key] = profile[key][:MAX_PROFILE_LIST_SIZE]
+            # meta_data 只暴露四个核心字段
+            _META_FIELDS = ("goals", "traits", "interests", "core_facts")
+            raw_meta = end_user_info_record.meta_data or {}
+            filtered_meta = {k: raw_meta[k] for k in _META_FIELDS if k in raw_meta}
 
             response_data = {
                 "end_user_info_id": str(end_user_info_record.id),
                 "end_user_id": str(end_user_info_record.end_user_id),
                 "other_name": end_user_info_record.other_name,
                 "aliases": end_user_info_record.aliases,
-                "profile": profile,
-                "knowledge_tags": meta.get("knowledge_tags"),
-                "behavioral_hints": meta.get("behavioral_hints"),
+                "meta_data": filtered_meta,
                 "created_at": datetime_to_timestamp(end_user_info_record.created_at),
                 "updated_at": datetime_to_timestamp(end_user_info_record.updated_at)
             }

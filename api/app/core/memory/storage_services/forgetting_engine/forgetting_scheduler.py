@@ -20,6 +20,7 @@ from uuid import UUID
 from datetime import datetime
 
 from app.core.memory.storage_services.forgetting_engine.forgetting_strategy import ForgettingStrategy
+from app.core.memory.utils.memory_count_utils import sync_end_user_memory_count_from_neo4j
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 
@@ -145,7 +146,22 @@ class ForgettingScheduler:
                 }
                 
                 logger.info("没有可遗忘的节点对，遗忘周期结束")
-                
+                # 同步 Neo4j 记忆节点总数到 PostgreSQL 的 end_users.memory_count
+                if end_user_id:
+                    try:
+                        node_count = await sync_end_user_memory_count_from_neo4j(
+                            end_user_id,
+                            self.connector,
+                        )
+                        logger.info(
+                            f"[MemoryCount] 遗忘后同步 memory_count: "
+                            f"end_user_id={end_user_id}, count={node_count}"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"[MemoryCount] 遗忘后同步 memory_count 失败（不影响主流程）: {e}",
+                            exc_info=True,
+                        )
                 return report
             
             # 步骤3：按激活值排序（激活值最低的优先）
@@ -302,7 +318,22 @@ class ForgettingScheduler:
                 f"({reduction_rate:.2%}), "
                 f"耗时 {duration:.2f} 秒"
             )
-            
+            # 同步 Neo4j 记忆节点总数到 PostgreSQL 的 end_users.memory_count
+            if end_user_id:
+                try:
+                    node_count = await sync_end_user_memory_count_from_neo4j(
+                        end_user_id,
+                        self.connector,
+                    )
+                    logger.info(
+                        f"[MemoryCount] 遗忘后同步 memory_count: "
+                        f"end_user_id={end_user_id}, count={node_count}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[MemoryCount] 遗忘后同步 memory_count 失败（不影响主流程）: {e}",
+                        exc_info=True,
+                    )
             return report
         
         except Exception as e:

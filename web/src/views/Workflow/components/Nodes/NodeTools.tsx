@@ -20,9 +20,8 @@ const NodeTools: FC<{ node: Node }> = ({
     }
   }
   return (
-    <div className={clsx("rb:absolute rb:p-1 rb:bg-white rb:-top-7.5 rb:right-0 rb:rounded-lg", {
-      'rb:block': data.isSelected,
-      'rb:hidden': !data.isSelected
+    <Flex align="center" gap={8} className={clsx("rb:absolute rb:p-1! rb:bg-white rb:-top-7.5 rb:right-0 rb:rounded-lg", {
+      'rb:hidden!': !data.isSelected
     })}>
       <Dropdown
         menu={{
@@ -36,7 +35,7 @@ const NodeTools: FC<{ node: Node }> = ({
         <div className="rb:cursor-pointer rb:size-4 rb:hover:bg-[#F6F6F6] rb:rounded-sm rb:bg-cover rb:bg-[url(@/assets/images/common/dash.svg)]">
         </div>
       </Dropdown>
-    </div>
+    </Flex>
   )
 }
 

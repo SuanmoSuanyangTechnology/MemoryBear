@@ -13,8 +13,6 @@ const MemoryConfig: FC<{ options: Suggestion[]; parentName: string; }> = ({
   const { t } = useTranslation()
   const form = Form.useFormInstance();
   const values = Form.useWatch([], form) || {}
-
-  console.log('MemoryConfig', values)
   
   const handleChangeEnable = (value: boolean) => {
     if (value) {

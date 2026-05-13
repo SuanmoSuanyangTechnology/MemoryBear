@@ -34,31 +34,27 @@ def generate_file_key(
     Generate a unique file key for storage.
 
     The file key follows the format: {tenant_id}/{workspace_id}/{file_id}{file_ext}
-
-    Args:
-        tenant_id: The tenant UUID.
-        workspace_id: The workspace UUID.
-        file_id: The file UUID.
-        file_ext: The file extension (e.g., '.pdf', '.txt').
-
-    Returns:
-        A unique file key string.
-
-    Example:
-        >>> generate_file_key(
-        ...     uuid.UUID('550e8400-e29b-41d4-a716-446655440000'),
-        ...     uuid.UUID('660e8400-e29b-41d4-a716-446655440001'),
-        ...     uuid.UUID('770e8400-e29b-41d4-a716-446655440002'),
-        ...     '.pdf'
-        ... )
-        '550e8400-e29b-41d4-a716-446655440000/660e8400-e29b-41d4-a716-446655440001/770e8400-e29b-41d4-a716-446655440002.pdf'
     """
-    # Ensure file_ext starts with a dot
     if file_ext and not file_ext.startswith('.'):
         file_ext = f'.{file_ext}'
     if workspace_id:
         return f"{tenant_id}/{workspace_id}/{file_id}{file_ext}"
     return f"{tenant_id}/{file_id}{file_ext}"
+
+
+def generate_kb_file_key(
+    kb_id: uuid.UUID,
+    file_id: uuid.UUID,
+    file_ext: str,
+) -> str:
+    """
+    Generate a file key for knowledge base files.
+
+    Format: kb/{kb_id}/{file_id}{file_ext}
+    """
+    if file_ext and not file_ext.startswith('.'):
+        file_ext = f'.{file_ext}'
+    return f"kb/{kb_id}/{file_id}{file_ext}"
 
 
 class FileStorageService:
