@@ -38,7 +38,7 @@ const typeList = [
   },
 ]
 
-const NodeStatistics: FC = () => {
+const NodeStatistics: FC<{ highlightKeys?: string[] }> = ({ highlightKeys = [] }) => {
   const navigate = useNavigate();
   const { t } = useTranslation()
   const { id } = useParams()
@@ -70,6 +70,10 @@ const NodeStatistics: FC = () => {
   /** Render statistics card */
   const renderCard = (key: string, isChild: boolean = false) => {
     const item = data.find((item) => item.type === key)
+    const isHighlighted = highlightKeys.includes(key) || 
+      // LONG_TERM_MEMORY 高亮时，其子节点也全部高亮
+      (highlightKeys.includes('LONG_TERM_MEMORY') && 
+        typeList.find(t => t.key === 'LONG_TERM_MEMORY')?.children?.some(c => c.key === key))
     return (
       <Flex
         vertical
@@ -83,13 +87,13 @@ const NodeStatistics: FC = () => {
         onClick={() => handleViewDetail(key)}
       >
         <div>
-          <div className={clsx("rb:text-[#5B6167] rb:leading-5 rb:font-regular")}>
+          <div className={clsx("rb:leading-5 rb:font-regular", isHighlighted ? 'rb:text-[#155EEF]' : 'rb:text-[#5B6167]')}>
             {t(`userMemory.${key}`)}
           </div>
         </div>
         <Flex justify="space-between" align="center">
-          <div className="rb:text-[24px] rb:leading-8 rb:font-extrabold rb:font-[MiSans-Heavy]">{item?.count ?? 0}</div>
-          <div className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/userMemory/arrow_right.svg')] rb:group-hover:bg-[url('@/assets/images/userMemory/arrow_right_hover.svg')]"></div>
+          <div className={clsx("rb:text-[24px] rb:leading-8 rb:font-extrabold rb:font-[MiSans-Heavy]", isHighlighted && 'rb:text-[#155EEF]')}>{item?.count ?? 0}</div>
+          <div className={clsx("rb:size-5 rb:cursor-pointer rb:bg-cover')]", isHighlighted ? "rb:bg-[url('@/assets/images/userMemory/arrow_right_active.svg')] " : "rb:bg-[url('@/assets/images/userMemory/arrow_right.svg')] rb:group-hover:bg-[url('@/assets/images/userMemory/arrow_right_hover.svg")}></div>
         </Flex>
       </Flex>
     )
@@ -106,7 +110,9 @@ const NodeStatistics: FC = () => {
             }
             return (
               <div key={vo.key} className={clsx("rb:col-span-3 rb:shaodow-[0px_2px_6px_0px_rgba(33,35,50,0.08)] rb:rounded-xl rb:bg-[#FFFFFF] rb:overflow-hidden")}>
-                <div className="rb:bg-[#171719] rb:text-[12px] rb:text-[#FFFFFF] rb:font-medium rb:text-center rb:leading-4 rb:py-px rb:rounded-tl-xl  rb:rounded-tr-xl">{t(`userMemory.${vo.key}`)}</div>
+                <div className="rb:w-[136px] rb:h-5 rb:text-xs rb:text-[#171719] rb:py-[2px] rb:font-medium rb:text-center rb:rounded-tl-xl  rb:rounded-br-xl"
+                  style={{ background: 'linear-gradient( 90deg, #F0E3FE 0%, #D1E7FF 100%)' }}
+                >{t(`userMemory.${vo.key}`)}</div>
                 <div className="rb:grid rb:grid-cols-3">
                   {vo.children.map((child, index) => <Flex key={child.key} align="center">
                     {index > 0 && <Divider type="vertical" className="rb:h-12! rb:mx-0!" />}

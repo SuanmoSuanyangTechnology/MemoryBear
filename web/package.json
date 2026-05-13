@@ -31,6 +31,7 @@
     "@lexical/list": "^0.39.0",
     "@lexical/react": "^0.39.0",
     "@lexical/rich-text": "^0.39.0",
+    "@redbear/memory-brick": "^0.0.6",
     "antd": "^5.29.2",
     "axios": "^1.12.2",
     "clsx": "^2.1.1",
@@ -62,6 +63,7 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "tailwindcss": "^4.1.14",
+    "three": "^0.184.0",
     "xlsx": "^0.18.5",
     "zustand": "^5.0.8"
   },
@@ -81,6 +83,7 @@
     "@types/react-router-dom": "^5.3.3",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@types/recordrtc": "^5.6.15",
+    "@types/three": "^0.184.1",
     "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.4.21",
     "eslint": "^9.36.0",

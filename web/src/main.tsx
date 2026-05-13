@@ -11,6 +11,13 @@ import App from '@/App.tsx'
 // Synchronously import i18n config to ensure initialization before component rendering
 import './i18n'
 
+// 容错加载私有组件库（saas 环境）
+if (import.meta.env.VITE_PROD_ENV === 'saas') {
+  import('@redbear/memory-brick')
+    .then(() => console.log('✅ @redbear/memory-brick loaded'))
+    .catch(() => console.log('ℹ️ @redbear/memory-brick not available, skipping'))
+}
+
 // Fix autofill background color on focus
 document.addEventListener('animationstart', (e) => {
   if (e.animationName === 'onAutoFillStart') {

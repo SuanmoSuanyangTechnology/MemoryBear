@@ -4,12 +4,15 @@
  * @Author: yujiangping
  * @Date: 2025-11-24 19:00:14
  * @LastEditors: yujiangping
- * @LastEditTime: 2025-11-25 18:48:26
+ * @LastEditTime: 2026-05-13 14:51:20
  */
 import { RouterProvider } from 'react-router-dom';
 import { 
   Suspense, 
-  useEffect
+  useEffect,
+  lazy,
+  type FC,
+  type ReactNode,
 } from 'react';
 import { 
   Spin, 
@@ -17,7 +20,6 @@ import {
   App as AntdApp
 } from 'antd';
 import i18n from 'i18next';
-
 import { lightTheme } from './styles/antdThemeConfig.ts'
 import router from './routes';
 import { useI18n } from '@/store/locale'
@@ -30,6 +32,13 @@ import { cookieUtils } from './utils/request';
 import { useUser } from '@/store/user';
 
 import menuJson from '@/store/menu.json';
+
+const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
+
+// saas 环境动态加载 Provider，非 saas 用 antd ConfigProvider 降级
+const PrivateProvider = isSaas
+  ? lazy(() => import('@redbear/memory-brick').then(mod => ({ default: mod.Provider })))
+  : null
 
 type MenuEntry = { path: string; i18nKey: string };
 
@@ -70,6 +79,24 @@ const SKIP_TITLE_PATTERNS = [
 
 
 
+// 根据环境选择 Provider：saas 用私有组件库的 Provider，其他用 antd ConfigProvider
+const AppProvider: FC<{ locale: any; theme: any; children: ReactNode }> = ({ locale, theme, children }) => {
+  if (isSaas && PrivateProvider) {
+    return (
+      <Suspense fallback={<Spin fullscreen />}>
+        <PrivateProvider locale={locale} theme={theme}>
+          {children}
+        </PrivateProvider>
+      </Suspense>
+    )
+  }
+  return (
+    <ConfigProvider locale={locale} theme={theme}>
+      {children}
+    </ConfigProvider>
+  )
+}
+
 function App() {
   const { locale, language, timeZone } = useI18n()
   const { checkJump } = useUser();
@@ -104,10 +131,7 @@ function App() {
   }, [timeZone])
 
   return (
-    <ConfigProvider
-      locale={locale}
-      theme={lightTheme}
-    >
+    <AppProvider locale={locale} theme={lightTheme}>
       <AntdApp>
         <Suspense fallback={<Spin fullscreen></Spin>}>
           <RouterProvider 
@@ -118,7 +142,7 @@ function App() {
           />
         </Suspense>
       </AntdApp>
-    </ConfigProvider>
+    </AppProvider>
   );
 }
 
