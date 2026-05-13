@@ -66,6 +66,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
     refresh(selectedRows.map(item => ({
       ...item,
       config: {
+        vector_similarity_weight: 0.5,
         similarity_threshold: 0.7,
         retrieve_type: "hybrid",
         top_k: 3,

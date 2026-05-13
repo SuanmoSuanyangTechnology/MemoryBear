@@ -88,11 +88,13 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
   const handleSave = () => {
     refresh(selectedRows.map(item => ({
       ...item,
+      vector_similarity_weight: 0.5,
       similarity_threshold: 0.7,
       retrieve_type: "hybrid",
       top_k: 3,
       weight: 1,
       config: {
+        vector_similarity_weight: 0.5,
         similarity_threshold: 0.7,
         retrieve_type: "hybrid",
         top_k: 3,
