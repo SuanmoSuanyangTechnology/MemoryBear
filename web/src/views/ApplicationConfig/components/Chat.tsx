@@ -636,7 +636,7 @@ const Chat: FC<ChatProps> = ({
                   streamLoading={compareLoadingRef.current}
                   labelPosition="top"
                   labelFormat={(item) => item.role === 'user' ? t('application.you') : chat.label || t(`application.ai`)}
-                  errorDesc={t('application.ReplyException')}
+                  // errorDesc={t('application.ReplyException')}
                 />
               </Flex>
             ))}
