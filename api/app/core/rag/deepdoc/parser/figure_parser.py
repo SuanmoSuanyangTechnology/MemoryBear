@@ -99,7 +99,7 @@ class VisionFigureParser:
             description_text = picture_vision_llm_chunk(
                 binary=figure_binary,
                 vision_model=self.vision_model,
-                prompt=vision_llm_figure_describe_prompt(),
+                prompt=vision_llm_figure_describe_prompt(lang=getattr(self.vision_model, "lang", "Chinese")),
                 callback=callback,
             )
             return figure_idx, description_text
