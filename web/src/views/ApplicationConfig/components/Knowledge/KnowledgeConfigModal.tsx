@@ -10,7 +10,7 @@
  * Supports different retrieval modes: participle, semantic, and hybrid
  */
 
-import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
+import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Select, InputNumber, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
@@ -89,19 +89,6 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
     handleClose
   }));
 
-  useEffect(() => {
-    if (values?.retrieve_type) {
-      const resetValues: KnowledgeConfigForm = {}
-      const fieldsToReset = Object.keys(values).filter(key =>
-        key !== 'kb_id' && key !== 'retrieve_type' && key !== 'top_k'
-      ) as (keyof KnowledgeConfigForm)[];
-      fieldsToReset.forEach(key => {
-        resetValues[key] = undefined
-      })
-      form.setFieldsValue(resetValues);
-    }
-  }, [values?.retrieve_type])
-
   return (
     <RbModal
       title={t('application.knowledgeConfig')}
@@ -145,7 +132,6 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
           label={t('application.top_k')}
           rules={[{ required: true, message: t('common.pleaseEnter') }]}
           extra={t('application.top_k_desc')}
-          initialValue={5}
         >
           <InputNumber
             style={{ width: '100%' }}
@@ -154,24 +140,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
             onChange={(value) => form.setFieldValue('top_k', value)}
           />
         </FormItem>
-        {/* Vector similarity weight */}
-        {values?.retrieve_type === 'semantic' && (
-          <FormItem
-            name="vector_similarity_weight"
-            label={t('application.vector_similarity_weight')}
-            extra={t('application.vector_similarity_weight_desc')}
-            initialValue={0.5}
-          >
-            <RbSlider
-              max={1.0}
-              step={0.1}
-              min={0.0}
-              isInput={true}
-            />
-          </FormItem>
-        )}
-        {/* Semantic similarity threshold */}
-        {values?.retrieve_type === 'participle' && (
+        {!['semantic', 'graph'].includes(values?.retrieve_type || '') &&
           <FormItem
             name="similarity_threshold"
             label={t('application.similarity_threshold')}
@@ -185,38 +154,22 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
               isInput={true}
             />
           </FormItem>
-        )}
-        {/* Hybrid retrieval weight */}
-        {values?.retrieve_type === 'hybrid' && (
-          <>
-            <FormItem
-              name="similarity_threshold"
-              label={t('application.similarity_threshold')}
-              extra={t('application.similarity_threshold_desc1')}
-              initialValue={0.5}
-            >
-              <RbSlider
-                max={1.0}
-                step={0.1}
-                min={0.0}
-                isInput={true}
-              />
-            </FormItem>
-            <FormItem
-              name="vector_similarity_weight"
-              label={t('application.vector_similarity_weight')}
-              extra={t('application.vector_similarity_weight_desc1')}
-              initialValue={0.5}
-            >
-              <RbSlider
-                max={1.0}
-                step={0.1}
-                min={0.0}
-                isInput={true}
-              />
-            </FormItem>
-          </>
-        )}
+        }
+        {!['participle', 'graph'].includes(values?.retrieve_type || '') &&
+          <FormItem
+            name="vector_similarity_weight"
+            label={t('application.vector_similarity_weight')}
+            extra={t('application.vector_similarity_weight_desc1')}
+            initialValue={0.5}
+          >
+            <RbSlider
+              max={1.0}
+              step={0.1}
+              min={0.0}
+              isInput={true}
+            />
+          </FormItem>
+        }
       </Form>
     </RbModal>
   );

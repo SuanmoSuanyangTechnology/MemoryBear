@@ -25,6 +25,7 @@ import { billingUnits } from '@/views/Package/constant'
 import { UnitWrapper } from '@/views/Package'
 import { submitOrder, getPackageList, upgradePackagePreview } from '@/api/package'
 import Tag from '@/components/Tag'
+import { getTenantSubscription } from '@/api/user'
 
 const { TextArea } = Input;
 
@@ -97,9 +98,12 @@ const OrderPayment: React.FC = () => {
       setJumpFrom(location.state?.jumpFrom)
 
       if (location.state?.jumpFrom === 'renewal') {
-        getPackageList({ search: location.state?.id }).then(res => {
-          setPkg((res as Package[])[0] ? { ...(res as Package[])[0], created_at: dayjs().valueOf() } : null)
-        })
+        getTenantSubscription()
+          .then(subscription => {
+            getPackageList({ search: (subscription as any).package_plan_id }).then(res => {
+              setPkg((res as Package[])[0] ? { ...(res as Package[])[0], expired_at: (subscription as any).expired_at, created_at: dayjs().valueOf() } : null)
+            })
+          })
       }
     }
     if (!location.state?.id) return
@@ -255,7 +259,17 @@ const OrderPayment: React.FC = () => {
                   </td>
                   <td className="rb:px-4 rb:py-2 rb:w-32 rb:text-[#5B6167]">
                     <Form.Item name="multiplier" initialValue={1}>
-                      <InputNumber min={1} max={100} precision={0} suffix={t(`package.${pkg?.billing_cycle}`)} />
+                      <InputNumber 
+                        min={1} 
+                        max={100} 
+                        precision={0} 
+                        suffix={t(`package.${pkg?.billing_cycle}`)} 
+                        onChange={(value) => {
+                          if (value === null || value === undefined) {
+                            form.setFieldsValue({ multiplier: 1 });
+                          }
+                        }}
+                      />
                     </Form.Item>
                   </td>
                   <td className="rb:px-4 rb:py-2">

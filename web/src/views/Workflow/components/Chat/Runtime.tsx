@@ -27,6 +27,7 @@ import type { ChatItem } from '@/components/Chat/types'
 import Markdown from '@/components/Markdown'
 import CodeBlock from '@/components/Markdown/CodeBlock'
 import RbAlert from '@/components/RbAlert'
+import { hasProcessNodes } from '../../constant'
 
 /**
  * Runtime component props
@@ -185,7 +186,7 @@ const Runtime: FC<{ item: ChatItem; index: number;}> = ({
                     )}
                     {/* Display input and output data as JSON code blocks */}
                     {['input', 'process', 'output'].map(key => {
-                      if (vo.node_type !== 'http-request' && key === 'process') return null
+                      if (!hasProcessNodes.includes(vo.node_type) && key === 'process') return null
                       return (
                         <div key={key} className="rb:bg-[#EBEBEB] rb:rounded-lg">
                           <div className="rb:py-2 rb:px-3 rb:flex rb:justify-between rb:items-center rb:text-[12px]">

@@ -186,6 +186,9 @@ const Package: FC = () => {
       case 'permanent_free':
         navigate(user.current_workspace_id ? '/' : '/space');
         break
+      case 'local_deployment':
+        window.open(`https://docs.redbearai.com/s/${language || 'en'}-memorybear`, '_blank')
+        break
       default:
         if (curPkg?.package_plan?.billing_cycle === 'permanent_free') {
           navigate(`/order-pay`, {
@@ -291,12 +294,17 @@ const Package: FC = () => {
                     </div>
 
                     <Button
-                      type={pkg.billing_cycle !== 'permanent_free' ? 'primary' : 'default'}
+                      type={['permanent_free', 'local_deployment'].includes(pkg.billing_cycle) ? 'default' : 'primary'}
                       block
-                      className={btnClassNames[pkg.billing_cycle === 'permanent_free' ? 'permanent_free' : 'default']}
+                      className={btnClassNames[['permanent_free', 'local_deployment'].includes(pkg.billing_cycle) ? 'permanent_free' : 'default']}
                       onClick={() => handleChoosePlan(pkg)}
                     >
-                      {pkg.billing_cycle === 'permanent_free' ? t('pricing.startedBtn') : t('pricing.choosePlanBtn')}
+                      {pkg.billing_cycle === 'permanent_free'
+                        ? t('pricing.startedBtn')
+                        : pkg.billing_cycle === 'local_deployment'
+                        ? t('pricing.contactBtn')
+                        : t('pricing.choosePlanBtn')
+                      }
                     </Button>
 
                     <Divider className="rb:my-4" />

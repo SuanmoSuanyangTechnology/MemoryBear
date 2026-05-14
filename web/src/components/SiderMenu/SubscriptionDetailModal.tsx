@@ -67,8 +67,12 @@ const SubscriptionDetailModal = forwardRef<SubscriptionDetailModalRef, { current
       title={[t('package.packageDetail'), detail?.package_plan?.[getKeyWithLanguage('name')]].filter(item => item).join(' - ')}
       open={open}
       onCancel={handleCancel}
-      footer={(detail?.package_plan?.billing_cycle === 'permanent_free' && detail?.package_plan?.tier_level === 0)
+      footer={(detail?.package_plan?.billing_cycle === 'permanent_free' && detail?.package_plan?.tier_level === 0) || detail?.package_plan?.billing_cycle === 'local_deployment'
         ? null
+        : detail?.package_plan?.billing_cycle === 'permanent_free'
+        ? [
+          <Button type="primary" onClick={handleUpgrade}>{t('pricing.upgrade')}</Button>
+        ]
         : [
           <Button onClick={handleRenewal}>{t('pricing.renewal')}</Button>,
           <Button type="primary" onClick={handleUpgrade}>{t('pricing.upgrade')}</Button>

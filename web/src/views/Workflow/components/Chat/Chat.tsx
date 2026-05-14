@@ -476,7 +476,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
         streamLoading={streamLoading}
         labelPosition="bottom"
         labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
-        errorDesc={t('application.ReplyException')}
+        // errorDesc={t('application.ReplyException')}
         renderRuntime={(item, index) => {
           return <Runtime item={item} index={index} />
         }}
