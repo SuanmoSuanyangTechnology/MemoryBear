@@ -1367,7 +1367,7 @@ class VisionParser(RAGPdfParser):
             text = picture_vision_llm_chunk(
                 binary=img_binary,
                 vision_model=self.vision_model,
-                prompt=vision_llm_describe_prompt(page=pdf_page_num + 1),
+                prompt=vision_llm_describe_prompt(page=pdf_page_num + 1, lang=getattr(self.vision_model, "lang", "Chinese")),
                 callback=callback,
             )
 
