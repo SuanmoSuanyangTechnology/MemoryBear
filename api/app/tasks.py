@@ -285,14 +285,29 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         from app.core.rag.app.naive import chunk
         logger.info(f"[ParseDoc] file_binary size={len(file_binary)} bytes, type={type(file_binary).__name__}, bool={bool(file_binary)}")
-        res = chunk(filename=file_name,
-                    binary=file_binary,
-                    from_page=0,
-                    to_page=DEFAULT_PARSE_TO_PAGE,
-                    callback=progress_callback,
-                    vision_model=vision_model,
-                    parser_config=db_document.parser_config,
-                    is_root=False)
+
+        parent_child_mode = db_document.parser_config.get("parent_child_mode", False)
+        if parent_child_mode:
+            from app.core.rag.app.naive import chunk_parent_child
+            child_res, parent_res, parent_id_map = chunk_parent_child(
+                filename=file_name,
+                binary=file_binary,
+                from_page=0,
+                to_page=DEFAULT_PARSE_TO_PAGE,
+                callback=progress_callback,
+                vision_model=vision_model,
+                parser_config=db_document.parser_config,
+                is_root=False,
+            )
+        else:
+            res = chunk(filename=file_name,
+                        binary=file_binary,
+                        from_page=0,
+                        to_page=DEFAULT_PARSE_TO_PAGE,
+                        callback=progress_callback,
+                        vision_model=vision_model,
+                        parser_config=db_document.parser_config,
+                        is_root=False)
 
         progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Finish parsing.")
         db_document.progress = 0.8
@@ -301,7 +316,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         db.refresh(db_document)
 
         # 2. Document vectorization and storage
-        total_chunks = len(res)
+        total_chunks = (len(child_res) + len(parent_res)) if parent_child_mode else len(res)
         progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Generate {total_chunks} chunks.")
 
         if total_chunks == 0:
@@ -329,7 +344,57 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             # 预先构建所有 batch 的 chunks，保证 sort_id 全局有序
             all_batch_chunks: list[list[DocumentChunk]] = []
 
-            if auto_questions_topn:
+            if parent_child_mode:
+                # 父子分块模式：parent chunks + child chunks
+                parent_chunks_list = []
+                parent_id_to_doc_id = {}
+
+                for idx, item in enumerate(parent_res):
+                    parent_doc_id = uuid.uuid4().hex
+                    parent_id_to_doc_id[idx] = parent_doc_id
+                    meta = {
+                        "doc_id": parent_doc_id,
+                        "file_id": str(db_document.file_id),
+                        "file_name": db_document.file_name,
+                        "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                        "document_id": str(db_document.id),
+                        "knowledge_id": str(db_document.kb_id),
+                        "sort_id": idx,
+                        "status": 1,
+                        "chunk_type": "parent",
+                    }
+                    parent_chunks_list.append(
+                        DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+
+                child_chunks_list = []
+                for idx, item in enumerate(child_res):
+                    parent_idx = parent_id_map.get(idx)
+                    parent_doc_id = parent_id_to_doc_id.get(parent_idx, "")
+                    meta = {
+                        "doc_id": uuid.uuid4().hex,
+                        "file_id": str(db_document.file_id),
+                        "file_name": db_document.file_name,
+                        "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                        "document_id": str(db_document.id),
+                        "knowledge_id": str(db_document.kb_id),
+                        "sort_id": idx,
+                        "status": 1,
+                        "chunk_type": "child",
+                        "parent_id": parent_doc_id,
+                    }
+                    child_chunks_list.append(
+                        DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+
+                all_chunks = parent_chunks_list + child_chunks_list
+                for batch_start in range(0, len(all_chunks), EMBEDDING_BATCH_SIZE):
+                    batch_end = min(batch_start + EMBEDDING_BATCH_SIZE, len(all_chunks))
+                    all_batch_chunks.append(all_chunks[batch_start:batch_end])
+
+                progress_lines.append(
+                    f"{datetime.now().strftime('%H:%M:%S')} Parent-child mode: {len(parent_chunks_list)} parent chunks + "
+                    f"{len(child_chunks_list)} child chunks prepared.")
+
+            elif auto_questions_topn:
                 # QA 模式（FastGPT 方案）：
                 # 1. 原 chunk 标记为 source（保留供 GraphRAG 使用，不参与检索）
                 # 2. LLM 生成 QA 对，每个 QA 对独立存储为 qa chunk

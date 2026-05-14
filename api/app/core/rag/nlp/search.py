@@ -224,6 +224,7 @@ def _retrieve_for_knowledge(
                 top_k=kb_config["top_k"],
                 score_threshold=kb_config["similarity_threshold"],
                 file_names_filter=file_names_filter,
+                resolve_parents=False,
             )
         case "semantic":
             rs = vector_service.search_by_vector(
@@ -231,6 +232,7 @@ def _retrieve_for_knowledge(
                 top_k=kb_config["top_k"],
                 score_threshold=kb_config["vector_similarity_weight"],
                 file_names_filter=file_names_filter,
+                resolve_parents=False,
             )
         case _:
             rs1 = vector_service.search_by_vector(
@@ -238,12 +240,14 @@ def _retrieve_for_knowledge(
                 top_k=kb_config["top_k"],
                 score_threshold=kb_config["vector_similarity_weight"],
                 file_names_filter=file_names_filter,
+                resolve_parents=False,
             )
             rs2 = vector_service.search_by_full_text(
                 query=kb_config["query"],
                 top_k=kb_config["top_k"],
                 score_threshold=kb_config["similarity_threshold"],
                 file_names_filter=file_names_filter,
+                resolve_parents=False,
             )
             # 合并去重
             seen_ids = set()
@@ -277,6 +281,8 @@ def _retrieve_for_knowledge(
                 except Exception as graph_error:
                     logger.warning(f"Graph retrieval failed for kb {db_knowledge.id}: {graph_error}")
 
+    # local rerank 之后解析父块，保证 rerank 在子块上做精确评分
+    rs = vector_service.resolve_parent_chunks(rs)
     results.extend(rs)
     return results, chat_model, embedding_model
 
