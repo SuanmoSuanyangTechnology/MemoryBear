@@ -53,6 +53,9 @@ class ElasticSearchVector(BaseVector):
         return "elasticsearch"
 
     def add_chunks(self, chunks: list[DocumentChunk], **kwargs):
+        # 仅在写入时检查并补充字段映射，避免每次检索都做冗余检查
+        ElasticSearchVectorFactory._ensure_parent_id_mapping(self._client, self._collection_name)
+
         # QA chunks: embedding 只对 question 字段做；source/parent chunks: 不做 embedding
         texts_for_embedding = []
         for chunk in chunks:
@@ -918,9 +921,6 @@ class ElasticSearchVectorFactory:
             raise ValueError(f"embedding_id config error: {str(knowledge.embedding_id)}")
         if knowledge.reranker is None:
             raise ValueError(f"reranker_id config error: {str(knowledge.reranker_id)}")
-
-        # 确保存量索引包含 parent_id 字段映射（幂等操作）
-        cls._ensure_parent_id_mapping(client, collection_name)
 
         return ElasticSearchVector(
             index_name=collection_name,

@@ -22,7 +22,8 @@ from app.core.rag.deepdoc.parser.figure_parser import VisionFigureParser,vision_
 from app.core.rag.deepdoc.parser.pdf_parser import PlainParser, VisionParser
 from app.core.rag.deepdoc.parser.mineru_parser import MinerUParser
 from app.core.rag.app.textin_parser import TextLnParser
-from app.core.rag.nlp import concat_img, find_codec, naive_merge, naive_merge_with_images, naive_merge_docx, map_children_to_parents, tokenize, rag_tokenizer, tokenize_chunks, tokenize_chunks_with_images, tokenize_table
+from app.core.rag.common.token_utils import num_tokens_from_string
+from app.core.rag.nlp import concat_img, find_codec, naive_merge, naive_merge_with_images, naive_merge_docx, tokenize, rag_tokenizer, tokenize_chunks, tokenize_chunks_with_images, tokenize_table
 
 def by_deepdoc(filename, binary=None, from_page=0, to_page=100000, lang="Chinese", callback=None, vision_model=None, pdf_cls = None, **kwargs):
     callback = callback
@@ -818,20 +819,18 @@ def chunk_parent_child(
     """
     Parent-child chunking mode.
 
-    Calls chunk() twice with different chunk_token_num to produce:
-    - child chunks: fine-grained retrieval units
-    - parent chunks: coarse-grained context chunks
-
-    Both go through chunk()'s normal pipeline (merge → tokenize → clean),
-    so content is clean and consistent with non-parent-child mode.
+    Calls chunk() once at child granularity, then builds parent chunks
+    by merging consecutive children until token budget is reached.
+    This avoids double-parsing the document and guarantees accurate
+    child→parent mapping.
 
     Returns:
         (child_res, parent_res, parent_id_map)
+        - parent_id_map: dict mapping child index → parent index
     """
     parser_config = kwargs.get("parser_config", {})
     child_token_num = int(parser_config.get("chunk_token_num", 128))
     parent_token_num = int(parser_config.get("parent_chunk_token_num", 1024))
-    parent_delimiter = parser_config.get("parent_delimiter", "\n\n")
 
     if parent_token_num <= child_token_num:
         logging.warning(
@@ -840,7 +839,7 @@ def chunk_parent_child(
         )
         parent_token_num = 1024
 
-    # Child: normal chunk() call with configured token_num
+    # Single parse → child chunks
     child_res = chunk(
         filename, binary=binary, from_page=from_page, to_page=to_page,
         lang=lang, callback=callback, vision_model=vision_model,
@@ -848,25 +847,45 @@ def chunk_parent_child(
     )
     logging.info(f"[ParentChild] child: token_num={child_token_num}, chunk_count={len(child_res)}")
 
-    # Parent: normal chunk() call with larger token_num + paragraph delimiter.
-    # _keep_chunk_token_num prevents MinerU from forcing chunk_token_num=0.
-    parent_kwargs = {
-        **kwargs,
-        "parser_config": {**parser_config, "chunk_token_num": parent_token_num, "delimiter": parent_delimiter},
-        "_keep_chunk_token_num": True,
-    }
-    parent_res = chunk(
-        filename, binary=binary, from_page=from_page, to_page=to_page,
-        lang=lang, callback=callback, vision_model=vision_model,
-        **parent_kwargs
-    )
-    logging.info(f"[ParentChild] parent: token_num={parent_token_num}, delimiter={repr(parent_delimiter)}, chunk_count={len(parent_res)}")
+    # Build parents by merging consecutive children
+    parent_res: list[dict] = []
+    parent_id_map: dict[int, int] = {}
+    buf_texts: list[str] = []
+    buf_images: list = []
+    buf_tokens = 0
 
-    # Map children to parents using clean content_with_weight
-    child_texts = [c["content_with_weight"] for c in child_res]
-    parent_texts = [p["content_with_weight"] for p in parent_res]
-    parent_ids = map_children_to_parents(parent_texts, child_texts)
-    parent_id_map = {i: pid for i, pid in enumerate(parent_ids)}
+    def flush_parent():
+        nonlocal buf_texts, buf_images, buf_tokens
+        merged = "\n\n".join(buf_texts)
+        merged_image = None
+        for img in buf_images:
+            merged_image = concat_img(merged_image, img) if merged_image else img
+        parent_res.append({
+            "content_with_weight": merged,
+            "image": merged_image,
+        })
+        buf_texts = []
+        buf_images = []
+        buf_tokens = 0
+
+    for child_idx, child in enumerate(child_res):
+        text = child["content_with_weight"]
+        image = child.get("image")
+        tkn = num_tokens_from_string(text)
+
+        if buf_texts and buf_tokens + tkn > parent_token_num:
+            flush_parent()
+
+        buf_texts.append(text)
+        if image is not None:
+            buf_images.append(image)
+        buf_tokens += tkn
+        parent_id_map[child_idx] = len(parent_res)
+
+    if buf_texts:
+        flush_parent()
+
+    logging.info(f"[ParentChild] parent: token_num={parent_token_num}, chunk_count={len(parent_res)}")
 
     return child_res, parent_res, parent_id_map
 

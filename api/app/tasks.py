@@ -316,7 +316,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         db.refresh(db_document)
 
         # 2. Document vectorization and storage
-        total_chunks = len(child_res) if parent_child_mode else len(res)
+        total_chunks = (len(child_res) + len(parent_res)) if parent_child_mode else len(res)
         progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Generate {total_chunks} chunks.")
 
         if total_chunks == 0:
