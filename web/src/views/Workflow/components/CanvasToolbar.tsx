@@ -1,6 +1,6 @@
 import type { FC } from 'react';
 import { Select, Divider, Tooltip } from 'antd';
-import { PlusOutlined, MinusOutlined, FileAddOutlined, UndoOutlined, RedoOutlined } from '@ant-design/icons'
+import { PlusOutlined, MinusOutlined, FileAddOutlined, UndoOutlined, RedoOutlined, FormatPainterOutlined, FireOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
 import { Node } from '@antv/x6';
 import { useTranslation } from 'react-i18next'
@@ -32,6 +32,8 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
   onUndo,
   onRedo,
   addNotes,
+  isHandMode,
+  setIsHandMode,
 }) => {
   const { t } = useTranslation()
   return (
@@ -46,6 +48,13 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
         'rb:right-8': !selectedNode,
         'rb:right-95.5': selectedNode,
       })}>
+        <Tooltip title={t('workflow.pointerMode')}>
+          <FormatPainterOutlined className={clsx('rb:text-[16px]', !isHandMode ? 'rb:cursor-pointer rb:text-[#1890FF]' : 'rb:cursor-pointer rb:opacity-50')} onClick={() => setIsHandMode(false)} />
+        </Tooltip>
+        <Tooltip title={t('workflow.handMode')}>
+          <FireOutlined className={clsx('rb:text-[16px]', isHandMode ? 'rb:cursor-pointer rb:text-[#1890FF]' : 'rb:cursor-pointer rb:opacity-50')} onClick={() => setIsHandMode(true)} />
+        </Tooltip>
+        <Divider type="vertical" className="rb:h-4" />
         <MinusOutlined className="rb:text-[16px] rb:cursor-pointer" onClick={() => graphRef.current?.zoom(-0.1)} />
         <Select
           value={Math.round(zoomLevel * 100)}

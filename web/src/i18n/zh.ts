@@ -2499,6 +2499,8 @@ export const zh = {
       redo: '重做',
       undo: '撤销',
       fit: '自适应',
+      handMode: '手模式',
+      pointerMode: '指针模式',
 
       input_result: '输入',
       output_result: '输出',
