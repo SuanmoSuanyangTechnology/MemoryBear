@@ -33,6 +33,7 @@ interface RunResult {
     completion_tokens: number;
     total_tokens: number;
   };
+  process?: any;
   elapsed_time?: number;
   error?: string | null;
 }
