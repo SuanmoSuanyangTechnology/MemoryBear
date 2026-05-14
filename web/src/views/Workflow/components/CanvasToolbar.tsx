@@ -1,6 +1,6 @@
 import type { FC } from 'react';
 import { Select, Divider, Tooltip } from 'antd';
-import { PlusOutlined, MinusOutlined, FileAddOutlined, UndoOutlined, RedoOutlined, FormatPainterOutlined, FireOutlined } from '@ant-design/icons'
+import { PlusOutlined, MinusOutlined, FileAddOutlined } from '@ant-design/icons'
 import clsx from 'clsx'
 import { Node } from '@antv/x6';
 import { useTranslation } from 'react-i18next'
@@ -49,10 +49,20 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
         'rb:right-95.5': selectedNode,
       })}>
         <Tooltip title={t('workflow.pointerMode')}>
-          <FormatPainterOutlined className={clsx('rb:text-[16px]', !isHandMode ? 'rb:cursor-pointer rb:text-[#1890FF]' : 'rb:cursor-pointer rb:opacity-50')} onClick={() => setIsHandMode(false)} />
+          <div
+            className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/workflow/pointer.svg')]", {
+              'rb:opacity-50 rb:cursor-pointer': isHandMode
+            })}
+            onClick={() => setIsHandMode(false)}
+          ></div>
         </Tooltip>
         <Tooltip title={t('workflow.handMode')}>
-          <FireOutlined className={clsx('rb:text-[16px]', isHandMode ? 'rb:cursor-pointer rb:text-[#1890FF]' : 'rb:cursor-pointer rb:opacity-50')} onClick={() => setIsHandMode(true)} />
+          <div
+            className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/workflow/cursor.svg')]", {
+              'rb:opacity-50 rb:cursor-pointer': !isHandMode
+            })}
+            onClick={() => setIsHandMode(true)}
+          ></div>
         </Tooltip>
         <Divider type="vertical" className="rb:h-4" />
         <MinusOutlined className="rb:text-[16px] rb:cursor-pointer" onClick={() => graphRef.current?.zoom(-0.1)} />
@@ -84,8 +94,25 @@ const CanvasToolbar: FC<CanvasToolbarProps> = ({
         />
         <PlusOutlined className="rb:text-[16px] rb:cursor-pointer" onClick={() => graphRef.current?.zoom(0.1)} />
         <Divider type="vertical" className="rb:h-4" />
-        <Tooltip title={`${t('workflow.undo')} (Ctrl+Z)`}><UndoOutlined className={clsx('rb:text-[16px]', canUndo ? 'rb:cursor-pointer' : 'rb:opacity-30 rb:cursor-not-allowed')} onClick={onUndo} /></Tooltip>
-        <Tooltip title={`${t('workflow.redo')} (Ctrl+Y)`}><RedoOutlined className={clsx('rb:text-[16px]', canRedo ? 'rb:cursor-pointer' : 'rb:opacity-30 rb:cursor-not-allowed')} onClick={onRedo} /></Tooltip>
+        <Tooltip title={`${t('workflow.undo')} (Ctrl+Z)`}>
+          <div
+            className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/workflow/undo.svg')]", {
+              'rb:opacity-50': !canUndo,
+              'rb:cursor-pointer': canUndo
+            })}
+            onClick={onUndo}
+          ></div>
+        </Tooltip>
+        <Tooltip title={`${t('workflow.redo')} (Ctrl+Y)`}>
+          <div
+            className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/workflow/undo.svg')] rb:scale-x-[-1]", {
+              'rb:opacity-50': !canRedo,
+              'rb:cursor-pointer': canRedo
+            })}
+            onClick={onRedo}
+          ></div>
+          {/* <RedoOutlined className={clsx('rb:text-[16px]', canRedo ? 'rb:cursor-pointer' : 'rb:opacity-30 rb:cursor-not-allowed')} onClick={onRedo} /> */}
+        </Tooltip>
         <Divider type="vertical" className="rb:h-4" />
         <FileAddOutlined onClick={addNotes} />
       </div>
