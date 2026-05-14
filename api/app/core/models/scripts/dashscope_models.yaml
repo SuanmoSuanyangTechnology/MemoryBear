@@ -7,14 +7,12 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-  - thinking
-  - json_output
+  - thinking_only
   is_omni: false
   tags:
   - 大语言模型
   - agent-thought
   logo: dashscope
-
 - name: deepseek-r1-distill-qwen-32b
   type: llm
   provider: dashscope
@@ -22,14 +20,12 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-  - thinking
-  - json_output
+  - thinking_only
   is_omni: false
   tags:
   - 大语言模型
   - agent-thought
   logo: dashscope
-
 - name: deepseek-r1
   type: llm
   provider: dashscope
@@ -37,14 +33,12 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-  - thinking
-  - json_output
+  - thinking_only
   is_omni: false
   tags:
   - 大语言模型
   - agent-thought
   logo: dashscope
-
 - name: deepseek-v3.1
   type: llm
   provider: dashscope
@@ -58,7 +52,6 @@ models:
   - 大语言模型
   - agent-thought
   logo: dashscope
-
 - name: deepseek-v3.2-exp
   type: llm
   provider: dashscope
@@ -72,7 +65,6 @@ models:
   - 大语言模型
   - agent-thought
   logo: dashscope
-
 - name: deepseek-v3.2
   type: llm
   provider: dashscope
@@ -86,7 +78,6 @@ models:
   - 大语言模型
   - agent-thought
   logo: dashscope
-
 - name: deepseek-v3
   type: llm
   provider: dashscope
@@ -100,7 +91,6 @@ models:
   - 大语言模型
   - agent-thought
   logo: dashscope
-
 - name: farui-plus
   type: llm
   provider: dashscope
@@ -109,6 +99,7 @@ models:
   is_official: true
   capability:
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -116,7 +107,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: glm-4.7
   type: llm
   provider: dashscope
@@ -125,6 +115,7 @@ models:
   is_official: true
   capability:
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -132,7 +123,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qvq-max-latest
   type: llm
   provider: dashscope
@@ -141,8 +131,7 @@ models:
   is_official: true
   capability:
   - vision
-  - thinking
-  - json_output
+  - thinking_only
   is_omni: false
   tags:
   - 大语言模型
@@ -150,7 +139,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qvq-max
   type: llm
   provider: dashscope
@@ -159,8 +147,7 @@ models:
   is_official: true
   capability:
   - vision
-  - thinking
-  - json_output
+  - thinking_only
   is_omni: false
   tags:
   - 大语言模型
@@ -168,7 +155,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen-coder-turbo-0919
   type: llm
   provider: dashscope
@@ -182,7 +168,6 @@ models:
   - 代码模型
   - agent-thought
   logo: dashscope
-
 - name: qwen-max-latest
   type: llm
   provider: dashscope
@@ -192,6 +177,7 @@ models:
   capability:
   - thinking
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -199,7 +185,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen-max-longcontext
   type: llm
   provider: dashscope
@@ -214,7 +199,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen-max
   type: llm
   provider: dashscope
@@ -223,6 +207,7 @@ models:
   is_official: true
   capability:
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -230,7 +215,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen-mt-plus
   type: llm
   provider: dashscope
@@ -244,7 +228,6 @@ models:
   - 翻译模型
   - agent-thought
   logo: dashscope
-
 - name: qwen-mt-turbo
   type: llm
   provider: dashscope
@@ -258,7 +241,6 @@ models:
   - 翻译模型
   - agent-thought
   logo: dashscope
-
 - name: qwen-plus-0112
   type: llm
   provider: dashscope
@@ -273,7 +255,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen-plus-0125
   type: llm
   provider: dashscope
@@ -288,7 +269,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen-plus-0723
   type: llm
   provider: dashscope
@@ -303,7 +283,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen-plus-0806
   type: llm
   provider: dashscope
@@ -318,7 +297,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen-plus-0919
   type: llm
   provider: dashscope
@@ -333,7 +311,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen-plus-1125
   type: llm
   provider: dashscope
@@ -348,7 +325,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen-plus-1127
   type: llm
   provider: dashscope
@@ -363,7 +339,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen-plus-1220
   type: llm
   provider: dashscope
@@ -378,7 +353,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen-vl-max
   type: chat
   provider: dashscope
@@ -397,7 +371,6 @@ models:
   - agent-thought
   - video
   logo: dashscope
-
 - name: qwen-vl-plus-0809
   type: chat
   provider: dashscope
@@ -415,7 +388,6 @@ models:
   - agent-thought
   - video
   logo: dashscope
-
 - name: qwen-vl-plus-2025-01-02
   type: chat
   provider: dashscope
@@ -433,7 +405,6 @@ models:
   - agent-thought
   - video
   logo: dashscope
-
 - name: qwen-vl-plus-2025-01-25
   type: chat
   provider: dashscope
@@ -451,7 +422,6 @@ models:
   - agent-thought
   - video
   logo: dashscope
-
 - name: qwen-vl-plus-latest
   type: chat
   provider: dashscope
@@ -470,7 +440,6 @@ models:
   - agent-thought
   - video
   logo: dashscope
-
 - name: qwen-vl-plus
   type: chat
   provider: dashscope
@@ -489,7 +458,6 @@ models:
   - agent-thought
   - video
   logo: dashscope
-
 - name: qwen2.5-0.5b-instruct
   type: llm
   provider: dashscope
@@ -505,7 +473,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen3-14b
   type: llm
   provider: dashscope
@@ -515,6 +482,7 @@ models:
   capability:
   - thinking
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -522,7 +490,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen3-235b-a22b-instruct-2507
   type: llm
   provider: dashscope
@@ -531,6 +498,7 @@ models:
   is_official: true
   capability:
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -538,7 +506,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen3-235b-a22b-thinking-2507
   type: llm
   provider: dashscope
@@ -546,7 +513,7 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-  - thinking
+  - thinking_only
   - json_output
   is_omni: false
   tags:
@@ -555,7 +522,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen3-235b-a22b
   type: llm
   provider: dashscope
@@ -565,6 +531,7 @@ models:
   capability:
   - thinking
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -572,7 +539,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen3-30b-a3b-instruct-2507
   type: llm
   provider: dashscope
@@ -581,6 +547,7 @@ models:
   is_official: true
   capability:
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -588,7 +555,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen3-30b-a3b
   type: llm
   provider: dashscope
@@ -598,6 +564,7 @@ models:
   capability:
   - thinking
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -605,7 +572,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen3-32b
   type: llm
   provider: dashscope
@@ -615,6 +581,7 @@ models:
   capability:
   - thinking
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -622,7 +589,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen3-4b
   type: llm
   provider: dashscope
@@ -632,6 +598,7 @@ models:
   capability:
   - thinking
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -639,7 +606,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen3-8b
   type: llm
   provider: dashscope
@@ -649,6 +615,7 @@ models:
   capability:
   - thinking
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -656,7 +623,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen3-coder-30b-a3b-instruct
   type: llm
   provider: dashscope
@@ -671,7 +637,6 @@ models:
   - 代码模型
   - agent-thought
   logo: dashscope
-
 - name: qwen3-coder-480b-a35b-instruct
   type: llm
   provider: dashscope
@@ -686,7 +651,6 @@ models:
   - 代码模型
   - agent-thought
   logo: dashscope
-
 - name: qwen3-coder-plus-2025-09-23
   type: llm
   provider: dashscope
@@ -702,7 +666,6 @@ models:
   - 代码模型
   - agent-thought
   logo: dashscope
-
 - name: qwen3-coder-plus
   type: llm
   provider: dashscope
@@ -718,7 +681,6 @@ models:
   - 代码模型
   - agent-thought
   logo: dashscope
-
 - name: qwen3-max-2025-09-23
   type: llm
   provider: dashscope
@@ -728,6 +690,7 @@ models:
   capability:
   - thinking
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -736,7 +699,6 @@ models:
   - stream-tool-call
   - 联网搜索
   logo: dashscope
-
 - name: qwen3-max-2026-01-23
   type: llm
   provider: dashscope
@@ -746,6 +708,7 @@ models:
   capability:
   - thinking
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -754,7 +717,6 @@ models:
   - stream-tool-call
   - 联网搜索
   logo: dashscope
-
 - name: qwen3-max-preview
   type: llm
   provider: dashscope
@@ -764,6 +726,7 @@ models:
   capability:
   - thinking
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -771,7 +734,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen3-max
   type: llm
   provider: dashscope
@@ -781,6 +743,7 @@ models:
   capability:
   - thinking
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -789,7 +752,6 @@ models:
   - stream-tool-call
   - 联网搜索
   logo: dashscope
-
 - name: qwen3-next-80b-a3b-instruct
   type: llm
   provider: dashscope
@@ -805,7 +767,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen3-next-80b-a3b-thinking
   type: llm
   provider: dashscope
@@ -813,7 +774,7 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-  - thinking
+  - thinking_only
   - json_output
   is_omni: false
   tags:
@@ -822,7 +783,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwen3-omni-flash-2025-12-01
   type: llm
   provider: dashscope
@@ -844,7 +804,6 @@ models:
   - video
   - audio
   logo: dashscope
-
 - name: qwen3-vl-235b-a22b-instruct
   type: chat
   provider: dashscope
@@ -855,6 +814,7 @@ models:
   - vision
   - video
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -865,7 +825,6 @@ models:
   - vision
   - video
   logo: dashscope
-
 - name: qwen3-vl-235b-a22b-thinking
   type: chat
   provider: dashscope
@@ -875,7 +834,7 @@ models:
   capability:
   - vision
   - video
-  - thinking
+  - thinking_only
   - json_output
   is_omni: false
   tags:
@@ -887,7 +846,6 @@ models:
   - vision
   - video
   logo: dashscope
-
 - name: qwen3-vl-30b-a3b-instruct
   type: chat
   provider: dashscope
@@ -898,6 +856,7 @@ models:
   - vision
   - video
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -908,7 +867,6 @@ models:
   - vision
   - video
   logo: dashscope
-
 - name: qwen3-vl-30b-a3b-thinking
   type: chat
   provider: dashscope
@@ -918,7 +876,7 @@ models:
   capability:
   - vision
   - video
-  - thinking
+  - thinking_only
   - json_output
   is_omni: false
   tags:
@@ -930,7 +888,6 @@ models:
   - vision
   - video
   logo: dashscope
-
 - name: qwen3-vl-flash
   type: chat
   provider: dashscope
@@ -942,6 +899,7 @@ models:
   - video
   - thinking
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -952,7 +910,6 @@ models:
   - vision
   - video
   logo: dashscope
-
 - name: qwen3-vl-plus-2025-09-23
   type: chat
   provider: dashscope
@@ -972,7 +929,6 @@ models:
   - agent-thought
   - video
   logo: dashscope
-
 - name: qwen3-vl-plus
   type: chat
   provider: dashscope
@@ -984,6 +940,7 @@ models:
   - video
   - thinking
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -992,7 +949,6 @@ models:
   - agent-thought
   - video
   logo: dashscope
-
 - name: qwq-32b
   type: llm
   provider: dashscope
@@ -1000,15 +956,13 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-  - thinking
-  - json_output
+  - thinking_only
   is_omni: false
   tags:
   - 大语言模型
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwq-plus-0305
   type: llm
   provider: dashscope
@@ -1016,15 +970,13 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-  - thinking
-  - json_output
+  - thinking_only
   is_omni: false
   tags:
   - 大语言模型
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: qwq-plus
   type: llm
   provider: dashscope
@@ -1032,15 +984,13 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-  - thinking
-  - json_output
+  - thinking_only
   is_omni: false
   tags:
   - 大语言模型
   - agent-thought
   - stream-tool-call
   logo: dashscope
-
 - name: gte-rerank-v2
   type: rerank
   provider: dashscope
@@ -1052,7 +1002,6 @@ models:
   tags:
   - 重排序模型
   logo: dashscope
-
 - name: gte-rerank
   type: rerank
   provider: dashscope
@@ -1064,7 +1013,6 @@ models:
   tags:
   - 重排序模型
   logo: dashscope
-
 - name: multimodal-embedding-v1
   type: embedding
   provider: dashscope
@@ -1079,7 +1027,6 @@ models:
   - 多模态模型
   - vision
   logo: dashscope
-
 - name: text-embedding-v1
   type: embedding
   provider: dashscope
@@ -1092,7 +1039,6 @@ models:
   - 嵌入模型
   - 文本嵌入
   logo: dashscope
-
 - name: text-embedding-v2
   type: embedding
   provider: dashscope
@@ -1105,7 +1051,6 @@ models:
   - 嵌入模型
   - 文本嵌入
   logo: dashscope
-
 - name: text-embedding-v3
   type: embedding
   provider: dashscope
@@ -1118,7 +1063,6 @@ models:
   - 嵌入模型
   - 文本嵌入
   logo: dashscope
-
 - name: text-embedding-v4
   type: embedding
   provider: dashscope
