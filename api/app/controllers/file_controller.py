@@ -402,7 +402,13 @@ async def batch_download_files(
         )
         yield eocd
 
-    zip_name = request_body.zip_filename or "download.zip"
+    if request_body.zip_filename:
+        zip_name = request_body.zip_filename
+    else:
+        first_name = valid_files[0].file_name
+        stem = first_name.rsplit(".", 1)[0] if "." in first_name else first_name
+        count = len(valid_files)
+        zip_name = f"{stem}.zip" if count == 1 else f"{stem}_等{count}个文件.zip"
     if not zip_name.endswith(".zip"):
         zip_name += ".zip"
 
