@@ -46,7 +46,10 @@ async def run_graphrag(
     start = trio.current_time()
     workspace_id, kb_id, document_id = row["workspace_id"], str(row["kb_id"]), row["document_id"]
     chunks = []
-    for d in settings.retriever.chunk_list(document_id, workspace_id, [kb_id], fields=["page_content", "document_id"], sort_by_position=True):
+    for d in settings.retriever.chunk_list(document_id, workspace_id, [kb_id], fields=["page_content", "document_id", "chunk_type"], sort_by_position=True):
+        # 跳过 QA chunks，只用原文 chunks 构建图谱
+        if d.get("chunk_type") == "qa":
+            continue
         chunks.append(d["page_content"])
 
     with trio.fail_after(max(120, len(chunks) * 60 * 10) if enable_timeout_assertion else 10000000000):
@@ -150,6 +153,9 @@ async def run_graphrag_for_kb(
 
         total, items = vector_service.search_by_segment(document_id=str(document_id), query=None, pagesize=9999, page=1, asc=True)
         for doc in items:
+            # 跳过 QA chunks，只用原文 chunks 构建图谱
+            if (doc.metadata or {}).get("chunk_type") == "qa":
+                continue
             content = doc.page_content
             if num_tokens_from_string(current_chunk + content) < 1024:
                 current_chunk += content

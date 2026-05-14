@@ -10,8 +10,8 @@ import { useEffect, useState, useRef, type FC } from 'react';
 import { useNavigate, useParams, useLocation, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useBreadcrumbManager, type BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
-import { Button, Spin, message, Switch } from 'antd';
-import { getDocumentDetail, getDocumentChunkList, downloadFile, updateDocument, updateDocumentChunk, createDocumentChunk, getFileUrl } from '@/api/knowledgeBase';
+import { Button, Spin, message, Switch, App } from 'antd';
+import { getDocumentDetail, getDocumentChunkList, downloadFile, updateDocument, updateDocumentChunk, createDocumentChunk } from '@/api/knowledgeBase';
 import type { KnowledgeBaseDocumentData, RecallTestData } from '@/views/KnowledgeBase/types';
 import { formatDateTime } from '@/utils/format';
 import InfoPanel, { type InfoItem } from '../components/InfoPanel';
@@ -20,10 +20,11 @@ import SearchInput from '@/components/SearchInput';
 import DocumentPreview from '@/components/DocumentPreview';
 import InsertModal, { type InsertModalRef } from '../components/InsertModal';
 import exitIcon from '@/assets/images/knowledgeBase/exit.png';
-const imagePath = 'https://devapi.mem.redbearai.com'
+import copy from 'copy-to-clipboard'
 const DocumentDetails: FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { message: messageApi } = App.useApp()
   const { knowledgeBaseId } = useParams<{ knowledgeBaseId: string }>();
   const location = useLocation();
   const { updateBreadcrumbs } = useBreadcrumbManager({
@@ -100,9 +101,25 @@ const DocumentDetails: FC = () => {
   }, [keywords]);
 
 
+  const handleCopy = (value?: string) => {
+    if (!value) return
+    copy(value)
+    messageApi.success(t('common.copySuccess'))
+  }
+
 
   const formatDocumentInfo = (doc: KnowledgeBaseDocumentData): InfoItem[] => {
     return [
+      {
+        key: 'file_id',
+        label: 'ID',
+        value: <span onClick={() => handleCopy(doc.file_id)}>
+          {doc.file_id}
+          <span
+            className="rb:cursor-pointer rb:-mb-0.5 rb:ml-1 rb:inline-block rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"
+          ></span>
+        </span>,
+      },
       {
         key: 'file_name',
         label: t('knowledgeBase.fileName') || '文件名',
@@ -210,6 +227,11 @@ const DocumentDetails: FC = () => {
     }
   };
 
+  const refreshChunks = () => {
+    let nextPage = 1;
+    setPage(nextPage);
+    ChunkList(nextPage);
+  }
   const loadMoreChunks = () => {
     const nextPage = page + 1;
     setPage(nextPage);
@@ -244,7 +266,7 @@ const DocumentDetails: FC = () => {
   };
 
   // Handle insert/edit content
-  const handleInsertContent = async (_docId: string, content: string, chunkId?: string): Promise<boolean> => {
+  const handleInsertContent = async (_docId: string, content: string | Record<string, string>, chunkId?: string): Promise<boolean> => {
     try {
       if (chunkId) {
         // Edit mode: Update existing chunk
@@ -253,7 +275,7 @@ const DocumentDetails: FC = () => {
         // Update frontend list directly without waiting for backend cache refresh
         setChunkList(prev => prev.map(item => 
           item.metadata?.doc_id === chunkId 
-            ? { ...item, page_content: response.page_content || content }
+            ? { ...item, page_content: typeof content === 'object' ? `'Q: ${response.metadata.question}\n A: ${response.metadata.answer}` :  response.page_content || content }
             : item
         ));
         
@@ -345,8 +367,8 @@ const DocumentDetails: FC = () => {
                 fileName={document?.file_name}
                 fileExt={document?.file_ext}
                 height="calc(100% - 40px)"
-                mode="google"
-                showModeSwitch={true}
+                // mode="google"
+                // showModeSwitch={true}
               />
             </div>
           )}
@@ -387,7 +409,7 @@ const DocumentDetails: FC = () => {
       <div className="rb:flex rb:h-full rb:flex-1 rb:overflow-hidden rb:bg-white rb:rounded-xl rb:border rb:border-[#DFE4ED]">
         {/* Left: Document info */}
         <div className='rb:w-80 rb:h-full rb:flex rb:flex-col rb:gap-4 rb:overflow-hidden'>
-          <div className='rb:h-full rb:border-r rb:border-[#DFE4ED] rb:p-4'>
+          <div className='rb:h-full rb:border-r rb:border-[#DFE4ED] rb:p-4 rb:overflow-y-auto'>
             <InfoPanel 
               title={t('knowledgeBase.documentInfo') || '文档信息'} 
               items={infoItems}
@@ -407,7 +429,7 @@ const DocumentDetails: FC = () => {
             {t('knowledgeBase.chunkList') || '分块列表'}
           </h2>
           <RecallTestResult 
-            
+            refresh={refreshChunks}
             data={chunkList} 
             showEmpty={false}
             hasMore={hasMore}
@@ -417,6 +439,7 @@ const DocumentDetails: FC = () => {
             editable={true}
             onItemClick={handleChunkClick}
             parserMode={parserMode}
+            handleCopy={handleCopy}
           />
         </div>
       </div>

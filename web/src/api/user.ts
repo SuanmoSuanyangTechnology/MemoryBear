@@ -58,7 +58,7 @@ export const changeEmail = (data: ChangeEmailModalForm) => {
   return request.put('/users/change-email', data)
 }
 
-// 获取租户套餐信息
+// Get tenant package information
 export const getTenantSubscription = () => {
   return request.get('/tenant/subscription')
 }

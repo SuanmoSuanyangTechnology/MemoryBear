@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-27 14:07:14
+ * @Last Modified time: 2026-05-07 18:17:40
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -16,6 +16,12 @@ import NoteNode from './components/Nodes/NoteNode';
 import { memoryConfigListUrl } from '@/api/memory';
 import type { NodeLibrary } from './types';
 
+
+export const cannotRunNodes = [
+  'start',
+  'end',
+  'output',
+]
 /**
  * Workflow node library configuration
  * Defines all available node types, their icons, and configuration schemas
@@ -144,6 +150,12 @@ export const nodeLibrary: NodeLibrary[] = [
           vision_input: {
             type: 'variableList',
             onFilterVariableType: ['array[file]', 'file']
+          },
+          error_handle: {
+            type: 'errorHandle',
+            defaultValue: {
+              method: 'none', // 'none' | 'branch' | 'default'
+            },
           }
         }
       },
@@ -954,7 +966,7 @@ export const graphNodeLibrary: Record<string, NodeConfig> = {
     height: 76,
     shape: 'normal-node',
     ports: {
-      groups: { left: defaultPortGroup },
+      groups: { left: leftPortGroup },
       items: [defaultPortItems[0]],
     },
   }

@@ -77,13 +77,11 @@ const AddChatVariable = forwardRef<AddChatVariableRef, AddChatVariableProps>(({
             renderItem={(item, index) => (
               <List.Item>
                 <div key={index} className="rb:relative rb:p-[12px_16px] rb:bg-[#FBFDFF] rb:cursor-pointer rb-border rb:rounded-lg">
-                  <Flex align="center" justify="space-between">
-                    <div className="rb:leading-4">
-                      <span className="rb:font-medium">{item.name}</span>
-                      <span className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular"> ({t(`workflow.config.parameter-extractor.${item.type}`)})</span>
-                    </div>
+                  <Flex align="center" justify="space-between" className="rb:leading-4 rb:max-w-[calc(100%-60px)]">
+                    <div className="rb:flex-1 rb:font-medium rb:whitespace-break-spaces rb:wrap-break-word rb:line-clamp-1">{item.name}</div>
+                    <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular"> ({t(`workflow.config.parameter-extractor.${item.type}`)})</div>
                   </Flex>
-                  <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:wrap-break-word rb:line-clamp-1">{item.description}</div>
+                  <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:wrap-break-word rb:line-clamp-1 rb:max-w-[calc(100%-60px)]">{item.description}</div>
                   <Flex gap={12} className="rb:absolute rb:right-4 rb:top-[50%] rb:transform-[translateY(-50%)] rb:bg-white">
                     <div
                       className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/editBorder.svg')] rb:hover:bg-[url('@/assets/images/editBg.svg')]"

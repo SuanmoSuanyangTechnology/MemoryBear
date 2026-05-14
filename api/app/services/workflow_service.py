@@ -2,6 +2,7 @@
 工作流服务层
 """
 import datetime
+import time
 import logging
 import uuid
 from typing import Any, Annotated, Optional
@@ -17,7 +18,6 @@ from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.validator import validate_workflow_config
 from app.db import get_db
-from sqlalchemy import select
 from app.models import App
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution
 from app.repositories import knowledge_repository
@@ -618,6 +618,63 @@ class WorkflowService:
                 storage_type = 'neo4j'
         return storage_type, user_rag_memory_id
 
+    @staticmethod
+    def _extract_human_message_and_meta(
+            final_messages: list[dict],
+            fallback_message: str,
+            fallback_files: list[dict] | None = None
+    ) -> tuple[str, dict]:
+        """从消息列表中提取用户消息和文件元数据，失败时回退到 payload 数据。"""
+        human_message = fallback_message
+        human_meta: dict = {"files": []}
+        for message in final_messages:
+            if message["role"] == "user":
+                if isinstance(message["content"], str):
+                    if not human_message:
+                        human_message = message["content"]
+                elif isinstance(message["content"], list):
+                    for f in message["content"]:
+                        human_meta["files"].append({
+                            "type": f.get("type"),
+                            "url": f.get("url"),
+                            "file_type": f.get("origin_file_type"),
+                            "name": f.get("name"),
+                            "size": f.get("size"),
+                        })
+        if not human_meta["files"] and fallback_files:
+            for f in fallback_files:
+                human_meta["files"].append({
+                    "type": f.get("type"),
+                    "url": f.get("url"),
+                    "file_type": f.get("origin_file_type"),
+                    "name": f.get("name"),
+                    "size": f.get("size"),
+                })
+        return human_message, human_meta
+
+    def _save_failed_conversation(
+            self,
+            conversation_id: uuid.UUID | None,
+            message_id: uuid.UUID | None,
+            human_message: str,
+            human_meta: dict,
+            error: str,
+    ) -> None:
+        """将失败时的用户消息和助手错误消息写入会话。"""
+        self.conversation_service.add_message(
+            conversation_id=conversation_id,
+            role="user",
+            content=human_message,
+            meta_data=human_meta,
+        )
+        self.conversation_service.add_message(
+            **({"message_id": message_id} if message_id else {}),
+            conversation_id=conversation_id,
+            role="assistant",
+            content="",
+            meta_data={"error": error},
+        )
+
     def _get_history_info(self, conversation_id: uuid.UUID) -> tuple[dict, list] | None:
         executions = self.execution_repo.get_by_conversation_id(
             conversation_id=conversation_id,
@@ -764,7 +821,10 @@ class WorkflowService:
                             for file in message["content"]:
                                 human_meta["files"].append({
                                     "type": file.get("type"),
-                                    "url": file.get("url")
+                                    "url": file.get("url"),
+                                    "file_type": file.get("origin_file_type"),
+                                    "name": file.get("name"),
+                                    "size": file.get("size"),
                                 })
                     if message["role"] == "assistant":
                         assistant_message = message["content"]
@@ -814,6 +874,13 @@ class WorkflowService:
                 )
                 logger.error(f"Workflow Run Failed, execution_id: {execution.execution_id},"
                              f" error: {result.get('error')}")
+                final_messages = result.get("messages", [])[init_message_length:]
+                human_message, human_meta = self._extract_human_message_and_meta(
+                    final_messages, payload.message or "", files
+                )
+                self._save_failed_conversation(
+                    conversation_id_uuid, message_id, human_message, human_meta, result.get("error") or ""
+                )
                 filtered_citations = []
 
             # 返回增强的响应结构
@@ -835,11 +902,9 @@ class WorkflowService:
 
         except Exception as e:
             logger.error(f"工作流执行失败: execution_id={execution.execution_id}, error={e}", exc_info=True)
-            self.update_execution_status(
-                execution.execution_id,
-                "failed",
-                error_message=str(e)
-            )
+            self.update_execution_status(execution.execution_id, "failed", error_message=str(e))
+            human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
+            self._save_failed_conversation(conversation_id_uuid, None, human_message, human_meta, str(e))
             raise BusinessException(
                 code=BizCode.INTERNAL_ERROR,
                 message=f"工作流执行失败: {str(e)}"
@@ -1026,10 +1091,16 @@ class WorkflowService:
                         logger.info(f"Workflow Run Success, "
                                     f"execution_id: {execution.execution_id}, message count: {len(final_messages)}")
                     elif status == "failed":
+                        error_msg = event.get("data", {}).get("error", "未知错误")
+                        final_messages = event.get("data", {}).get("messages", [])[init_message_length:]
+                        human_message, human_meta = self._extract_human_message_and_meta(
+                            final_messages, payload.message or "", files
+                        )
+                        self._save_failed_conversation(
+                            conversation_id_uuid, message_id, human_message, human_meta, error_msg
+                        )
                         self.update_execution_status(
-                            execution.execution_id,
-                            "failed",
-                            output_data=event.get("data")
+                            execution.execution_id, "failed", output_data=event.get("data")
                         )
                     else:
                         logger.error(f"unexpect workflow run status, status: {status}")
@@ -1056,17 +1127,195 @@ class WorkflowService:
                 f"Workflow streaming execution failed: execution_id={execution.execution_id}, error={e}",
                 exc_info=True
             )
-            self.update_execution_status(
-                execution.execution_id,
-                "failed",
-                error_message=str(e)
-            )
-            # 发送错误事件
+            self.update_execution_status(execution.execution_id, "failed", error_message=str(e))
+            human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
+            self._save_failed_conversation(conversation_id_uuid, None, human_message, human_meta, str(e))
+            yield {"event": "error", "data": {"execution_id": execution.execution_id, "error": str(e)}}
+
+    async def _build_node_context(
+            self,
+            app_id: uuid.UUID,
+            node_id: str,
+            config: WorkflowConfig,
+            workspace_id: uuid.UUID,
+            input_data: dict[str, Any],
+    ):
+        """构建单节点执行所需的上下文（node_config, node, state, variable_pool）"""
+        from app.core.workflow.engine.runtime_schema import ExecutionContext
+        from app.core.workflow.engine.variable_pool import VariablePool, VariablePoolInitializer
+        from app.core.workflow.engine.state_manager import WorkflowState
+        from app.core.workflow.nodes.node_factory import NodeFactory
+        from app.core.workflow.variable.base_variable import VariableType
+
+        if not config:
+            config = self.get_workflow_config(app_id)
+        if not config:
+            raise BusinessException(code=BizCode.CONFIG_MISSING, message="工作流配置不存在")
+
+        node_config = next((n for n in config.nodes if n.get("id") == node_id), None)
+        if not node_config:
+            raise BusinessException(code=BizCode.NOT_FOUND, message=f"节点不存在: node_id={node_id}")
+
+        workflow_config_dict = {
+            "nodes": config.nodes,
+            "edges": config.edges,
+            "variables": config.variables or [],
+            "execution_config": config.execution_config or {},
+            "features": config.features or {},
+        }
+
+        storage_type, user_rag_memory_id = self._get_memory_store_info(workspace_id)
+        execution_id = f"node_{uuid.uuid4().hex[:16]}"
+
+        execution_context = ExecutionContext.create(
+            execution_id=execution_id,
+            workspace_id=str(workspace_id),
+            user_id=input_data.get("user_id", ""),
+            conversation_id=input_data.get("conversation_id", ""),
+            memory_storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+        )
+
+        # sys.files 转换为 FileObject 格式
+        raw_files = input_data.get("files") or []
+        if raw_files:
+            from app.schemas.app_schema import FileInput
+            file_inputs = [
+                FileInput(**f) if isinstance(f, dict) else f
+                for f in raw_files
+            ]
+            input_data["files"] = await self._handle_file_input(file_inputs)
+
+        variable_pool = VariablePool()
+        await VariablePoolInitializer(workflow_config_dict).initialize(variable_pool, input_data, execution_context)
+
+        # 注入节点输入变量，支持扁平格式 {"node_id.var": value}
+        for key, value in (input_data.get("inputs") or {}).items():
+            if "." in key:
+                ref_node_id, var_name = key.split(".", 1)
+                var_type = VariableType.type_map(value)
+                await variable_pool.new(ref_node_id, var_name, value, var_type, mut=False)
+
+        cycle_nodes = [
+            n.get("id") for n in workflow_config_dict.get("nodes", [])
+            if n.get("type") in [NodeType.LOOP, NodeType.ITERATION]
+        ]
+        state = WorkflowState(
+            messages=input_data.get("conv_messages", []),
+            node_outputs={},
+            execution_id=execution_id,
+            workspace_id=str(workspace_id),
+            user_id=input_data.get("user_id", ""),
+            error=None,
+            error_node=None,
+            cycle_nodes=cycle_nodes,
+            looping=0,
+            activate={node_id: True},
+            memory_storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+        )
+
+        node = NodeFactory.create_node(node_config, workflow_config_dict, [])
+        return node_config, node, state, variable_pool
+
+    async def run_single_node(
+            self,
+            app_id: uuid.UUID,
+            node_id: str,
+            config: WorkflowConfig,
+            workspace_id: uuid.UUID,
+            input_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """单节点执行（非流式）"""
+        input_data = input_data or {}
+        node_config, node, state, variable_pool = await self._build_node_context(
+            app_id, node_id, config, workspace_id, input_data
+        )
+        start_time = time.time()
+        try:
+            result = await node.execute(state, variable_pool)
+            elapsed = (time.time() - start_time) * 1000
+            return {
+                "status": "completed",
+                "node_id": node_id,
+                "node_type": node_config.get("type"),
+                "inputs": node._extract_input(state, variable_pool),
+                "outputs": node._extract_output(result),
+                "token_usage": node._extract_token_usage(result),
+                "elapsed_time": elapsed,
+                "error": None,
+            }
+        except Exception as e:
+            elapsed = (time.time() - start_time) * 1000
+            logger.error(f"单节点执行失败: node_id={node_id}, error={e}", exc_info=True)
+            return {
+                "status": "failed",
+                "node_id": node_id,
+                "node_type": node_config.get("type"),
+                "inputs": node._extract_input(state, variable_pool),
+                "outputs": None,
+                "token_usage": None,
+                "elapsed_time": elapsed,
+                "error": str(e),
+            }
+
+    async def run_single_node_stream(
+            self,
+            app_id: uuid.UUID,
+            node_id: str,
+            config: WorkflowConfig,
+            workspace_id: uuid.UUID,
+            input_data: dict[str, Any] | None = None,
+    ):
+        """单节点执行（流式）
+
+        Yields:
+            node_start -> node_chunk（LLM 等流式节点）-> node_end / node_error
+        """
+        input_data = input_data or {}
+        node_config, node, state, variable_pool = await self._build_node_context(
+            app_id, node_id, config, workspace_id, input_data
+        )
+        node_type = node_config.get("type")
+        start_time = time.time()
+
+        yield {"event": "node_start", "data": {"node_id": node_id, "node_type": node_type}}
+
+        final_result = None
+        try:
+            async for item in node.execute_stream(state, variable_pool):
+                if item.get("__final__"):
+                    final_result = item["result"]
+                else:
+                    chunk = item.get("chunk", "")
+                    if chunk:
+                        yield {"event": "node_chunk", "data": {"node_id": node_id, "chunk": chunk}}
+
+            elapsed = (time.time() - start_time) * 1000
             yield {
-                "event": "error",
+                "event": "node_end",
                 "data": {
-                    "execution_id": execution.execution_id,
-                    "error": str(e)
+                    "node_id": node_id,
+                    "node_type": node_type,
+                    "status": "succeeded",
+                    "inputs": node._extract_input(state, variable_pool),
+                    "outputs": node._extract_output(final_result),
+                    "token_usage": node._extract_token_usage(final_result),
+                    "elapsed_time": elapsed,
+                    "error": None,
+                }
+            }
+        except Exception as e:
+            elapsed = (time.time() - start_time) * 1000
+            logger.error(f"单节点流式执行失败: node_id={node_id}, error={e}", exc_info=True)
+            yield {
+                "event": "node_error",
+                "data": {
+                    "node_id": node_id,
+                    "node_type": node_type,
+                    "inputs": node._extract_input(state, variable_pool),
+                    "elapsed_time": elapsed,
+                    "error": str(e),
                 }
             }
 

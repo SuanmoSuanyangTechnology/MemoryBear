@@ -40,6 +40,7 @@ class MemoryReadNode(BaseNode):
                 end_user_id=end_user_id,
                 user_rag_memory_id=state["user_rag_memory_id"],
             )
+            # TODO: Historical Messages -> Used to refer to coreference resolution
             search_result = await memory_service.read(
                 self._render_template(self.typed_config.message, variable_pool),
                 search_switch=SearchStrategy(self.typed_config.search_switch)
@@ -110,7 +111,7 @@ class MemoryWriteNode(BaseNode):
                         upload_file_id=instence.value.file_id,
                         url=instence.value.url,
                         file_type=instence.value.origin_file_type
-                    ).model_dump())
+                    ).model_dump(mode="json"))
                 elif isinstance(instence, ArrayVariable) and instence.child_type == FileVariable:
                     for file_instence in instence.value:
                         file_info.append(FileInput(
@@ -119,7 +120,7 @@ class MemoryWriteNode(BaseNode):
                             upload_file_id=file_instence.value.file_id,
                             url=file_instence.value.url,
                             file_type=file_instence.value.origin_file_type
-                        ).model_dump())
+                        ).model_dump(mode="json"))
             messages.append({
                 "role": message.role,
                 "content": self._render_template(content, variable_pool),

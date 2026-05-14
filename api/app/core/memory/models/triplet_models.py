@@ -37,6 +37,7 @@ class Entity(BaseModel):
     name: str = Field(..., description="Name of the entity")
     name_embedding: Optional[List[float]] = Field(None, description="Embedding vector for the entity name")
     type: str = Field(..., description="Type/category of the entity")
+    type_description: str = Field(default="", description="Chinese definition of the entity type from ontology")
     description: str = Field(..., description="Description of the entity")
     example: str = Field(
         default="",
@@ -79,6 +80,7 @@ class Triplet(BaseModel):
     subject_name: str = Field(..., description="Name of the subject entity")
     subject_id: int = Field(..., description="ID of the subject entity")
     predicate: str = Field(..., description="Relationship/predicate between subject and object")
+    predicate_description: str = Field(default="", description="Chinese definition of the predicate from ontology")
     object_name: str = Field(..., description="Name of the object entity")
     object_id: int = Field(..., description="ID of the object entity")
     value: Optional[str] = Field(None, description="Additional value or context")

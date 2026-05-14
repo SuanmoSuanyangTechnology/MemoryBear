@@ -48,8 +48,6 @@ class EntityRepository(BaseNeo4jRepository[ExtractedEntityNode]):
         # 处理datetime字段
         if isinstance(n.get('created_at'), str):
             n['created_at'] = datetime.fromisoformat(n['created_at'])
-        if n.get('expired_at') and isinstance(n.get('expired_at'), str):
-            n['expired_at'] = datetime.fromisoformat(n['expired_at'])
         
         # 确保aliases字段存在且为列表
         if 'aliases' not in n or n['aliases'] is None:

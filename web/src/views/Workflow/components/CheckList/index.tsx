@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-04-09 18:58:21 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-04-20 10:39:17 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-05-07 18:35:54
  */
 import { useState, useCallback, useEffect, useRef, type FC } from 'react'
 import { Popover, Flex } from 'antd'
@@ -60,7 +60,7 @@ const specialValidators: Record<string, (val: any) => boolean> = {
     return val.some(c => !c?.expressions?.length || c.expressions.some((expr: any) => !isExprSet(expr)))
   },
   // question-classifier.categories: every category must have a value
-  'question-classifier.categories': (val: any[]) => !Array.isArray(val) || !val.some(c => c?.class_name && String(c.class_name).trim()),
+  'question-classifier.categories': (val: any[]) => !Array.isArray(val) || !val.every(c => c?.class_name && String(c.class_name).trim()),
   // var-aggregator.group_variables: must be non-empty array
   'var-aggregator.group_variables': (val: any[]) => !Array.isArray(val) || !val.length,
   // assigner.assignments: every item needs variable_selector + operation; value required unless operation is 'clear'

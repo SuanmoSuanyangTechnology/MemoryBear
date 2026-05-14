@@ -64,7 +64,7 @@ class ImplicitMemoryLLMClient:
         self.default_model_id = default_model_id
         self._client_factory = MemoryClientFactory(db)
         
-        logger.info("ImplicitMemoryLLMClient initialized")
+        logger.debug("ImplicitMemoryLLMClient initialized")
 
     def _get_llm_client(self, model_id: Optional[str] = None):
         """Get LLM client instance.

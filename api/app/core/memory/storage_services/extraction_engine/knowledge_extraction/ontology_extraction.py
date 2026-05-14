@@ -51,7 +51,7 @@ class OntologyExtractor:
         self.validator = OntologyValidator()
         self.owl_validator = OWLValidator()
         
-        logger.info("OntologyExtractor initialized")
+        logger.debug("OntologyExtractor initialized")
     
     async def extract_ontology_classes(
         self,

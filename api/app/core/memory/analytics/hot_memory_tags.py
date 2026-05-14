@@ -186,7 +186,7 @@ async def get_raw_tags_from_db(
     if by_user:
         query = (
             "MATCH (e:ExtractedEntity) "
-            "WHERE e.user_id = $id AND e.entity_type <> '人物' AND e.name IS NOT NULL AND NOT e.name IN $names_to_exclude "
+            "WHERE e.user_id = $id AND e.entity_type <> '生命体' AND e.name IS NOT NULL AND NOT e.name IN $names_to_exclude "
             "RETURN e.name AS name, count(e) AS frequency "
             "ORDER BY frequency DESC "
             "LIMIT $limit"
@@ -194,7 +194,7 @@ async def get_raw_tags_from_db(
     else:
         query = (
             "MATCH (e:ExtractedEntity) "
-            "WHERE e.end_user_id = $id AND e.entity_type <> '人物' AND e.name IS NOT NULL AND NOT e.name IN $names_to_exclude "
+            "WHERE e.end_user_id = $id AND e.entity_type <> '生命体' AND e.name IS NOT NULL AND NOT e.name IN $names_to_exclude "
             "RETURN e.name AS name, count(e) AS frequency "
             "ORDER BY frequency DESC "
             "LIMIT $limit"

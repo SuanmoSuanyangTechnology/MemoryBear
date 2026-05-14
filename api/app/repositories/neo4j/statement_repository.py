@@ -50,12 +50,12 @@ class StatementRepository(BaseNeo4jRepository[StatementNode]):
         # 处理datetime字段
         if isinstance(n.get('created_at'), str):
             n['created_at'] = datetime.fromisoformat(n['created_at'])
-        if n.get('expired_at') and isinstance(n['expired_at'], str):
-            n['expired_at'] = datetime.fromisoformat(n['expired_at'])
         if n.get('valid_at') and isinstance(n['valid_at'], str):
             n['valid_at'] = datetime.fromisoformat(n['valid_at'])
         if n.get('invalid_at') and isinstance(n['invalid_at'], str):
             n['invalid_at'] = datetime.fromisoformat(n['invalid_at'])
+        if n.get('dialog_at') and isinstance(n['dialog_at'], str):
+            n['dialog_at'] = datetime.fromisoformat(n['dialog_at'])
         
         # 处理temporal_info字段
         if isinstance(n.get('temporal_info'), str):

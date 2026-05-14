@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 16:35:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 14:43:54
+ * @Last Modified time: 2026-05-08 16:12:25
  */
 /**
  * HTTP Request Utility Module
@@ -159,7 +159,7 @@ service.interceptors.response.use(
     }
 
     // Handle network errors, timeouts, etc.
-    let msg = error.response?.data?.error || error.response?.error;
+    let msg = error.response?.data?.error || error.response?.error || error.response?.data?.msg || error.response?.msg;
     const status = error?.response ? error.response.status : error;
     // Server responded but status code is not in 2xx range
     switch (status) {

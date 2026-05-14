@@ -57,7 +57,7 @@ class LoopRuntime:
         self.looping = True
         self.variable_pool = variable_pool
         self.child_variable_pool = child_variable_pool
-        self.event_write = get_stream_writer()
+        self.event_write = get_stream_writer() if self.stream else (lambda x: None)
 
         self.checkpoint = RunnableConfig(
             configurable={
@@ -223,7 +223,7 @@ class LoopRuntime:
                         })
             return self.graph.get_state(config=self.checkpoint).values
         else:
-            return await self.graph.ainvoke(loopstate)
+            return await self.graph.ainvoke(loopstate, config=self.checkpoint)
 
     async def run(self):
         """

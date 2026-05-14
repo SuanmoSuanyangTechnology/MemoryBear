@@ -57,7 +57,7 @@ class SensitiveDataFilter:
         (re.compile(r'\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'), "[TOKEN]"),
         # JWT Token 部分匹配（只有header和payload，没有signature）
         (re.compile(r'\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]*)?'), "[TOKEN]"),
-        # UUID格式的token或ID
+        # UUID格式的token或ID 
         (re.compile(r'\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b', re.IGNORECASE), "[UUID]"),
         # API密钥格式（32位以上的字母数字组合）
         (re.compile(r'\b[A-Za-z0-9]{32,}\b'), "[API_KEY]"),

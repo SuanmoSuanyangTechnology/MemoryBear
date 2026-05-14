@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-21 14:27:15
+ * @Last Modified time: 2026-05-08 14:39:39
  */
 /**
  * Conversation Page
@@ -219,8 +219,8 @@ const Conversation: FC = () => {
     }])
   }
 
-  const updateAssistantMessage = (content: string = '', audio_url?: string, audio_status?: string, citations?: any[]) => {
-    if (!content && !audio_url && (!citations || citations?.length < 1)) return
+  const updateAssistantMessage = (content: string = '', audio_url?: string, audio_status?: string, citations?: any[], error?: string) => {
+    if (!content && !audio_url && (!citations || citations?.length < 1) && typeof error !== 'string') return
     if (streamLoadingRef.current) streamLoadingRef.current = false
     setChatList(prev => {
       const lastList = [...prev]
@@ -236,7 +236,8 @@ const Conversation: FC = () => {
               ...(lastMsg.meta_data || {}),
               audio_url: audio_url || lastMsg.meta_data?.audio_url,
               audio_status: audio_status || lastMsg.meta_data?.audio_status,
-              citations: citations || lastMsg.meta_data?.citations
+              citations: citations || lastMsg.meta_data?.citations,
+              error: error || lastMsg.meta_data?.error
             }
           }
         ]
@@ -337,14 +338,15 @@ const Conversation: FC = () => {
     let currentConversationId: string | null = null
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach((item) => {
-        const { content, conversation_id: curId, audio_url, citations } = item.data as {
+        const { content, conversation_id: curId, audio_url, citations, error } = item.data as {
           content: string; conversation_id: string; audio_url?: string;
           citations?: {
             document_id: string;
             file_name: string;
             knowledge_id: string;
             score: string;
-          }[]
+          }[];
+          error?: string;
         }
         switch (item.event) {
           case 'start':
@@ -376,8 +378,8 @@ const Conversation: FC = () => {
                 setConversationId(currentConversationId)
               }
             }
-            if (citations && citations.length > 0) {
-              updateAssistantMessage(content, audio_url, undefined, citations)
+            if ((citations && citations.length > 0) || error) {
+              updateAssistantMessage(content, audio_url, undefined, citations, error)
             }
             setLoading(false)
             getHistory(true)

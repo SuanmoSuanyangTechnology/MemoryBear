@@ -49,8 +49,6 @@ class DialogRepository(BaseNeo4jRepository[DialogueNode]):
         # 处理datetime字段
         if isinstance(n.get('created_at'), str):
             n['created_at'] = datetime.fromisoformat(n['created_at'])
-        if n.get('expired_at') and isinstance(n['expired_at'], str):
-            n['expired_at'] = datetime.fromisoformat(n['expired_at'])
         
         return DialogueNode(**n)
     

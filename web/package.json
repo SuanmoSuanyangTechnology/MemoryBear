@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "install:private": "node install-private.js"
   },
   "dependencies": {
     "@antv/layout": "^1.2.14-beta.8",
@@ -62,6 +63,8 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "tailwindcss": "^4.1.14",
+    "three": "^0.184.0",
+    "x6-html-shape": "^0.4.9",
     "xlsx": "^0.18.5",
     "zustand": "^5.0.8"
   },
@@ -81,6 +84,7 @@
     "@types/react-router-dom": "^5.3.3",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@types/recordrtc": "^5.6.15",
+    "@types/three": "^0.184.1",
     "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.4.21",
     "eslint": "^9.36.0",

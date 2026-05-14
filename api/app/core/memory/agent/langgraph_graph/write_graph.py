@@ -40,8 +40,20 @@ async def long_term_storage(
     # 获取数据库会话
     with get_db_context() as db_session:
         config_service = MemoryConfigService(db_session)
+        # 通过 end_user_id 获取 workspace_id，确保日志和 fallback 逻辑完整
+        from app.services.memory_agent_service import get_end_user_connected_config
+        import uuid as _uuid
+        workspace_id = None
+        try:
+            connected = get_end_user_connected_config(end_user_id, db_session)
+            raw = connected.get("workspace_id")
+            if raw and raw != "None":
+                workspace_id = _uuid.UUID(str(raw))
+        except Exception:
+            pass
         memory_config = config_service.load_memory_config(
-            config_id=memory_config_id,  # 改为整数
+            config_id=memory_config_id,
+            workspace_id=workspace_id,
             service_name="MemoryAgentService"
         )
         if long_term_type == AgentMemory_Long_Term.STRATEGY_CHUNK:

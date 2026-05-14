@@ -134,6 +134,19 @@
               "subs": []
             }
           ]
+        },
+        {
+          "id": 61,
+          "parent": 6,
+          "code": "upgrade",
+          "label": "升级",
+          "i18nKey": "menu.upgradePackage",
+          "path": "/upgrade",
+          "enable": true,
+          "display": false,
+          "level": 1,
+          "sort": 0,
+          "subs": []
         }
       ]
     },

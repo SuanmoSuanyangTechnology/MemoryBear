@@ -1,9 +1,8 @@
 from typing import Self
 
-from pydantic import BaseModel, Field, field_serializer, ConfigDict, model_validator, computed_field
+from pydantic import BaseModel, Field, field_serializer, ConfigDict, computed_field
 
 from app.core.memory.enums import Neo4jNodeType, StorageType
-from app.core.validators import file_validator
 from app.schemas.memory_config_schema import MemoryConfig
 
 
@@ -32,10 +31,12 @@ class Memory(BaseModel):
 
 class MemorySearchResult(BaseModel):
     memories: list[Memory]
+    content_str: str = Field(default="")
 
-    @computed_field
     @property
     def content(self) -> str:
+        if self.content_str:
+            return self.content_str
         return "\n".join([memory.content for memory in self.memories])
 
     @computed_field

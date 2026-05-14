@@ -39,7 +39,7 @@ const Knowledge: FC<{value?: KnowledgeConfig; onChange?: (config: KnowledgeConfi
           const fullBases = knowledge_bases.map(base => {
             if (!base.name) {
               const fullBase = res.items.find((item: any) => item.id === base.kb_id)
-              return fullBase ? { ...base, ...fullBase } : base
+              return fullBase ? { ...fullBase, ...base } : base
             }
             return base
           })

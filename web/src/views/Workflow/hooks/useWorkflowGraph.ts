@@ -2,13 +2,15 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-28 13:49:11
+ * @Last Modified time: 2026-05-07 18:22:14
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, type Edge } from '@antv/x6';
-import { register } from '@antv/x6-react-shape';
+import { register as registerReactShape } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 import { App } from 'antd';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, createElement } from 'react';
+import type { RefObject, Dispatch, SetStateAction, MutableRefObject, DragEvent } from 'react';
+import { createRoot } from 'react-dom/client';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 
@@ -20,14 +22,16 @@ import type { ChatVariable, HistoryRecord, NodeProperties, WorkflowConfig } from
 import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils';
 import { useWorkflowStore } from '@/store/workflow';
 
+const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+
 /**
  * Props for useWorkflowGraph hook
  */
 export interface UseWorkflowGraphProps {
   /** Reference to the main graph container element */
-  containerRef: React.RefObject<HTMLDivElement>;
+  containerRef: RefObject<HTMLDivElement>;
   /** Reference to the minimap container element */
-  miniMapRef: React.RefObject<HTMLDivElement>;
+  miniMapRef: RefObject<HTMLDivElement>;
   /** Callback when features config is loaded */
   onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void;
 }
@@ -39,23 +43,23 @@ export interface UseWorkflowGraphReturn {
   /** Current workflow configuration */
   config: WorkflowConfig | null;
   /** Function to update workflow configuration */
-  setConfig: React.Dispatch<React.SetStateAction<WorkflowConfig | null>>;
+  setConfig: Dispatch<SetStateAction<WorkflowConfig | null>>;
   /** Reference to the X6 graph instance */
-  graphRef: React.MutableRefObject<Graph | undefined>;
+  graphRef: MutableRefObject<Graph | undefined>;
   /** Currently selected node */
   selectedNode: Node | null;
   /** Function to update selected node */
-  setSelectedNode: React.Dispatch<React.SetStateAction<Node | null>>;
+  setSelectedNode: Dispatch<SetStateAction<Node | null>>;
   /** Current zoom level of the graph */
   zoomLevel: number;
   /** Function to update zoom level */
-  setZoomLevel: React.Dispatch<React.SetStateAction<number>>;
+  setZoomLevel: Dispatch<SetStateAction<number>>;
   /** Whether hand/pan mode is enabled */
   isHandMode: boolean;
   /** Function to toggle hand mode */
-  setIsHandMode: React.Dispatch<React.SetStateAction<boolean>>;
+  setIsHandMode: Dispatch<SetStateAction<boolean>>;
   /** Handler for dropping nodes onto canvas */
-  onDrop: (event: React.DragEvent) => void;
+  onDrop: (event: DragEvent) => void;
   /** Handler for clicking blank canvas area */
   blankClick: () => void;
   /** Handler for delete keyboard event */
@@ -77,7 +81,7 @@ export interface UseWorkflowGraphReturn {
   /** Chat variables for workflow */
   chatVariables: ChatVariable[];
   /** Function to update chat variables */
-  setChatVariables: React.Dispatch<React.SetStateAction<ChatVariable[]>>;
+  setChatVariables: Dispatch<SetStateAction<ChatVariable[]>>;
 
   handleAddNotes: () => void;
   handleSaveFeaturesConfig: (value: FeaturesConfigForm) => void;
@@ -124,9 +128,7 @@ export const useWorkflowGraph = ({
   const [canRedo, setCanRedo] = useState(false)
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([])
   const lastHistoryRef = useRef<{ cellIds: string[]; timestamp: number; type: string } | null>(null)
-  const undoRef = useRef<() => void>(() => {})
-  const redoRef = useRef<() => void>(() => {})
-  const syncChildRelationshipsRef = useRef<() => void>(() => {})
+  const syncChildRelationshipsRef = useRef<() => void>(() => { })
   const isSyncingRef = useRef(false)
   useEffect(() => {
     if (!graphRef.current) return
@@ -167,6 +169,21 @@ export const useWorkflowGraph = ({
   useEffect(() => {
     initWorkflow()
   }, [config, graphRef.current])
+
+  /**
+   * Assign explicit zIndex values to enforce layer order:
+   *   parent nodes (loop/iteration) → child edges → child nodes
+   * Ports live inside each node's SVG container and are always above
+   * edges once the node zIndex is higher than the edge zIndex.
+   */
+  const reorderCells = (graph: Graph) => {
+    // Safari uses x6-html-shape (dual HTML layer architecture).
+    // zIndex controls order within each HTML layer and SVG layer.
+    graph.getEdges().forEach(edge => edge.setZIndex(0));
+    graph.getNodes().forEach(node => {
+      node.setZIndex(node.getData()?.cycle ? 2 : 1);
+    });
+  };
 
   /**
    * Initialize workflow graph with nodes and edges from configuration
@@ -310,9 +327,8 @@ export const useWorkflowGraph = ({
 
           nodeConfig.height = newHeight;
         }
-
         // Check error_handle.method config for http-request node
-        if (type === 'http-request' && (nodeConfig as any).error_handle?.method === 'branch') {
+        if (['http-request', 'llm'].includes(type) && (config as any)?.error_handle?.method === 'branch') {
           nodeConfig.ports = {
             groups: {
               right: { position: 'right', markup: portMarkup, attrs: portAttrs },
@@ -443,7 +459,7 @@ export const useWorkflowGraph = ({
           }
 
           // If http-request node has label, match corresponding port by label
-          if (sourceCell.getData()?.type === 'http-request' && label) {
+          if (['http-request', 'llm'].includes(sourceCell.getData()?.type) && label) {
             const matchingPort = sourcePorts.find((port: any) => port.id === label);
             if (matchingPort) {
               sourcePort = label;
@@ -471,29 +487,63 @@ export const useWorkflowGraph = ({
       graphRef.current.addEdges(edgeList.filter(vo => vo !== null))
     }
 
+    // Check if loop/iteration nodes need add-node added
+    const parentNodes = graphRef.current.getNodes().filter(node => {
+      const type = node.getData()?.type;
+      return type === 'loop' || type === 'iteration';
+    });
+
+    parentNodes.forEach(parentNode => {
+      const parentData = parentNode.getData();
+      const allChildren = graphRef.current!.getNodes().filter(n => n.getData()?.cycle === parentData.id);
+      const cycleStartNodes = allChildren.filter(n => n.getData()?.type === 'cycle-start');
+
+      // If only cycle-start exists, add add-node
+      if (cycleStartNodes.length === 1 && allChildren.length === 1) {
+        const cycleStartNode = cycleStartNodes[0];
+        const bbox = cycleStartNode.getBBox();
+        const addNode = graphRef.current!.addNode({
+          ...graphNodeLibrary.addStart,
+          x: bbox.x + 84,
+          y: bbox.y + 4,
+          data: { type: 'add-node', parentId: parentNode.id, cycle: parentData.id, label: t('workflow.addNode'), icon: '+' },
+        });
+        parentNode.addChild(addNode, { silent: true });
+        graphRef.current!.addEdge({
+          source: { cell: cycleStartNode.id, port: cycleStartNode.getPorts().find(p => p.group === 'right')?.id || 'right' },
+          target: { cell: addNode.id, port: addNode.getPorts().find(p => p.group === 'left')?.id || 'left' },
+          ...edgeAttrs,
+        });
+      }
+    });
+
     graphRef.current.centerContent()
     // Initialize after completion, display nodes in visible area
     if (nodes.length > 0 || edges.length > 0) {
       setTimeout(() => {
         if (graphRef.current) {
-          graphRef.current.getNodes().forEach(node => {
-            if (!node.getData()?.cycle) node.toFront();
-          });
-          // Bring edges to front first, then child nodes above edges; parent nodes stay behind
-          graphRef.current.getEdges().forEach(edge => {
-            const sourceCell = graphRef.current?.getCellById(edge.getSourceCellId());
-            const targetCell = graphRef.current?.getCellById(edge.getTargetCellId());
-            if (sourceCell?.getData()?.cycle || targetCell?.getData()?.cycle) {
-              edge.toFront();
-            }
-          });
-          graphRef.current.getNodes().forEach(node => {
-            if (node.getData()?.cycle) node.toFront();
-          });
+          if (isSafari) {
+            reorderCells(graphRef.current)
+          } else {
+            graphRef.current.getNodes().forEach(node => {
+              if (!node.getData()?.cycle) node.toFront();
+            });
+            // Bring edges to front first, then child nodes above edges; parent nodes stay behind
+            graphRef.current.getEdges().forEach(edge => {
+              const sourceCell = graphRef.current?.getCellById(edge.getSourceCellId());
+              const targetCell = graphRef.current?.getCellById(edge.getTargetCellId());
+              if (sourceCell?.getData()?.cycle || targetCell?.getData()?.cycle) {
+                edge.toFront();
+              }
+            });
+            graphRef.current.getNodes().forEach(node => {
+              if (node.getData()?.cycle) node.toFront();
+            });
+          }
           graphRef.current.enableHistory()
           graphRef.current.cleanHistory()
         }
-      }, 200)
+      }, isSafari ? 0 : 200)
     } else {
       graphRef.current.enableHistory()
       graphRef.current.cleanHistory()
@@ -532,24 +582,82 @@ export const useWorkflowGraph = ({
     const graph = graphRef.current
     graph.disableHistory()
     graph.getNodes().forEach(node => {
-      const cycleId = node.getData()?.cycle
-      if (!cycleId) return
-      const parentNode = graph.getCellById(cycleId) as Node | null
-      if (!parentNode) return
-      if (!parentNode.getChildren()?.some(c => c.id === node.id)) {
-        parentNode.addChild(node, { silent: true })
-      }
-    })
-    graph.getNodes().forEach(node => {
+      const nodeData = node.getData()
       const children = node.getChildren()
-      if (!children?.length) return
-      children.forEach(child => {
-        if (!child.isNode()) return
-        const childCycleId = (child as Node).getData?.()?.cycle
-        if (childCycleId !== node.id && childCycleId !== node.getData?.()?.id) {
-          node.removeChild(child, { silent: true })
+
+      const cycleId = nodeData?.cycle
+
+      if (cycleId) {
+        const parentNode = graph.getCellById(cycleId) as Node | null
+        if (!parentNode) return
+        if (!parentNode.getChildren()?.some(c => c.id === node.id)) {
+          parentNode.addChild(node, { silent: true })
         }
-      })
+      }
+
+      if (nodeData.type === 'if-else') {
+        const rightPorts = node.getPorts().filter(p => p.group === 'right')
+        const caseCount = rightPorts.length - 1 // last port is ELSE
+        const currentCases: any[] = nodeData.config?.cases?.defaultValue ?? []
+        const newCases = caseCount !== currentCases.length
+          ? Array.from({ length: caseCount }, (_, i) => currentCases[i] ?? { logical_operator: 'and', expressions: [] })
+          : currentCases
+        if (caseCount !== currentCases.length) {
+          node.setData({
+            ...nodeData,
+            config: { ...nodeData.config, cases: { ...nodeData.config.cases, defaultValue: newCases } }
+          }, { deep: false, silent: true })
+        }
+        // Sync node height and port Y positions
+        node.prop('size', { width: nodeWidth, height: calcConditionNodeTotalHeight(newCases) })
+        newCases.forEach((_c: any, i: number) => {
+          node.portProp(`CASE${i + 1}`, 'args/y', getConditionNodeCasePortY(newCases, i))
+        })
+        node.portProp(`CASE${newCases.length + 1}`, 'args/y', getConditionNodeCasePortY(newCases, newCases.length))
+        node.toFront()
+        graph.getEdges().filter(e => e.getSourceCellId() === node.id).forEach(e => {
+          const tgt = graph.getCellById(e.getTargetCellId())
+          tgt?.toFront()
+        })
+      } else if (nodeData.type === 'question-classifier') {
+        const rightPorts = node.getPorts().filter(p => p.group === 'right')
+        const currentCategories: any[] = nodeData.config?.categories?.defaultValue ?? []
+        const categoryCount = rightPorts.length
+        const newCategories = categoryCount !== currentCategories.length
+          ? rightPorts.map((port, i) => {
+            if (currentCategories[i]) return currentCategories[i]
+            const edge = graph.getEdges().find(e => e.getSourceCellId() === node.id && e.getSourcePortId() === port.id)
+            return edge ? { name: '' } : {}
+          })
+          : currentCategories
+        if (categoryCount !== currentCategories.length) {
+          node.setData({
+            ...nodeData,
+            config: { ...nodeData.config, categories: { ...nodeData.config.categories, defaultValue: [...newCategories] } }
+          }, { deep: false, silent: true })
+        }
+        // Sync node height and port Y positions
+        const newHeight = conditionNodeHeight + (categoryCount - 2) * conditionNodeItemHeight
+        node.prop('size', { width: nodeWidth, height: Math.max(newHeight, conditionNodeHeight) })
+        rightPorts.forEach((_p, i) => {
+          node.portProp(`CASE${i + 1}`, 'args/y', portItemArgsY * i + conditionNodePortItemArgsY)
+        })
+        node.toFront()
+        graph.getEdges().filter(e => e.getSourceCellId() === node.id).forEach(e => {
+          const tgt = graph.getCellById(e.getTargetCellId())
+          tgt?.toFront()
+        })
+      }
+
+      if (children?.length) {
+        children.forEach(child => {
+          if (!child.isNode()) return
+          const childCycleId = (child as Node).getData?.()?.cycle
+          if (childCycleId !== node.id && childCycleId !== node.getData?.()?.id) {
+            node.removeChild(child, { silent: true })
+          }
+        })
+      }
     })
     resizeGroupNodes(graph)
     graph.getEdges().forEach(edge => {
@@ -652,31 +760,41 @@ export const useWorkflowGraph = ({
    * @param node - Clicked node
    */
   const nodeClick = ({ node }: { node: Node }) => {
+    // add-node type: dispatch port:click to open node selection popover
+    // Must handle before blankClick() to avoid blank:click closing the popover immediately
+    const nodeData = node.getData()
+    if (nodeData?.type === 'add-node') {
+      const b = node.getBBox();
+      const screenPos = graphRef.current!.localToClient(b.x + b.width, b.y + b.height / 2);
+      const tempDiv = document.createElement('div');
+      tempDiv.style.cssText = `position:fixed;left:${screenPos.x}px;top:${screenPos.y}px;width:1px;height:1px;z-index:9999;`;
+      document.body.appendChild(tempDiv);
+      window.dispatchEvent(new CustomEvent('port:click', {
+        detail: {
+          node,
+          port: 'right',
+          element: tempDiv,
+          rect: { left: screenPos.x, top: screenPos.y },
+          edgeInsertion: null,
+        },
+      }));
+      return;
+    }
+
     blankClick()
 
     setTimeout(() => {
-      // Ignore add-node type node clicks
+    // Ignore add-node type node clicks
       const nodeData = node.getData()
-      if (nodeData?.type === 'add-node' || nodeData.type === 'break' || nodeData.type === 'cycle-start') {
+      if (nodeData.type === 'break' || nodeData.type === 'cycle-start') {
         setSelectedNode(null)
         return;
       }
-
-      const nodes = graphRef.current?.getNodes();
-
-      nodes?.forEach(vo => {
-        const data = vo.getData();
-        if (data.isSelected) {
-          vo.setData({
-            ...data,
-            isSelected: false,
-          }, { silent: true });
-        }
-      });
+      clearNodeSelect()
       node.setData({
         ...nodeData,
         isSelected: true,
-      }, { silent: true });
+      });
       clearEdgeSelect()
       if (nodeData.type !== 'notes') {
         setSelectedNode(node);
@@ -705,7 +823,7 @@ export const useWorkflowGraph = ({
         node.setData({
           ...data,
           isSelected: false,
-        }, { silent: true });
+        });
       }
     });
     setSelectedNode(null);
@@ -745,7 +863,8 @@ export const useWorkflowGraph = ({
     const cycle = node.getData()?.cycle;
     if (cycle) {
       const parentNode = graphRef.current!.getNodes().find(n => n.id === cycle);
-      if (parentNode?.getData()?.isGroup) {
+      const parentType = parentNode?.getData()?.type;
+      if (parentNode?.getData()?.isGroup || (parentNode && (parentType === 'loop' || parentType === 'iteration'))) {
         // Get parent node and child node bounding boxes
         const parentBBox = parentNode.getBBox();
         const childBBox = node.getBBox();
@@ -934,6 +1053,12 @@ export const useWorkflowGraph = ({
     e.preventDefault();
     const portElement = e.target as HTMLElement;
     const rect = portElement.getBoundingClientRect();
+    const clickPort = node.getPorts().find(p => p.id === port)
+    const portGroup = clickPort?.group
+
+    if (portGroup === 'left') {
+      return
+    }
 
     // Create temporary popover trigger element
     const tempDiv = document.createElement('div');
@@ -965,13 +1090,37 @@ export const useWorkflowGraph = ({
   /**
    * Initialize X6 graph with configuration and event listeners
    */
-  const init = () => {
+  const init = async () => {
     if (!containerRef.current || !miniMapRef.current) return;
 
     // Register React shapes
-    nodeRegisterLibrary.forEach((item) => {
-      register(item);
-    });
+    // Safari: use x6-html-shape to avoid foreignObject rendering issues
+    if (isSafari) {
+      const { register: registerHtmlShape } = await import('x6-html-shape');
+      nodeRegisterLibrary.forEach(({ shape, width, height, component }) => {
+        registerHtmlShape({
+          shape,
+          width,
+          height,
+          render(node: Node, _graph: unknown, container: HTMLElement) {
+            const root = createRoot(container);
+            const doRender = () => {
+              root.render(createElement(component as any, { node, graph: node.model?.graph, data: node.getData() }));
+            };
+            doRender();
+            node.on('change:data', doRender);
+            return () => {
+              node.off('change:data', doRender);
+              root.unmount();
+            };
+          },
+        });
+      });
+    } else {
+      nodeRegisterLibrary.forEach((item) => {
+        registerReactShape(item);
+      });
+    }
 
     const container = containerRef.current;
     graphRef.current = new Graph({
@@ -1161,10 +1310,71 @@ export const useWorkflowGraph = ({
     // Listen to node move event
     graphRef.current.on('node:moved', nodeMoved);
 
+    if (isSafari) {
+      // When a parent (loop/iteration) node moves, keep child nodes in sync.
+      // Store each child's offset relative to the parent at drag start, then
+      // reapply it every frame to avoid cumulative delta errors.
+      const dragOffsets = new Map<string, { dx: number; dy: number }>();
+
+      graphRef.current.on('node:moving', ({ node }: { node: Node }) => {
+        const data = node.getData();
+        if (data?.type !== 'loop' && data?.type !== 'iteration') return;
+        const pos = node.getPosition();
+        const PORT_RADIUS = 6;
+
+        // Update parent componentContainer directly
+        const parentView = graphRef.current?.findViewByCell(node) as any;
+        if (parentView?.componentContainer) {
+          parentView.componentContainer.style.transform =
+            `translate(${pos.x + PORT_RADIUS}px, ${pos.y}px)`;
+        }
+
+        const children = graphRef.current?.getNodes().filter(child => {
+          const cycle = child.getData()?.cycle;
+          return cycle === data.id || cycle === node.id;
+        }) ?? [];
+
+        // First event for this drag: record offsets
+        if (!dragOffsets.has(node.id)) {
+          children.forEach(child => {
+            const cp = child.getPosition();
+            dragOffsets.set(child.id, { dx: cp.x - pos.x, dy: cp.y - pos.y });
+          });
+        }
+
+        // Apply stored offsets to keep children in place relative to parent
+        children.forEach(child => {
+          const off = dragOffsets.get(child.id);
+          if (!off) return;
+          const nx = pos.x + off.dx;
+          const ny = pos.y + off.dy;
+          child.setPosition(nx, ny);
+          const childView = graphRef.current?.findViewByCell(child) as any;
+          if (childView?.componentContainer) {
+            childView.componentContainer.style.transform =
+              `translate(${nx + PORT_RADIUS}px, ${ny}px)`;
+          }
+        });
+      });
+
+      graphRef.current.on('node:moved', ({ node }: { node: Node }) => {
+        // Clear offsets for this parent and all its children
+        const data = node.getData();
+        graphRef.current?.getNodes().forEach(child => {
+          const cycle = child.getData()?.cycle;
+          if (cycle === data?.id || cycle === node.id) dragOffsets.delete(child.id);
+        });
+        dragOffsets.delete(node.id);
+        nodeMoved({ node });
+      });
+    }
+
     graphRef.current.on('node:removed', blankClick)
-    // When edge connected, bring connected nodes' ports to front
+    // When edge connected, reorder all cells to maintain correct layer order
     graphRef.current.on('edge:connected', ({ isNew, edge }) => {
-      if (isNew) {
+      if (isSafari && isNew && graphRef.current) {
+        reorderCells(graphRef.current);
+      } else if (!isSafari && isNew) {
         const sourceCellId = edge.getSourceCellId()
         const targetCellId = edge.getTargetCellId()
         const sourceCell = graphRef.current?.getCellById(sourceCellId);
@@ -1278,7 +1488,7 @@ export const useWorkflowGraph = ({
    * Creates new node at drop position
    * @param event - React drag event
    */
-  const onDrop = (event: React.DragEvent) => {
+  const onDrop = (event: DragEvent) => {
     if (!graphRef.current) return;
     event.preventDefault();
     const dragData = JSON.parse(event.dataTransfer.getData('application/json'));
@@ -1456,7 +1666,7 @@ export const useWorkflowGraph = ({
                   ...itemConfig,
                   ...(data.config[key].defaultValue || {}),
                   knowledge_bases: knowledge_bases?.map((vo: any) => {
-                    const kb_config = vo.config || { similarity_threshold: vo.similarity_threshold, retrieve_type: vo.retrieve_type, top_k: vo.top_k, weight: vo.weight }
+                    const kb_config = vo.config || vo
                     return { kb_id: vo.kb_id || vo.id, ...kb_config, }
                   })
                 }
@@ -1506,7 +1716,7 @@ export const useWorkflowGraph = ({
           }
 
           // If http-request node right port connection, add label
-          if (sourceCell?.getData()?.type === 'http-request') {
+          if (['http-request', 'llm'].includes(sourceCell?.getData()?.type)) {
             if (sourcePortId === 'ERROR') {
               return {
                 source: sourceCell.getData().id,

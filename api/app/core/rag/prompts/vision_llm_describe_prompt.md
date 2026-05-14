@@ -14,6 +14,7 @@ Transcribe the content from the provided PDF page image into clean Markdown form
 6. Do NOT wrap the output in ```markdown or ``` blocks.
 7. Only apply Markdown structure to headings, paragraphs, lists, and tables, strictly based on the layout of the image. Do NOT create tables unless an actual table exists in the image.
 8. Preserve the original language, information, and order exactly as shown in the image.
+9. Your output language MUST match the language of the content in the image. If the image contains Chinese text, output in Chinese. If English, output in English. Never translate.
 
 {% if page %}
 At the end of the transcription, add the page divider: `--- Page {{ page }} ---`.

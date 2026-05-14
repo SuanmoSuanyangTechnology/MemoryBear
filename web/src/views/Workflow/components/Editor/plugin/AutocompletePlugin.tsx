@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-13 14:00:07
+ * @Last Modified time: 2026-05-06 15:06:03
  */
 import { useEffect, useLayoutEffect, useState, useRef, type FC } from 'react';
 import { createPortal } from 'react-dom';
@@ -27,6 +27,7 @@ export interface Suggestion {
   disabled?: boolean; // Flag for disabled state
   children?: Suggestion[]; // Sub-variables (e.g. file fields)
   parentLabel?: string; // Parent variable label (for child display)
+  default?: any;
 }
 
 // Autocomplete plugin for variable suggestions triggered by '/' character

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:25:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-07 17:03:22
+ * @Last Modified time: 2026-04-29 17:21:05
  */
 /**
  * Knowledge Global Configuration Modal
@@ -67,7 +67,8 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
 
   useEffect(() => {
     if (values?.rerank_model) {
-      form.setFieldsValue({ ...data })
+      const { rerank_model, ...rest } = data;
+      form.setFieldsValue({ ...rest })
     } else {
       form.setFieldsValue({ reranker_id: undefined, reranker_top_k: undefined })
     }

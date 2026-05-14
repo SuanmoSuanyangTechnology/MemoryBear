@@ -10,7 +10,7 @@
  * Shows profile, interests, node statistics, relationships, and insights
  */
 
-import { type FC, useRef, useState, type MouseEvent, useEffect } from 'react'
+import { type FC, useRef, useState, type MouseEvent, useEffect, Suspense } from 'react'
 import clsx from 'clsx'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Flex, Popover } from 'antd'
@@ -28,6 +28,12 @@ import {
 } from '@/api/memory'
 import { useI18n } from '@/store/locale'
 
+import PrivateWrap from '@/components/PrivateWrap'
+import { BrainView } from '@redbear/memory-brick'
+
+
+const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
+
 const Neo4j: FC = () => {
   const { id } = useParams()
   const { t } = useTranslation();
@@ -38,7 +44,14 @@ const Neo4j: FC = () => {
   const ref = useRef<EndUserProfileRef>(null)
   const memoryInsightRef = useRef<MemoryInsightRef>(null)
   const aboutMeRef = useRef<AboutMeRef>(null)
+  const brainViewRef = useRef(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [brainMemories, setBrainMemories] = useState<string[]>([])
+
+  /** Handle brain region memory types change */
+  const handleBrainMemoriesChange = (memories: string[]) => {
+    setBrainMemories(memories)
+  }
 
   /** Update displayed name */
   const handleNameUpdate = (data?: EndUser) => {
@@ -78,10 +91,11 @@ const Neo4j: FC = () => {
     e.preventDefault();
     e.stopPropagation();
     setSelectedKey(type)
+    if (type !== 'Brain') setBrainMemories([])
   }
 
   return (
-    <div className="rb:h-screen rb:w-screen rb:p-3 rb:relative" onClick={() => setSelectedKey(null)}>
+    <div className="rb:h-screen rb:w-screen rb:p-3 rb:relative" onClick={() => { setSelectedKey(null); setBrainMemories([]) }}>
       <Flex className="rb:h-full!" gap={12}>
         <Flex gap={15} vertical justify="space-between" align="center" className="rb:h-full! rb:px-4! rb:pt-6! rb:pb-5! rb:bg-white rb:w-20 rb:rounded-xl">
           <Flex gap={15} vertical>
@@ -93,6 +107,22 @@ const Neo4j: FC = () => {
             >
               <div className="rb:mb-4.25! rb:size-12 rb:rounded-xl rb:bg-cover rb:bg-[url('@/assets/images/userMemory/logo.png')]"></div>
             </Popover>
+            {isSaas && BrainView && (
+            <Flex
+              align="center"
+              justify="center"
+              className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group", {
+                'rb:bg-[#171719]': selectedKey === 'Brain',
+                'rb:hover:bg-[#EBEBEB]': selectedKey !== 'Brain',
+              })}
+              onClick={(e) => onOpenChange(e, 'Brain')}
+            >
+              <div className={clsx("rb:size-6 rb:bg-cover", {
+                "rb:bg-[url('@/assets/images/userMemory/brain.svg')]": selectedKey !== 'Brain',
+                "rb:bg-[url('@/assets/images/userMemory/brain_active.svg')]": selectedKey === 'Brain'
+              })}></div>
+            </Flex>
+            )}
 
             <Flex
               align="center"
@@ -164,13 +194,22 @@ const Neo4j: FC = () => {
         </Flex>
 
         <Flex vertical className="rb:flex-1">
-          <NodeStatistics />
+          <NodeStatistics highlightKeys={brainMemories} />
           <RelationshipNetwork />
         </Flex>
       </Flex>
       <div onClick={(e) => e.stopPropagation()}>
         <EndUserProfile ref={ref} onDataLoaded={handleNameUpdate} className={selectedKey === 'userProfile' ? 'rb:block!' : 'rb:hidden!'} />
         <AboutMe ref={aboutMeRef} className={selectedKey === 'aboutMe' ? 'rb:block!' : 'rb:hidden!'} />
+        {/* <Provider> */}
+        {BrainView && (
+          <Suspense fallback={null}>
+            <PrivateWrap>
+              <BrainView ref={brainViewRef} className={selectedKey === 'Brain' ? 'rb:block!' : 'rb:hidden!'} onMemoriesChange={handleBrainMemoriesChange} onClose={() => { setSelectedKey(null); setBrainMemories([]) }} />
+            </PrivateWrap>
+          </Suspense>
+        )}
+        {/* </Provider> */}
         <InterestDistribution className={selectedKey === 'interestDistribution' ? 'rb:block!' : 'rb:hidden!'} />
         <MemoryInsight ref={memoryInsightRef} className={selectedKey === 'memoryInsight' ? 'rb:block!' : 'rb:hidden!'} />
       </div>

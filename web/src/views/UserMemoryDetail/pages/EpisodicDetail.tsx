@@ -271,7 +271,10 @@ const EpisodicDetail: FC = () => {
                     <div className="rb:font-medium rb:leading-5 rb:mb-2 rb:pl-1">{t('episodicDetail.content_records')}</div>
 
                     <ul className="rb:leading-5.5 rb:list-disc rb-border rb:rounded-xl rb:pl-8 rb:pr-4 rb:py-3">
-                      {detail.content_records.map((vo, index) => <li key={index}>{vo}</li>)}
+                      {detail.content_records?.length > 0
+                        ? detail.content_records.map((vo, index) => <li key={index}>{vo}</li>)
+                        : <Empty size={96} className="rb:pt-1! rb:pb-3.5!" />
+                      }
                     </ul>
                   </div>
 
