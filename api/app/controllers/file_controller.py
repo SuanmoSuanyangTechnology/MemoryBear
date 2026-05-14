@@ -1,10 +1,13 @@
+import asyncio
 import os
+import struct
+import zlib
 from typing import Any, Optional
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Query
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -228,11 +231,195 @@ async def get_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found in storage")
 
     import mimetypes
+    from urllib.parse import quote
     media_type = mimetypes.guess_type(db_file.file_name)[0] or "application/octet-stream"
+    filename_encoded = quote(db_file.file_name)
     return Response(
         content=content,
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{db_file.file_name}"'}
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename_encoded}"}
+    )
+
+
+@router.post("/batch-download")
+async def batch_download_files(
+        request_body: file_schema.BatchDownloadRequest,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+        storage_service: FileStorageService = Depends(get_file_storage_service),
+):
+    """批量下载文件，边打包边推流（streaming ZIP，内存占用恒定）"""
+
+    files = db.query(file_model.File).filter(
+        file_model.File.id.in_(request_body.file_ids)
+    ).all()
+
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="未找到任何文件",
+        )
+
+    valid_files = [f for f in files if f.file_key]
+    if not valid_files:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="所选文件均无有效存储Key",
+        )
+
+    # 同名文件自动去重 — 在流式之前预分配文件名
+    name_counter: dict[str, int] = {}
+    arc_names: list[str] = []
+
+    def unique_name(original: str) -> str:
+        if original not in name_counter:
+            name_counter[original] = 0
+            return original
+        name_counter[original] += 1
+        stem, *ext_parts = original.rsplit(".", 1)
+        ext = f".{ext_parts[0]}" if ext_parts else ""
+        return f"{stem}_{name_counter[original]}{ext}"
+
+    for f in valid_files:
+        arc_names.append(unique_name(f.file_name))
+
+    expected_count = len(valid_files)
+
+    async def stream_zip():
+        """逐文件下载 → 实时压缩 → yield ZIP 数据块，全程不落盘。"""
+        central_entries: list[tuple[bytes, int, int, int, int]] = []
+        skipped_files: list[str] = []
+        offset = 0
+
+        for f, arc_name in zip(valid_files, arc_names):
+            try:
+                async with asyncio.timeout(120):
+                    content = await storage_service.download_file(f.file_key)
+            except Exception as e:
+                api_logger.warning(f"跳过文件 {f.file_name} (id={f.id}): {e}")
+                skipped_files.append(f.file_name)
+                continue
+
+            arc_name_bytes = arc_name.encode("utf-8")
+            crc = zlib.crc32(content) & 0xFFFFFFFF
+            uncompressed_size = len(content)
+            compressor = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -15)
+            compressed_data = compressor.compress(content) + compressor.flush()
+            compressed_size = len(compressed_data)
+
+            # --- Local File Header (30 bytes + name) ---
+            local_header = struct.pack(
+                "<4sHHHHHIIIHH",
+                b"PK\x03\x04",
+                20,                # version needed
+                0x08,              # flags: data descriptor
+                8,                 # compression: deflate
+                0, 0,              # mod time/date
+                0,                 # crc (unused with data descriptor)
+                0,                 # compressed size (unused with data descriptor)
+                0,                 # uncompressed size (unused with data descriptor)
+                len(arc_name_bytes),
+                0,                 # extra field length
+            ) + arc_name_bytes
+
+            # --- Compressed data ---
+            yield local_header
+            yield compressed_data
+
+            # --- Data Descriptor (12 bytes, no signature) ---
+            descriptor = struct.pack(
+                "<III",
+                crc,
+                compressed_size,
+                uncompressed_size,
+            )
+            yield descriptor
+
+            header_data_len = len(local_header) + compressed_size
+            central_entries.append((arc_name_bytes, crc, compressed_size, uncompressed_size, offset))
+            offset += header_data_len + 12
+
+        if skipped_files:
+            lines = "\n".join(f"- {name}" for name in skipped_files)
+            content = f"以下文件下载失败，未包含在此ZIP包中：\n\n{lines}\n".encode("utf-8")
+            crc = zlib.crc32(content) & 0xFFFFFFFF
+            uncompressed_size = len(content)
+            compressor = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -15)
+            compressed_data = compressor.compress(content) + compressor.flush()
+            compressed_size = len(compressed_data)
+            name_bytes = "_skipped_files.txt".encode("utf-8")
+
+            local_header = struct.pack(
+                "<4sHHHHHIIIHH",
+                b"PK\x03\x04", 20, 0x08, 8, 0, 0, 0, 0, 0, len(name_bytes), 0,
+            ) + name_bytes
+            descriptor = struct.pack("<III", crc, compressed_size, uncompressed_size)
+
+            yield local_header
+            yield compressed_data
+            yield descriptor
+
+            header_data_len = len(local_header) + compressed_size
+            central_entries.append((name_bytes, crc, compressed_size, uncompressed_size, offset))
+            offset += header_data_len + 12
+
+        # --- Central Directory ---
+        central_offset = offset
+        for arc_name_bytes, crc, compressed_size, uncompressed_size, local_offset in central_entries:
+            entry = struct.pack(
+                "<4sHHHHHHIIIHHHHHII",
+                b"PK\x01\x02",
+                20,                # version made by
+                20,                # version needed
+                0x08,              # flags
+                8,                 # compression
+                0, 0,              # mod time/date
+                crc,
+                compressed_size,
+                uncompressed_size,
+                len(arc_name_bytes),
+                0, 0,              # extra/comment length
+                0,                 # disk start
+                0,                 # internal attrs
+                0,                 # external attrs
+                local_offset,
+            ) + arc_name_bytes
+            yield entry
+            offset += len(entry)
+
+        central_size = offset - central_offset
+
+        # --- End of Central Directory (22 bytes) ---
+        eocd = struct.pack(
+            "<4sHHHHIIH",
+            b"PK\x05\x06",
+            0, 0,
+            len(central_entries),
+            len(central_entries),
+            central_size,
+            central_offset,
+            0,
+        )
+        yield eocd
+
+    if request_body.zip_filename:
+        zip_name = request_body.zip_filename
+    else:
+        first_name = valid_files[0].file_name
+        stem = first_name.rsplit(".", 1)[0] if "." in first_name else first_name
+        count = len(valid_files)
+        zip_name = f"{stem}.zip" if count == 1 else f"{stem}_等{count}个文件.zip"
+    if not zip_name.endswith(".zip"):
+        zip_name += ".zip"
+
+    from urllib.parse import quote
+    return StreamingResponse(
+        stream_zip(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}",
+            "X-Total-Files": str(expected_count),
+        },
     )
 
 
