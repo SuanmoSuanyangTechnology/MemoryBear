@@ -288,6 +288,7 @@ async def batch_download_files(
     async def stream_zip():
         """逐文件下载 → 实时压缩 → yield ZIP 数据块，全程不落盘。"""
         central_entries: list[tuple[bytes, int, int, int, int]] = []
+        skipped_files: list[str] = []
         offset = 0
 
         for f, arc_name in zip(valid_files, arc_names):
@@ -296,6 +297,7 @@ async def batch_download_files(
                     content = await storage_service.download_file(f.file_key)
             except Exception as e:
                 api_logger.warning(f"跳过文件 {f.file_name} (id={f.id}): {e}")
+                skipped_files.append(f.file_name)
                 continue
 
             arc_name_bytes = arc_name.encode("utf-8")
@@ -335,6 +337,30 @@ async def batch_download_files(
 
             header_data_len = len(local_header) + compressed_size
             central_entries.append((arc_name_bytes, crc, compressed_size, uncompressed_size, offset))
+            offset += header_data_len + 12
+
+        if skipped_files:
+            lines = "\n".join(f"- {name}" for name in skipped_files)
+            content = f"以下文件下载失败，未包含在此ZIP包中：\n\n{lines}\n".encode("utf-8")
+            crc = zlib.crc32(content) & 0xFFFFFFFF
+            uncompressed_size = len(content)
+            compressor = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -15)
+            compressed_data = compressor.compress(content) + compressor.flush()
+            compressed_size = len(compressed_data)
+            name_bytes = "_skipped_files.txt".encode("utf-8")
+
+            local_header = struct.pack(
+                "<4sHHHHHIIIHH",
+                b"PK\x03\x04", 20, 0x08, 8, 0, 0, 0, 0, 0, len(name_bytes), 0,
+            ) + name_bytes
+            descriptor = struct.pack("<III", crc, compressed_size, uncompressed_size)
+
+            yield local_header
+            yield compressed_data
+            yield descriptor
+
+            header_data_len = len(local_header) + compressed_size
+            central_entries.append((name_bytes, crc, compressed_size, uncompressed_size, offset))
             offset += header_data_len + 12
 
         # --- Central Directory ---
@@ -380,11 +406,12 @@ async def batch_download_files(
     if not zip_name.endswith(".zip"):
         zip_name += ".zip"
 
+    from urllib.parse import quote
     return StreamingResponse(
         stream_zip(),
         media_type="application/zip",
         headers={
-            "Content-Disposition": f'attachment; filename="{zip_name}"',
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}",
             "X-Total-Files": str(expected_count),
         },
     )
