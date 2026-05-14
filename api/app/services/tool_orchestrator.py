@@ -13,6 +13,15 @@ from app.core.logging_config import get_business_logger
 
 logger = get_business_logger()
 
+# 单次调用工具的精确名称集合，超过1次调用直接提示换工具
+_SINGLE_CALL_TOOLS: frozenset = frozenset({"knowledge_retrieval_tool", "long_term_memory"})
+
+
+def _is_single_call_tool(name: str) -> bool:
+    """判断工具是否为单次调用工具：工具对象标记优先，其次精确名称匹配"""
+    return name in _SINGLE_CALL_TOOLS
+
+
 # 解析模型输出的 Thought/Action/Input 三段式
 _ACTION_PATTERN = re.compile(
     r"Thought[：:]\s*(.*?)\s*Action[：:]\s*(\S+)\s*Input[：:]\s*([\s\S]*?\{[\s\S]*?})",
@@ -48,14 +57,10 @@ Input：JSON格式工具入参，无参数则填空对象 {{}}
 
 def _build_tools_info(tools: Dict[str, Any]) -> str:
     """将工具列表格式化为 prompt 中的工具描述"""
-    # 知识库和记忆工具的关键词，标注单次调用策略
-    _single_call_keywords = ("knowledge_retrieval", "long_term_memory")
-
     lines = []
     for name, tool in tools.items():
         desc = getattr(tool, "description", "") or ""
-        is_single_call = any(k in name.lower() for k in _single_call_keywords)
-        if is_single_call:
+        if _is_single_call_tool(name):
             desc = f"[{desc}][仅调用一次，结果不匹配时请换用其他工具]"
         schema = getattr(tool, "args_schema", None)
         if schema:
@@ -200,13 +205,10 @@ class ToolOrchestrator:
             return f"{original_system_prompt}\n\n{react_block}"
         return react_block
 
-    # 单次调用工具：调用超过1次直接提示换工具
-    _SINGLE_CALL_KEYWORDS = ("knowledge_retrieval", "long_term_memory")
-
     async def _call_tool(self, name: str, input_dict: dict) -> str:
         """执行单个工具调用"""
-        # 知识库和记忆工具只允许调用一次
-        if any(k in name for k in self._SINGLE_CALL_KEYWORDS):
+        # 单次调用工具超过1次直接提示换工具
+        if _is_single_call_tool(name):
             self._single_call_counts[name] = self._single_call_counts.get(name, 0) + 1
             if self._single_call_counts[name] > 1:
                 return f"[{name}] 已调用过一次，请勿重复调用，如结果不满足需求请换用其他工具补充信息。"
