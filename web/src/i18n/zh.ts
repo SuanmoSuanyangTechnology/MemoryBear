@@ -668,7 +668,7 @@ export const zh = {
       hybrid: '混合检索',
       graph: '图谱检索',
 
-      similarity_threshold: '向量相似度权重',
+      similarity_threshold: '相似度权重',
       similarity_threshold_desc: '仅返回BM25分数高于此阈值的结果',
       similarity_threshold_desc1: '分词检索的最小BM25分数阈值',
 
@@ -2743,6 +2743,7 @@ export const zh = {
       comboName: '套餐名称',
       spAndTa: '方案定位与目标人群',
       versionInformation: '版本信息',
+      multiplier: '订购周期',
       orderCycle: '订购周期',
       orderAmount: '订单金额',
       personal: {

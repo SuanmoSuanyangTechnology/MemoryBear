@@ -455,18 +455,16 @@ class WritePipeline:
     # ──────────────────────────────────────────────
 
     def _merge_alias_in_memory(self, result: ExtractionResult) -> None:
-        """别名归并（内存侧）：处理 predicate="别名属于" 和 predicate="别名失效" 的边。
+        """别名归并（内存侧）：处理 predicate="别名属于" 的边。
 
         在写入 Neo4j 之前执行，确保写入的数据已经完成别名归并：
         - 别名属于：将别名实体的 name 追加到目标实体的 aliases
         - 别名属于：将别名实体的 description 拼接到目标实体的 description
-        - 别名失效：从目标实体的 aliases 中移除对应的旧别名
         - 重定向指向别名节点的边到目标节点
 
         纯内存操作，不涉及 Neo4j。
         """
         ALIAS_PREDICATE = "别名属于"
-        ALIAS_INVALID_PREDICATE = "别名失效"
 
         alias_edges = [
             e
@@ -474,15 +472,9 @@ class WritePipeline:
             if getattr(e, "relation_type", "") == ALIAS_PREDICATE
             or getattr(e, "predicate", "") == ALIAS_PREDICATE
         ]
-        invalid_alias_edges = [
-            e
-            for e in result.entity_entity_edges
-            if getattr(e, "relation_type", "") == ALIAS_INVALID_PREDICATE
-            or getattr(e, "predicate", "") == ALIAS_INVALID_PREDICATE
-        ]
 
-        if not alias_edges and not invalid_alias_edges:
-            logger.debug("[AliasMerge] 无 '别名属于'/'别名失效' 关系，跳过")
+        if not alias_edges:
+            logger.debug("[AliasMerge] 无 '别名属于' 关系，跳过")
             return
 
         try:
@@ -516,52 +508,29 @@ class WritePipeline:
                             f"{tgt_desc}；{src_desc}" if tgt_desc else src_desc
                         )
 
-            # ── 处理 别名失效：从 aliases 中移除旧别名 ──
-            invalid_alias_to_target: dict[str, str] = {}
-            for edge in invalid_alias_edges:
-                source_node = entity_map.get(edge.source)
-                target_node = entity_map.get(edge.target)
-                if not source_node or not target_node:
-                    continue
-
-                invalid_alias_to_target[edge.source] = edge.target
-
-                # 从 target.aliases 中移除 source.name（忽略大小写）
-                invalid_name = (source_node.name or "").strip()
-                if invalid_name and target_node.aliases:
-                    target_node.aliases = [
-                        a for a in target_node.aliases
-                        if a.lower() != invalid_name.lower()
-                    ]
-                    logger.debug(
-                        f"[AliasMerge] 从 '{target_node.name}' 的 aliases 中移除失效别名 '{invalid_name}'"
-                    )
-
             # 重定向指向别名节点的边到目标节点
-            alias_ids = set(alias_to_target.keys()) | set(invalid_alias_to_target.keys())
-            all_alias_map = {**alias_to_target, **invalid_alias_to_target}
+            alias_ids = set(alias_to_target.keys())
             redirected_ee_count = 0
             redirected_se_count = 0
 
             for edge in result.entity_entity_edges:
                 rel_type = getattr(edge, "relation_type", "")
-                if rel_type in (ALIAS_PREDICATE, ALIAS_INVALID_PREDICATE):
+                if rel_type == ALIAS_PREDICATE:
                     continue
                 if edge.source in alias_ids:
-                    edge.source = all_alias_map[edge.source]
+                    edge.source = alias_to_target[edge.source]
                     redirected_ee_count += 1
                 if edge.target in alias_ids:
-                    edge.target = all_alias_map[edge.target]
+                    edge.target = alias_to_target[edge.target]
                     redirected_ee_count += 1
 
             for edge in result.stmt_entity_edges:
                 if edge.target in alias_ids:
-                    edge.target = all_alias_map[edge.target]
+                    edge.target = alias_to_target[edge.target]
                     redirected_se_count += 1
 
             logger.info(
                 f"[AliasMerge] 内存归并完成，处理 {len(alias_edges)} 条 '别名属于' 边，"
-                f"{len(invalid_alias_edges)} 条 '别名失效' 边，"
                 f"重定向 entity_entity 边 {redirected_ee_count} 次，"
                 f"重定向 stmt_entity 边 {redirected_se_count} 次"
             )

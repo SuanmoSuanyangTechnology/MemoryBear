@@ -187,11 +187,12 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
           label={t('application.thinking_budget_tokens')}
           hidden={!['model', 'chat'].includes(source) || !(values?.deep_thinking || values?.capability?.includes('thinking'))}
           extra={<>{t('application.range')}: [{minThinkingBudgetTokens}, {t(`application.max_tokens`)}: {values?.max_tokens}]</>}
+          dependencies={['max_tokens']}
           rules={[
             { required: values?.deep_thinking, message: t('common.pleaseEnter') },
             {
               validator: (_, value) => {
-                const maxTokens = values?.max_tokens
+                const maxTokens = form.getFieldValue('max_tokens')
                 const deep_thinking = values?.deep_thinking;
                 if (deep_thinking && value !== undefined) {
                   if (value < minThinkingBudgetTokens) {

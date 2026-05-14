@@ -624,7 +624,7 @@ const TestChat: FC<TestChatProps> = ({
             toolbarRef.current?.setFiles(list || [])
           }}
           labelFormat={(item) => item.role === 'user' ? t('application.you') : dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
-          errorDesc={t('application.ReplyException')}
+          // errorDesc={t('application.ReplyException')}
           renderRuntime={application?.type === 'workflow' ? (item, index) => <Runtime item={item} index={index} /> : undefined}
         >
           <ChatToolbar
