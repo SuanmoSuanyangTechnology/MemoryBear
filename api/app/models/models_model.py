@@ -32,6 +32,17 @@ class ModelType(StrEnum):
     VIDEO = "video"
 
 
+class ModelCapability(StrEnum):
+    """模型能力枚举"""
+    VISION = "vision"
+    AUDIO = "audio"
+    VIDEO = "video"
+    THINKING = "thinking"
+    THINKING_ONLY = "thinking_only"
+    JSON_OUTPUT = "json_output"
+    FUNCTION_CALL = "function_call"
+
+
 class ModelProvider(StrEnum):
     """模型提供商枚举"""
     OPENAI = "openai"

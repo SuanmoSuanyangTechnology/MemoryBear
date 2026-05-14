@@ -14,6 +14,7 @@ from app.core.memory.agent.langgraph_graph.write_graph import write_long_term
 from app.db import get_db
 from app.models import MultiAgentConfig, AgentConfig, ModelType
 from app.models import WorkflowConfig
+from app.models.models_model import ModelCapability
 from app.repositories.tool_repository import ToolRepository
 from app.schemas import DraftRunRequest
 from app.schemas.app_schema import FileInput, FileType
@@ -27,6 +28,7 @@ from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
 from app.services.multimodal_service import MultimodalService
 from app.services.workflow_service import WorkflowService
 from app.models.file_metadata_model import FileMetadata
+from app.services.tool_orchestrator import ToolOrchestrator
 
 logger = get_business_logger()
 
@@ -157,7 +159,7 @@ class AppChatService:
                 workspace_id=workspace_id
             )
             logger.info(f"处理了 {len(processed_files)} 个文件")
-            if doc_img_recognition and "vision" in (api_key_obj.capability or []) and any(
+            if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
                 f.type == FileType.DOCUMENT for f in files
             ):
                 system_prompt += (
@@ -166,6 +168,29 @@ class AppChatService:
                     "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
                     "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
                 )
+
+        # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
+        capability = api_key_obj.capability or []
+        if ModelCapability.FUNCTION_CALL not in capability and tools:
+            _api_key_config = {
+                "model_name": api_key_obj.model_name,
+                "api_key": api_key_obj.api_key,
+                "provider": api_key_obj.provider,
+                "api_base": api_key_obj.api_base,
+                "is_omni": api_key_obj.is_omni,
+                "capability": capability,
+            }
+            system_prompt = await ToolOrchestrator.create_and_run(
+                tools=tools,
+                system_prompt=system_prompt,
+                message=message,
+                history=history,
+                api_key_config=_api_key_config,
+                model_config=model_info,
+                effective_params=model_parameters,
+                processed_files=processed_files,
+            )
+            tools = []
 
         # 创建 LangChain Agent
         agent = LangChainAgent(
@@ -181,7 +206,7 @@ class AppChatService:
             deep_thinking=model_parameters.get("deep_thinking", False),
             thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
             json_output=model_parameters.get("json_output", False),
-            capability=api_key_obj.capability or [],
+            capability=capability,
         )
 
         # 为需要运行时上下文的工具注入上下文
@@ -446,7 +471,7 @@ class AppChatService:
                     workspace_id=workspace_id
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件")
-                if doc_img_recognition and "vision" in (api_key_obj.capability or []) and any(
+                if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
                     f.type == FileType.DOCUMENT for f in files
                 ):
                     from langchain.agents import create_agent
@@ -456,6 +481,29 @@ class AppChatService:
                         "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
                         "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
                     )
+
+            # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
+            capability = api_key_obj.capability or []
+            if ModelCapability.FUNCTION_CALL not in capability and tools:
+                _api_key_config = {
+                    "model_name": api_key_obj.model_name,
+                    "api_key": api_key_obj.api_key,
+                    "provider": api_key_obj.provider,
+                    "api_base": api_key_obj.api_base,
+                    "is_omni": api_key_obj.is_omni,
+                    "capability": capability,
+                }
+                system_prompt = await ToolOrchestrator.create_and_run(
+                    tools=tools,
+                    system_prompt=system_prompt,
+                    message=message,
+                    history=history,
+                    api_key_config=_api_key_config,
+                    model_config=model_info,
+                    effective_params=model_parameters,
+                    processed_files=processed_files,
+                )
+                tools = []
 
             # 创建 LangChain Agent
             agent = LangChainAgent(
@@ -472,7 +520,7 @@ class AppChatService:
                 deep_thinking=model_parameters.get("deep_thinking", False),
                 thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                 json_output=model_parameters.get("json_output", False),
-                capability=api_key_obj.capability or [],
+                capability=capability,
             )
 
             # 为需要运行时上下文的工具注入上下文
