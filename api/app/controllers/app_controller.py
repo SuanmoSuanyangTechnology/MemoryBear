@@ -1392,7 +1392,6 @@ async def download_citation_file(
     encoded_name = quote(doc.file_name)
     return FileResponse(
         path=file_path,
-        filename=doc.file_name,
         media_type="application/octet-stream",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"}
     )
