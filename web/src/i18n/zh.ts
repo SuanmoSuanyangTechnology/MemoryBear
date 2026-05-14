@@ -1327,7 +1327,9 @@ export const zh = {
       video: '视频',
       thinking: '深度思考',
       is_thinking: '支持深度思考',
+      thinking_only: '仅支持思考',
       json_output: '支持JSON格式化输出',
+      function_call: '工具调用/外部函数调用',
     },
     timezones: {
       'Asia/Shanghai': '中国标准时间 (UTC+8)',

@@ -638,7 +638,9 @@ export const en = {
       video: 'Video',
       thinking: 'Deep Thinking',
       is_thinking: 'Deep Thinking Support',
+      thinking_only: 'Only Thinking Support',
       json_output: 'Support JSON formatted output',
+      function_call: 'Tool Call/External Function Call',
     },
     knowledgeBase: {
       home: 'Home',
