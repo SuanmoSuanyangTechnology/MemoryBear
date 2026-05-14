@@ -24,7 +24,7 @@ class KnowledgeBase(BaseModel):
     chunk_num: int | None = None
     parser_id: str | None = None
     parser_config: dict | None = None
-    external_id: str | None = Field(None, min_length=36, max_length=36)
+    external_id: str | None = Field(None, min_length=1, max_length=36)
 
 
 class KnowledgeCreate(KnowledgeBase):
