@@ -98,6 +98,7 @@ Each output item should be a structured candidate memory statement.
 - 如果可以解析到具体实体名，优先输出具体实体名，并将 `has_unsolved_reference` 设为 `false`。
 - 如果不能解析到具体实体名，但可以解析到最小必要描述，则输出该最小必要描述，并将 `has_unsolved_reference` 设为 `true`。
 - 如果既不能解析到具体实体名，也不能稳定解析到最小必要描述，则保留最小必要原始表达，并将 `has_unsolved_reference` 设为 `true`。
+- 但对任何命名表达（如“X 叫 Z / X 的名字是 Z / 大家叫 X 为 Z”），只允许为了解析 `X` 做必要改写；`Z` 是新出现的名字、称呼或别名，必须保留原文表面形式，不得被共指消解、翻译、转写或归一化成 `X`。
 - 对涉及用户与其他人的共同活动，优先写成“用户和谁……”的形式，而不是保留“我们”“他们”这类未展开表达。
 
 清晰指代与模糊指代：
@@ -205,6 +206,7 @@ Coreference resolution:
 - If you can resolve to a concrete named entity, output that name and set `has_unsolved_reference` to `false`.
 - If you cannot resolve to a concrete named entity but can resolve to a minimal grounded description, output that description and set `has_unsolved_reference` to `true`.
 - If you cannot even resolve to a stable minimal grounded description, keep the minimal original expression and set `has_unsolved_reference` to `true`.
+- However, for any naming expression such as "X is called Z", "X's name is Z", or "people call X Z", only `X` may be minimally rewritten for reference resolution; `Z` is a newly introduced name, form of address, or alias and must keep its original surface form. Do not coreference-resolve, translate, transcribe, or normalize `Z` into `X`.
 - For shared activities involving the user and others, prefer forms like “the user and X...” rather than unresolved expressions like “we” or “they”.
 
 Clear vs unresolved reference:
