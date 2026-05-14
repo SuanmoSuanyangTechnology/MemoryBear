@@ -56,6 +56,8 @@ class AssistantPruningResponse(BaseModel):
 
     - assistant_memory_hint: 从 Assistant 消息中提取的极短辅助摘要，无价值时为 "NULL"
     - assistant_memory_type: 摘要类型枚举，无价值时为 "NULL"
+    - should_process_user_msg: 是否需要对 User 消息做规整
+    - processed_user_msg: 规整后的 User 消息文本，不需要处理时为 null
     """
 
     assistant_memory_hint: str = Field(
@@ -64,6 +66,12 @@ class AssistantPruningResponse(BaseModel):
     assistant_memory_type: str = Field(
         ...,
         description="comfort | suggestion | recommendation | warning | instruction | NULL",
+    )
+    should_process_user_msg: bool = Field(
+        default=False, description="是否需要对 User 消息做规整"
+    )
+    processed_user_msg: Optional[str] = Field(
+        default=None, description="规整后的 User 消息文本，不需要处理时为 null"
     )
 
 
@@ -246,16 +254,20 @@ class SemanticPruner:
                         "gold": {
                             "assistant_memory_hint": asst_msg.msg,
                             "assistant_memory_type": "skipped (has files)",
+                            "should_process_user_msg": False,
+                            "processed_user_msg": None,
                         },
                     })
-                    return asst_idx, asst_msg.msg, False
+                    return user_idx, asst_idx, asst_msg.msg, False, False, None
 
                 result = await self._extract_assistant_hint(user_msg, asst_msg)
 
-                # 收集 snapshot 记录
+                # 收集 snapshot 记录（包含 user 侧处理结果）
                 self._snapshot_records.append({
                     "input": input_record,
-                    "gold": {
+                    "output": {
+                        "should_process_user_msg": result.should_process_user_msg,
+                        "processed_user_msg": result.processed_user_msg,
                         "assistant_memory_hint": result.assistant_memory_hint,
                         "assistant_memory_type": result.assistant_memory_type,
                     },
@@ -275,14 +287,37 @@ class SemanticPruner:
                         f"  [{label}] 索引{asst_idx} → NULL，删除 "
                         f"('{asst_msg.msg[:40]}')"
                     )
-                    return asst_idx, None, True  # 标记删除
+                    asst_new_text = None
+                    asst_should_delete = True
                 else:
                     self._log(
                         f"  [{label}] 索引{asst_idx} → "
                         f"type={result.assistant_memory_type}, "
                         f"hint='{result.assistant_memory_hint[:50]}'"
                     )
-                    return asst_idx, result.assistant_memory_hint, False
+                    asst_new_text = result.assistant_memory_hint
+                    asst_should_delete = False
+
+                # user 侧处理结果
+                user_should_replace = (
+                    result.should_process_user_msg
+                    and result.processed_user_msg is not None
+                    and result.processed_user_msg.strip() != ""
+                )
+                if user_should_replace:
+                    self._log(
+                        f"  [{label}] 索引{user_idx} User → 规整: "
+                        f"'{result.processed_user_msg[:50]}'"
+                    )
+
+                return (
+                    user_idx,
+                    asst_idx,
+                    asst_new_text,
+                    asst_should_delete,
+                    user_should_replace,
+                    result.processed_user_msg if user_should_replace else None,
+                )
 
         tasks = [process_pair(u, a) for u, a in pairs]
         pair_results = await asyncio.gather(*tasks)
@@ -290,11 +325,16 @@ class SemanticPruner:
         # 构建替换/删除映射
         # asst_idx → (new_msg_text | None)
         asst_actions: Dict[int, Optional[str]] = {}
-        for asst_idx, new_text, should_delete in pair_results:
-            if should_delete:
+        # user_idx → new_msg_text
+        user_actions: Dict[int, str] = {}
+
+        for user_idx, asst_idx, asst_new_text, asst_should_delete, user_should_replace, user_new_text in pair_results:
+            if asst_should_delete:
                 asst_actions[asst_idx] = None
             else:
-                asst_actions[asst_idx] = new_text
+                asst_actions[asst_idx] = asst_new_text
+            if user_should_replace and user_new_text is not None:
+                user_actions[user_idx] = user_new_text
 
         # 第三步：构建最终消息列表
         kept: List[ConversationMessage] = []
@@ -311,6 +351,13 @@ class SemanticPruner:
                         msg=new_text,
                         files=m.files,
                     ))
+            elif idx in user_actions:
+                # 用规整后的文本替换 User 消息
+                kept.append(ConversationMessage(
+                    role=m.role,
+                    msg=user_actions[idx],
+                    files=m.files,
+                ))
             else:
                 # User 消息、未配对的消息原样保留
                 kept.append(m)

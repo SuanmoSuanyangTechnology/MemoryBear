@@ -408,9 +408,13 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - 当句子只是在讨论一般道理、抽象规律、空泛结果或非个体化概念，而这些概念本身不构成可复用记忆时，不要创建实体。
 - 如果句子表达的是用户的观点、信念、判断、愿望或目标倾向，但其中抽象对象不值得作为独立实体保留，则只保留相关高价值实体，不要再创建这些低价值对象实体；只有当未抽取内容适合作为该实体的稳定描述时，才写入相关实体的 `description`。
 - 当前阶段不要把情绪或心理状态抽成实体；像“紧张”“开心”“难过”“焦虑”“放松”等不应映射到 `知识能力`、`偏好习惯`、`具体目标` 或其他近似类型。
-- 用户本人节点必须命名为 `用户`；但用户拥有或关联的实体应使用完整所有格短语，例如 `用户的小狗`、`用户的 GitHub 账号`，不要使用 `用户's小狗`、`用户's 小狗`、`user的小狗` 等中英混合形式。
-- 有稳定所有格指向的具体生命体可以作为实体抽取，例如 `用户的小狗`、`张三的猫`；这类实体的名字应保留完整所有格短语，不要简化成 `小狗` 或错误归并到所有者。
-- 泛化或未稳定指向的生命体表达不要抽取，例如 `一只狗`、`狗这种动物`、`某个朋友`。
+- triplet 阶段不重新判断 unresolved reference；只要 hard gate 已通过，就默认 `statement_text` 中的实体指代已经由上游处理清楚，应从当前 statement 抽取可表达的实体。
+- 实体 `name` 必须尽量具体，避免同名同类型误合并。命名优先级：1）有专名或上游已解析到具体实体时，使用该具体实体名，例如 `海底捞`；2）没有专名但表达稳定关系时，使用稳定语义限定，例如 `用户就职的公司`、`用户常去的图书馆`、`用户的手机`；3）只有泛称但 hard gate 已通过时，使用 `statement_text` 中已有或已由上游解析出的具体时间、动作、用途、内容、地点或场景限定补全 name，例如 `2026-05-15早上去吃饭的饭店`，不要只写 `饭店`。
+- 补全 name 时只能使用 `statement_text` 中已有或上游已解析出的信息，不要引入外部推断，也不要使用未解析的相对时间。
+- 对 `文档媒体`、`物品设备`、`地点设施`、`组织`、`群体`、`识别联系信息`，尤其避免直接使用泛称 name；如果已有专名、稳定归属、平台、主题、内容、用途、地点、时间或场景限定，应写进 name。
+- `角色职业` 是例外：角色/职业类别本身可以作为实体，例如 `导师`、`程序员`；但具体人物的稳定关系应通过 triplet 或 description 表达。
+- 用户本人节点必须命名为 `用户`；用户拥有、归属或关联的实体应使用完整所有格、归属短语或稳定语义限定，例如 `用户的小狗`、`用户的 GitHub 账号`、`用户的公司办公室`、`用户就职的公司`，不要简化成 `小狗`、`账号`，也不要使用 `用户's小狗` 等中英混合形式。
+- 泛化或未稳定指向的表达不要抽取，例如 `一只狗`、`狗这种动物`、`某个朋友`、`一个账号`、`某个办公室`。
 - `description` 必须使用中文。
 - `type` 必须使用上方预定义的中文标签；`type_description` 必须直接复用对应 `type` 的预定义中文定义。
   {% else %}
@@ -421,9 +425,13 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - If the sentence is only about a generic principle, abstract outcome, or non-personalized concept that is not worth remembering on its own, do not create an entity for it.
 - If a statement expresses the user's belief, judgment, opinion, wish, or goal tendency but the referenced abstract concepts are not worth keeping as standalone entities, keep only the relevant high-value entities and do not create those low-value concept entities; write the unextracted content into an entity `description` only when it is suitable as a stable description of that entity.
 - In the current stage, do not extract emotional or psychological states as entities. States such as nervousness, happiness, sadness, anxiety, or relief should not be mapped to `知识能力`, `偏好习惯`, `具体目标`, or any other approximate type.
-- The user node itself must be named `用户`; entities owned by or associated with the user should use a complete possessive phrase, such as `the user's dog` in English source text or `用户的小狗` in Chinese source text, and must never use mixed forms such as `用户's dog`, `用户's小狗`, or `user的小狗`.
-- A concrete living being with a stable possessive reference may be extracted as an entity, such as `the user's dog` or `Zhang San's cat`; keep the full possessive phrase as the entity name, and do not collapse it to `dog` or merge it into the owner.
-- Do not extract generic or weakly resolved living-being mentions, such as `a dog`, `dogs as a species`, or `some friend`.
+- The triplet stage must not re-decide unresolved references. Once the hard gate passes, assume entity references in `statement_text` have already been handled upstream, and extract expressible entities from the current statement.
+- Entity `name` must be as specific as possible to avoid same-name same-type false merges. Naming priority: 1) if there is a proper name or upstream has resolved the mention to a concrete entity, use that concrete name, such as `Haidilao`; 2) if there is no proper name but the statement expresses a stable relation, use a stable semantic qualifier, such as `the company where the user works`, `the library the user often visits`, or `the user's phone`; 3) if there is only a generic name but the hard gate has passed, complete `name` using concrete time, action, purpose, content, location, or scene qualifiers already present in `statement_text` or resolved upstream, such as `the restaurant where the user will eat on the morning of 2026-05-15`, rather than only `restaurant`.
+- When completing `name`, use only information already present in `statement_text` or resolved upstream. Do not introduce external inference, and do not use unresolved relative time.
+- For `文档媒体`, `物品设备`, `地点设施`, `组织`, `群体`, and `识别联系信息`, especially avoid generic names. If a proper name, stable owner, platform, topic, content, purpose, location, time, or scene qualifier is available, include it in `name`.
+- `角色职业` is an exception: role and occupation categories may themselves be entities, such as `导师` or `程序员`; but stable relations involving specific people should be represented through triplets or descriptions.
+- The user node itself must be named `用户`; entities owned by, affiliated with, or associated with the user should use a complete possessive phrase, affiliation phrase, or stable semantic qualifier, such as `the user's dog`, `the user's GitHub account`, `the user's company office`, or `the company where the user works`. Do not collapse these names to `dog` or `account`, and never use mixed forms such as `用户's dog`.
+- Do not extract generic or weakly resolved mentions, such as `a dog`, `dogs as a species`, `some friend`, `an account`, or `some office`.
 - `description` must be in English.
 - `type` must use the predefined Chinese label above, while `type_description` must explain that predefined type in English.
   {% endif %}
@@ -495,6 +503,7 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - 当多个名字明确指向同一实体时，使用 `别名属于`。
 - 方向始终是 `alias -> 别名属于 -> canonical entity`。
 - 规范实体必须是“被命名的那个实体”，而不是与它相关的拥有者、施事者、使用者或上位对象。
+- 对任何 `别名属于` 关系，alias 实体和 canonical entity 的 `name` 必须不同；alias 实体必须保留命名表达中新出现的表面形式，不得被转写、翻译或规范化成 canonical entity 的 `name`。如果二者同名，说明 alias 被错误归一化，应恢复 alias 原文；不要创建两个同名实体。
 - 例如，如果句子表达“某个对象叫某个名字”，则这个名字应连向该对象本身；不要因为所有者更显眼，就把名字误连到所有者身上。
 - 对“X 的 Y 叫 Z / 名字是 Z”这类所有格命名表达，如果 `X 的 Y` 是稳定、清晰且类型允许的实体，则抽取 `Z -> 别名属于 -> X 的 Y`；不要只抽取 `Z`，也不要抽取 `Z -> 别名属于 -> X`。
 - 对稳定人际关系命名表达同样适用，例如“我的老婆叫林小雨”应先规范为 `用户的老婆`，再抽取 `林小雨 -> 别名属于 -> 用户的老婆`。
@@ -505,6 +514,7 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - Use `别名属于` when multiple names clearly refer to the same entity.
 - Direction is always `alias -> 别名属于 -> canonical entity`.
 - The canonical entity must be the entity being named itself, not its owner, caller, user, or parent object.
+- For any `别名属于` relation, the alias entity and the canonical entity MUST have different `name` values. The alias entity must keep the newly introduced surface form from the naming expression and must not be transcribed, translated, or normalized into the canonical entity's `name`. If the two names are identical, the alias was incorrectly normalized; restore the original alias surface form and do not create two same-name entities.
 - For example, if the statement says that some object has a name, the alias should point to that object itself rather than a more salient owner.
 - For possessive naming patterns such as "X's Y is called Z" or "X's Y's name is Z", if `X's Y` is a stable, clear, and type-allowed entity, extract `Z -> 别名属于 -> X's Y`; do not extract only `Z`, and do not extract `Z -> 别名属于 -> X`.
 - The same rule applies to stable interpersonal-relation naming expressions. For example, "my wife is called Lin Xiaoyu" should first normalize the named entity to `the user's wife`, then extract `Lin Xiaoyu -> 别名属于 -> the user's wife`.
