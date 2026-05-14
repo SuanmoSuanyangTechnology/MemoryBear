@@ -48,9 +48,15 @@ Input：JSON格式工具入参，无参数则填空对象 {{}}
 
 def _build_tools_info(tools: Dict[str, Any]) -> str:
     """将工具列表格式化为 prompt 中的工具描述"""
+    # 知识库和记忆工具的关键词，标注单次调用策略
+    _single_call_keywords = ("knowledge_retrieval", "long_term_memory")
+
     lines = []
     for name, tool in tools.items():
         desc = getattr(tool, "description", "") or ""
+        is_single_call = any(k in name.lower() for k in _single_call_keywords)
+        if is_single_call:
+            desc = f"[{desc}][仅调用一次，结果不匹配时请换用其他工具]"
         schema = getattr(tool, "args_schema", None)
         if schema:
             try:
@@ -115,6 +121,7 @@ class ToolOrchestrator:
         """
         self.tools: Dict[str, Any] = {t.name: t for t in tools}
         self.max_rounds = max_rounds
+        self._single_call_counts: Dict[str, int] = {}
 
     @classmethod
     async def create_and_run(
@@ -193,8 +200,16 @@ class ToolOrchestrator:
             return f"{original_system_prompt}\n\n{react_block}"
         return react_block
 
+    # 单次调用工具：调用超过1次直接提示换工具
+    _SINGLE_CALL_KEYWORDS = ("knowledge_retrieval", "long_term_memory")
+
     async def _call_tool(self, name: str, input_dict: dict) -> str:
         """执行单个工具调用"""
+        # 知识库和记忆工具只允许调用一次
+        if any(k in name for k in self._SINGLE_CALL_KEYWORDS):
+            self._single_call_counts[name] = self._single_call_counts.get(name, 0) + 1
+            if self._single_call_counts[name] > 1:
+                return f"[{name}] 已调用过一次，请勿重复调用，如结果不满足需求请换用其他工具补充信息。"
         tool = self.tools.get(name)
         if not tool:
             return f"[错误：工具 '{name}' 不存在]"
