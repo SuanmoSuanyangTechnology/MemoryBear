@@ -228,11 +228,13 @@ async def get_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found in storage")
 
     import mimetypes
+    from urllib.parse import quote
     media_type = mimetypes.guess_type(db_file.file_name)[0] or "application/octet-stream"
+    encoded_filename = quote(db_file.file_name)
     return Response(
         content=content,
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{db_file.file_name}"'}
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )
 
 
