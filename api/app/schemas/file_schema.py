@@ -18,6 +18,13 @@ class BatchDownloadRequest(BaseModel):
     )
 
 
+class KBBatchDownloadRequest(BaseModel):
+    zip_filename: Optional[str] = Field(
+        None,
+        description="ZIP文件名，不传则自动生成",
+    )
+
+
 class FileBase(BaseModel):
     kb_id: uuid.UUID
     created_by: uuid.UUID | None = None

@@ -3,8 +3,8 @@
  * @Version: 0.0.1
  * @Author: yujiangping
  * @Date: 2026-01-12 16:34:59
- * @LastEditors: ZhaoYing
- * @LastEditTime: 2026-04-02 10:36:37 
+ * @LastEditors: yujiangping
+ * @LastEditTime: 2026-05-15 15:59:15
  */
 import React, { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -40,7 +40,7 @@ const VersionCard: React.FC = () => {
   }, []);
     
   return (
-    <div className='rb:w-full rb:p-3 rb:bg-white rb:rounded-xl rb:mt-3'>
+    <div className='rb:w-full rb:h-full rb:p-3 rb:bg-white rb:rounded-xl'>
       <Flex gap={4} className="rb:mb-3">
         <span className="rb:font-[MiSans-Bold] rb:font-bold rb:leading-5">{t('index.latestUpdate')}</span>
         {versionInfo?.version && 

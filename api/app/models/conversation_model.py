@@ -88,7 +88,7 @@ class Message(Base):
     meta_data = Column(JSON, comment="消息元数据（如模型、token使用等）")
 
     # 状态
-    status = Column(String(20), nullable=False, default="completed", comment="消息状态: completed/failed")
+    status = Column(String(20), nullable=False, server_default="completed", comment="消息状态: completed/failed")
 
     # 时间戳
     created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")

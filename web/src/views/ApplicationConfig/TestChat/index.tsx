@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 12:30:17
+ * @Last Modified time: 2026-05-15 15:09:29
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -175,7 +175,7 @@ const TestChat: FC<TestChatProps> = ({
     }])
   }
 
-  const updateAssistantMessage = (content: string, audio_url?: string, audio_status?: string, citations?: NodeData['citations']) => {
+  const updateAssistantMessage = (content: string, audio_url?: string, audio_status?: string, citations?: NodeData['citations'], suggested_questions?: string[] | undefined) => {
     setChatList(prev => {
       const newList = [...prev]
       const lastMsg = newList[newList.length - 1]
@@ -187,7 +187,8 @@ const TestChat: FC<TestChatProps> = ({
             ...(lastMsg.meta_data || {}),
             audio_url: audio_url || lastMsg.meta_data?.audio_url,
             audio_status: audio_status || lastMsg.meta_data?.audio_status,
-            citations: citations || lastMsg.meta_data?.citations
+            citations: citations || lastMsg.meta_data?.citations,
+            suggested_questions: suggested_questions || lastMsg.meta_data?.suggested_questions
           }
         }
       }
@@ -395,9 +396,10 @@ const TestChat: FC<TestChatProps> = ({
 
   const handleStreamMessage = (data: SSEMessage[]) => {
     data.map(item => {
-      const { conversation_id, content, message_length, audio_url, citations } = item.data as {
+      const { conversation_id, content, message_length, audio_url, citations, suggested_questions } = item.data as {
         conversation_id: string, content: string, message_length: number; audio_url?: string;
-        citations?: NodeData['citations']
+        citations?: NodeData['citations'];
+        suggested_questions?: string[]
       };
       switch (item.event) {
         case 'start':
@@ -425,7 +427,7 @@ const TestChat: FC<TestChatProps> = ({
             }))
           }
           if (audio_url) {
-            updateAssistantMessage(content || '', audio_url, 'pending')
+            updateAssistantMessage(content || '', audio_url, 'pending', citations, suggested_questions)
             const { file_id } = item.data as { file_id?: string }
             const idToPoll = file_id || audio_url || ''
             const fileId = audio_url.split('/').pop()
@@ -451,8 +453,8 @@ const TestChat: FC<TestChatProps> = ({
               audioPollingRef.current.set(idToPoll, timer)
             }
           }
-          if (citations && citations.length > 0) {
-            updateAssistantMessage(content, audio_url, undefined, citations)
+          if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0)) {
+            updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions)
           }
           updateErrorAssistantMessage(message_length)
           streamLoadingRef.current = false

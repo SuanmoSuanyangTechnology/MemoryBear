@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:39 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 10:58:45
+ * @Last Modified time: 2026-05-15 14:52:57
  */
 /**
  * Chat debugging component for application testing
@@ -176,8 +176,8 @@ const Chat: FC<ChatProps> = ({
     })
   }
   /** Update assistant message with streaming content */
-  const updateAssistantMessage = (content?: string, model_config_id?: string, conversation_id?: string, audio_url?: string, citations?: any[]) => {
-    if ((!content && !audio_url && (!citations || citations?.length < 1)) || !model_config_id) return
+  const updateAssistantMessage = (content?: string, model_config_id?: string, conversation_id?: string, audio_url?: string, citations?: any[], suggested_questions?: string[]) => {
+    if ((!content && !audio_url && (!citations || citations?.length < 1) && (!suggested_questions || suggested_questions?.length < 1)) || !model_config_id) return
     updateChatList(prev => {
       const targetIndex = prev.findIndex(item => item.model_config_id === model_config_id);
       if (targetIndex !== -1) {
@@ -197,7 +197,8 @@ const Chat: FC<ChatProps> = ({
                 meta_data: {
                   ...(lastMsg.meta_data || {}),
                   ...(audio_url !== undefined ? { audio_url, audio_status: 'pending' } : {}),
-                  citations: citations || lastMsg.meta_data?.citations
+                  citations: citations || lastMsg.meta_data?.citations,
+                  suggested_questions: suggested_questions || lastMsg.meta_data?.suggested_questions,
                 }
               }
             ]
@@ -452,7 +453,7 @@ const Chat: FC<ChatProps> = ({
 
         const handleStreamMessage = (data: SSEMessage[]) => {
           data.map(item => {
-            const { model_config_id, conversation_id, content, message_length, audio_url, citations } = item.data as {
+            const { model_config_id, conversation_id, content, message_length, audio_url, citations, suggested_questions } = item.data as {
               model_config_id: string; conversation_id: string; content: string; message_length: number; audio_url: string;
               input?: any;
               output?: any;
@@ -463,6 +464,7 @@ const Chat: FC<ChatProps> = ({
                 knowledge_id: string;
                 score: string;
               }[]
+              suggested_questions?: string[];
             };
             
             switch (item.event) {
@@ -521,9 +523,8 @@ const Chat: FC<ChatProps> = ({
                     audioPollingRef.current.set(idToPoll, timer)
                   }
                 }
-
-                if (citations && citations.length > 0) {
-                  updateAssistantMessage(content, model_config_id, conversation_id, audio_url, citations)
+                if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0)) {
+                  updateAssistantMessage(content, model_config_id, conversation_id, audio_url, citations, suggested_questions)
                 }
                 updateErrorAssistantMessage(message_length, model_config_id)
                 break;
