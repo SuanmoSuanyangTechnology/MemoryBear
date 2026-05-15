@@ -1544,6 +1544,7 @@ export const en = {
       thinking_budget_tokens_max_error: "Cannot exceed the max tokens limit ({{max}})",
       thinking_budget_tokens_min_error: "Cannot be less than {{min}}",
       logSearchPlaceholder: 'Search log content',
+      tags: 'Tags',
     },
     userMemory: {
       userMemory: 'User Memory',
