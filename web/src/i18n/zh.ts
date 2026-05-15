@@ -1897,6 +1897,9 @@ export const zh = {
       citations: '引用',
       reasoning_content: '深度思考内容',
       history: '历史记录',
+      likeMsg: '感谢您的正面反馈',
+      dislikeMsg: '感谢您的反馈，我们会继续改进',
+      cancelMsg: '已撤销反馈',
     },
     login: {
       title: '红熊记忆科学',
