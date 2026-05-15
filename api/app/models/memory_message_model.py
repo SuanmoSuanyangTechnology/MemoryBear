@@ -10,7 +10,7 @@ import datetime
 import uuid
 
 from sqlalchemy import Column, String, Boolean, DateTime, Integer, Text, ForeignKey, Index
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -62,6 +62,9 @@ class MemoryMessage(Base):
         default=True,
         comment="是否需要记忆写入；FALSE 时跳过 Write_Pipeline 但 write_cursor 继续推进",
     )
+
+    # 多模态文件信息（工作流 MemoryWriteNode 传入）
+    files = Column(JSON, nullable=True, comment="文件信息列表，FileInput.model_dump(mode='json')")
 
     # 时间戳
     created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")

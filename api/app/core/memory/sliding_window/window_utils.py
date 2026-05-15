@@ -1,8 +1,11 @@
 """
 滑动窗口共享工具函数
 
-scheduler.py 和 flush_task.py 共用的窗口上下文构建、write_cursor 推进
-和 MemoryMessage 转换逻辑，避免 200+ 行重复代码。
+scheduler.py、flush_task.py、MemoryService、MemoryAgentService 共用的：
+- 窗口上下文构建（build_context_before / build_context_after）
+- write_cursor 原子推进
+- MemoryMessage 批量写入
+- SlidingWindowScheduler 分派
 
 数据源：所有查询均基于 memory_messages 表，仅按 conversation_id 维度过滤。
 """
@@ -10,9 +13,11 @@ scheduler.py 和 flush_task.py 共用的窗口上下文构建、write_cursor 推
 from __future__ import annotations
 
 import logging
+import uuid
+from datetime import datetime, timezone
 from typing import List
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.db import get_db_context
 from app.models.conversation_model import Conversation
@@ -194,4 +199,307 @@ def message_to_dict(message: MemoryMessage) -> dict:
             if message.created_at is not None
             else None
         ),
+        "files": message.files,
     }
+
+
+# ──────────────────────────────────────────────
+# file_content 重建
+# ──────────────────────────────────────────────
+
+
+async def enrich_file_content(messages: List[dict]) -> None:
+    """通过 file URL 查找已创建的 MemoryPerceptualModel，重建 file_content。
+
+    在滑动窗口 flush 时调用此函数，弥补 write_batch_to_memory_messages
+    只能序列化 files（FileInput dicts）而无法持久化 file_content（ORM 对象）的 gap。
+
+    Args:
+        messages: 消息列表，每元素含 files 字段（List[FileInput dict]）。
+                  函数会原地修改，为有 files 的消息注入 file_content。
+    """
+    if not messages:
+        return
+
+    from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
+
+    for msg in messages:
+        files = msg.get("files") or []
+        if not files:
+            continue
+        file_content = []
+        try:
+            with get_db_context() as db:
+                repo = MemoryPerceptualRepository(db)
+                for file_info in files:
+                    url = file_info.get("url", "")
+                    if not url:
+                        continue
+                    for memory in repo.get_by_url(url):
+                        file_content.append((memory, file_info.get("type", "")))
+        except Exception as e:
+            logger.warning(
+                f"[WindowUtils] 重建 file_content 失败: err={e}"
+            )
+        msg["file_content"] = file_content
+
+
+# ──────────────────────────────────────────────
+# MemoryMessage 批量写入
+# ──────────────────────────────────────────────
+
+
+async def write_batch_to_memory_messages(
+    conversation_id: str,
+    messages: List[dict],
+) -> List[MemoryMessage]:
+    """批量写入 memory_messages 表，自动分配递增 message_seq。
+
+    在单个 DB 事务中完成：查询 max(message_seq) → 逐条分配 + 写入 → commit。
+
+    Args:
+        conversation_id: 对话 ID
+        messages: 消息列表，每条格式 {"role": "user"|"assistant", "content": "...", "files": [...]}
+
+    Returns:
+        成功写入的 MemoryMessage 实例列表（跳过 content 为空的消息）
+    """
+    written: List[MemoryMessage] = []
+
+    with get_db_context() as db:
+        max_seq_result = db.execute(
+            select(func.coalesce(func.max(MemoryMessage.message_seq), 0))
+            .where(MemoryMessage.conversation_id == uuid.UUID(conversation_id))
+        ).scalar()
+        next_seq = (max_seq_result or 0)
+
+        for msg in messages:
+            role = str(msg.get("role", "user"))
+            content = str(msg.get("content", "") or "")
+            if not content.strip():
+                continue
+
+            next_seq += 1
+            mm = MemoryMessage(
+                id=uuid.uuid4(),
+                conversation_id=uuid.UUID(conversation_id),
+                original_message_id=None,
+                role=role,
+                content=content,
+                message_seq=next_seq,
+                should_memorize=True,
+                created_at=datetime.now(timezone.utc),
+                files=msg.get("files"),
+            )
+            db.add(mm)
+            written.append(mm)
+            logger.debug(
+                f"[WindowUtils] 写入 memory_messages: "
+                f"conv={conversation_id}, seq={next_seq}, role={role}"
+            )
+
+        db.commit()
+
+    return written
+
+
+# ──────────────────────────────────────────────
+# SlidingWindowScheduler 分派
+# ──────────────────────────────────────────────
+
+
+async def dispatch_to_scheduler(
+    conversation_id: str,
+    config_id: str = "",
+    end_user_id: str = "",
+    workspace_id: str = "",
+    language: str = "zh",
+) -> None:
+    """分派 SlidingWindowScheduler（Agent 对话路径，fire-and-forget）。
+
+    失败只记 warning 日志，不抛异常。
+    """
+    try:
+        from app.core.memory.sliding_window.scheduler import SlidingWindowScheduler
+
+        scheduler = SlidingWindowScheduler()
+        await scheduler.check_and_dispatch(
+            conversation_id=conversation_id,
+            config_id=config_id,
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
+            language=language,
+        )
+    except Exception as e:
+        logger.warning(
+            f"[WindowUtils] 分派 SlidingWindowScheduler 失败（不影响主流程）: "
+            f"conv={conversation_id}, err={e}",
+            exc_info=True,
+        )
+
+
+# ──────────────────────────────────────────────
+# Layer 2: 从候选池执行滑动窗口写入
+# ──────────────────────────────────────────────
+
+
+async def execute_pending_from_pool(
+    conversation_id: str,
+    end_user_id: str,
+    config_id: str = "",
+    workspace_id: str = "",
+    language: str = "zh",
+) -> int:
+    """Layer 2：从 memory_messages 池中拉取并执行滑动窗口写入。
+
+    流程：
+    1. 加载 memory_config
+    2. 查询 write_cursor
+    3. 查询 message_seq > write_cursor 的所有消息
+    4. should_memorize=FALSE → 原子推进 write_cursor
+    5. role=user + should_memorize=TRUE → 构建窗口上下文 → WritePipeline.run_with_window()
+    6. role=assistant → 跳过（WritePipeline 内部 Pruned_Context 阶段处理）
+
+    与 Scheduler 不同，本函数不检查下文条件——适用于同步执行场景
+    （API /write、MemoryWriteNode）和 FlushTask 兜底。
+
+    Args:
+        conversation_id: 对话 ID
+        end_user_id: 终端用户 ID
+        config_id: 记忆配置 ID
+        workspace_id: 工作空间 ID
+        language: 语言
+
+    Returns:
+        处理的消息数（含 should_memorize=FALSE 跳过的）
+    """
+    from app.core.memory.pipelines.write_pipeline import WritePipeline
+    from app.services.memory_config_service import MemoryConfigService
+    import uuid as _uuid
+
+    if not conversation_id:
+        logger.warning("[execute_pending_from_pool] conversation_id 为空，跳过")
+        return 0
+
+    # 1. 加载 memory_config
+    try:
+        _workspace_id = _uuid.UUID(workspace_id) if workspace_id else None
+        _config_id = _uuid.UUID(config_id) if config_id else None
+        with get_db_context() as db:
+            memory_config = MemoryConfigService(db).load_memory_config(
+                config_id=_config_id,
+                workspace_id=_workspace_id,
+                service_name="execute_pending_from_pool",
+            )
+    except Exception as e:
+        logger.error(
+            f"[execute_pending_from_pool] 加载 memory_config 失败: "
+            f"conv={conversation_id}, err={e}",
+            exc_info=True,
+        )
+        return 0
+
+    # 2. 查询 write_cursor
+    try:
+        with get_db_context() as db:
+            write_cursor = db.execute(
+                select(Conversation.write_cursor).where(
+                    Conversation.id == conversation_id
+                )
+            ).scalar_one_or_none()
+    except Exception as e:
+        logger.error(
+            f"[execute_pending_from_pool] 查询 write_cursor 失败: "
+            f"conv={conversation_id}, err={e}",
+            exc_info=True,
+        )
+        return 0
+
+    if write_cursor is None:
+        logger.warning(
+            f"[execute_pending_from_pool] 对话不存在或无 write_cursor: conv={conversation_id}"
+        )
+        return 0
+
+    # 3. 查询待处理消息
+    try:
+        with get_db_context() as db:
+            pending = (
+                db.execute(
+                    select(MemoryMessage)
+                    .where(
+                        MemoryMessage.conversation_id == conversation_id,
+                        MemoryMessage.message_seq > write_cursor,
+                    )
+                    .order_by(MemoryMessage.message_seq.asc())
+                )
+                .scalars()
+                .all()
+            )
+    except Exception as e:
+        logger.error(
+            f"[execute_pending_from_pool] 查询待处理消息失败: "
+            f"conv={conversation_id}, err={e}",
+            exc_info=True,
+        )
+        return 0
+
+    if not pending:
+        logger.debug(
+            f"[execute_pending_from_pool] 无待处理消息: "
+            f"conv={conversation_id}, write_cursor={write_cursor}"
+        )
+        return 0
+
+    logger.info(
+        f"[execute_pending_from_pool] 待处理消息: {len(pending)}, "
+        f"conv={conversation_id}, write_cursor={write_cursor}"
+    )
+
+    processed = 0
+    write_pipeline = WritePipeline(
+        memory_config=memory_config,
+        end_user_id=end_user_id,
+        language=language,
+    )
+
+    for message in pending:
+        target_seq = message.message_seq
+        if target_seq is None:
+            continue
+
+        try:
+            if not message.should_memorize:
+                await advance_write_cursor(conversation_id, target_seq)
+                processed += 1
+                continue
+
+            if message.role != "user":
+                continue
+
+            context_before = await build_context_before(conversation_id, target_seq)
+            context_after = await build_context_after(conversation_id, target_seq)
+
+            target_dict = message_to_dict(message)
+
+            await write_pipeline.run_with_window(
+                target_message=target_dict,
+                context_before=context_before,
+                context_after=context_after,
+                conversation_id=conversation_id,
+                message_seq=target_seq,
+            )
+            processed += 1
+
+        except Exception as e:
+            logger.error(
+                f"[execute_pending_from_pool] 消息处理异常，跳过: "
+                f"conv={conversation_id}, seq={target_seq}, err={e}",
+                exc_info=True,
+            )
+            continue
+
+    logger.info(
+        f"[execute_pending_from_pool] 完成: conv={conversation_id}, processed={processed}"
+    )
+    return processed

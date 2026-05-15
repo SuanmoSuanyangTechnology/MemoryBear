@@ -184,7 +184,7 @@ class PruningPipeline:
         """调用 SemanticPruner 对单条 assistant 消息执行剪枝。
 
         复用现有 SemanticPruner 逻辑，将"整批消息剪枝"适配为"单条消息剪枝"。
-        构造一个 user-assistant 消息对，调用 SemanticPruner._extract_assistant_hint()。
+        构造一个 user-assistant 消息对，调用 SemanticPruner.extract_assistant_hint()。
 
         Args:
             content: assistant 消息原始内容
@@ -195,7 +195,7 @@ class PruningPipeline:
             - pruned_content: 剪枝后内容（A'）；若无记忆价值则为空字符串
             - memory_type: LLM 返回的类型枚举（comfort/suggestion/... 或 NULL）
         """
-        from app.core.memory.storage_services.extraction_engine.data_preprocessing.data_pruning import (
+        from app.core.memory.storage_services.extraction_engine.data_preprocessing import (
             SemanticPruner,
         )
         from app.core.memory.models.config_models import PruningConfig
@@ -229,7 +229,7 @@ class PruningPipeline:
         )
         asst_msg = ConversationMessage(role="assistant", msg=content)
 
-        result = await pruner._extract_assistant_hint(user_msg, asst_msg)
+        result = await pruner.extract_assistant_hint(user_msg, asst_msg)
 
         if result.assistant_memory_hint == "NULL":
             logger.info("[PruningPipeline] LLM 判断无记忆价值，返回空字符串")
