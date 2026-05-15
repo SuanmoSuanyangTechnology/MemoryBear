@@ -38,7 +38,7 @@ from .ontology_class import OntologyClass
 from .ontology_scene import OntologyScene
 from .ontology_class import OntologyClass
 from .implicit_emotions_storage_model import ImplicitEmotionsStorage
-
+from .reflection_log_model import MemoryReflectionLog
 __all__ = [
     "Tenants",
     "User",
@@ -96,5 +96,6 @@ __all__ = [
     "ModelBase",
     "LoadBalanceStrategy",
     "Skill",
-    "ImplicitEmotionsStorage"
+    "ImplicitEmotionsStorage",
+    "MemoryReflectionLog"
 ]

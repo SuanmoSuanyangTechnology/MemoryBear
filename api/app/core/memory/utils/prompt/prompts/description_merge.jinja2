@@ -1,0 +1,114 @@
+===Task===
+{% if language == "zh" %}
+你是一个记忆系统的描述合并助手。请将以下实体的描述内容合并为一段连贯的自然语言摘要。
+{% else %}
+You are a memory system description merge assistant. Please merge the following entity's description content into a coherent natural language summary.
+{% endif %}
+
+===Input===
+{% if language == "zh" %}
+实体信息:
+- 名称: "{{ entity_name }}"
+- 类型: "{{ entity_type }}"
+- 条目数量: {{ parts_count }}
+
+描述内容:
+{% if summary %}
+【上次合并摘要】
+1. {{ summary }}
+
+【新增碎片】
+{% for frag in fragments %}
+{{ loop.index + 1 }}. {{ frag }}
+{% endfor %}
+{% else %}
+【原始描述碎片】
+{% for frag in fragments %}
+{{ loop.index }}. {{ frag }}
+{% endfor %}
+{% endif %}
+{% else %}
+Entity Information:
+- Name: "{{ entity_name }}"
+- Type: "{{ entity_type }}"
+- Entry Count: {{ parts_count }}
+
+Description Content:
+{% if summary %}
+[Previous Merged Summary]
+1. {{ summary }}
+
+[New Fragments]
+{% for frag in fragments %}
+{{ loop.index + 1 }}. {{ frag }}
+{% endfor %}
+{% else %}
+[Original Description Fragments]
+{% for frag in fragments %}
+{{ loop.index }}. {{ frag }}
+{% endfor %}
+{% endif %}
+{% endif %}
+
+===Guidelines===
+{% if language == "zh" %}
+1. 综合所有信息（包括上次摘要中的事实 + 新碎片），生成完整的新摘要
+2. 如果同一属性有多个值（如工作地点），以最新时间的为准
+3. 去除语义重复的内容
+4. 输出纯自然语言文本（不保留时间戳格式）
+5. 不限制长度，有多少独特事实就保留多少
+6. 不编造，只能用输入中的信息
+7. 使用逗号和句号作为分隔符，禁止使用中文分号（；），因为系统用分号作为碎片分隔符
+{% else %}
+1. Synthesize all information into a complete new summary
+2. If the same attribute has multiple values, use the most recent one
+3. Remove semantically duplicate content
+4. Output pure natural language text (no timestamps)
+5. No length limit, preserve as many unique facts as available
+6. Do not fabricate; only use information from the input
+7. Use commas and periods as separators, NEVER use Chinese semicolons (；) as the system uses them as fragment delimiters
+{% endif %}
+
+===Output Format===
+{% if language == "zh" %}
+请严格按以下 JSON 格式输出（注意字段名必须是 merged_description）：
+{% else %}
+Please output strictly in the following JSON format (field name must be merged_description):
+{% endif %}
+
+{{ json_schema }}
+
+===Example===
+{% if language == "zh" %}
+输入碎片：
+1. 后端工程师
+2. 性格内向
+3. 喜欢跑步
+4. 在学Rust
+5. 养了一只橘猫叫豆包
+
+输出：
+{"merged_description": "后端工程师，性格内向，平时喜欢跑步，近期在学习Rust，养了一只橘猫叫豆包"}
+{% else %}
+Input fragments:
+1. Backend engineer
+2. Introverted personality
+3. Likes running
+4. Learning Rust
+5. Has an orange cat named Douban
+
+Output:
+{"merged_description": "A backend engineer with an introverted personality who enjoys running, is currently learning Rust, and has an orange cat named Douban"}
+{% endif %}
+
+**CRITICAL JSON FORMATTING REQUIREMENTS:**
+1. Use only standard ASCII double quotes (") for JSON structure
+2. The field name MUST be "merged_description", not "description" or anything else
+3. Do not include line breaks within JSON string values
+4. Output ONLY the JSON object, no other text
+
+{% if language == "zh" %}
+输出语言应始终与输入语言相同。
+{% else %}
+The output language should always be the same as the input language.
+{% endif %}
