@@ -69,7 +69,7 @@ def list_apps(
     - 默认包含本工作空间的应用和分享给本工作空间的应用
     - 设置 include_shared=false 可以只查看本工作空间的应用
     - 当提供 ids 参数时，按逗号分割获取指定应用，不分页
-    - search 参数支持：应用名称模糊搜索、API Key 精确搜索
+    - search 参数支持：应用名称模糊搜索、应用标签模糊搜索、API Key 精确搜索
     """
     from sqlalchemy import select as sa_select
     from app.models.api_key_model import ApiKey

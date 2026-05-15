@@ -140,12 +140,14 @@ class ToolOrchestrator:
         effective_params: Dict[str, Any],
         processed_files: Optional[List[Dict]] = None,
         max_rounds: int = 5,
-    ) -> str:
+    ) -> Tuple[str, List[Dict]]:
         """
         创建编排器并执行 ReAct 循环。
 
         Returns:
-            更新后的 system_prompt（包含工具调用结果）
+            (updated_system_prompt, node_executions):
+            - updated_system_prompt: 包含工具调用结果的 system_prompt
+            - node_executions: 工具调用步骤记录列表
         """
         from app.core.models import RedBearLLM, RedBearModelConfig
 
@@ -181,7 +183,7 @@ class ToolOrchestrator:
             if processed_files else message
         )
 
-        final_answer, trajectory_context = await orchestrator.run(
+        final_answer, trajectory_context, node_executions = await orchestrator.run(
             llm_caller=_llm_caller,
             message=react_message,
             history=history
@@ -192,7 +194,7 @@ class ToolOrchestrator:
             react_system_prompt + trajectory_context
             + f"\n\n工具调用已完成，调用结果：{final_answer}\n请直接将以上答案整理后回复用户，不要再输出 Thought/Action/Input 格式。"
         )
-        return updated_system_prompt
+        return updated_system_prompt, node_executions
 
     def build_react_system_prompt(self, original_system_prompt: str) -> str:
         """
@@ -205,7 +207,7 @@ class ToolOrchestrator:
             return f"{original_system_prompt}\n\n{react_block}"
         return react_block
 
-    async def _call_tool(self, name: str, input_dict: dict) -> str:
+    async def _call_tool(self, name: str, input_dict: dict) -> dict:
         """执行单个工具调用"""
         # 单次调用工具超过1次直接提示换工具
         if _is_single_call_tool(name):
@@ -214,7 +216,7 @@ class ToolOrchestrator:
                 return f"[{name}] 已调用过一次，请勿重复调用，如结果不满足需求请换用其他工具补充信息。"
         tool = self.tools.get(name)
         if not tool:
-            return f"[错误：工具 '{name}' 不存在]"
+            return {"success": False, "output": "", "error": f"工具 '{name}' 不存在"}
         try:
             # LangchainToolWrapper 使用 _arun，@tool 装饰器生成的工具使用 func
             if hasattr(tool, 'func') and callable(tool.func):
@@ -228,12 +230,12 @@ class ToolOrchestrator:
                     input_dict = {**input_dict, 'operation': operation}
                 result = await tool._arun(**input_dict)
             logger.debug(f"工具 '{name}' 执行成功，结果长度={len(str(result))}")
-            return str(result)
+            return {"success": True, "output": str(result), "error": None}
         except Exception as e:
             logger.warning(f"工具 '{name}' 执行失败: {e}")
-            return f"[工具调用失败: {e}]"
+            return {"success": False, "output": "", "error": f"[工具调用失败: {e}]"}
 
-    async def run(self, llm_caller, message: str | list, history: List[Dict]) -> Tuple[str, str]:
+    async def run(self, llm_caller, message: str | list, history: List[Dict]) -> Tuple[str, str, List[Dict]]:
         """
         执行 ReAct 多轮工具调用循环。
 
@@ -243,14 +245,19 @@ class ToolOrchestrator:
             history: 历史对话列表
 
         Returns:
-            (final_answer, trajectory_context):
+            (final_answer, trajectory_context, node_executions):
             - final_answer: 模型最终自然语言回答
             - trajectory_context: 完整工具调用轨迹，用于注入 system_prompt
+            - node_executions: 工具调用步骤记录列表（用于 agent_executions）
         """
+        import time
+        import uuid as _uuid
+
         # 构建初始消息列表（历史 + 当前用户消息，支持多模态 content）
         messages = list(history) + [{"role": "user", "content": message}]
 
         trajectory: List[str] = []  # 记录每轮 thought/action/observation
+        node_executions: List[Dict] = []  # 工具调用步骤记录
         final_answer = ""
         response = ""
 
@@ -273,8 +280,42 @@ class ToolOrchestrator:
             thought, action, input_dict = parsed
             logger.info(f"ReAct 第 {round_idx + 1} 轮：调用工具 '{action}'，参数={input_dict}")
 
+            # 记录工具调用开始
+            step_start = time.time()
+            step_id = str(_uuid.uuid4())
+
             # 执行工具
-            observation = await self._call_tool(action, input_dict)
+            tool_result = await self._call_tool(action, input_dict)
+
+            success: bool = bool(tool_result.get("success", True))
+            output: str = str(tool_result.get("output") or "")
+            error: Optional[str] = tool_result.get("error")
+
+            observation = f"[错误: {error}]" if error else output
+
+            # 构建步骤记录
+            tool = self.tools.get(action)
+            tool_meta = getattr(tool, "_tool_meta", None) if tool else None
+            elapsed_ms = round((time.time() - step_start) * 1000, 2)
+
+            node = {
+                "step_id": step_id,
+                "node_type": "tool",
+                "node_name": action,
+                "status": "completed" if success else "failed",
+                "input": json.dumps(input_dict, ensure_ascii=False)[:2000],
+                "output": output[:2000],
+                "elapsed_time": elapsed_ms,
+                "error": error,
+                "meta": tool_meta if tool_meta else None,
+            }
+            # 提取知识库来源
+            if tool and hasattr(tool, "_last_sources") and tool._last_sources:
+                if not node["meta"]:
+                    node["meta"] = {}
+                node["meta"]["sources"] = tool._last_sources
+                tool._last_sources = []
+            node_executions.append(node)
 
             # 记录本轮轨迹
             trajectory.append(
@@ -293,7 +334,7 @@ class ToolOrchestrator:
             final_answer = response.strip() if response else "已达到最大思考轮次，无法继续"
 
         trajectory_context = self.build_trajectory_context(trajectory)
-        return final_answer, trajectory_context
+        return final_answer, trajectory_context, node_executions
 
     @staticmethod
     def build_trajectory_context(trajectory: List[str]) -> str:

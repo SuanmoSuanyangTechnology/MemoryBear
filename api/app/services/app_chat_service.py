@@ -15,6 +15,8 @@ from app.db import get_db
 from app.models import MultiAgentConfig, AgentConfig, ModelType
 from app.models import WorkflowConfig
 from app.models.models_model import ModelCapability
+from app.models.agent_execution_model import AgentExecution
+from app.repositories.agent_execution_repository import AgentExecutionRepository
 from app.repositories.tool_repository import ToolRepository
 from app.schemas import DraftRunRequest
 from app.schemas.app_schema import FileInput, FileType
@@ -171,6 +173,7 @@ class AppChatService:
 
         # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
         capability = api_key_obj.capability or []
+        orchestrator_node_executions = []
         if ModelCapability.FUNCTION_CALL not in capability and tools:
             _api_key_config = {
                 "model_name": api_key_obj.model_name,
@@ -180,7 +183,7 @@ class AppChatService:
                 "is_omni": api_key_obj.is_omni,
                 "capability": capability,
             }
-            system_prompt = await ToolOrchestrator.create_and_run(
+            system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                 tools=tools,
                 system_prompt=system_prompt,
                 message=message,
@@ -217,13 +220,49 @@ class AppChatService:
                     conversation_id=str(conversation_id) if conversation_id else None,
                     uploaded_files=processed_files or []
                 )
-        # 调用 Agent（支持多模态）
-        result = await agent.chat(
-            message=message,
-            history=history,
-            context=None,
-            files=processed_files  # 传递处理后的文件
+
+        # 创建 Agent 执行记录（pending 状态，对齐工作流行为）
+        import datetime as dt
+        from app.models.app_model import App
+        agent_exec_repo = AgentExecutionRepository(self.db)
+        app_obj = self.db.get(App, config.app_id)
+        agent_execution = AgentExecution(
+            app_id=config.app_id,
+            conversation_id=conversation_id,
+            message_id=None,
+            agent_config_id=config.id,
+            release_id=app_obj.current_release_id if app_obj else None,
+            triggered_by=None,
+            steps=[],
+            status="running",
+            started_at=dt.datetime.fromtimestamp(start_time),
+            meta_data={
+                "model": api_key_obj.model_name,
+                "provider": api_key_obj.provider,
+            },
         )
+        agent_exec_repo.create(agent_execution)
+        self.db.commit()
+
+        try:
+            # 调用 Agent（支持多模态）
+            result = await agent.chat(
+                message=message,
+                history=history,
+                context=None,
+                files=processed_files
+            )
+        except Exception as e:
+            # Agent 执行失败，更新记录为 failed
+            elapsed_time = time.time() - start_time
+            agent_exec_repo.update_completed(
+                execution_id=agent_execution.id,
+                steps=[],
+                status="failed",
+                elapsed_time=elapsed_time,
+                error_message=str(e)[:2000],
+            )
+            raise
 
         ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
 
@@ -331,6 +370,17 @@ class AppChatService:
             meta_data=assistant_meta
         )
         message_id = ai_message.id
+
+        # 更新 Agent 执行记录为 completed
+        node_executions = orchestrator_node_executions + result.get("node_executions", [])
+        agent_exec_repo.update_completed(
+            execution_id=agent_execution.id,
+            steps=node_executions,
+            status="completed",
+            elapsed_time=elapsed_time,
+            token_usage=result.get("usage"),
+            message_id=message_id,
+        )
 
         return {
             "conversation_id": conversation_id,
@@ -485,6 +535,7 @@ class AppChatService:
 
             # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
             capability = api_key_obj.capability or []
+            orchestrator_node_executions = []
             if ModelCapability.FUNCTION_CALL not in capability and tools:
                 _api_key_config = {
                     "model_name": api_key_obj.model_name,
@@ -494,7 +545,7 @@ class AppChatService:
                     "is_omni": api_key_obj.is_omni,
                     "capability": capability,
                 }
-                system_prompt = await ToolOrchestrator.create_and_run(
+                system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                     tools=tools,
                     system_prompt=system_prompt,
                     message=message,
@@ -504,6 +555,11 @@ class AppChatService:
                     effective_params=model_parameters,
                     processed_files=processed_files,
                 )
+                # 把已完成的工具调用步骤作为事件补发给前端
+                for step in orchestrator_node_executions:
+                    event_type = "tool_error" if step.get("status") == "failed" else "tool_end"
+                    yield f"event: tool_start\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'input': step.get('input'), 'meta': step.get('meta')}, ensure_ascii=False)}\n\n"
+                    yield f"event: {event_type}\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'output': step.get('output'), 'error': step.get('error'), 'meta': step.get('meta')}, ensure_ascii=False)}\n\n"
                 tools = []
 
             # 创建 LangChain Agent
@@ -533,10 +589,34 @@ class AppChatService:
                         uploaded_files=processed_files or []
                     )
 
+            # 创建 Agent 执行记录（running 状态）
+            import datetime as dt
+            from app.models.app_model import App
+            agent_exec_repo = AgentExecutionRepository(self.db)
+            app_obj = self.db.get(App, config.app_id)
+            agent_execution = AgentExecution(
+                app_id=config.app_id,
+                conversation_id=conversation_id,
+                message_id=None,
+                agent_config_id=config.id,
+                release_id=app_obj.current_release_id if app_obj else None,
+                triggered_by=None,
+                steps=[],
+                status="running",
+                started_at=dt.datetime.fromtimestamp(start_time),
+                meta_data={
+                    "model": api_key_obj.model_name,
+                    "provider": api_key_obj.provider,
+                },
+            )
+            agent_exec_repo.create(agent_execution)
+            self.db.commit()
+
             # 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
             full_reasoning = ""
             total_tokens = 0
+            node_executions = []
 
             text_queue: asyncio.Queue = asyncio.Queue()
             api_key_config = {
@@ -562,6 +642,14 @@ class AppChatService:
                 elif isinstance(chunk, dict) and chunk.get("type") == "reasoning":
                     full_reasoning += chunk['content']
                     yield f"event: reasoning\ndata: {json.dumps({'content': chunk['content']}, ensure_ascii=False)}\n\n"
+                elif isinstance(chunk, dict) and chunk.get("type") == "node_executions":
+                    node_executions = chunk.get("data", [])
+                elif isinstance(chunk, dict) and chunk.get("type") == "tool_start":
+                    yield f"event: tool_start\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'input': chunk.get('input'), 'meta': chunk.get('meta')}, ensure_ascii=False)}\n\n"
+                elif isinstance(chunk, dict) and chunk.get("type") == "tool_end":
+                    yield f"event: tool_end\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'output': chunk.get('output'), 'meta': chunk.get('meta')}, ensure_ascii=False)}\n\n"
+                elif isinstance(chunk, dict) and chunk.get("type") == "tool_error":
+                    yield f"event: tool_error\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'error': chunk.get('error')}, ensure_ascii=False)}\n\n"
                 else:
                     full_content += chunk
                     yield f"event: message\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
@@ -683,6 +771,18 @@ class AppChatService:
                 content=full_content,
                 meta_data=assistant_meta
             )
+
+            # 更新 Agent 执行记录为 completed
+            all_node_executions = orchestrator_node_executions + node_executions
+            agent_exec_repo.update_completed(
+                execution_id=agent_execution.id,
+                steps=all_node_executions,
+                status="completed",
+                elapsed_time=elapsed_time,
+                token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                message_id=message_id,
+            )
+
             yield f"event: end\ndata: {json.dumps(end_data, ensure_ascii=False)}\n\n"
 
             logger.info(
@@ -700,6 +800,36 @@ class AppChatService:
             raise
         except Exception as e:
             logger.error(f"流式聊天失败: {str(e)}", exc_info=True)
+            # 保存失败的消息，使前端可以展示失败状态
+            try:
+                self.conversation_service.add_message(
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=message,
+                    meta_data=human_meta,
+                )
+                self.conversation_service.add_message(
+                    message_id=message_id,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content="",
+                    meta_data={"error": str(e)[:2000]},
+                    status="failed",
+                )
+            except Exception:
+                pass
+            # 更新 Agent 执行记录为 failed
+            try:
+                elapsed_time = time.time() - start_time
+                agent_exec_repo.update_completed(
+                    execution_id=agent_execution.id,
+                    steps=node_executions if 'node_executions' in dir() else [],
+                    status="failed",
+                    elapsed_time=elapsed_time,
+                    error_message=str(e)[:2000],
+                )
+            except Exception:
+                pass  # 保存失败不影响错误事件发送
             # 发送错误事件
             yield f"event: end\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
 
