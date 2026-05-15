@@ -195,11 +195,11 @@ class ToolOrchestrator:
             return f"{original_system_prompt}\n\n{react_block}"
         return react_block
 
-    async def _call_tool(self, name: str, input_dict: dict) -> str:
+    async def _call_tool(self, name: str, input_dict: dict) -> dict:
         """执行单个工具调用"""
         tool = self.tools.get(name)
         if not tool:
-            return f"[错误：工具 '{name}' 不存在]"
+            return {"success": False, "output": "", "error": f"工具 '{name}' 不存在"}
         try:
             # LangchainToolWrapper 使用 _arun，@tool 装饰器生成的工具使用 func
             if hasattr(tool, 'func') and callable(tool.func):
@@ -213,10 +213,10 @@ class ToolOrchestrator:
                     input_dict = {**input_dict, 'operation': operation}
                 result = await tool._arun(**input_dict)
             logger.debug(f"工具 '{name}' 执行成功，结果长度={len(str(result))}")
-            return str(result)
+            return {"success": True, "output": str(result), "error": None}
         except Exception as e:
             logger.warning(f"工具 '{name}' 执行失败: {e}")
-            return f"[工具调用失败: {e}]"
+            return {"success": False, "output": "", "error": str(e)}
 
     async def run(self, llm_caller, message: str | list, history: List[Dict]) -> Tuple[str, str, List[Dict]]:
         """
@@ -268,7 +268,13 @@ class ToolOrchestrator:
             step_id = str(_uuid.uuid4())
 
             # 执行工具
-            observation = await self._call_tool(action, input_dict)
+            tool_result = await self._call_tool(action, input_dict)
+
+            success: bool = bool(tool_result.get("success", True))
+            output: str = str(tool_result.get("output") or "")
+            error: Optional[str] = tool_result.get("error")
+
+            observation = f"[错误: {error}]" if error else output
 
             # 构建步骤记录
             tool = self.tools.get(action)
@@ -279,11 +285,11 @@ class ToolOrchestrator:
                 "step_id": step_id,
                 "node_type": "tool",
                 "node_name": action,
-                "status": "completed" if not observation.startswith("[工具调用失败") and not observation.startswith("[错误") else "failed",
+                "status": "completed" if success else "failed",
                 "input": json.dumps(input_dict, ensure_ascii=False)[:2000],
-                "output": observation[:2000],
+                "output": output[:2000],
                 "elapsed_time": elapsed_ms,
-                "error": observation if observation.startswith("[工具调用失败") or observation.startswith("[错误") else None,
+                "error": error,
                 "meta": tool_meta if tool_meta else None,
             }
             # 提取知识库来源
