@@ -2147,6 +2147,8 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
         result = loop.run_until_complete(_run())
     except Exception as e:
         result = {"status": "FAILED", "error": str(e)}
+    finally:
+        _shutdown_loop_gracefully(loop)
 
     result["elapsed_time"] = time.time() - start_time
     result["task_id"] = self.request.id

@@ -29,4 +29,4 @@ class MemoryReflectionLog(Base):
     solution_detail = Column(JSONB, nullable=True)
     execution_detail = Column(JSONB, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), default=datetime.datetime.now, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.now, nullable=False)

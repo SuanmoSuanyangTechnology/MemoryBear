@@ -78,10 +78,10 @@ class ExecutionTracker:
 
 class Layer2Inspector:
     def __init__(self, neo4j_connector: Neo4jConnector, llm_client: Any,
-                 log_repo: Any, config: Optional[Dict[str, Any]] = None):
+                 log_repo_factory: Any, config: Optional[Dict[str, Any]] = None):
         self.connector = neo4j_connector
         self.llm_client = llm_client
-        self.log_repo = log_repo
+        self.log_repo_factory = log_repo_factory
         self.desc_config = DescriptionMergeConfig(**(config or {}))
         self._semaphore = asyncio.Semaphore(self.desc_config.merge_concurrency)
 
@@ -126,11 +126,18 @@ class Layer2Inspector:
         tasks = [_merge_with_limit(e) for e in candidates]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         merged_count = sum(1 for r in results if r is True)
+        failed_count = sum(1 for r in results if isinstance(r, Exception))
+
+        # 记录失败的异常
+        for i, r in enumerate(results):
+            if isinstance(r, Exception):
+                logger.error(f"描述合并异常 entity={candidates[i].get('name', '?')}: {r}")
 
         return {
             "status": "success",
             "candidate_count": len(candidates),
             "merged_count": merged_count,
+            "failed_count": failed_count,
         }
 
     async def _merge_one_entity(self, entity: Dict, end_user_id: str,
@@ -178,8 +185,9 @@ class Layer2Inspector:
         )
         tracker.end_step("写入完成")
 
-        # 写 ReflectionLog
-        self.log_repo.create(
+        # 写 ReflectionLog（每次创建新 session）
+        log_repo = self.log_repo_factory()
+        log_repo.create(
             end_user_id=end_user_id,
             sub_problem="description_merge",
             trigger_type="scheduled",

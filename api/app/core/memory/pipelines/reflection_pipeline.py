@@ -49,15 +49,11 @@ class ReflectionPipeline:
 
         # 延迟初始化的客户端
         self._llm_client = None
-        self._neo4j_connector = None
-        self._log_repo = None
 
     def _lazy_init(self):
         """延迟初始化依赖，避免循环导入和不必要的连接创建"""
         if self._llm_client is None:
             from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
-            from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-            from app.repositories.reflection_log_repository import ReflectionLogRepository
             from app.db import get_db_context
 
             llm_id = (
@@ -70,9 +66,6 @@ class ReflectionPipeline:
                 if llm_id:
                     factory = MemoryClientFactory(db)
                     self._llm_client = factory.get_llm_client(llm_id)
-                self._log_repo = ReflectionLogRepository(db)
-
-            self._neo4j_connector = Neo4jConnector()
 
     async def run_layer2(self, baseline: str = "HYBRID") -> Dict[str, Any]:
         """Layer 2 离线巡检 — 由高频定时任务调用（如每 10 分钟）
@@ -84,12 +77,21 @@ class ReflectionPipeline:
         if not self._llm_client:
             return {"status": "skipped", "reason": "no llm_id configured"}
 
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         from app.core.memory.storage_services.reflection_engine.layer2_inspector import Layer2Inspector
 
+        def _create_log_repo():
+            """每次写日志时创建新 session，避免 session 生命周期问题"""
+            from app.repositories.reflection_log_repository import ReflectionLogRepository
+            from app.db import get_db_context
+            db = get_db_context().__enter__()
+            return ReflectionLogRepository(db)
+
+        connector = Neo4jConnector()
         inspector = Layer2Inspector(
-            neo4j_connector=self._neo4j_connector,
+            neo4j_connector=connector,
             llm_client=self._llm_client,
-            log_repo=self._log_repo,
+            log_repo_factory=_create_log_repo,
         )
 
         try:
@@ -99,8 +101,7 @@ class ReflectionPipeline:
                 language=self.language,
             )
         finally:
-            if self._neo4j_connector:
-                await self._neo4j_connector.close()
+            await connector.close()
 
     async def run_layer3(self) -> Dict[str, Any]:
         """Layer 3 知识综合 — 由低频定时任务调用（如每天一次）

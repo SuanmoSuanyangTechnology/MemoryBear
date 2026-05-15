@@ -1,4 +1,5 @@
 """子问题 6 · LLM 层：描述合并"""
+import json
 import logging
 import os
 from typing import List, Optional
@@ -47,7 +48,7 @@ async def merge_description(
         from app.core.memory.storage_services.extraction_engine.steps.base import call_structured
 
         template = _prompt_env.get_template("description_merge.jinja2")
-        json_schema = DescriptionMergeOutput.model_json_schema()
+        json_schema = json.dumps(DescriptionMergeOutput.model_json_schema(), indent=2)
 
         rendered_prompt = template.render(
             entity_name=entity_name,
