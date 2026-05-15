@@ -166,6 +166,8 @@ export const zh = {
       feishuAuthSuccess: '飞书认证成功',
       authFailed: '认证失败，请检查您的凭证',
       recallTest: '召回测试',
+      batchDownload: '导出知识库',
+      batchDownloadSuccess: '批量导出成功',
       testQuestion: '测试问题',
       doc_num: '文档数量',
       chunk_num: '数据总量',
