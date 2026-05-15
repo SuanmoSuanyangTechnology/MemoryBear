@@ -7,10 +7,11 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - audio
-    - video
-    - json_output
+  - vision
+  - audio
+  - video
+  - json_output
+  - function_call
   is_omni: true
   tags:
   - 大语言模型
@@ -21,7 +22,6 @@ models:
   - audio
   - video
   logo: openai
-
 - name: gpt-3.5-turbo-0125
   type: llm
   provider: openai
@@ -30,6 +30,7 @@ models:
   is_official: true
   capability:
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -37,7 +38,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: openai
-
 - name: gpt-3.5-turbo-1106
   type: llm
   provider: openai
@@ -46,6 +46,7 @@ models:
   is_official: true
   capability:
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -53,7 +54,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: openai
-
 - name: gpt-3.5-turbo-16k
   type: llm
   provider: openai
@@ -62,6 +62,7 @@ models:
   is_official: true
   capability:
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -69,7 +70,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: openai
-
 - name: gpt-3.5-turbo-instruct
   type: llm
   provider: openai
@@ -81,7 +81,6 @@ models:
   tags:
   - 大语言模型
   logo: openai
-
 - name: gpt-3.5-turbo
   type: llm
   provider: openai
@@ -90,6 +89,7 @@ models:
   is_official: true
   capability:
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -97,7 +97,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: openai
-
 - name: gpt-4-0125-preview
   type: llm
   provider: openai
@@ -106,6 +105,7 @@ models:
   is_official: true
   capability:
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -113,7 +113,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: openai
-
 - name: gpt-4-1106-preview
   type: llm
   provider: openai
@@ -122,6 +121,7 @@ models:
   is_official: true
   capability:
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -129,7 +129,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: openai
-
 - name: gpt-4-turbo-2024-04-09
   type: llm
   provider: openai
@@ -137,8 +136,9 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - json_output
+  - vision
+  - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -147,7 +147,6 @@ models:
   - stream-tool-call
   - vision
   logo: openai
-
 - name: gpt-4-turbo-preview
   type: llm
   provider: openai
@@ -156,6 +155,7 @@ models:
   is_official: true
   capability:
   - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -163,7 +163,6 @@ models:
   - agent-thought
   - stream-tool-call
   logo: openai
-
 - name: gpt-4-turbo
   type: llm
   provider: openai
@@ -171,8 +170,9 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - json_output
+  - vision
+  - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -181,7 +181,6 @@ models:
   - stream-tool-call
   - vision
   logo: openai
-
 - name: o1-preview
   type: llm
   provider: openai
@@ -194,7 +193,6 @@ models:
   - 大语言模型
   - agent-thought
   logo: openai
-
 - name: o1
   type: llm
   provider: openai
@@ -202,9 +200,10 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - thinking
-    - json_output
+  - vision
+  - thinking_only
+  - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -214,7 +213,6 @@ models:
   - vision
   - structured-output
   logo: openai
-
 - name: o3-2025-04-16
   type: llm
   provider: openai
@@ -222,9 +220,10 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - thinking
-    - json_output
+  - vision
+  - thinking_only
+  - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -234,7 +233,6 @@ models:
   - stream-tool-call
   - structured-output
   logo: openai
-
 - name: o3-mini-2025-01-31
   type: llm
   provider: openai
@@ -242,8 +240,9 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - thinking
-    - json_output
+  - thinking_only
+  - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -252,7 +251,6 @@ models:
   - stream-tool-call
   - structured-output
   logo: openai
-
 - name: o3-mini
   type: llm
   provider: openai
@@ -260,8 +258,9 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - thinking
-    - json_output
+  - thinking_only
+  - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -270,7 +269,6 @@ models:
   - stream-tool-call
   - structured-output
   logo: openai
-
 - name: o3-pro-2025-06-10
   type: llm
   provider: openai
@@ -278,9 +276,10 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - thinking
-    - json_output
+  - vision
+  - thinking_only
+  - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -289,7 +288,6 @@ models:
   - vision
   - structured-output
   logo: openai
-
 - name: o3-pro
   type: llm
   provider: openai
@@ -297,9 +295,10 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - thinking
-    - json_output
+  - vision
+  - thinking_only
+  - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -308,7 +307,6 @@ models:
   - vision
   - structured-output
   logo: openai
-
 - name: o3
   type: llm
   provider: openai
@@ -316,9 +314,10 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - thinking
-    - json_output
+  - vision
+  - thinking_only
+  - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -328,7 +327,6 @@ models:
   - stream-tool-call
   - structured-output
   logo: openai
-
 - name: o4-mini-2025-04-16
   type: llm
   provider: openai
@@ -336,9 +334,10 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - thinking
-    - json_output
+  - vision
+  - thinking_only
+  - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -348,7 +347,6 @@ models:
   - stream-tool-call
   - structured-output
   logo: openai
-
 - name: o4-mini
   type: llm
   provider: openai
@@ -356,9 +354,10 @@ models:
   is_deprecated: false
   is_official: true
   capability:
-    - vision
-    - thinking
-    - json_output
+  - vision
+  - thinking_only
+  - json_output
+  - function_call
   is_omni: false
   tags:
   - 大语言模型
@@ -368,7 +367,6 @@ models:
   - stream-tool-call
   - structured-output
   logo: openai
-
 - name: text-embedding-3-large
   type: embedding
   provider: openai
@@ -380,7 +378,6 @@ models:
   tags:
   - 文本向量模型
   logo: openai
-
 - name: text-embedding-3-small
   type: embedding
   provider: openai
@@ -392,7 +389,6 @@ models:
   tags:
   - 文本向量模型
   logo: openai
-
 - name: text-embedding-ada-002
   type: embedding
   provider: openai

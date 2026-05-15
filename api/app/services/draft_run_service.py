@@ -27,6 +27,7 @@ from app.core.memory.memory_service import MemoryService
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_db_context
 from app.models import AgentConfig, ModelConfig
+from app.models.models_model import ModelCapability
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput, Citation, FileType
 from app.schemas.model_schema import ModelInfo
@@ -37,6 +38,7 @@ from app.services.model_parameter_merger import ModelParameterMerger
 from app.services.model_service import ModelApiKeyService
 from app.services.multimodal_service import MultimodalService
 from app.services.tool_service import ToolService
+from app.services.tool_orchestrator import ToolOrchestrator
 
 logger = get_business_logger()
 
@@ -647,7 +649,7 @@ class AgentRunService:
                 capability = api_key_config.get("capability", [])
                 has_doc_with_images = (
                     doc_img_recognition
-                    and "vision" in capability
+                    and ModelCapability.VISION in capability
                     and any(f.type == FileType.DOCUMENT for f in files)
                 )
             if has_doc_with_images:
@@ -657,6 +659,23 @@ class AgentRunService:
                     "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
                     "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
                 )
+
+            # 7. 根据模型能力选择执行路径
+            capability = api_key_config.get("capability", [])
+            use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            if not use_agent_mode and tools:
+                # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
+                system_prompt = await ToolOrchestrator.create_and_run(
+                    tools=tools,
+                    system_prompt=system_prompt,
+                    message=message,
+                    history=history,
+                    api_key_config=api_key_config,
+                    model_config=model_config,
+                    effective_params=effective_params,
+                    processed_files=processed_files,
+                )
+                tools = []
 
             agent = LangChainAgent(
                 model_name=api_key_config["model_name"],
@@ -671,10 +690,9 @@ class AgentRunService:
                 deep_thinking=effective_params.get("deep_thinking", False),
                 thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                 json_output=effective_params.get("json_output", False),
-                capability=api_key_config.get("capability", []),
+                capability=capability,
             )
 
-            # 为需要运行时上下文的工具注入上下文
             for t in tools:
                 if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
                     t.tool_instance.set_runtime_context(
@@ -682,21 +700,19 @@ class AgentRunService:
                         conversation_id=str(conversation_id) if conversation_id else None,
                         uploaded_files=processed_files or []
                     )
-            # 7. 知识库检索
             context = None
 
             logger.debug(
                 "准备调用 LangChain Agent",
                 extra={
                     "model": api_key_config["model_name"],
+                    "use_agent_mode": use_agent_mode,
                     "has_history": bool(history),
-                    "has_context": bool(context),
                     "has_files": bool(processed_files)
                 }
             )
 
             memory_config_ = agent_config.memory
-            # 兼容新旧字段名：优先使用 memory_config_id，回退到 memory_content
             config_id = memory_config_.get("memory_config_id") or memory_config_.get("memory_content", None)
 
             # 8. 调用 Agent（支持多模态）
@@ -924,7 +940,7 @@ class AgentRunService:
                 capability = api_key_config.get("capability", [])
                 has_doc_with_images = (
                     doc_img_recognition
-                    and "vision" in capability
+                    and ModelCapability.VISION in capability
                     and any(f.type == FileType.DOCUMENT for f in files)
                 )
             if has_doc_with_images:
@@ -934,6 +950,23 @@ class AgentRunService:
                     "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
                     "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
                 )
+
+            # 7. 根据模型能力选择执行路径
+            capability = api_key_config.get("capability", [])
+            use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            if not use_agent_mode and tools:
+                # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
+                system_prompt = await ToolOrchestrator.create_and_run(
+                    tools=tools,
+                    system_prompt=system_prompt,
+                    message=message,
+                    history=history,
+                    api_key_config=api_key_config,
+                    model_config=model_config,
+                    effective_params=effective_params,
+                    processed_files=processed_files,
+                )
+                tools = []
 
             # 创建 LangChain Agent
             agent = LangChainAgent(
@@ -950,10 +983,9 @@ class AgentRunService:
                 deep_thinking=effective_params.get("deep_thinking", False),
                 thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                 json_output=effective_params.get("json_output", False),
-                capability=api_key_config.get("capability", []),
+                capability=capability,
             )
 
-            # 为需要运行时上下文的工具注入上下文
             for t in tools:
                 if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
                     t.tool_instance.set_runtime_context(
@@ -961,7 +993,6 @@ class AgentRunService:
                         conversation_id=str(conversation_id) if conversation_id else None,
                         uploaded_files=processed_files or []
                     )
-            # 7. 知识库检索
             context = None
 
             # 8. 发送开始事件

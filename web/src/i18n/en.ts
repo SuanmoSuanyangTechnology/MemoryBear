@@ -1545,6 +1545,7 @@ export const en = {
       thinking_budget_tokens_max_error: "Cannot exceed the max tokens limit ({{max}})",
       thinking_budget_tokens_min_error: "Cannot be less than {{min}}",
       logSearchPlaceholder: 'Search log content',
+      tags: 'Tags',
     },
     userMemory: {
       userMemory: 'User Memory',
@@ -2535,6 +2536,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       redo: 'Redo',
       undo: 'Undo',
       fit: 'Fit View',
+      handMode: 'Hand Mode',
+      pointerMode: 'Pointer Mode',
 
       input_result: 'Input',
       output_result: 'Output',

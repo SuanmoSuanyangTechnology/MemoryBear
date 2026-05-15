@@ -124,14 +124,63 @@ async def get_preview_chunks(
             base_url=db_knowledge.image2text.api_keys[0].api_base
         )
     from app.core.rag.app.naive import chunk
-    res = chunk(filename=db_file.file_name,
-                binary=file_binary,
-                from_page=0,
-                to_page=5,
-                callback=progress_callback,
-                vision_model=vision_model,
-                parser_config=db_document.parser_config,
-                is_root=False)
+    parent_child_mode = db_document.parser_config.get("parent_child_mode", False)
+
+    if parent_child_mode:
+        from app.core.rag.app.naive import chunk_parent_child
+        child_res, parent_res, parent_id_map = chunk_parent_child(
+            filename=db_file.file_name,
+            binary=file_binary,
+            from_page=0,
+            to_page=5,
+            callback=progress_callback,
+            vision_model=vision_model,
+            parser_config=db_document.parser_config,
+            is_root=False,
+        )
+        # Combine parent and child chunks for preview
+        parent_id_to_doc_id = {}
+        all_preview = []
+        for idx, item in enumerate(parent_res):
+            pid = uuid.uuid4().hex
+            parent_id_to_doc_id[idx] = pid
+            meta = {
+                "doc_id": pid,
+                "file_id": str(db_document.file_id),
+                "file_name": db_document.file_name,
+                "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                "document_id": str(db_document.id),
+                "knowledge_id": str(db_document.kb_id),
+                "sort_id": idx,
+                "status": 1,
+                "chunk_type": "parent",
+            }
+            all_preview.append(DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+        for idx, item in enumerate(child_res):
+            parent_idx = parent_id_map.get(idx)
+            meta = {
+                "doc_id": uuid.uuid4().hex,
+                "file_id": str(db_document.file_id),
+                "file_name": db_document.file_name,
+                "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                "document_id": str(db_document.id),
+                "knowledge_id": str(db_document.kb_id),
+                "sort_id": idx,
+                "status": 1,
+                "chunk_type": "child",
+                "parent_id": parent_id_to_doc_id.get(parent_idx, ""),
+            }
+            all_preview.append(DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+        res = all_preview
+    else:
+        res = chunk(filename=db_file.file_name,
+                    binary=file_binary,
+                    from_page=0,
+                    to_page=5,
+                    callback=progress_callback,
+                    vision_model=vision_model,
+                    parser_config=db_document.parser_config,
+                    is_root=False)
 
     start_index = (page - 1) * pagesize
     end_index = start_index + pagesize
@@ -139,17 +188,21 @@ async def get_preview_chunks(
     paginated_chunk_str_list = res[start_index:end_index]
     chunks = []
     for idx, item in enumerate(paginated_chunk_str_list):
-        metadata = {
-            "doc_id": uuid.uuid4().hex,
-            "file_id": str(db_document.file_id),
-            "file_name": db_document.file_name,
-            "file_created_at": int(db_document.created_at.timestamp() * 1000),
-            "document_id": str(db_document.id),
-            "knowledge_id": str(db_document.kb_id),
-            "sort_id": idx,
-            "status": 1,
-        }
-        chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=metadata))
+        if parent_child_mode:
+            # item is already a DocumentChunk in parent-child mode
+            chunks.append(item)
+        else:
+            metadata = {
+                "doc_id": uuid.uuid4().hex,
+                "file_id": str(db_document.file_id),
+                "file_name": db_document.file_name,
+                "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                "document_id": str(db_document.id),
+                "knowledge_id": str(db_document.kb_id),
+                "sort_id": idx,
+                "status": 1,
+            }
+            chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=metadata))
 
     # 8. Return structured response
     total = len(res)

@@ -197,6 +197,7 @@ const Conversation: FC = () => {
             if (msg.role === 'assistant' && msg.meta_data?.audio_url && audioPollingRef.current.has(msg.meta_data.audio_url)) {
               return { ...msg, meta_data: { ...msg.meta_data, audio_status: 'pending' } }
             }
+            msg.status = msg.role === 'user' ? undefined : msg.status
             return msg
           }))
         })
