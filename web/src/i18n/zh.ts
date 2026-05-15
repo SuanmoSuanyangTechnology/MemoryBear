@@ -875,6 +875,7 @@ export const zh = {
       thinking_budget_tokens_max_error: "不能超过 最大令牌数 ({{max}})",
       thinking_budget_tokens_min_error: "不能小于 {{min}}",
       logSearchPlaceholder: '搜索日志内容',
+      tags: '标签',
     },
     table: {
       totalRecords: '共 {{total}} 条记录'

@@ -16,8 +16,9 @@ import { formatDateTime } from '@/utils/format';
 import type { LogItem, LogDetailModalRef } from './types'
 import LogDetailModal from './components/LogDetailModal'
 import SearchInput from '@/components/SearchInput'
+import type { Application } from '@/views/ApplicationManagement/types'
 
-const Statistics: FC = () => {
+const Logs: FC<{ application: Application }> = ({ application }) => {
   const { t } = useTranslation();
   const { id } = useParams();
   const logDetailRef = useRef<LogDetailModalRef>(null);
@@ -86,8 +87,8 @@ const Statistics: FC = () => {
         isScroll={true}
         scrollY="calc(100vh - 242px)"
       />
-      <LogDetailModal ref={logDetailRef} />
+      <LogDetailModal ref={logDetailRef} source={application.type} />
     </div>
   );
 }
-export default Statistics;
+export default Logs;

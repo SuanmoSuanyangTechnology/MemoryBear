@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-08 14:39:39
+ * @Last Modified time: 2026-05-15 13:39:25
  */
 /**
  * Conversation Page
@@ -179,6 +179,7 @@ const Conversation: FC = () => {
             if (msg.role === 'assistant' && msg.meta_data?.audio_url && audioPollingRef.current.has(msg.meta_data.audio_url)) {
               return { ...msg, meta_data: { ...msg.meta_data, audio_status: 'pending' } }
             }
+            msg.status = msg.role === 'user' ? undefined : msg.status
             return msg
           }))
         })
