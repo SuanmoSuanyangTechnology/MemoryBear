@@ -736,6 +736,11 @@ class AgentRunService:
             # 过滤 citations（只调用一次）
             filtered_citations = self._filter_citations(features_config, citations_collector)
 
+            # 生成建议问题（在保存消息前生成，以便存入 meta_data）
+            suggested_questions = (await self._generate_suggested_questions(
+                features_config, result["content"], api_key_config, effective_params
+            )) if not sub_agent else []
+
             # 10. 保存会话消息
             if not sub_agent:
                 await self._save_conversation_message(
@@ -750,7 +755,8 @@ class AgentRunService:
                             "completion_tokens": 0,
                             "total_tokens": 0
                         }),
-                        "reasoning_content": result.get("reasoning_content")
+                        "reasoning_content": result.get("reasoning_content"),
+                        "suggested_questions": suggested_questions
                     },
                     files=files,
                     processed_files=processed_files,
@@ -770,9 +776,7 @@ class AgentRunService:
                     "total_tokens": 0
                 }),
                 "elapsed_time": elapsed_time,
-                "suggested_questions": await self._generate_suggested_questions(
-                    features_config, result["content"], api_key_config, effective_params
-                ) if not sub_agent else [],
+                "suggested_questions": suggested_questions,
                 "citations": filtered_citations,
                 "audio_url": audio_url,
                 "audio_status": "pending" if audio_url else None
@@ -1048,6 +1052,10 @@ class AgentRunService:
             # 过滤 citations（只调用一次）
             filtered_citations = self._filter_citations(features_config, citations_collector)
 
+            suggested_questions = (await self._generate_suggested_questions(
+                features_config, full_content, api_key_config, effective_params
+            )) if not sub_agent else []
+
             # 11. 保存会话消息
             if not sub_agent:
                 await self._save_conversation_message(
@@ -1058,7 +1066,8 @@ class AgentRunService:
                     user_id=user_id,
                     meta_data={
                         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
-                        "reasoning_content": full_reasoning or None
+                        "reasoning_content": full_reasoning or None,
+                        "suggested_questions": suggested_questions
                     },
                     files=files,
                     processed_files=processed_files,
@@ -1075,9 +1084,7 @@ class AgentRunService:
                 "message_length": len(full_content)
             }
             if not sub_agent:
-                end_data["suggested_questions"] = await self._generate_suggested_questions(
-                    features_config, full_content, api_key_config, effective_params
-                )
+                end_data["suggested_questions"] = suggested_questions
                 end_data["audio_url"] = stream_audio_url
                 # 检查TTS是否已完成（非阻塞，不取消任务）
                 audio_status = "pending"

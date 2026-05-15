@@ -259,6 +259,7 @@ class AppChatService:
             "usage": result.get("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}),
             "audio_url": None,
             "citations": filtered_citations,
+            "suggested_questions": suggested_questions,
             "reasoning_content": result.get("reasoning_content")
         }
         if files:
@@ -576,12 +577,14 @@ class AppChatService:
             # 发送结束事件（包含 suggested_questions、tts、audio_status、citations）
             end_data: dict = {"elapsed_time": elapsed_time, "message_length": len(full_content), "error": None}
             sq_config = features_config.get("suggested_questions_after_answer", {})
+            suggested_questions = []
             if isinstance(sq_config, dict) and sq_config.get("enabled"):
-                end_data["suggested_questions"] = await self.agent_service._generate_suggested_questions(
+                suggested_questions = await self.agent_service._generate_suggested_questions(
                     features_config, full_content,
                     {"model_name": api_key_obj.model_name, "api_key": api_key_obj.api_key,
                      "api_base": api_key_obj.api_base}, {}
                 )
+                end_data["suggested_questions"] = suggested_questions
             end_data["audio_url"] = stream_audio_url
             # 检查TTS是否已完成（非阻塞，不取消任务）
             audio_status = "pending"
@@ -608,6 +611,7 @@ class AppChatService:
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                 "audio_url": None,
                 "citations": filtered_citations,
+                "suggested_questions": suggested_questions,
                 "reasoning_content": full_reasoning or None
             }
 
