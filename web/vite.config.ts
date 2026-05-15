@@ -49,7 +49,7 @@ export default defineConfig({
     proxy: {
       // 主要API代理，支持 /api 和 /api/* 格式
       '/api': {
-        target: 'https://devcopymemorybear.redbearai.com/',
+        target: 'http://localhost:5173',
         changeOrigin: true,
 
         // 匹配所有以/api开头的请求，包括/api/token
