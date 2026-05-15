@@ -61,7 +61,7 @@ const QuickActions: FC<QuickActionsProps> = ({ onNavigate }) => {
   ];
 
   return (
-    <div className='rb:w-full rb:bg-white rb:rounded-xl rb:mt-2.5 rb:py-3'>
+    <div className='rb:w-full rb:bg-white rb:rounded-xl rb:py-3'>
       <div className='rb:font-[MiSans-Bold] rb:font-bold rb:leading-5 rb:px-4 rb:pb-3.5'>
         { t('quickActions.title') }
       </div>
