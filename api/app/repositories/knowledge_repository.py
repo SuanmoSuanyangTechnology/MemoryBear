@@ -98,7 +98,7 @@ def create_knowledge(db: Session, knowledge: knowledge_schema.KnowledgeCreate) -
 
 def get_knowledge_by_id(db: Session, knowledge_id: uuid.UUID) -> Knowledge | None:
     db_logger.debug(f"Query knowledge base based on ID: knowledge_id={knowledge_id}")
-    
+
     try:
         knowledge = db.query(Knowledge).filter(Knowledge.id == knowledge_id).first()
         if knowledge:
@@ -108,6 +108,43 @@ def get_knowledge_by_id(db: Session, knowledge_id: uuid.UUID) -> Knowledge | Non
         return knowledge
     except Exception as e:
         db_logger.error(f"Failed to query the knowledge base based on the ID: knowledge_id={knowledge_id} - {str(e)}")
+        raise
+
+
+def get_knowledge_by_external_id(db: Session, external_id: str, workspace_id: uuid.UUID) -> Knowledge | None:
+    db_logger.debug(f"Query knowledge base based on external_id: external_id={external_id}, workspace_id={workspace_id}")
+
+    try:
+        knowledge = db.query(Knowledge).filter(
+            Knowledge.external_id == external_id,
+            Knowledge.workspace_id == workspace_id,
+            Knowledge.status == 1
+        ).first()
+        if knowledge:
+            db_logger.debug(f"knowledge base query successful: {knowledge.name} (external_id: {external_id})")
+        else:
+            db_logger.debug(f"knowledge base does not exist: external_id={external_id}")
+        return knowledge
+    except Exception as e:
+        db_logger.error(f"Failed to query the knowledge base based on external_id: external_id={external_id} - {str(e)}")
+        raise
+
+
+def get_knowledge_ids_by_external_ids(db: Session, external_ids: list[str], workspace_id: uuid.UUID) -> list[uuid.UUID]:
+    """解析 external_ids 为 knowledge UUID 列表（仅返回存在的）"""
+    db_logger.debug(f"Resolve external_ids to knowledge UUIDs: external_ids={external_ids}, workspace_id={workspace_id}")
+
+    try:
+        results = db.query(Knowledge.id).filter(
+            Knowledge.external_id.in_(external_ids),
+            Knowledge.workspace_id == workspace_id,
+            Knowledge.status == 1
+        ).all()
+        ids = [r[0] for r in results]
+        db_logger.debug(f"Resolved {len(external_ids)} external_ids to {len(ids)} UUIDs")
+        return ids
+    except Exception as e:
+        db_logger.error(f"Failed to resolve external_ids: external_ids={external_ids} - {str(e)}")
         raise
 
 
