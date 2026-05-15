@@ -216,7 +216,7 @@ class ToolOrchestrator:
             return {"success": True, "output": str(result), "error": None}
         except Exception as e:
             logger.warning(f"工具 '{name}' 执行失败: {e}")
-            return {"success": False, "output": "", "error": str(e)}
+            return {"success": False, "output": "", "error": f"[工具调用失败: {e}]"}
 
     async def run(self, llm_caller, message: str | list, history: List[Dict]) -> Tuple[str, str, List[Dict]]:
         """
