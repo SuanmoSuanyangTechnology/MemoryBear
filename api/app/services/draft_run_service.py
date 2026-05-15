@@ -829,8 +829,9 @@ class AgentRunService:
             )) if not sub_agent else []
 
             # 10. 保存会话消息
+            message_id = None
             if not sub_agent:
-                await self._save_conversation_message(
+                message_id = await self._save_conversation_message(
                     conversation_id=conversation_id,
                     user_message=message,
                     assistant_message=result["content"],
@@ -866,6 +867,7 @@ class AgentRunService:
 
             response = {
                 "message": result["content"],
+                "message_id": message_id,
                 "reasoning_content": result.get("reasoning_content"),
                 "conversation_id": conversation_id,
                 "usage": result.get("usage", {
@@ -1216,8 +1218,9 @@ class AgentRunService:
             )) if not sub_agent else []
 
             # 11. 保存会话消息
+            message_id = None
             if not sub_agent:
-                await self._save_conversation_message(
+                message_id = await self._save_conversation_message(
                     conversation_id=conversation_id,
                     user_message=message,
                     assistant_message=full_content,
@@ -1249,6 +1252,7 @@ class AgentRunService:
             # 12. 发送结束事件（包含 suggested_questions、audio_url 和 audio_status）
             end_data: Dict[str, Any] = {
                 "conversation_id": conversation_id,
+                "message_id": message_id,
                 "elapsed_time": elapsed_time,
                 "message_length": len(full_content)
             }
@@ -1568,7 +1572,7 @@ class AgentRunService:
             citations: Optional[List[Any]] = None,
             provider: Optional[str] = None,
             is_omni: Optional[bool] = None
-    ) -> None:
+    ) -> Optional[str]:
         """保存会话消息（会话已通过 _ensure_conversation 确保存在）
 
         Args:
@@ -1584,6 +1588,9 @@ class AgentRunService:
             citations: 引用来源列表
             provider: 模型供应商
             is_omni: 是否为全模态模型
+
+        Returns:
+            Optional[str]: 助手消息ID
         """
         try:
             from app.services.conversation_service import ConversationService
@@ -1632,7 +1639,7 @@ class AgentRunService:
                 }
 
             # 保存用户消息
-            conversation_service.add_message(
+            user_msg = conversation_service.add_message(
                 conversation_id=conv_uuid,
                 role="user",
                 content=user_message,
@@ -1643,24 +1650,33 @@ class AgentRunService:
                 meta_data["audio_url"] = audio_url
             if citations:
                 meta_data["citations"] = citations
-            conversation_service.add_message(
+            assistant_msg = conversation_service.add_message(
                 conversation_id=conv_uuid,
                 role="assistant",
                 content=assistant_message,
                 meta_data=meta_data
             )
 
+            # 设置 parent_message_id（助手消息关联到用户消息）
+            assistant_msg.parent_message_id = user_msg.id
+            self.db.commit()
+
             logger.debug(
                 "保存会话消息",
                 extra={
                     "conversation_id": conversation_id,
                     "user_message_length": len(user_message),
-                    "assistant_message_length": len(assistant_message)
+                    "assistant_message_length": len(assistant_message),
+                    "user_msg_id": str(user_msg.id),
+                    "assistant_msg_id": str(assistant_msg.id),
                 }
             )
 
+            return str(assistant_msg.id)
+
         except Exception as e:
             logger.warning("保存会话消息失败", extra={"error": str(e)})
+            return None
 
     async def _get_config_snapshot(self, app_id: uuid.UUID) -> Dict[str, Any]:
         """获取当前配置快照
@@ -2769,3 +2785,149 @@ class AgentRunService:
                 "total_time": sum(r.get("elapsed_time", 0) for r in results)
             }
         )
+
+    # ==================== 重新生成功能 ====================
+
+    async def regenerate(
+            self,
+            *,
+            message_id: uuid.UUID,
+            agent_config: AgentConfig,
+            model_config: ModelConfig,
+            workspace_id: uuid.UUID,
+            user_id: str,
+            storage_type: Optional[str] = None,
+            user_rag_memory_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """重新生成回复（多版本支持）
+
+        核心逻辑：
+        1. 获取原 assistant 消息及其父 user 消息
+        2. 将原 assistant 消息标记为非当前版本 (is_current=False)
+        3. 复用相同的上下文重新调用 LLM
+        4. 保存新版本 assistant 消息（version+1, is_current=True）
+
+        Args:
+            message_id: 原 AI 回复的消息ID
+            agent_config: Agent 配置
+            model_config: 模型配置
+            workspace_id: 工作空间ID
+            user_id: 用户ID
+            storage_type: 存储类型
+            user_rag_memory_id: RAG 记忆ID
+
+        Returns:
+            Dict: 包含新消息ID、内容、版本号等
+        """
+        from app.models import Message
+
+        # 1. 获取原消息
+        original_msg = self.db.get(Message, message_id)
+        if not original_msg or original_msg.role != "assistant":
+            raise BusinessException("只能重新生成 AI 回复", BizCode.BAD_REQUEST)
+
+        if original_msg.is_deleted:
+            raise BusinessException("消息已被删除", BizCode.BAD_REQUEST)
+
+        # 2. 将原版本标记为非当前
+        original_msg.is_current = False
+        self.db.commit()
+
+        # 3. 获取父用户消息（用于提取原始问题）
+        parent_msg_id = original_msg.parent_message_id
+        if not parent_msg_id:
+            # 如果没有 parent_message_id，则查找上一条 user 消息
+            from sqlalchemy import select as sa_select
+            parent_msg = self.db.scalars(
+                sa_select(Message)
+                .where(
+                    Message.conversation_id == original_msg.conversation_id,
+                    Message.role == "user",
+                    Message.created_at < original_msg.created_at,
+                    Message.is_deleted == False,
+                )
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            ).first()
+            if not parent_msg:
+                raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
+            parent_msg_id = parent_msg.id
+        else:
+            parent_msg = self.db.get(Message, parent_msg_id)
+
+        user_message_content = parent_msg.content if parent_msg else ""
+
+        # 4. 加载上下文（到父消息为止）
+        conversation_id = str(original_msg.conversation_id)
+        history = await self._load_conversation_history(
+            conversation_id=conversation_id,
+            max_history=agent_config.memory.get("max_history", 10) if agent_config.memory else 10,
+            current_provider=None,
+            current_is_omni=False,
+        )
+
+        filtered_history = []
+        for h in history:
+            # TODO: 需要过滤掉当前消息之后的历史（只保留到父消息）
+            filtered_history.append(h)
+
+        # 5. 调用 LLM（复用现有 run 方法，不保存消息）
+        result = await self.run(
+            agent_config=agent_config,
+            model_config=model_config,
+            message=user_message_content,
+            workspace_id=workspace_id,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+            sub_agent=True,  # 标记为子调用，避免重复保存
+        )
+
+        # 6. 保存新版本消息
+        new_version = original_msg.version + 1
+        new_msg = Message(
+            conversation_id=original_msg.conversation_id,
+            role="assistant",
+            content=result["message"],
+            version=new_version,
+            is_current=True,
+            parent_message_id=parent_msg_id,
+            meta_data={
+                "usage": result.get("usage"),
+                "reasoning_content": result.get("reasoning_content"),
+                "regenerated_from": str(message_id),
+                "suggested_questions": result.get("suggested_questions", []),
+                "citations": result.get("citations", []),
+            },
+        )
+        self.db.add(new_msg)
+
+        # 更新会话消息计数
+        from app.models import Conversation
+        conv = self.db.get(Conversation, original_msg.conversation_id)
+        if conv:
+            conv.message_count += 1
+
+        self.db.commit()
+        self.db.refresh(new_msg)
+
+        logger.info(
+            "重新生成回复成功",
+            extra={
+                "original_message_id": str(message_id),
+                "new_message_id": str(new_msg.id),
+                "version": new_version,
+                "conversation_id": conversation_id,
+            }
+        )
+
+        return {
+            "message_id": str(new_msg.id),
+            "message": result["message"],
+            "reasoning_content": result.get("reasoning_content"),
+            "version": new_version,
+            "conversation_id": conversation_id,
+            "suggested_questions": result.get("suggested_questions", []),
+            "citations": result.get("citations", []),
+        }
