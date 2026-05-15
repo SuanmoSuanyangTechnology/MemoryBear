@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:28:07 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-16 18:51:01
+ * @Last Modified time: 2026-05-14 18:35:43
  */
 /**
  * Model Configuration Modal
@@ -109,7 +109,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
   const handleChange: SelectProps['onChange'] = (_value, option) => {
     const newValues: ModelConfig = {
       capability: (option as Model).capability,
-      deep_thinking: false,
+      deep_thinking: (option as Model).capability?.includes('thinking_only'),
       thinking_budget_tokens: defaultThinkingBudgetTokens,
       json_output: false,
     }
@@ -179,13 +179,13 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
         <FormItem name="json_output" valuePropName="checked" hidden={!(values?.capability?.includes('json_output'))}>
           <Checkbox>{t('application.json_output')}</Checkbox>
         </FormItem>
-        <FormItem name="deep_thinking" valuePropName="checked" hidden={!['model', 'chat'].includes(source) || !(values?.deep_thinking || values?.capability?.includes('thinking'))}>
-          <Checkbox>{t('application.deep_thinking')}</Checkbox>
+        <FormItem name="deep_thinking" valuePropName="checked" hidden={!['model', 'chat'].includes(source) || !(values?.deep_thinking || values?.capability?.includes('thinking') || values?.capability?.includes('thinking_only'))}>
+          <Checkbox disabled={values?.capability?.includes('thinking_only')}>{t('application.deep_thinking')}</Checkbox>
         </FormItem>
         <FormItem
           name="thinking_budget_tokens"
           label={t('application.thinking_budget_tokens')}
-          hidden={!['model', 'chat'].includes(source) || !(values?.deep_thinking || values?.capability?.includes('thinking'))}
+          hidden={!['model', 'chat'].includes(source) || !(values?.deep_thinking || values?.capability?.includes('thinking') || values?.capability?.includes('thinking_only'))}
           extra={<>{t('application.range')}: [{minThinkingBudgetTokens}, {t(`application.max_tokens`)}: {values?.max_tokens}]</>}
           dependencies={['max_tokens']}
           rules={[
