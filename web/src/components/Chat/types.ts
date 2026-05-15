@@ -70,6 +70,9 @@ export interface ChatProps {
   className?: string;
   renderRuntime?: (item: ChatItem, index: number) => ReactNode;
   conversationId?: string | null;
+
+  userIcon?: ReactNode;
+  assistantIcon?: ReactNode;
 }
 
 /**
@@ -114,4 +117,6 @@ export interface ChatContentProps {
   renderRuntime?: (item: ChatItem, index: number) => ReactNode;
   /** Send message callback */
   onSend?: (msg: string) => void;
+  userIcon?: ReactNode;
+  assistantIcon?: ReactNode;
 }

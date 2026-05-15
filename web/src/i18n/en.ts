@@ -1210,6 +1210,7 @@ export const en = {
       exportDSLFile: 'Export DSL file',
       willRollToThisVersion: 'Will roll to this version',
       share: 'Share',
+      embedWebsite: 'Embed Website',
       lastUpdateTime: 'Last Update Time',
       editor: 'Editor',
       releaseTime: 'Release Time',
