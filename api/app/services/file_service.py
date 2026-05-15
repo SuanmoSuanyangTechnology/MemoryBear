@@ -95,17 +95,22 @@ def delete_file_by_id(db: Session, file_id: uuid.UUID, current_user: User) -> No
 
 def build_zip_arcnames(files: list[Any]) -> list[tuple[str, str, str]]:
     """同名文件自动去重，返回 [(file_name, file_key, arc_name), ...]"""
-    name_counter: dict[str, int] = {}
+    seen: set[str] = set()
     result: list[tuple[str, str, str]] = []
 
     def unique_name(original: str) -> str:
-        if original not in name_counter:
-            name_counter[original] = 0
+        if original not in seen:
+            seen.add(original)
             return original
-        name_counter[original] += 1
         stem, *ext_parts = original.rsplit(".", 1)
         ext = f".{ext_parts[0]}" if ext_parts else ""
-        return f"{stem}_{name_counter[original]}{ext}"
+        counter = 1
+        while True:
+            candidate = f"{stem}_{counter}{ext}"
+            if candidate not in seen:
+                seen.add(candidate)
+                return candidate
+            counter += 1
 
     for f in files:
         result.append((f.file_name, f.file_key, unique_name(f.file_name)))
@@ -142,32 +147,32 @@ async def stream_zip_files(
         try:
             async with asyncio.timeout(120):
                 content = await storage_service.download_file(file_key)
+
+            arc_name_bytes = arc_name.encode("utf-8")
+            crc = zlib.crc32(content) & 0xFFFFFFFF
+            uncompressed_size = len(content)
+            compressor = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -15)
+            compressed_data = compressor.compress(content) + compressor.flush()
+            compressed_size = len(compressed_data)
+
+            local_header = struct.pack(
+                "<4sHHHHHIIIHH",
+                b"PK\x03\x04", 20, 0x08, 8, 0, 0, 0, 0, 0, len(arc_name_bytes), 0,
+            ) + arc_name_bytes
+
+            yield local_header
+            yield compressed_data
+
+            descriptor = struct.pack("<III", crc, compressed_size, uncompressed_size)
+            yield descriptor
+
+            header_data_len = len(local_header) + compressed_size
+            central_entries.append((arc_name_bytes, crc, compressed_size, uncompressed_size, offset))
+            offset += header_data_len + 12
         except Exception as e:
             logger.warning(f"跳过文件 {file_name}: {e}")
             skipped_files.append(file_name)
             continue
-
-        arc_name_bytes = arc_name.encode("utf-8")
-        crc = zlib.crc32(content) & 0xFFFFFFFF
-        uncompressed_size = len(content)
-        compressor = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -15)
-        compressed_data = compressor.compress(content) + compressor.flush()
-        compressed_size = len(compressed_data)
-
-        local_header = struct.pack(
-            "<4sHHHHHIIIHH",
-            b"PK\x03\x04", 20, 0x08, 8, 0, 0, 0, 0, 0, len(arc_name_bytes), 0,
-        ) + arc_name_bytes
-
-        yield local_header
-        yield compressed_data
-
-        descriptor = struct.pack("<III", crc, compressed_size, uncompressed_size)
-        yield descriptor
-
-        header_data_len = len(local_header) + compressed_size
-        central_entries.append((arc_name_bytes, crc, compressed_size, uncompressed_size, offset))
-        offset += header_data_len + 12
 
     # --- skipped_files manifest ---
     if skipped_files:
