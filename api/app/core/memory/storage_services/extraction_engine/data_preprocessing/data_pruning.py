@@ -260,7 +260,7 @@ class SemanticPruner:
                     })
                     return user_idx, asst_idx, asst_msg.msg, False, False, None
 
-                result = await self._extract_assistant_hint(user_msg, asst_msg)
+                result = await self.extract_assistant_hint(user_msg, asst_msg)
 
                 # 收集 snapshot 记录（包含 user 侧处理结果）
                 self._snapshot_records.append({
@@ -402,7 +402,7 @@ class SemanticPruner:
     # LLM 调用
     # ──────────────────────────────────────────────
 
-    async def _extract_assistant_hint(
+    async def extract_assistant_hint(
         self,
         user_msg: ConversationMessage,
         asst_msg: ConversationMessage,

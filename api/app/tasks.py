@@ -1478,7 +1478,8 @@ def write_message_task(
         config_id: str | int,
         storage_type: str,
         user_rag_memory_id: str,
-        language: str = "zh"
+        language: str = "zh",
+        conversation_id: str = "",
 ) -> Dict[str, Any]:
     """Celery task to process a write message via MemoryAgentService.
     Args:
@@ -1554,6 +1555,7 @@ def write_message_task(
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
                     language=language,
+                    conversation_id=conversation_id,
                 ),
                 db,
             )

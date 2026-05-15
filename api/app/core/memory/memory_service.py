@@ -19,7 +19,6 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
 
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 if TYPE_CHECKING:
@@ -273,20 +272,13 @@ class MemoryService:
         await cls._refresh_active_key(conversation_id)
 
         # Step 3: 分派给 SlidingWindowScheduler
-        try:
-            from app.core.memory.sliding_window.scheduler import SlidingWindowScheduler
-            scheduler = SlidingWindowScheduler()
-            await scheduler.check_and_dispatch(
-                conversation_id=str(conversation_id),
-                config_id=config_id,
-                workspace_id=workspace_id,
-            )
-        except Exception as e:
-            logger.warning(
-                f"[MemoryService] 分派 SlidingWindowScheduler 失败（不影响主流程）: "
-                f"conv={conversation_id}, err={e}",
-                exc_info=True,
-            )
+        from app.core.memory.sliding_window.window_utils import dispatch_to_scheduler
+
+        await dispatch_to_scheduler(
+            conversation_id=str(conversation_id),
+            config_id=config_id,
+            workspace_id=workspace_id,
+        )
 
         return memory_msg
 
@@ -357,23 +349,15 @@ class MemoryService:
         await self._refresh_active_key(conversation_id)
 
         # Step 3: 分派给 SlidingWindowScheduler
-        try:
-            from app.core.memory.sliding_window.scheduler import SlidingWindowScheduler
+        from app.core.memory.sliding_window.window_utils import dispatch_to_scheduler
 
-            scheduler = SlidingWindowScheduler()
-            await scheduler.check_and_dispatch(
-                conversation_id=str(conversation_id),
-                config_id=config_id,
-                end_user_id=self.ctx.end_user_id,
-                workspace_id=workspace_id,
-                language=self.ctx.memory_config.language if self.ctx.memory_config else "zh",
-            )
-        except Exception as e:
-            logger.warning(
-                f"[MemoryService] 分派 SlidingWindowScheduler 失败（不影响主流程）: "
-                f"conv={conversation_id}, err={e}",
-                exc_info=True,
-            )
+        await dispatch_to_scheduler(
+            conversation_id=str(conversation_id),
+            config_id=config_id,
+            end_user_id=self.ctx.end_user_id,
+            workspace_id=workspace_id,
+            language=self.ctx.memory_config.language if self.ctx.memory_config else "zh",
+        )
 
         return memory_msg
 
@@ -430,86 +414,37 @@ class MemoryService:
     ) -> List["MemoryMessage"]:
         """工作流 MemoryWriteNode 消息写入 memory_messages 表。
 
-        1. 将消息写入 memory_messages 表（should_memorize 强制 TRUE，使用 conversation_id）
-        2. 分派给 SlidingWindowScheduler.check_and_dispatch()
-
-        注意：此方法不检查 memory-write 节点是否存在（由 GraphBuilder 保证
-        MemoryWriteNode 仅在有 memory-write 节点时被实例化）。
+        1. 将消息写入 memory_messages 表（should_memorize 强制 TRUE）
+        2. 分派给 SlidingWindowScheduler
 
         Args:
-            conversation_id: 会话 ID（工作流对应的会话）
-            messages: 消息列表，每条格式为 {"role": "user"|"assistant", "content": "..."}
+            conversation_id: 会话 ID
+            messages: 消息列表 [{"role": "user"|"assistant", "content": "...", "files": [...]}]
             config_id: 记忆配置 ID
             end_user_id: 终端用户 ID
             workspace_id: 工作空间 ID
             language: 语言
 
         Returns:
-            写入的 MemoryMessage 实例列表
+            成功写入的 MemoryMessage 实例列表
         """
-        import datetime as dt
+        from app.core.memory.sliding_window.window_utils import (
+            write_batch_to_memory_messages,
+            dispatch_to_scheduler,
+        )
 
-        written: List[MemoryMessage] = []
+        written = await write_batch_to_memory_messages(
+            conversation_id=conversation_id,
+            messages=messages,
+        )
 
-        for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            if not content:
-                continue
-
-            try:
-                with get_db_context() as db:
-                    # 计算下一个 message_seq（按 conversation_id 维度）
-                    max_seq = db.execute(
-                        select(func.coalesce(func.max(MemoryMessage.message_seq), 0))
-                        .where(MemoryMessage.conversation_id == uuid.UUID(str(conversation_id)))
-                    ).scalar()
-                    next_seq = (max_seq or 0) + 1
-
-                    mm = MemoryMessage(
-                        id=uuid.uuid4(),
-                        conversation_id=uuid.UUID(str(conversation_id)),
-                        original_message_id=None,
-                        role=role,
-                        content=content,
-                        message_seq=next_seq,
-                        should_memorize=True,
-                        created_at=dt.datetime.now(),
-                    )
-                    db.add(mm)
-                    db.commit()
-                    written.append(mm)
-                    logger.debug(
-                        f"[MemoryService] 工作流消息已写入 memory_messages: "
-                        f"conv={conversation_id}, seq={next_seq}, role={role}"
-                    )
-            except Exception as e:
-                logger.error(
-                    f"[MemoryService] 工作流消息写入 memory_messages 失败: "
-                    f"conv={conversation_id}, role={role}, err={e}",
-                    exc_info=True,
-                )
-
-        if not written:
-            return written
-
-        # 分派给 SlidingWindowScheduler
-        try:
-            from app.core.memory.sliding_window.scheduler import SlidingWindowScheduler
-
-            scheduler = SlidingWindowScheduler()
-            await scheduler.check_and_dispatch(
-                conversation_id=str(conversation_id),
+        if written:
+            await dispatch_to_scheduler(
+                conversation_id=conversation_id,
                 config_id=config_id,
                 end_user_id=end_user_id,
                 workspace_id=workspace_id,
                 language=language,
-            )
-        except Exception as e:
-            logger.warning(
-                f"[MemoryService] 工作流路径分派 SlidingWindowScheduler 失败（不影响主流程）: "
-                f"conv={conversation_id}, err={e}",
-                exc_info=True,
             )
 
         return written

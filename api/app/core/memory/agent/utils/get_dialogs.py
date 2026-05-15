@@ -75,7 +75,7 @@ async def get_chunked_dialogs(
     
 # step2: 语义剪枝步骤（在分块之前）
     try:
-        from app.core.memory.storage_services.extraction_engine.data_preprocessing.data_pruning import SemanticPruner
+        from app.core.memory.storage_services.extraction_engine.data_preprocessing import SemanticPruner
         from app.core.memory.models.config_models import PruningConfig
         from app.db import get_db_context
         from app.services.memory_config_service import MemoryConfigService
