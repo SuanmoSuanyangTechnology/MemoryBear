@@ -593,8 +593,19 @@ async def retrieve_chunks(
     """
     api_logger.info(f"retrieve chunk: query={retrieve_data.query}, username: {current_user.username}")
 
+    # Resolve ex_ids to kb_ids and merge (union)
+    kb_ids = list(retrieve_data.kb_ids)
+    if retrieve_data.ex_ids:
+        resolved_ids = knowledge_service.get_knowledge_ids_by_external_ids(
+            db=db,
+            external_ids=retrieve_data.ex_ids,
+            workspace_id=current_user.current_workspace_id,
+            current_user=current_user
+        )
+        kb_ids = list(set(kb_ids + resolved_ids))
+
     filters = [
-        knowledge_model.Knowledge.id.in_(retrieve_data.kb_ids),
+        knowledge_model.Knowledge.id.in_(kb_ids),
         knowledge_model.Knowledge.permission_id == knowledge_model.PermissionType.Private,
         knowledge_model.Knowledge.chunk_num > 0,
         knowledge_model.Knowledge.status == 1
@@ -607,7 +618,7 @@ async def retrieve_chunks(
     private_kb_ids = [item[0] for item in private_items]
     private_workspace_ids = [item[1] for item in private_items]
     filters = [
-        knowledge_model.Knowledge.id.in_(retrieve_data.kb_ids),
+        knowledge_model.Knowledge.id.in_(kb_ids),
         knowledge_model.Knowledge.permission_id == knowledge_model.PermissionType.Share,
         knowledge_model.Knowledge.chunk_num > 0,
         knowledge_model.Knowledge.status == 1
@@ -619,7 +630,7 @@ async def retrieve_chunks(
     )
     if items:
         filters = [
-            knowledgeshare_model.KnowledgeShare.target_kb_id.in_(retrieve_data.kb_ids)
+            knowledgeshare_model.KnowledgeShare.target_kb_id.in_(kb_ids)
         ]
         share_items = knowledgeshare_service.get_source_kb_ids_by_target_kb_id(
             db=db,

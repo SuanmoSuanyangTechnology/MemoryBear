@@ -40,6 +40,7 @@ class Knowledge(Base):
     __tablename__ = "knowledges"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    external_id = Column(String(36), nullable=True, index=True, unique=False, comment="user-defined external identifier, workspace-unique")
     workspace_id = Column(UUID(as_uuid=True), nullable=False, comment="workspaces.id")
     created_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False, comment="users.id")
     parent_id = Column(UUID(as_uuid=True), nullable=True, default=None, comment="parent folder id when type is Folder")
