@@ -737,9 +737,9 @@ class AgentRunService:
             filtered_citations = self._filter_citations(features_config, citations_collector)
 
             # 生成建议问题（在保存消息前生成，以便存入 meta_data）
-            suggested_questions = await self._generate_suggested_questions(
+            suggested_questions = (await self._generate_suggested_questions(
                 features_config, result["content"], api_key_config, effective_params
-            ) if not sub_agent else []
+            )) if not sub_agent else []
 
             # 10. 保存会话消息
             if not sub_agent:
@@ -1052,9 +1052,9 @@ class AgentRunService:
             # 过滤 citations（只调用一次）
             filtered_citations = self._filter_citations(features_config, citations_collector)
 
-            suggested_questions = await self._generate_suggested_questions(
+            suggested_questions = (await self._generate_suggested_questions(
                 features_config, full_content, api_key_config, effective_params
-            ) if not sub_agent else []
+            )) if not sub_agent else []
 
             # 11. 保存会话消息
             if not sub_agent:
