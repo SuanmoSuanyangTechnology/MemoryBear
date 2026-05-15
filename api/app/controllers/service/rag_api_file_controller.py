@@ -14,6 +14,7 @@ from app.schemas import file_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
 from app.services import api_key_service
+from app.services.file_storage_service import FileStorageService, get_file_storage_service
 
 
 router = APIRouter(prefix="/files", tags=["V1 - RAG API"])
@@ -90,6 +91,7 @@ async def upload_file(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
+    storage_service: FileStorageService = Depends(get_file_storage_service),
     file: UploadFile = File(...),
 ):
     """
@@ -104,7 +106,8 @@ async def upload_file(
                                              parent_id=parent_id,
                                              file=file,
                                              db=db,
-                                             current_user=current_user)
+                                             current_user=current_user,
+                                             storage_service=storage_service)
 
 
 @router.post("/customtext", response_model=ApiResponse)
@@ -115,6 +118,7 @@ async def custom_text(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
+    storage_service: FileStorageService = Depends(get_file_storage_service),
     title: str = Body(..., description="title"),
     content: str = Body(..., description="content"),
 ):
@@ -132,13 +136,15 @@ async def custom_text(
                                              parent_id=parent_id,
                                              create_data=create_data,
                                              db=db,
-                                             current_user=current_user)
+                                             current_user=current_user,
+                                             storage_service=storage_service)
 
 
 @router.get("/{file_id}", response_model=Any)
 async def get_file(
     file_id: uuid.UUID,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    storage_service: FileStorageService = Depends(get_file_storage_service),
 ) -> Any:
     """
     Download the file based on the file_id
@@ -147,7 +153,8 @@ async def get_file(
     - Return a FileResponse to download the file
     """
     return await file_controller.get_file(file_id=file_id,
-                                          db=db)
+                                          db=db,
+                                          storage_service=storage_service)
 
 
 @router.put("/{file_id}", response_model=ApiResponse)
@@ -183,6 +190,7 @@ async def delete_file(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
+    storage_service: FileStorageService = Depends(get_file_storage_service),
 ):
     """
     Delete a file or folder
@@ -194,5 +202,6 @@ async def delete_file(
 
     return await file_controller.delete_file(file_id=file_id,
                                              db=db,
-                                             current_user=current_user)
+                                             current_user=current_user,
+                                             storage_service=storage_service)
 

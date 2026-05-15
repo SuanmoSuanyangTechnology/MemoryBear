@@ -13,6 +13,15 @@ from app.core.logging_config import get_business_logger
 
 logger = get_business_logger()
 
+# 单次调用工具的精确名称集合，超过1次调用直接提示换工具
+_SINGLE_CALL_TOOLS: frozenset = frozenset({"knowledge_retrieval_tool", "long_term_memory"})
+
+
+def _is_single_call_tool(name: str) -> bool:
+    """判断工具是否为单次调用工具：工具对象标记优先，其次精确名称匹配"""
+    return name in _SINGLE_CALL_TOOLS
+
+
 # 解析模型输出的 Thought/Action/Input 三段式
 _ACTION_PATTERN = re.compile(
     r"Thought[：:]\s*(.*?)\s*Action[：:]\s*(\S+)\s*Input[：:]\s*([\s\S]*?\{[\s\S]*?})",
@@ -51,6 +60,8 @@ def _build_tools_info(tools: Dict[str, Any]) -> str:
     lines = []
     for name, tool in tools.items():
         desc = getattr(tool, "description", "") or ""
+        if _is_single_call_tool(name):
+            desc = f"[{desc}][仅调用一次，结果不匹配时请换用其他工具]"
         schema = getattr(tool, "args_schema", None)
         if schema:
             try:
@@ -115,6 +126,7 @@ class ToolOrchestrator:
         """
         self.tools: Dict[str, Any] = {t.name: t for t in tools}
         self.max_rounds = max_rounds
+        self._single_call_counts: Dict[str, int] = {}
 
     @classmethod
     async def create_and_run(
@@ -197,6 +209,11 @@ class ToolOrchestrator:
 
     async def _call_tool(self, name: str, input_dict: dict) -> dict:
         """执行单个工具调用"""
+        # 单次调用工具超过1次直接提示换工具
+        if _is_single_call_tool(name):
+            self._single_call_counts[name] = self._single_call_counts.get(name, 0) + 1
+            if self._single_call_counts[name] > 1:
+                return f"[{name}] 已调用过一次，请勿重复调用，如结果不满足需求请换用其他工具补充信息。"
         tool = self.tools.get(name)
         if not tool:
             return {"success": False, "output": "", "error": f"工具 '{name}' 不存在"}

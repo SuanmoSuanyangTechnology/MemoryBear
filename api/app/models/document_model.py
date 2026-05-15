@@ -24,6 +24,9 @@ class Document(Base):
                                "auto_keywords": 0,
                                "auto_questions": 0,
                                "html4excel": False,
+                               "parent_child_mode": False,
+                               "parent_chunk_token_num": 1024,
+                               "parent_delimiter": "\n",
                                "graphrag": {
                                     "use_graphrag": False,
                                     "scene_name": "",

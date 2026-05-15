@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-08 14:39:39
+ * @Last Modified time: 2026-05-15 14:35:14
  */
 /**
  * Conversation Page
@@ -14,7 +14,7 @@ import { type FC, useState, useEffect, useRef } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import InfiniteScroll from 'react-infinite-scroll-component';
-import { Flex, Skeleton, App, Tooltip } from 'antd'
+import { Flex, Skeleton, App, Tooltip, Space } from 'antd'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 
@@ -41,6 +41,7 @@ const Conversation: FC = () => {
   const location = useLocation()
   const searchParams = new URLSearchParams(location.search)
   const userId = searchParams.get('user_id')
+  const windowType = searchParams.get('type')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string>('')
   const [conversation_id, setConversationId] = useState<string | null>(null)
@@ -65,6 +66,23 @@ const Conversation: FC = () => {
   const streamLoadingRef = useRef(false)
   const [isDeepThinking, setIsDeepThinking] = useState<Record<string, any>>({})
   const [thinking, setThinking] = useState(false)
+
+  const [isIframe, setIsIframe] = useState(false)
+  const [isSmallScreen, setIsSmallScreen] = useState(false)
+
+  useEffect(() => {
+    setIsIframe(location.pathname.includes('/chat-box/'))
+  }, [location?.pathname])
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsSmallScreen(window.innerWidth < 1080)
+    }
+    handleResize()
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
 
   useEffect(() => {
     return () => {
@@ -179,6 +197,7 @@ const Conversation: FC = () => {
             if (msg.role === 'assistant' && msg.meta_data?.audio_url && audioPollingRef.current.has(msg.meta_data.audio_url)) {
               return { ...msg, meta_data: { ...msg.meta_data, audio_status: 'pending' } }
             }
+            msg.status = msg.role === 'user' ? undefined : msg.status
             return msg
           }))
         })
@@ -454,7 +473,195 @@ const Conversation: FC = () => {
     })
   }
 
-  console.log('chatList', fileList, streamLoadingRef.current)
+  const [showHistory, setShowHistory] = useState(false)
+  const isFloatBtn = windowType === 'floatBtn'
+
+  if (isIframe || isSmallScreen) {
+    return (
+      <Flex className={clsx("rb:bg-[#FFFFFF]", {
+        'rb:rounded-tl-2xl! rb:h-full! rb:w-full!': isFloatBtn,
+        'rb:w-full rb:h-full': !isFloatBtn,
+      })}>
+        <div className="rb:flex-1">
+            <Flex
+              justify={isFloatBtn ? "space-between" : 'end'}
+              className={clsx("rb:p-3! rb:h-11.25! rb:w-full! rb-border-b", {
+                'rb:bg-[#171719] rb:text-[#FFFFFF]': isFloatBtn,
+                'rb:text-[#171719]': !isFloatBtn,
+                'rb:rounded-tl-2xl': showHistory && isFloatBtn,
+                'rb:rounded-tl-2xl rb:rounded-tr-2xl': !showHistory && isFloatBtn
+              })}
+            >
+              {isFloatBtn && <span className=" rb:font-medium">{config.app_name}</span>}
+              <Space size={12}>
+                {!isIframe && isSmallScreen && historyList.length > 0 &&
+                  <Tooltip title={t('memoryConversation.history')}>
+                    <div
+                      className={clsx("rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/history_dark.svg')]", {
+                        "rb:bg-[url('@/assets/images/conversation/history_white.svg')]": isFloatBtn,
+                      })}
+                      onClick={() => setShowHistory(true)}
+                    ></div>
+                  </Tooltip>
+                }
+                <Tooltip placement="left" title={t('memoryConversation.startANewConversation')}>
+                  <div
+                    className={clsx("rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/refresh_dark.svg')]", {
+                      "rb:bg-[url('@/assets/images/refresh_white.svg')]": isFloatBtn,
+                    })}
+                    onClick={() => handleChangeHistory(null)}
+                  ></div>
+                </Tooltip>
+
+                {isFloatBtn &&
+                  <div
+                    className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/close.svg')]"
+                    onClick={() => {
+                      window.parent?.postMessage({ type: 'CLOSE_CHAT' }, '*')
+                    }}
+                  ></div>
+                }
+              </Space>
+            </Flex>
+
+          <div className="rb:h-[calc(100%-45px)] rb:px-4">
+            <Chat
+              userIcon={<div className="rb:size-8 rb:bg-cover rb:bg-[url(@/assets/images/conversation/user.png)]"></div>}
+              assistantIcon={<div className="rb:size-8 rb:bg-cover rb:bg-[url(@/assets/images/conversation/ai.png)]"></div>}
+              empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
+              contentClassName={!fileList.length ? "rb:h-[calc(100%-144px)] rb:w-full" : "rb:h-[calc(100%-208px)] rb:w-full"}
+              data={chatList}
+              streamLoading={streamLoadingRef.current}
+              loading={loading}
+              onChange={setMessage}
+              onSend={handleSend}
+              labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
+              conversationId={conversation_id}
+              fileList={fileList}
+              fileChange={(list) => {
+                setFileList(list || [])
+                toolbarRef.current?.setFiles(list || [])
+              }}
+            >
+              <ChatToolbar
+                ref={toolbarRef}
+                features={features}
+                onFilesChange={setFileList}
+                uploadAction={shareFileUploadUrlWithoutApiPrefix}
+                uploadRequestConfig={{
+                  headers: {
+                    'Content-Type': 'multipart/form-data',
+                    Authorization: `Bearer ${shareToken || ''}`,
+                  }
+                }}
+                leftExtra={
+                  (features?.web_search?.enabled || isHasMemory || isDeepThinking)
+                  ? <Flex align="center" justify="end" gap={8}>
+                    {isDeepThinking &&
+                      <Tooltip title={t('memoryConversation.deepThinking')}>
+                        <Flex justify="center" align="center"
+                          className={clsx("rb:size-7 rb:cursor-pointer rb:border rb:hover:bg-[#F6F6F6] rb:rounded-full rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]", {
+                            'rb:bg-[rgba(21,94,239,0.06)] rb:border-[rgba(21,94,239,0.25)]': thinking,
+                            'rb:border-[#EBEBEB]': !thinking,
+                          })}
+                          onClick={handleChangeDeepThinking}
+                        >
+                          <div className={clsx("rb:size-4 rb:bg-cover", {
+                            "rb:bg-[url('@/assets/images/conversation/deepThinking.svg')]": !thinking,
+                            "rb:bg-[url('@/assets/images/conversation/deepThinkingChecked.svg')]": thinking
+                          })} />
+                        </Flex>
+                      </Tooltip>
+                    }
+                    {features?.web_search?.enabled &&
+                      <Tooltip title={t('memoryConversation.web_search')}>
+                        <Flex justify="center" align="center"
+                          className={clsx("rb:size-7 rb:border rb:cursor-pointer rb:hover:bg-[#F6F6F6] rb:rounded-full rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]", {
+                            'rb:bg-[rgba(21,94,239,0.06)] rb:border-[rgba(21,94,239,0.25)]': webSearch,
+                            'rb:border-[#EBEBEB]': !webSearch,
+                          })}
+                          onClick={() => setWebSearch(prev => !prev)}
+                        >
+                          <div className={clsx("rb:size-4 rb:bg-cover", {
+                            "rb:bg-[url('@/assets/images/conversation/online.svg')]": !webSearch,
+                            "rb:bg-[url('@/assets/images/conversation/onlineChecked.svg')]": webSearch
+                          })} />
+                        </Flex>
+                      </Tooltip>
+                    }
+                    {isHasMemory &&
+                      <Tooltip title={t('memoryConversation.memory')}>
+                        <Flex justify="center" align="center"
+                          className={clsx("rb:size-7 rb:border rb:hover:bg-[#F6F6F6] rb:rounded-full rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.12)]", {
+                            'rb:bg-[rgba(21,94,239,0.06)] rb:border-[rgba(21,94,239,0.25)]': memory,
+                            'rb:border-[#EBEBEB]': !memory,
+                            'rb:cursor-pointer': config.app_type !== 'workflow',
+                            'rb:cursor-not-allowed rb:opacity-65': config.app_type === 'workflow',
+                          })}
+                          onClick={handleChangeMemory}
+                        >
+                          <div className={clsx("rb:size-4 rb:bg-cover", {
+                            "rb:bg-[url('@/assets/images/conversation/memoryFunction.svg')]": !memory,
+                            "rb:bg-[url('@/assets/images/conversation/memoryFunctionChecked.svg')]": memory
+                          })} />
+                        </Flex>
+                      </Tooltip>
+                    }
+                  </Flex>
+                  : undefined
+                }
+                onVariablesChange={handleChangeVariables}
+              />
+            </Chat>
+          </div>
+        </div>
+        {showHistory &&
+          <div className="rb:w-55 rb-border-l">
+            <Flex justify="space-between" className="rb:p-3! rb:h-11.25! rb:w-full! rb-border-b rb:text-[#171719] rb:font-medium">
+              <Space>
+                <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/conversation/clock.svg')]"></div>
+                {t('memoryConversation.history')}
+              </Space>
+
+              <div
+                className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/close.svg')]"
+                onClick={() => setShowHistory(false)}
+              ></div>
+            </Flex>
+
+            <div
+              ref={scrollRef}
+              id="scrollableDiv"
+              className="rb:overflow-y-auto rb:h-[calc(100vh-144px)]"
+            >
+              <InfiniteScroll
+                dataLength={historyList.length}
+                next={getHistory}
+                hasMore={hasMore}
+                loader={<Skeleton active />}
+                scrollableTarget="scrollableDiv"
+              >
+                {historyList.map(item => (
+                  <div
+                    className={clsx("rb:cursor-pointer rb:px-4 rb:py-2 rb:hover:bg-[#F6F6F6]", {
+                      "rb:bg-[rgba(21,94,239,0.08)]! rb:relative rb:border-l-[3px] rb:border-[#155EEF]": item.id === conversation_id,
+                    })}
+                    onClick={() => handleChangeHistory(item.id)}
+                  >
+                    <div className="rb:text-[12px] rb:font-medium rb:mb-1">{item.title}</div>
+                    <Flex justify="space-between" className="rb:text-[12px] rb:text-[#5B6167]">
+                      <span>{formatDateTime(item.updated_at, 'MM-DD')}</span>
+                      <span>{formatDateTime(item.updated_at, 'HH:mm')}</span>
+                    </Flex>
+                  </div>
+                ))}
+              </InfiniteScroll>
+            </div>
+          </div>
+        }
+      </Flex>
+    )
+  }
 
   return (
     <Flex className="rb:w-full rb:p-[-16px]!">
