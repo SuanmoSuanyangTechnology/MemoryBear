@@ -185,7 +185,8 @@ async def write_server(
                 config_id=config_id,
                 storage_type=storage_type,
                 user_rag_memory_id=user_rag_memory_id,
-                language=language
+                language=language,
+                conversation_id=user_input.conversation_id,
             ),
             db,
         )

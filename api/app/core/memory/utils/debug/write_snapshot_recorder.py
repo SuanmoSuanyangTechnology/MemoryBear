@@ -49,6 +49,25 @@ class WriteSnapshotRecorder:
         """暴露底层 PipelineSnapshot，供需要直接传递的场景使用（如 SemanticPruner）。"""
         return self._snapshot
 
+    # ── Stage 1: 剪枝结果 ──
+
+    def record_pruning_results(self, pruning_records: list) -> None:
+        """记录 PruningPipeline 对 assistant 消息的剪枝结果。
+
+        每条记录包含：
+        - conversation_id: 对话 ID
+        - message_seq: 消息序号
+        - original_content: 原始 assistant 消息内容
+        - pruned_content: 剪枝后内容（A'）
+        - source: "llm"（本轮 LLM 剪枝）或 "cache"（Redis 缓存命中）
+
+        Args:
+            pruning_records: 剪枝记录列表，每条为 dict
+        """
+        if not pruning_records:
+            return
+        self._snapshot.save_stage("1_assistant_pruning", pruning_records)
+
     # ── Stage 2-5: 萃取阶段各步骤输出 ──
 
     def record_stage_outputs(self, stage_outputs: Optional[Dict[str, Any]]) -> None:

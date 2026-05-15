@@ -290,6 +290,7 @@ class MemoryAgentService:
         storage_type = request.storage_type
         user_rag_memory_id = request.user_rag_memory_id
         language = request.language
+        conversation_id = request.conversation_id
         start_time = time.time()
 
         # ── Step 1: 解析配置 ── 通过 end_user_id 查找关联的 config_id / workspace_id，并从数据库加载完整 memory_config
@@ -310,7 +311,23 @@ class MemoryAgentService:
                 await write_rag(end_user_id, message_text, user_rag_memory_id)
                 return "success"
             else:
-                await self._write_neo4j(end_user_id, messages, memory_config, language, db)
+                if conversation_id:
+                    # ── 滑动窗口写入路径 ── 通过 SlidingWindowScheduler 调度异步写入任务
+                    from app.core.memory.sliding_window.scheduler import SlidingWindowScheduler
+                    scheduler = SlidingWindowScheduler()
+                    await scheduler.check_and_dispatch(
+                        conversation_id=conversation_id,
+                        config_id=str(memory_config.config_id),
+                        end_user_id=end_user_id,
+                        workspace_id=str(memory_config.workspace_id),
+                        language=str(language),
+                    )
+                else:
+                    # ── 回退路径 ── conversation_id 不可用时直接写入 Neo4j（非滑动窗口场景）
+                    logger.debug(
+                        f"[write_memory] conversation_id 未提供，回退到直接写入: end_user_id={end_user_id}"
+                    )
+                    await self._write_neo4j(end_user_id, messages, memory_config, language, db)
 
                 # ── Step 4: 后处理 ── 失效缓存、序列化文件路径、记录审计日志并返回结果
                 await self._invalidate_interest_cache(end_user_id)

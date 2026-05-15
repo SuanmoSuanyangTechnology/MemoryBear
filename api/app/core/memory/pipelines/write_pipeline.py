@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field, ConfigDict
 if TYPE_CHECKING:
     from app.core.memory.models.message_models import DialogData
     from app.schemas.memory_config_schema import MemoryConfig
+    from app.core.memory.pipelines.pruning_pipeline import PruningPipeline
 
 from app.core.memory.models.graph_models import (
     ChunkNode,
@@ -856,6 +857,297 @@ class WritePipeline:
             )
         except Exception as e:
             logger.warning(f"写入活动统计缓存失败（不影响主流程）: {e}")
+
+    # ──────────────────────────────────────────────
+    # 滑动窗口写入：公开入口
+    # ──────────────────────────────────────────────
+
+    async def run_with_window(
+        self,
+        target_message: dict,
+        context_before: List[dict],
+        context_after: List[dict],
+        conversation_id: str,
+        message_seq: int,
+        ref_id: str = "",
+        dispatch_at: str = "",
+    ) -> WriteResult:
+        """滑动窗口写入入口。
+
+        步骤：
+        1. 初始化 PruningPipeline
+        2. 对 context_before 和 context_after 调用 _build_pruned_context()
+        3. 将 dispatch_at 注入到 target_message["dialog_at"]，作为萃取阶段的时间基准
+        4. 调用 get_chunked_dialogs（传入 context_before_pruned、context_after_pruned）
+        5. 执行现有萃取 + 存储流程
+        6. 调用 _advance_write_cursor()
+
+        Args:
+            target_message: 目标 user 消息 {"role": "user", "content": "...", ...}
+            context_before: 上文消息列表（按 message_seq 升序）
+            context_after: 下文消息列表（按 message_seq 升序）
+            conversation_id: 对话 ID
+            message_seq: 目标消息的 message_seq，用于推进 write_cursor
+            ref_id: 引用 ID，为空则自动生成
+            dispatch_at: 任务派发时刻的 UTC ISO 8601 时间戳，注入为 dialog_at，
+                         作为萃取阶段的时间基准（用于 valid_at / 实体描述中的时间锚点）
+
+        Returns:
+            WriteResult 包含状态和统计信息
+
+        Requirements: 2.1, 2.4, 3.2
+        """
+        if not ref_id:
+            ref_id = uuid.uuid4().hex
+
+        extraction_result = None
+
+        try:
+            async with bear.pipeline(
+                "WritePipeline.run_with_window",
+                mode="滑动窗口",
+                config_name=self.memory_config.config_name,
+                end_user_id=self.end_user_id,
+                conversation_id=conversation_id,
+                message_seq=message_seq,
+            ):
+                # 初始化客户端和连接
+                self._init_clients()
+                self._init_neo4j_connector()
+
+                # 初始化快照记录器
+                from app.core.memory.utils.debug.write_snapshot_recorder import (
+                    WriteSnapshotRecorder,
+                )
+
+                self._recorder = WriteSnapshotRecorder("new")
+
+                # Step 1: 初始化 PruningPipeline
+                from app.core.memory.pipelines.pruning_pipeline import PruningPipeline
+
+                pruning_pipeline = PruningPipeline(
+                    memory_config=self.memory_config,
+                    end_user_id=self.end_user_id,
+                    language=self.language,
+                )
+
+                # Step 2: 对上下文中的 assistant 消息执行语义剪枝
+                async with bear.step(1, 5, "剪枝", "构建 Pruned_Context") as s:
+                    pruning_records: list = []  # 收集本轮所有剪枝记录，用于快照
+                    context_before_pruned = await self._build_pruned_context(
+                        messages=context_before,
+                        conversation_id=conversation_id,
+                        pruning_pipeline=pruning_pipeline,
+                        pruning_records=pruning_records,
+                    )
+                    context_after_pruned = await self._build_pruned_context(
+                        messages=context_after,
+                        conversation_id=conversation_id,
+                        pruning_pipeline=pruning_pipeline,
+                        pruning_records=pruning_records,
+                    )
+                    s.metadata(
+                        before_count=len(context_before_pruned),
+                        after_count=len(context_after_pruned),
+                        pruned_count=len(pruning_records),
+                    )
+                    # 写入剪枝快照（含 source 标记：llm / cache）
+                    recorder = getattr(self, "_recorder", None)
+                    if recorder is not None:
+                        recorder.record_pruning_results(pruning_records)
+
+                # Step 3: 组装完整消息列表
+                # 注意：messages 只包含 target_message，上下文通过 context_before/after
+                # 参数注入到 SupportingContext，不参与分块和 statement 提取。
+                # 将 dispatch_at 注入为 dialog_at，作为萃取阶段的时间基准：
+                # - 正常路径：使用任务派发时刻（UTC ISO 8601）
+                # - 回退路径：使用消息的 created_at（Flush_Task 场景）
+                _dialog_at = (
+                    dispatch_at
+                    or target_message.get("created_at", "")
+                    or ""
+                )
+                messages = [{**target_message, "dialog_at": _dialog_at}]
+
+                # Step 4: 预处理 - 消息分块（注入上下文）
+                async with bear.step(2, 5, "预处理", "消息分块") as s:
+                    from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
+
+                    recorder = getattr(self, "_recorder", None)
+                    snapshot = recorder.snapshot if recorder else None
+
+                    chunked_dialogs = await get_chunked_dialogs(
+                        chunker_strategy=self.memory_config.chunker_strategy,
+                        end_user_id=self.end_user_id,
+                        messages=messages,
+                        ref_id=ref_id,
+                        config_id=str(self.memory_config.config_id),
+                        workspace_id=self.memory_config.workspace_id,
+                        snapshot=snapshot,
+                        context_before=context_before_pruned,
+                        context_after=context_after_pruned,
+                    )
+                    s.metadata(chunks=sum(len(d.chunks) for d in chunked_dialogs))
+
+                # Step 5: 萃取 - 知识提取 + 去重
+                async with bear.step(3, 5, "萃取", "知识提取") as s:
+                    extraction_result = await self._extract(chunked_dialogs, is_pilot_run=False)
+                    self._merge_alias_in_memory(extraction_result)
+                    stats = extraction_result.stats
+                    s.metadata(
+                        entities=stats["entity_count"],
+                        statements=stats["statement_count"],
+                        relations=stats["relation_count"],
+                    )
+
+                # Step 6: 存储 - 写入 Neo4j
+                async with bear.step(4, 5, "存储", "写入 Neo4j"):
+                    await self._store(extraction_result)
+
+                # Step 6.5: 异步后处理
+                await self._post_store_async_tasks(extraction_result)
+
+                # Step 7: 聚类
+                async with bear.step(5, 5, "聚类", "增量更新社区") as s:
+                    await self._cluster(extraction_result)
+                    s.metadata(mode="async")
+
+                # Step 8: 原子推进 write_cursor
+                await self._advance_write_cursor(
+                    conversation_id=conversation_id,
+                    message_seq=message_seq,
+                )
+
+                # 更新活动统计缓存
+                await self._update_stats_cache(extraction_result)
+
+                return WriteResult(
+                    status="success",
+                    extraction=extraction_result.stats,
+                    elapsed_seconds=0.0,
+                )
+
+        except Exception:
+            raise
+
+        finally:
+            await self._cleanup()
+
+    # ──────────────────────────────────────────────
+    # 滑动窗口写入：辅助方法
+    # ──────────────────────────────────────────────
+
+    async def _build_pruned_context(
+        self,
+        messages: List[dict],
+        conversation_id: str,
+        pruning_pipeline: "PruningPipeline",
+        pruning_records: Optional[list] = None,
+    ) -> List[dict]:
+        """将消息列表中的 assistant 消息替换为剪枝后版本（A'）。
+
+        assistant 消息剪枝并发执行（asyncio.gather），窗口上下文中多条
+        assistant 消息之间无依赖关系。单条失败时回退到原文，不阻塞其他剪枝任务。
+
+        Args:
+            messages: 消息列表，每条消息包含 role、content、message_seq 等字段
+            conversation_id: 对话 ID
+            pruning_pipeline: 已初始化的 PruningPipeline 实例
+            pruning_records: 可选的列表，若传入则将剪枝记录追加到其中
+
+        Returns:
+            替换后的消息列表（Pruned_Context）
+
+        Requirements: 2.1, 2.3
+        """
+        # 预计算每条 assistant 消息紧邻的 user 消息内容
+        last_user_content = ""
+        prune_tasks: list = []  # (index, coroutine)
+        result: List[Optional[dict]] = [None] * len(messages)
+        for i, msg in enumerate(messages):
+            if msg.get("role") == "user":
+                last_user_content = msg.get("content", "")
+                result[i] = msg
+            elif msg.get("role") == "assistant":
+                user_ctx = last_user_content
+                prune_tasks.append((i, pruning_pipeline.prune(
+                    conversation_id=conversation_id,
+                    message_seq=msg.get("message_seq", 0),
+                    content=msg.get("content", ""),
+                    user_content=user_ctx,
+                    _pruning_records=pruning_records,
+                )))
+                last_user_content = ""
+            else:
+                result[i] = msg
+
+        # 并发执行所有剪枝任务
+        if prune_tasks:
+            coros = [coro for _, coro in prune_tasks]
+            pruned_results = await asyncio.gather(*coros, return_exceptions=True)
+            for (idx, _), pruned_content in zip(prune_tasks, pruned_results):
+                if isinstance(pruned_content, BaseException):
+                    logger.warning(
+                        f"[WritePipeline] 剪枝失败，回退原文: "
+                        f"conv={conversation_id}, seq={messages[idx].get('message_seq')}, err={pruned_content}"
+                    )
+                    result[idx] = messages[idx]
+                else:
+                    result[idx] = {**messages[idx], "content": pruned_content}
+
+        return [m for m in result if m is not None]
+
+    async def _advance_write_cursor(
+        self,
+        conversation_id: str,
+        message_seq: int,
+    ) -> None:
+        """原子性推进对话的 write_cursor。
+
+        执行原子性 UPDATE conversations SET write_cursor = :new_seq
+        WHERE id = :conv_id AND write_cursor < :new_seq，
+        确保 write_cursor 只能单调递增，防止并发任务乱序覆盖。
+
+        更新失败时记录警告日志，不抛出异常（fire-and-forget 语义）。
+
+        Args:
+            conversation_id: 对话 ID
+            message_seq: 目标 user 消息的 message_seq，作为新的 write_cursor 值
+
+        Requirements: 3.2
+        """
+        try:
+            from sqlalchemy import update
+            from app.models.conversation_model import Conversation
+            from app.db import get_db_context
+
+            with get_db_context() as db:
+                result = db.execute(
+                    update(Conversation)
+                    .where(
+                        Conversation.id == conversation_id,
+                        Conversation.write_cursor < message_seq,
+                    )
+                    .values(write_cursor=message_seq)
+                )
+                db.commit()
+
+                if result.rowcount == 0:
+                    logger.warning(
+                        f"[WritePipeline] write_cursor 未更新（可能已被更大的 seq 覆盖）: "
+                        f"conv={conversation_id}, seq={message_seq}"
+                    )
+                else:
+                    logger.info(
+                        f"[WritePipeline] write_cursor 已推进: "
+                        f"conv={conversation_id}, new_cursor={message_seq}"
+                    )
+        except Exception as e:
+            logger.warning(
+                f"[WritePipeline] _advance_write_cursor 失败（不影响主流程）: "
+                f"conv={conversation_id}, seq={message_seq}, err={e}",
+                exc_info=True,
+            )
 
     async def _cleanup(self) -> None:
         """

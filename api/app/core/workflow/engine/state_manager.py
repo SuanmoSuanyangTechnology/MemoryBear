@@ -32,6 +32,7 @@ class WorkflowState(dict):
         "execution_id",
         "workspace_id",
         "user_id",
+        "conversation_id",
         "activate",
         "memory_storage_type",
         "user_rag_memory_id"
@@ -56,6 +57,7 @@ class WorkflowState(dict):
     execution_id: str
     workspace_id: str
     user_id: str
+    conversation_id: str
 
     # Error information (for error edges)
     error: str | None
@@ -84,6 +86,7 @@ class WorkflowStateManager:
             execution_id=execution_context.execution_id,
             workspace_id=execution_context.workspace_id,
             user_id=execution_context.user_id,
+            conversation_id=execution_context.conversation_id,
             error=None,
             error_node=None,
             cycle_nodes=self._identify_cycle_nodes(workflow_config),

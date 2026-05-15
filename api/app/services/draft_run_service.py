@@ -1411,8 +1411,26 @@ class AgentRunService:
 
         conversation_service = ConversationService(self.db)
 
-        # 如果没有提供会话ID，创建新会话
+        # 如果没有提供会话ID，先查找已存在的会话（一个工作流对应一个 conversation）
         if not conversation_id:
+            existing = self.db.query(ConversationModel).filter(
+                ConversationModel.app_id == app_id,
+                ConversationModel.user_id == user_id,
+                ConversationModel.is_active.is_(True),
+                ConversationModel.is_draft == True,
+            ).order_by(ConversationModel.updated_at.desc()).first()
+
+            if existing:
+                logger.info(
+                    "复用已有草稿会话",
+                    extra={
+                        "conversation_id": str(existing.id),
+                        "app_id": str(app_id),
+                        "user_id": user_id,
+                    }
+                )
+                return str(existing.id)
+
             logger.info(
                 "创建新的草稿会话",
                 extra={"workspace_id": str(workspace_id)}

@@ -42,6 +42,7 @@ from .reflection_log_model import MemoryReflectionLog
 from .message_feedback_model import MessageFeedback
 from .message_report_model import MessageReport
 from .conversation_share_model import ConversationShare
+from .memory_message_model import MemoryMessage
 
 __all__ = [
     "Tenants",
@@ -104,5 +105,6 @@ __all__ = [
     "LoadBalanceStrategy",
     "Skill",
     "ImplicitEmotionsStorage",
+    "MemoryMessage",
     "MemoryReflectionLog"
 ]
