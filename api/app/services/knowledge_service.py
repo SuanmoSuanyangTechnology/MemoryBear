@@ -7,6 +7,8 @@ from app.models.models_model import ModelConfig
 from app.schemas.knowledge_schema import KnowledgeCreate, KnowledgeUpdate
 from app.repositories import knowledge_repository
 from app.core.logging_config import get_business_logger
+from app.core.exceptions import BusinessException
+from app.core.error_codes import BizCode
 from app.models.models_model import ModelType
 
 business_logger = get_business_logger()
@@ -71,13 +73,19 @@ def create_knowledge(
             knowledge.parent_id = knowledge.workspace_id
 
         if knowledge.external_id:
-            if len(knowledge.external_id) != 36:
-                raise Exception("external_id must be 36 characters")
+            if not (1 <= len(knowledge.external_id) <= 36):
+                raise BusinessException(
+                    "external_id must be between 1 and 36 characters",
+                    code=BizCode.VALIDATION_FAILED,
+                )
             existing = knowledge_repository.get_knowledge_by_external_id(
                 db, knowledge.external_id, knowledge.workspace_id
             )
             if existing:
-                raise Exception(f"external_id already exists in this workspace: {knowledge.external_id}")
+                raise BusinessException(
+                    f"external_id already exists in this workspace: {knowledge.external_id}",
+                    code=BizCode.VALIDATION_FAILED,
+                )
 
         workspace = db.query(Workspace).filter(Workspace.id == knowledge.workspace_id).first()
         if not workspace:
