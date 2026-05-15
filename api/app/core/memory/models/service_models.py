@@ -29,15 +29,43 @@ class Memory(BaseModel):
         return v.value
 
 
+class RelationMemory(BaseModel):
+    source: str = ""
+    relation: str = ""
+    target: str = ""
+    target_desc: str = ""
+    target_id: str = ""
+
+    @property
+    def dedup_key(self) -> tuple:
+        return self.source, self.relation, self.target
+
+
+class EntityPair(BaseModel):
+    source_id: str = ""
+    target_id: str = ""
+
+
+class RelationSearchResult(BaseModel):
+    pairs: list[EntityPair] = Field(default_factory=list)
+
+
 class MemorySearchResult(BaseModel):
     memories: list[Memory]
+    relations: list[RelationMemory] = Field(default_factory=list)
     content_str: str = Field(default="")
 
     @property
     def content(self) -> str:
+        parts = []
         if self.content_str:
-            return self.content_str
-        return "\n".join([memory.content for memory in self.memories])
+            parts.append(self.content_str)
+        else:
+            parts.append("\n".join([memory.content for memory in self.memories]))
+        if self.relations:
+            from app.core.memory.read_services.search_engine.result_builder import build_relation_content
+            parts.append("\n".join([build_relation_content(rel) for rel in self.relations]))
+        return "\n".join(parts)
 
     @computed_field
     @property
@@ -47,6 +75,16 @@ class MemorySearchResult(BaseModel):
     def filter(self, score_threshold: float) -> Self:
         self.memories = [memory for memory in self.memories if memory.score >= score_threshold]
         return self
+
+    def _dedup_relations(self) -> None:
+        seen = set()
+        unique = []
+        for rel in self.relations:
+            key = rel.dedup_key
+            if key not in seen:
+                seen.add(key)
+                unique.append(rel)
+        self.relations = unique
 
     def __add__(self, other: "MemorySearchResult") -> "MemorySearchResult":
         if not isinstance(other, MemorySearchResult):
@@ -61,6 +99,12 @@ class MemorySearchResult(BaseModel):
                 merged.memories.append(memory)
                 ids.add(memory.id)
 
+        merged.relations = list(self.relations)
+        seen_rel_keys = {r.dedup_key for r in merged.relations}
+        for rel in other.relations:
+            key = rel.dedup_key
+            if key not in seen_rel_keys:
+                merged.relations.append(rel)
+                seen_rel_keys.add(key)
+
         return merged
-
-

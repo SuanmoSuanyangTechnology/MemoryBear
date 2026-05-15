@@ -341,3 +341,7 @@ export const rebuildKnowledgeGraph = async (kb_id: string) => {
   const response = await request.post(`${apiPrefix}/knowledges/${kb_id}/knowledge_graph`);
   return response;
 };
+export const batchDownloadFilesByKb = async (kb_id: string, fileName: string, callback: () => void) => {
+  const response = await request.downloadFile(`/knowledges/${kb_id}/batch-download`, fileName, undefined, callback);
+  return response;
+};

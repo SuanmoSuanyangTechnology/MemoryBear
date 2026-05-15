@@ -14,7 +14,7 @@ import textIcon from '@/assets/images/knowledgeBase/text.png';
 import editIcon from '@/assets/images/knowledgeBase/edit.png';
 // import blankIcon from '@/assets/images/knowledgeBase/blankDocument.png';
 // import imageIcon from '@/assets/images/knowledgeBase/image.png'
-import { getKnowledgeBaseDetail, deleteDocument, downloadFile, updateKnowledgeBase, createSync } from '@/api/knowledgeBase';
+import { getKnowledgeBaseDetail, deleteDocument, downloadFile, updateKnowledgeBase, createSync, batchDownloadFilesByKb } from '@/api/knowledgeBase';
 import { 
   type CreateModalRef, 
   type KnowledgeBaseListItem, 
@@ -781,6 +781,12 @@ const Private: FC = () => {
     messageApi.success(t('common.copySuccess'))
   }
 
+  const handleBatchDownload = () => {
+    batchDownloadFilesByKb(knowledgeBase.id, `${knowledgeBase.name}.zip`, () => {
+      messageApi.success(t('knowledgeBase.batchDownloadSuccess'))
+    })
+  }
+
   return (
     <>
     <div className="rb:flex rb:h-full rb:bg-white rb:rounded-xl">
@@ -842,6 +848,7 @@ const Private: FC = () => {
             <Button onClick={handleShare}>{t('knowledgeBase.share')}</Button>
             <Button onClick={handleRecallTest}>{t('knowledgeBase.recallTest')}</Button>
             <Button onClick={handleSetting}>{t('knowledgeBase.knowledgeBase')} {t('knowledgeBase.setting')}</Button>
+            <Button onClick={handleBatchDownload}>{t('knowledgeBase.batchDownload')}</Button>
             {(knowledgeBase?.type === 'Web' || knowledgeBase?.type === 'Third-party') && (
               <Button 
                 type="primary" 

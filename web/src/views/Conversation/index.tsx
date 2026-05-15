@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 14:35:14
+ * @Last Modified time: 2026-05-15 18:52:30
  */
 /**
  * Conversation Page
@@ -18,7 +18,7 @@ import { Flex, Skeleton, App, Tooltip, Space } from 'antd'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 
-import { getConversationHistory, sendConversation, getConversationDetail, getShareToken, getExperienceConfig } from '@/api/application'
+import { getConversationHistory, sendConversation, getConversationDetail, getShareToken, getExperienceConfig, feedbackMessage } from '@/api/application'
 import type { HistoryItem } from './types'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
@@ -238,8 +238,8 @@ const Conversation: FC = () => {
     }])
   }
 
-  const updateAssistantMessage = (content: string = '', audio_url?: string, audio_status?: string, citations?: any[], error?: string) => {
-    if (!content && !audio_url && (!citations || citations?.length < 1) && typeof error !== 'string') return
+  const updateAssistantMessage = (content: string = '', audio_url?: string, audio_status?: string, citations?: any[], suggested_questions?: any[], error?: string) => {
+    if (!content && !audio_url && (!citations || citations?.length < 1) && (!suggested_questions || suggested_questions?.length < 1) && typeof error !== 'string') return
     if (streamLoadingRef.current) streamLoadingRef.current = false
     setChatList(prev => {
       const lastList = [...prev]
@@ -256,6 +256,7 @@ const Conversation: FC = () => {
               audio_url: audio_url || lastMsg.meta_data?.audio_url,
               audio_status: audio_status || lastMsg.meta_data?.audio_status,
               citations: citations || lastMsg.meta_data?.citations,
+              suggested_questions: suggested_questions || lastMsg.meta_data?.suggested_questions,
               error: error || lastMsg.meta_data?.error
             }
           }
@@ -357,7 +358,7 @@ const Conversation: FC = () => {
     let currentConversationId: string | null = null
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach((item) => {
-        const { content, conversation_id: curId, audio_url, citations, error } = item.data as {
+        const { content, conversation_id: curId, audio_url, citations, suggested_questions, error } = item.data as {
           content: string; conversation_id: string; audio_url?: string;
           citations?: {
             document_id: string;
@@ -366,12 +367,28 @@ const Conversation: FC = () => {
             score: string;
           }[];
           error?: string;
+          suggested_questions?: string[];
         }
         switch (item.event) {
           case 'start':
           case 'node_start':
-            const { conversation_id: newId } = item.data as { conversation_id: string }
+            const { conversation_id: newId, message_id } = item.data as { conversation_id: string; message_id: string }
             currentConversationId = newId
+            setChatList(prev => {
+              const lastList = [...prev]
+              const lastIndex = lastList.length - 1
+              const lastMsg = lastList[lastIndex]
+              if (lastMsg?.role === 'assistant') {
+                return [
+                  ...lastList.slice(0, lastIndex),
+                  {
+                    id: message_id,
+                    ...lastMsg,
+                  }
+                ]
+              }
+              return prev
+            })
             break
           case 'reasoning':
             updateAssistantReasoningMessage(content)
@@ -384,7 +401,7 @@ const Conversation: FC = () => {
           case 'end':
           case 'workflow_end':
             if (audio_url) {
-              updateAssistantMessage(content, audio_url, 'pending', citations)
+              updateAssistantMessage(content, audio_url, 'pending', citations, suggested_questions, error)
               const { file_id } = item.data as { file_id?: string }
               const idToPoll = file_id || audio_url || ''
               const fileId = audio_url.split('/').pop()
@@ -397,8 +414,8 @@ const Conversation: FC = () => {
                 setConversationId(currentConversationId)
               }
             }
-            if ((citations && citations.length > 0) || error) {
-              updateAssistantMessage(content, audio_url, undefined, citations, error)
+            if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0) || error) {
+              updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions, error)
             }
             setLoading(false)
             getHistory(true)
@@ -663,6 +680,27 @@ const Conversation: FC = () => {
     )
   }
 
+  const handleFeedback = (feedbackType: 'like' | 'dislike', id?: string) => {
+    if (!token || !conversation_id || !id) return
+    feedbackMessage(token, id, { feedback_type: feedbackType })
+      .then((res) => {
+        const { feedback_type } = res as { feedback_type: 'like' | 'dislike' | null; }
+        messageApi.success( feedback_type === 'dislike'
+          ? t('memoryConversation.dislikeMsg')
+          : feedback_type === 'like'
+          ? t('memoryConversation.likeMsg')
+          : t('memoryConversation.cancelMsg')
+        )
+        setChatList(prev => prev.map(item => item.id === id
+          ? {
+            ...item,
+            feedback_type,
+          }
+          : item))
+      })
+  }
+
+  console.log(chatList)
   return (
     <Flex className="rb:w-full rb:p-[-16px]!">
       <div className="rb:w-80 rb:h-screen rb:bg-[#F6F6F6] rb:overflow-hidden">
@@ -734,6 +772,8 @@ const Conversation: FC = () => {
               setFileList(list || [])
               toolbarRef.current?.setFiles(list || [])
             }}
+            isSupportTools={true}
+            handleFeedback={handleFeedback}
           >
           <ChatToolbar
             ref={toolbarRef}

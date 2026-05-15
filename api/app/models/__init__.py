@@ -39,6 +39,10 @@ from .ontology_scene import OntologyScene
 from .ontology_class import OntologyClass
 from .implicit_emotions_storage_model import ImplicitEmotionsStorage
 from .reflection_log_model import MemoryReflectionLog
+from .message_feedback_model import MessageFeedback
+from .message_report_model import MessageReport
+from .conversation_share_model import ConversationShare
+
 __all__ = [
     "Tenants",
     "User",
@@ -67,6 +71,9 @@ __all__ = [
     "ReleaseShare",
     "Conversation",
     "Message",
+    "MessageFeedback",
+    "MessageReport",
+    "ConversationShare",
     "ApiKey",
     "ApiKeyLog",
     "ApiKeyType",

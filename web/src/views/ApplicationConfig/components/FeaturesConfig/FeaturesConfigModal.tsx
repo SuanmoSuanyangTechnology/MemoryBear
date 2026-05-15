@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 16:13:44
+ * @Last Modified time: 2026-05-15 14:48:44
  */
 /**
  * Copy Application Modal
@@ -146,6 +146,13 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
                   title={t('application.text_to_speech')}
                   name={['text_to_speech', "enabled"]}
                   desc={t('application.text_to_speech_desc')}
+                />
+              </div>
+              {/* suggested_questions_after_answer */}
+              <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
+                <SwitchFormItem
+                  title={t('application.suggested_questions_after_answer')}
+                  name={['suggested_questions_after_answer', "enabled"]}
                 />
               </div>
             </>}

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-06 15:09:49
+ * @Last Modified time: 2026-05-15 18:48:44
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
@@ -103,6 +103,15 @@ export const sendConversation = (values: QueryParams, onMessage: (data: SSEMessa
 // Get conversation details
 export const getConversationDetail = (share_token: string, conversation_id: string) => {
   return request.get(`/public/share/conversations/${conversation_id}`, {}, {
+    headers: {
+      'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
+    }
+  })
+}
+// Like/Dislike AI response
+export const feedbackMessage = (share_token: string, message_id: string, data: { feedback_type: 'like' | 'dislike' }) => {
+  console.log('token', share_token, `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`)
+  return request.post(`/public/share/messages/${message_id}/feedback`, data, {
     headers: {
       'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
     }

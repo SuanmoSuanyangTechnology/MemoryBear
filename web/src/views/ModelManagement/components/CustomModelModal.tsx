@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-21 15:02:53
+ * @Last Modified time: 2026-05-14 16:32:45
  */
 /**
  * Custom Model Modal
@@ -38,6 +38,8 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   const [abortController, setAbortController] = useState<AbortController | null>(null)
   const modelType = Form.useWatch(['type'], form);
   const isOmni = Form.useWatch(['is_omni'], form);
+  const isThinking = Form.useWatch(['is_thinking'], form);
+  const thinkingOnly = Form.useWatch(['thinking_only'], form);
 
   useEffect(() => {
     if (isOmni) {
@@ -74,6 +76,8 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         is_audio: capability?.includes('audio') || false,
         is_thinking: capability?.includes('thinking') || false,
         json_output: capability?.includes('json_output') || false,
+        function_call: capability?.includes('function_call') || false,
+        thinking_only: capability?.includes('thinking_only') || false,
       });
     } else {
       setIsEdit(false);
@@ -103,7 +107,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
     form
       .validateFields()
       .then((values) => {
-        const { logo, type, is_vision, is_video, is_audio, is_omni, is_thinking, json_output, ...rest } = values;
+        const { logo, type, is_vision, is_video, is_audio, is_omni, is_thinking, thinking_only, json_output, function_call, ...rest } = values;
         const formData: CustomModelForm = {
           ...rest,
           type,
@@ -125,8 +129,14 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           if (is_thinking) {
             capability.push('thinking')
           }
+          if (thinking_only) {
+            capability.push('thinking_only')
+          }
           if (json_output) {
             capability.push('json_output')
+          }
+          if (function_call) {
+            capability.push('function_call')
           }
 
           formData.capability = capability
@@ -272,12 +282,22 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
             </Col>
             <Col span={24}>
               <Form.Item name="is_thinking" valuePropName="checked" className="rb:mb-0!">
-                <Checkbox>{t('modelNew.is_thinking')}</Checkbox>
+                <Checkbox disabled={thinkingOnly} onChange={() => form.setFieldValue('thinking_only', undefined)}>{t('modelNew.is_thinking')}</Checkbox>
+              </Form.Item>
+            </Col>
+            <Col span={24}>
+              <Form.Item name="thinking_only" valuePropName="checked" className="rb:mb-0!">
+                <Checkbox disabled={isThinking} onChange={() => form.setFieldValue('is_thinking', undefined)}>{t('modelNew.thinking_only')}</Checkbox>
               </Form.Item>
             </Col>
             <Col span={24}>
               <Form.Item name="json_output" valuePropName="checked" className="rb:mb-0!">
                 <Checkbox>{t('modelNew.json_output')}</Checkbox>
+              </Form.Item>
+            </Col>
+            <Col span={24}>
+              <Form.Item name="function_call" valuePropName="checked" className="rb:mb-0!">
+                <Checkbox>{t('modelNew.function_call')}</Checkbox>
               </Form.Item>
             </Col>
           </Row>
