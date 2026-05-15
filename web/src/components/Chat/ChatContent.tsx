@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-08 14:32:15
+ * @Last Modified time: 2026-05-14 17:49:08
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -33,7 +33,9 @@ const ChatContent: FC<ChatContentProps> = ({
   labelFormat,
   errorDesc,
   renderRuntime,
-  onSend
+  onSend,
+  userIcon,
+  assistantIcon,
 }) => {
   const { t } = useTranslation()
   // Scroll container reference for controlling auto-scroll to bottom
@@ -146,132 +148,145 @@ const ChatContent: FC<ChatContentProps> = ({
         : data.map((item, index) => {
           if (!item) return null
           return (
-          <div key={index} className={clsx("rb:relative", {
-            'rb:mt-6': index !== 0, // Add top margin for non-first messages
-            'rb:right-0 rb:text-right': item.role === 'user', // User messages right-aligned
-            'rb:left-0 rb:text-left': item.role === 'assistant', // Assistant messages left-aligned
-          })}>
-            {/* Don't display if streaming and content is empty */}
-            {streamLoading && index === data.length - 1 && item.content === '' && !renderRuntime
-              ? <Spin />
-              : <>
-                {/* Top label (such as timestamp, username, etc.) */}
-                {labelPosition === 'top' &&
-                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular rb:px-1">
-                    {labelFormat(item)}
-                  </div>
-                }
-                <MessageFiles files={item.meta_data?.files ?? []} contentClassNames={contentClassNames} onDownload={handleDownload} />
-                {/* Message bubble */}
-                <div className={clsx('rb:text-left rb:leading-5 rb:inline-block rb:wrap-break-word rb:relative', item.role === 'user' ? contentClassNames : '', {
-                  // Error message style (content is null and not assistant message)
-                  'rb:text-[#FF5D34]': (item.status && item.status !== 'completed') || (errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime) || (item.role === 'assistant' && typeof item.meta_data?.error === 'string'),
-                  // Assistant message style
-                  'rb:bg-[#E3EBFD] rb:p-[10px_12px_2px_12px] rb:rounded-lg rb:max-w-130': item.role === 'user',
-                  'rb:max-w-full rb:w-full': item.role === 'assistant',
-                  // User message style
-                  'rb:text-[#212332]': item.role === 'assistant' && (item.content || item.content === '' || typeof renderRuntime === 'function'),
-                  'rb:mt-1': labelPosition === 'top',
-                  'rb:mb-1': labelPosition === 'bottom',
-                  'rb:pl-7': item.role === 'assistant' && typeof item.meta_data?.error === 'string',
-                })}>
-                  {item.meta_data?.reasoning_content &&
-                    <div className={clsx("rb:mb-4 rb-border rb:rounded-xl rb:px-4 rb:pt-4 rb:bg-white", {
-                      'rb:hover:bg-[#F6F6F6] rb:w-64': !isReasoningExpanded(index)
-                    })}>
-                      <Flex
-                        align="center"
-                        justify="space-between"
-                        className="rb:font-medium rb:pb-4!"
-                      >
-                        <span>{t('memoryConversation.reasoning_content')}</span>
-                        <Flex
-                          align="center"
-                          justify="center"
-                          className={clsx("rb:size-6.5 rb:cursor-pointer rb-border rb:rounded-lg", {
-                            'rb:hover:bg-[#F6F6F6]!': isReasoningExpanded(index)
-                          })}
-                          onClick={() => toggleReasoning(index)}
-                        >
-                          <div
-                            className={clsx("rb:size-4 rb:bg-cover", {
-                              'rb:bg-[url("@/assets/images/conversation/compress.svg")]': isReasoningExpanded(index),
-                              'rb:bg-[url("@/assets/images/conversation/expand.svg")]': !isReasoningExpanded(index)
-                            })}
-                          ></div>
-                      </Flex>
-                      </Flex>
-                    {isReasoningExpanded(index) && <Markdown content={item.meta_data.reasoning_content} className="rb:text-[#5B6167] rb:text-[12px]" />}
-                    </div>
-                  }
-                  {(item.status || typeof item.meta_data?.error === 'string') &&
-                    <div className={clsx("rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/conversation/exclamation_circle.svg')] rb:absolute rb:-left-7", {
-                      'rb:-left-7': item.status && item.role === 'user',
-                      'rb:left-0': item.role === 'assistant' && typeof item.meta_data?.error === 'string',
-                    })}></div>
-                  }
-                  {item.subContent && renderRuntime && renderRuntime(item, index)}
-                  {/* Render message content using Markdown component */}
-                  <Markdown
-                    content={formatContent(item)}
-                    onFormSubmit={onFormSubmit}
-                  />
-
-                  {item.meta_data?.suggested_questions && item.meta_data?.suggested_questions?.length > 0 && <Flex wrap className="rb:my-1!">
-                    {item.meta_data?.suggested_questions?.map((question, idx) => (
-                      <Button key={idx} size="small" className="rb:text-[12px]! rb:text-[#155EEF]!"
-                        onClick={() => onSend?.(question)}
-                      >{question}</Button>
-                    ))}
-                  </Flex>}
-                  {item.meta_data?.citations && item.meta_data?.citations.length > 0 &&
-                    <Flex vertical gap={4} className="rb:mt-1! rb:pt-3! rb-border-t rb:mb-2!">
-                      <div className="rb:font-medium">{t('memoryConversation.citations')}</div>
-                      {item.meta_data?.citations?.map((citation, idx) => (
-                        <Flex key={idx} align="center" gap={12}>
-                          <div
-                            className="rb:text-[#155EEF] rb:leading-5 rb:underline rb:cursor-pointer"
-                            onClick={() => {
-                              const params = new URLSearchParams({ documentId: citation.document_id, parentId: citation.knowledge_id });
-                              window.open(`/#/knowledge-base/${citation.knowledge_id}/DocumentDetails?${params}`, '_blank');
-                            }}
-                          >{citation.file_name}</div>
-
-                          {citation.download_url &&
-                            <div className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/application/export.svg')]"
-                              onClick={() => handleDownload({ url: citation.download_url })}
-                            ></div>
-                          }
-                        </Flex>
-                      ))}
-                    </Flex>
-                  }
-                </div>
-                {/* Bottom label (such as timestamp, username, etc.) */}
-                {(labelPosition === 'bottom' || item.meta_data?.audio_url) && <Flex gap={16} align="center" justify={item.role === 'user' ? 'end' : 'start'}>
-                  {item.meta_data?.audio_url && <>
-                    {playingIndex !== item.meta_data?.audio_url && item.meta_data?.audio_status === 'pending'
-                      ? <Spin />
-                      : playingIndex !== item.meta_data?.audio_url
-                        ? <SoundOutlined className={clsx("rb:cursor-pointer rb:size-5.5", {
-                          'rb:text-[#FF5D34]': item.meta_data?.audio_status === 'error',
-                          'rb:hover:text-[#155EEF]!': !item.meta_data?.audio_status || !['pending', 'error'].includes(item.meta_data?.audio_status)
-                        })} onClick={() => handlePlay(item.meta_data?.audio_url!, item.meta_data?.audio_status)} />
-                        : <div
-                          className="rb:size-5.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/audio_ing.gif')]"
-                          onClick={() => handlePlay(item.meta_data?.audio_url!, item.meta_data?.audio_status)}
+            <div key={index} className={clsx("rb:relative", {
+              'rb:mt-6': index !== 0, // Add top margin for non-first messages
+              'rb:right-0 rb:text-right': item.role === 'user', // User messages right-aligned
+              'rb:left-0 rb:text-left': item.role === 'assistant', // Assistant messages left-aligned
+            })}>
+              {/* Don't display if streaming and content is empty */}
+              {streamLoading && index === data.length - 1 && item.content === '' && !renderRuntime
+                ? <Spin />
+                : <>
+                  <Flex
+                    justify={item.role === 'user' ? "end" : "start"}
+                    gap={12}
+                  >
+                    {/* Assistant icon */}
+                    {item.role === 'assistant' && assistantIcon}
+                    <div
+                      className="rb:flex-1"
+                    >
+                      {/* Top label (such as timestamp, username, etc.) */}
+                      {labelPosition === 'top' &&
+                        <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular rb:px-1">
+                          {labelFormat(item)}
+                        </div>
+                      }
+                      <MessageFiles files={item.meta_data?.files ?? []} contentClassNames={contentClassNames} onDownload={handleDownload} />
+                      {/* Message bubble */}
+                      <div className={clsx('rb:text-left rb:leading-5 rb:inline-block rb:wrap-break-word rb:relative', item.role === 'user' ? contentClassNames : '', {
+                        // Error message style (content is null and not assistant message)
+                        'rb:text-[#FF5D34]': (item.status && item.status !== 'completed') || (errorDesc && item.role === 'assistant' && item.content === null && !renderRuntime) || (item.role === 'assistant' && typeof item.meta_data?.error === 'string'),
+                        // Assistant message style
+                        'rb:bg-[#E3EBFD] rb:p-[10px_12px_2px_12px] rb:rounded-lg rb:max-w-130': item.role === 'user',
+                        'rb:max-w-full rb:w-full': item.role === 'assistant',
+                        // User message style
+                        'rb:text-[#212332]': item.role === 'assistant' && (item.content || item.content === '' || typeof renderRuntime === 'function'),
+                        'rb:mt-1': labelPosition === 'top',
+                        'rb:mb-1': labelPosition === 'bottom',
+                        'rb:pl-7': item.role === 'assistant' && typeof item.meta_data?.error === 'string',
+                      })}>
+                        {item.meta_data?.reasoning_content &&
+                          <div className={clsx("rb:mb-4 rb-border rb:rounded-xl rb:px-4 rb:pt-4 rb:bg-white", {
+                            'rb:hover:bg-[#F6F6F6] rb:w-64': !isReasoningExpanded(index)
+                          })}>
+                            <Flex
+                              align="center"
+                              justify="space-between"
+                              className="rb:font-medium rb:pb-4!"
+                            >
+                              <span>{t('memoryConversation.reasoning_content')}</span>
+                              <Flex
+                                align="center"
+                                justify="center"
+                                className={clsx("rb:size-6.5 rb:cursor-pointer rb-border rb:rounded-lg", {
+                                  'rb:hover:bg-[#F6F6F6]!': isReasoningExpanded(index)
+                                })}
+                                onClick={() => toggleReasoning(index)}
+                              >
+                                <div
+                                  className={clsx("rb:size-4 rb:bg-cover", {
+                                    'rb:bg-[url("@/assets/images/conversation/compress.svg")]': isReasoningExpanded(index),
+                                    'rb:bg-[url("@/assets/images/conversation/expand.svg")]': !isReasoningExpanded(index)
+                                  })}
+                                ></div>
+                            </Flex>
+                            </Flex>
+                          {isReasoningExpanded(index) && <Markdown content={item.meta_data.reasoning_content} className="rb:text-[#5B6167] rb:text-[12px]" />}
+                          </div>
+                        }
+                        {(item.status || typeof item.meta_data?.error === 'string') &&
+                          <div className={clsx("rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/conversation/exclamation_circle.svg')] rb:absolute rb:-left-7", {
+                            'rb:-left-7': item.status && item.role === 'user',
+                            'rb:left-0': item.role === 'assistant' && typeof item.meta_data?.error === 'string',
+                          })}></div>
+                        }
+                        {item.subContent && renderRuntime && renderRuntime(item, index)}
+                        {/* Render message content using Markdown component */}
+                        <Markdown
+                          content={formatContent(item)}
+                          onFormSubmit={onFormSubmit}
                         />
-                    }
-                  </>}
-                  {labelPosition === 'bottom' && <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
-                    {labelFormat(item)}
-                  </div>}
-                </Flex>
-                }
-              </>
-            }
-          </div>
-        )})
+
+                        {item.meta_data?.suggested_questions && item.meta_data?.suggested_questions?.length > 0 && <Flex wrap className="rb:my-1!">
+                          {item.meta_data?.suggested_questions?.map((question, idx) => (
+                            <Button key={idx} size="small" className="rb:text-[12px]! rb:text-[#155EEF]!"
+                              onClick={() => onSend?.(question)}
+                            >{question}</Button>
+                          ))}
+                        </Flex>}
+                        {item.meta_data?.citations && item.meta_data?.citations.length > 0 &&
+                          <Flex vertical gap={4} className="rb:mt-1! rb:pt-3! rb-border-t rb:mb-2!">
+                            <div className="rb:font-medium">{t('memoryConversation.citations')}</div>
+                            {item.meta_data?.citations?.map((citation, idx) => (
+                              <Flex key={idx} align="center" gap={12}>
+                                <div
+                                  className="rb:text-[#155EEF] rb:leading-5 rb:underline rb:cursor-pointer"
+                                  onClick={() => {
+                                    const params = new URLSearchParams({ documentId: citation.document_id, parentId: citation.knowledge_id });
+                                    window.open(`/#/knowledge-base/${citation.knowledge_id}/DocumentDetails?${params}`, '_blank');
+                                  }}
+                                >{citation.file_name}</div>
+
+                                {citation.download_url &&
+                                  <div className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/application/export.svg')]"
+                                    onClick={() => handleDownload({ url: citation.download_url })}
+                                  ></div>
+                                }
+                              </Flex>
+                            ))}
+                          </Flex>
+                        }
+                      </div>
+                      {/* Bottom label (such as timestamp, username, etc.) */}
+                      {(labelPosition === 'bottom' || item.meta_data?.audio_url) && <Flex gap={16} align="center" justify={item.role === 'user' ? 'end' : 'start'}>
+                        {item.meta_data?.audio_url && <>
+                          {playingIndex !== item.meta_data?.audio_url && item.meta_data?.audio_status === 'pending'
+                            ? <Spin />
+                            : playingIndex !== item.meta_data?.audio_url
+                              ? <SoundOutlined className={clsx("rb:cursor-pointer rb:size-5.5", {
+                                'rb:text-[#FF5D34]': item.meta_data?.audio_status === 'error',
+                                'rb:hover:text-[#155EEF]!': !item.meta_data?.audio_status || !['pending', 'error'].includes(item.meta_data?.audio_status)
+                              })} onClick={() => handlePlay(item.meta_data?.audio_url!, item.meta_data?.audio_status)} />
+                              : <div
+                                className="rb:size-5.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/audio_ing.gif')]"
+                                onClick={() => handlePlay(item.meta_data?.audio_url!, item.meta_data?.audio_status)}
+                              />
+                          }
+                        </>}
+                        {labelPosition === 'bottom' && <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
+                          {labelFormat(item)}
+                        </div>}
+                      </Flex>
+                      }
+                    </div>
+                    {/* User icon */}
+                    {item.role === 'user' && userIcon}
+                  </Flex>
+                </>
+              }
+            </div>
+          )})
       }
     </div>
   )
