@@ -112,13 +112,13 @@ def build_zip_arcnames(files: list[Any]) -> list[tuple[str, str, str]]:
     return result
 
 
-def make_zip_filename(files: list[Any], custom_name: str | None = None) -> str:
-    """生成 ZIP 文件名：自定义 / 基于首个文件名自动生成"""
+def make_zip_filename(files: list[Any], custom_name: str | None = None, base_name: str | None = None) -> str:
+    """生成 ZIP 文件名：自定义 / base_name / 基于首个文件名自动生成"""
     if custom_name:
         zip_name = custom_name
     else:
-        first_name = files[0].file_name
-        stem = first_name.rsplit(".", 1)[0] if "." in first_name else first_name
+        stem = base_name or files[0].file_name
+        stem = stem.rsplit(".", 1)[0] if "." in stem else stem
         count = len(files)
         zip_name = f"{stem}.zip" if count == 1 else f"{stem}_等{count}个文件.zip"
     if not zip_name.endswith(".zip"):

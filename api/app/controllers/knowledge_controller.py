@@ -290,7 +290,7 @@ async def kb_batch_download(
         )
 
     entries = file_service.build_zip_arcnames(files)
-    zip_name = file_service.make_zip_filename(files, request_body.zip_filename)
+    zip_name = file_service.make_zip_filename(files, request_body.zip_filename, base_name=db_knowledge.name)
 
     from urllib.parse import quote
     return StreamingResponse(
