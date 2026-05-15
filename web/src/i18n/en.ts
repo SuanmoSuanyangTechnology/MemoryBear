@@ -1210,6 +1210,7 @@ export const en = {
       exportDSLFile: 'Export DSL file',
       willRollToThisVersion: 'Will roll to this version',
       share: 'Share',
+      embedWebsite: 'Embed Website',
       lastUpdateTime: 'Last Update Time',
       editor: 'Editor',
       releaseTime: 'Release Time',
@@ -1544,6 +1545,7 @@ export const en = {
       thinking_budget_tokens_max_error: "Cannot exceed the max tokens limit ({{max}})",
       thinking_budget_tokens_min_error: "Cannot be less than {{min}}",
       logSearchPlaceholder: 'Search log content',
+      tags: 'Tags',
     },
     userMemory: {
       userMemory: 'User Memory',

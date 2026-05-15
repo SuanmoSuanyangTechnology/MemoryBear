@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:41 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-10 17:02:07
+ * @Last Modified time: 2026-05-15 14:31:17
  */
 import { type FC, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -16,13 +16,14 @@ import { getReleaseList, rollbackRelease, appExport } from '@/api/application'
 import ReleaseModal from './components/ReleaseModal'
 import ReleaseShareModal from './components/ReleaseShareModal'
 import AppSharingModal from './components/AppSharingModal'
-import type { Release, ReleaseModalRef, ReleaseShareModalRef, AppSharingModalRef } from './types'
+import type { Release, ReleaseModalRef, ReleaseShareModalRef, AppSharingModalRef, EmbedWebsiteModalRef } from './types'
 import type { Application } from '@/views/ApplicationManagement/types'
 import { useWorkflowStore } from '@/store/workflow'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
 import Markdown from '@/components/Markdown'
 import RbButton from '@/components/RbButton';
+import EmbedWebsiteModal from './components/EmbedWebsiteModal'
 /**
  * Tag color mapping for release versions
  */
@@ -48,6 +49,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
   const appSharingModalRef = useRef<AppSharingModalRef>(null)
   const [selectedVersion, setSelectedVersion] = useState<Release | null>(null);
   const [releaseList, setReleaseList] = useState<Release[]>([])
+  const embedWebsiteModalRef = useRef<EmbedWebsiteModalRef>(null)
 
   useEffect(() => {
     getData()
@@ -145,6 +147,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                 {data?.type !== 'multi_agent' && <RbButton onClick={handleExport}>{t('common.export')}</RbButton>}
                 {data.current_release_id !== selectedVersion.id && <RbButton onClick={handleRollback}>{t('application.willRollToThisVersion')}</RbButton>}
                 <RbButton type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</RbButton>
+                {/* <RbButton type="primary" ghost onClick={() => embedWebsiteModalRef.current?.handleOpen()}>{t('application.embedWebsite')}</RbButton> */}
                 {data?.type !== 'multi_agent' && <RbButton type="primary" ghost onClick={() => appSharingModalRef.current?.handleOpen()}>{t('application.sharing')}</RbButton>}
               </>}
               <RbButton type="primary" onClick={async () => {
@@ -221,6 +224,10 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
       <AppSharingModal
         ref={appSharingModalRef}
         appId={data.id}
+        version={selectedVersion}
+      />
+      <EmbedWebsiteModal
+        ref={embedWebsiteModalRef}
         version={selectedVersion}
       />
     </Flex>

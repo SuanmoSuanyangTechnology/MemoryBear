@@ -579,6 +579,9 @@ export const zh = {
       exportDSLFile: '导出DSL文件',
       willRollToThisVersion: '将回滚到此版本',
       share: '分享',
+      embedWebsite: '嵌入网站',
+      embedWebsiteTip: '选择一种方式将聊天应用嵌入到你的网站中',
+      embedWebsiteCodeTip: '将以下代码嵌入到你的网站中',
       lastUpdateTime: '最后更新时间',
       editor: '编辑者',
       releaseTime: '发布时间',
@@ -875,6 +878,7 @@ export const zh = {
       thinking_budget_tokens_max_error: "不能超过 最大令牌数 ({{max}})",
       thinking_budget_tokens_min_error: "不能小于 {{min}}",
       logSearchPlaceholder: '搜索日志内容',
+      tags: '标签',
     },
     table: {
       totalRecords: '共 {{total}} 条记录'
@@ -1891,6 +1895,7 @@ export const zh = {
       startAudioRecorder: '开始录音',
       citations: '引用',
       reasoning_content: '深度思考内容',
+      history: '历史记录',
     },
     login: {
       title: '红熊记忆科学',
