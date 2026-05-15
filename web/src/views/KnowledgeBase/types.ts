@@ -96,6 +96,8 @@ export interface ParserConfig {
   auto_questions?: number; // 自动问题
   html4excel?: boolean; // 是否为Excel文件
   graphrag?: GraphragConfig; // 知识图谱生成
+
+  doc_type?: string;
   
   // Web 类型特有字段
   entry_url?: string; // 入口网址

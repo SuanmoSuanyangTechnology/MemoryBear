@@ -679,6 +679,8 @@ export const en = {
       feishuAuthSuccess: 'Feishu authentication successful',
       authFailed: 'Authentication failed, please check your credentials',
       recallTest: 'Recall Test',
+      batchDownload: 'Batch Download',
+      batchDownloadSuccess: 'Batch download successful',
       testQuestion: 'Test Question',
       doc_num: 'Document Number',
       chunk_num: 'Total data Size',
