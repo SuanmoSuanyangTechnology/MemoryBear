@@ -1468,6 +1468,7 @@ export const en = {
       document_image_recognition: 'Enable image recognition in documents',
       text_to_speech: 'Text to Speech',
       text_to_speech_desc: 'Text can be converted to speech',
+      suggested_questions_after_answer: 'Suggested Questions After Answer',
       opening_statement: 'Conversation Opening',
       opening_statement_desc: 'Set the conversation opening content',
       editOpeningStatement: 'Edit Opening Statement',

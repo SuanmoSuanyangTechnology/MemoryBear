@@ -801,6 +801,7 @@ export const zh = {
       document_image_recognition: '是否识别文档中的图片',
       text_to_speech: '文字转语音',
       text_to_speech_desc: '文本可以转换成语音',
+      suggested_questions_after_answer: '回答后建议问题',
       opening_statement: '对话开场白',
       opening_statement_desc: '设置对话开场白内容',
       editOpeningStatement: '编辑开场白',
