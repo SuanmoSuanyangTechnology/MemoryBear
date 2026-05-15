@@ -203,7 +203,21 @@ class NewExtractionOrchestrator:
     def _build_supporting_context(
         dialog: DialogData,
     ) -> SupportingContext:
-        """Build a SupportingContext from a dialog's content for pronoun resolution."""
+        """Build a SupportingContext from a dialog for pronoun resolution.
+
+        Priority:
+            1. If ``dialog.metadata["supporting_context"]`` exists (injected by
+               the sliding-window write path via ``get_chunked_dialogs``), use
+               the structured ``List[MessageItem]`` directly.
+            2. Otherwise fall back to wrapping ``dialog.content`` as a single
+               ``MessageItem(role="context", ...)`` for backward compatibility
+               with non-sliding-window call paths.
+        """
+        # Prefer structured context injected by the sliding-window write path
+        if dialog.metadata and "supporting_context" in dialog.metadata:
+            return SupportingContext(msgs=dialog.metadata["supporting_context"])
+
+        # Fallback: legacy string-concatenation path
         msgs: List[MessageItem] = []
         if hasattr(dialog, "content") and dialog.content:
             # dialog.content is the raw conversation string; wrap as single msg

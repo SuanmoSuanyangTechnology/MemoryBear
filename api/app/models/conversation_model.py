@@ -45,6 +45,9 @@ class Conversation(Base):
     # 统计信息
     message_count = Column(Integer, default=0, comment="消息数量")
 
+    # 滑动窗口写入游标：最后一条已处理的 memory_messages 表中消息的 message_seq；should_memorize=FALSE 时也推进
+    write_cursor = Column(Integer, nullable=False, default=0, comment="最后一条已处理的 memory_messages 表中消息的 message_seq；should_memorize=FALSE 时也推进")
+
     # 状态
     is_active = Column(Boolean, default=True, nullable=False, comment="是否活跃")
 
@@ -103,6 +106,9 @@ class Message(Base):
 
     # 状态
     status = Column(String(20), nullable=False, server_default="completed", comment="消息状态: completed/failed")
+
+    # 消息顺序编号：从 1 开始，按 created_at 升序（同 created_at 时以 id 升序）；新消息由应用层在插入事务中赋值
+    message_seq = Column(Integer, nullable=True, comment="消息在对话中的顺序编号，从 1 开始，按 created_at 升序（同 created_at 时以 id 升序）")
 
     # 时间戳
     created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")

@@ -6,6 +6,8 @@ from typing import Optional, List, Tuple, Dict, Any
 
 import json_repair
 from fastapi import Depends
+from jinja2 import Template
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -183,6 +185,7 @@ class ConversationService:
             meta_data: Optional[dict] = None,
             message_id: Optional[uuid.UUID] = None,
             status: str = "completed",
+            sync_memory: bool = True,
     ) -> Message:
         """
         Add a message to a conversation using UnitOfWork.
@@ -194,6 +197,8 @@ class ConversationService:
             meta_data (Optional[dict]): Optional metadata.
             message_id (Optional[uuid.UUID]): Optional custom message UUID.
             status (str): Message status, default "completed".
+            sync_memory (bool): 是否同步写入 memory_messages 表。工作流中设为 False，
+                因为只有 MemoryWriteNode 才应写入 memory_messages。
 
         Returns:
             Message: Newly created Message instance.
@@ -203,6 +208,12 @@ class ConversationService:
                 conversation_id
             )
 
+            # 在同一事务中计算并赋值 message_seq（Requirements 3.4）
+            max_seq = self.db.execute(
+                select(func.coalesce(func.max(Message.message_seq), 0))
+                .where(Message.conversation_id == conversation_id)
+            ).scalar()
+
             message = Message(
                 id=message_id if message_id else uuid.uuid4(),
                 conversation_id=conversation_id,
@@ -210,6 +221,7 @@ class ConversationService:
                 content=content,
                 meta_data=meta_data,
                 status=status,
+                message_seq=max_seq + 1,
             )
 
             self.message_repo.add_message(message)
@@ -220,6 +232,50 @@ class ConversationService:
                 conversation.title = (
                         content[:50] + ("..." if len(content) > 50 else "")
                 )
+
+            # 同步写入 memory_messages 表（仅当 sync_memory=True 时）
+            # MemoryService.sync_message() 内部检查 app_releases.config.memory.enabled：
+            #   enabled=true  → 写入 memory_messages（should_memorize=true）
+            #   enabled=false → 不写入，返回 None
+            # 工作流中 sync_memory=False，因为只有 MemoryWriteNode 通过
+            # MemoryService.write_workflow_messages() 写入 memory_messages
+            # 注意：此处为 fire-and-forget，失败不影响消息写入主流程
+            if sync_memory:
+                try:
+                    import asyncio
+                    from app.core.memory.memory_service import MemoryService as _MemoryService
+
+                    _workspace_id = str(conversation.workspace_id) if conversation.workspace_id else ""
+
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.ensure_future(
+                            _MemoryService.sync_message(
+                                conversation_id=str(conversation_id),
+                                message=message,
+                                app_id=str(conversation.app_id),
+                                is_draft=conversation.is_draft,
+                                config_id="",
+                                workspace_id=_workspace_id,
+                            )
+                        )
+                    else:
+                        loop.run_until_complete(
+                            _MemoryService.sync_message(
+                                conversation_id=str(conversation_id),
+                                message=message,
+                                app_id=str(conversation.app_id),
+                                is_draft=conversation.is_draft,
+                                config_id="",
+                                workspace_id=_workspace_id,
+                            )
+                        )
+                except Exception as _mem_err:
+                    logger.warning(
+                        f"[ConversationService] MemoryService.sync_message 调度失败（不影响主流程）: "
+                        f"conv={conversation_id}, err={_mem_err}",
+                        exc_info=True,
+                    )
 
             self.db.commit()
             self.db.refresh(message)
@@ -436,6 +492,25 @@ class ConversationService:
                     extra={"conversation_id": str(conversation_id)}
                 )
 
+        # 没有提供会话ID或会话不存在：先查找已存在的同 app+user 会话
+        existing = self.conversation_repo.db.query(Conversation).filter(
+            Conversation.app_id == app_id,
+            Conversation.user_id == user_id,
+            Conversation.is_active.is_(True),
+            Conversation.is_draft == is_draft,
+        ).order_by(Conversation.updated_at.desc()).first()
+
+        if existing:
+            logger.info(
+                "Reusing existing conversation",
+                extra={
+                    "conversation_id": str(existing.id),
+                    "app_id": str(app_id),
+                    "user_id": user_id,
+                }
+            )
+            return existing
+
         # 创建新会话（使用发布版本的配置）
         conversation = self.create_conversation(
             app_id=app_id,
@@ -447,7 +522,7 @@ class ConversationService:
         logger.info(
             "Created a new conversation for shared link usage",
             extra={
-                "conversation_id": str(conversation_id),
+                "conversation_id": str(conversation.id),
             }
         )
 
