@@ -251,9 +251,16 @@ async def download_file(
         
         # Return file response
         logger.info(f"Download successful: {db_file.file_name} (ID: {file_id})")
+        
+        # Use RFC 5987 encoding for non-ASCII filenames in Content-Disposition header
+        from urllib.parse import quote
+        encoded_filename = quote(db_file.file_name)
+        headers = {
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+        }
         return FileResponse(
             path=str(storage_path),
-            filename=db_file.file_name,
+            headers=headers,
             media_type=db_file.mime_type or "application/octet-stream"
         )
         

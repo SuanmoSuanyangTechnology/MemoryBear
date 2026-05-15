@@ -16,7 +16,7 @@ import uuid
 from typing import Any
 import httpx
 import mimetypes
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, quote
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
@@ -430,10 +430,11 @@ async def download_file(
             )
 
         api_logger.info(f"Serving local file: file_key={file_key}")
+        encoded_filename = quote(file_metadata.file_name)
         return FileResponse(
             path=str(full_path),
-            filename=file_metadata.file_name,
-            media_type=file_metadata.content_type or "application/octet-stream"
+            media_type=file_metadata.content_type or "application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
         )
     else:
         try:
@@ -710,10 +711,11 @@ async def public_download_file(
             )
 
         api_logger.info(f"Serving public file: file_key={file_key}")
+        encoded_filename = quote(file_metadata.file_name)
         return FileResponse(
             path=str(full_path),
-            filename=file_metadata.file_name,
-            media_type=file_metadata.content_type or "application/octet-stream"
+            media_type=file_metadata.content_type or "application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
         )
     else:
         # For remote storage, redirect to presigned URL
@@ -781,10 +783,11 @@ async def permanent_download_file(
             )
 
         api_logger.info(f"Serving permanent file: file_key={file_key}")
+        encoded_filename = quote(file_metadata.file_name)
         return FileResponse(
             path=str(full_path),
-            filename=file_metadata.file_name,
-            media_type=file_metadata.content_type or "application/octet-stream"
+            media_type=file_metadata.content_type or "application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
         )
     else:
         # For remote storage, redirect to presigned URL with long expiration
