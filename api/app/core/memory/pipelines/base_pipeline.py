@@ -20,8 +20,7 @@ class ModelClientMixin(ABC):
                 provider=api_config.provider,
                 api_key=api_config.api_key,
                 base_url=api_config.api_base,
-                is_omni=api_config.is_omni,
-                support_thinking="thinking" in (api_config.capability or []),
+                is_omni=api_config.is_omni
             )
         )
 

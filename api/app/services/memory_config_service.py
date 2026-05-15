@@ -18,7 +18,6 @@ from app.core.logging_config import get_config_logger, get_logger
 from app.core.validators.memory_config_validators import (
     validate_and_resolve_model_id,
 )
-from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.schemas.memory_config_schema import (
     ConfigurationError,
