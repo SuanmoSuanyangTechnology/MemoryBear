@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:19:30 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-04 10:11:37
+ * @Last Modified time: 2026-05-15 11:10:12
  */
 /**
  * RadioGroupCard Component
@@ -54,6 +54,7 @@ interface RadioCardProps extends Omit<RadioGroupProps, 'onChange'> {
   allowClear?: boolean;
   /** Whether to display cards in block (vertical) layout */
   block?: boolean;
+  disabled?: boolean;
 }
 
 /** Radio group card component that displays options as selectable cards */
@@ -65,6 +66,7 @@ const RadioGroupCard: FC<RadioCardProps> = ({
   itemRender,
   allowClear = true,
   block = false,
+  disabled = false,
 }) => {
   const { t } = useTranslation();
   /** Listen to value changes and trigger side effects via onValueChange callback */
@@ -77,7 +79,7 @@ const RadioGroupCard: FC<RadioCardProps> = ({
   /** Handle option selection with support for clear and disabled states */
   const handleChange = (option: RadioCardOption) => {
     // Ignore clicks on disabled options
-    if (option.disabled) return
+    if (option.disabled || disabled) return
     if (onChange) {
       // Clear selection if allowClear is true and option is already selected
       if (allowClear && value === option.value) {
@@ -98,7 +100,7 @@ const RadioGroupCard: FC<RadioCardProps> = ({
         <div key={String(option.value)} className={clsx("rb:relative rb:border rb:rounded-lg rb:w-full rb:text-center rb:cursor-pointer", {
           'rb:border rb:border-[#171719]!': option.value === value,
           'rb:border-[#EBEBEB] rb:bg-white': option.value !== value,
-          'rb:opacity-[0.75]': option.disabled,
+          'rb:opacity-[0.75]': option.disabled || disabled,
           'rb:py-5 rb:px-3 rb:leading-5.5': !block,
           'rb:flex rb:items-center rb:text-left rb:gap-4 rb:py-3 rb:px-4 rb:leading-4': block,
         })} onClick={() => handleChange(option)}>

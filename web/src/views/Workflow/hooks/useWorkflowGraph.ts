@@ -2,9 +2,9 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-07 18:22:14
+ * @Last Modified time: 2026-05-14 13:59:06
  */
-import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, type Edge } from '@antv/x6';
+import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection, type Edge } from '@antv/x6';
 import { register as registerReactShape } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 import { App } from 'antd';
@@ -705,6 +705,16 @@ export const useWorkflowGraph = ({
       }),
     );
     graphRef.current.use(
+      new Selection({
+        enabled: false,
+        multiple: true,
+        rubberband: true,
+        movable: true,
+        showNodeSelectionBox: true,
+        showEdgeSelectionBox: true,
+      })
+    )
+    graphRef.current.use(
       new History({
         enabled: false,
         beforeAddCommand(_event, args: any) {
@@ -747,6 +757,19 @@ export const useWorkflowGraph = ({
     graphRef.current.on('history:undo', () => { if (!isSyncingRef.current) syncChildRelationshipsRef.current() })
     graphRef.current.on('history:redo', () => { if (!isSyncingRef.current) syncChildRelationshipsRef.current() })
   };
+
+  // 控制框选：isHandMode = false 时启用框选
+  useEffect(() => {
+    if (!graphRef.current) return;
+    if (isHandMode) {
+      graphRef.current?.enablePanning();
+      graphRef.current?.disableSelection();
+      graphRef.current?.cleanSelection()
+    } else {
+      graphRef.current?.disablePanning();
+      graphRef.current?.enableSelection();
+    }
+  }, [isHandMode, graphRef.current]);
   // 显示/隐藏连接桩
   // const showPorts = (show: boolean) => {
   //   const container = containerRef.current!;
@@ -901,7 +924,12 @@ export const useWorkflowGraph = ({
    */
   const copyEvent = () => {
     if (!graphRef.current) return false;
-    const selectedNodes = graphRef.current.getNodes().filter(node => node.getData()?.isSelected);
+    let selectedNodes = []
+    if (isHandMode) {
+      selectedNodes = graphRef.current.getNodes().filter(node => node.getData()?.isSelected);
+    } else {
+     selectedNodes = graphRef.current.getSelectedCells();
+    }
     if (selectedNodes.length) {
       graphRef.current.copy(selectedNodes);
     }

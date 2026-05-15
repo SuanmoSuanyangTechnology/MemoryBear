@@ -183,6 +183,7 @@ class ConversationService:
             content: str,
             meta_data: Optional[dict] = None,
             message_id: Optional[uuid.UUID] = None,
+            status: str = "completed",
     ) -> Message:
         """
         Add a message to a conversation using UnitOfWork.
@@ -193,6 +194,7 @@ class ConversationService:
             content (str): Message content.
             meta_data (Optional[dict]): Optional metadata.
             message_id (Optional[uuid.UUID]): Optional custom message UUID.
+            status (str): Message status, default "completed".
 
         Returns:
             Message: Newly created Message instance.
@@ -208,6 +210,7 @@ class ConversationService:
                 role=role,
                 content=content,
                 meta_data=meta_data,
+                status=status,
             )
 
             self.message_repo.add_message(message)

@@ -49,7 +49,11 @@ class KnowledgeRetrievalNode(BaseNode):
         return []
 
     def _extract_extra_fields(self, business_result: Any) -> dict:
-        return {"citations": self._extract_citations(business_result)}
+        citations = self._extract_citations(business_result)
+        process: dict = {"citations": citations}
+        if isinstance(business_result, dict):
+            process["chunks_count"] = len(business_result.get("chunks", []))
+        return {"citations": citations, "process": process}
 
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         return {

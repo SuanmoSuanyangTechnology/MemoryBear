@@ -75,6 +75,7 @@ class LLMNode(BaseNode):
         super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: LLMNodeConfig | None = None
         self.messages = []
+        self.model_info: ModelInfo | None = None
 
     def _output_types(self) -> dict[str, VariableType]:
         return {"output": VariableType.STRING, "branch_signal": VariableType.STRING}
@@ -124,6 +125,7 @@ class LLMNode(BaseNode):
                 is_omni=api_config.is_omni,
                 capability=api_config.capability
             )
+            self.model_info = model_info
 
         # 4. 创建 LLM 实例（使用已提取的数据）
         # 注意：对于流式输出，需要在模型初始化时设置 streaming=True
@@ -294,6 +296,16 @@ class LLMNode(BaseNode):
                 "max_tokens": self.config.get("max_tokens")
             }
         }
+
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        llm_result = business_result.get("llm_result") if isinstance(business_result, dict) else business_result
+        if isinstance(llm_result, AIMessage):
+            meta = llm_result.response_metadata or {}
+            return {"process": {
+                "finish_reason": meta.get("finish_reason") or meta.get("stop_reason"),
+                "model": self.model_info.model_name,
+            }}
+        return {}
 
     def _extract_output(self, business_result: Any) -> dict:
         """从业务结果中提取输出变量

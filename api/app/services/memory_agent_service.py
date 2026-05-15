@@ -440,15 +440,15 @@ class MemoryAgentService:
                     end_user_id=end_user_id,
                     memory_config=memory_config,
                     file=FileInput(**file),
+                    content=message.content if isinstance(message, MessageItem) else message["content"],
                 )
                 if file_object is None:
                     continue
                 if isinstance(message, dict):
-                    message["content"] = f"<input-file-summary>{file_object.summary}</input-file-summary>" + message[
-                        "content"]
+                    message["content"] = message["content"] + f"<input-file-summary>{file_object.summary}</input-file-summary>"
                     message["file_content"].append((file_object, file["type"]))
                 else:
-                    message.content = f"<input-file-summary>{file_object.summary}</input-file-summary>" + message.content
+                    message.content = message.content + f"<input-file-summary>{file_object.summary}</input-file-summary>"
                     message.file_content.append((file_object, file["type"]))
         logger.info(messages)
         return messages

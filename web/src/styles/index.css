@@ -348,6 +348,12 @@ body {
   min-height: 100%;
   max-height: 100%;
 }
+.x6-widget-selection-inner,
+.x6-widget-selection-box {
+  border-color: #171719;
+  border-width: 1px;
+  border-radius: 16px;
+}
 
 .ͼ2 .cm-gutters {
   background-color: transparent;
@@ -492,4 +498,7 @@ input:-webkit-autofill:active {
   -webkit-box-shadow: 0 0 0px 1000px #0A0A0A inset !important;
   -webkit-text-fill-color: #FFFFFF !important;
   transition: background-color 5000s ease-in-out 0s !important;
+}
+.ant-app {
+  height: 100%;
 }

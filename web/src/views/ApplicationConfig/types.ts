@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-16 18:20:14
+ * @Last Modified time: 2026-05-15 13:47:17
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
@@ -504,4 +504,7 @@ export interface LogItem {
 }
 export interface LogDetailModalRef {
   handleOpen: (vo: LogItem) => void;
+}
+export interface EmbedWebsiteModalRef {
+  handleOpen: () => void;
 }

@@ -19,6 +19,10 @@ class AssignerNode(BaseNode):
         self.variable_updater = True
         self.typed_config: AssignerNodeConfig | None = None
         self._input_data: dict[str, Any] | None = None
+        self._assignments_process: list = []
+
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        return {"process": {"assignments": self._assignments_process}}
 
     def _output_types(self) -> dict[str, VariableType]:
         return {}
@@ -43,6 +47,7 @@ class AssignerNode(BaseNode):
         """
         # 在执行前提取并缓存输入数据（捕获执行前的变量值）
         self._input_data = {"config": self._resolve_config(self.config, variable_pool)}
+        self._assignments_process = []
         
         # Initialize a variable pool for accessing conversation, node, and system variables
         self.typed_config = AssignerNodeConfig(**self.config)
@@ -77,6 +82,7 @@ class AssignerNode(BaseNode):
             )
 
             # Execute the configured assignment operation
+            before_value = variable_pool.get_value(variable_selector)
             match assignment.operation:
                 case AssignmentOperator.COVER:
                     await operator.assign()
@@ -102,4 +108,10 @@ class AssignerNode(BaseNode):
                     await operator.extend()
                 case _:
                     raise ValueError(f"Invalid Operator: {assignment.operation}")
+            self._assignments_process.append({
+                "variable": variable_selector,
+                "operation": str(assignment.operation),
+                "before": before_value,
+                "after": variable_pool.get_value(variable_selector),
+            })
             logger.info(f"Node {self.node_id}: execution completed")

@@ -17,6 +17,10 @@ class IfElseNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
         super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: IfElseNodeConfig | None = None
+        self._condition_results: list = []
+
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        return {"process": {"conditions": self._condition_results}}
 
     def _output_types(self) -> dict[str, VariableType]:
         return {
@@ -143,6 +147,9 @@ class IfElseNode(BaseNode):
         """
         self.typed_config = IfElseNodeConfig(**self.config)
         expressions = self.evaluate_conditional_edge_expressions(variable_pool)
+        self._condition_results = [
+            {"case": f"CASE{i+1}", "result": v} for i, v in enumerate(expressions[:-1])
+        ] + [{"case": "default", "result": expressions[-1]}]
         for i in range(len(expressions)):
             if expressions[i]:
                 logger.info(f"Node {self.node_id}: switched to branch CASE {i + 1}")

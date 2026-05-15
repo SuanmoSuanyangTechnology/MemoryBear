@@ -25,6 +25,10 @@ class ToolNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
         super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: ToolNodeConfig | None = None
+        self._process: dict = {}
+
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        return {"process": self._process}
 
     def _output_types(self) -> dict[str, VariableType]:
         return {
@@ -73,6 +77,7 @@ class ToolNode(BaseNode):
             rendered_parameters[param_name] = rendered_value
 
         logger.info(f"节点 {self.node_id} 执行工具 {self.typed_config.tool_id}，参数: {rendered_parameters}")
+        self._process = {"tool_id": str(self.typed_config.tool_id), "parameters": rendered_parameters}
 
         # 执行工具
         with get_db_read() as db:
@@ -99,6 +104,7 @@ class ToolNode(BaseNode):
 
         if result.success:
             logger.info(f"节点 {self.node_id} 工具执行成功")
+            self._process["raw_output"] = result.data
             return {
                 "data": result.data if isinstance(result.data, str) else json.dumps(result.data, ensure_ascii=False),
                 "execution_time": result.execution_time

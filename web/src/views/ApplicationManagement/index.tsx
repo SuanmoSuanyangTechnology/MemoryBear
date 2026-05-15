@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 15:38:13
+ * @Last Modified time: 2026-05-15 11:33:58
  */
 /**
  * Application Management Page
@@ -29,6 +29,8 @@ import MySharing from './MySharing'
 import RbCard from '@/components/RbCard'
 import RbButton from '@/components/RbButton'
 import RbDescriptions from '@/components/RbDescriptions'
+import OverflowTags from '@/components/OverflowTags'
+import Tag from '@/components/Tag'
 
 
 const tabKeys = ['apps', 'sharing', 'myShare']
@@ -209,7 +211,7 @@ const ApplicationManagement: React.FC = () => {
               }
             >
               <RbDescriptions
-                items={['type', 'source', 'created_at'].map(key => ({
+                items={['type', 'source', 'tags', 'created_at'].map(key => ({
                   key,
                   label: t(`application.${key}`),
                   children: <span className={clsx('rb:font-medium', {
@@ -221,7 +223,11 @@ const ApplicationManagement: React.FC = () => {
                         ? t('application.configuration')
                         : key === 'created_at'
                           ? formatDateTime(item.created_at, 'YYYY-MM-DD HH:mm:ss')
-                          : t(`application.${item[key as keyof Application]}`)
+                          : key === 'tags'
+                            ? <OverflowTags
+                              items={item.tags.map(tag => <Tag>{tag}</Tag>)}
+                            />
+                            : t(`application.${item[key as keyof Application]}`)
                     }
                   </span>
                 }))}

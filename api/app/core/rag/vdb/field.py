@@ -19,3 +19,5 @@ class Field(StrEnum):
     QUESTION = "question"
     ANSWER = "answer"
     SOURCE_CHUNK_ID = "source_chunk_id"
+    # Parent-child fields
+    PARENT_ID = "parent_id"

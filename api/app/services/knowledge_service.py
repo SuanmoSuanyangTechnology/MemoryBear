@@ -7,6 +7,8 @@ from app.models.models_model import ModelConfig
 from app.schemas.knowledge_schema import KnowledgeCreate, KnowledgeUpdate
 from app.repositories import knowledge_repository
 from app.core.logging_config import get_business_logger
+from app.core.exceptions import BusinessException
+from app.core.error_codes import BizCode
 from app.models.models_model import ModelType
 
 business_logger = get_business_logger()
@@ -70,6 +72,21 @@ def create_knowledge(
         if knowledge.parent_id is None:
             knowledge.parent_id = knowledge.workspace_id
 
+        if knowledge.external_id:
+            if not (1 <= len(knowledge.external_id) <= 36):
+                raise BusinessException(
+                    "external_id must be between 1 and 36 characters",
+                    code=BizCode.VALIDATION_FAILED,
+                )
+            existing = knowledge_repository.get_knowledge_by_external_id(
+                db, knowledge.external_id, knowledge.workspace_id
+            )
+            if existing:
+                raise BusinessException(
+                    f"external_id already exists in this workspace: {knowledge.external_id}",
+                    code=BizCode.VALIDATION_FAILED,
+                )
+
         workspace = db.query(Workspace).filter(Workspace.id == knowledge.workspace_id).first()
         if not workspace:
             raise Exception(f"Workspace {knowledge.workspace_id} not found")
@@ -126,6 +143,33 @@ def get_knowledge_by_id(db: Session, knowledge_id: uuid.UUID, current_user: User
         return knowledge
     except Exception as e:
         business_logger.error(f"Failed to query the knowledge base based on the ID: knowledge_id={knowledge_id} - {str(e)}")
+        raise
+
+
+def get_knowledge_by_external_id(db: Session, external_id: str, workspace_id: uuid.UUID, current_user: User) -> Knowledge | None:
+    business_logger.debug(f"Query knowledge base based on external_id: external_id={external_id}, username: {current_user.username}")
+
+    try:
+        knowledge = knowledge_repository.get_knowledge_by_external_id(db=db, external_id=external_id, workspace_id=workspace_id)
+        if knowledge:
+            business_logger.info(f"knowledge base query successful: {knowledge.name} (external_id: {external_id})")
+        else:
+            business_logger.warning(f"knowledge base does not exist: external_id={external_id}")
+        return knowledge
+    except Exception as e:
+        business_logger.error(f"Failed to query the knowledge base based on external_id: external_id={external_id} - {str(e)}")
+        raise
+
+
+def get_knowledge_ids_by_external_ids(db: Session, external_ids: list[str], workspace_id: uuid.UUID, current_user: User) -> list[uuid.UUID]:
+    business_logger.debug(f"Resolve external_ids to knowledge UUIDs: external_ids={external_ids}, username: {current_user.username}")
+
+    try:
+        ids = knowledge_repository.get_knowledge_ids_by_external_ids(db=db, external_ids=external_ids, workspace_id=workspace_id)
+        business_logger.info(f"Resolved external_ids: {len(external_ids)} -> {len(ids)} UUIDs")
+        return ids
+    except Exception as e:
+        business_logger.error(f"Failed to resolve external_ids: external_ids={external_ids} - {str(e)}")
         raise
 
 

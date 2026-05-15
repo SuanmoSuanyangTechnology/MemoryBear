@@ -62,6 +62,7 @@ class AppLogNodeExecution(BaseModel):
     cycle_items: Optional[List[Any]] = None
     elapsed_time: Optional[float] = None
     token_usage: Optional[Dict[str, Any]] = None
+    meta: Optional[Dict[str, Any]] = None
 
 
 class AppLogConversationDetail(AppLogConversation):

@@ -817,7 +817,7 @@ const CreateDataset = () => {
                     </div>
                     <DelimiterSelector value={delimiter} onChange={setDelimiter} />
                   </div>
-                  <SliderInput label={t('knowledgeBase.suggestedBlockSize')} max={1024} min={1} step={1} value={blockSize} onChange={handleChange} />
+                  <SliderInput label={t('knowledgeBase.suggestedBlockSize')} max={12000} min={6} step={1} value={blockSize} onChange={handleChange} />
                 </div>
                 <div>
                   <div className='rb:w-full rb:text-[#5B6167] rb:leading-5 rb:mb-2 rb:mt-4'>

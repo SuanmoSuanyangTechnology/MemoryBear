@@ -55,6 +55,11 @@ class CodeNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
         super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: CodeNodeConfig | None = None
+        self._executed_code: str = ""
+        self._language: str = ""
+
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        return {"process": {"language": self._language, "code": self._executed_code}}
 
     def _output_types(self) -> dict[str, VariableType]:
         output_dict = {}
@@ -113,6 +118,8 @@ class CodeNode(BaseNode):
             self.typed_config.code
         ).decode("utf-8")
         code = urllib.parse.unquote(code, encoding='utf-8')
+        self._executed_code = code
+        self._language = self.typed_config.language
 
         input_variable_dict = base64.b64encode(
             json.dumps(input_variable_dict).encode("utf-8")

@@ -40,6 +40,7 @@ class Knowledge(Base):
     __tablename__ = "knowledges"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    external_id = Column(String(36), nullable=True, index=True, unique=False, comment="user-defined external identifier, workspace-unique")
     workspace_id = Column(UUID(as_uuid=True), nullable=False, comment="workspaces.id")
     created_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False, comment="users.id")
     parent_id = Column(UUID(as_uuid=True), nullable=True, default=None, comment="parent folder id when type is Folder")
@@ -74,6 +75,9 @@ class Knowledge(Base):
                                "auto_keywords": 0,
                                "auto_questions": 0,
                                "html4excel": False,
+                               "parent_child_mode": False,
+                               "parent_chunk_token_num": 1024,
+                               "parent_delimiter": "\n",
                                "graphrag": {
                                     "use_graphrag": False,
                                     "scene_name": "",

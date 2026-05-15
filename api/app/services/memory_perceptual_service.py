@@ -242,7 +242,8 @@ class MemoryPerceptualService:
             self,
             end_user_id: str,
             memory_config: MemoryConfig,
-            file: FileInput
+            file: FileInput,
+            content: str | None = None,
     ):
         llm, model_config = self._get_mutlimodal_client(file.type, memory_config)
         if model_config is None or llm is None:
@@ -267,14 +268,15 @@ class MemoryPerceptualService:
             prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prompt')
             with open(os.path.join(prompt_path, 'perceptual_summary_system.jinja2'), 'r', encoding='utf-8') as f:
                 opt_system_prompt = f.read()
-            rendered_system_message = Template(opt_system_prompt).render(file_type=file.type, language='zh')
+            rendered_system_message = Template(opt_system_prompt).render(file_type=file.type)
         except FileNotFoundError as e:
             business_logger.error(f"Failed to generate perceptual memory: {str(e)}")
             return None
         messages = [
             {"role": RoleType.SYSTEM.value, "content": [{"type": "text", "text": rendered_system_message}]},
             {"role": RoleType.USER.value, "content": [
-                {"type": "text", "text": "Summarize the following file"}, file_message
+                file_message,
+                {"type": "text", "text": f"<content>{content if content else 'zh'}</content>"}
             ]}
         ]
         try:

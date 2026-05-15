@@ -28,12 +28,16 @@ const Chat: FC<ChatProps> = ({
   fileChange,
   className,
   renderRuntime,
-  conversationId
+  conversationId,
+  userIcon,
+  assistantIcon,
 }) => {
   return (
     <div className={`rb:h-full rb:relative rb:pt-2 ${className}`}>
       {/* Chat content display area */}
       <ChatContent
+        userIcon={userIcon}
+        assistantIcon={assistantIcon}
         key={conversationId ?? 'new'}
         classNames={contentClassName}
         data={data}

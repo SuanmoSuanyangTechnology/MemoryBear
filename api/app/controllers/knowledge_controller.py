@@ -5,6 +5,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import StreamingResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -22,10 +23,14 @@ from app.core.response_utils import success, fail
 from app.db import get_db
 from app.dependencies import get_current_user
 from app.models import knowledge_model
+from app.models import file_model
 from app.models.user_model import User
 from app.schemas import knowledge_schema
+from app.schemas import file_schema
 from app.schemas.response_schema import ApiResponse
 from app.services import knowledge_service, document_service
+from app.services import file_service
+from app.services.file_storage_service import FileStorageService, get_file_storage_service
 from app.services.model_service import ModelConfigService
 from app.core.quota_stub import check_knowledge_capacity_quota
 
@@ -250,6 +255,52 @@ async def update_knowledge(
     api_logger.info(f"Update knowledge base request: knowledge_id={knowledge_id}, username: {current_user.username}")
     db_knowledge = await _update_knowledge(knowledge_id=knowledge_id, update_data=update_data, db=db, current_user=current_user)
     return success(data=jsonable_encoder(knowledge_schema.Knowledge.model_validate(db_knowledge)), msg="The knowledge base information has been successfully updated")
+
+
+@router.post("/{kb_id}/batch-download")
+async def kb_batch_download(
+        kb_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+        storage_service: FileStorageService = Depends(get_file_storage_service),
+        request_body: file_schema.KBBatchDownloadRequest = file_schema.KBBatchDownloadRequest(),
+):
+    """知识库文件一键下载 — 将该知识库下所有文件打包为 ZIP 流式下载"""
+    api_logger.info(f"KB batch download: kb_id={kb_id}, username={current_user.username}")
+
+    db_knowledge = knowledge_service.get_knowledge_by_id(
+        db, knowledge_id=kb_id, current_user=current_user
+    )
+    if not db_knowledge:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="知识库不存在或无权访问",
+        )
+
+    files = db.query(file_model.File).filter(
+        file_model.File.kb_id == kb_id,
+        file_model.File.file_key.isnot(None),
+        file_model.File.file_key != "",
+    ).all()
+
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="该知识库下没有可下载的文件",
+        )
+
+    entries = file_service.build_zip_arcnames(files)
+    zip_name = file_service.make_zip_filename(files, request_body.zip_filename, base_name=db_knowledge.name)
+
+    from urllib.parse import quote
+    return StreamingResponse(
+        file_service.stream_zip_files(entries, storage_service, api_logger),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}",
+            "X-Total-Files": str(len(files)),
+        },
+    )
 
 
 async def _update_knowledge(
