@@ -18,7 +18,7 @@ from app.core.memory.utils.llm.llm_utils import StructResponse
 from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.repositories import knowledge_repository
-from app.repositories.neo4j.graph_search import get_nodes_by_ids, get_relation_between_entities, search_graph, \
+from app.repositories.neo4j.graph_search import get_nodes_by_ids, get_relations_between_entity_pairs, search_graph, \
     search_graph_by_embedding
 from app.repositories.neo4j.graph_search import search_user_metadata
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -281,16 +281,16 @@ class Neo4jSearchService:
             user_meta = await search_user_metadata(connector, self.ctx.end_user_id)
             user_entity_id = user_meta.get("id", "")
 
-            relation_records = []
-            for pair in pairs:
-                src_id = user_entity_id if pair.source_id == "__user__" else pair.source_id
-                records = await get_relation_between_entities(
-                    connector,
-                    self.ctx.end_user_id,
-                    src_id,
-                    pair.target_id
-                )
-                relation_records.extend(records)
+            batch_pairs = [
+                {"source_id": user_entity_id if p.source_id == "__user__" else p.source_id,
+                 "target_id": p.target_id}
+                for p in pairs
+            ]
+            relation_records = await get_relations_between_entity_pairs(
+                connector,
+                self.ctx.end_user_id,
+                batch_pairs,
+            )
 
             all_entity_ids = {user_entity_id}
             for rec in relation_records:
@@ -428,5 +428,5 @@ class RAGSearchService:
             return MemorySearchResult(memories=[])
 
     async def relation_search(self, query: str) -> MemorySearchResult:
-        logger.info("RAG not suport releation search")
+        logger.info("RAG does not support relation search")
         return MemorySearchResult(memories=[])

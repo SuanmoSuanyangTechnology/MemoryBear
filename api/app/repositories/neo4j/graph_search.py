@@ -30,7 +30,8 @@ from app.repositories.neo4j.cypher_queries import (
     NODE_ID_QUERY_CYPHER_MAPPING,
     SEARCH_USER_METADATA,
     SEARCH_ENITITES_BY_RELATIONSHIP,
-    SEARCH_RELATION_BETWEEN_ENTITIES
+    SEARCH_RELATION_BETWEEN_ENTITIES,
+    SEARCH_RELATIONS_BETWEEN_ENTITY_PAIRS,
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
@@ -196,7 +197,14 @@ async def _update_search_results_activation(
             update_keys.append(key)
 
     async def _run_updates(tasks):
-        await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for idx, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(
+                    "后台激活更新任务失败: task_index=%s exception=%r",
+                    idx,
+                    result,
+                )
 
     if update_tasks:
         asyncio.create_task(_run_updates(update_tasks))
@@ -411,6 +419,21 @@ async def get_relation_between_entities(
         end_user_id=end_user_id,
         source_id=source_id,
         target_id=target_id
+    )
+
+
+async def get_relations_between_entity_pairs(
+        connector: Neo4jConnector,
+        end_user_id: str,
+        pairs: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    """Batch query relations for multiple (source_id, target_id) pairs using UNWIND."""
+    if not pairs:
+        return []
+    return await connector.execute_query(
+        SEARCH_RELATIONS_BETWEEN_ENTITY_PAIRS,
+        end_user_id=end_user_id,
+        pairs=pairs,
     )
 
 

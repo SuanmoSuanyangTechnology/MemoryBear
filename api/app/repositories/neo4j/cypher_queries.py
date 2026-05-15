@@ -1840,6 +1840,17 @@ RETURN n.id AS source_id,
        m.name AS target_name
 """
 
+SEARCH_RELATIONS_BETWEEN_ENTITY_PAIRS = """
+UNWIND $pairs AS pair
+MATCH (n:ExtractedEntity)-[r]-(m:ExtractedEntity)
+WHERE n.end_user_id = $end_user_id AND n.id = pair.source_id AND m.id = pair.target_id
+RETURN n.id AS source_id,
+       n.name AS source_name,
+       r.predicate AS relation_predicate,
+       m.id AS target_id,
+       m.name AS target_name
+"""
+
 SEARCH_USER_METADATA = """
 MATCH (n:ExtractedEntity)
 WHERE (n.end_user_id = $end_user_id AND n.entity_type ='用户')
