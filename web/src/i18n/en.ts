@@ -1936,6 +1936,10 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       startAudioRecorder: 'Start Recording',
       citations: 'Citations',
       reasoning_content: 'Deep reasoning Content',
+      history: 'History',
+      likeMsg: 'Thank you for your positive feedback',
+      dislikeMsg: 'Thank you for your feedback',
+      cancelMsg: 'Feedback canceled',
     },
     login: {
       title: 'Red Bear Memory Science',

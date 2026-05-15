@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 15:14:21
+ * @Last Modified time: 2026-05-15 17:20:31
  */
 import { type FC } from 'react'
 import ChatInput from './ChatInput'
@@ -32,6 +32,7 @@ const Chat: FC<ChatProps> = ({
   userIcon,
   assistantIcon,
   isSupportTools = false,
+  handleFeedback,
 }) => {
   return (
     <div className={`rb:h-full rb:relative rb:pt-2 ${className}`}>
@@ -49,6 +50,7 @@ const Chat: FC<ChatProps> = ({
         renderRuntime={renderRuntime}
         onSend={onSend}
         isSupportTools={isSupportTools}
+        handleFeedback={handleFeedback}
       />
 
       {/* Chat input area */}
