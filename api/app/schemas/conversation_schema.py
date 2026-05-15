@@ -45,6 +45,7 @@ class Message(BaseModel):
     conversation_id: uuid.UUID
     role: str
     content: str
+    status: str
     meta_data: Optional[Dict[str, Any]] = None
     created_at: datetime.datetime
 

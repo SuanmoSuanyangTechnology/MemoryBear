@@ -10,6 +10,7 @@ from app.core.logging_config import get_business_logger
 from app.models.app_model import AppType
 from app.models.conversation_model import Conversation, Message
 from app.models.workflow_model import WorkflowExecution
+from app.repositories.agent_execution_repository import AgentExecutionRepository
 from app.repositories.conversation_repository import ConversationRepository, MessageRepository
 from app.schemas.app_log_schema import AppLogMessage, AppLogNodeExecution
 
@@ -119,9 +120,7 @@ class AppLogService:
             messages = self.message_repository.get_messages_by_conversation(
                 conversation_id=conversation_id
             )
-            node_executions_map = self._get_workflow_node_executions_with_map(
-                conversation_id, messages
-            )
+            node_executions_map = self._get_agent_node_executions(conversation_id, messages)
 
         logger.info(
             "查询应用日志会话详情成功",
@@ -328,6 +327,83 @@ class AppLogService:
             msg_id_str = str(best_msg.id)
             used_message_ids.add(msg_id_str)
             node_executions_map[msg_id_str] = execution_nodes
+            
+        return node_executions_map
+
+    def _get_agent_node_executions(
+        self,
+        conversation_id: uuid.UUID,
+        messages: list[Message]
+    ) -> dict[str, list[AppLogNodeExecution]]:
+        """从 agent_executions 表中读取 Agent 应用的节点执行记录
+
+        Args:
+            conversation_id: 会话 ID
+            messages: 消息列表
+
+        Returns:
+            按 message_id 分组的节点执行记录字典
+        """
+        agent_exec_repo = AgentExecutionRepository(self.db)
+        executions = agent_exec_repo.get_by_conversation(conversation_id)
+
+        if not executions:
+            return {}
+
+        node_executions_map: dict[str, list[AppLogNodeExecution]] = {}
+
+        # 筛选 assistant 消息用于时序匹配
+        assistant_messages = [m for m in messages if m.role == "assistant"]
+        used_message_ids: set[str] = set()
+
+        for execution in executions:
+            steps = execution.steps or []
+            if not steps:
+                continue
+
+            # 将 steps 转换为 AppLogNodeExecution 列表
+            execution_nodes = []
+            for idx, step in enumerate(steps):
+                if not isinstance(step, dict):
+                    continue
+                execution_nodes.append(AppLogNodeExecution(
+                    node_id=step.get("step_id", f"agent_step_{idx}"),
+                    node_type=step.get("node_type", "tool"),
+                    node_name=step.get("node_name"),
+                    status=step.get("status", "completed"),
+                    error=step.get("error"),
+                    input=step.get("input"),
+                    output=step.get("output"),
+                    elapsed_time=step.get("elapsed_time"),
+                    token_usage=None,
+                    meta=step.get("meta"),
+                ))
+
+            if not execution_nodes:
+                continue
+
+            # 优先使用 message_id 关联
+            if execution.message_id:
+                node_executions_map[str(execution.message_id)] = execution_nodes
+                continue
+
+            # 回退：通过时序匹配关联到对应的 assistant message
+            best_msg = None
+            best_dt = None
+            for msg in assistant_messages:
+                msg_id_str = str(msg.id)
+                if msg_id_str in used_message_ids:
+                    continue
+                if msg.created_at and execution.started_at and msg.created_at >= execution.started_at:
+                    delta = (msg.created_at - execution.started_at).total_seconds()
+                    if best_dt is None or delta < best_dt:
+                        best_dt = delta
+                        best_msg = msg
+
+            if best_msg:
+                msg_id_str = str(best_msg.id)
+                used_message_ids.add(msg_id_str)
+                node_executions_map[msg_id_str] = execution_nodes
 
         return node_executions_map
 

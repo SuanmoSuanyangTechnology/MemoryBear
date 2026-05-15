@@ -28,6 +28,8 @@ from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_db_context
 from app.models import AgentConfig, ModelConfig
 from app.models.models_model import ModelCapability
+from app.models.agent_execution_model import AgentExecution
+from app.repositories.agent_execution_repository import AgentExecutionRepository
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput, Citation, FileType
 from app.schemas.model_schema import ModelInfo
@@ -63,7 +65,8 @@ def create_long_term_memory_tool(
         memory_config: Dict[str, Any],
         end_user_id: str,
         storage_type: Optional[str] = None,
-        user_rag_memory_id: Optional[str] = None
+        user_rag_memory_id: Optional[str] = None,
+        memory_name: Optional[str] = None
 ):
     """创建记忆工具,
 
@@ -149,6 +152,11 @@ def create_long_term_memory_tool(
             logger.error("长期记忆检索失败", extra={"error": str(e), "error_type": type(e).__name__})
             return f"记忆检索失败: {str(e)}"
 
+    # 挂载工具元数据，供 Agent 执行记录使用
+    long_term_memory._tool_meta = {
+        "tool_type": "long_term_memory",
+        "sources": [{"id": config_id, "name": memory_name or config_id}],
+    }
     return long_term_memory
 
 
@@ -195,7 +203,7 @@ def create_web_search_tool(web_search_config: Dict[str, Any]):
     return web_search_tool
 
 
-def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collector: Optional[List[Citation]] = None):
+def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collector: Optional[List[Citation]] = None, kb_names: Optional[List[Dict]] = None):
     """从知识库中检索相关信息。当用户的问题需要参考知识库、文档或历史记录时，使用此工具进行检索。
 
     Args:
@@ -203,11 +211,7 @@ def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collec
         kb_ids: 知识库ID列表
         user_id: 用户ID
         citations_collector: 用于收集引用信息的列表（由外部传入，tool 执行时填充）
-            列表元素类型为 Citation，包含字段：
-            - document_id: 文档唯一标识
-            - file_name: 文件名
-            - knowledge_id: 知识库 ID
-            - score: 检索相关性得分
+        kb_names: 知识库名称列表 [{"id": "...", "name": "..."}]
 
     Returns:
         检索到的相关知识内容
@@ -256,14 +260,35 @@ def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collec
                                 score=meta.get("score", 0)
                             ))
 
+                # 收集每条结果的来源知识库信息（用于 agent_executions 记录）
+                # 构建知识库 ID → 名称映射
+                kb_name_map = {item["id"]: item["name"] for item in (kb_names or [])}
+                sources = []
+                for chunk in retrieve_chunks_result:
+                    meta = chunk.metadata or {}
+                    kid = str(meta.get("knowledge_id", ""))
+                    sources.append({
+                        "knowledge_id": kid,
+                        "knowledge_name": kb_name_map.get(kid, kid),
+                        "file_name": meta.get("file_name", ""),
+                        "content": chunk.page_content[:500] if chunk.page_content else "",
+                    })
+                # 把来源信息挂到函数属性上，供外部读取
+                knowledge_retrieval_tool._last_sources = sources
+
                 return f"检索到以下相关信息：\n\n{context}"
             else:
+                knowledge_retrieval_tool._last_sources = []
                 logger.warning("知识库检索未找到结果")
                 return "未找到相关信息"
         except Exception as e:
             logger.error("知识库检索失败", extra={"error": str(e), "error_type": type(e).__name__})
             return f"检索失败: {str(e)}"
 
+    # 挂载工具元数据，供 Agent 执行记录使用
+    knowledge_retrieval_tool._tool_meta = {
+        "tool_type": "knowledge_retrieval",
+    }
     return knowledge_retrieval_tool
 
 
@@ -330,6 +355,19 @@ class AgentRunService:
         if skill_enable:
             middleware = AgentMiddleware(skills=skills_config)
             skill_tools, skill_configs, tool_to_skill_map = middleware.load_skill_tools(self.db, tenant_id)
+
+            # 给技能工具挂载元数据（技能名称）
+            for t in skill_tools:
+                t_name = getattr(t, "name", None)
+                if t_name and t_name in tool_to_skill_map:
+                    skill_id = tool_to_skill_map[t_name]
+                    skill_cfg = skill_configs.get(skill_id, {})
+                    skill_name = skill_cfg.get("name", t_name)
+                    t._tool_meta = {
+                        "tool_type": "skill",
+                        "sources": [{"id": skill_id, "name": skill_name}],
+                    }
+
             tools.extend(skill_tools)
             logger.debug(f"已加载 {len(skill_tools)} 个技能工具")
 
@@ -357,9 +395,21 @@ class AgentRunService:
         knowledge_bases = knowledge_retrieval_config.get("knowledge_bases", [])
         kb_ids = [kb["kb_id"] for kb in knowledge_bases if kb.get("kb_id")]
         if kb_ids:
+            # 查询知识库名称
+            kb_names = []
+            try:
+                from app.models import Knowledge
+                rows = self.db.query(Knowledge.id, Knowledge.name).filter(
+                    Knowledge.id.in_(kb_ids)
+                ).all()
+                kb_names = [{"id": str(r.id), "name": r.name} for r in rows]
+            except Exception:
+                kb_names = [{"id": kid, "name": kid} for kid in kb_ids]
+
             kb_tool = create_knowledge_retrieval_tool(
                 knowledge_retrieval_config, kb_ids, user_id,
-                citations_collector=citations_collector
+                citations_collector=citations_collector,
+                kb_names=kb_names
             )
             tools.append(kb_tool)
             logger.debug(
@@ -382,9 +432,24 @@ class AgentRunService:
         tools = []
         if memory_config.get("enabled"):
             if user_id:
+                # 查询记忆配置名称
+                config_id = memory_config.get("memory_config_id") or memory_config.get("memory_content", None)
+                memory_name = None
+                if config_id:
+                    try:
+                        from app.models import MemoryConfig
+                        mc = self.db.query(MemoryConfig.config_name).filter(
+                            MemoryConfig.config_id == config_id
+                        ).first()
+                        memory_name = mc.config_name if mc else None
+                    except Exception:
+                        pass
+
                 # 创建长期记忆工具
-                memory_tool = create_long_term_memory_tool(memory_config, user_id, storage_type,
-                                                           user_rag_memory_id)
+                memory_tool = create_long_term_memory_tool(
+                    memory_config, user_id, storage_type, user_rag_memory_id,
+                    memory_name=memory_name
+                )
                 tools.append(memory_tool)
 
                 logger.debug(
@@ -663,9 +728,10 @@ class AgentRunService:
             # 7. 根据模型能力选择执行路径
             capability = api_key_config.get("capability", [])
             use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            orchestrator_node_executions = []
             if not use_agent_mode and tools:
                 # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
-                system_prompt = await ToolOrchestrator.create_and_run(
+                system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                     tools=tools,
                     system_prompt=system_prompt,
                     message=message,
@@ -715,12 +781,33 @@ class AgentRunService:
             memory_config_ = agent_config.memory
             config_id = memory_config_.get("memory_config_id") or memory_config_.get("memory_content", None)
 
+            # 创建 Agent 执行记录（running 状态）
+            if not sub_agent:
+                agent_exec_repo = AgentExecutionRepository(self.db)
+                agent_execution = AgentExecution(
+                    app_id=agent_config.app_id,
+                    conversation_id=uuid.UUID(conversation_id) if isinstance(conversation_id, str) else conversation_id,
+                    message_id=None,
+                    agent_config_id=agent_config.id,
+                    release_id=None,
+                    triggered_by=None,
+                    steps=[],
+                    status="running",
+                    started_at=datetime.datetime.fromtimestamp(start_time),
+                    meta_data={
+                        "model": api_key_config["model_name"],
+                        "provider": api_key_config.get("provider"),
+                    },
+                )
+                agent_exec_repo.create(agent_execution)
+                self.db.commit()
+
             # 8. 调用 Agent（支持多模态）
             result = await agent.chat(
                 message=message,
                 history=history,
                 context=context,
-                files=processed_files  # 传递处理后的文件
+                files=processed_files
             )
 
             elapsed_time = time.time() - start_time
@@ -760,6 +847,17 @@ class AgentRunService:
                     is_omni=api_key_config.get("is_omni", False)
                 )
 
+            # 11. 更新 Agent 执行记录为 completed
+            node_executions = result.get("node_executions", [])
+            if not sub_agent:
+                agent_exec_repo.update_completed(
+                    execution_id=agent_execution.id,
+                    steps=orchestrator_node_executions + node_executions,
+                    status="completed",
+                    elapsed_time=elapsed_time,
+                    token_usage=result.get("usage"),
+                )
+
             response = {
                 "message": result["content"],
                 "reasoning_content": result.get("reasoning_content"),
@@ -792,6 +890,19 @@ class AgentRunService:
 
         except Exception as e:
             logger.error("LangChain Agent 调用失败", extra={"error": str(e), "error_type": type(e).__name__})
+            # 更新 Agent 执行记录为 failed
+            if not sub_agent:
+                try:
+                    elapsed_time = time.time() - start_time
+                    agent_exec_repo.update_completed(
+                        execution_id=agent_execution.id,
+                        steps=[],
+                        status="failed",
+                        elapsed_time=elapsed_time,
+                        error_message=str(e)[:2000],
+                    )
+                except Exception:
+                    pass
             raise BusinessException(f"Agent 调用失败: {str(e)}", BizCode.INTERNAL_ERROR, cause=e)
 
     async def run_stream(
@@ -954,9 +1065,10 @@ class AgentRunService:
             # 7. 根据模型能力选择执行路径
             capability = api_key_config.get("capability", [])
             use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            orchestrator_node_executions = []
             if not use_agent_mode and tools:
                 # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
-                system_prompt = await ToolOrchestrator.create_and_run(
+                system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                     tools=tools,
                     system_prompt=system_prompt,
                     message=message,
@@ -1001,14 +1113,53 @@ class AgentRunService:
                 "timestamp": time.time()
             })
 
+            # 把弱模型的工具调用步骤补发给前端
+            for step in orchestrator_node_executions:
+                event_type = "tool_error" if step.get("status") == "failed" else "tool_end"
+                yield self._format_sse_event("tool_start", {
+                    "step_id": step.get("step_id"),
+                    "name": step.get("node_name"),
+                    "input": step.get("input"),
+                    "meta": step.get("meta"),
+                })
+                yield self._format_sse_event(event_type, {
+                    "step_id": step.get("step_id"),
+                    "name": step.get("node_name"),
+                    "output": step.get("output"),
+                    "error": step.get("error"),
+                    "meta": step.get("meta"),
+                })
+
             memory_config_ = agent_config.memory
             # 兼容新旧字段名：优先使用 memory_config_id，回退到 memory_content
             config_id = memory_config_.get("memory_config_id") or memory_config_.get("memory_content", None)
+
+            # 创建 Agent 执行记录（running 状态）
+            if not sub_agent:
+                agent_exec_repo = AgentExecutionRepository(self.db)
+                agent_execution = AgentExecution(
+                    app_id=agent_config.app_id,
+                    conversation_id=uuid.UUID(conversation_id) if isinstance(conversation_id, str) else conversation_id,
+                    message_id=None,
+                    agent_config_id=agent_config.id,
+                    release_id=None,
+                    triggered_by=None,
+                    steps=[],
+                    status="running",
+                    started_at=datetime.datetime.fromtimestamp(start_time),
+                    meta_data={
+                        "model": api_key_config["model_name"],
+                        "provider": api_key_config.get("provider"),
+                    },
+                )
+                agent_exec_repo.create(agent_execution)
+                self.db.commit()
 
             # 9. 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
             full_reasoning = ""
             total_tokens = 0
+            node_executions = []
 
             # 启动流式 TTS（文本边输出边合成）
             text_queue: asyncio.Queue = asyncio.Queue()
@@ -1029,6 +1180,14 @@ class AgentRunService:
                 elif isinstance(chunk, dict) and chunk.get("type") == "reasoning":
                     full_reasoning += chunk["content"]
                     yield self._format_sse_event("reasoning", {"content": chunk["content"]})
+                elif isinstance(chunk, dict) and chunk.get("type") == "node_executions":
+                    node_executions = chunk.get("data", [])
+                elif isinstance(chunk, dict) and chunk.get("type") == "tool_start":
+                    yield self._format_sse_event("tool_start", {"step_id": chunk.get("step_id"), "name": chunk["name"], "input": chunk.get("input"), "meta": chunk.get("meta")})
+                elif isinstance(chunk, dict) and chunk.get("type") == "tool_end":
+                    yield self._format_sse_event("tool_end", {"step_id": chunk.get("step_id"), "name": chunk["name"], "output": chunk.get("output"), "meta": chunk.get("meta")})
+                elif isinstance(chunk, dict) and chunk.get("type") == "tool_error":
+                    yield self._format_sse_event("tool_error", {"step_id": chunk.get("step_id"), "name": chunk["name"], "error": chunk.get("error")})
                 else:
                     full_content += chunk
                     yield self._format_sse_event("message", {"content": chunk})
@@ -1068,6 +1227,16 @@ class AgentRunService:
                     is_omni=api_key_config.get("is_omni", False)
                 )
 
+            # 11.5 更新 Agent 执行记录为 completed
+            if not sub_agent:
+                agent_exec_repo.update_completed(
+                    execution_id=agent_execution.id,
+                    steps=orchestrator_node_executions + node_executions,
+                    status="completed",
+                    elapsed_time=elapsed_time,
+                    token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                )
+
             # 12. 发送结束事件（包含 suggested_questions、audio_url 和 audio_status）
             end_data: Dict[str, Any] = {
                 "conversation_id": conversation_id,
@@ -1104,6 +1273,41 @@ class AgentRunService:
 
         except Exception as e:
             logger.error("流式 Agent 调用失败", extra={"error": str(e)}, exc_info=True)
+            # 保存失败的消息，使前端可以展示失败状态
+            if not sub_agent:
+                try:
+                    from app.services.conversation_service import ConversationService
+
+                    conv_svc = ConversationService(self.db)
+                    conv_uuid = uuid.UUID(conversation_id)
+                    conv_svc.add_message(
+                        conversation_id=conv_uuid,
+                        role="user",
+                        content=message,
+                        meta_data={"files": [], "history_files": {}},
+                    )
+                    conv_svc.add_message(
+                        conversation_id=conv_uuid,
+                        role="assistant",
+                        content="",
+                        meta_data={"error": str(e)[:2000]},
+                        status="failed",
+                    )
+                except Exception:
+                    pass
+            # 更新 Agent 执行记录为 failed
+            if not sub_agent:
+                try:
+                    elapsed_time = time.time() - start_time
+                    agent_exec_repo.update_completed(
+                        execution_id=agent_execution.id,
+                        steps=node_executions if 'node_executions' in dir() else [],
+                        status="failed",
+                        elapsed_time=elapsed_time,
+                        error_message=str(e)[:2000],
+                    )
+                except Exception:
+                    pass
             # 发送错误事件
             yield self._format_sse_event("error", {
                 "error": str(e),
@@ -2314,6 +2518,35 @@ class AgentRunService:
                                     "label": model_label,
                                     "conversation_id": returned_conversation_id,
                                     "content": event_data.get("content", "")
+                                }))
+
+                            # 转发工具调用事件（带模型标识）
+                            if event_type == "tool_start" and event_data:
+                                await event_queue.put(self._format_sse_event("model_tool_start", {
+                                    "model_index": idx,
+                                    "model_config_id": model_config_id,
+                                    "step_id": event_data.get("step_id"),
+                                    "name": event_data.get("name", ""),
+                                    "input": event_data.get("input"),
+                                }))
+
+                            if event_type == "tool_end" and event_data:
+                                await event_queue.put(self._format_sse_event("model_tool_end", {
+                                    "model_index": idx,
+                                    "model_config_id": model_config_id,
+                                    "step_id": event_data.get("step_id"),
+                                    "name": event_data.get("name", ""),
+                                    "output": event_data.get("output"),
+                                    "meta": event_data.get("meta"),
+                                }))
+
+                            if event_type == "tool_error" and event_data:
+                                await event_queue.put(self._format_sse_event("model_tool_error", {
+                                    "model_index": idx,
+                                    "model_config_id": model_config_id,
+                                    "step_id": event_data.get("step_id"),
+                                    "name": event_data.get("name", ""),
+                                    "error": event_data.get("error"),
                                 }))
 
                             # 从 end 事件中提取 features 输出字段
