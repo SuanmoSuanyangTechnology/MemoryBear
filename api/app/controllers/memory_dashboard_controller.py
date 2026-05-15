@@ -173,8 +173,11 @@ def get_workspace_end_users(
 
     # 触发社区聚类补全任务（异步，不阻塞接口响应）
     try:
-        from app.tasks import init_community_clustering_for_users
-        init_community_clustering_for_users.delay(end_user_ids=end_user_ids, workspace_id=str(workspace_id))
+        from app.celery_app import celery_app as _celery_app
+        _celery_app.send_task(
+            "app.tasks.init_community_clustering_for_users",
+            kwargs={"end_user_ids": end_user_ids, "workspace_id": str(workspace_id)},
+        )
         api_logger.info(f"已触发社区聚类补全任务，候选用户数: {len(end_user_ids)}")
     except Exception as e:
         api_logger.warning(f"触发社区聚类补全任务失败（不影响主流程）: {str(e)}")
