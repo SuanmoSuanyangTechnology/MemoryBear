@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-14 17:49:08
+ * @Last Modified time: 2026-05-15 16:35:08
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -36,6 +36,7 @@ const ChatContent: FC<ChatContentProps> = ({
   onSend,
   userIcon,
   assistantIcon,
+  isSupportTools = false,
 }) => {
   const { t } = useTranslation()
   // Scroll container reference for controlling auto-scroll to bottom
@@ -228,13 +229,6 @@ const ChatContent: FC<ChatContentProps> = ({
                           onFormSubmit={onFormSubmit}
                         />
 
-                        {item.meta_data?.suggested_questions && item.meta_data?.suggested_questions?.length > 0 && <Flex wrap className="rb:my-1!">
-                          {item.meta_data?.suggested_questions?.map((question, idx) => (
-                            <Button key={idx} size="small" className="rb:text-[12px]! rb:text-[#155EEF]!"
-                              onClick={() => onSend?.(question)}
-                            >{question}</Button>
-                          ))}
-                        </Flex>}
                         {item.meta_data?.citations && item.meta_data?.citations.length > 0 &&
                           <Flex vertical gap={4} className="rb:mt-1! rb:pt-3! rb-border-t rb:mb-2!">
                             <div className="rb:font-medium">{t('memoryConversation.citations')}</div>
@@ -259,25 +253,45 @@ const ChatContent: FC<ChatContentProps> = ({
                         }
                       </div>
                       {/* Bottom label (such as timestamp, username, etc.) */}
-                      {(labelPosition === 'bottom' || item.meta_data?.audio_url) && <Flex gap={16} align="center" justify={item.role === 'user' ? 'end' : 'start'}>
-                        {item.meta_data?.audio_url && <>
-                          {playingIndex !== item.meta_data?.audio_url && item.meta_data?.audio_status === 'pending'
-                            ? <Spin />
-                            : playingIndex !== item.meta_data?.audio_url
-                              ? <SoundOutlined className={clsx("rb:cursor-pointer rb:size-5.5", {
-                                'rb:text-[#FF5D34]': item.meta_data?.audio_status === 'error',
-                                'rb:hover:text-[#155EEF]!': !item.meta_data?.audio_status || !['pending', 'error'].includes(item.meta_data?.audio_status)
-                              })} onClick={() => handlePlay(item.meta_data?.audio_url!, item.meta_data?.audio_status)} />
-                              : <div
-                                className="rb:size-5.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/audio_ing.gif')]"
-                                onClick={() => handlePlay(item.meta_data?.audio_url!, item.meta_data?.audio_status)}
-                              />
+                      {(labelPosition === 'bottom' || item.meta_data?.audio_url) &&
+                        <Flex gap={16} align="center" justify={item.role === 'user' ? 'end' : 'start'}>
+                          {labelPosition === 'bottom' &&
+                            <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
+                              {labelFormat(item)}
+                            </div>
                           }
-                        </>}
-                        {labelPosition === 'bottom' && <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
-                          {labelFormat(item)}
-                        </div>}
-                      </Flex>
+                          {item.meta_data?.audio_url && <>
+                            {playingIndex !== item.meta_data?.audio_url && item.meta_data?.audio_status === 'pending'
+                              ? <Spin />
+                              : playingIndex !== item.meta_data?.audio_url
+                                ? <SoundOutlined className={clsx("rb:cursor-pointer rb:size-5.5", {
+                                  'rb:text-[#FF5D34]': item.meta_data?.audio_status === 'error',
+                                  'rb:hover:text-[#155EEF]!': !item.meta_data?.audio_status || !['pending', 'error'].includes(item.meta_data?.audio_status)
+                                })} onClick={() => handlePlay(item.meta_data?.audio_url!, item.meta_data?.audio_status)} />
+                                : <div
+                                  className="rb:size-5.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/audio_ing.gif')]"
+                                  onClick={() => handlePlay(item.meta_data?.audio_url!, item.meta_data?.audio_status)}
+                                />
+                            }
+                          </>}
+                          {/* {isSupportTools && item.role === 'assistant' && <>
+                            <div className="rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/like.svg')]"
+                              onClick={() => handleLike(item?.id)}
+                            ></div>
+                            <div className="rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/unlike.svg')]"
+                              onClick={() => handleUnlike(item?.id)}
+                            ></div>
+                          </>} */}
+                        </Flex>
+                      }
+                      {item.meta_data?.suggested_questions && item.meta_data?.suggested_questions?.length > 0 &&
+                        <Flex wrap gap={8} className="rb:my-1!">
+                          {item.meta_data?.suggested_questions?.map((question, idx) => (
+                            <Button key={idx} size="small" className="rb:text-[12px]! rb:text-[#155EEF]!"
+                              onClick={() => onSend?.(question)}
+                            >{question}</Button>
+                          ))}
+                        </Flex>
                       }
                     </div>
                     {/* User icon */}

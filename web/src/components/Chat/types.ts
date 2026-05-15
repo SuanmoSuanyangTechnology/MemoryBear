@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:45:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-08 14:10:42
+ * @Last Modified time: 2026-05-15 14:45:21
  */
 import { type ReactNode } from 'react'
 
@@ -73,6 +73,7 @@ export interface ChatProps {
 
   userIcon?: ReactNode;
   assistantIcon?: ReactNode;
+  isSupportTools?: boolean;
 }
 
 /**
@@ -119,4 +120,5 @@ export interface ChatContentProps {
   onSend?: (msg: string) => void;
   userIcon?: ReactNode;
   assistantIcon?: ReactNode;
+  isSupportTools?: boolean;
 }
