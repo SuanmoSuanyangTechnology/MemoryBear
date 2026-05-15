@@ -3,19 +3,25 @@ import logging
 import math
 import uuid
 
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from neo4j import Session
 
-from app.core.memory.enums import Neo4jNodeType
+from app.core.memory.enums import Neo4jNodeType, TripletPredicate
+from app.core.memory.models.service_models import Memory, MemorySearchResult, RelationMemory, RelationSearchResult, \
+    EntityPair
 from app.core.memory.models.service_models import MemoryContext
-from app.core.memory.models.service_models import Memory, MemorySearchResult
+from app.core.memory.prompt import prompt_manager
+from app.core.memory.read_services.search_engine.result_builder import MetadataBuilder
 from app.core.memory.read_services.search_engine.result_builder import data_builder_factory
-from app.core.models import RedBearEmbeddings
+from app.core.memory.read_services.search_engine.tools import make_entity_search_tool, make_relation_search_tool
+from app.core.memory.utils.llm.llm_utils import StructResponse
+from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.repositories import knowledge_repository
-from app.repositories.neo4j.graph_search import search_graph, search_graph_by_embedding
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.core.memory.read_services.search_engine.result_builder import MetadataBuilder
+from app.repositories.neo4j.graph_search import get_nodes_by_ids, get_relation_between_entities, search_graph, \
+    search_graph_by_embedding
 from app.repositories.neo4j.graph_search import search_user_metadata
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +30,15 @@ DEFAULT_FULLTEXT_SCORE_THRESHOLD = 1.5
 DEFAULT_COSINE_SCORE_THRESHOLD = 0.5
 DEFAULT_CONTENT_SCORE_THRESHOLD = 0.5
 
+RELATIONSHIP_LOOP_LIMIT = 5
+
 
 class Neo4jSearchService:
     def __init__(
             self,
             ctx: MemoryContext,
             embedder: RedBearEmbeddings,
+            llm: RedBearLLM,
             includes: list[Neo4jNodeType] | None = None,
             alpha: float = DEFAULT_ALPHA,
             fulltext_score_threshold: float = DEFAULT_FULLTEXT_SCORE_THRESHOLD,
@@ -43,18 +52,22 @@ class Neo4jSearchService:
         self.content_score_threshold = content_score_threshold
 
         self.embedder: RedBearEmbeddings = embedder
+        self.llm: RedBearLLM = llm
         self.connector: Neo4jConnector | None = None
 
         self.includes = includes
         if includes is None:
             self.includes = [
                 Neo4jNodeType.STATEMENT,
-                Neo4jNodeType.CHUNK,
+                # Neo4jNodeType.CHUNK,
                 Neo4jNodeType.EXTRACTEDENTITY,
                 Neo4jNodeType.MEMORYSUMMARY,
                 Neo4jNodeType.PERCEPTUAL,
                 Neo4jNodeType.COMMUNITY
             ]
+
+        self.relation_search_tool = make_relation_search_tool(self.ctx)
+        self.entity_search_tool = make_entity_search_tool(self.ctx)
 
     async def _keyword_search(
             self,
@@ -86,7 +99,6 @@ class Neo4jSearchService:
             limit: int,
     ) -> list[dict]:
         keyword_results = self._normalize_kw_scores(keyword_results)
-        embedding_results = embedding_results
 
         kw_norm_map = {}
         for item in keyword_results:
@@ -127,7 +139,7 @@ class Neo4jSearchService:
         # ]
         results = results[:limit]
 
-        logger.info(
+        logger.debug(
             f"[MemorySearch] rerank: merged={len(combined)}, after_threshold={len(results)} "
             f"(alpha={self.alpha})"
         )
@@ -141,7 +153,7 @@ class Neo4jSearchService:
             it[f"normalized_kw_score"] = 1 / (1 + math.exp(-(s - self.fulltext_score_threshold) / 2)) if s else 0
         return items
 
-    async def search(
+    async def hybrid_search(
             self,
             query: str,
             limit: int = 10,
@@ -178,6 +190,169 @@ class Neo4jSearchService:
                 ))
         memories.sort(key=lambda x: x.score, reverse=True)
         return MemorySearchResult(memories=memories[:limit])
+
+    async def _run_relation_agent(self, query: str) -> RelationSearchResult:
+        system_prompt = prompt_manager.render(
+            name="relation_search",
+            predicates=[p.to_dict() for p in TripletPredicate],
+        )
+
+        tools = [self.relation_search_tool, self.entity_search_tool]
+        tool_map = {t.name: t for t in tools}
+        llm_with_tools = self.llm.bind_tools(tools)
+
+        messages: list[SystemMessage | HumanMessage | AIMessage | ToolMessage] = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=(
+                f"<current-entity></current-entity>"
+                f"<user-query>{query}</user-query>"
+            ))
+        ]
+
+        for _ in range(RELATIONSHIP_LOOP_LIMIT):
+            response: AIMessage = await llm_with_tools.ainvoke(messages)
+            messages.append(response)
+
+            if not response.tool_calls:
+                break
+
+            for tc in response.tool_calls:
+                tool = tool_map[tc["name"]]
+                tool_result = await tool.ainvoke(tc["args"])
+                messages.append(ToolMessage(
+                    content=str(tool_result),
+                    tool_call_id=tc["id"],
+                ))
+
+        final_message = next(
+            (m for m in reversed(messages) if isinstance(m, AIMessage)),
+            messages[-1],
+        )
+        try:
+            return final_message | StructResponse(mode="pydantic", model=RelationSearchResult)
+        except Exception:
+            logger.debug(
+                "[RelationSearch] LLM final message parsing failed, "
+                "falling back to tool-call extraction"
+            )
+            return self._extract_pairs_from_messages(messages)
+
+    @staticmethod
+    def _extract_pairs_from_messages(
+        messages: list[SystemMessage | HumanMessage | AIMessage | ToolMessage],
+    ) -> RelationSearchResult:
+        """Extract EntityPairs from relation_search_tool results when LLM output is unusable."""
+        import ast
+
+        tool_results: dict[str, list[dict]] = {}
+        for msg in messages:
+            if isinstance(msg, ToolMessage) and msg.tool_call_id:
+                try:
+                    tool_results[msg.tool_call_id] = ast.literal_eval(msg.content)
+                except (ValueError, SyntaxError):
+                    tool_results[msg.tool_call_id] = []
+
+        pairs: list[EntityPair] = []
+        seen = set()
+        for msg in messages:
+            if not isinstance(msg, AIMessage) or not msg.tool_calls:
+                continue
+            for tc in msg.tool_calls:
+                if tc["name"] != "relation_search_tool":
+                    continue
+                source_id = str(tc.get("args", {}).get("source_id") or "__user__")
+                results = tool_results.get(tc["id"], [])
+                for item in results:
+                    target_id = str(item.get("id", ""))
+                    if not target_id:
+                        continue
+                    key = (source_id, target_id)
+                    if key not in seen:
+                        seen.add(key)
+                        pairs.append(EntityPair(source_id=source_id, target_id=target_id))
+
+        return RelationSearchResult(pairs=pairs)
+
+    async def _fetch_relation_data(
+            self,
+            pairs: list[EntityPair]
+    ) -> tuple[list[dict], list[dict]]:
+        async with Neo4jConnector() as connector:
+            user_meta = await search_user_metadata(connector, self.ctx.end_user_id)
+            user_entity_id = user_meta.get("id", "")
+
+            relation_records = []
+            for pair in pairs:
+                src_id = user_entity_id if pair.source_id == "__user__" else pair.source_id
+                records = await get_relation_between_entities(
+                    connector,
+                    self.ctx.end_user_id,
+                    src_id,
+                    pair.target_id
+                )
+                relation_records.extend(records)
+
+            all_entity_ids = {user_entity_id}
+            for rec in relation_records:
+                all_entity_ids.add(rec.get("source_id", ""))
+                all_entity_ids.add(rec.get("target_id", ""))
+            for pair in pairs:
+                sid = user_entity_id if pair.source_id == "__user__" else pair.source_id
+                all_entity_ids.add(sid)
+                all_entity_ids.add(pair.target_id)
+            all_entity_ids.discard("")
+
+            entity_records = await get_nodes_by_ids(
+                connector,
+                Neo4jNodeType.EXTRACTEDENTITY,
+                list(all_entity_ids)
+            )
+
+        return relation_records, entity_records
+
+    @staticmethod
+    def _build_relation_memories(
+            relation_records: list[dict],
+            entity_records: list[dict]
+    ) -> list[RelationMemory]:
+        name_map = {r.get("id", ""): r.get("name", "") for r in entity_records}
+        desc_map = {r.get("id", ""): r.get("description", "") for r in entity_records}
+
+        relations = []
+        seen = set()
+        for rec in relation_records:
+            rel_key = (
+                str(rec.get("source_id", "")),
+                str(rec.get("relation_predicate", "")),
+                str(rec.get("target_id", ""))
+            )
+            if rel_key in seen:
+                continue
+            seen.add(rel_key)
+            relations.append(RelationMemory(
+                source=name_map.get(rec.get("source_id", ""), rec.get("source_name", "")),
+                relation=str(rec.get("relation_predicate", "")),
+                target=name_map.get(rec.get("target_id", ""), rec.get("target_name", "")),
+                target_desc=desc_map.get(rec.get("target_id", ""), ""),
+                target_id=str(rec.get("target_id", "")),
+            ))
+
+        return relations
+
+    async def relation_search(
+            self,
+            query: str
+    ) -> MemorySearchResult:
+        result = await self._run_relation_agent(query)
+
+        if not result.pairs:
+            return MemorySearchResult(memories=[], relations=[])
+
+        relation_records, entity_records = await self._fetch_relation_data(result.pairs)
+        relations = self._build_relation_memories(relation_records, entity_records)
+
+        logger.info(f"[RelationSearch] resolved {len(relations)} relations from {len(result.pairs)} pairs")
+        return MemorySearchResult(memories=[], relations=relations)
 
     async def memory_l0(self) -> Memory:
         async with Neo4jConnector() as connector:
@@ -227,7 +402,7 @@ class RAGSearchService:
             "reranker_top_k": limit
         }
 
-    async def search(self, query: str, limit: int) -> MemorySearchResult:
+    async def hybrid_search(self, query: str, limit: int) -> MemorySearchResult:
         try:
             kb_config = self.get_kb_config(limit)
         except RuntimeError as e:
@@ -251,3 +426,7 @@ class RAGSearchService:
         except RuntimeError as e:
             logger.error(f"[MemorySearch] rag search error: {e}")
             return MemorySearchResult(memories=[])
+
+    async def relation_search(self, query: str) -> MemorySearchResult:
+        logger.info("RAG not suport releation search")
+        return MemorySearchResult(memories=[])

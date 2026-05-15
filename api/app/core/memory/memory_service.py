@@ -12,19 +12,18 @@ MemoryService — 记忆模块统一入口（Facade）
 """
 
 import logging
-from typing import  Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
 from app.core.memory.enums import SearchStrategy, StorageType
+from app.core.memory.models.message_models import DialogData
 from app.core.memory.models.service_models import MemoryContext, MemorySearchResult
 from app.core.memory.pipelines.memory_read import ReadPipeLine
-from app.db import get_db_context
-from app.services.memory_config_service import MemoryConfigService
-
 from app.core.memory.pipelines.pilot_write_pipeline import PilotWriteResult
 from app.core.memory.pipelines.write_pipeline import WriteResult
-from app.core.memory.models.message_models import DialogData
+from app.db import get_db_context
+from app.services.memory_config_service import MemoryConfigService
 
 logger = logging.getLogger(__name__)
 

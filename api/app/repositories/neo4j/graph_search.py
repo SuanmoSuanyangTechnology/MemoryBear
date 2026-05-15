@@ -28,7 +28,9 @@ from app.repositories.neo4j.cypher_queries import (
     FULLTEXT_QUERY_CYPHER_MAPPING,
     USER_ID_QUERY_CYPHER_MAPPING,
     NODE_ID_QUERY_CYPHER_MAPPING,
-    SEARCH_USER_METADATA
+    SEARCH_USER_METADATA,
+    SEARCH_ENITITES_BY_RELATIONSHIP,
+    SEARCH_RELATION_BETWEEN_ENTITIES
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
@@ -64,7 +66,6 @@ def cosine_similarity_search(
 
 
 async def _update_activation_values_batch(
-        connector: Neo4jConnector,
         nodes: List[Dict[str, Any]],
         node_label: str,
         end_user_id: Optional[str] = None,
@@ -86,67 +87,68 @@ async def _update_activation_values_batch(
     Returns:
         List[Dict[str, Any]]: 成功更新的节点列表
     """
-    if not nodes:
-        return []
+    async with Neo4jConnector() as connector:
+        if not nodes:
+            return []
 
-    # 延迟导入以避免循环依赖
-    from app.core.memory.storage_services.forgetting_engine.access_history_manager import (
-        AccessHistoryManager,
-    )
-    from app.core.memory.storage_services.forgetting_engine.actr_calculator import (
-        ACTRCalculator,
-    )
-
-    # 创建计算器和管理器实例
-    actr_calculator = ACTRCalculator()
-    access_manager = AccessHistoryManager(
-        connector=connector,
-        actr_calculator=actr_calculator,
-        max_retries=max_retries
-    )
-
-    # 提取节点ID列表并去重（保持原始顺序）
-    seen_ids = set()
-    unique_node_ids = []
-    for node in nodes:
-        node_id = node.get('id')
-        if node_id and node_id not in seen_ids:
-            seen_ids.add(node_id)
-            unique_node_ids.append(node_id)
-
-    if not unique_node_ids:
-        logger.warning("批量更新激活值：没有有效的节点ID")
-        return nodes
-
-    # 记录去重信息（仅针对具有有效 ID 的节点）
-    id_nodes_count = sum(1 for n in nodes if n.get("id"))
-    if len(unique_node_ids) < id_nodes_count:
-        logger.info(
-            f"批量更新激活值：检测到重复节点，具有有效ID的节点数量={id_nodes_count}, "
-            f"去重后唯一ID数量={len(unique_node_ids)}"
+        # 延迟导入以避免循环依赖
+        from app.core.memory.storage_services.forgetting_engine.access_history_manager import (
+            AccessHistoryManager,
+        )
+        from app.core.memory.storage_services.forgetting_engine.actr_calculator import (
+            ACTRCalculator,
         )
 
-    # 批量记录访问
-    try:
-        updated_nodes = await access_manager.record_batch_access(
-            node_ids=unique_node_ids,
-            node_label=node_label,
-            end_user_id=end_user_id
+        # 创建计算器和管理器实例
+        actr_calculator = ACTRCalculator()
+        access_manager = AccessHistoryManager(
+            connector=connector,
+            actr_calculator=actr_calculator,
+            max_retries=max_retries
         )
 
-        logger.info(
-            f"批量更新激活值成功: {node_label}, "
-            f"更新数量={len(updated_nodes)}/{len(unique_node_ids)}"
-        )
+        # 提取节点ID列表并去重（保持原始顺序）
+        seen_ids = set()
+        unique_node_ids = []
+        for node in nodes:
+            node_id = node.get('id')
+            if node_id and node_id not in seen_ids:
+                seen_ids.add(node_id)
+                unique_node_ids.append(node_id)
 
-        return updated_nodes
+        if not unique_node_ids:
+            logger.warning("批量更新激活值：没有有效的节点ID")
+            return nodes
 
-    except Exception as e:
-        logger.error(
-            f"批量更新激活值失败: {node_label}, 错误: {str(e)}"
-        )
-        # 失败时返回原始节点列表
-        return nodes
+        # 记录去重信息（仅针对具有有效 ID 的节点）
+        id_nodes_count = sum(1 for n in nodes if n.get("id"))
+        if len(unique_node_ids) < id_nodes_count:
+            logger.info(
+                f"批量更新激活值：检测到重复节点，具有有效ID的节点数量={id_nodes_count}, "
+                f"去重后唯一ID数量={len(unique_node_ids)}"
+            )
+
+        # 批量记录访问
+        try:
+            updated_nodes = await access_manager.record_batch_access(
+                node_ids=unique_node_ids,
+                node_label=node_label,
+                end_user_id=end_user_id
+            )
+
+            logger.debug(
+                f"批量更新激活值成功: {node_label}, "
+                f"更新数量={len(updated_nodes)}/{len(unique_node_ids)}"
+            )
+
+            return updated_nodes
+
+        except Exception as e:
+            logger.error(
+                f"批量更新激活值失败: {node_label}, 错误: {str(e)}"
+            )
+            # 失败时返回原始节点列表
+            return nodes
 
 
 async def _update_search_results_activation(
@@ -186,7 +188,6 @@ async def _update_search_results_activation(
         if key in results and results[key]:
             update_tasks.append(
                 _update_activation_values_batch(
-                    connector=connector,
                     nodes=results[key],
                     node_label=label,
                     end_user_id=end_user_id
@@ -194,62 +195,63 @@ async def _update_search_results_activation(
             )
             update_keys.append(key)
 
-    if not update_tasks:
-        return results
+    async def _run_updates(tasks):
+        await asyncio.gather(*tasks)
 
-    # 并行执行所有更新
-    update_results = await asyncio.gather(*update_tasks, return_exceptions=True)
+    if update_tasks:
+        asyncio.create_task(_run_updates(update_tasks))
+    return results
 
-    # 更新结果字典，保留原始搜索分数
-    updated_results = results.copy()
-    for key, update_result in zip(update_keys, update_results):
-        if not isinstance(update_result, Exception):
-            # 更新成功，合并原始搜索结果和更新后的激活值数据
-            # 保留原始的 score 字段（BM25/Embedding 分数）
-            original_nodes = results[key]
-            updated_nodes = update_result
+    # # 更新结果字典，保留原始搜索分数
+    # updated_results = results.copy()
+    # for key, update_result in zip(update_keys, update_results):
+    #     if not isinstance(update_result, Exception):
+    #         # 更新成功，合并原始搜索结果和更新后的激活值数据
+    #         # 保留原始的 score 字段（BM25/Embedding 分数）
+    #         original_nodes = results[key]
+    #         updated_nodes = update_result
+    #
+    #         # 创建 ID 到更新节点的映射（用于快速查找激活值数据）
+    #         updated_map = {node.get('id'): node for node in updated_nodes if node.get('id')}
+    #
+    #         # 合并数据：保留所有原始节点（包括重复的），用更新后的激活值数据填充
+    #         merged_nodes = []
+    #         for original_node in original_nodes:
+    #             node_id = original_node.get('id')
+    #             if node_id and node_id in updated_map:
+    #                 # 从原始节点开始，用更新后的激活值数据覆盖
+    #                 merged_node = original_node.copy()
+    #
+    #                 # 更新激活值相关字段
+    #                 activation_fields = {
+    #                     'activation_value',
+    #                     'access_history',
+    #                     'last_access_time',
+    #                     'access_count',
+    #                     'importance_score',
+    #                     'version',
+    #                     'statement',  # Statement 节点的内容字段
+    #                     'content'  # MemorySummary 节点的内容字段
+    #                 }
+    #
+    #                 # 只更新激活值相关字段，保留原始节点的其他字段
+    #                 for field in activation_fields:
+    #                     if field in updated_map[node_id]:
+    #                         merged_node[field] = updated_map[node_id][field]
+    #
+    #                 merged_nodes.append(merged_node)
+    #             else:
+    #                 # 如果没有更新数据，保留原始节点
+    #                 merged_nodes.append(original_node)
+    #
+    #         updated_results[key] = merged_nodes
+    #     else:
+    #         # 更新失败，记录错误但保留原始结果
+    #         logger.warning(
+    #             f"更新 {key} 激活值失败: {str(update_result)}"
+    #         )
 
-            # 创建 ID 到更新节点的映射（用于快速查找激活值数据）
-            updated_map = {node.get('id'): node for node in updated_nodes if node.get('id')}
-
-            # 合并数据：保留所有原始节点（包括重复的），用更新后的激活值数据填充
-            merged_nodes = []
-            for original_node in original_nodes:
-                node_id = original_node.get('id')
-                if node_id and node_id in updated_map:
-                    # 从原始节点开始，用更新后的激活值数据覆盖
-                    merged_node = original_node.copy()
-
-                    # 更新激活值相关字段
-                    activation_fields = {
-                        'activation_value',
-                        'access_history',
-                        'last_access_time',
-                        'access_count',
-                        'importance_score',
-                        'version',
-                        'statement',  # Statement 节点的内容字段
-                        'content'  # MemorySummary 节点的内容字段
-                    }
-
-                    # 只更新激活值相关字段，保留原始节点的其他字段
-                    for field in activation_fields:
-                        if field in updated_map[node_id]:
-                            merged_node[field] = updated_map[node_id][field]
-
-                    merged_nodes.append(merged_node)
-                else:
-                    # 如果没有更新数据，保留原始节点
-                    merged_nodes.append(original_node)
-
-            updated_results[key] = merged_nodes
-        else:
-            # 更新失败，记录错误但保留原始结果
-            logger.warning(
-                f"更新 {key} 激活值失败: {str(update_result)}"
-            )
-
-    return updated_results
+    # return updated_results
 
 
 async def search_perceptual_by_fulltext(
@@ -385,6 +387,31 @@ async def search_by_embedding(
     from app.core.memory.src.search import deduplicate_results
     records = deduplicate_results(records)
     return records
+
+
+async def get_nodes_by_ids(
+        connector: Neo4jConnector,
+        node_type: Neo4jNodeType,
+        ids: list[str],
+) -> list[dict[str, Any]]:
+    return await connector.execute_query(
+        NODE_ID_QUERY_CYPHER_MAPPING[node_type],
+        ids=ids
+    )
+
+
+async def get_relation_between_entities(
+        connector: Neo4jConnector,
+        end_user_id: str,
+        source_id: str,
+        target_id: str,
+) -> list[dict[str, Any]]:
+    return await connector.execute_query(
+        SEARCH_RELATION_BETWEEN_ENTITIES,
+        end_user_id=end_user_id,
+        source_id=source_id,
+        target_id=target_id
+    )
 
 
 async def search_graph(
@@ -555,6 +582,21 @@ async def search_graph_by_embedding(
         logger.info("[PERF] Skipping activation updates (only summaries)")
 
     return results
+
+
+async def search_graph_by_relationship(
+        connector: Neo4jConnector,
+        end_user_id: str,
+        source_id: str,
+        predicates: list[str],
+):
+    related_node = await connector.execute_query(
+        SEARCH_ENITITES_BY_RELATIONSHIP,
+        end_user_id=end_user_id,
+        source_id=source_id,
+        predicates=predicates,
+    )
+    return related_node
 
 
 async def search_user_metadata(

@@ -1821,6 +1821,25 @@ ORDER BY score DESC
 LIMIT $limit
 """
 
+SEARCH_ENITITES_BY_RELATIONSHIP = """
+MATCH (n:ExtractedEntity)-[r]-(m:ExtractedEntity)
+WHERE (n.end_user_id = $end_user_id AND n.id = $source_id AND r.predicate IN $predicates)
+RETURN m.id AS id,
+       n.name AS source_name,
+       r.predicate AS relation_predicate,
+       m.name AS target_name
+"""
+
+SEARCH_RELATION_BETWEEN_ENTITIES = """
+MATCH (n:ExtractedEntity)-[r]-(m:ExtractedEntity)
+WHERE n.end_user_id = $end_user_id AND n.id = $source_id AND m.id = $target_id
+RETURN n.id AS source_id,
+       n.name AS source_name,
+       r.predicate AS relation_predicate,
+       m.id AS target_id,
+       m.name AS target_name
+"""
+
 SEARCH_USER_METADATA = """
 MATCH (n:ExtractedEntity)
 WHERE (n.end_user_id = $end_user_id AND n.entity_type ='用户')
@@ -1833,7 +1852,8 @@ RETURN n.description AS description,
        n.goals AS goals,
        n.interests AS interests,
        n.relations AS relations,
-       n.traits AS traits
+       n.traits AS traits,
+       n.id AS id
 """
 
 FULLTEXT_QUERY_CYPHER_MAPPING = {
