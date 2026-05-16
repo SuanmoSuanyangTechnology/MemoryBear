@@ -21,7 +21,7 @@ from uuid import UUID
 import redis
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.cache import InterestMemoryCache
@@ -493,6 +493,7 @@ class MemoryAgentService:
             language: 语言
         """
         from app.core.memory.sliding_window.window_utils import (
+            ensure_conversation_exists,
             write_batch_to_memory_messages,
             execute_pending_from_pool,
         )
@@ -501,6 +502,11 @@ class MemoryAgentService:
             msg if isinstance(msg, dict) else msg.model_dump(exclude_none=True)
             for msg in messages
         ]
+
+        await ensure_conversation_exists(
+            conversation_id=conversation_id,
+            workspace_id=workspace_id,
+        )
 
         await write_batch_to_memory_messages(
             conversation_id=conversation_id,

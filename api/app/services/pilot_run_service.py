@@ -136,7 +136,7 @@ async def run_pilot_extraction(
 
         if memory_config.pruning_enabled:
             try:
-                from app.core.memory.storage_services.extraction_engine.data_preprocessing import (
+                from app.core.memory.storage_services.extraction_engine.data_preprocessing.data_pruning import (
                     SemanticPruner,
                 )
                 from app.core.memory.models.config_models import PruningConfig

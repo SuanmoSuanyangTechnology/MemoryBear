@@ -138,7 +138,7 @@ class AppChatService:
                     conversation_id=conversation_id,
                     role="assistant",
                     content=opening,
-                    meta_data={"suggested_questions": suggested_questions},
+                    meta_data={"suggested_questions": suggested_questions}
                 )
                 # 重新加载历史（包含刚写入的开场白）
                 history = await self.conversation_service.get_conversation_history(
@@ -360,13 +360,13 @@ class AppChatService:
             conversation_id=conversation_id,
             role="user",
             content=message,
-            meta_data=human_meta,
+            meta_data=human_meta
         )
         ai_message = self.conversation_service.add_message(
             conversation_id=conversation_id,
             role="assistant",
             content=result["content"],
-            meta_data=assistant_meta,
+            meta_data=assistant_meta
         )
         message_id = ai_message.id
 
@@ -498,7 +498,7 @@ class AppChatService:
                         conversation_id=conversation_id,
                         role="assistant",
                         content=opening,
-                        meta_data={"suggested_questions": suggested_questions},
+                        meta_data={"suggested_questions": suggested_questions}
                     )
                     # 重新加载历史（包含刚写入的开场白）
                     history = await self.conversation_service.get_conversation_history(
@@ -760,14 +760,14 @@ class AppChatService:
                 conversation_id=conversation_id,
                 role="user",
                 content=message,
-                meta_data=human_meta,
+                meta_data=human_meta
             )
             self.conversation_service.add_message(
                 message_id=message_id,
                 conversation_id=conversation_id,
                 role="assistant",
                 content=full_content,
-                meta_data=assistant_meta,
+                meta_data=assistant_meta
             )
 
             # 更新 Agent 执行记录为 completed
@@ -863,6 +863,7 @@ class AppChatService:
             variables=variables,
             use_llm_routing=True,  # 默认启用 LLM 路由
             web_search=web_search,  # 网络搜索参数
+            memory=memory  # 记忆功能参数
         )
 
         elapsed_time = time.time() - start_time
@@ -871,7 +872,7 @@ class AppChatService:
         self.conversation_service.add_message(
             conversation_id=conversation_id,
             role="user",
-            content=message,
+            content=message
         )
 
         ai_message = self.conversation_service.add_message(
@@ -939,6 +940,7 @@ class AppChatService:
                     variables=variables,
                     use_llm_routing=True,
                     web_search=web_search,  # 网络搜索参数
+                    memory=memory,  # 记忆功能参数
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id
             ):
@@ -969,7 +971,7 @@ class AppChatService:
             self.conversation_service.add_message(
                 conversation_id=conversation_id,
                 role="user",
-                content=message,
+                content=message
             )
 
             self.conversation_service.add_message(

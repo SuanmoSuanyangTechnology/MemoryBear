@@ -249,6 +249,50 @@ async def enrich_file_content(messages: List[dict]) -> None:
 # ──────────────────────────────────────────────
 
 
+async def ensure_conversation_exists(
+    conversation_id: str,
+    workspace_id: str = "",
+) -> None:
+    """确保 conversations 表中存在该记录，fasle时创建最小条目。
+
+    memory_messages.conversation_id 有 FK → conversations.id 约束。
+    工作流 MemoryWriteNode 等路径可能在 conversation 创建前就触发写入，
+    这里做容错兜底。
+
+    Args:
+        conversation_id: 会话 ID
+        workspace_id: 工作空间 ID（缺失时用 sentinel UUID）
+    """
+    import uuid as _uuid
+
+    try:
+        with get_db_context() as db:
+            existing = db.get(Conversation, _uuid.UUID(conversation_id))
+            if existing is not None:
+                return
+
+            SENTINEL_APP_ID = _uuid.UUID("00000000-0000-0000-0000-000000000000")
+            _ws_id = _uuid.UUID(workspace_id) if workspace_id else SENTINEL_APP_ID
+
+            conv = Conversation(
+                id=_uuid.UUID(conversation_id),
+                app_id=SENTINEL_APP_ID,
+                workspace_id=_ws_id,
+                is_draft=True,
+            )
+            db.add(conv)
+            db.commit()
+            logger.info(
+                f"[WindowUtils] 创建兜底 Conversation: conv={conversation_id}"
+            )
+    except Exception as e:
+        logger.warning(
+            f"[WindowUtils] ensure_conversation_exists 失败: "
+            f"conv={conversation_id}, err={e}",
+            exc_info=True,
+        )
+
+
 async def write_batch_to_memory_messages(
     conversation_id: str,
     messages: List[dict],
@@ -416,10 +460,7 @@ async def execute_pending_from_pool(
         return 0
 
     if write_cursor is None:
-        logger.warning(
-            f"[execute_pending_from_pool] 对话不存在或无 write_cursor: conv={conversation_id}"
-        )
-        return 0
+        write_cursor = 0
 
     # 3. 查询待处理消息
     try:
