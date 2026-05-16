@@ -484,8 +484,23 @@ async def execute_pending_from_pool(
         )
 
     try:
-        _workspace_id = _uuid.UUID(workspace_id) if workspace_id else None
-        _config_id = _uuid.UUID(config_id) if config_id else None
+        try:
+            _workspace_id = _uuid.UUID(workspace_id) if workspace_id else None
+        except (ValueError, AttributeError):
+            logger.warning(
+                f"[execute_pending_from_pool] workspace_id 非合法 UUID，回退为 None: "
+                f"conv={conversation_id}, workspace_id={workspace_id!r}"
+            )
+            _workspace_id = None
+        try:
+            _config_id = _uuid.UUID(config_id) if config_id else None
+        except (ValueError, AttributeError):
+            logger.warning(
+                f"[execute_pending_from_pool] config_id 非合法 UUID，回退为 None: "
+                f"conv={conversation_id}, config_id={config_id!r}"
+            )
+            _config_id = None
+
         with get_db_context() as db:
             memory_config = MemoryConfigService(db).load_memory_config(
                 config_id=_config_id,

@@ -220,6 +220,7 @@ class MemoryService:
         workspace_id: str = "",
         end_user_id: str = "",
         should_memorize: bool = True,
+        language: str = "zh",
     ) -> Optional["MemoryMessage"]:
         """Agent 对话消息同步到 memory_messages 表（类方法，无需实例化）。
 
@@ -236,18 +237,20 @@ class MemoryService:
             conversation_id: 会话 ID
             message: Message ORM 对象（已持久化到 messages 表）
             app_id: 应用 ID，用于检查 memory.enabled
-            is_draft: 是否为草稿会话（保留参数，当前不使用——未发布的应用一律不写候选池）
+            is_draft: 保留参数（当前未使用）——产品规则不区分草稿/正式
             config_id: 记忆配置 ID（传给 Scheduler，可为空）
             workspace_id: 工作空间 ID
             end_user_id: 终端用户 ID（celery_task_scheduler 的分片键，保证 per-user 串行）
             should_memorize: 会话级记忆开关——用户在前端切换的状态。
                 True → 触发 Write_Pipeline 萃取；False → 仍写候选池但 cursor 只推进不萃取。
+            language: 对话语言，透传给 SlidingWindowScheduler 用于下游 prompt 选择。
+                调用方（conversation_service）若不知道语言可保持默认 "zh"。
 
         Returns:
             MemoryMessage 实例若成功写入，否则 None
         """
         # Step 0: 检查应用级记忆门禁
-        if not await cls._check_memory_enabled(app_id, is_draft):
+        if not await cls._check_memory_enabled(app_id):
             logger.debug(
                 f"[MemoryService] memory.enabled=false，跳过: "
                 f"conv={conversation_id}, app={app_id}, is_draft={is_draft}"
@@ -277,6 +280,7 @@ class MemoryService:
             config_id=config_id,
             end_user_id=end_user_id,
             workspace_id=workspace_id,
+            language=language,
         )
 
         return memory_msg
@@ -310,7 +314,7 @@ class MemoryService:
             MemoryMessage 实例若成功写入，否则 None
         """
         # Step 0: 检查应用级记忆门禁
-        if not await self._check_memory_enabled(app_id, is_draft):
+        if not await self._check_memory_enabled(app_id):
             logger.debug(
                 f"[MemoryService] memory.enabled=false，跳过: "
                 f"conv={conversation_id}, app={app_id}, is_draft={is_draft}"
@@ -540,14 +544,11 @@ class MemoryService:
             return None
 
     @staticmethod
-    async def _check_memory_enabled(app_id: str, is_draft: bool) -> bool:
+    async def _check_memory_enabled(app_id: str) -> bool:
         """查询 app_releases.config -> 'memory' ->> 'enabled'。
 
         只读应用当前发布版本（is_active=True 且最新）的配置——这是产品规则：
         agent 应用必须发布之后配置才生效；未发布的应用不写入候选池。
-
-        is_draft 参数保留向后兼容，当前实现不再使用它（无论 is_draft 与否，
-        都读发布版本）。
 
         返回 False 若：
           - 应用未发布（无 is_active=True 的记录）
@@ -556,7 +557,6 @@ class MemoryService:
 
         Args:
             app_id: 应用 ID
-            is_draft: 保留参数，当前不使用
 
         Returns:
             True 表示该应用启用了记忆功能（已发布且 memory.enabled=true）
@@ -583,7 +583,7 @@ class MemoryService:
         except Exception as e:
             logger.warning(
                 f"[MemoryService] 检查 memory.enabled 失败，默认返回 False: "
-                f"app={app_id}, is_draft={is_draft}, err={e}",
+                f"app={app_id}, err={e}",
                 exc_info=True,
             )
             return False
