@@ -200,6 +200,7 @@ class ConversationService:
                 True → memory_messages.should_memorize=true，会触发 Write_Pipeline；
                 False → memory_messages.should_memorize=false，cursor 只推进不萃取。
                 由调用方根据请求 payload.memory 透传。
+                注：仅当 sync_memory=True 时生效；sync_memory=False 时本参数被忽略。
 
         Returns:
             Message: Newly created Message instance.
@@ -241,6 +242,8 @@ class ConversationService:
                     "message_id": str(message.id),
                     "role": role,
                     "content_length": len(content),
+                    "sync_memory": sync_memory,
+                    "memorize_flag": memorize_flag,
                 },
             )
 

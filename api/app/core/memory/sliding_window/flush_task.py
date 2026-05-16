@@ -20,7 +20,10 @@ from app.db import get_db_context
 from app.models.conversation_model import Conversation
 from app.models.memory_message_model import MemoryMessage
 
-from app.core.memory.sliding_window.window_utils import advance_write_cursor
+from app.core.memory.sliding_window.window_utils import (
+    advance_write_cursor,
+    message_to_dict,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +79,7 @@ class FlushTask:
             conversation_id=conversation_id,
             end_user_id=end_user_id,
             workspace_id=workspace_id,
-            enforce_window=False,  # 兜底路径：无视下文条件，强制处理所有 pending
+            enforce_window=False,  # 兜底路径，详见 execute_pending_from_pool docstring
         )
         logger.info(
             f"[FlushTask] Layer 2 完成 user 消息: conv={conversation_id}, processed={user_processed}"
@@ -209,8 +212,6 @@ class FlushTask:
 
         Requirements: 4.3
         """
-        from app.core.memory.sliding_window.window_utils import message_to_dict
-
         try:
             with get_db_context() as db:
                 messages = (

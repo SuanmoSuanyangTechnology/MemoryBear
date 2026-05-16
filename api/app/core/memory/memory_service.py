@@ -39,6 +39,14 @@ from app.services.memory_config_service import MemoryConfigService
 logger = logging.getLogger(__name__)
 
 
+# Redis key 前缀（与 app.tasks.CONV_ACTIVE_KEY_PREFIX 保持一致；这里独立定义
+# 是为了避免 memory_service ↔ tasks 之间形成循环 import）
+CONV_ACTIVE_KEY_PREFIX = "conv_active:"
+# 对话活跃 key 的 TTL（秒）。每写入一条 memory_messages 都会 SETEX 续期，
+# 超过该时长无新消息后 scan_idle_conversations_task 会派发兜底 FlushTask
+CONV_ACTIVE_TTL_SECONDS = 300
+
+
 class MemoryService:
     """记忆模块统一入口
 
@@ -284,7 +292,7 @@ class MemoryService:
     ) -> Optional["MemoryMessage"]:
         """Agent 对话消息同步到 memory_messages 表。
 
-        1. 检查 app_releases.config.memory.enabled（草稿会话使用草稿配置）
+        1. 检查 app_releases.config.memory.enabled（按产品规则：未发布的应用一律视为关闭）
         2. 若 false → 返回 None，消息不进入 memory_messages
         3. 若 true → 写入 memory_messages（should_memorize=TRUE）
         4. 刷新 Redis 活跃 key（conv_active:{conversation_id}）
@@ -294,7 +302,7 @@ class MemoryService:
             conversation_id: 会话 ID
             message: Message ORM 对象（已持久化到 messages 表）
             app_id: 应用 ID，用于检查 memory.enabled
-            is_draft: 是否为草稿会话
+            is_draft: 保留参数（当前未使用）——产品规则不区分草稿/正式
             config_id: 记忆配置 ID
             workspace_id: 工作空间 ID
 
@@ -502,8 +510,8 @@ class MemoryService:
                 max_seq = db.execute(
                     sa_select(func.coalesce(func.max(MemoryMessage.message_seq), 0))
                     .where(MemoryMessage.conversation_id == uuid.UUID(conversation_id))
-                ).scalar() or 0
-                next_seq = max_seq + 1
+                ).scalar()
+                next_seq = (max_seq or 0) + 1
 
                 memory_msg = MemoryMessage(
                     id=uuid.uuid4(),
@@ -594,10 +602,11 @@ class MemoryService:
             from app.aioRedis import get_thread_safe_redis
 
             redis_client = get_thread_safe_redis()
-            key = f"conv_active:{conversation_id}"
-            await redis_client.set(key, "1", ex=300)
+            key = f"{CONV_ACTIVE_KEY_PREFIX}{conversation_id}"
+            await redis_client.set(key, "1", ex=CONV_ACTIVE_TTL_SECONDS)
             logger.debug(
-                f"[MemoryService] 活跃 key 已刷新: key={key}, ttl=300s"
+                f"[MemoryService] 活跃 key 已刷新: key={key}, "
+                f"ttl={CONV_ACTIVE_TTL_SECONDS}s"
             )
         except Exception as e:
             logger.warning(

@@ -15,6 +15,7 @@ Requirements: 2.1, 2.2, 6.1, 6.2, 6.4
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
@@ -24,6 +25,9 @@ if TYPE_CHECKING:
     from app.schemas.memory_config_schema import MemoryConfig
 
 logger = logging.getLogger(__name__)
+
+# 当 LLM 未返回 memory_type 枚举时使用的占位值（写入 Redis JSON 时用）
+_MEMORY_TYPE_NULL = "NULL"
 
 
 class PruningPipeline:
@@ -365,7 +369,6 @@ class PruningPipeline:
         """
         try:
             from app.aioRedis import get_thread_safe_redis
-            import json
 
             redis_client = get_thread_safe_redis()
             value = await redis_client.get(cache_key)
@@ -373,6 +376,8 @@ class PruningPipeline:
                 return None, None
 
             obj = json.loads(value)
+            if not isinstance(obj, dict):
+                return None, None
             return obj.get("hint"), obj.get("type")
         except Exception as e:
             logger.warning(
@@ -398,18 +403,18 @@ class PruningPipeline:
         """
         try:
             from app.aioRedis import get_thread_safe_redis
-            import json
 
             redis_client = get_thread_safe_redis()
+            type_value = memory_type or "NULL"
             payload = json.dumps(
-                {"hint": pruned_content, "type": memory_type or "NULL"},
+                {"hint": pruned_content, "type": type_value},
                 ensure_ascii=False,
             )
             await redis_client.set(cache_key, payload, ex=self.CACHE_TTL)
             logger.info(
                 f"[PruningPipeline] Redis 缓存写入: key={cache_key}, "
                 f"ttl={self.CACHE_TTL}s, content_len={len(pruned_content)}, "
-                f"memory_type={memory_type}"
+                f"memory_type={type_value}"
             )
         except Exception as e:
             logger.warning(

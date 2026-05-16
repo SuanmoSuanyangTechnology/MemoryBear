@@ -1492,7 +1492,6 @@ def write_message_task(
         language: 语言类型 ("zh" 中文, "en" 英文)
         conversation_id: 对话 ID（用于候选池消费模式）
         workspace_id: 工作空间 ID（候选池消费模式加载 memory_config 时使用）
-        language: 语言类型 ("zh" 中文, "en" 英文)
 
     Returns:
         Dict containing the result and metadata
@@ -1503,7 +1502,9 @@ def write_message_task(
     logger.info(
         f"[CELERY WRITE] Starting write task - end_user_id={end_user_id}, "
         f"config_id={config_id} (type: {type(config_id).__name__}), "
-        f"storage_type={storage_type}, language={language}")
+        f"storage_type={storage_type}, language={language}, "
+        f"conversation_id={conversation_id or '-'}, "
+        f"workspace_id={workspace_id or '-'}")
     start_time = time.time()
 
     # Convert config_id to UUID
@@ -1556,7 +1557,7 @@ def write_message_task(
                 conversation_id=conversation_id,
                 end_user_id=end_user_id,
                 config_id=str(actual_config_id) if actual_config_id else "",
-                workspace_id=workspace_id or "",
+                workspace_id=workspace_id,
                 language=language,
             )
             return {"status": "success", "processed": processed}
@@ -4232,6 +4233,19 @@ def sliding_window_write_task(
                 )
 
 
+# ──────────────────────────────────────────────
+# 滑动窗口写入相关常量
+# ──────────────────────────────────────────────
+
+# Redis key 前缀
+CONV_ACTIVE_KEY_PREFIX = "conv_active:"
+FLUSH_LOCK_KEY_PREFIX = "flush_lock:"
+
+# Flush 任务幂等锁 TTL（秒）：派发 flush_conversation_task 时 SETNX 这把锁
+# 防止同一对话被并发兜底，FlushTask 完成（成功或失败）会主动 DELETE 释放
+FLUSH_LOCK_TTL_SECONDS = 600
+
+
 @celery_app.task(
     bind=True,
     name="app.tasks.flush_conversation",
@@ -4287,7 +4301,7 @@ def flush_conversation_task(self, conversation_id: str) -> None:
             )
             # 释放幂等锁，后续 Beat 会重新派发
             try:
-                redis_client.delete(f"flush_lock:{conversation_id}")
+                redis_client.delete(f"{FLUSH_LOCK_KEY_PREFIX}{conversation_id}")
             except Exception:
                 pass
             return
@@ -4316,7 +4330,7 @@ def flush_conversation_task(self, conversation_id: str) -> None:
                 logger.warning(f"[FlushTask] 释放写入锁失败: {e}")
         if redis_client:
             try:
-                redis_client.delete(f"flush_lock:{conversation_id}")
+                redis_client.delete(f"{FLUSH_LOCK_KEY_PREFIX}{conversation_id}")
             except Exception as e:
                 logger.warning(
                     f"[FlushTask] 删除 flush_lock 失败: conv={conversation_id}, err={e}"
@@ -4331,7 +4345,6 @@ def flush_conversation_task(self, conversation_id: str) -> None:
 )
 def scan_idle_conversations_task() -> None:
     """Celery Beat 定时任务（每 60 秒）：扫描空闲对话并派发兜底写入任务。
-
     扫描条件（三者同时满足才派发 flush_conversation_task）：
     1. 数据库中存在 message_seq > write_cursor 的未写入消息
     2. Redis 中 conv_active:{conversation_id} 已过期或不存在（对话空闲 >5 分钟）
@@ -4356,13 +4369,11 @@ def scan_idle_conversations_task() -> None:
     # 单独构造一个连接到 settings.REDIS_DB 的客户端，用于读取 conv_active key
     active_redis_client = None
     try:
-        from app.core.config import settings as _settings
-
         active_redis_client = redis.StrictRedis(
-            host=_settings.REDIS_HOST,
-            port=_settings.REDIS_PORT,
-            db=_settings.REDIS_DB,
-            password=_settings.REDIS_PASSWORD if _settings.REDIS_PASSWORD else None,
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB,
+            password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
             decode_responses=True,
         )
         active_redis_client.ping()
@@ -4415,7 +4426,7 @@ def scan_idle_conversations_task() -> None:
             # conv_active 写在 settings.REDIS_DB（DB 13），需要用专属 client 读取
             if active_redis_client is not None:
                 try:
-                    active_key = f"conv_active:{conv_id_str}"
+                    active_key = f"{CONV_ACTIVE_KEY_PREFIX}{conv_id_str}"
                     if active_redis_client.exists(active_key):
                         skipped_active += 1
                         continue
@@ -4431,8 +4442,11 @@ def scan_idle_conversations_task() -> None:
 
             # 原子写入 flush_lock（nx=True 保证只有一个 worker 能成功）
             try:
-                flush_lock_key = f"flush_lock:{conv_id_str}"
-                acquired = redis_client.set(flush_lock_key, "1", ex=600, nx=True)
+                flush_lock_key = f"{FLUSH_LOCK_KEY_PREFIX}{conv_id_str}"
+                acquired = redis_client.set(
+                    flush_lock_key, "1",
+                    ex=FLUSH_LOCK_TTL_SECONDS, nx=True,
+                )
                 if not acquired:
                     # 锁已存在，说明已有 Flush_Task 在处理
                     skipped_locked += 1
@@ -4459,6 +4473,13 @@ def scan_idle_conversations_task() -> None:
 
     except Exception as e:
         logger.error(f"[ScanIdle] 扫描任务失败: err={e}", exc_info=True)
+    finally:
+        # 释放专属于 DB 13 的 Redis client，避免长跑 Beat 进程慢慢累积 socket fd
+        if active_redis_client is not None:
+            try:
+                active_redis_client.close()
+            except Exception:
+                pass
 
     logger.info(
         f"[ScanIdle] 扫描完成: 派发={dispatched}, 跳过(活跃)={skipped_active}, 跳过(已锁)={skipped_locked}"
