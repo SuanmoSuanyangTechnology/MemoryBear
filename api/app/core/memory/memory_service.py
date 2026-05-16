@@ -210,6 +210,7 @@ class MemoryService:
         is_draft: bool = False,
         config_id: str = "",
         workspace_id: str = "",
+        end_user_id: str = "",
     ) -> Optional["MemoryMessage"]:
         """Agent 对话消息同步到 memory_messages 表（类方法，无需实例化）。
 
@@ -229,6 +230,7 @@ class MemoryService:
             is_draft: 是否为草稿会话
             config_id: 记忆配置 ID（传给 Scheduler，可为空）
             workspace_id: 工作空间 ID
+            end_user_id: 终端用户 ID（celery_task_scheduler 的分片键，保证 per-user 串行）
 
         Returns:
             MemoryMessage 实例若成功写入，否则 None
@@ -277,6 +279,7 @@ class MemoryService:
         await dispatch_to_scheduler(
             conversation_id=str(conversation_id),
             config_id=config_id,
+            end_user_id=end_user_id,
             workspace_id=workspace_id,
         )
 

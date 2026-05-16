@@ -3,8 +3,9 @@ SlidingWindowScheduler — 滑动窗口写入调度器（条件检查 + 触发 L
 
 职责：
 - 在 MemoryService 将消息写入 memory_messages 表后，检查下文条件
-- 若任一待处理 user 消息的下文 ≥3 个 memorable Q，则调用 execute_pending_from_pool()
-- 不再自行派发 Celery 任务——统一委托给 Layer 2 执行
+- 若任一待处理 user 消息的下文 ≥3 个 memorable Q，则派发到 celery_task_scheduler
+  按 end_user_id 串行执行 execute_pending_from_pool()
+- 不再在调用进程内同步 await Layer 2，统一通过 scheduler 入队保证 per-user 串行
 
 Requirements: 1.1, 1.2
 """
@@ -18,8 +19,6 @@ from sqlalchemy import func, select
 from app.db import get_db_context
 from app.models.conversation_model import Conversation
 from app.models.memory_message_model import MemoryMessage
-
-from app.core.memory.sliding_window.window_utils import execute_pending_from_pool
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +46,9 @@ class SlidingWindowScheduler:
 
         1. 查询 write_cursor
         2. 查询 message_seq > write_cursor 的 user 消息
-        3. 若任一消息下游 ≥ WINDOW_SIZE 个 memorable user Q → 调用 execute_pending_from_pool()
-        4. should_memorize=FALSE 的消息先原子推进 write_cursor
+        3. should_memorize=FALSE 的消息先原子推进 write_cursor
+        4. 若任一消息下游 ≥ WINDOW_SIZE 个 memorable user Q
+           → 通过 celery_task_scheduler.push_task 按 end_user_id 串行派发候选池消费任务
         """
         if not conversation_id:
             logger.warning("[SlidingWindowScheduler] conversation_id 为空，跳过")
@@ -101,7 +101,7 @@ class SlidingWindowScheduler:
                     f"[SlidingWindowScheduler] 满足写入条件: "
                     f"conv={conversation_id}, seq={target_seq}, downstream={downstream_count}"
                 )
-                await execute_pending_from_pool(
+                self._enqueue_pending_consume(
                     conversation_id=conversation_id,
                     end_user_id=end_user_id,
                     config_id=config_id,
@@ -113,6 +113,82 @@ class SlidingWindowScheduler:
         logger.debug(
             f"[SlidingWindowScheduler] 下文不足，等待更多消息: conv={conversation_id}"
         )
+
+    @staticmethod
+    def _enqueue_pending_consume(
+        conversation_id: str,
+        end_user_id: str,
+        config_id: str,
+        workspace_id: str,
+        language: str,
+    ) -> None:
+        """通过 celery_task_scheduler 按 end_user_id 串行派发候选池消费任务。
+
+        分片键 = end_user_id，与旧 write_message 任务沿用同一把 lock_key
+        ("{task_name}:{end_user_id}")，保证同一 user 的所有写入串行。
+
+        end_user_id 为空时回退到本进程同步执行（不阻塞主流程，但失去 per-user 串行保证）。
+        """
+        if not end_user_id:
+            logger.warning(
+                f"[SlidingWindowScheduler] end_user_id 为空，回退到同步执行: conv={conversation_id}"
+            )
+            try:
+                import asyncio
+                from app.core.memory.sliding_window.window_utils import execute_pending_from_pool
+
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.ensure_future(execute_pending_from_pool(
+                        conversation_id=conversation_id,
+                        end_user_id=end_user_id,
+                        config_id=config_id,
+                        workspace_id=workspace_id,
+                        language=language,
+                    ))
+                else:
+                    loop.run_until_complete(execute_pending_from_pool(
+                        conversation_id=conversation_id,
+                        end_user_id=end_user_id,
+                        config_id=config_id,
+                        workspace_id=workspace_id,
+                        language=language,
+                    ))
+            except Exception as e:
+                logger.error(
+                    f"[SlidingWindowScheduler] 同步执行 execute_pending_from_pool 失败: "
+                    f"conv={conversation_id}, err={e}",
+                    exc_info=True,
+                )
+            return
+
+        try:
+            from app.celery_task_scheduler import scheduler as celery_scheduler
+
+            msg_id = celery_scheduler.push_task(
+                "app.core.memory.agent.write_message",
+                end_user_id,
+                {
+                    "end_user_id": end_user_id,
+                    # 不传 message → write_message_task 走"仅消费候选池"模式
+                    "message": [],
+                    "config_id": config_id or "",
+                    "storage_type": "neo4j",
+                    "user_rag_memory_id": "",
+                    "language": language,
+                    "conversation_id": conversation_id,
+                },
+            )
+            logger.info(
+                f"[SlidingWindowScheduler] 已派发候选池消费任务: "
+                f"conv={conversation_id}, end_user_id={end_user_id}, msg_id={msg_id}"
+            )
+        except Exception as e:
+            logger.error(
+                f"[SlidingWindowScheduler] push_task 失败（不影响主流程）: "
+                f"conv={conversation_id}, end_user_id={end_user_id}, err={e}",
+                exc_info=True,
+            )
 
     # ──────────────────────────────────────────────
     # 内部方法

@@ -15,6 +15,8 @@ import json
 import os
 import time
 import uuid
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from uuid import UUID
 
@@ -56,6 +58,25 @@ config_logger = get_config_logger()
 
 # Initialize Neo4j connector for analytics functions
 _neo4j_connector = Neo4jConnector()
+
+# 标记当前 task/coroutine 已持有 per-end_user 写入锁（避免重入死锁）
+# 由 write_message_task 在 worker 上下文中设置；MemoryAgentService.write_memory 检查后跳过自加锁
+_write_lock_holder: ContextVar[Optional[str]] = ContextVar("_write_lock_holder", default=None)
+
+
+def _is_holding_write_lock(end_user_id: str) -> bool:
+    """判断当前上下文是否已持有 end_user_id 的写入锁。"""
+    return _write_lock_holder.get() == end_user_id
+
+
+def _set_write_lock_holder(end_user_id: str):
+    """标记当前上下文已持有 end_user_id 的写入锁。返回原 token 供 reset 使用。"""
+    return _write_lock_holder.set(end_user_id)
+
+
+def _reset_write_lock_holder(token):
+    """恢复 _write_lock_holder 到 set 之前的值。"""
+    _write_lock_holder.reset(token)
 
 
 class MemoryAgentService:
@@ -293,7 +314,117 @@ class MemoryAgentService:
         conversation_id = request.conversation_id
         start_time = time.time()
 
-        # ── Step 1: 解析配置 ── 通过 end_user_id 查找关联的 config_id / workspace_id，并从数据库加载完整 memory_config
+        # ── per-end_user 互斥锁 ── 与 celery_task_scheduler 的 lock_key 共享同一命名空间
+        # （app.core.memory.agent.write_message:{end_user_id}），保证 API 同步路径与
+        # scheduler worker 路径之间也按 end_user_id 串行
+        async with self._acquire_per_user_lock(end_user_id):
+            return await self._write_memory_locked(
+                end_user_id=end_user_id,
+                messages=messages,
+                config_id=config_id,
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+                language=language,
+                conversation_id=conversation_id,
+                db=db,
+                start_time=start_time,
+            )
+
+    @staticmethod
+    @asynccontextmanager
+    async def _acquire_per_user_lock(end_user_id: str):
+        """获取 per-end_user 互斥锁，与 Celery worker 共享 RedisFairLock key。
+
+        worker 路径（write_message_task）和 API 同步路径都使用同一把锁
+        memory_write:{end_user_id}，保证同一 user 任意路径之间也按顺序执行。
+
+        重入检测：若当前 contextvar 标记已持有同 end_user_id 的锁（典型场景：
+        worker 在 task 入口已加锁，再调用 MemoryAgentService.write_memory），
+        则跳过自加锁，避免自死锁。
+
+        celery_task_scheduler 自身在 lock_key="{task_name}:{user_id}" 上做的
+        是 worker 之间串行（简单 SET-NX），与 RedisFairLock 用不同的 key 互不冲突。
+
+        失败（Redis 不可用）时不阻塞主流程，仅记录 warning 后放行。
+        """
+        if not end_user_id:
+            yield
+            return
+
+        # 重入检测：上层已经持有同 user 的锁，本层跳过
+        if _is_holding_write_lock(end_user_id):
+            logger.debug(
+                f"[write_memory] 当前上下文已持有锁，跳过重复加锁: end_user_id={end_user_id}"
+            )
+            yield
+            return
+
+        from app.utils.redis_lock import RedisFairLock
+
+        redis_client = None
+        try:
+            redis_client = redis.StrictRedis(
+                host=settings.REDIS_HOST,
+                port=settings.REDIS_PORT,
+                db=settings.REDIS_DB_CELERY_BACKEND,
+                password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
+                decode_responses=True,
+            )
+            redis_client.ping()
+        except Exception as e:
+            logger.warning(
+                f"[write_memory] 无法获取 Redis 客户端，跳过锁保护: end_user_id={end_user_id}, err={e}"
+            )
+            redis_client = None
+
+        if redis_client is None:
+            yield
+            return
+
+        lock = RedisFairLock(
+            key=f"memory_write:{end_user_id}",
+            redis_client=redis_client,
+            expire=600,
+            timeout=3600,
+            auto_renewal=True,
+        )
+
+        # acquire 是同步阻塞，放进线程池避免阻塞 event loop
+        import asyncio
+
+        acquired = await asyncio.to_thread(lock.acquire)
+        if not acquired:
+            logger.warning(
+                f"[write_memory] 获取锁超时，跳过本次写入: end_user_id={end_user_id}"
+            )
+            yield
+            return
+
+        token = _set_write_lock_holder(end_user_id)
+        try:
+            yield
+        finally:
+            _reset_write_lock_holder(token)
+            try:
+                await asyncio.to_thread(lock.release)
+            except Exception as e:
+                logger.warning(
+                    f"[write_memory] 释放锁失败（不影响主流程）: end_user_id={end_user_id}, err={e}"
+                )
+
+    async def _write_memory_locked(
+            self,
+            end_user_id: str,
+            messages,
+            config_id,
+            storage_type,
+            user_rag_memory_id,
+            language,
+            conversation_id,
+            db: Session,
+            start_time: float,
+    ) -> str:
+        """write_memory 的核心实现（已持有 per-end_user 锁）。"""
         memory_config = await self._resolve_and_load_config(
             end_user_id, config_id, db, start_time
         )
