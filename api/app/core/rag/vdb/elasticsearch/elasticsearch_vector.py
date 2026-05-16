@@ -30,7 +30,7 @@ class ElasticSearchVector(BaseVector):
     def __init__(self, index_name: str, client: Elasticsearch,
                  embedding_config: ModelApiKey, reranker_config: ModelApiKey):
         super().__init__(index_name.lower())
-        
+
         # 初始化 Embedding 模型（自动支持火山引擎多模态）
         self.embeddings = RedBearEmbeddings(RedBearModelConfig(
             model_name=embedding_config.model_name,
@@ -39,7 +39,7 @@ class ElasticSearchVector(BaseVector):
             base_url=embedding_config.api_base
         ))
         self.is_multimodal_embedding = self.embeddings.is_multimodal_supported()
-        
+
         self.reranker = RedBearRerank(RedBearModelConfig(
             model_name=reranker_config.model_name,
             provider=reranker_config.provider,
@@ -290,7 +290,7 @@ class ElasticSearchVector(BaseVector):
             if chunk_type == "qa":
                 metadata["question"] = source.get(Field.QUESTION.value, "")
                 metadata["answer"] = source.get(Field.ANSWER.value, "")
-                page_content = f"Q: {metadata['question']}\nA: {metadata['answer']}"
+                page_content = f"question: {metadata['question']}\nanswer: {metadata['answer']}"
 
             docs_and_scores.append((DocumentChunk(page_content=page_content, vector=vector, metadata=metadata), score))
 
@@ -516,7 +516,7 @@ class ElasticSearchVector(BaseVector):
             if chunk_type == "qa":
                 question = source.get(Field.QUESTION.value, "")
                 answer = source.get(Field.ANSWER.value, "")
-                page_content = f"Q: {question}\nA: {answer}"
+                page_content = f"question: {question}\nanswer: {answer}"
                 metadata["chunk_type"] = "qa"
                 metadata["question"] = question
                 metadata["answer"] = answer
@@ -593,7 +593,7 @@ class ElasticSearchVector(BaseVector):
             query=query_str,
         )
         # logger.info(result)
-        
+
         if "errors" in result:
             raise ValueError(f"Error during query: {result['errors']}")
 
@@ -609,7 +609,7 @@ class ElasticSearchVector(BaseVector):
             if chunk_type == "qa":
                 question = source.get(Field.QUESTION.value, "")
                 answer = source.get(Field.ANSWER.value, "")
-                page_content = f"Q: {question}\nA: {answer}"
+                page_content = f"question: {question}\nanswer: {answer}"
                 metadata["chunk_type"] = "qa"
                 metadata["question"] = question
                 metadata["answer"] = answer
@@ -617,7 +617,7 @@ class ElasticSearchVector(BaseVector):
             # Normalize the score to the [0,1] interval
             normalized_score = res["_score"] / max_score
             docs_and_scores.append((DocumentChunk(page_content=page_content, metadata=metadata), normalized_score))
-        
+
         docs = []
         for doc, score in docs_and_scores:
             # check score threshold
