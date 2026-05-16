@@ -1534,7 +1534,29 @@ def write_message_task(
             # Log but continue - will fail later with proper error
             pass
 
-    async def _run() -> str:
+    async def _run() -> str | dict:
+        """两种模式：
+        - 候选池消费模式：message 为空且 conversation_id 非空 → 直接执行 Layer 2
+        - 完整写入模式：走 MemoryAgentService.write_memory（API write 路径专用）
+        """
+        # 候选池消费模式（Agent 对话 / 工作流 MemoryWriteNode 路径）
+        if (not message) and conversation_id:
+            from app.core.memory.sliding_window.window_utils import execute_pending_from_pool
+
+            logger.info(
+                f"[CELERY WRITE] 候选池消费模式: "
+                f"conv={conversation_id}, end_user_id={end_user_id}"
+            )
+            processed = await execute_pending_from_pool(
+                conversation_id=conversation_id,
+                end_user_id=end_user_id,
+                config_id=str(actual_config_id) if actual_config_id else "",
+                workspace_id="",
+                language=language,
+            )
+            return {"status": "success", "processed": processed}
+
+        # 完整写入模式（API write 路径，带 messages）
         with get_db_context() as db:
             logger.info(
                 f"[CELERY WRITE] Executing MemoryAgentService.write_memory "
@@ -1565,6 +1587,7 @@ def write_message_task(
     redis_client = get_sync_redis_client()
     lock = None
     loop = None
+    lock_token = None
     if redis_client is not None:
         lock = RedisFairLock(
             key=f"memory_write:{end_user_id}",
@@ -1583,6 +1606,10 @@ def write_message_task(
                 "elapsed_time": time.time() - start_time,
                 "task_id": self.request.id,
             }
+
+        # 标记当前上下文已持有锁，防止下游 MemoryAgentService.write_memory 重复加锁
+        from app.services.memory_agent_service import _set_write_lock_holder
+        lock_token = _set_write_lock_holder(end_user_id)
 
     try:
         task_start_time = int(time.time())
@@ -1642,6 +1669,12 @@ def write_message_task(
             "task_id": self.request.id
         }
     finally:
+        if lock_token is not None:
+            try:
+                from app.services.memory_agent_service import _reset_write_lock_holder
+                _reset_write_lock_holder(lock_token)
+            except Exception as e:
+                logger.warning(f"[CELERY WRITE] 重置锁标记失败: {e}")
         if lock is not None:
             try:
                 lock.release()
@@ -4204,13 +4237,58 @@ def sliding_window_write_task(
 def flush_conversation_task(self, conversation_id: str) -> None:
     """兜底写入任务：逐条处理 write_cursor 后的所有未写入消息。
 
+    使用 memory_write:{end_user_id} 锁与其他写入路径互斥，保证同一 user 串行。
     完成后（无论成功或失败）删除 flush_lock:{conversation_id}。
     Fire-and-forget：异常时记录日志，不重试。
     """
+    # 提前查 end_user_id 用于加锁
+    end_user_id_for_lock: Optional[str] = None
+    try:
+        from sqlalchemy import select
+
+        from app.models.conversation_model import Conversation
+
+        with get_db_context() as db:
+            row = db.execute(
+                select(Conversation.user_id).where(Conversation.id == conversation_id)
+            ).scalar_one_or_none()
+            if row:
+                end_user_id_for_lock = str(row)
+    except Exception as e:
+        logger.warning(
+            f"[FlushTask] 查询 end_user_id 失败，将以无锁模式执行: conv={conversation_id}, err={e}"
+        )
+
     async def _run() -> None:
         from app.core.memory.sliding_window.flush_task import FlushTask
 
         await FlushTask().run(conversation_id)
+
+    redis_client = get_sync_redis_client()
+    write_lock = None
+    write_lock_token = None
+    if redis_client is not None and end_user_id_for_lock:
+        write_lock = RedisFairLock(
+            key=f"memory_write:{end_user_id_for_lock}",
+            redis_client=redis_client,
+            expire=600,
+            timeout=3600,
+            auto_renewal=True,
+        )
+        if not write_lock.acquire():
+            logger.warning(
+                f"[FlushTask] 获取锁超时，跳过本次 flush: "
+                f"conv={conversation_id}, end_user_id={end_user_id_for_lock}"
+            )
+            # 释放幂等锁，后续 Beat 会重新派发
+            try:
+                redis_client.delete(f"flush_lock:{conversation_id}")
+            except Exception:
+                pass
+            return
+
+        from app.services.memory_agent_service import _set_write_lock_holder
+        write_lock_token = _set_write_lock_holder(end_user_id_for_lock)
 
     try:
         asyncio.run(_run())
@@ -4220,7 +4298,17 @@ def flush_conversation_task(self, conversation_id: str) -> None:
             exc_info=True,
         )
     finally:
-        redis_client = get_sync_redis_client()
+        if write_lock_token is not None:
+            try:
+                from app.services.memory_agent_service import _reset_write_lock_holder
+                _reset_write_lock_holder(write_lock_token)
+            except Exception as e:
+                logger.warning(f"[FlushTask] 重置锁标记失败: {e}")
+        if write_lock is not None:
+            try:
+                write_lock.release()
+            except Exception as e:
+                logger.warning(f"[FlushTask] 释放写入锁失败: {e}")
         if redis_client:
             try:
                 redis_client.delete(f"flush_lock:{conversation_id}")

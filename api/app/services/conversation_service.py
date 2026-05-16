@@ -274,13 +274,15 @@ class ConversationService:
 
         Args:
             message: 已分配 message_seq 的 Message 实例（尚未 commit）
-            conversation: 该消息所属的 Conversation，用于读取 app_id / workspace_id / is_draft
+            conversation: 该消息所属的 Conversation，用于读取 app_id / workspace_id /
+                is_draft / user_id（即 end_user_id）
         """
         try:
             import asyncio
             from app.core.memory.memory_service import MemoryService
 
             workspace_id = str(conversation.workspace_id) if conversation.workspace_id else ""
+            end_user_id = str(conversation.user_id) if conversation.user_id else ""
             coro = MemoryService.sync_message(
                 conversation_id=str(message.conversation_id),
                 message=message,
@@ -288,6 +290,7 @@ class ConversationService:
                 is_draft=conversation.is_draft,
                 config_id="",
                 workspace_id=workspace_id,
+                end_user_id=end_user_id,
             )
 
             loop = asyncio.get_event_loop()
