@@ -7,7 +7,6 @@ from typing import Optional, List, Tuple, Dict, Any
 import json_repair
 from fastapi import Depends
 from jinja2 import Template
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -185,7 +184,7 @@ class ConversationService:
             meta_data: Optional[dict] = None,
             message_id: Optional[uuid.UUID] = None,
             status: str = "completed",
-            sync_memory: bool = True,
+            memorize_flag: bool = True,
     ) -> Message:
         """
         Add a message to a conversation using UnitOfWork.
@@ -197,8 +196,10 @@ class ConversationService:
             meta_data (Optional[dict]): Optional metadata.
             message_id (Optional[uuid.UUID]): Optional custom message UUID.
             status (str): Message status, default "completed".
-            sync_memory (bool): 是否同步写入 memory_messages 表。工作流中设为 False，
-                因为只有 MemoryWriteNode 才应写入 memory_messages。
+            memorize_flag (bool): 会话级记忆开关——用户在会话中切换的"记忆"按钮状态。
+                True → memory_messages.should_memorize=true，会触发 Write_Pipeline；
+                False → memory_messages.should_memorize=false，cursor 只推进不萃取。
+                由调用方根据请求 payload.memory 透传。
 
         Returns:
             Message: Newly created Message instance.
@@ -207,12 +208,6 @@ class ConversationService:
             conversation = self.conversation_repo.get_conversation_by_conversation_id(
                 conversation_id
             )
-
-            # 在同一事务中计算并赋值 message_seq（Requirements 3.4）
-            max_seq = self.db.execute(
-                select(func.coalesce(func.max(Message.message_seq), 0))
-                .where(Message.conversation_id == conversation_id)
-            ).scalar()
 
             message = Message(
                 id=message_id if message_id else uuid.uuid4(),
@@ -234,7 +229,7 @@ class ConversationService:
                 )
 
             if sync_memory:
-                self._dispatch_memory_sync(message, conversation)
+                self._dispatch_memory_sync(message, conversation, memorize_flag)
 
             self.db.commit()
             self.db.refresh(message)
@@ -266,7 +261,11 @@ class ConversationService:
             )
 
     @staticmethod
-    def _dispatch_memory_sync(message: Message, conversation: Conversation) -> None:
+    def _dispatch_memory_sync(
+        message: Message,
+        conversation: Conversation,
+        memorize_flag: bool = True,
+    ) -> None:
         """触发 MemoryService.sync_message 把消息同步到 memory_messages 表。
 
         fire-and-forget：失败仅记录 warning，不影响 messages 表的主写入流程。
@@ -276,6 +275,7 @@ class ConversationService:
             message: 已分配 message_seq 的 Message 实例（尚未 commit）
             conversation: 该消息所属的 Conversation，用于读取 app_id / workspace_id /
                 is_draft / user_id（即 end_user_id）
+            memorize_flag: 透传给 MemoryMessage.should_memorize（会话级记忆开关）
         """
         try:
             import asyncio
@@ -291,6 +291,7 @@ class ConversationService:
                 config_id="",
                 workspace_id=workspace_id,
                 end_user_id=end_user_id,
+                should_memorize=memorize_flag,
             )
 
             loop = asyncio.get_event_loop()

@@ -91,11 +91,11 @@ class PruningPipeline:
         cache_key = self._cache_key(conversation_id, message_seq)
 
         # Step 1: 查询 Redis 缓存
-        cached = await self._get_from_cache(cache_key)
-        if cached is not None:
+        cached_hint, cached_type = await self._get_from_cache(cache_key)
+        if cached_hint is not None:
             logger.info(
                 f"[PruningPipeline] 缓存命中: key={cache_key}, "
-                f"content_len={len(cached)}"
+                f"content_len={len(cached_hint)}"
             )
             if _pruning_records is not None:
                 _pruning_records.append({
@@ -109,11 +109,11 @@ class PruningPipeline:
                         ]
                     },
                     "output": {
-                        "assistant_memory_hint": cached,
-                        "assistant_memory_type": "cache",
+                        "assistant_memory_hint": cached_hint,
+                        "assistant_memory_type": cached_type or "NULL",
                     },
                 })
-            return cached
+            return cached_hint
 
         # Step 2: 缓存未命中，调用 LLM 剪枝
         logger.info(
@@ -137,7 +137,7 @@ class PruningPipeline:
 
         # Step 4: 写入 Redis 缓存（TTL=86400s）
         try:
-            await self._set_to_cache(cache_key, pruned_content)
+            await self._set_to_cache(cache_key, pruned_content, memory_type)
         except Exception as e:
             logger.warning(
                 f"[PruningPipeline] Redis 缓存写入失败（不影响主流程）: "
@@ -350,46 +350,66 @@ class PruningPipeline:
     # 内部方法：Redis 缓存读写
     # ──────────────────────────────────────────────
 
-    async def _get_from_cache(self, cache_key: str) -> Optional[str]:
+    async def _get_from_cache(self, cache_key: str) -> tuple[Optional[str], Optional[str]]:
         """从 Redis 缓存读取剪枝结果。
+
+        缓存格式（JSON）：{"hint": "...", "type": "comfort"}
 
         Args:
             cache_key: Redis key（格式：pruning:{conversation_id}:{message_seq}）
 
         Returns:
-            缓存的剪枝内容（A'），不存在时返回 None
+            (hint, memory_type) 元组：
+            - hint: 缓存的剪枝内容（A'），不存在或解析失败时为 None
+            - memory_type: 缓存的 memory_type（comfort/suggestion/...）
         """
         try:
             from app.aioRedis import get_thread_safe_redis
+            import json
 
             redis_client = get_thread_safe_redis()
             value = await redis_client.get(cache_key)
-            return value  # decode_responses=True，直接返回字符串或 None
+            if value is None:
+                return None, None
+
+            obj = json.loads(value)
+            return obj.get("hint"), obj.get("type")
         except Exception as e:
             logger.warning(
                 f"[PruningPipeline] Redis 读取失败: key={cache_key}, err={e}",
                 exc_info=True,
             )
-            return None
+            return None, None
 
-    async def _set_to_cache(self, cache_key: str, pruned_content: str) -> None:
-        """将剪枝结果写入 Redis 缓存（SETEX，TTL=86400s）。
+    async def _set_to_cache(
+        self,
+        cache_key: str,
+        pruned_content: str,
+        memory_type: Optional[str] = None,
+    ) -> None:
+        """将剪枝结果写入 Redis 缓存（SETEX，TTL=86400s），格式为 JSON。
 
         使用 SETEX 确保 TTL 被正确设置，防止缓存永久占用内存。
 
         Args:
             cache_key: Redis key（格式：pruning:{conversation_id}:{message_seq}）
             pruned_content: 剪枝后内容（A'）
+            memory_type: LLM 返回的 memory_type 枚举（comfort/suggestion/... 或 NULL）
         """
         try:
             from app.aioRedis import get_thread_safe_redis
+            import json
 
             redis_client = get_thread_safe_redis()
-            # 使用 set(..., ex=TTL) 等价于 SETEX，redis.asyncio 推荐此方式
-            await redis_client.set(cache_key, pruned_content, ex=self.CACHE_TTL)
+            payload = json.dumps(
+                {"hint": pruned_content, "type": memory_type or "NULL"},
+                ensure_ascii=False,
+            )
+            await redis_client.set(cache_key, payload, ex=self.CACHE_TTL)
             logger.info(
                 f"[PruningPipeline] Redis 缓存写入: key={cache_key}, "
-                f"ttl={self.CACHE_TTL}s, content_len={len(pruned_content)}"
+                f"ttl={self.CACHE_TTL}s, content_len={len(pruned_content)}, "
+                f"memory_type={memory_type}"
             )
         except Exception as e:
             logger.warning(

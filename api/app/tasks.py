@@ -1480,6 +1480,7 @@ def write_message_task(
         user_rag_memory_id: str,
         language: str = "zh",
         conversation_id: str = "",
+        workspace_id: str = "",
 ) -> Dict[str, Any]:
     """Celery task to process a write message via MemoryAgentService.
     Args:
@@ -1488,6 +1489,9 @@ def write_message_task(
         config_id: Configuration ID (can be UUID string, integer, or config_id_old)
         storage_type: Storage type (neo4j or rag)
         user_rag_memory_id: User RAG memory ID
+        language: 语言类型 ("zh" 中文, "en" 英文)
+        conversation_id: 对话 ID（用于候选池消费模式）
+        workspace_id: 工作空间 ID（候选池消费模式加载 memory_config 时使用）
         language: 语言类型 ("zh" 中文, "en" 英文)
 
     Returns:
@@ -1545,13 +1549,14 @@ def write_message_task(
 
             logger.info(
                 f"[CELERY WRITE] 候选池消费模式: "
-                f"conv={conversation_id}, end_user_id={end_user_id}"
+                f"conv={conversation_id}, end_user_id={end_user_id}, "
+                f"workspace_id={workspace_id}"
             )
             processed = await execute_pending_from_pool(
                 conversation_id=conversation_id,
                 end_user_id=end_user_id,
                 config_id=str(actual_config_id) if actual_config_id else "",
-                workspace_id="",
+                workspace_id=workspace_id or "",
                 language=language,
             )
             return {"status": "success", "processed": processed}
@@ -4333,6 +4338,11 @@ def scan_idle_conversations_task() -> None:
     3. Redis 中 flush_lock:{conversation_id} 不存在（无正在执行的 Flush_Task）
 
     满足条件时：原子写入 flush_lock（TTL=600s），再派发 flush_conversation_task。
+
+    注意：conv_active key 由 MemoryService._refresh_active_key 写在
+    settings.REDIS_DB（DB 13），而 flush_lock 与其他 Celery 共享数据写在
+    settings.REDIS_DB_CELERY_BACKEND（DB 15）——两者 DB 不同，扫描时需要
+    分别从对应 DB 读取。
     """
     from sqlalchemy import func, select, text
 
@@ -4342,6 +4352,26 @@ def scan_idle_conversations_task() -> None:
     if redis_client is None:
         logger.error("[ScanIdle] Redis 不可用，跳过本次扫描")
         return
+
+    # 单独构造一个连接到 settings.REDIS_DB 的客户端，用于读取 conv_active key
+    active_redis_client = None
+    try:
+        from app.core.config import settings as _settings
+
+        active_redis_client = redis.StrictRedis(
+            host=_settings.REDIS_HOST,
+            port=_settings.REDIS_PORT,
+            db=_settings.REDIS_DB,
+            password=_settings.REDIS_PASSWORD if _settings.REDIS_PASSWORD else None,
+            decode_responses=True,
+        )
+        active_redis_client.ping()
+    except Exception as e:
+        logger.warning(
+            f"[ScanIdle] 无法连接 conv_active 所在 Redis DB（settings.REDIS_DB），"
+            f"将跳过空闲检查（所有对话视为活跃）: err={e}"
+        )
+        active_redis_client = None
 
     dispatched = 0
     skipped_active = 0
@@ -4382,13 +4412,21 @@ def scan_idle_conversations_task() -> None:
             conv_id_str = str(conv_id)
 
             # 检查 conv_active key 是否存在（存在则对话仍活跃，跳过）
-            try:
-                active_key = f"conv_active:{conv_id_str}"
-                if redis_client.exists(active_key):
+            # conv_active 写在 settings.REDIS_DB（DB 13），需要用专属 client 读取
+            if active_redis_client is not None:
+                try:
+                    active_key = f"conv_active:{conv_id_str}"
+                    if active_redis_client.exists(active_key):
+                        skipped_active += 1
+                        continue
+                except Exception as e:
+                    logger.warning(f"[ScanIdle] 检查 conv_active 失败: conv={conv_id_str}, err={e}")
+                    # 检查失败时保守起见跳过——避免误派发兜底
                     skipped_active += 1
                     continue
-            except Exception as e:
-                logger.warning(f"[ScanIdle] 检查 conv_active 失败: conv={conv_id_str}, err={e}")
+            else:
+                # 拿不到 active client：保守起见全部视为活跃，跳过派发
+                skipped_active += 1
                 continue
 
             # 原子写入 flush_lock（nx=True 保证只有一个 worker 能成功）
