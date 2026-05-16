@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from bisect import bisect_right
 from datetime import datetime, timezone
 from typing import List
 
@@ -387,34 +388,37 @@ async def dispatch_to_scheduler(
 # ──────────────────────────────────────────────
 
 
-async def _count_downstream_memorable_user_messages(
-    conversation_id: str,
-    target_seq: int,
-) -> int:
-    """统计 conversation 中 message_seq > target_seq 且 role=user 且
-    should_memorize=true 的消息数。
+async def _load_memorable_user_seqs(conversation_id: str) -> List[int]:
+    """一次性拉取 conversation 中所有 role=user 且 should_memorize=true 的
+    message_seq 升序列表。
 
-    用于判断滑动窗口下文是否够 WINDOW_SIZE 条 memorable user Q。
+    用于在 execute_pending_from_pool 顺序处理多条 user 消息时校验下文长度：
+    给定该列表后，下文条数 = len(seqs) - bisect_right(seqs, target_seq)，
+    避免对每条 target_seq 各跑一次 COUNT 查询。
+
+    Args:
+        conversation_id: 对话 ID
+
+    Returns:
+        升序排列的 message_seq 列表；查询失败时返回空列表
     """
     try:
         with get_db_context() as db:
-            count = db.execute(
-                select(func.count(MemoryMessage.id)).where(
+            rows = db.execute(
+                select(MemoryMessage.message_seq).where(
                     MemoryMessage.conversation_id == conversation_id,
                     MemoryMessage.role == "user",
                     MemoryMessage.should_memorize.is_(True),
-                    MemoryMessage.message_seq > target_seq,
-                )
-            ).scalar_one()
-            # COUNT 永不返回 None，但为防御保留 int 转换
-            return int(count)
+                ).order_by(MemoryMessage.message_seq.asc())
+            ).scalars().all()
+            return [int(s) for s in rows if s is not None]
     except Exception as e:
         logger.error(
-            f"[WindowUtils] 统计下文消息数失败: "
-            f"conv={conversation_id}, target_seq={target_seq}, err={e}",
+            f"[WindowUtils] 加载 memorable user seq 列表失败: "
+            f"conv={conversation_id}, err={e}",
             exc_info=True,
         )
-        return 0
+        return []
 
 
 async def execute_pending_from_pool(
@@ -578,6 +582,13 @@ async def execute_pending_from_pool(
         language=language,
     )
 
+    # 仅在需要校验下文长度时（实时滑动窗口路径）一次性加载 memorable user seq
+    # 列表，循环里用 bisect_right 替代 N 次 COUNT 查询，开销从 N 次 SQL
+    # 降到 1 次 SQL + O(N log N) 内存查找。
+    memorable_user_seqs: List[int] = []
+    if enforce_window:
+        memorable_user_seqs = await _load_memorable_user_seqs(conversation_id)
+
     for message in pending:
         target_seq = message.get("message_seq")
         if target_seq is None:
@@ -595,8 +606,9 @@ async def execute_pending_from_pool(
             # 实时滑动窗口路径：检查下文 ≥ WINDOW_SIZE 的 memorable user Q，
             # 不够就停止处理（保留给以后触发）。这样保证萃取上下文充分。
             if enforce_window:
-                downstream_count = await _count_downstream_memorable_user_messages(
-                    conversation_id, target_seq
+                downstream_count = (
+                    len(memorable_user_seqs)
+                    - bisect_right(memorable_user_seqs, target_seq)
                 )
                 if downstream_count < WINDOW_SIZE:
                     logger.info(
