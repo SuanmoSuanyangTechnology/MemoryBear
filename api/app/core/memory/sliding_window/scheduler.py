@@ -77,13 +77,18 @@ class SlidingWindowScheduler:
         )
 
         # Step 3: 推进 should_memorize=FALSE 的游标
+        # 只推进 pending 头部连续的 false 消息——遇到第一个 true 消息就停，
+        # 防止把后面尚未处理的 true 消息（如 seq=1）跳过。
         from app.core.memory.sliding_window.window_utils import advance_write_cursor
 
         for msg in pending:
-            if not msg.get("should_memorize", True):
-                target_seq = msg.get("message_seq")
-                if target_seq is not None:
-                    await advance_write_cursor(conversation_id, target_seq)
+            if msg.get("should_memorize", True):
+                # 头部遇到第一个 true 消息，停止推进——它必须等到下文够 3 条
+                # memorable Q 后由 execute_pending_from_pool 正常处理
+                break
+            target_seq = msg.get("message_seq")
+            if target_seq is not None:
+                await advance_write_cursor(conversation_id, target_seq)
 
         # Step 4: 检查是否有满足下文条件的消息
         for msg in pending:
@@ -110,8 +115,9 @@ class SlidingWindowScheduler:
                 )
                 return
 
-        logger.debug(
-            f"[SlidingWindowScheduler] 下文不足，等待更多消息: conv={conversation_id}"
+        logger.info(
+            f"[SlidingWindowScheduler] 下文不足（< {WINDOW_SIZE} 条 memorable user Q），"
+            f"等待更多消息: conv={conversation_id}, pending={len(pending)}"
         )
 
     @staticmethod
@@ -177,6 +183,7 @@ class SlidingWindowScheduler:
                     "user_rag_memory_id": "",
                     "language": language,
                     "conversation_id": conversation_id,
+                    "workspace_id": workspace_id or "",
                 },
             )
             logger.info(

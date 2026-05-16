@@ -650,6 +650,7 @@ class MemoryAgentService:
             config_id=config_id,
             workspace_id=workspace_id,
             language=language,
+            enforce_window=False,  # API 同步路径：用户期望立即处理，不等下文凑齐
         )
 
     async def _write_neo4j(

@@ -211,15 +211,16 @@ class MemoryService:
         config_id: str = "",
         workspace_id: str = "",
         end_user_id: str = "",
+        should_memorize: bool = True,
     ) -> Optional["MemoryMessage"]:
         """Agent 对话消息同步到 memory_messages 表（类方法，无需实例化）。
 
         不依赖 memory_config，专供 conversation_service.py 调用。
         内部直接操作 memory_messages 表并分派 SlidingWindowScheduler。
 
-        1. 检查 app_releases.config.memory.enabled（草稿会话使用草稿配置）
+        1. 检查 app_releases.config.memory.enabled（仅查发布版本，未发布的应用直接跳过）
         2. 若 false → 返回 None，消息不进入 memory_messages
-        3. 若 true → 写入 memory_messages（should_memorize=TRUE）
+        3. 若 true → 写入 memory_messages（should_memorize 由参数决定）
         4. 刷新 Redis 活跃 key
         5. 分派给 SlidingWindowScheduler
 
@@ -227,10 +228,12 @@ class MemoryService:
             conversation_id: 会话 ID
             message: Message ORM 对象（已持久化到 messages 表）
             app_id: 应用 ID，用于检查 memory.enabled
-            is_draft: 是否为草稿会话
+            is_draft: 是否为草稿会话（保留参数，当前不使用——未发布的应用一律不写候选池）
             config_id: 记忆配置 ID（传给 Scheduler，可为空）
             workspace_id: 工作空间 ID
             end_user_id: 终端用户 ID（celery_task_scheduler 的分片键，保证 per-user 串行）
+            should_memorize: 会话级记忆开关——用户在前端切换的状态。
+                True → 触发 Write_Pipeline 萃取；False → 仍写候选池但 cursor 只推进不萃取。
 
         Returns:
             MemoryMessage 实例若成功写入，否则 None
@@ -244,30 +247,15 @@ class MemoryService:
             return None
 
         # Step 1: 写入 memory_messages 表
-        try:
-            with get_db_context() as db:
-                memory_msg = MemoryMessage(
-                    id=uuid.uuid4(),
-                    conversation_id=uuid.UUID(str(conversation_id)),
-                    original_message_id=message.id,
-                    role=message.role,
-                    content=message.content,
-                    message_seq=message.message_seq,
-                    should_memorize=True,
-                    created_at=message.created_at,
-                )
-                db.add(memory_msg)
-                db.commit()
-                logger.debug(
-                    f"[MemoryService] MemoryMessage 已写入: "
-                    f"conv={conversation_id}, seq={message.message_seq}, role={message.role}"
-                )
-        except Exception as e:
-            logger.error(
-                f"[MemoryService] 写入 memory_messages 失败: "
-                f"conv={conversation_id}, seq={message.message_seq}, err={e}",
-                exc_info=True,
-            )
+        memory_msg = cls._persist_memory_message(
+            conversation_id=str(conversation_id),
+            original_message_id=message.id,
+            role=message.role,
+            content=message.content,
+            created_at=message.created_at,
+            should_memorize=should_memorize,
+        )
+        if memory_msg is None:
             return None
 
         # Step 2: 刷新 Redis 活跃 key
@@ -322,30 +310,14 @@ class MemoryService:
             return None
 
         # Step 1: 写入 memory_messages 表
-        try:
-            with get_db_context() as db:
-                memory_msg = MemoryMessage(
-                    id=uuid.uuid4(),
-                    conversation_id=uuid.UUID(str(conversation_id)),
-                    original_message_id=message.id,
-                    role=message.role,
-                    content=message.content,
-                    message_seq=message.message_seq,
-                    should_memorize=True,
-                    created_at=message.created_at,
-                )
-                db.add(memory_msg)
-                db.commit()
-                logger.debug(
-                    f"[MemoryService] MemoryMessage 已写入: "
-                    f"conv={conversation_id}, seq={message.message_seq}, role={message.role}"
-                )
-        except Exception as e:
-            logger.error(
-                f"[MemoryService] 写入 memory_messages 失败: "
-                f"conv={conversation_id}, seq={message.message_seq}, err={e}",
-                exc_info=True,
-            )
+        memory_msg = self._persist_memory_message(
+            conversation_id=str(conversation_id),
+            original_message_id=message.id,
+            role=message.role,
+            content=message.content,
+            created_at=message.created_at,
+        )
+        if memory_msg is None:
             return None
 
         # Step 2: 刷新 Redis 活跃 key
@@ -471,6 +443,10 @@ class MemoryService:
             )
 
             if written:
+                # 刷新 Redis 活跃 key（与 sync_message/sync_agent_message 行为一致）
+                # —— 工作流写入后也属于"对话活跃"，应阻止 scan_idle 在短期内派发兜底
+                await cls._refresh_active_key(conversation_id)
+
                 await dispatch_to_scheduler(
                     conversation_id=conversation_id,
                     config_id=config_id,
@@ -493,46 +469,105 @@ class MemoryService:
     # ──────────────────────────────────────────────
 
     @staticmethod
+    def _persist_memory_message(
+        conversation_id: str,
+        original_message_id,
+        role: str,
+        content: str,
+        created_at,
+        should_memorize: bool = True,
+    ) -> Optional["MemoryMessage"]:
+        """在事务内自增 message_seq 并写入 memory_messages 表。
+
+        message_seq 完全由 memory_messages 自身决定，与 messages 表的序号无关——
+        memory.enabled=false 时消息只进 messages 表不进 memory_messages，两表序号
+        本就不应一一对应。
+
+        Args:
+            conversation_id: 会话 ID（字符串）
+            original_message_id: 原始 messages 表行的 id（用于反查源消息）
+            role: user/assistant/system
+            content: 消息内容
+            created_at: 时间戳，沿用 Message 的 created_at 以保持时间一致
+            should_memorize: 是否触发 Write_Pipeline；False 时仍写候选池但 cursor
+                只推进不萃取（用于"用户在会话里关闭记忆开关"场景）
+
+        Returns:
+            写入成功的 MemoryMessage 实例；失败时返回 None
+        """
+        from sqlalchemy import func, select as sa_select
+
+        try:
+            with get_db_context() as db:
+                max_seq = db.execute(
+                    sa_select(func.coalesce(func.max(MemoryMessage.message_seq), 0))
+                    .where(MemoryMessage.conversation_id == uuid.UUID(conversation_id))
+                ).scalar() or 0
+                next_seq = max_seq + 1
+
+                memory_msg = MemoryMessage(
+                    id=uuid.uuid4(),
+                    conversation_id=uuid.UUID(conversation_id),
+                    original_message_id=original_message_id,
+                    role=role,
+                    content=content,
+                    message_seq=next_seq,
+                    should_memorize=should_memorize,
+                    created_at=created_at,
+                )
+                db.add(memory_msg)
+                db.commit()
+                logger.debug(
+                    f"[MemoryService] MemoryMessage 已写入: "
+                    f"conv={conversation_id}, seq={next_seq}, role={role}, "
+                    f"should_memorize={should_memorize}"
+                )
+                return memory_msg
+        except Exception as e:
+            logger.error(
+                f"[MemoryService] 写入 memory_messages 失败: "
+                f"conv={conversation_id}, err={e}",
+                exc_info=True,
+            )
+            return None
+
+    @staticmethod
     async def _check_memory_enabled(app_id: str, is_draft: bool) -> bool:
         """查询 app_releases.config -> 'memory' ->> 'enabled'。
 
-        草稿会话使用草稿配置，发布会话使用发布版本配置。
-        返回 False 若 memory 键不存在或 enabled 为 false。
+        只读应用当前发布版本（is_active=True 且最新）的配置——这是产品规则：
+        agent 应用必须发布之后配置才生效；未发布的应用不写入候选池。
+
+        is_draft 参数保留向后兼容，当前实现不再使用它（无论 is_draft 与否，
+        都读发布版本）。
+
+        返回 False 若：
+          - 应用未发布（无 is_active=True 的记录）
+          - 配置中无 memory 键
+          - memory.enabled = false
 
         Args:
             app_id: 应用 ID
-            is_draft: 是否为草稿会话
+            is_draft: 保留参数，当前不使用
 
         Returns:
-            True 表示该应用启用了记忆功能
+            True 表示该应用启用了记忆功能（已发布且 memory.enabled=true）
         """
         try:
             from sqlalchemy import select as sa_select
             from app.models.app_release_model import AppRelease
 
             with get_db_context() as db:
-                if is_draft:
-                    # 草稿会话：查询草稿版本（is_active=False 且最新）
-                    result = db.execute(
-                        sa_select(AppRelease.config)
-                        .where(
-                            AppRelease.app_id == uuid.UUID(str(app_id)),
-                            AppRelease.is_active.is_(False),
-                        )
-                        .order_by(AppRelease.created_at.desc())
-                        .limit(1)
-                    ).scalar_one_or_none()
-                else:
-                    # 发布会话：查询当前活跃版本（取最新版本，避免多个 is_active=True 记录导致 MultipleResultsFound）
-                    result = db.execute(
-                        sa_select(AppRelease.config)
-                        .where(
-                            AppRelease.app_id == uuid.UUID(str(app_id)),
-                            AppRelease.is_active.is_(True),
-                        )
-                        .order_by(AppRelease.version.desc())
-                        .limit(1)
-                    ).scalar_one_or_none()
+                # 只读最新发布版本，按版本号倒序避免 MultipleResultsFound
+                result = db.execute(
+                    sa_select(AppRelease.config)
+                    .where(
+                        AppRelease.app_id == uuid.UUID(str(app_id)),
+                        AppRelease.is_active.is_(True),
+                    )
+                    .order_by(AppRelease.version.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
 
                 config = result or {}
                 memory_config = config.get("memory", {}) if isinstance(config, dict) else {}

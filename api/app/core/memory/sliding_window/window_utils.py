@@ -387,25 +387,60 @@ async def dispatch_to_scheduler(
 # ──────────────────────────────────────────────
 
 
+async def _count_downstream_memorable_user_messages(
+    conversation_id: str,
+    target_seq: int,
+) -> int:
+    """统计 conversation 中 message_seq > target_seq 且 role=user 且
+    should_memorize=true 的消息数。
+
+    用于判断滑动窗口下文是否够 WINDOW_SIZE 条 memorable user Q。
+    """
+    from sqlalchemy import func
+
+    try:
+        with get_db_context() as db:
+            count = db.execute(
+                select(func.count(MemoryMessage.id)).where(
+                    MemoryMessage.conversation_id == conversation_id,
+                    MemoryMessage.role == "user",
+                    MemoryMessage.should_memorize.is_(True),
+                    MemoryMessage.message_seq > target_seq,
+                )
+            ).scalar_one()
+            return count or 0
+    except Exception as e:
+        logger.error(
+            f"[WindowUtils] 统计下文消息数失败: "
+            f"conv={conversation_id}, target_seq={target_seq}, err={e}",
+            exc_info=True,
+        )
+        return 0
+
+
 async def execute_pending_from_pool(
     conversation_id: str,
     end_user_id: str,
     config_id: str = "",
     workspace_id: str = "",
     language: str = "zh",
+    enforce_window: bool = True,
 ) -> int:
-    """Layer 2：从 memory_messages 池中拉取并执行滑动窗口写入。
+    """Layer 2:从 memory_messages 池中拉取并执行滑动窗口写入。
 
     流程：
     1. 加载 memory_config
     2. 查询 write_cursor
     3. 查询 message_seq > write_cursor 的所有消息
-    4. should_memorize=FALSE → 原子推进 write_cursor
-    5. role=user + should_memorize=TRUE → 构建窗口上下文 → WritePipeline.run_with_window()
-    6. role=assistant → 跳过（WritePipeline 内部 Pruned_Context 阶段处理）
-
-    与 Scheduler 不同，本函数不检查下文条件——适用于同步执行场景
-    （API /write、MemoryWriteNode）和 FlushTask 兜底。
+    4. 顺序处理：
+       - should_memorize=FALSE → 原子推进 write_cursor
+       - role=user + should_memorize=TRUE：
+         · 若 enforce_window=True（默认，实时滑动窗口路径）：检查下游
+           memorable user Q 是否 ≥ WINDOW_SIZE。不够就停止处理，保留
+           给后续触发；这样 design.md 的"等待下文凑齐 3 条"语义生效。
+         · 若 enforce_window=False（FlushTask / API 同步写入路径）：
+           无视下文条件，强制处理。
+       - role=assistant → 跳过（WritePipeline 内部 Pruned_Context 阶段处理）
 
     Args:
         conversation_id: 对话 ID
@@ -413,6 +448,8 @@ async def execute_pending_from_pool(
         config_id: 记忆配置 ID
         workspace_id: 工作空间 ID
         language: 语言
+        enforce_window: 是否要求下文 ≥ WINDOW_SIZE 才处理 user 消息。
+            实时滑动窗口路径传 True；兜底场景（FlushTask、API 同步）传 False。
 
     Returns:
         处理的消息数（含 should_memorize=FALSE 跳过的）
@@ -426,6 +463,27 @@ async def execute_pending_from_pool(
         return 0
 
     # 1. 加载 memory_config
+    # workspace_id 缺失时，从 conversation 表反查（增强容错）
+    try:
+        if not workspace_id:
+            with get_db_context() as db:
+                row = db.execute(
+                    select(Conversation.workspace_id).where(
+                        Conversation.id == conversation_id
+                    )
+                ).scalar_one_or_none()
+                if row:
+                    workspace_id = str(row)
+                    logger.info(
+                        f"[execute_pending_from_pool] 从 conversation 反查 workspace_id: "
+                        f"conv={conversation_id}, workspace_id={workspace_id}"
+                    )
+    except Exception as e:
+        logger.warning(
+            f"[execute_pending_from_pool] 反查 workspace_id 失败: "
+            f"conv={conversation_id}, err={e}"
+        )
+
     try:
         _workspace_id = _uuid.UUID(workspace_id) if workspace_id else None
         _config_id = _uuid.UUID(config_id) if config_id else None
@@ -438,7 +496,8 @@ async def execute_pending_from_pool(
     except Exception as e:
         logger.error(
             f"[execute_pending_from_pool] 加载 memory_config 失败: "
-            f"conv={conversation_id}, err={e}",
+            f"conv={conversation_id}, config_id={config_id}, "
+            f"workspace_id={workspace_id}, err={e}",
             exc_info=True,
         )
         return 0
@@ -462,10 +521,10 @@ async def execute_pending_from_pool(
     if write_cursor is None:
         write_cursor = 0
 
-    # 3. 查询待处理消息
+    # 3. 查询待处理消息（在 with 块内转成 dict，避免 session 关闭后 lazy-load 失败）
     try:
         with get_db_context() as db:
-            pending = (
+            pending_orm = (
                 db.execute(
                     select(MemoryMessage)
                     .where(
@@ -477,6 +536,7 @@ async def execute_pending_from_pool(
                 .scalars()
                 .all()
             )
+            pending = [message_to_dict(m) for m in pending_orm]
     except Exception as e:
         logger.error(
             f"[execute_pending_from_pool] 查询待处理消息失败: "
@@ -505,26 +565,37 @@ async def execute_pending_from_pool(
     )
 
     for message in pending:
-        target_seq = message.message_seq
+        target_seq = message.get("message_seq")
         if target_seq is None:
             continue
 
         try:
-            if not message.should_memorize:
+            if not message.get("should_memorize", True):
                 await advance_write_cursor(conversation_id, target_seq)
                 processed += 1
                 continue
 
-            if message.role != "user":
+            if message.get("role") != "user":
                 continue
+
+            # 实时滑动窗口路径：检查下文 ≥ WINDOW_SIZE 的 memorable user Q，
+            # 不够就停止处理（保留给以后触发）。这样保证萃取上下文充分。
+            if enforce_window:
+                downstream_count = await _count_downstream_memorable_user_messages(
+                    conversation_id, target_seq
+                )
+                if downstream_count < WINDOW_SIZE:
+                    logger.info(
+                        f"[execute_pending_from_pool] 下文不足 ({downstream_count} < {WINDOW_SIZE})"
+                        f"，停止处理: conv={conversation_id}, seq={target_seq}"
+                    )
+                    break
 
             context_before = await build_context_before(conversation_id, target_seq)
             context_after = await build_context_after(conversation_id, target_seq)
 
-            target_dict = message_to_dict(message)
-
             await write_pipeline.run_with_window(
-                target_message=target_dict,
+                target_message=message,
                 context_before=context_before,
                 context_after=context_after,
                 conversation_id=conversation_id,

@@ -76,6 +76,7 @@ class FlushTask:
             conversation_id=conversation_id,
             end_user_id=end_user_id,
             workspace_id=workspace_id,
+            enforce_window=False,  # 兜底路径：无视下文条件，强制处理所有 pending
         )
         logger.info(
             f"[FlushTask] Layer 2 完成 user 消息: conv={conversation_id}, processed={user_processed}"
@@ -91,7 +92,7 @@ class FlushTask:
         pending = await self._get_pending_messages(conversation_id, write_cursor)
         assistant_messages = [
             m for m in pending
-            if m.role == "assistant" and m.should_memorize
+            if m.get("role") == "assistant" and m.get("should_memorize")
         ]
 
         if not assistant_messages:
@@ -118,14 +119,14 @@ class FlushTask:
         )
 
         for message in assistant_messages:
-            target_seq = message.message_seq
+            target_seq = message.get("message_seq")
             if target_seq is None:
                 continue
             try:
                 await pruning_pipeline.prune(
                     conversation_id=conversation_id,
                     message_seq=target_seq,
-                    content=message.content or "",
+                    content=message.get("content") or "",
                 )
                 await advance_write_cursor(conversation_id, target_seq)
                 logger.info(
@@ -199,14 +200,17 @@ class FlushTask:
 
     async def _get_pending_messages(
         self, conversation_id: str, write_cursor: int
-    ) -> List[MemoryMessage]:
+    ) -> List[dict]:
         """查询 memory_messages 表中 write_cursor 之后的所有未写入消息。
 
         查询 message_seq > write_cursor 的所有消息（包含 user 和 assistant），
-        按 message_seq 升序排列。
+        按 message_seq 升序排列。返回 dict 列表（在 with 块内转换，避免 session
+        关闭后 ORM 对象 lazy-load 失败）。
 
         Requirements: 4.3
         """
+        from app.core.memory.sliding_window.window_utils import message_to_dict
+
         try:
             with get_db_context() as db:
                 messages = (
@@ -221,7 +225,7 @@ class FlushTask:
                     .scalars()
                     .all()
                 )
-                return list(messages)
+                return [message_to_dict(m) for m in messages]
         except Exception as e:
             logger.error(
                 f"[FlushTask] 查询待处理消息失败: "
