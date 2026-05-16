@@ -184,7 +184,7 @@ class ConversationService:
             meta_data: Optional[dict] = None,
             message_id: Optional[uuid.UUID] = None,
             status: str = "completed",
-            memorize_flag: bool = True,
+            should_memorize: bool = True,
     ) -> Message:
         """
         Add a message to a conversation using UnitOfWork.
@@ -196,7 +196,7 @@ class ConversationService:
             meta_data (Optional[dict]): Optional metadata.
             message_id (Optional[uuid.UUID]): Optional custom message UUID.
             status (str): Message status, default "completed".
-            memorize_flag (bool): 会话级记忆开关——用户在会话中切换的"记忆"按钮状态。
+            should_memorize (bool): 会话级记忆开关——用户在会话中切换的"记忆"按钮状态。
                 True → memory_messages.should_memorize=true，会触发 Write_Pipeline；
                 False → memory_messages.should_memorize=false，cursor 只推进不萃取。
                 由调用方根据请求 payload.memory 透传。
@@ -230,7 +230,7 @@ class ConversationService:
                 )
 
             if sync_memory:
-                self._dispatch_memory_sync(message, conversation, memorize_flag)
+                self._dispatch_memory_sync(message, conversation, should_memorize)
 
             self.db.commit()
             self.db.refresh(message)
@@ -243,7 +243,7 @@ class ConversationService:
                     "role": role,
                     "content_length": len(content),
                     "sync_memory": sync_memory,
-                    "memorize_flag": memorize_flag,
+                    "should_memorize": should_memorize,
                 },
             )
 
@@ -267,7 +267,7 @@ class ConversationService:
     def _dispatch_memory_sync(
         message: Message,
         conversation: Conversation,
-        memorize_flag: bool = True,
+        should_memorize: bool = True,
     ) -> None:
         """触发 MemoryService.sync_message 把消息同步到 memory_messages 表。
 
@@ -278,7 +278,7 @@ class ConversationService:
             message: 已分配 message_seq 的 Message 实例（尚未 commit）
             conversation: 该消息所属的 Conversation，用于读取 app_id / workspace_id /
                 is_draft / user_id（即 end_user_id）
-            memorize_flag: 透传给 MemoryMessage.should_memorize（会话级记忆开关）
+            should_memorize: 透传给 MemoryMessage.should_memorize（会话级记忆开关）
         """
         try:
             import asyncio
@@ -294,7 +294,7 @@ class ConversationService:
                 config_id="",
                 workspace_id=workspace_id,
                 end_user_id=end_user_id,
-                should_memorize=memorize_flag,
+                should_memorize=should_memorize,
             )
 
             loop = asyncio.get_event_loop()
