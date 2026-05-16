@@ -396,8 +396,6 @@ async def _count_downstream_memorable_user_messages(
 
     用于判断滑动窗口下文是否够 WINDOW_SIZE 条 memorable user Q。
     """
-    from sqlalchemy import func
-
     try:
         with get_db_context() as db:
             count = db.execute(
@@ -408,7 +406,8 @@ async def _count_downstream_memorable_user_messages(
                     MemoryMessage.message_seq > target_seq,
                 )
             ).scalar_one()
-            return count or 0
+            # COUNT 永不返回 None，但为防御保留 int 转换
+            return int(count)
     except Exception as e:
         logger.error(
             f"[WindowUtils] 统计下文消息数失败: "
@@ -426,7 +425,7 @@ async def execute_pending_from_pool(
     language: str = "zh",
     enforce_window: bool = True,
 ) -> int:
-    """Layer 2:从 memory_messages 池中拉取并执行滑动窗口写入。
+    """Layer 2：从 memory_messages 池中拉取并执行滑动窗口写入。
 
     流程：
     1. 加载 memory_config
