@@ -1,7 +1,6 @@
 import re
 from typing import Any
 
-from app.celery_task_scheduler import scheduler
 from app.core.memory.enums import SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.workflow.engine.state_manager import WorkflowState
@@ -97,6 +96,7 @@ class MemoryWriteNode(BaseNode):
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
         self.typed_config = MemoryWriteNodeConfig(**self.config)
         end_user_id = self.get_variable("sys.user_id", variable_pool)
+        conversation_id = str(state.get("conversation_id", ""))
 
         if not end_user_id:
             raise RuntimeError("End user id is required")
@@ -138,24 +138,12 @@ class MemoryWriteNode(BaseNode):
                 "files": file_info
             })
 
-        scheduler.push_task(
-            "app.core.memory.agent.write_message",
-            end_user_id,
-            {
-                "end_user_id": end_user_id,
-                "message": messages,
-                "config_id": str(self.typed_config.config_id),
-                "storage_type": state["memory_storage_type"],
-                "user_rag_memory_id": state["user_rag_memory_id"],
-                "conversation_id": str(state.get("conversation_id", "")),
-            }
+        await MemoryService.write_workflow_messages(
+            conversation_id=conversation_id,
+            messages=messages,
+            config_id=str(self.typed_config.config_id),
+            end_user_id=end_user_id,
+            workspace_id=str(state.get("workspace_id", "") or ""),
         )
-        # write_message_task.delay(
-        #     end_user_id=end_user_id,
-        #     message=messages,
-        #     config_id=str(self.typed_config.config_id),
-        #     storage_type=state["memory_storage_type"],
-        #     user_rag_memory_id=state["user_rag_memory_id"]
-        # )
 
         return "success"

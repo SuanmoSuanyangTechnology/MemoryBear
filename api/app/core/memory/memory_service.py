@@ -403,8 +403,9 @@ class MemoryService:
     # 统一门户：工作流 MemoryWriteNode 消息写入
     # ──────────────────────────────────────────────
 
+    @classmethod
     async def write_workflow_messages(
-        self,
+        cls,
         conversation_id: str,
         messages: List[dict],
         config_id: str = "",
@@ -412,10 +413,14 @@ class MemoryService:
         workspace_id: str = "",
         language: str = "zh",
     ) -> List["MemoryMessage"]:
-        """工作流 MemoryWriteNode 消息写入 memory_messages 表。
+        """工作流 MemoryWriteNode 消息写入 memory_messages 表（类方法，无需实例化）。
 
-        1. 将消息写入 memory_messages 表（should_memorize 强制 TRUE）
-        2. 分派给 SlidingWindowScheduler
+        不依赖 memory_config，专供 MemoryWriteNode 调用——避免在节点路径上
+        额外加载/校验 memory_config，从而绕开配置缺失/校验失败导致的节点崩溃。
+
+        1. 兜底确保 conversations 表存在该记录
+        2. 批量写入 memory_messages 表（should_memorize 强制 TRUE）
+        3. 分派给 SlidingWindowScheduler
 
         Args:
             conversation_id: 会话 ID
@@ -429,25 +434,56 @@ class MemoryService:
             成功写入的 MemoryMessage 实例列表
         """
         from app.core.memory.sliding_window.window_utils import (
+            ensure_conversation_exists,
             write_batch_to_memory_messages,
             dispatch_to_scheduler,
         )
 
-        written = await write_batch_to_memory_messages(
-            conversation_id=conversation_id,
-            messages=messages,
-        )
+        if not conversation_id:
+            logger.warning(
+                "[MemoryService] write_workflow_messages: conversation_id 为空，跳过"
+            )
+            return []
+        if not messages:
+            logger.warning(
+                f"[MemoryService] write_workflow_messages: messages 为空，跳过 "
+                f"conv={conversation_id}"
+            )
+            return []
 
-        if written:
-            await dispatch_to_scheduler(
+        try:
+            await ensure_conversation_exists(
                 conversation_id=conversation_id,
-                config_id=config_id,
-                end_user_id=end_user_id,
                 workspace_id=workspace_id,
-                language=language,
             )
 
-        return written
+            written = await write_batch_to_memory_messages(
+                conversation_id=conversation_id,
+                messages=messages,
+            )
+
+            logger.info(
+                f"[MemoryService] write_workflow_messages 写入完成: "
+                f"conv={conversation_id}, written={len(written)}/{len(messages)}"
+            )
+
+            if written:
+                await dispatch_to_scheduler(
+                    conversation_id=conversation_id,
+                    config_id=config_id,
+                    end_user_id=end_user_id,
+                    workspace_id=workspace_id,
+                    language=language,
+                )
+
+            return written
+        except Exception as e:
+            logger.error(
+                f"[MemoryService] write_workflow_messages 失败: "
+                f"conv={conversation_id}, err={e}",
+                exc_info=True,
+            )
+            raise
 
     # ──────────────────────────────────────────────
     # 内部辅助方法
