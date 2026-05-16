@@ -361,14 +361,14 @@ class AppChatService:
             role="user",
             content=message,
             meta_data=human_meta,
-            memorize_flag=memory,
+            should_memorize=memory,
         )
         ai_message = self.conversation_service.add_message(
             conversation_id=conversation_id,
             role="assistant",
             content=result["content"],
             meta_data=assistant_meta,
-            memorize_flag=memory,
+            should_memorize=memory,
         )
         message_id = ai_message.id
 
@@ -763,7 +763,7 @@ class AppChatService:
                 role="user",
                 content=message,
                 meta_data=human_meta,
-                memorize_flag=memory,
+                should_memorize=memory,
             )
             self.conversation_service.add_message(
                 message_id=message_id,
@@ -771,7 +771,7 @@ class AppChatService:
                 role="assistant",
                 content=full_content,
                 meta_data=assistant_meta,
-                memorize_flag=memory,
+                should_memorize=memory,
             )
 
             # 更新 Agent 执行记录为 completed
