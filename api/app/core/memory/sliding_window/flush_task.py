@@ -12,7 +12,7 @@ Requirements: 4.3, 4.4, 4.5
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from sqlalchemy import select
 
