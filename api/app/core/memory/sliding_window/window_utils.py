@@ -253,6 +253,37 @@ async def enrich_file_content(messages: List[dict]) -> None:
 SENTINEL_APP_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
+def _ensure_sentinel_app_exists() -> None:
+    """确保哨兵 App 在 apps 表中存在，不存在则自动创建。
+
+    其他环境首次运行时无需手动执行 migration，代码自动兜底。
+    """
+    from app.models.app_model import App
+
+    try:
+        with get_db_context() as db:
+            existing = db.get(App, SENTINEL_APP_ID)
+            if existing is not None:
+                return
+
+            sentinel = App(
+                id=SENTINEL_APP_ID,
+                workspace_id=uuid.UUID("00000000-0000-0000-0000-000000000000"),
+                created_by=uuid.UUID("00000000-0000-0000-0000-000000000000"),
+                name="__system_memory_service__",
+                type="agent",
+                visibility="private",
+                status="active",
+                is_active=True,
+            )
+            db.add(sentinel)
+            db.commit()
+            logger.info("[WindowUtils] 创建哨兵 App: id=00000000-0000-0000-0000-000000000001")
+    except Exception as e:
+        # 并发场景下可能 unique violation，忽略即可
+        logger.debug(f"[WindowUtils] 确保哨兵 App 存在时异常（可忽略）: {e}")
+
+
 def get_or_create_service_api_conversation(
     workspace_id: str,
     end_user_id: str,
@@ -270,6 +301,9 @@ def get_or_create_service_api_conversation(
         conversation_id (str)
     """
     import uuid as _uuid
+
+    # 确保哨兵 App 存在（首次运行时自动创建）
+    _ensure_sentinel_app_exists()
 
     _ws_id = _uuid.UUID(workspace_id)
 
