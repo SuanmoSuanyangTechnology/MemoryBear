@@ -121,6 +121,7 @@ export const useWorkflowGraph = ({
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isHandMode, setIsHandMode] = useState(true);
+  const isHandModeRef = useRef(true)
   const [config, setConfig] = useState<WorkflowConfig | null>(null);
   const [chatVariables, setChatVariables] = useState<ChatVariable[]>([])
   const featuresRef = useRef<FeaturesConfigForm | undefined>(undefined)
@@ -144,6 +145,10 @@ export const useWorkflowGraph = ({
   useEffect(() => {
     getConfig()
   }, [id])
+
+  useEffect(() => {
+    isHandModeRef.current = isHandMode
+  }, [isHandMode])
   /**
    * Fetch workflow configuration from API
    */
@@ -761,7 +766,7 @@ export const useWorkflowGraph = ({
   // 控制框选：isHandMode = false 时启用框选
   useEffect(() => {
     if (!graphRef.current) return;
-    if (isHandMode) {
+    if (isHandModeRef.current) {
       graphRef.current?.enablePanning();
       graphRef.current?.disableSelection();
       graphRef.current?.cleanSelection()
@@ -769,7 +774,7 @@ export const useWorkflowGraph = ({
       graphRef.current?.disablePanning();
       graphRef.current?.enableSelection();
     }
-  }, [isHandMode, graphRef.current]);
+  }, [isHandModeRef.current, graphRef.current]);
   // 显示/隐藏连接桩
   // const showPorts = (show: boolean) => {
   //   const container = containerRef.current!;
@@ -925,7 +930,7 @@ export const useWorkflowGraph = ({
   const copyEvent = () => {
     if (!graphRef.current) return false;
     let selectedNodes = []
-    if (isHandMode) {
+    if (isHandModeRef.current) {
       selectedNodes = graphRef.current.getNodes().filter(node => node.getData()?.isSelected);
     } else {
      selectedNodes = graphRef.current.getSelectedCells();
@@ -941,6 +946,7 @@ export const useWorkflowGraph = ({
    */
   const parseEvent = () => {
     if (!graphRef.current?.isClipboardEmpty()) {
+      graphRef.current?.startBatch('copy');
       const pastedNodes = graphRef.current?.paste({ offset: 32 }) ?? [];
       pastedNodes.forEach(cell => {
         if (cell.isNode()) {
@@ -950,6 +956,7 @@ export const useWorkflowGraph = ({
         }
       });
       blankClick();
+      graphRef.current?.stopBatch('copy');
     }
     return false;
   };
@@ -1166,7 +1173,7 @@ export const useWorkflowGraph = ({
           thickness: 1, // Grid dot size
         }
       },
-      panning: isHandMode,
+      panning: isHandModeRef.current,
       mousewheel: {
         enabled: true,
         factor: 0.1,
