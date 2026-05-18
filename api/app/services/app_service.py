@@ -1143,6 +1143,7 @@ class AppService:
             visibility: Optional[str] = None,
             status: Optional[str] = None,
             search: Optional[str] = None,
+            tag_search: Optional[str] = None,
             include_shared: bool = True,
             shared_only: bool = False,
             page: int = 1,
@@ -1159,7 +1160,8 @@ class AppService:
             type: 应用类型过滤
             visibility: 可见性过滤
             status: 状态过滤
-            search: 搜索关键词（同时匹配应用名称和标签）
+            search: 搜索关键词（模糊匹配应用名称）
+            tag_search: 标签搜索关键词（模糊匹配应用标签）
             include_shared: 是否包含分享的应用
             page: 页码（从1开始）
             pagesize: 每页数量
@@ -1190,14 +1192,16 @@ class AppService:
         if search:
             search_pattern = f"%{search.lower()}%"
             filters.append(
-                or_(
-                    func.lower(App.name).like(search_pattern),
-                    exists(
-                        select(1).select_from(
-                            func.jsonb_array_elements_text(App.tags.cast(JSONB))
-                        ).where(
-                            func.lower(column('value')).like(search_pattern)
-                        )
+                func.lower(App.name).like(search_pattern)
+            )
+        if tag_search:
+            tag_pattern = f"%{tag_search.lower()}%"
+            filters.append(
+                exists(
+                    select(1).select_from(
+                        func.jsonb_array_elements_text(App.tags.cast(JSONB))
+                    ).where(
+                        func.lower(column('value')).like(tag_pattern)
                     )
                 )
             )
@@ -2619,6 +2623,7 @@ def list_apps(
         visibility: Optional[str] = None,
         status: Optional[str] = None,
         search: Optional[str] = None,
+        tag_search: Optional[str] = None,
         include_shared: bool = True,
         shared_only: bool = False,
         page: int = 1,
@@ -2632,6 +2637,7 @@ def list_apps(
         visibility=visibility,
         status=status,
         search=search,
+        tag_search=tag_search,
         include_shared=include_shared,
         shared_only=shared_only,
         page=page,
