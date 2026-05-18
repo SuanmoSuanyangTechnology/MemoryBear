@@ -50,8 +50,21 @@ class FileInput(BaseModel):
     _content = None
 
     def __init__(self, **data):
+        if "transfer_method" not in data:
+            if "upload_file_id" in data or "file_id" in data:
+                data["transfer_method"] = "local_file"
+            elif "url" in data and not str(data.get("url", "")).startswith("blob:"):
+                data["transfer_method"] = "remote_url"
+            else:
+                data["transfer_method"] = "local_file"
+
+        if str(data.get("url", "")).startswith("blob:"):
+            data.pop("url", None)
+
         if "type" in data:
-            data['file_type'] = data['type']
+            data["file_type"] = data["type"]
+        if "file_id" in data and "upload_file_id" not in data:
+            data["upload_file_id"] = data.pop("file_id")
         super().__init__(**data)
 
     def set_content(self, content: bytes):

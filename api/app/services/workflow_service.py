@@ -763,6 +763,9 @@ class WorkflowService:
             files = await self._handle_file_input(payload.files)
             storage_type, user_rag_memory_id = self._get_memory_store_info(workspace_id)
             input_data["files"] = files
+            # 更新 execution.input_data，确保数据库中的 files 包含 URL
+            execution.input_data = input_data
+            self.db.commit()
             message_id = uuid.uuid4()
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
@@ -979,6 +982,9 @@ class WorkflowService:
             files = await self._handle_file_input(payload.files)
             storage_type, user_rag_memory_id = self._get_memory_store_info(workspace_id)
             input_data["files"] = files
+            # 更新 execution.input_data，确保数据库中的 files 包含 URL
+            execution.input_data = input_data
+            self.db.commit()
             self.update_execution_status(execution.execution_id, "running")
             history = self._get_history_info(conversation_id_uuid)
             if history:

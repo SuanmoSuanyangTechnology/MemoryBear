@@ -12,7 +12,7 @@ from app.models.conversation_model import Conversation, Message
 from app.models.workflow_model import WorkflowExecution
 from app.repositories.agent_execution_repository import AgentExecutionRepository
 from app.repositories.conversation_repository import ConversationRepository, MessageRepository
-from app.schemas.app_log_schema import AppLogMessage, AppLogNodeExecution
+from app.schemas.app_log_schema import AppLogMessage, AppLogNodeExecution, LogFileInfo
 
 logger = get_business_logger()
 
@@ -209,12 +209,23 @@ class AppLogService:
                 continue
 
             files = input_data.get("files") or []
+            file_infos = []
+            for f in files:
+                if isinstance(f, dict) and f.get("url"):
+                    file_infos.append(LogFileInfo(
+                        type=f.get("type", ""),
+                        url=f["url"],
+                        name=f.get("name"),
+                        size=f.get("size"),
+                        file_type=f.get("file_type"),
+                    ))
             user_msg = AppLogMessage(
                 id=uuid.uuid5(execution.id, "user"),
                 conversation_id=conversation_id,
                 role="user",
                 content=input_content,
                 meta_data={"files": files} if files else None,
+                files=file_infos,
                 created_at=started_at,
             )
             messages.append(user_msg)
