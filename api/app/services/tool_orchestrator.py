@@ -24,7 +24,7 @@ def _is_single_call_tool(name: str) -> bool:
 
 # 解析模型输出的 Thought/Action/Input 三段式
 _ACTION_PATTERN = re.compile(
-    r"Thought[：:]\s*(.*?)\s*Action[：:]\s*(\S+)\s*Input[：:]\s*([\s\S]*?\{[\s\S]*?})",
+    r"Thought[：:]\s*(.*?)\s*Action[：:]\s*(\S+)\s*Input[：:]\s*([\s\S]*?\{[\s\S]*?\})",
     re.DOTALL,
 )
 
@@ -40,15 +40,19 @@ _REACT_SYSTEM_TEMPLATE = """\
 3. 若任务需要多个步骤、依赖多个工具（如先查时间再查天气），必须分多轮依次调用。
 4. 参考历史已有的工具返回结果，自动复用已有信息，无需重复调用工具。
 5. 如果用户问题不需要任何工具就能回答，直接给出最终答案，不输出工具调用格式。
-6. 工具参数缺失时，不要编造参数，正常推理是否需要继续调用或询问用户。
+6. 工具参数缺失时，不要编造参数，正常推理是否需要继续调用。
 
-# 输出格式（强制严格遵守，只能按以下三段式输出，禁止额外多余话术）
+# 输出规范
+## 调用工具时，**必须严格使用以下固定三段式格式输出**，一字不差遵守排版：
 Thought：你的思考过程，分析用户需求、是否需要调用工具、应该选哪个工具、缺少什么信息
 Action：选中的工具名称（必须和工具列表里的名称完全一致）
 Input：JSON格式工具入参，无参数则填空对象 {{}}
 
+## 无需调用工具、信息充足可以直接回答用户时：
+**直接输出纯自然语言回答即可，严禁输出 Thought、Action、Input 任何字段，不使用任何固定格式**。
+
 # 终止条件
-当已经收集到全部所需信息、无需再调用任何工具时，直接整理信息给出自然语言最终回答，不再输出 Thought/Action/Input 格式。
+当已经收集到全部所需信息、无需再调用任何工具时，直接整理信息用普通自然语言回复用户，彻底停止三段式格式输出。
 
 # 上下文说明
 你能看到历史对话和上一轮工具返回的观察结果，请基于已有结果继续推理下一步动作。\
@@ -176,7 +180,7 @@ class ToolOrchestrator:
                     item.get("text", "") if isinstance(item, dict) else str(item)
                     for item in content
                 )
-            return content
+            return content.strip()
 
         react_message = (
             [{"type": "text", "text": message}] + processed_files
@@ -192,7 +196,7 @@ class ToolOrchestrator:
 
         updated_system_prompt = (
             react_system_prompt + trajectory_context
-            + f"\n\n工具调用已完成，调用结果：{final_answer}\n请直接将以上答案整理后回复用户，不要再输出 Thought/Action/Input 格式。"
+            + f"\n\n工具调用已完成，调用结果：{final_answer}"
         )
         return updated_system_prompt, node_executions
 
@@ -213,7 +217,7 @@ class ToolOrchestrator:
         if _is_single_call_tool(name):
             self._single_call_counts[name] = self._single_call_counts.get(name, 0) + 1
             if self._single_call_counts[name] > 1:
-                return f"[{name}] 已调用过一次，请勿重复调用，如结果不满足需求请换用其他工具补充信息。"
+                return {"success": False, "output": "", "error": f"[{name}] 已调用过一次，请勿重复调用，如结果不满足需求请换用其他工具补充信息。"}
         tool = self.tools.get(name)
         if not tool:
             return {"success": False, "output": "", "error": f"工具 '{name}' 不存在"}
