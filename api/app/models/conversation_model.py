@@ -107,9 +107,6 @@ class Message(Base):
     # 状态
     status = Column(String(20), nullable=False, server_default="completed", comment="消息状态: completed/failed")
 
-    # 消息顺序编号：从 1 开始，按 created_at 升序（同 created_at 时以 id 升序）；新消息由应用层在插入事务中赋值
-    message_seq = Column(Integer, nullable=True, comment="消息在对话中的顺序编号，从 1 开始，按 created_at 升序（同 created_at 时以 id 升序）")
-
     # 时间戳
     created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")
 

@@ -236,8 +236,29 @@ async def enrich_file_content(messages: List[dict]) -> None:
                     url = file_info.get("url", "")
                     if not url:
                         continue
-                    for memory in repo.get_by_url(url):
-                        file_content.append((memory, file_info.get("type", "")))
+                    memories = repo.get_by_url(url)
+                    if not memories:
+                        continue
+                    # 同一 URL 可能因多次 API 调用而存在多条记录，
+                    # 只取最新的一条（按 created_time 降序），避免重复 Perceptual 节点
+                    memory = max(
+                        memories,
+                        key=lambda m: m.created_time if m.created_time else datetime.min,
+                    )
+                    # 在 Session 关闭前显式访问所有需要的属性，
+                    # 确保它们被加载到内存中，避免 detach 后
+                    # 访问 expired 属性触发 DetachedInstanceError
+                    _ = memory.meta_data
+                    _ = memory.summary
+                    _ = memory.file_path
+                    _ = memory.file_name
+                    _ = memory.file_ext
+                    _ = memory.perceptual_type
+                    _ = memory.end_user_id
+                    _ = memory.id
+                    _ = memory.created_time
+                    db.expunge(memory)
+                    file_content.append((memory, file_info.get("type", "")))
         except Exception as e:
             logger.warning(
                 f"[WindowUtils] 重建 file_content 失败: err={e}"
