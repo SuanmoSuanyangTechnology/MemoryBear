@@ -41,6 +41,7 @@ class MetadataExtractionStep(ExtractionStep[MetadataStepInput, MetadataStepOutpu
     async def render_prompt(self, input_data: MetadataStepInput) -> str:
         """使用 Jinja2 模板渲染元数据提取 prompt。"""
         from app.core.memory.utils.prompt.prompt_utils import prompt_env
+        from app.core.language_utils import detect_text_language
 
         template = prompt_env.get_template("extract_user_metadata.jinja2")
 
@@ -53,8 +54,12 @@ class MetadataExtractionStep(ExtractionStep[MetadataStepInput, MetadataStepOutpu
             indent=2,
         )
 
+        # 根据输入内容检测语言，确保 prompt 指令语言与输入一致
+        detect_source = " ".join(input_data.descriptions) if input_data.descriptions else ""
+        detected_language = detect_text_language(detect_source, fallback=self.language)
+
         return template.render(
-            language=self.language,
+            language=detected_language,
             input_json=input_json,
         )
 

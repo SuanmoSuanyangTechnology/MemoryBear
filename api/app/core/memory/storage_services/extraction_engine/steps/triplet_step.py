@@ -74,12 +74,18 @@ class TripletExtractionStep(ExtractionStep[TripletStepInput, TripletStepOutput])
             "has_unsolved_reference": input_data.has_unsolved_reference,
         }
 
+        # 根据输入内容检测语言，确保 prompt 指令语言与输入一致
+        from app.core.language_utils import detect_text_language
+        detected_language = detect_text_language(
+            input_data.statement_text, fallback=self.language
+        )
+
         return await render_triplet_extraction_prompt(
             statement=input_data.statement_text,
             chunk_content=chunk_content,
             json_schema=self.json_schema,
             predicate_instructions=self.predicate_instructions,
-            language=self.language,
+            language=detected_language,
             ontology_types=self.ontology_types,
             speaker=input_data.speaker,
             input_json=input_json,

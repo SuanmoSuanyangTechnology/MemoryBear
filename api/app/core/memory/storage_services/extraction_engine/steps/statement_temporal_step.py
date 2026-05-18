@@ -97,6 +97,8 @@ class StatementTemporalExtractionStep(ExtractionStep[StatementStepInput, List[St
     # ── Lifecycle ──
 
     async def render_prompt(self, input_data: StatementStepInput) -> str:
+        from app.core.language_utils import detect_text_language
+
         # Build optional dialogue context from supporting_context messages
         dialogue_content = None
         if self.include_dialogue_context and input_data.supporting_context.msgs:
@@ -118,6 +120,11 @@ class StatementTemporalExtractionStep(ExtractionStep[StatementStepInput, List[St
             },
         }
 
+        # 根据输入内容检测语言，确保 prompt 指令语言与输入一致
+        detected_language = detect_text_language(
+            input_data.target_content, fallback=self.language
+        )
+
         return await render_statement_extraction_prompt(
             chunk_content=input_data.target_content,
             definitions=self.definitions,
@@ -126,7 +133,7 @@ class StatementTemporalExtractionStep(ExtractionStep[StatementStepInput, List[St
             include_dialogue_context=self.include_dialogue_context,
             dialogue_content=dialogue_content,
             max_dialogue_chars=self.max_dialogue_context_chars,
-            language=self.language,
+            language=detected_language,
             input_json=input_json,
         )
 

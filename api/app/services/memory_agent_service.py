@@ -60,7 +60,7 @@ config_logger = get_config_logger()
 _neo4j_connector = Neo4jConnector()
 
 # 标记当前 task/coroutine 已持有 per-end_user 写入锁（避免重入死锁）
-# 由 write_message_task 在 worker 上下文中设置；MemoryAgentService.write_memory 检查后跳过自加锁
+# 由 flush_conversation_task 在 worker 上下文中设置，防止下游重复加锁
 _write_lock_holder: ContextVar[Optional[str]] = ContextVar("_write_lock_holder", default=None)
 
 
@@ -314,9 +314,8 @@ class MemoryAgentService:
         conversation_id = request.conversation_id
         start_time = time.time()
 
-        # ── per-end_user 互斥锁 ── 与 celery_task_scheduler 的 lock_key 共享同一命名空间
-        # （app.core.memory.agent.write_message:{end_user_id}），保证 API 同步路径与
-        # scheduler worker 路径之间也按 end_user_id 串行
+        # ── per-end_user 互斥锁 ──
+        # 防止同一 end_user_id 的 API 并发调用和 FlushTask 同时操作同一个 conversation
         async with self._acquire_per_user_lock(end_user_id):
             return await self._write_memory_locked(
                 end_user_id=end_user_id,
@@ -333,17 +332,13 @@ class MemoryAgentService:
     @staticmethod
     @asynccontextmanager
     async def _acquire_per_user_lock(end_user_id: str):
-        """获取 per-end_user 互斥锁，与 Celery worker 共享 RedisFairLock key。
+        """获取 per-end_user 互斥锁（RedisFairLock）。
 
-        worker 路径（write_message_task）和 API 同步路径都使用同一把锁
-        memory_write:{end_user_id}，保证同一 user 任意路径之间也按顺序执行。
+        防止同一 end_user_id 的并发 API 调用和 FlushTask 同时操作同一个
+        哨兵会话的 write_cursor 和 pending 消息。
 
-        重入检测：若当前 contextvar 标记已持有同 end_user_id 的锁（典型场景：
-        worker 在 task 入口已加锁，再调用 MemoryAgentService.write_memory），
-        则跳过自加锁，避免自死锁。
-
-        celery_task_scheduler 自身在 lock_key="{task_name}:{user_id}" 上做的
-        是 worker 之间串行（简单 SET-NX），与 RedisFairLock 用不同的 key 互不冲突。
+        FlushTask (flush_conversation_task) 也使用同一把锁
+        memory_write:{end_user_id}，保证互斥。
 
         失败（Redis 不可用）时不阻塞主流程，仅记录 warning 后放行。
         """
@@ -351,11 +346,8 @@ class MemoryAgentService:
             yield
             return
 
-        # 重入检测：上层已经持有同 user 的锁，本层跳过
+        # 重入检测：FlushTask 在 worker 中已持有锁时跳过
         if _is_holding_write_lock(end_user_id):
-            logger.debug(
-                f"[write_memory] 当前上下文已持有锁，跳过重复加锁: end_user_id={end_user_id}"
-            )
             yield
             return
 
@@ -373,11 +365,8 @@ class MemoryAgentService:
             redis_client.ping()
         except Exception as e:
             logger.warning(
-                f"[write_memory] 无法获取 Redis 客户端，跳过锁保护: end_user_id={end_user_id}, err={e}"
+                f"[write_memory] Redis 不可用，跳过锁保护: end_user_id={end_user_id}, err={e}"
             )
-            redis_client = None
-
-        if redis_client is None:
             yield
             return
 
@@ -385,13 +374,11 @@ class MemoryAgentService:
             key=f"memory_write:{end_user_id}",
             redis_client=redis_client,
             expire=600,
-            timeout=3600,
+            timeout=120,
             auto_renewal=True,
         )
 
-        # acquire 是同步阻塞，放进线程池避免阻塞 event loop
         import asyncio
-
         acquired = await asyncio.to_thread(lock.acquire)
         if not acquired:
             logger.warning(
@@ -400,16 +387,14 @@ class MemoryAgentService:
             yield
             return
 
-        token = _set_write_lock_holder(end_user_id)
         try:
             yield
         finally:
-            _reset_write_lock_holder(token)
             try:
                 await asyncio.to_thread(lock.release)
             except Exception as e:
                 logger.warning(
-                    f"[write_memory] 释放锁失败（不影响主流程）: end_user_id={end_user_id}, err={e}"
+                    f"[write_memory] 释放锁失败: end_user_id={end_user_id}, err={e}"
                 )
 
     async def _write_memory_locked(

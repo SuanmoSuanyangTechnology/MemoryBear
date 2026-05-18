@@ -252,10 +252,10 @@ class SemanticPruner:
                     self._snapshot_records.append({
                         "input": input_record,
                         "gold": {
-                            "assistant_memory_hint": asst_msg.msg,
-                            "assistant_memory_type": "skipped (has files)",
                             "should_process_user_msg": False,
                             "processed_user_msg": None,
+                            "assistant_memory_hint": asst_msg.msg,
+                            "assistant_memory_type": "skipped (has files)",
                         },
                     })
                     return user_idx, asst_idx, asst_msg.msg, False, False, None
@@ -435,7 +435,10 @@ class SemanticPruner:
             del self._cache[oldest]
 
         # 渲染模板
-        rendered = self.template.render(dialog_text=dialog_text, language=self.language)
+        rendered = self.template.render(
+            dialog_text=dialog_text,
+            language=self.language,
+        )
         log_template_rendering("extract_pruning.jinja2", {
             "language": self.language,
         })

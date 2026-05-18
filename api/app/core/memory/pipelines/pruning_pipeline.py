@@ -74,8 +74,8 @@ class PruningPipeline:
         content: str,
         user_content: str = "",
         _pruning_records: Optional[list] = None,
-    ) -> str:
-        """对单条 assistant 消息执行语义剪枝。
+    ) -> tuple[str, bool, Optional[str]]:
+        """对单条 assistant 消息执行语义剪枝，同时判断 user 消息是否需要规整。
 
         1. 查 Redis 缓存 pruning:{conversation_id}:{message_seq}
         2. 命中 → 直接返回 A'（source="cache"）
@@ -90,7 +90,10 @@ class PruningPipeline:
                               供调用方汇总后写入快照
 
         Returns:
-            剪枝后的内容（A'）；若无记忆价值则返回空字符串
+            (pruned_content, should_process_user_msg, processed_user_msg) 元组：
+            - pruned_content: 剪枝后的内容（A'）；若无记忆价值则返回空字符串
+            - should_process_user_msg: 是否需要对 user 消息做规整
+            - processed_user_msg: 规整后的 user 消息文本，不需要处理时为 None
         """
         cache_key = self._cache_key(conversation_id, message_seq)
 
@@ -113,18 +116,21 @@ class PruningPipeline:
                         ]
                     },
                     "output": {
+                        "should_process_user_msg": False,
+                        "processed_user_msg": None,
                         "assistant_memory_hint": cached_hint,
                         "assistant_memory_type": cached_type or "NULL",
                     },
                 })
-            return cached_hint
+            # 缓存命中时无法获取 user 侧剪枝结果，保留原始 user 消息
+            return cached_hint, False, None
 
         # Step 2: 缓存未命中，调用 LLM 剪枝
         logger.info(
             f"[PruningPipeline] 缓存未命中，执行剪枝: "
             f"conv={conversation_id}, seq={message_seq}"
         )
-        pruned_content, memory_type = await self._call_llm_prune(
+        pruned_content, memory_type, should_process_user_msg, processed_user_msg = await self._call_llm_prune(
             content=content,
             user_content=user_content,
         )
@@ -161,12 +167,14 @@ class PruningPipeline:
                     ]
                 },
                 "gold": {
+                    "should_process_user_msg": should_process_user_msg,
+                    "processed_user_msg": processed_user_msg,
                     "assistant_memory_hint": pruned_content,
                     "assistant_memory_type": memory_type,
                 },
             })
 
-        return pruned_content
+        return pruned_content, should_process_user_msg, processed_user_msg
 
     def _cache_key(self, conversation_id: str, message_seq: int) -> str:
         """生成 Redis 缓存 key。
@@ -184,29 +192,39 @@ class PruningPipeline:
     # 内部方法：LLM 剪枝
     # ──────────────────────────────────────────────
 
-    async def _call_llm_prune(self, content: str, user_content: str = "") -> tuple[str, str]:
+    async def _call_llm_prune(self, content: str, user_content: str = "") -> tuple[str, str, bool, Optional[str]]:
         """调用 SemanticPruner 对单条 assistant 消息执行剪枝。
 
         复用现有 SemanticPruner 逻辑，将"整批消息剪枝"适配为"单条消息剪枝"。
         构造一个 user-assistant 消息对，调用 SemanticPruner.extract_assistant_hint()。
+
+        语言检测：根据输入内容（user_content + content）自动检测语言，
+        确保 prompt 指令语言与输入内容语言一致，从而让 LLM 输出跟随输入语言。
 
         Args:
             content: assistant 消息原始内容
             user_content: 紧邻此 assistant 消息之前的 user 消息内容（可为空）
 
         Returns:
-            (pruned_content, memory_type) 元组：
+            (pruned_content, memory_type, should_process_user_msg, processed_user_msg) 元组：
             - pruned_content: 剪枝后内容（A'）；若无记忆价值则为空字符串
             - memory_type: LLM 返回的类型枚举（comfort/suggestion/... 或 NULL）
+            - should_process_user_msg: 是否需要对 user 消息做规整
+            - processed_user_msg: 规整后的 user 消息文本，不需要处理时为 None
         """
         from app.core.memory.storage_services.extraction_engine.data_preprocessing import (
             SemanticPruner,
         )
         from app.core.memory.models.config_models import PruningConfig
         from app.core.memory.models.message_models import ConversationMessage
+        from app.core.language_utils import detect_text_language
 
         # 确保 LLM 客户端已初始化
         self._ensure_llm_client()
+
+        # 根据输入内容检测语言，优先看 user 消息，其次看 assistant 消息
+        detect_source = user_content if user_content.strip() else content
+        detected_language = detect_text_language(detect_source, fallback=self.language)
 
         pruning_config = PruningConfig(
             pruning_switch=True,
@@ -223,7 +241,7 @@ class PruningPipeline:
         pruner = SemanticPruner(
             config=pruning_config,
             llm_client=self._llm_client,
-            language=self.language,
+            language=detected_language,
         )
 
         # 使用实际的 user 消息（若有），否则用占位符
@@ -237,9 +255,9 @@ class PruningPipeline:
 
         if result.assistant_memory_hint == "NULL":
             logger.info("[PruningPipeline] LLM 判断无记忆价值，返回空字符串")
-            return "", result.assistant_memory_type
+            return "", result.assistant_memory_type, result.should_process_user_msg, result.processed_user_msg
 
-        return result.assistant_memory_hint, result.assistant_memory_type
+        return result.assistant_memory_hint, result.assistant_memory_type, result.should_process_user_msg, result.processed_user_msg
 
     # ──────────────────────────────────────────────
     # 内部方法：Neo4j 写入
