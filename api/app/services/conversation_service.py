@@ -7,7 +7,7 @@ from typing import Optional, List, Tuple, Dict, Any
 import json_repair
 from fastapi import Depends
 from jinja2 import Template
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -212,12 +212,6 @@ class ConversationService:
                 conversation_id
             )
 
-            # 在同一事务中计算并赋值 message_seq
-            max_seq = self.db.execute(
-                select(func.coalesce(func.max(Message.message_seq), 0))
-                .where(Message.conversation_id == conversation_id)
-            ).scalar()
-
             message = Message(
                 id=message_id if message_id else uuid.uuid4(),
                 conversation_id=conversation_id,
@@ -225,7 +219,6 @@ class ConversationService:
                 content=content,
                 meta_data=meta_data,
                 status=status,
-                message_seq=max_seq + 1,
             )
 
             self.message_repo.add_message(message)
@@ -284,7 +277,7 @@ class ConversationService:
         否则 run_until_complete。
 
         Args:
-            message: 已分配 message_seq 的 Message 实例（尚未 commit）
+            message: Message 实例（尚未 commit）
             conversation: 该消息所属的 Conversation，用于读取 app_id / workspace_id /
                 is_draft / user_id（即 end_user_id）
             should_memorize: 透传给 MemoryMessage.should_memorize（会话级记忆开关）
