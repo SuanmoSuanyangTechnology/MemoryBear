@@ -1020,10 +1020,13 @@ class WritePipeline:
         pruning_pipeline: "PruningPipeline",
         pruning_records: Optional[list] = None,
     ) -> List[dict]:
-        """将消息列表中的 assistant 消息替换为剪枝后版本（A'）。
+        """将消息列表中的 assistant 消息替换为剪枝后版本（A'），同时处理 user 消息规整。
 
         assistant 消息剪枝并发执行（asyncio.gather），窗口上下文中多条
         assistant 消息之间无依赖关系。单条失败时回退到原文，不阻塞其他剪枝任务。
+
+        当 LLM 判断 user 消息需要规整（should_process_user_msg=true）时，
+        用 processed_user_msg 替换原始 user 消息内容进入下一阶段。
 
         Args:
             messages: 消息列表，每条消息包含 role、content、message_seq 等字段
@@ -1038,15 +1041,18 @@ class WritePipeline:
         """
         # 预计算每条 assistant 消息紧邻的 user 消息内容
         last_user_content = ""
-        prune_tasks: list = []  # (index, coroutine)
+        last_user_idx = -1
+        prune_tasks: list = []  # (index, user_idx, coroutine)
         result: List[Optional[dict]] = [None] * len(messages)
         for i, msg in enumerate(messages):
             if msg.get("role") == "user":
                 last_user_content = msg.get("content", "")
+                last_user_idx = i
                 result[i] = msg
             elif msg.get("role") == "assistant":
                 user_ctx = last_user_content
-                prune_tasks.append((i, pruning_pipeline.prune(
+                user_idx = last_user_idx
+                prune_tasks.append((i, user_idx, pruning_pipeline.prune(
                     conversation_id=conversation_id,
                     message_seq=msg.get("message_seq", 0),
                     content=msg.get("content", ""),
@@ -1054,22 +1060,34 @@ class WritePipeline:
                     _pruning_records=pruning_records,
                 )))
                 last_user_content = ""
+                last_user_idx = -1
             else:
                 result[i] = msg
 
         # 并发执行所有剪枝任务
         if prune_tasks:
-            coros = [coro for _, coro in prune_tasks]
+            coros = [coro for _, _, coro in prune_tasks]
             pruned_results = await asyncio.gather(*coros, return_exceptions=True)
-            for (idx, _), pruned_content in zip(prune_tasks, pruned_results):
-                if isinstance(pruned_content, BaseException):
+            for (idx, user_idx, _), prune_result in zip(prune_tasks, pruned_results):
+                if isinstance(prune_result, BaseException):
                     logger.warning(
                         f"[WritePipeline] 剪枝失败，回退原文: "
-                        f"conv={conversation_id}, seq={messages[idx].get('message_seq')}, err={pruned_content}"
+                        f"conv={conversation_id}, seq={messages[idx].get('message_seq')}, err={prune_result}"
                     )
                     result[idx] = messages[idx]
                 else:
+                    pruned_content, should_process_user_msg, processed_user_msg = prune_result
+                    # 替换 assistant 消息为剪枝后内容
                     result[idx] = {**messages[idx], "content": pruned_content}
+                    # 如果 user 消息需要规整，用 processed_user_msg 替换
+                    if (
+                        should_process_user_msg
+                        and processed_user_msg is not None
+                        and processed_user_msg.strip() != ""
+                        and user_idx >= 0
+                        and result[user_idx] is not None
+                    ):
+                        result[user_idx] = {**result[user_idx], "content": processed_user_msg}
 
         return [m for m in result if m is not None]
 

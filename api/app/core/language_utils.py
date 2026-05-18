@@ -6,8 +6,10 @@
 Functions:
     validate_language: 校验语言参数，确保其为有效值
     get_language_from_header: 从请求头获取并校验语言参数
+    detect_text_language: 根据文本内容检测语言
 """
 
+import re
 from typing import Optional
 
 from app.core.logging_config import get_logger
@@ -19,6 +21,66 @@ SUPPORTED_LANGUAGES = {"zh", "en"}
 
 # 默认回退语言
 DEFAULT_LANGUAGE = "zh"
+
+# CJK Unicode 范围（中文字符）
+_CJK_RANGES = (
+    r"[\u4e00-\u9fff"       # CJK Unified Ideographs
+    r"\u3400-\u4dbf"        # CJK Unified Ideographs Extension A
+    r"\uf900-\ufaff"        # CJK Compatibility Ideographs
+    r"\u2e80-\u2eff"        # CJK Radicals Supplement
+    r"\u3000-\u303f"        # CJK Symbols and Punctuation
+    r"\uff00-\uffef]"       # Halfwidth and Fullwidth Forms
+)
+_CJK_PATTERN = re.compile(_CJK_RANGES)
+
+
+def detect_text_language(text: Optional[str], fallback: str = "zh") -> str:
+    """根据文本内容检测主要语言。
+
+    使用简单的中文字符占比启发式方法：
+    - 统计文本中 CJK 字符数量与总有效字符（去除空白和标点后）的比例
+    - 中文字符占比 >= 10% 则判定为中文，否则判定为英文
+
+    此方法适用于记忆写入流水线中的输入文本语言检测，确保 LLM 输出语言
+    跟随输入内容语言，而非 X-Language-Type header。
+
+    Args:
+        text: 待检测的文本内容
+        fallback: 无法判断时的回退语言（默认 "zh"）
+
+    Returns:
+        "zh" 或 "en"
+
+    Examples:
+        >>> detect_text_language("我今年32岁，在上海工作。")
+        'zh'
+        >>> detect_text_language("I am a backend engineer.")
+        'en'
+        >>> detect_text_language("我使用 Python 和 JavaScript 开发。")
+        'zh'
+        >>> detect_text_language("")
+        'zh'
+    """
+    if not text or not text.strip():
+        return fallback
+
+    # 统计 CJK 字符数
+    cjk_chars = _CJK_PATTERN.findall(text)
+    cjk_count = len(cjk_chars)
+
+    # 统计总有效字符数（去除空白）
+    non_space = re.sub(r"\s", "", text)
+    total_chars = len(non_space)
+
+    if total_chars == 0:
+        return fallback
+
+    # 中文字符占比 >= 10% 则判定为中文
+    ratio = cjk_count / total_chars
+    if ratio >= 0.1:
+        return "zh"
+    else:
+        return "en"
 
 
 def validate_language(language: Optional[str]) -> str:
