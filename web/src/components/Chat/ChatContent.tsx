@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-18 11:18:43
+ * @Last Modified time: 2026-05-18 12:14:34
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -219,9 +219,9 @@ const ChatContent: FC<ChatContentProps> = ({
                           </div>
                         }
                         {((item.status && item.status !== 'completed') || typeof item.meta_data?.error === 'string') &&
-                          <div className={clsx("rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/conversation/exclamation_circle.svg')] rb:absolute rb:-left-7", {
-                            'rb:-left-7': item.status && item.status !== 'completed' && item.role === 'user',
-                            'rb:left-0': item.role === 'assistant' && typeof item.meta_data?.error === 'string',
+                          <div className={clsx("rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/conversation/exclamation_circle.svg')] rb:absolute", {
+                            'rb:-left-7!': item.status && item.status !== 'completed' && item.role === 'user',
+                            'rb:left-0!': item.role === 'assistant' && typeof item.meta_data?.error === 'string',
                           })}></div>
                         }
                         {item.subContent && renderRuntime && renderRuntime(item, index)}
