@@ -167,7 +167,7 @@ const ChatContent: FC<ChatContentProps> = ({
                     {/* Assistant icon */}
                     {item.role === 'assistant' && assistantIcon}
                     <div
-                      className="rb:flex-1"
+                      className={item.role === 'assistant' && assistantIcon ? "rb:flex-1" : "rb:w-full!"}
                     >
                       {/* Top label (such as timestamp, username, etc.) */}
                       {labelPosition === 'top' &&
