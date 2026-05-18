@@ -275,7 +275,7 @@ const DocumentDetails: FC = () => {
         // Update frontend list directly without waiting for backend cache refresh
         setChunkList(prev => prev.map(item => 
           item.metadata?.doc_id === chunkId 
-            ? { ...item, page_content: typeof content === 'object' ? `'Q: ${response.metadata.question}\n A: ${response.metadata.answer}` :  response.page_content || content }
+            ? { ...item, page_content: typeof content === 'object' ? `Q: ${response.metadata.question}\n A: ${response.metadata.answer}` :  response.page_content || content }
             : item
         ));
         
