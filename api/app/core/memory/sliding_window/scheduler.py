@@ -253,13 +253,18 @@ class SlidingWindowScheduler:
         conversation_id: str,
         target_seq: int,
     ) -> int:
+        """统计 target_seq 之后的 user 消息数（窗口下文）。
+
+        无论 should_memorize=true/false 都计入：should_memorize=false 的消息
+        虽然不会触发 Neo4j 写入，但仍作为窗口上下文参与计数；写入流程会跳过
+        这些消息并推进 write_cursor。
+        """
         try:
             with get_db_context() as db:
                 count = db.execute(
                     select(func.count(MemoryMessage.id)).where(
                         MemoryMessage.conversation_id == conversation_id,
                         MemoryMessage.role == "user",
-                        MemoryMessage.should_memorize.is_(True),
                         MemoryMessage.message_seq > target_seq,
                     )
                 ).scalar_one()

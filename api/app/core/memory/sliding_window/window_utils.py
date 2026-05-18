@@ -388,13 +388,16 @@ async def dispatch_to_scheduler(
 # ──────────────────────────────────────────────
 
 
-async def _load_memorable_user_seqs(conversation_id: str) -> List[int]:
-    """一次性拉取 conversation 中所有 role=user 且 should_memorize=true 的
-    message_seq 升序列表。
+async def _load_user_seqs(conversation_id: str) -> List[int]:
+    """一次性拉取 conversation 中所有 role=user 的 message_seq 升序列表。
 
     用于在 execute_pending_from_pool 顺序处理多条 user 消息时校验下文长度：
     给定该列表后，下文条数 = len(seqs) - bisect_right(seqs, target_seq)，
     避免对每条 target_seq 各跑一次 COUNT 查询。
+
+    注意：should_memorize=false 的 user 消息也计入下文，仅作为窗口上下文凑数；
+    这些消息的 Neo4j 写入会在 execute_pending_from_pool 主循环里被 advance_write_cursor
+    跳过推进。
 
     Args:
         conversation_id: 对话 ID
@@ -408,13 +411,12 @@ async def _load_memorable_user_seqs(conversation_id: str) -> List[int]:
                 select(MemoryMessage.message_seq).where(
                     MemoryMessage.conversation_id == conversation_id,
                     MemoryMessage.role == "user",
-                    MemoryMessage.should_memorize.is_(True),
                 ).order_by(MemoryMessage.message_seq.asc())
             ).scalars().all()
             return [int(s) for s in rows if s is not None]
     except Exception as e:
         logger.error(
-            f"[WindowUtils] 加载 memorable user seq 列表失败: "
+            f"[WindowUtils] 加载 user seq 列表失败: "
             f"conv={conversation_id}, err={e}",
             exc_info=True,
         )
@@ -582,12 +584,15 @@ async def execute_pending_from_pool(
         language=language,
     )
 
-    # 仅在需要校验下文长度时（实时滑动窗口路径）一次性加载 memorable user seq
+    # 仅在需要校验下文长度时（实时滑动窗口路径）一次性加载 user seq
     # 列表，循环里用 bisect_right 替代 N 次 COUNT 查询，开销从 N 次 SQL
     # 降到 1 次 SQL + O(N log N) 内存查找。
+    # 注意：列表包含 should_memorize=false 的 user 消息——它们作为窗口
+    # 上下文计入下文长度，但不会触发写入（在主循环里 advance_write_cursor
+    # 跳过）。
     memorable_user_seqs: List[int] = []
     if enforce_window:
-        memorable_user_seqs = await _load_memorable_user_seqs(conversation_id)
+        memorable_user_seqs = await _load_user_seqs(conversation_id)
 
     for message in pending:
         target_seq = message.get("message_seq")
