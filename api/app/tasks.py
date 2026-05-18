@@ -4154,8 +4154,12 @@ def flush_conversation_task(self, conversation_id: str) -> None:
 )
 def scan_idle_conversations_task() -> None:
     """Celery Beat 定时任务（每 60 秒）：扫描空闲对话并派发兜底写入任务。
+
+    优先从 Redis Set (pending_conversations) 获取候选对话 ID，避免全表 JOIN 扫描。
+    若 Set 不可用则回退到数据库查询。
+
     扫描条件（三者同时满足才派发 flush_conversation_task）：
-    1. 数据库中存在 message_seq > write_cursor 的未写入消息
+    1. 对话存在未写入消息（来自 Redis Set 或 DB 查询）
     2. Redis 中 conv_active:{conversation_id} 已过期或不存在（对话空闲 >5 分钟）
     3. Redis 中 flush_lock:{conversation_id} 不存在（无正在执行的 Flush_Task）
 
@@ -4175,7 +4179,7 @@ def scan_idle_conversations_task() -> None:
         logger.error("[ScanIdle] Redis 不可用，跳过本次扫描")
         return
 
-    # 单独构造一个连接到 settings.REDIS_DB 的客户端，用于读取 conv_active key
+    # 单独构造一个连接到 settings.REDIS_DB 的客户端，用于读取 conv_active key 和 pending_conversations Set
     active_redis_client = None
     try:
         active_redis_client = redis.StrictRedis(
@@ -4198,39 +4202,50 @@ def scan_idle_conversations_task() -> None:
     skipped_locked = 0
 
     try:
-        with get_db_context() as db:
-            # 查询 memory_messages 表中存在未写入消息的对话（Agent 路径：conversation_id IS NOT NULL）
-            # MAX(message_seq) > write_cursor 表示有待处理消息
-            from app.models.memory_message_model import MemoryMessage
+        # 优先从 Redis Set 获取候选对话 ID（O(N) SMEMBERS，避免全表 JOIN）
+        candidate_conv_ids: list[str] | None = None
+        if active_redis_client is not None:
+            try:
+                from app.core.memory.sliding_window.window_utils import PENDING_CONVERSATIONS_SET_KEY
+                candidates = active_redis_client.smembers(PENDING_CONVERSATIONS_SET_KEY)
+                if candidates:
+                    candidate_conv_ids = list(candidates)
+                    logger.info(f"[ScanIdle] 从 Redis Set 获取 {len(candidate_conv_ids)} 个候选对话")
+            except Exception as e:
+                logger.warning(f"[ScanIdle] 读取 pending_conversations Set 失败，回退到 DB 查询: {e}")
 
-            max_seq_subq = (
-                select(
-                    MemoryMessage.conversation_id,
-                    func.max(MemoryMessage.message_seq).label("max_seq"),
-                )
-                .where(MemoryMessage.conversation_id.isnot(None))
-                .group_by(MemoryMessage.conversation_id)
-                .subquery()
-            )
+        # 回退：Redis Set 不可用或为空时，走数据库查询
+        if candidate_conv_ids is None:
+            with get_db_context() as db:
+                from app.models.memory_message_model import MemoryMessage
 
-            rows = (
-                db.execute(
-                    select(Conversation.id)
-                    .join(
-                        max_seq_subq,
-                        Conversation.id == max_seq_subq.c.conversation_id,
+                max_seq_subq = (
+                    select(
+                        MemoryMessage.conversation_id,
+                        func.max(MemoryMessage.message_seq).label("max_seq"),
                     )
-                    .where(max_seq_subq.c.max_seq > Conversation.write_cursor)
+                    .where(MemoryMessage.conversation_id.isnot(None))
+                    .group_by(MemoryMessage.conversation_id)
+                    .subquery()
                 )
-                .scalars()
-                .all()
-            )
 
-        logger.info(f"[ScanIdle] 发现 {len(rows)} 个对话存在未写入消息")
+                rows = (
+                    db.execute(
+                        select(Conversation.id)
+                        .join(
+                            max_seq_subq,
+                            Conversation.id == max_seq_subq.c.conversation_id,
+                        )
+                        .where(max_seq_subq.c.max_seq > Conversation.write_cursor)
+                    )
+                    .scalars()
+                    .all()
+                )
+                candidate_conv_ids = [str(r) for r in rows]
 
-        for conv_id in rows:
-            conv_id_str = str(conv_id)
+        logger.info(f"[ScanIdle] 发现 {len(candidate_conv_ids)} 个对话存在未写入消息")
 
+        for conv_id_str in candidate_conv_ids:
             # 检查 conv_active key 是否存在（存在则对话仍活跃，跳过）
             # conv_active 写在 settings.REDIS_DB（DB 13），需要用专属 client 读取
             if active_redis_client is not None:

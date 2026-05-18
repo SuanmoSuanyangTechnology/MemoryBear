@@ -61,7 +61,7 @@ class FlushTask:
         logger.info(f"[FlushTask] 开始处理: conv={conversation_id}")
 
         # Step 1: 查询对话信息（end_user_id + workspace_id）
-        conversation_info = await self._get_conversation_info(conversation_id)
+        conversation_info = self._get_conversation_info(conversation_id)
         if conversation_info is None:
             logger.error(f"[FlushTask] 对话不存在: conv={conversation_id}")
             return
@@ -87,12 +87,12 @@ class FlushTask:
 
         # Step 3: 处理剩余的 assistant 消息（should_memorize=TRUE 的）
         # 重新查询 write_cursor（可能已被 execute_pending_from_pool 推进）
-        write_cursor = await self._get_write_cursor(conversation_id)
+        write_cursor = self._get_write_cursor(conversation_id)
         if write_cursor is None:
             logger.info(f"[FlushTask] 无 write_cursor: conv={conversation_id}")
             return
 
-        pending = await self._get_pending_messages(conversation_id, write_cursor)
+        pending = self._get_pending_messages(conversation_id, write_cursor)
         assistant_messages = [
             m for m in pending
             if m.get("role") == "assistant" and m.get("should_memorize")
@@ -102,7 +102,7 @@ class FlushTask:
             logger.info(f"[FlushTask] 处理完成: conv={conversation_id}")
             return
 
-        memory_config = await self._load_memory_config(
+        memory_config = self._load_memory_config(
             end_user_id=end_user_id,
             workspace_id=workspace_id,
         )
@@ -147,10 +147,10 @@ class FlushTask:
         logger.info(f"[FlushTask] 处理完成: conv={conversation_id}")
 
     # ──────────────────────────────────────────────
-    # 内部方法：数据库查询
+    # 内部方法：数据库查询（同步，使用 get_db_context）
     # ──────────────────────────────────────────────
 
-    async def _get_conversation_info(
+    def _get_conversation_info(
         self, conversation_id: str
     ) -> Tuple[int, str | None, str | None] | None:
         """查询对话的 write_cursor、user_id 和 workspace_id。
@@ -185,7 +185,7 @@ class FlushTask:
             )
             return None
 
-    async def _get_write_cursor(self, conversation_id: str) -> int | None:
+    def _get_write_cursor(self, conversation_id: str) -> int | None:
         """查询 write_cursor。"""
         try:
             with get_db_context() as db:
@@ -201,7 +201,7 @@ class FlushTask:
             )
             return None
 
-    async def _get_pending_messages(
+    def _get_pending_messages(
         self, conversation_id: str, write_cursor: int
     ) -> List[dict]:
         """查询 memory_messages 表中 write_cursor 之后的所有未写入消息。
@@ -235,7 +235,7 @@ class FlushTask:
             )
             return []
 
-    async def _load_memory_config(
+    def _load_memory_config(
         self,
         end_user_id: str | None = None,
         workspace_id: str | None = None,

@@ -13,8 +13,9 @@ Requirements: 1.1, 1.2
 from __future__ import annotations
 
 import logging
+from bisect import bisect_right
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.db import get_db_context
 from app.models.conversation_model import Conversation
@@ -90,7 +91,10 @@ class SlidingWindowScheduler:
             if target_seq is not None:
                 await advance_write_cursor(conversation_id, target_seq)
 
-        # Step 4: 检查是否有满足下文条件的消息
+        # Step 4: 批量检查是否有满足下文条件的消息
+        # 一次性加载所有 user seq，用 bisect_right 替代 N 次 COUNT SQL
+        all_user_seqs = self._load_all_user_seqs(conversation_id)
+
         for msg in pending:
             if not msg.get("should_memorize", True):
                 continue
@@ -98,8 +102,8 @@ class SlidingWindowScheduler:
             if target_seq is None:
                 continue
 
-            downstream_count = self._count_downstream_memorable_user_messages(
-                conversation_id, target_seq
+            downstream_count = (
+                len(all_user_seqs) - bisect_right(all_user_seqs, target_seq)
             )
             if downstream_count >= WINDOW_SIZE:
                 logger.info(
@@ -249,30 +253,24 @@ class SlidingWindowScheduler:
             return []
 
     @staticmethod
-    def _count_downstream_memorable_user_messages(
-        conversation_id: str,
-        target_seq: int,
-    ) -> int:
-        """统计 target_seq 之后的 user 消息数（窗口下文）。
+    def _load_all_user_seqs(conversation_id: str) -> list[int]:
+        """一次性加载对话中所有 role=user 的 message_seq 升序列表。
 
-        无论 should_memorize=true/false 都计入：should_memorize=false 的消息
-        虽然不会触发 Neo4j 写入，但仍作为窗口上下文参与计数；写入流程会跳过
-        这些消息并推进 write_cursor。
+        用于 bisect_right 批量计算下文条数，避免对每条 pending 消息各执行一次 COUNT SQL。
         """
         try:
             with get_db_context() as db:
-                count = db.execute(
-                    select(func.count(MemoryMessage.id)).where(
+                rows = db.execute(
+                    select(MemoryMessage.message_seq).where(
                         MemoryMessage.conversation_id == conversation_id,
                         MemoryMessage.role == "user",
-                        MemoryMessage.message_seq > target_seq,
-                    )
-                ).scalar_one()
-                return count or 0
+                    ).order_by(MemoryMessage.message_seq.asc())
+                ).scalars().all()
+                return [int(s) for s in rows if s is not None]
         except Exception as e:
             logger.error(
-                f"[SlidingWindowScheduler] 统计下文消息数失败: "
-                f"conv={conversation_id}, target_seq={target_seq}, err={e}",
+                f"[SlidingWindowScheduler] 加载 user seq 列表失败: "
+                f"conv={conversation_id}, err={e}",
                 exc_info=True,
             )
-            return 0
+            return []

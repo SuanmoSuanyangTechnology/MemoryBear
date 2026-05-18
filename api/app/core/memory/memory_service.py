@@ -210,6 +210,77 @@ class MemoryService:
     # ──────────────────────────────────────────────
 
     @classmethod
+    async def _sync_and_dispatch(
+        cls,
+        conversation_id: str,
+        app_id: str,
+        original_message_id,
+        role: str,
+        content: str,
+        created_at,
+        should_memorize: bool,
+        config_id: str,
+        end_user_id: str,
+        workspace_id: str,
+        language: str,
+    ) -> Optional["MemoryMessage"]:
+        """内部统一方法：检查门禁 → 写入 memory_messages → 刷新活跃 key → 分派调度器。
+
+        sync_message 和 sync_agent_message 的公共逻辑抽取。
+
+        Args:
+            conversation_id: 会话 ID
+            app_id: 应用 ID，用于检查 memory.enabled
+            original_message_id: 原始 messages 表行的 id
+            role: user/assistant/system
+            content: 消息内容
+            created_at: 时间戳
+            should_memorize: 会话级记忆开关
+            config_id: 记忆配置 ID
+            end_user_id: 终端用户 ID
+            workspace_id: 工作空间 ID
+            language: 语言
+
+        Returns:
+            MemoryMessage 实例若成功写入，否则 None
+        """
+        # Step 0: 检查应用级记忆门禁
+        if not await cls._check_memory_enabled(app_id):
+            logger.debug(
+                f"[MemoryService] memory.enabled=false，跳过: "
+                f"conv={conversation_id}, app={app_id}"
+            )
+            return None
+
+        # Step 1: 写入 memory_messages 表
+        memory_msg = cls._persist_memory_message(
+            conversation_id=str(conversation_id),
+            original_message_id=original_message_id,
+            role=role,
+            content=content,
+            created_at=created_at,
+            should_memorize=should_memorize,
+        )
+        if memory_msg is None:
+            return None
+
+        # Step 2: 刷新 Redis 活跃 key
+        await cls._refresh_active_key(conversation_id)
+
+        # Step 3: 分派给 SlidingWindowScheduler
+        from app.core.memory.sliding_window.window_utils import dispatch_to_scheduler
+
+        await dispatch_to_scheduler(
+            conversation_id=str(conversation_id),
+            config_id=config_id,
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
+            language=language,
+        )
+
+        return memory_msg
+
+    @classmethod
     async def sync_message(
         cls,
         conversation_id: str,
@@ -249,41 +320,19 @@ class MemoryService:
         Returns:
             MemoryMessage 实例若成功写入，否则 None
         """
-        # Step 0: 检查应用级记忆门禁
-        if not await cls._check_memory_enabled(app_id):
-            logger.debug(
-                f"[MemoryService] memory.enabled=false，跳过: "
-                f"conv={conversation_id}, app={app_id}, is_draft={is_draft}"
-            )
-            return None
-
-        # Step 1: 写入 memory_messages 表
-        memory_msg = cls._persist_memory_message(
-            conversation_id=str(conversation_id),
+        return await cls._sync_and_dispatch(
+            conversation_id=conversation_id,
+            app_id=app_id,
             original_message_id=message.id,
             role=message.role,
             content=message.content,
             created_at=message.created_at,
             should_memorize=should_memorize,
-        )
-        if memory_msg is None:
-            return None
-
-        # Step 2: 刷新 Redis 活跃 key
-        await cls._refresh_active_key(conversation_id)
-
-        # Step 3: 分派给 SlidingWindowScheduler
-        from app.core.memory.sliding_window.window_utils import dispatch_to_scheduler
-
-        await dispatch_to_scheduler(
-            conversation_id=str(conversation_id),
             config_id=config_id,
             end_user_id=end_user_id,
             workspace_id=workspace_id,
             language=language,
         )
-
-        return memory_msg
 
     async def sync_agent_message(
         self,
@@ -313,40 +362,19 @@ class MemoryService:
         Returns:
             MemoryMessage 实例若成功写入，否则 None
         """
-        # Step 0: 检查应用级记忆门禁
-        if not await self._check_memory_enabled(app_id):
-            logger.debug(
-                f"[MemoryService] memory.enabled=false，跳过: "
-                f"conv={conversation_id}, app={app_id}, is_draft={is_draft}"
-            )
-            return None
-
-        # Step 1: 写入 memory_messages 表
-        memory_msg = self._persist_memory_message(
-            conversation_id=str(conversation_id),
+        return await self._sync_and_dispatch(
+            conversation_id=conversation_id,
+            app_id=app_id,
             original_message_id=message.id,
             role=message.role,
             content=message.content,
             created_at=message.created_at,
-        )
-        if memory_msg is None:
-            return None
-
-        # Step 2: 刷新 Redis 活跃 key
-        await self._refresh_active_key(conversation_id)
-
-        # Step 3: 分派给 SlidingWindowScheduler
-        from app.core.memory.sliding_window.window_utils import dispatch_to_scheduler
-
-        await dispatch_to_scheduler(
-            conversation_id=str(conversation_id),
+            should_memorize=True,
             config_id=config_id,
             end_user_id=self.ctx.end_user_id,
             workspace_id=workspace_id,
             language=self.ctx.memory_config.language if self.ctx.memory_config else "zh",
         )
-
-        return memory_msg
 
     async def sync_agent_messages_batch(
         self,
@@ -534,6 +562,11 @@ class MemoryService:
                     f"conv={conversation_id}, seq={next_seq}, role={role}, "
                     f"should_memorize={should_memorize}"
                 )
+
+                # 标记对话有待处理消息，供 scan_idle 快速过滤
+                from app.core.memory.sliding_window.window_utils import mark_conversation_pending
+                mark_conversation_pending(conversation_id)
+
                 return memory_msg
         except Exception as e:
             logger.error(
