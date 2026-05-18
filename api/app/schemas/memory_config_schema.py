@@ -417,7 +417,7 @@ class MemoryConfig:
     offset: float = 0.0
     
     # Pipeline config: Pruning
-    pruning_enabled: bool = False
+    pruning_enabled: bool = True
     pruning_scene: Optional[str] = "education"
     pruning_threshold: float = 0.5
     
