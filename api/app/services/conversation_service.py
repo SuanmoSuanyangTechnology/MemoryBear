@@ -7,6 +7,7 @@ from typing import Optional, List, Tuple, Dict, Any
 import json_repair
 from fastapi import Depends
 from jinja2 import Template
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -184,6 +185,7 @@ class ConversationService:
             meta_data: Optional[dict] = None,
             message_id: Optional[uuid.UUID] = None,
             status: str = "completed",
+            sync_memory: bool = True,
             should_memorize: bool = True,
     ) -> Message:
         """
@@ -209,6 +211,12 @@ class ConversationService:
             conversation = self.conversation_repo.get_conversation_by_conversation_id(
                 conversation_id
             )
+
+            # 在同一事务中计算并赋值 message_seq
+            max_seq = self.db.execute(
+                select(func.coalesce(func.max(Message.message_seq), 0))
+                .where(Message.conversation_id == conversation_id)
+            ).scalar()
 
             message = Message(
                 id=message_id if message_id else uuid.uuid4(),
@@ -272,7 +280,8 @@ class ConversationService:
         """触发 MemoryService.sync_message 把消息同步到 memory_messages 表。
 
         fire-and-forget：失败仅记录 warning，不影响 messages 表的主写入流程。
-        在已有事件循环中走 ensure_future，否则 run_until_complete。
+        在已有事件循环中走 ensure_future（附加 done_callback 记录异常），
+        否则 run_until_complete。
 
         Args:
             message: 已分配 message_seq 的 Message 实例（尚未 commit）
@@ -297,9 +306,22 @@ class ConversationService:
                 should_memorize=should_memorize,
             )
 
+            def _on_task_done(task: asyncio.Task) -> None:
+                """回调：记录 fire-and-forget 协程中未被捕获的异常。"""
+                if task.cancelled():
+                    return
+                exc = task.exception()
+                if exc is not None:
+                    logger.warning(
+                        f"[ConversationService] MemoryService.sync_message 异步执行失败: "
+                        f"conv={message.conversation_id}, err={exc}",
+                        exc_info=exc,
+                    )
+
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                asyncio.ensure_future(coro)
+                task = asyncio.ensure_future(coro)
+                task.add_done_callback(_on_task_done)
             else:
                 loop.run_until_complete(coro)
         except Exception as e:

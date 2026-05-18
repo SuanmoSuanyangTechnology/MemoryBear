@@ -252,18 +252,27 @@ async def enrich_file_content(messages: List[dict]) -> None:
 # 全局哨兵 App ID（Service API 虚拟会话专用）
 SENTINEL_APP_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
+# 模块级缓存：哨兵 App 是否已确认存在（进程生命周期内只需检查一次）
+_sentinel_app_verified: bool = False
+
 
 def _ensure_sentinel_app_exists() -> None:
     """确保哨兵 App 在 apps 表中存在，不存在则自动创建。
 
+    使用模块级 flag 缓存结果，进程生命周期内只查询一次数据库。
     其他环境首次运行时无需手动执行 migration，代码自动兜底。
     """
+    global _sentinel_app_verified
+    if _sentinel_app_verified:
+        return
+
     from app.models.app_model import App
 
     try:
         with get_db_context() as db:
             existing = db.get(App, SENTINEL_APP_ID)
             if existing is not None:
+                _sentinel_app_verified = True
                 return
 
             sentinel = App(
@@ -278,9 +287,11 @@ def _ensure_sentinel_app_exists() -> None:
             )
             db.add(sentinel)
             db.commit()
+            _sentinel_app_verified = True
             logger.info("[WindowUtils] 创建哨兵 App: id=00000000-0000-0000-0000-000000000001")
     except Exception as e:
-        # 并发场景下可能 unique violation，忽略即可
+        # 并发场景下可能 unique violation，忽略即可；标记为已验证避免重复查询
+        _sentinel_app_verified = True
         logger.debug(f"[WindowUtils] 确保哨兵 App 存在时异常（可忽略）: {e}")
 
 
@@ -432,12 +443,72 @@ async def write_batch_to_memory_messages(
 
         db.commit()
 
+    # 标记对话有待处理消息，供 scan_idle 快速过滤
+    if written:
+        mark_conversation_pending(conversation_id)
+
     return written
 
 
 # ──────────────────────────────────────────────
 # SlidingWindowScheduler 分派
 # ──────────────────────────────────────────────
+
+# Redis Set key：存储有待处理消息的对话 ID 集合
+# scan_idle_conversations_task 优先从此 Set 读取候选，避免全表 JOIN 扫描
+# 写在 settings.REDIS_DB（与 conv_active 同一 DB）
+PENDING_CONVERSATIONS_SET_KEY = "pending_conversations"
+
+
+def mark_conversation_pending(conversation_id: str) -> None:
+    """将对话 ID 加入 pending_conversations Redis Set。
+
+    在 write_batch_to_memory_messages 成功后调用，供 scan_idle_conversations_task
+    作为候选集快速过滤，避免每次 Beat 都做全表 JOIN。
+
+    fire-and-forget：失败仅记录 debug 日志。
+    """
+    try:
+        import redis as _redis
+        from app.core.config import settings
+
+        r = _redis.StrictRedis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB,
+            password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
+            decode_responses=True,
+            socket_connect_timeout=2,
+        )
+        r.sadd(PENDING_CONVERSATIONS_SET_KEY, conversation_id)
+        r.close()
+    except Exception as e:
+        logger.debug(f"[WindowUtils] mark_conversation_pending 失败（可忽略）: {e}")
+
+
+def unmark_conversation_pending(conversation_id: str) -> None:
+    """将对话 ID 从 pending_conversations Redis Set 中移除。
+
+    在 execute_pending_from_pool 处理完所有消息（pending 为空）后调用。
+
+    fire-and-forget：失败仅记录 debug 日志。
+    """
+    try:
+        import redis as _redis
+        from app.core.config import settings
+
+        r = _redis.StrictRedis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB,
+            password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
+            decode_responses=True,
+            socket_connect_timeout=2,
+        )
+        r.srem(PENDING_CONVERSATIONS_SET_KEY, conversation_id)
+        r.close()
+    except Exception as e:
+        logger.debug(f"[WindowUtils] unmark_conversation_pending 失败（可忽略）: {e}")
 
 
 async def dispatch_to_scheduler(
@@ -554,8 +625,8 @@ async def execute_pending_from_pool(
         logger.warning("[execute_pending_from_pool] conversation_id 为空，跳过")
         return 0
 
-    # 1. 加载 memory_config
-    # workspace_id 缺失时，从 conversation 表反查（增强容错）
+    # 1. 在单个 DB 会话中完成：反查 workspace_id + 加载 config + 查 write_cursor + 查 pending 消息
+    # 减少连接开销（原来 4 次 get_db_context 合并为 1 次）
     try:
         if not workspace_id:
             with get_db_context() as db:
@@ -594,43 +665,23 @@ async def execute_pending_from_pool(
             )
             _config_id = None
 
+        # 合并查询：在同一个 session 中加载 config、查 write_cursor、查 pending 消息
         with get_db_context() as db:
             memory_config = MemoryConfigService(db).load_memory_config(
                 config_id=_config_id,
                 workspace_id=_workspace_id,
                 service_name="execute_pending_from_pool",
             )
-    except Exception as e:
-        logger.error(
-            f"[execute_pending_from_pool] 加载 memory_config 失败: "
-            f"conv={conversation_id}, config_id={config_id}, "
-            f"workspace_id={workspace_id}, err={e}",
-            exc_info=True,
-        )
-        return 0
 
-    # 2. 查询 write_cursor
-    try:
-        with get_db_context() as db:
             write_cursor = db.execute(
                 select(Conversation.write_cursor).where(
                     Conversation.id == conversation_id
                 )
             ).scalar_one_or_none()
-    except Exception as e:
-        logger.error(
-            f"[execute_pending_from_pool] 查询 write_cursor 失败: "
-            f"conv={conversation_id}, err={e}",
-            exc_info=True,
-        )
-        return 0
 
-    if write_cursor is None:
-        write_cursor = 0
+            if write_cursor is None:
+                write_cursor = 0
 
-    # 3. 查询待处理消息（在 with 块内转成 dict，避免 session 关闭后 lazy-load 失败）
-    try:
-        with get_db_context() as db:
             pending_orm = (
                 db.execute(
                     select(MemoryMessage)
@@ -644,10 +695,12 @@ async def execute_pending_from_pool(
                 .all()
             )
             pending = [message_to_dict(m) for m in pending_orm]
+
     except Exception as e:
         logger.error(
-            f"[execute_pending_from_pool] 查询待处理消息失败: "
-            f"conv={conversation_id}, err={e}",
+            f"[execute_pending_from_pool] 加载配置/查询数据失败: "
+            f"conv={conversation_id}, config_id={config_id}, "
+            f"workspace_id={workspace_id}, err={e}",
             exc_info=True,
         )
         return 0
@@ -732,4 +785,10 @@ async def execute_pending_from_pool(
     logger.info(
         f"[execute_pending_from_pool] 完成: conv={conversation_id}, processed={processed}"
     )
+
+    # 如果所有 pending 消息都已处理完毕，从 Redis Set 中移除该对话
+    # （下次有新消息写入时会重新 mark）
+    if processed >= len([m for m in pending if m.get("role") == "user" or not m.get("should_memorize", True)]):
+        unmark_conversation_pending(conversation_id)
+
     return processed
