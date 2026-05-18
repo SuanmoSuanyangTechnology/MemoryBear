@@ -249,12 +249,66 @@ async def enrich_file_content(messages: List[dict]) -> None:
 # MemoryMessage 批量写入
 # ──────────────────────────────────────────────
 
+# 全局哨兵 App ID（Service API 虚拟会话专用）
+SENTINEL_APP_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
+def get_or_create_service_api_conversation(
+    workspace_id: str,
+    end_user_id: str,
+) -> str:
+    """按 (workspace_id, end_user_id, app_id=SENTINEL) 查找或创建虚拟会话。
+
+    Service API（v1）写入路径专用。每个 (workspace_id, end_user_id) 对应唯一
+    一条虚拟 conversation，用于承载滑动窗口的 memory_messages 和 write_cursor。
+
+    Args:
+        workspace_id: 工作空间 ID（从 API key 带入）
+        end_user_id: 终端用户 ID
+
+    Returns:
+        conversation_id (str)
+    """
+    import uuid as _uuid
+
+    _ws_id = _uuid.UUID(workspace_id)
+
+    with get_db_context() as db:
+        conv = (
+            db.query(Conversation)
+            .filter(
+                Conversation.workspace_id == _ws_id,
+                Conversation.app_id == SENTINEL_APP_ID,
+                Conversation.user_id == end_user_id,
+            )
+            .first()
+        )
+
+        if conv:
+            return str(conv.id)
+
+        conv = Conversation(
+            id=_uuid.uuid4(),
+            app_id=SENTINEL_APP_ID,
+            workspace_id=_ws_id,
+            user_id=end_user_id,
+            is_draft=True,
+            write_cursor=0,
+        )
+        db.add(conv)
+        db.commit()
+        logger.info(
+            f"[WindowUtils] 创建 Service API 虚拟会话: "
+            f"workspace_id={workspace_id}, end_user_id={end_user_id}, conv={conv.id}"
+        )
+        return str(conv.id)
+
 
 async def ensure_conversation_exists(
     conversation_id: str,
     workspace_id: str = "",
 ) -> None:
-    """确保 conversations 表中存在该记录，fasle时创建最小条目。
+    """确保 conversations 表中存在该记录，不存在时创建最小条目。
 
     memory_messages.conversation_id 有 FK → conversations.id 约束。
     工作流 MemoryWriteNode 等路径可能在 conversation 创建前就触发写入，
@@ -272,8 +326,7 @@ async def ensure_conversation_exists(
             if existing is not None:
                 return
 
-            SENTINEL_APP_ID = _uuid.UUID("00000000-0000-0000-0000-000000000000")
-            _ws_id = _uuid.UUID(workspace_id) if workspace_id else SENTINEL_APP_ID
+            _ws_id = _uuid.UUID(workspace_id) if workspace_id else _uuid.UUID("00000000-0000-0000-0000-000000000000")
 
             conv = Conversation(
                 id=_uuid.UUID(conversation_id),

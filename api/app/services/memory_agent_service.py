@@ -445,10 +445,11 @@ class MemoryAgentService:
                 # ── 滑动窗口写入路径（所有 Neo4j 写入统一入口）──
                 _conversation_id = str(conversation_id) if conversation_id else None
                 if not _conversation_id:
-                    _conversation_id = str(uuid.uuid4())
-                    logger.info(
-                        f"[write_memory] 未提供 conversation_id，自动生成: "
-                        f"conv={_conversation_id}, end_user_id={end_user_id}"
+                    # Service API 路径：按 (workspace_id, end_user_id) 查找/创建虚拟会话
+                    from app.core.memory.sliding_window.window_utils import get_or_create_service_api_conversation
+                    _conversation_id = get_or_create_service_api_conversation(
+                        workspace_id=str(memory_config.workspace_id),
+                        end_user_id=end_user_id,
                     )
                 await self._write_to_memory_messages_and_dispatch(
                     conversation_id=_conversation_id,
