@@ -33,6 +33,7 @@ const Chat: FC<ChatProps> = ({
   assistantIcon,
   isSupportTools = false,
   handleFeedback,
+  isEnded = true,
 }) => {
   return (
     <div className={`rb:h-full rb:relative rb:pt-2 ${className}`}>
@@ -51,6 +52,7 @@ const Chat: FC<ChatProps> = ({
         onSend={onSend}
         isSupportTools={isSupportTools}
         handleFeedback={handleFeedback}
+        isEnded={isEnded}
       />
 
       {/* Chat input area */}

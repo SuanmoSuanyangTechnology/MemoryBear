@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 18:52:30
+ * @Last Modified time: 2026-05-18 11:20:28
  */
 /**
  * Conversation Page
@@ -325,6 +325,7 @@ const Conversation: FC = () => {
     audioPollingRef.current.set(idToPoll, timer)
   }
 
+  const chatIsEnded = useRef(true)
   /** Send message and handle streaming response */
   const handleSend = (msg?: string) => {
     if (!token || !shareToken) return
@@ -349,6 +350,7 @@ const Conversation: FC = () => {
     if (!isCanSend) return
 
     setLoading(true)
+    chatIsEnded.current = false
     streamLoadingRef.current = true
     addUserMessage(msg || message, files)
     addAssistantMessage()
@@ -422,6 +424,7 @@ const Conversation: FC = () => {
             if (currentConversationId && currentConversationId !== conversation_id) {
               setConversationId(currentConversationId)
             }
+            chatIsEnded.current = true
             break
         }
       })
@@ -453,10 +456,12 @@ const Conversation: FC = () => {
       .catch(() => {
         setLoading(false)
         streamLoadingRef.current = false
+        chatIsEnded.current = true
       })
       .finally(() => {
         setLoading(false)
         streamLoadingRef.current = false
+        chatIsEnded.current = true
       })
   }
 
@@ -772,8 +777,9 @@ const Conversation: FC = () => {
               setFileList(list || [])
               toolbarRef.current?.setFiles(list || [])
             }}
-            isSupportTools={true}
+            isSupportTools={config.app_type === 'agent'}
             handleFeedback={handleFeedback}
+            isEnded={chatIsEnded.current}
           >
           <ChatToolbar
             ref={toolbarRef}

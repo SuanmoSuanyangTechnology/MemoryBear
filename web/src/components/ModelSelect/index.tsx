@@ -2,10 +2,10 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-07 16:49:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-20 18:14:34
+ * @Last Modified time: 2026-05-18 12:10:55
  */
 import { type FC, useEffect, useState } from 'react';
-import { Select, Flex, Space } from 'antd';
+import { Select, Flex } from 'antd';
 import type { SelectProps } from 'antd/es/select';
 import { useTranslation } from 'react-i18next';
 
@@ -64,22 +64,22 @@ const ModelSelect: FC<ModelSelectProps> = ({ params, placeholder, fontClassName,
       options={[...options, ...initialData]}
       fieldNames={{ label: 'name', value: 'id' }}
       allowClear
-      popupMatchSelectWidth={false}
+      // popupMatchSelectWidth={false}
       labelRender={labelRender}
       // Each dropdown option shows logo, name, and capability tags
       optionRender={(option) => {
         const { data } = option;
         const logo = getListLogoUrl(data.provider, data.logo as string);
         return (
-          <Flex align="center" gap={8}>
+          <Flex vertical gap={8}>
             <Flex align="center" gap={8}>
               {logo && <img src={logo} className="rb:size-5 rb:rounded-md" alt={logo} />}
               <span className="rb:wrap-break-word rb:line-clamp-1">{data.name as string}</span>
             </Flex>
             {data.capability?.length > 0 && (
-              <Space size={4}>
+              <Flex gap={4} wrap>
                 {data.capability.map((vo: string) => <Tag key={vo}>{vo}</Tag>)}
-              </Space>
+              </Flex>
             )}
           </Flex>
         );
