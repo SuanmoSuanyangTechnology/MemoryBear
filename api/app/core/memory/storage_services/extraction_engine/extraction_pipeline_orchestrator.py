@@ -22,6 +22,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from app.core.memory.models.message_models import DialogData
 from app.core.memory.models.variate_config import ExtractionPipelineConfig
+from app.plugins import get_plugin
 
 from .steps.base import ExtractionStep, StepContext
 from .steps.embedding_step import EmbeddingStep
@@ -95,6 +96,20 @@ class NewExtractionOrchestrator:
             embedder_client=embedder_client,
             is_pilot_run=is_pilot_run,
         )
+
+        # ── Premium memory plugins (enterprise only) ──
+        self._premium_emotion = get_plugin("memory.emotion")
+        self._premium_reflection = get_plugin("memory.reflection")
+
+        if self._premium_emotion:
+            logger.info("Premium EmotionEngine LOADED — 使用企业版情绪分析")
+        else:
+            logger.info("Premium EmotionEngine NOT found — 使用开源版情绪提取")
+
+        if self._premium_reflection:
+            logger.info("Premium ReflectionEngine LOADED — 使用企业版反思引擎")
+        else:
+            logger.info("Premium ReflectionEngine NOT found — 跳过企业版反思阶段")
 
         # ── Sidecar steps (auto-discovered via @register decorator) ──
         sidecar_groups = SidecarStepFactory.create_sidecars(self.config, self.context)
