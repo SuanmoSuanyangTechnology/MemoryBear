@@ -13,7 +13,8 @@ import type { WorkflowConfig } from '@/views/Workflow/types';
  */
 export interface Query {
   /** Search keyword */
-  search: string;
+  search_type?: string;
+  search?: string;
   type?: string;
   shared_only?: boolean;
   include_shared?: boolean;
