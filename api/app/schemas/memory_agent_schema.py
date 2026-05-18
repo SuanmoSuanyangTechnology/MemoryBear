@@ -60,8 +60,8 @@ class Write_UserInput(BaseModel):
     config_id: Optional[str] = None
     conversation_id: Optional[str] = Field(
         None,
-        description="对话 ID（可选）。传入时走滑动窗口写入路径，调度器从数据库查询待写入消息并异步派发；"
-                    "不传时回退到直接写入路径（旧行为）。用于对比实验。",
+        description="对话 ID（可选）。传入时使用该会话存储消息；"
+                    "不传时后端按 (workspace_id, end_user_id) 自动查找或创建虚拟会话。",
     )
 
 
@@ -75,7 +75,8 @@ class WriteMemoryRequest(BaseModel):
     language: Language = Language.ZH
     conversation_id: Optional[str] = Field(
         None,
-        description="对话 ID，用于滑动窗口写入调度器定位对话记录；不传则跳过滑动窗口调度，回退到直接写入",
+        description="对话 ID（可选）。传入时使用该会话存储消息；"
+                    "不传时后端按 (workspace_id, end_user_id) 自动查找或创建虚拟会话。",
     )
 
 
