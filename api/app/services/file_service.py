@@ -122,7 +122,7 @@ def _build_qa_export(db: Session, file_id: uuid.UUID, kb_id: uuid.UUID) -> tuple
         return None
 
     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
-    total, items = vector_service.search_by_segment(
+    _, items = vector_service.search_by_segment(
         document_id=str(doc.id), pagesize=10000, page=1, asc=True
     )
 
