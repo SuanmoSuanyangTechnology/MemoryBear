@@ -1,15 +1,13 @@
 import uuid
 from typing import Optional
 
-from sqlalchemy import select, desc, func, or_, cast, Text
+from sqlalchemy import select, desc, func
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ResourceNotFoundException
 from app.core.logging_config import get_db_logger
 from app.models import Conversation, Message
-from app.models.app_model import AppType
 from app.models.conversation_model import ConversationDetail
-from app.models.workflow_model import WorkflowExecution
 
 logger = get_db_logger()
 
@@ -209,7 +207,6 @@ class ConversationRepository:
             keyword: Optional[str] = None,
             page: int = 1,
             pagesize: int = 20,
-            app_type: Optional[str] = None,
     ) -> tuple[list[Conversation], int]:
         """
         查询应用日志会话列表（带分页和过滤）
@@ -218,12 +215,9 @@ class ConversationRepository:
             app_id: 应用 ID
             workspace_id: 工作空间 ID
             is_draft: 是否草稿会话（None表示返回全部）
-            keyword: 搜索关键词（匹配消息内容）
+            keyword: 搜索关键词（匹配 messages 表的消息内容）
             page: 页码（从 1 开始）
             pagesize: 每页数量
-            app_type: 应用类型。WORKFLOW 类型改用 workflow_executions 的
-                input_data/output_data 做关键词过滤（因为失败的工作流不会写入 messages 表）；
-                其他类型仍走 messages 表。
 
         Returns:
             Tuple[List[Conversation], int]: (会话列表，总数)
@@ -238,30 +232,17 @@ class ConversationRepository:
 
         base_stmt = select(Conversation).where(*base_conditions)
 
-        # 如果有关键词搜索，通过子查询过滤包含该关键词的 conversation
         if keyword:
             kw_pattern = f"%{keyword}%"
-            if app_type == AppType.WORKFLOW:
-                # 工作流：从 workflow_executions 的 input_data / output_data 匹配
-                # （messages 表只存开场白 assistant 消息，失败的工作流也不会写入）
-                keyword_stmt = (
-                    select(WorkflowExecution.conversation_id)
-                    .where(
-                        WorkflowExecution.conversation_id.is_not(None),
-                        or_(
-                            cast(WorkflowExecution.input_data, Text).ilike(kw_pattern),
-                            cast(WorkflowExecution.output_data, Text).ilike(kw_pattern),
-                        ),
-                    )
-                    .distinct()
+            app_conversation_ids = select(Conversation.id).where(*base_conditions)
+            keyword_stmt = (
+                select(Message.conversation_id)
+                .where(
+                    Message.conversation_id.in_(app_conversation_ids),
+                    Message.content.ilike(kw_pattern),
                 )
-            else:
-                # Agent 等其他类型：仍走 messages 表（user + assistant 内容)
-                keyword_stmt = (
-                    select(Message.conversation_id)
-                    .where(Message.content.ilike(kw_pattern))
-                    .distinct()
-                )
+                .distinct()
+            )
             base_stmt = base_stmt.where(Conversation.id.in_(keyword_stmt))
 
         # Calculate total number of records

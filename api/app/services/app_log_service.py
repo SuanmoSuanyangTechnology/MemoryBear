@@ -33,7 +33,6 @@ class AppLogService:
         pagesize: int = 20,
         is_draft: Optional[bool] = None,
         keyword: Optional[str] = None,
-        app_type: Optional[str] = None,
     ) -> Tuple[list[Conversation], int]:
         """
         查询应用日志会话列表
@@ -44,8 +43,7 @@ class AppLogService:
             page: 页码（从 1 开始）
             pagesize: 每页数量
             is_draft: 是否草稿会话（None表示返回全部）
-            keyword: 搜索关键词（匹配消息内容）
-            app_type: 应用类型（WORKFLOW 时关键词将从 workflow_executions 搜索）
+            keyword: 搜索关键词（匹配 messages 表消息内容）
 
         Returns:
             Tuple[list[Conversation], int]: (会话列表，总数)
@@ -59,7 +57,6 @@ class AppLogService:
                 "pagesize": pagesize,
                 "is_draft": is_draft,
                 "keyword": keyword,
-                "app_type": app_type,
             }
         )
 
@@ -71,7 +68,6 @@ class AppLogService:
             keyword=keyword,
             page=page,
             pagesize=pagesize,
-            app_type=app_type,
         )
 
         logger.info(

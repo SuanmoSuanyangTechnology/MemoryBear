@@ -52,7 +52,6 @@ def list_app_logs(
         pagesize=pagesize,
         is_draft=is_draft,
         keyword=keyword,
-        app_type=app.type,
     )
 
     items = [AppLogConversation.model_validate(c) for c in conversations]
