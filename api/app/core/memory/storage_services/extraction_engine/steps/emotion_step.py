@@ -54,17 +54,11 @@ class EmotionExtractionStep(ExtractionStep[EmotionStepInput, EmotionStepOutput])
     # ── Lifecycle ──
 
     async def render_prompt(self, input_data: EmotionStepInput) -> str:
-        # 根据输入内容检测语言，确保 prompt 指令语言与输入一致
-        from app.core.language_utils import detect_text_language
-        detected_language = detect_text_language(
-            input_data.statement_text, fallback=self.language
-        )
-
         return await render_emotion_extraction_prompt(
             statement=input_data.statement_text,
             extract_keywords=self.extract_keywords,
             enable_subject=self.enable_subject,
-            language=detected_language,
+            language=self.language,
         )
 
     async def call_llm(self, prompt: Any) -> Any:
