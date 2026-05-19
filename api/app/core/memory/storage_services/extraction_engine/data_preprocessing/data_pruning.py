@@ -435,7 +435,7 @@ class SemanticPruner:
             del self._cache[oldest]
 
         # 渲染模板
-        rendered = self.template.render(dialog_text=dialog_text)
+        rendered = self.template.render(dialog_text=dialog_text, language=self.language)
         log_template_rendering("extract_pruning.jinja2", {
             "language": self.language,
         })
