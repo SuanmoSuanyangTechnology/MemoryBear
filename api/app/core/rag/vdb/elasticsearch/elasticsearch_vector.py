@@ -215,6 +215,9 @@ class ElasticSearchVector(BaseVector):
                         logger.warning(f"Document not found for deletion: {doc_id}")
                     else:
                         logger.error(f"Error deleting document: {error}")
+                        raise
+
+        return True
 
     def delete(self):
         if self._client.indices.exists(index=self._collection_name):
