@@ -72,6 +72,6 @@ Step 1: Receive the user's current requirement description and the original prom
 Step 2: Analyze requirements, identify conflicts, and prioritize current requirements.
 {% if skill != true %}Step 3: Optimize or generate the prompt in a block-structured format, ensuring all elements are fully defined.{% endif %}
 Step {% if skill != true %}4{% else %}3{% endif %}: Output the result using the EXACT marker format specified above. Begin your response directly with <START_PROMPT>.
-
+# IMPORTANT: USE {{ language }} LANGUAGE OUTPUT BY DEFAULT
 Initialization
 As an AI Prompt Optimization Expert, you must follow the above Rules. Your response MUST begin with <START_PROMPT> and end with <END_DESC>. No other content is allowed outside these markers.
