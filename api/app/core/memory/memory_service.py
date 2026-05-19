@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 if TYPE_CHECKING:
     from app.models.conversation_model import Message
 
-# Runtime import — used in sync_agent_message and write_workflow_messages
+# Runtime import — used in sync_message and write_workflow_messages
 from app.models.memory_message_model import MemoryMessage
 
 from app.core.memory.enums import SearchStrategy, StorageType
@@ -80,7 +80,7 @@ class MemoryService:
         if memory_config is None and storage_type.lower() == "neo4j":
             logger.warning(
                 "MemoryService 初始化时未提供 memory config（config_id=None），"
-                "仅 sync_agent_message / write_workflow_messages 可用，"
+                "仅 sync_message / write_workflow_messages 可用，"
                 "write/read/pilot_write 方法将不可用"
             )
         self.ctx = MemoryContext(
@@ -226,7 +226,7 @@ class MemoryService:
     ) -> Optional["MemoryMessage"]:
         """内部统一方法：检查门禁 → 写入 memory_messages → 刷新活跃 key → 分派调度器。
 
-        sync_message 和 sync_agent_message 的公共逻辑抽取。
+        sync_message 的核心逻辑。
 
         Args:
             conversation_id: 会话 ID
@@ -334,86 +334,6 @@ class MemoryService:
             language=language,
         )
 
-    async def sync_agent_message(
-        self,
-        conversation_id: str,
-        message: "Message",
-        app_id: str,
-        is_draft: bool = False,
-        config_id: str = "",
-        workspace_id: str = "",
-    ) -> Optional["MemoryMessage"]:
-        """Agent 对话消息同步到 memory_messages 表。
-
-        1. 检查 app_releases.config.memory.enabled（按产品规则：未发布的应用一律视为关闭）
-        2. 若 false → 返回 None，消息不进入 memory_messages
-        3. 若 true → 写入 memory_messages（should_memorize=TRUE）
-        4. 刷新 Redis 活跃 key（conv_active:{conversation_id}）
-        5. 分派给 SlidingWindowScheduler.check_and_dispatch()
-
-        Args:
-            conversation_id: 会话 ID
-            message: Message ORM 对象（已持久化到 messages 表）
-            app_id: 应用 ID，用于检查 memory.enabled
-            is_draft: 保留参数（当前未使用）——产品规则不区分草稿/正式
-            config_id: 记忆配置 ID
-            workspace_id: 工作空间 ID
-
-        Returns:
-            MemoryMessage 实例若成功写入，否则 None
-        """
-        return await self._sync_and_dispatch(
-            conversation_id=conversation_id,
-            app_id=app_id,
-            original_message_id=message.id,
-            role=message.role,
-            content=message.content,
-            created_at=message.created_at,
-            should_memorize=True,
-            config_id=config_id,
-            end_user_id=self.ctx.end_user_id,
-            workspace_id=workspace_id,
-            language=self.ctx.memory_config.language if self.ctx.memory_config else "zh",
-        )
-
-    async def sync_agent_messages_batch(
-        self,
-        conversation_id: str,
-        messages: List["Message"],
-        app_id: str,
-        is_draft: bool = False,
-        config_id: str = "",
-        workspace_id: str = "",
-    ) -> List["MemoryMessage"]:
-        """批量同步 Agent 对话的消息到 memory_messages 表。
-
-        内部逐条调用 sync_agent_message。
-
-        Args:
-            conversation_id: 会话 ID
-            messages: Message ORM 对象列表（已持久化到 messages 表）
-            app_id: 应用 ID
-            is_draft: 是否为草稿会话
-            config_id: 记忆配置 ID
-            workspace_id: 工作空间 ID
-
-        Returns:
-            成功写入的 MemoryMessage 实例列表
-        """
-        results = []
-        for message in messages:
-            mm = await self.sync_agent_message(
-                conversation_id=conversation_id,
-                message=message,
-                app_id=app_id,
-                is_draft=is_draft,
-                config_id=config_id,
-                workspace_id=workspace_id,
-            )
-            if mm is not None:
-                results.append(mm)
-        return results
-
     # ──────────────────────────────────────────────
     # 统一门户：工作流 MemoryWriteNode 消息写入
     # ──────────────────────────────────────────────
@@ -483,7 +403,7 @@ class MemoryService:
             )
 
             if written:
-                # 刷新 Redis 活跃 key（与 sync_message/sync_agent_message 行为一致）
+                # 刷新 Redis 活跃 key（与 sync_message 行为一致）
                 # —— 工作流写入后也属于"对话活跃"，应阻止 scan_idle 在短期内派发兜底
                 await cls._refresh_active_key(conversation_id)
 
