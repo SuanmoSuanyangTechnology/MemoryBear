@@ -178,7 +178,7 @@ const ConditionList: FC<CaseListProps> = ({
                         className="rb:mb-2!"
                       >
                         <div className="rb:flex-1 rb:bg-[#F6F6F6] rb:rounded-lg">
-                          <Row className={clsx("rb:px-1!", {
+                          <Row wrap={false} className={clsx("rb:px-1!", {
                             'rb-border-b': !hideRightField
                           })}>
                             <Col flex="1">

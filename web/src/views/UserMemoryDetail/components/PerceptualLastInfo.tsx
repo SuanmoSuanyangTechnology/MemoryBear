@@ -134,7 +134,7 @@ const PerceptualLastInfo: FC = () => {
       </Flex>
       {loading
         ? <Skeleton active />
-        : <Flex vertical gap={16} className="rb:w-108">
+        : <Flex vertical gap={16} className="rb:w-107">
             {data.file_path
               ? <>
                 {/\.(jpg|jpeg|png|gif|webp|svg)$/i.test(data.file_name)
