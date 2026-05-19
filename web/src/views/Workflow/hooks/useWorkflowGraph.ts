@@ -145,10 +145,6 @@ export const useWorkflowGraph = ({
   useEffect(() => {
     getConfig()
   }, [id])
-
-  useEffect(() => {
-    isHandModeRef.current = isHandMode
-  }, [isHandMode])
   /**
    * Fetch workflow configuration from API
    */
@@ -763,10 +759,10 @@ export const useWorkflowGraph = ({
     graphRef.current.on('history:redo', () => { if (!isSyncingRef.current) syncChildRelationshipsRef.current() })
   };
 
-  // 控制框选：isHandMode = false 时启用框选
   useEffect(() => {
+    isHandModeRef.current = isHandMode
     if (!graphRef.current) return;
-    if (isHandModeRef.current) {
+    if (isHandMode) {
       graphRef.current?.enablePanning();
       graphRef.current?.disableSelection();
       graphRef.current?.cleanSelection()
@@ -774,7 +770,7 @@ export const useWorkflowGraph = ({
       graphRef.current?.disablePanning();
       graphRef.current?.enableSelection();
     }
-  }, [isHandModeRef.current, graphRef.current]);
+  }, [isHandMode, graphRef.current]);
   // 显示/隐藏连接桩
   // const showPorts = (show: boolean) => {
   //   const container = containerRef.current!;
@@ -1173,7 +1169,7 @@ export const useWorkflowGraph = ({
           thickness: 1, // Grid dot size
         }
       },
-      panning: isHandModeRef.current,
+      panning: isHandMode,
       mousewheel: {
         enabled: true,
         factor: 0.1,
