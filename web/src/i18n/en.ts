@@ -2323,11 +2323,15 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         start: {
           variables: 'Input Fields',
 
-          string: 'Text',
+          'text-input': 'Text',
+          paragraph: 'Paragraph',
+          select: 'Dropdown Options',
           number: 'Number',
-          boolean: 'Checkbox',
-          array: 'Dropdown Options',
-          object: 'Object',
+          checkbox: 'Checkbox',
+          'file-upload': 'Single File Upload',
+          'file-list-upload': 'File List Upload',
+          'json-editor': 'JSON',
+          selectRequired: 'At least one option is required for this dropdown',
 
           editVariable: 'Edit Variable',
           variableType: 'Variable Type',

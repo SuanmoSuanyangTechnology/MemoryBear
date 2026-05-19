@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 13:47:17
+ * @Last Modified time: 2026-05-19 11:06:59
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
@@ -438,7 +438,7 @@ interface FileSetttings {
   document_enabled: boolean;
   document_max_size_mb: number;
   document_allowed_extensions: string[];
-  document_image_recognition: boolean;
+  document_image_recognition?: boolean;
   video_enabled: boolean;
   video_max_size_mb: number;
   video_allowed_extensions: string[];

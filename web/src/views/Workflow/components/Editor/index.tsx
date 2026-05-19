@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-16 12:04:37
+ * @Last Modified time: 2026-05-19 13:57:29
  */
 import { type FC, useState, useMemo } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
@@ -58,7 +58,7 @@ const Editor: FC<LexicalEditorProps> =({
   height,
   className,
 }) => {
-  console.log('Editor value', value)
+  // console.log('Editor value', value)
   const [_count, setCount] = useState(0);
   const [focused, setFocused] = useState(false);
 

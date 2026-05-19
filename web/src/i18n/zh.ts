@@ -2287,11 +2287,15 @@ export const zh = {
         start: {
           variables: '输入字段',
 
-          string: '文本',
+          'text-input': '文本',
+          paragraph: '段落',
+          select: '下拉选项',
           number: '数字',
-          boolean: '复选框',
-          array: '下拉选项',
-          object: '对象',
+          checkbox: '复选框',
+          'file-upload': '单文件',
+          'file-list-upload': '文件列表',
+          'json-editor': 'JSON',
+          selectRequired: '至少需要一个选项',
 
           editVariable: '编辑变量',
           variableType: '变量类型',
@@ -2301,9 +2305,10 @@ export const zh = {
           default: '默认值',
           required: '必填',
           max_length: '最大长度',
-          defaultChecked: '选中',
-          notDefaultChecked: '不选中',
+          defaultChecked: '默认选中',
+          notDefaultChecked: '默认不选中',
           options: '选项',
+          defaultEmpty: '无默认值',
         },
         end: {
           output: '回复'
