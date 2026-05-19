@@ -44,10 +44,16 @@ class EdgeDefinition(BaseModel):
 class VariableDefinition(BaseModel):
     """变量定义"""
     name: str = Field(..., description="变量名称")
-    type: str = Field(default="string", description="变量类型: string, number, boolean, object, array")
+    type: str = Field(default="string", description="变量类型: string, number, boolean, object, file, array[string], array[number], array[boolean], array[object], array[file]")
+    ui_type: str | None = Field(default=None, description="UI展示类型: text-input, paragraph, select, file-upload, file-list-upload, json-editor")
     required: bool = Field(default=False, description="是否必填")
     default: Any = Field(None, description="默认值")
     description: str | None = Field(default=None, description="变量描述")
+    max_length: int | None = Field(default=None, description="字符串最大长度")
+    options: list[str] | None = Field(default=None, description="下拉选项候选值，仅 ui_type=select 时有效")
+    allowed_file_types: list[str] | None = Field(default=None, description="允许文件类型(image/document/audio/video)，仅 file/file-list-upload 时有效")
+    max_file_count: int | None = Field(default=None, description="文件列表最大数量，仅 file-list-upload 时有效")
+    max_file_size_mb: float | None = Field(default=None, description="单文件最大大小(MB)，仅 file/file-list-upload 时有效")
 
 
 class ExecutionConfig(BaseModel):

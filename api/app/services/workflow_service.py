@@ -519,6 +519,84 @@ class WorkflowService:
                 files_struct.append(await fetch_remote_file_meta(url, file_type, origin_file_type))
         return files_struct
 
+    async def _resolve_start_node_file_variables(
+            self,
+            start_node_vars: list[dict[str, Any]],
+            variables: dict[str, Any]
+    ) -> dict[str, Any]:
+        """解析开始节点变量中文件类型的运行时值
+        
+        对于 type=file 或 type=array[file] 的变量，如果用户传入的是
+        FileInput 格式的 dict/list，则将其转换为 FileObject 格式。
+        
+        Args:
+            start_node_vars: 开始节点变量定义列表
+            variables: 用户传入的变量值字典
+            
+        Returns:
+            解析后的变量值字典
+        """
+        from app.core.workflow.utils.file_processor import (
+            resolve_local_file_object_dict,
+            build_file_object_dict_from_meta,
+            fetch_remote_file_meta,
+        )
+
+        resolved = dict(variables)
+
+        for var_def in start_node_vars:
+            var_name = var_def.get("name")
+            var_type = var_def.get("type", "")
+            ui_type = var_def.get("ui_type")
+
+            if ui_type not in ("file-upload", "file-list-upload"):
+                continue
+
+            if var_name not in resolved:
+                continue
+
+            value = resolved[var_name]
+
+            if var_type == "file" and isinstance(value, dict) and not value.get("is_file"):
+                url = value.get("url", "")
+                transfer_method = value.get("transfer_method", "local_file" if value.get("upload_file_id") else "remote_url")
+                file_type = str(FileType.trans(value.get("type", "document")))
+                origin_file_type = value.get("file_type") or file_type
+
+                if transfer_method == "local_file" and value.get("upload_file_id"):
+                    fo = resolve_local_file_object_dict(self.db, value["upload_file_id"], file_type, origin_file_type)
+                    resolved[var_name] = fo or build_file_object_dict_from_meta(
+                        file_type=file_type, transfer_method="local_file",
+                        origin_file_type=origin_file_type,
+                        file_id=str(value["upload_file_id"]), url=url,
+                    )
+                elif url:
+                    resolved[var_name] = await fetch_remote_file_meta(url, file_type, origin_file_type)
+
+            elif var_type == "array[file]" and isinstance(value, list):
+                resolved_list = []
+                for item in value:
+                    if isinstance(item, dict) and item.get("is_file"):
+                        resolved_list.append(item)
+                    elif isinstance(item, dict):
+                        url = item.get("url", "")
+                        transfer_method = item.get("transfer_method", "local_file" if item.get("upload_file_id") else "remote_url")
+                        file_type = str(FileType.trans(item.get("type", "document")))
+                        origin_file_type = item.get("file_type") or file_type
+
+                        if transfer_method == "local_file" and item.get("upload_file_id"):
+                            fo = resolve_local_file_object_dict(self.db, item["upload_file_id"], file_type, origin_file_type)
+                            resolved_list.append(fo or build_file_object_dict_from_meta(
+                                file_type=file_type, transfer_method="local_file",
+                                origin_file_type=origin_file_type,
+                                file_id=str(item["upload_file_id"]), url=url,
+                            ))
+                        elif url:
+                            resolved_list.append(await fetch_remote_file_meta(url, file_type, origin_file_type))
+                resolved[var_name] = resolved_list
+
+        return resolved
+
     @staticmethod
     def _map_public_event(event: dict) -> dict | None:
         """
@@ -730,8 +808,14 @@ class WorkflowService:
         feature_configs = config.features or {}
         self._validate_file_upload(feature_configs, payload.files)
 
+        # 解析开始节点文件类型的变量值
+        start_node_vars = self.get_start_node_variables({"nodes": config.nodes})
+        resolved_variables = await self._resolve_start_node_file_variables(
+            start_node_vars, payload.variables or {}
+        )
+
         input_data = {
-            "message": payload.message, "variables": payload.variables,
+            "message": payload.message, "variables": resolved_variables,
             "conversation_id": payload.conversation_id,
             "files": [file.model_dump(mode='json') for file in payload.files]
         }
@@ -949,8 +1033,14 @@ class WorkflowService:
         feature_configs = config.features or {}
         self._validate_file_upload(feature_configs, payload.files)
 
+        # 解析开始节点文件类型的变量值
+        start_node_vars = self.get_start_node_variables({"nodes": config.nodes})
+        resolved_variables = await self._resolve_start_node_file_variables(
+            start_node_vars, payload.variables or {}
+        )
+
         input_data = {
-            "message": payload.message, "variables": payload.variables,
+            "message": payload.message, "variables": resolved_variables,
             "conversation_id": payload.conversation_id,
             "files": [file.model_dump(mode='json') for file in payload.files]
         }
@@ -1161,6 +1251,24 @@ class WorkflowService:
         node_config = next((n for n in config.nodes if n.get("id") == node_id), None)
         if not node_config:
             raise BusinessException(code=BizCode.NOT_FOUND, message=f"节点不存在: node_id={node_id}")
+
+        # 如果目标节点是开始节点，将 inputs 中的变量值注入到 variables（sys.input_variables）
+        if node_config.get("type") == NodeType.START:
+            start_node_vars = node_config.get("config", {}).get("variables", [])
+            start_node_id = node_config.get("id")
+            inputs = input_data.get("inputs") or {}
+            variables = input_data.get("variables") or {}
+            for var_def in start_node_vars:
+                var_name = var_def.get("name")
+                # 优先匹配 start_node_id.var_name 格式，其次匹配裸 var_name
+                keyed_value = inputs.get(f"{start_node_id}.{var_name}")
+                bare_value = inputs.get(var_name)
+                value = keyed_value if keyed_value is not None else bare_value
+                if value is not None:
+                    variables[var_name] = value
+            # 解析开始节点文件类型的变量值
+            variables = await self._resolve_start_node_file_variables(start_node_vars, variables)
+            input_data["variables"] = variables
 
         workflow_config_dict = {
             "nodes": config.nodes,

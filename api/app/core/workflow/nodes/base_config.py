@@ -27,6 +27,15 @@ class VariableDefinition(BaseModel):
         description="变量类型"
     )
 
+    ui_type: str | None = Field(
+        default=None,
+        description=(
+            "UI展示类型，区分同一底层类型的不同前端形态。"
+            "可选值: text-input, paragraph, select, file-upload, "
+            "file-list-upload, json-editor"
+        )
+    )
+
     required: bool = Field(
         default=False,
         description="是否必需"
@@ -45,6 +54,26 @@ class VariableDefinition(BaseModel):
     max_length: int = Field(
         default=200,
         description="只对字符串类型生效"
+    )
+
+    options: list[str] | None = Field(
+        default=None,
+        description="下拉选项的候选值列表，仅 ui_type=select 时有效"
+    )
+
+    allowed_file_types: list[str] | None = Field(
+        default=None,
+        description="允许的文件类型列表(image/document/audio/video)，仅 file/file-list-upload 时有效"
+    )
+
+    max_file_count: int | None = Field(
+        default=5,
+        description="文件列表最大文件数量，仅 file-list-upload 时有效"
+    )
+
+    max_file_size_mb: float | None = Field(
+        default=50.0,
+        description="单个文件最大大小(MB)，仅 file/file-list-upload 时有效"
     )
 
     class Config:
