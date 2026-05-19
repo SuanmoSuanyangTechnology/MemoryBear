@@ -1538,6 +1538,13 @@ def write_message_task(
             logger.info(
                 f"[CELERY WRITE] Executing MemoryAgentService.write_memory "
                 f"with config_id = {actual_config_id} (type: {type(actual_config_id).__name__}), language={language}")
+
+            from datetime import datetime, timezone
+            _default_dialog_at = datetime.now(timezone.utc).isoformat()
+            for msg in message:
+                if isinstance(msg, dict) and not msg.get("dialog_at"):
+                    msg["dialog_at"] = _default_dialog_at
+
             service = MemoryAgentService()
             result = await service.write_memory(
                 WriteMemoryRequest(
