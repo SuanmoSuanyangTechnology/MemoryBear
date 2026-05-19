@@ -63,6 +63,18 @@ Input：JSON格式工具入参，无参数则填空对象 {{}}
 你能看到历史对话和上一轮工具返回的观察结果，请基于已有结果继续推理下一步动作。\
 """
 
+# 最终回答专用提示词（给最终大模型使用，不含工具调用指令）
+_FINAL_ANSWER_SYSTEM_TEMPLATE = """\
+你是专业、友好、准确的智能助手。
+请严格基于下方提供的【工具调用过程与结果】来回答用户问题。
+
+规则：
+1. 只使用工具返回的信息回答，不编造、不脑补、不扩展无关内容
+2. 回答语言自然、通顺、礼貌，符合正常对话风格
+3. 如果工具返回结果为空或失败，请如实告知用户
+4. 不要输出任何 Thought/Action/Input 格式内容，只输出自然语言回答
+"""
+
 
 def _build_tools_info(tools: Dict[str, Any]) -> str:
     """将工具列表格式化为 prompt 中的工具描述"""
@@ -200,7 +212,8 @@ class ToolOrchestrator:
         logger.info("ReAct 工具调用完成", extra={"final_answer_len": len(final_answer)})
 
         updated_system_prompt = (
-            react_system_prompt + trajectory_context
+            system_prompt + f"\n\n{_FINAL_ANSWER_SYSTEM_TEMPLATE}"
+            + trajectory_context
             + f"\n\n工具调用已完成，调用结果：{final_answer}"
         )
         return updated_system_prompt, node_executions

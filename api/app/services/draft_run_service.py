@@ -1772,7 +1772,11 @@ class AgentRunService:
                 f"根据以下AI回复，生成3个用户可能继续追问的简短问题，每行一个，不加序号：\n\n{assistant_message}"
             )
             resp = await llm.ainvoke([HumanMessage(content=prompt)])
-            lines = [l.strip() for l in resp.content.strip().split("\n") if l.strip()]
+            content = resp.content
+            # 兼容 content 为 list 的情况（部分模型返回结构化内容）
+            if isinstance(content, list):
+                content = "".join(str(c) if isinstance(c, str) else c.get("text", "") for c in content)
+            lines = [l.strip() for l in content.strip().split("\n") if l.strip()]
             return lines[:3]
         except Exception as e:
             logger.warning(f"生成建议问题失败: {e}")
