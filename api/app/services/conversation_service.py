@@ -1,5 +1,4 @@
 """会话服务"""
-import os
 import uuid
 from datetime import datetime, timedelta
 from typing import Annotated
@@ -7,7 +6,6 @@ from typing import Optional, List, Tuple, Dict, Any
 
 import json_repair
 from fastapi import Depends
-from jinja2 import Template
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -24,6 +22,7 @@ from app.schemas.conversation_schema import ConversationOut
 from app.schemas.model_schema import ModelInfo
 from app.services import workspace_service
 from app.services.model_service import ModelConfigService
+from app.services.prompt import prompt_manager
 
 logger = get_business_logger()
 
@@ -694,14 +693,9 @@ class ConversationService:
                 takeaways=[],
                 info_score=0,
             )
-        prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prompt')
-        with open(os.path.join(prompt_path, 'conversation_summary_system.jinja2'), 'r', encoding='utf-8') as f:
-            system_prompt = f.read()
-        rendered_system_message = Template(system_prompt).render()
-
-        with open(os.path.join(prompt_path, 'conversation_summary_user.jinja2'), 'r', encoding='utf-8') as f:
-            user_prompt = f.read()
-        rendered_user_message = Template(user_prompt).render(
+        rendered_system_message = prompt_manager.render('conversation_summary_system')
+        rendered_user_message = prompt_manager.render(
+            'conversation_summary_user',
             language=language,
             conversation=str(conversation_messages)
         )
