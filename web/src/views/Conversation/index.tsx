@@ -498,6 +498,26 @@ const Conversation: FC = () => {
   const [showHistory, setShowHistory] = useState(false)
   const isFloatBtn = windowType === 'floatBtn'
 
+  const handleFeedback = (feedbackType: 'like' | 'dislike', id?: string) => {
+    if (!token || !conversation_id || !id) return
+    feedbackMessage(token, id, { feedback_type: feedbackType })
+      .then((res) => {
+        const { feedback_type } = res as { feedback_type: 'like' | 'dislike' | null; }
+        messageApi.success( feedback_type === 'dislike'
+          ? t('memoryConversation.dislikeMsg')
+          : feedback_type === 'like'
+          ? t('memoryConversation.likeMsg')
+          : t('memoryConversation.cancelMsg')
+        )
+        setChatList(prev => prev.map(item => item.id === id
+          ? {
+            ...item,
+            feedback_type,
+          }
+          : item))
+      })
+  }
+
   if (isIframe || isSmallScreen) {
     return (
       <Flex className={clsx("rb:bg-[#FFFFFF]", {
@@ -564,6 +584,9 @@ const Conversation: FC = () => {
                 setFileList(list || [])
                 toolbarRef.current?.setFiles(list || [])
               }}
+              isSupportTools={config.app_type === 'agent'}
+              handleFeedback={handleFeedback}
+              isEnded={chatIsEnded.current}
             >
               <ChatToolbar
                 ref={toolbarRef}
@@ -683,26 +706,6 @@ const Conversation: FC = () => {
         }
       </Flex>
     )
-  }
-
-  const handleFeedback = (feedbackType: 'like' | 'dislike', id?: string) => {
-    if (!token || !conversation_id || !id) return
-    feedbackMessage(token, id, { feedback_type: feedbackType })
-      .then((res) => {
-        const { feedback_type } = res as { feedback_type: 'like' | 'dislike' | null; }
-        messageApi.success( feedback_type === 'dislike'
-          ? t('memoryConversation.dislikeMsg')
-          : feedback_type === 'like'
-          ? t('memoryConversation.likeMsg')
-          : t('memoryConversation.cancelMsg')
-        )
-        setChatList(prev => prev.map(item => item.id === id
-          ? {
-            ...item,
-            feedback_type,
-          }
-          : item))
-      })
   }
 
   console.log(chatList)
