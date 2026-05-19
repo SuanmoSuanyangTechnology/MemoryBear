@@ -206,23 +206,12 @@ async def _judge_pair(
         "connect_strength": getattr(b, "connect_strength", None),
     }
  # 5. 渲染LLM提示词（用工具函数填充模板，包含实体信息、上下文、输出格式）
-    # 根据实体内容检测语言，确保 prompt 指令语言与输入一致
-    from app.core.language_utils import detect_text_language
-    _dedup_detect_text = " ".join(filter(None, [
-        entity_a.get("name", ""),
-        entity_a.get("description", ""),
-        entity_b.get("name", ""),
-        entity_b.get("description", ""),
-    ]))
-    _dedup_language = detect_text_language(_dedup_detect_text, fallback="zh")
-
     prompt = render_entity_dedup_prompt(
         entity_a=entity_a,
         entity_b=entity_b,
         context=ctx,
         json_schema=EntityDedupDecision.model_json_schema(),
         disambiguation_mode=False,  # 去重模式
-        language=_dedup_language,
     )
 
     messages = [
@@ -277,16 +266,6 @@ async def _judge_pair_disamb(
         # "fact_summary": getattr(b, "fact_summary", None),
         "connect_strength": getattr(b, "connect_strength", None),
     }
-    # 根据实体内容检测语言，确保 prompt 指令语言与输入一致
-    from app.core.language_utils import detect_text_language
-    _disamb_detect_text = " ".join(filter(None, [
-        entity_a.get("name", ""),
-        entity_a.get("description", ""),
-        entity_b.get("name", ""),
-        entity_b.get("description", ""),
-    ]))
-    _disamb_language = detect_text_language(_disamb_detect_text, fallback="zh")
-
     prompt = render_entity_dedup_prompt(
         entity_a=entity_a,
         entity_b=entity_b,

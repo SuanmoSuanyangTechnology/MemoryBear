@@ -209,6 +209,26 @@ class MemoryService:
     # 统一门户：Agent 对话消息同步
     # ──────────────────────────────────────────────
 
+    @staticmethod
+    def _extract_files_from_message(message: "Message") -> Optional[list]:
+        """从 Message ORM 对象的 meta_data 中提取 files 信息。
+
+        Agent 对话场景中，文件信息存储在 messages.meta_data["files"] 字段中，
+        格式为 [{"type": "image", "url": "...", ...}, ...]。
+
+        Args:
+            message: Message ORM 对象
+
+        Returns:
+            文件信息列表，若无文件则返回 None
+        """
+        if not message.meta_data:
+            return None
+        files = message.meta_data.get("files")
+        if not files:
+            return None
+        return files
+
     @classmethod
     async def _sync_and_dispatch(
         cls,
@@ -223,6 +243,7 @@ class MemoryService:
         end_user_id: str,
         workspace_id: str,
         language: str,
+        files: Optional[list] = None,
     ) -> Optional["MemoryMessage"]:
         """内部统一方法：检查门禁 → 写入 memory_messages → 刷新活跃 key → 分派调度器。
 
@@ -240,6 +261,7 @@ class MemoryService:
             end_user_id: 终端用户 ID
             workspace_id: 工作空间 ID
             language: 语言
+            files: 多模态文件信息列表，可为 None
 
         Returns:
             MemoryMessage 实例若成功写入，否则 None
@@ -260,6 +282,7 @@ class MemoryService:
             content=content,
             created_at=created_at,
             should_memorize=should_memorize,
+            files=files,
         )
         if memory_msg is None:
             return None
@@ -332,6 +355,7 @@ class MemoryService:
             end_user_id=end_user_id,
             workspace_id=workspace_id,
             language=language,
+            files=cls._extract_files_from_message(message),
         )
 
     # ──────────────────────────────────────────────
@@ -436,6 +460,7 @@ class MemoryService:
         content: str,
         created_at,
         should_memorize: bool = True,
+        files: Optional[list] = None,
     ) -> Optional["MemoryMessage"]:
         """在事务内自增 message_seq 并写入 memory_messages 表。
 
@@ -451,6 +476,7 @@ class MemoryService:
             created_at: 时间戳，沿用 Message 的 created_at 以保持时间一致
             should_memorize: 是否触发 Write_Pipeline；False 时仍写候选池但 cursor
                 只推进不萃取（用于"用户在会话里关闭记忆开关"场景）
+            files: 多模态文件信息列表（FileInput dict 格式），可为 None
 
         Returns:
             写入成功的 MemoryMessage 实例；失败时返回 None
@@ -474,6 +500,7 @@ class MemoryService:
                     message_seq=next_seq,
                     should_memorize=should_memorize,
                     created_at=created_at,
+                    files=files,
                 )
                 db.add(memory_msg)
                 db.commit()

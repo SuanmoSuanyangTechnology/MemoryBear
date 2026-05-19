@@ -217,14 +217,9 @@ class PruningPipeline:
         )
         from app.core.memory.models.config_models import PruningConfig
         from app.core.memory.models.message_models import ConversationMessage
-        from app.core.language_utils import detect_text_language
 
         # 确保 LLM 客户端已初始化
         self._ensure_llm_client()
-
-        # 根据输入内容检测语言，优先看 user 消息，其次看 assistant 消息
-        detect_source = user_content if user_content.strip() else content
-        detected_language = detect_text_language(detect_source, fallback=self.language)
 
         pruning_config = PruningConfig(
             pruning_switch=True,
@@ -241,7 +236,7 @@ class PruningPipeline:
         pruner = SemanticPruner(
             config=pruning_config,
             llm_client=self._llm_client,
-            language=detected_language,
+            language=self.language,
         )
 
         # 使用实际的 user 消息（若有），否则用占位符

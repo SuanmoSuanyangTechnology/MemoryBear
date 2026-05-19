@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
 
 from app.core.memory.utils.log.bear_logger import BearLogger
@@ -729,6 +730,101 @@ class WritePipeline:
             logger.error(f"Memory summary step failed: {e}", exc_info=True)
 
     # ──────────────────────────────────────────────
+    # 文件预处理（与旧路径 memory_agent_service._preprocess_files 一脉相承）
+    # ──────────────────────────────────────────────
+
+    async def _preprocess_files(self, messages: List[dict]) -> None:
+        """处理消息中附带的文件，生成 Perceptual 记录并注入 summary 到 content。
+
+        与旧路径 memory_agent_service._preprocess_files 逻辑一致：
+        1. 遍历消息中的 files 列表
+        2. 对每个文件，先查找已有的 Perceptual 记录（通过 URL）
+        3. 若不存在，调用 generate_perceptual_memory 创建（调用多模态 LLM 生成 summary）
+        4. 将 file_object.summary 以 <input-file-summary> 标签注入到 message["content"]
+        5. 将 (file_object, file_type) 挂载到 message["file_content"]
+
+        Args:
+            messages: 消息列表，每条消息含 files 字段（List[FileInput dict]）。
+                      函数会原地修改 content 和 file_content。
+        """
+        if not messages:
+            return
+
+        from app.db import get_db_context
+        from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
+        from app.schemas.app_schema import FileInput
+        from app.services.memory_perceptual_service import MemoryPerceptualService
+
+        for msg in messages:
+            files = msg.get("files") or []
+            if not files:
+                msg["file_content"] = []
+                continue
+
+            msg["file_content"] = []
+            for file_info in files:
+                url = file_info.get("url", "")
+                if not url:
+                    continue
+
+                try:
+                    with get_db_context() as db:
+                        # 先查找已有的 Perceptual 记录
+                        repo = MemoryPerceptualRepository(db)
+                        memories = repo.get_by_url(url)
+
+                        if memories:
+                            # 已存在，复用最新的一条
+                            memory = max(
+                                memories,
+                                key=lambda m: m.created_time if m.created_time else datetime.min,
+                            )
+                            # 在 Session 内提取所有需要的属性到一个简单对象中，
+                            # 彻底避免 DetachedInstanceError
+                            class _PerceptualSnapshot:
+                                pass
+                            snap = _PerceptualSnapshot()
+                            snap.id = memory.id
+                            snap.summary = memory.summary
+                            snap.meta_data = memory.meta_data
+                            snap.file_path = memory.file_path
+                            snap.file_name = memory.file_name
+                            snap.file_ext = memory.file_ext
+                            snap.perceptual_type = memory.perceptual_type
+                            snap.end_user_id = memory.end_user_id
+                            snap.created_time = memory.created_time
+                            file_object = snap
+                        else:
+                            # 不存在，创建 Perceptual 记录
+                            perceptual_service = MemoryPerceptualService(db)
+                            # 补充 transfer_method（memory_messages.files 中可能缺失此字段）
+                            file_data = dict(file_info)
+                            if "transfer_method" not in file_data:
+                                file_data["transfer_method"] = "remote_url" if file_data.get("url") else "local_file"
+                            file_input = FileInput(**file_data)
+                            file_object = await perceptual_service.generate_perceptual_memory(
+                                end_user_id=self.end_user_id,
+                                memory_config=self.memory_config,
+                                file=file_input,
+                                content=msg.get("content") or None,
+                            )
+
+                        if file_object is None:
+                            continue
+
+                        # 注入 summary 到 content
+                        if file_object.summary:
+                            msg["content"] = (msg.get("content") or "") + f"<input-file-summary>{file_object.summary}</input-file-summary>"
+
+                        msg["file_content"].append((file_object, file_info.get("type", "")))
+
+                except Exception as e:
+                    logger.warning(
+                        f"[WritePipeline] 文件预处理失败: url={url}, err={e}",
+                        exc_info=True,
+                    )
+
+    # ──────────────────────────────────────────────
     # 辅助方法
     # ──────────────────────────────────────────────
 
@@ -949,10 +1045,11 @@ class WritePipeline:
 
                 messages = [target_message]
 
-                from app.core.memory.sliding_window.window_utils import enrich_file_content
-                await enrich_file_content(messages)
-                await enrich_file_content(context_before_pruned)
-                await enrich_file_content(context_after_pruned)
+                # 文件预处理：生成 Perceptual 记录并注入 summary 到 content
+                # 与旧路径 memory_agent_service._preprocess_files 逻辑一致
+                await self._preprocess_files(messages)
+                await self._preprocess_files(context_before_pruned)
+                await self._preprocess_files(context_after_pruned)
 
                 async with bear.step(2, 5, "预处理", "消息分块") as s:
                     from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
