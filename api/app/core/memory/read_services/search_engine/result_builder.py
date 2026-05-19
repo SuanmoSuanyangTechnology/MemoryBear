@@ -145,7 +145,7 @@ class PerceptualBuilder(BaseBuilder):
 
     @property
     def content(self) -> str:
-        parts = ["<history-file-info>"]
+        parts = ["<history-file-input>"]
         fields = [
             ("file-name", self.record.get("file_name", "")),
             ("file-path", self.record.get("file_path", "")),
@@ -158,7 +158,7 @@ class PerceptualBuilder(BaseBuilder):
         for tag, value in fields:
             if value:
                 parts.append(f"<{tag}>{value}</{tag}>")
-        parts.append("</history-file-info>")
+        parts.append("</history-file-input>")
         return "".join(parts)
 
 
