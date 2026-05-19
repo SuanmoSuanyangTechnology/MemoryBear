@@ -174,15 +174,15 @@ class AppChatService:
         # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
         capability = api_key_obj.capability or []
         orchestrator_node_executions = []
+        _api_key_config = {
+            "model_name": api_key_obj.model_name,
+            "api_key": api_key_obj.api_key,
+            "provider": api_key_obj.provider,
+            "api_base": api_key_obj.api_base,
+            "is_omni": api_key_obj.is_omni,
+            "capability": capability,
+        }
         if ModelCapability.FUNCTION_CALL not in capability and tools:
-            _api_key_config = {
-                "model_name": api_key_obj.model_name,
-                "api_key": api_key_obj.api_key,
-                "provider": api_key_obj.provider,
-                "api_base": api_key_obj.api_base,
-                "is_omni": api_key_obj.is_omni,
-                "capability": capability,
-            }
             system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                 tools=tools,
                 system_prompt=system_prompt,
@@ -274,8 +274,7 @@ class AppChatService:
         if isinstance(sq_config, dict) and sq_config.get("enabled"):
             suggested_questions = await self.agent_service._generate_suggested_questions(
                 features_config, result["content"],
-                {"model_name": api_key_obj.model_name, "api_key": api_key_obj.api_key,
-                 "api_base": api_key_obj.api_base}, {}
+                _api_key_config, {}
             )
 
         audio_url = await self.agent_service._generate_tts(
@@ -536,15 +535,15 @@ class AppChatService:
             # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
             capability = api_key_obj.capability or []
             orchestrator_node_executions = []
+            _api_key_config = {
+                "model_name": api_key_obj.model_name,
+                "api_key": api_key_obj.api_key,
+                "provider": api_key_obj.provider,
+                "api_base": api_key_obj.api_base,
+                "is_omni": api_key_obj.is_omni,
+                "capability": capability,
+            }
             if ModelCapability.FUNCTION_CALL not in capability and tools:
-                _api_key_config = {
-                    "model_name": api_key_obj.model_name,
-                    "api_key": api_key_obj.api_key,
-                    "provider": api_key_obj.provider,
-                    "api_base": api_key_obj.api_base,
-                    "is_omni": api_key_obj.is_omni,
-                    "capability": capability,
-                }
                 system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                     tools=tools,
                     system_prompt=system_prompt,
@@ -669,8 +668,7 @@ class AppChatService:
             if isinstance(sq_config, dict) and sq_config.get("enabled"):
                 suggested_questions = await self.agent_service._generate_suggested_questions(
                     features_config, full_content,
-                    {"model_name": api_key_obj.model_name, "api_key": api_key_obj.api_key,
-                     "api_base": api_key_obj.api_base}, {}
+                    _api_key_config, {}
                 )
                 end_data["suggested_questions"] = suggested_questions
             end_data["audio_url"] = stream_audio_url
