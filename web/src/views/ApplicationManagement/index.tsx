@@ -131,8 +131,9 @@ const ApplicationManagement: React.FC = () => {
   const [focus, setFocus] = useState(false)
 
   const formatQuery = () => {
-    const { search_type = 'search', search } = query || {}
+    const { search_type = 'search', search, ...rest } = query || {}
     return {
+      ...rest,
       shared_only: activeTab === 'sharing',
       include_shared: activeTab !== 'apps',
       [search_type || 'search']: search
