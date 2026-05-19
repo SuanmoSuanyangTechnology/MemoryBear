@@ -349,6 +349,7 @@ class SemanticPruner:
                     kept.append(ConversationMessage(
                         role=m.role,
                         msg=new_text,
+                        dialog_at=m.dialog_at,
                         files=m.files,
                     ))
             elif idx in user_actions:
@@ -356,6 +357,7 @@ class SemanticPruner:
                 kept.append(ConversationMessage(
                     role=m.role,
                     msg=user_actions[idx],
+                    dialog_at=m.dialog_at,
                     files=m.files,
                 ))
             else:
