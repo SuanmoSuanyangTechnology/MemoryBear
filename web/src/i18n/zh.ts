@@ -814,6 +814,8 @@ export const zh = {
       allow_download: '允许下载引用原文',
       invalidVariablesTitle: "对话开场白中引用了以下未定义的变量，是否保存开场白配置？",
       deep_thinking: '开启深度思考',
+      promptInvalidVariablesTitle: '提示词中引用了未定义的变量，是否自动添加到用户输入表单中？',
+      addNewVariable: '添加新变量',
 
       apps: '我的应用',
       sharing: '共享',
