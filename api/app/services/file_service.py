@@ -157,7 +157,7 @@ async def stream_zip_files(
 
             local_header = struct.pack(
                 "<4sHHHHHIIIHH",
-                b"PK\x03\x04", 20, 0x08, 8, 0, 0, 0, 0, 0, len(arc_name_bytes), 0,
+                b"PK\x03\x04", 20, 0x0808, 8, 0, 0, 0, 0, 0, len(arc_name_bytes), 0,
             ) + arc_name_bytes
 
             yield local_header
@@ -187,7 +187,7 @@ async def stream_zip_files(
 
         local_header = struct.pack(
             "<4sHHHHHIIIHH",
-            b"PK\x03\x04", 20, 0x08, 8, 0, 0, 0, 0, 0, len(name_bytes), 0,
+            b"PK\x03\x04", 20, 0x0808, 8, 0, 0, 0, 0, 0, len(name_bytes), 0,
         ) + name_bytes
         descriptor = struct.pack("<III", crc, compressed_size, uncompressed_size)
 
@@ -204,7 +204,7 @@ async def stream_zip_files(
     for arc_name_bytes, crc, compressed_size, uncompressed_size, local_offset in central_entries:
         entry = struct.pack(
             "<4sHHHHHHIIIHHHHHII",
-            b"PK\x01\x02", 20, 20, 0x08, 8, 0, 0,
+            b"PK\x01\x02", 20, 20, 0x0808, 8, 0, 0,
             crc, compressed_size, uncompressed_size,
             len(arc_name_bytes), 0, 0, 0, 0, 0, local_offset,
         ) + arc_name_bytes
