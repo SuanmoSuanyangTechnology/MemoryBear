@@ -123,7 +123,7 @@ class MCPTool(BaseTool):
             # 确定要调用的工具名称
             # 优先使用参数中的 tool_name，否则使用当前工具名（从 available_tools 提取）
             tool_name = kwargs.pop("tool_name", None) or self.name
-            arguments = kwargs.pop("arguments", {}) if "arguments" in kwargs else kwargs  # 剩余参数作为工具参数
+            arguments = kwargs.pop("arguments", kwargs)  # 剩余参数作为工具参数
             
             from .client import SimpleMCPClient
             
