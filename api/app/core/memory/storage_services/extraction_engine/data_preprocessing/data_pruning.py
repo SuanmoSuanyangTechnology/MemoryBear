@@ -349,6 +349,7 @@ class SemanticPruner:
                     kept.append(ConversationMessage(
                         role=m.role,
                         msg=new_text,
+                        dialog_at=m.dialog_at,
                         files=m.files,
                     ))
             elif idx in user_actions:
@@ -356,6 +357,7 @@ class SemanticPruner:
                 kept.append(ConversationMessage(
                     role=m.role,
                     msg=user_actions[idx],
+                    dialog_at=m.dialog_at,
                     files=m.files,
                 ))
             else:
@@ -433,7 +435,7 @@ class SemanticPruner:
             del self._cache[oldest]
 
         # 渲染模板
-        rendered = self.template.render(dialog_text=dialog_text)
+        rendered = self.template.render(dialog_text=dialog_text, language=self.language)
         log_template_rendering("extract_pruning.jinja2", {
             "language": self.language,
         })

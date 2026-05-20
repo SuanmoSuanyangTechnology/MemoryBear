@@ -94,7 +94,7 @@ const Timeline: FC = () => {
         ? <Empty />
         : <Flex gap={12} vertical>
             {data.map((vo, index) => (
-              <Row key={vo.id}className="rb:flex rb:gap-6 rb:min-h-16">
+              <Row key={vo.id} wrap={false} className="rb:flex rb:gap-6 rb:min-h-16">
                 <Col flex="90px" className="rb:leading-5 rb:font-semibold">
                   <Flex vertical gap={12} align="center" justify="center" className="rb:h-full!">
                     <span className="rb:text-center">{formatDateTime(vo.created_time)}</span>

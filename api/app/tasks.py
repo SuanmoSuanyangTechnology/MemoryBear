@@ -1538,6 +1538,13 @@ def write_message_task(
             logger.info(
                 f"[CELERY WRITE] Executing MemoryAgentService.write_memory "
                 f"with config_id = {actual_config_id} (type: {type(actual_config_id).__name__}), language={language}")
+
+            from datetime import datetime, timezone
+            _default_dialog_at = datetime.now(timezone.utc).isoformat()
+            for msg in message:
+                if isinstance(msg, dict) and not msg.get("dialog_at"):
+                    msg["dialog_at"] = _default_dialog_at
+
             service = MemoryAgentService()
             result = await service.write_memory(
                 WriteMemoryRequest(
@@ -3843,6 +3850,7 @@ def run_incremental_clustering(
     new_entity_ids: List[str],
     llm_model_id: Optional[str] = None,
     embedding_model_id: Optional[str] = None,
+    language: str = "zh",
 ) -> Dict[str, Any]:
     """增量聚类任务：处理新增实体的社区分配和元数据生成。
     
@@ -3853,6 +3861,7 @@ def run_incremental_clustering(
         new_entity_ids: 新增实体 ID 列表
         llm_model_id: LLM 模型 ID（可选）
         embedding_model_id: Embedding 模型 ID（可选）
+        language: 语言类型 ("zh" | "en")
     
     Returns:
         包含任务执行结果的字典
@@ -3876,6 +3885,7 @@ def run_incremental_clustering(
                 connector=connector,
                 llm_model_id=llm_model_id,
                 embedding_model_id=embedding_model_id,
+                language=language,
             )
 
             # 执行增量聚类

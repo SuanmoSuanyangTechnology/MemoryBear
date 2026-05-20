@@ -121,6 +121,7 @@ export const useWorkflowGraph = ({
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isHandMode, setIsHandMode] = useState(true);
+  const isHandModeRef = useRef(true)
   const [config, setConfig] = useState<WorkflowConfig | null>(null);
   const [chatVariables, setChatVariables] = useState<ChatVariable[]>([])
   const featuresRef = useRef<FeaturesConfigForm | undefined>(undefined)
@@ -758,8 +759,8 @@ export const useWorkflowGraph = ({
     graphRef.current.on('history:redo', () => { if (!isSyncingRef.current) syncChildRelationshipsRef.current() })
   };
 
-  // 控制框选：isHandMode = false 时启用框选
   useEffect(() => {
+    isHandModeRef.current = isHandMode
     if (!graphRef.current) return;
     if (isHandMode) {
       graphRef.current?.enablePanning();
@@ -925,7 +926,7 @@ export const useWorkflowGraph = ({
   const copyEvent = () => {
     if (!graphRef.current) return false;
     let selectedNodes = []
-    if (isHandMode) {
+    if (isHandModeRef.current) {
       selectedNodes = graphRef.current.getNodes().filter(node => node.getData()?.isSelected);
     } else {
      selectedNodes = graphRef.current.getSelectedCells();
@@ -941,6 +942,7 @@ export const useWorkflowGraph = ({
    */
   const parseEvent = () => {
     if (!graphRef.current?.isClipboardEmpty()) {
+      graphRef.current?.startBatch('copy');
       const pastedNodes = graphRef.current?.paste({ offset: 32 }) ?? [];
       pastedNodes.forEach(cell => {
         if (cell.isNode()) {
@@ -950,6 +952,7 @@ export const useWorkflowGraph = ({
         }
       });
       blankClick();
+      graphRef.current?.stopBatch('copy');
     }
     return false;
   };

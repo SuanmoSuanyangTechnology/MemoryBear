@@ -117,6 +117,13 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
    * Closes the drawer and resets all state
    */
   const handleClose = () => {
+    setChatHistory(conversationIdRef.current, chatList.map((item: ChatItem) => ({
+      ...item,
+      subContent: item.subContent?.map(sub => ({
+        ...sub,
+        status: sub.status === 'running' ? undefined : sub.status
+      }))
+    })))
     abortRef.current?.()
     abortRef.current = null;
     setOpen(false)
@@ -454,6 +461,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   }, [chatList.length, features?.opening_statement, variables])
 
   useEffect(() => {
+    if (chatList.length < 1) return
     setChatHistory(conversationIdRef.current, chatList)
   }, [chatList])
 

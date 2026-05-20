@@ -102,7 +102,16 @@ async def get_chunked_dialogs(
                             llm_client = factory.get_llm_client_from_config(memory_config)
                             
                             # 执行剪枝 - 使用 prune_dataset 支持消息级剪枝
-                            pruner = SemanticPruner(config=pruning_config, llm_client=llm_client, snapshot=snapshot)
+                            import re
+                            import langid
+                            user_text = " ".join(
+                                re.sub(r"<input-file-summary>.*?</input-file-summary>", "", m.msg, flags=re.DOTALL).strip()
+                                for m in dialog_data.context.msgs if m.role == "user" and m.msg
+                            )
+                            pruning_language = langid.classify(user_text)[0] if user_text else "zh"
+                            if pruning_language not in ("zh", "en"):
+                                pruning_language = "en"
+                            pruner = SemanticPruner(config=pruning_config, llm_client=llm_client, language=pruning_language, snapshot=snapshot)
                             original_msg_count = len(dialog_data.context.msgs)
                             
                             # 使用 prune_dataset 而不是 prune_dialog

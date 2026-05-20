@@ -57,6 +57,7 @@ def list_apps(
         visibility: str | None = None,
         status: str | None = None,
         search: str | None = None,
+        tag_search: str | None = None,
         include_shared: bool = True,
         shared_only: bool = False,
         page: int = 1,
@@ -70,7 +71,8 @@ def list_apps(
     - 默认包含本工作空间的应用和分享给本工作空间的应用
     - 设置 include_shared=false 可以只查看本工作空间的应用
     - 当提供 ids 参数时，按逗号分割获取指定应用，不分页
-    - search 参数支持：应用名称模糊搜索、应用标签模糊搜索、API Key 精确搜索
+    - search 参数支持：应用名称模糊搜索、API Key 精确搜索
+    - tag_search 参数支持：应用标签模糊搜索
     """
     from sqlalchemy import select as sa_select
     from app.models.api_key_model import ApiKey
@@ -115,6 +117,7 @@ def list_apps(
         visibility=visibility,
         status=status,
         search=search,
+        tag_search=tag_search,
         include_shared=include_shared,
         shared_only=shared_only,
         page=page,
