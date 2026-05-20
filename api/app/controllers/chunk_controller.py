@@ -728,7 +728,10 @@ async def retrieve_chunks(
                     unique_rs.append(doc)
             rs = vector_service.rerank(query=retrieve_data.query, docs=unique_rs, top_k=retrieve_data.top_k) if unique_rs else []
             rerank_threshold = retrieve_data.rerank_score_threshold if retrieve_data.rerank_score_threshold is not None else (retrieve_data.vector_similarity_weight if retrieve_data.vector_similarity_weight is not None else 0.1)
+            print(f"\n[DEBUG] rerank_threshold={rerank_threshold}, top_k={retrieve_data.top_k}")
+            print(f"[DEBUG] before filter: {len(rs)} docs, scores={[doc.metadata.get('score', 0) for doc in rs]}")
             rs = [doc for doc in rs if doc.metadata.get("score", 0) > rerank_threshold]
+            print(f"[DEBUG] after filter: {len(rs)} docs, scores={[doc.metadata.get('score', 0) for doc in rs]}")
             if retrieve_data.retrieve_type == chunk_schema.RetrieveType.Graph:
                 kb_ids = [str(kb_id) for kb_id in private_kb_ids]
                 workspace_ids = [str(workspace_id) for workspace_id in private_workspace_ids]
