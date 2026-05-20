@@ -1,7 +1,7 @@
-# 导入 Python 的annotations特性，允许在类型注解中使用尚未定义的类（支持 “向前引用”），提升代码中类型注解的灵活性。
+# 导入 Python 的annotations特性，允许在类型注解中使用尚未定义的类（支持 "向前引用"），提升代码中类型注解的灵活性。
 # 这是什么意思？ 该类的属性的类型是这个类本身（递归定义）？
 """
-这段代码是 “第二层去重消歧” 的核心实现，逻辑可分为四步：
+这段代码是 "第二层去重消歧" 的核心实现，逻辑可分为四步：
 1.从第一层去重消歧后的实体中提取核心信息，作为索引查询 Neo4j 中同组的候选实体；
 2.对候选实体去重并转换为统一模型；
 3.构建预重定向关系（第一层实体 ID→数据库实体 ID），确保优先使用数据库 ID；
@@ -87,15 +87,16 @@ async def second_layer_dedup_and_merge_with_neo4j( # 二层去重的核心逻辑
     entity_entity_edges: List[EntityEntityEdge], # 输入的实体实体边列表，用于处理实体之间的关系
     dedup_config: DedupConfig | None = None,
     llm_client = None,
-) -> Tuple[List[ExtractedEntityNode], List[StatementEntityEdge], List[EntityEntityEdge]]:
+) -> Tuple[List[ExtractedEntityNode], List[StatementEntityEdge], List[EntityEntityEdge], Dict[str, str]]:
     """
     第二层去重消歧：
     - 以第一层结果为索引，检索相同 end_user_id 下的 DB 候选实体
     - 将 DB 候选与当前实体集合联合，按既有精确/模糊/LLM 决策进行融合
     - 返回融合后的实体与重定向后的边（边已指向规范 ID，优先 DB ID）
+    - 返回 id_redirect 映射（被合并实体 ID → 规范实体 ID），供调用方删除冗余节点和重定向边
     """
     if not entity_nodes:
-        return entity_nodes, statement_entity_edges, entity_entity_edges
+        return entity_nodes, statement_entity_edges, entity_entity_edges, {}
 
     # 构造批量行并检索候选（精确/别名 + CONTAINS 召回）
     # 将第一层去重消歧的结果作为索引，批量查询DB候选实体
@@ -106,7 +107,7 @@ async def second_layer_dedup_and_merge_with_neo4j( # 二层去重的核心逻辑
     candidates_map = await get_dedup_candidates_for_entities( # 从 Neo4j 中查询候选实体，并将结果赋值给candidates_map（等待异步操作完成）。
         connector=connector, end_user_id=end_user_id,
         entities=incoming_rows,  # 传入参数：第一层实体的核心信息（作为查询索引）
-        use_contains_fallback=True # 传入参数：启用 “包含关系” 作为匹配失败的降级策略（若精确匹配无结果，用包含关系召回候选），与src\database\cypher_queries.py的307产生联动
+        use_contains_fallback=True # 传入参数：启用 "包含关系" 作为匹配失败的降级策略（若精确匹配无结果，用包含关系召回候选），与src\database\cypher_queries.py的307产生联动
     )
 
     # 拉平候选，转为模型（按 DB 节点优先）
@@ -144,7 +145,7 @@ async def second_layer_dedup_and_merge_with_neo4j( # 二层去重的核心逻辑
         except Exception:
             # 报告写入失败不影响主流程
             pass
-        return entity_nodes, statement_entity_edges, entity_entity_edges
+        return entity_nodes, statement_entity_edges, entity_entity_edges, {}
 
     # 联合集合（DB 在前，确保规范 ID 优先使用 DB ID）
     # 将从 DB 检索到的候选实体与第一层去重消歧的实体合并，作为输入继续调用去重方法。
@@ -152,7 +153,7 @@ async def second_layer_dedup_and_merge_with_neo4j( # 二层去重的核心逻辑
     union_entities: List[ExtractedEntityNode] = db_candidate_models + list(entity_nodes)
 
     # 融合（内部执行精确/模糊/LLM 决策；随后再做边重定向与去重）
-    fused_entities, fused_stmt_entity_edges, fused_entity_entity_edges, _ = await deduplicate_entities_and_edges(
+    fused_entities, fused_stmt_entity_edges, fused_entity_entity_edges, dedup_details = await deduplicate_entities_and_edges(
         union_entities,
         statement_entity_edges,
         entity_entity_edges,
@@ -162,4 +163,7 @@ async def second_layer_dedup_and_merge_with_neo4j( # 二层去重的核心逻辑
         llm_client=llm_client,
     )
 
-    return fused_entities, fused_stmt_entity_edges, fused_entity_entity_edges
+    # 提取 id_redirect 映射（被合并实体 ID → 规范实体 ID）
+    id_redirect: Dict[str, str] = dedup_details.get("id_redirect", {})
+
+    return fused_entities, fused_stmt_entity_edges, fused_entity_entity_edges, id_redirect
