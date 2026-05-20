@@ -165,7 +165,7 @@ def _retrieve_for_knowledge(
     results: list[DocumentChunk] = []
 
     # 处理共享知识库
-    if db_knowledge.permission_id.lower() == knowledge_model.PermissionType.Share:
+    if db_knowledge.permission_id == knowledge_model.PermissionType.Share:
         knowledgeshare = knowledgeshare_repository.get_knowledgeshare_by_id(db=db, knowledgeshare_id=db_knowledge.id)
         if not knowledgeshare:
             return results, chat_model, embedding_model
