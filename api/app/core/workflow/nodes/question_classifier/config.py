@@ -19,6 +19,14 @@ class QuestionClassifierNodeConfig(BaseNodeConfig):
     input_variable: str = Field(default="{{sys.message}}", description="输入变量选择器(用户问题)")
     user_supplement_prompt: Optional[str] = Field(default=None, description="用户补充提示词，额外分类指令")
     categories: list[ClassifierConfig] = Field(..., description="分类类别列表")
+    vision: bool = Field(
+        default=False,
+        description="是否启用视觉模型"
+    )
+    vision_input: Optional[str] = Field(
+        default=None,
+        description="视觉输入变量选择器，如 {{sys.files}}"
+    )
     system_prompt: str = Field(
         default="你是一个问题分类器，请根据用户问题选择最合适的分类。只返回分类名称，不要其他内容。",
         description="系统提示词"

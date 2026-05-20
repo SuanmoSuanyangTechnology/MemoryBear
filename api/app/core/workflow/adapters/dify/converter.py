@@ -373,10 +373,17 @@ class DifyConverter(BaseConverter):
                 )
             )
 
+        vision = node_data.get("vision", {}).get("enabled", False)
+        vision_input = self._process_list_variable_literal(
+            node_data["vision"]["configs"]["variable_selector"]
+        ) if vision else None
+
         result = QuestionClassifierNodeConfig.model_construct(
             input_variable=self._process_list_variable_literal(node_data.get("query_variable_selector")),
             user_supplement_prompt=self.trans_variable_format(node_data.get("instructions", "")),
             categories=categories,
+            vision=vision,
+            vision_input=vision_input,
         ).model_dump()
         self.config_validate(node["id"], node["data"]["title"], QuestionClassifierNodeConfig, result)
         return result
