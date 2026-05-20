@@ -27,8 +27,10 @@ from app.repositories.workflow_repository import (
     WorkflowNodeExecutionRepository
 )
 from app.schemas import DraftRunRequest, FileInput, FileType
+from app.services.annotation_service import AnnotationService
 from app.services.conversation_service import ConversationService
 from app.services.multi_agent_service import convert_uuids_to_str
+from app.models.annotation_model import HitLogSource
 from app.services.multimodal_service import MultimodalService
 from app.services.workspace_service import get_workspace_storage_type_without_auth
 
@@ -47,6 +49,61 @@ class WorkflowService:
         self.multimodal_service = MultimodalService(db)
 
         self.registry = PlatformAdapterRegistry
+
+    def _check_annotation_match(self, app_id: uuid.UUID, message: str,
+                              source: str = "") -> Optional[dict]:
+        """检查是否命中标注
+
+        Args:
+            app_id: 应用ID
+            message: 用户消息
+            source: 来源（用于记录命中来源）
+        """
+        try:
+            service = AnnotationService(self.db)
+            setting = service.get_setting(app_id)
+            if not setting or not setting.enabled:
+                return None
+            if not setting.model_config_id:
+                return None
+
+            annotations = service.repo.get_all_active_by_app(app_id)
+            if not annotations:
+                return None
+
+            from app.models.models_model import ModelConfig
+            from app.services.model_service import ModelApiKeyService
+            model_cfg = self.db.query(ModelConfig).filter(
+                ModelConfig.id == setting.model_config_id
+            ).first()
+            if not model_cfg:
+                return None
+
+            api_key_obj = ModelApiKeyService.get_available_api_key(self.db, setting.model_config_id)
+            if not api_key_obj:
+                return None
+
+            from app.core.models.base import RedBearModelConfig
+            config = RedBearModelConfig(
+                model_name=api_key_obj.model_name,
+                provider=api_key_obj.provider,
+                api_key=api_key_obj.api_key,
+                base_url=api_key_obj.api_base or None,
+                timeout=60,
+                max_retries=3,
+            )
+
+            return service.find_best_match(
+                query=message,
+                annotations=annotations,
+                threshold=setting.similarity_threshold,
+                model_config=config,
+                app_id=app_id,
+                source=source,
+            )
+        except Exception as e:
+            logger.warning(f"标注匹配检查失败: {e}")
+            return None
 
     # ==================== 配置管理 ====================
 
@@ -765,10 +822,22 @@ class WorkflowService:
             if isinstance(last_state, dict):
                 variables = last_state.get("variables", {})
                 conv_vars = variables.get("conv", {})
-                # input_data["conv"] = conv_vars
-                # input_data["conv_messages"] = last_state.get("messages") or []
                 conv_messages = last_state.get("messages") or []
                 return conv_vars, conv_messages
+
+        messages = self.conversation_service.message_repo.get_message_by_conversation_id(
+            conversation_id,
+            limit=None
+        )
+        if messages:
+            conv_messages = []
+            for msg in messages:
+                conv_messages.append({
+                    "role": msg.role,
+                    "content": msg.content
+                })
+            return {}, conv_messages
+
         return None
 
     # ==================== 工作流执行 ====================
@@ -780,6 +849,7 @@ class WorkflowService:
             config: WorkflowConfig,
             workspace_id: uuid.UUID,
             release_id: uuid.UUID | None = None,
+            source: str = "",
     ):
         """运行工作流
 
@@ -822,6 +892,87 @@ class WorkflowService:
 
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
+
+        # 检查标注命中 — 在创建工作流执行之前，命中则直接返回跳过整个工作流
+        annotation_match = self._check_annotation_match(app_id, payload.message,
+                                                        source=source or HitLogSource.CONSOLE)
+        if annotation_match:
+            if not conversation_id_uuid:
+                conversation_id_uuid = uuid.uuid4()
+                from app.models import Conversation as ConversationModel
+                new_conversation = ConversationModel(
+                    id=conversation_id_uuid,
+                    app_id=app_id,
+                    workspace_id=workspace_id,
+                    user_id=payload.user_id,
+                    is_draft=True,
+                    title="草稿会话",
+                )
+                self.db.add(new_conversation)
+                self.db.commit()
+                self.db.refresh(new_conversation)
+
+            message_id = uuid.uuid4()
+            prev_messages = []
+            history = self._get_history_info(conversation_id_uuid)
+            if history:
+                _, prev_messages = history
+            self.conversation_service.add_message(
+                conversation_id=conversation_id_uuid,
+                role="user",
+                content=payload.message,
+                meta_data={"files": []}
+            )
+            self.conversation_service.add_message(
+                message_id=message_id,
+                conversation_id=conversation_id_uuid,
+                role="assistant",
+                content=annotation_match["answer"],
+                meta_data={"usage": {}}
+            )
+
+            # 创建 WorkflowExecution 记录，用于日志显示
+            execution = self.create_execution(
+                workflow_config_id=config.id,
+                app_id=app_id,
+                trigger_type="manual",
+                triggered_by=None,
+                conversation_id=conversation_id_uuid,
+                input_data=input_data,
+                release_id=release_id,
+            )
+            execution.status = "completed"
+            output_messages = prev_messages + [
+                {"role": "user", "content": payload.message},
+                {"role": "assistant", "content": annotation_match["answer"]}
+            ]
+            execution.output_data = {
+                "answer": annotation_match["answer"],
+                "messages": output_messages,
+                "annotation_hit": {
+                    "annotation_id": str(annotation_match["annotation_id"]),
+                    "similarity": annotation_match["similarity"],
+                    "question": annotation_match["question"],
+                }
+            }
+            execution.token_usage = {}
+            execution.elapsed_time = 0
+            execution.completed_at = datetime.datetime.now()
+            self.db.commit()
+
+            return {
+                "status": "completed",
+                "answer": annotation_match["answer"],
+                "messages": output_messages,
+                "conversation_id": str(conversation_id_uuid),
+                "token_usage": {},
+                "elapsed_time": 0,
+                "annotation_hit": {
+                    "annotation_id": str(annotation_match["annotation_id"]),
+                    "similarity": annotation_match["similarity"],
+                    "question": annotation_match["question"],
+                }
+            }
 
         # 2. 创建执行记录
         execution = self.create_execution(
@@ -1004,7 +1155,8 @@ class WorkflowService:
             config: WorkflowConfig,
             workspace_id: uuid.UUID,
             release_id: Optional[uuid.UUID] = None,
-            public: bool = False
+            public: bool = False,
+            source: str = "",
     ):
         """运行工作流（流式）
 
@@ -1047,6 +1199,98 @@ class WorkflowService:
 
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
+
+        # 检查标注命中 — 在创建工作流执行之前，命中则直接返回跳过整个工作流
+        annotation_match = self._check_annotation_match(app_id, payload.message,
+                                                        source=source or HitLogSource.CONSOLE)
+        if annotation_match:
+            if not conversation_id_uuid:
+                from app.models import Conversation as ConversationModel
+                conversation_id_uuid = uuid.uuid4()
+                new_conversation = ConversationModel(
+                    id=conversation_id_uuid,
+                    app_id=app_id,
+                    workspace_id=workspace_id,
+                    user_id=payload.user_id,
+                    is_draft=True,
+                    title="草稿会话",
+                )
+                self.db.add(new_conversation)
+                self.db.commit()
+                self.db.refresh(new_conversation)
+                payload.conversation_id = str(conversation_id_uuid)
+
+            message_id = uuid.uuid4()
+            prev_messages = []
+            history = self._get_history_info(conversation_id_uuid)
+            if history:
+                _, prev_messages = history
+            self.conversation_service.add_message(
+                conversation_id=conversation_id_uuid,
+                role="user",
+                content=payload.message,
+                meta_data={"files": []}
+            )
+            self.conversation_service.add_message(
+                message_id=message_id,
+                conversation_id=conversation_id_uuid,
+                role="assistant",
+                content=annotation_match["answer"],
+                meta_data={"usage": {}}
+            )
+
+            # 创建 WorkflowExecution 记录，用于日志显示
+            execution = self.create_execution(
+                workflow_config_id=config.id,
+                app_id=app_id,
+                trigger_type="manual",
+                triggered_by=None,
+                conversation_id=conversation_id_uuid,
+                input_data=input_data,
+                release_id=release_id,
+            )
+            execution.status = "completed"
+            output_messages = prev_messages + [
+                {"role": "user", "content": payload.message},
+                {"role": "assistant", "content": annotation_match["answer"]}
+            ]
+            execution.output_data = {
+                "answer": annotation_match["answer"],
+                "messages": output_messages,
+                "annotation_hit": {
+                    "annotation_id": str(annotation_match["annotation_id"]),
+                    "similarity": annotation_match["similarity"],
+                    "question": annotation_match["question"],
+                }
+            }
+            execution.token_usage = {}
+            execution.elapsed_time = 0
+            execution.completed_at = datetime.datetime.now()
+            self.db.commit()
+
+            yield {
+                "event": "annotation_hit",
+                "data": {**annotation_match, "conversation_id": str(conversation_id_uuid)}
+            }
+            end_internal_event = {
+                "event": "workflow_end",
+                "data": {
+                    "conversation_id": str(conversation_id_uuid),
+                    "answer": annotation_match["answer"],
+                    "usage": {},
+                    "elapsed_time": 0,
+                    "status": "completed",
+                    "annotation_hit": {
+                        "annotation_id": str(annotation_match["annotation_id"]),
+                        "similarity": annotation_match["similarity"],
+                        "question": annotation_match["question"],
+                    }
+                }
+            }
+            end_event = self._emit(public, end_internal_event)
+            if end_event:
+                yield end_event
+            return
 
         # 2. 创建执行记录
         execution = self.create_execution(

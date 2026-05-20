@@ -41,6 +41,7 @@ from app.services.model_service import ModelApiKeyService
 from app.services.multimodal_service import MultimodalService
 from app.services.tool_service import ToolService
 from app.services.tool_orchestrator import ToolOrchestrator
+from app.services.annotation_service import AnnotationService
 
 logger = get_business_logger()
 
@@ -302,6 +303,66 @@ class AgentRunService:
             db: 数据库会话
         """
         self.db = db
+
+    def _check_annotation_match(self, app_id: uuid.UUID, message: str,
+                              source: str = "") -> Optional[dict]:
+        """检查是否命中标注
+
+        Args:
+            app_id: 应用ID
+            message: 用户消息
+            source: 来源（用于记录命中来源）
+
+        Returns:
+            命中返回标注结果字典，未命中返回None
+        """
+        try:
+            service = AnnotationService(self.db)
+            setting = service.get_setting(app_id)
+            if not setting or not setting.enabled:
+                return None
+            if not setting.model_config_id:
+                return None
+
+            annotations = service.repo.get_all_active_by_app(app_id)
+            if not annotations:
+                return None
+
+            from app.models.models_model import ModelConfig
+            from app.services.model_service import ModelApiKeyService
+            model_cfg = self.db.query(ModelConfig).filter(
+                ModelConfig.id == setting.model_config_id
+            ).first()
+            if not model_cfg:
+                return None
+
+            api_key_obj = ModelApiKeyService.get_available_api_key(self.db, setting.model_config_id)
+            if not api_key_obj:
+                return None
+
+            from app.core.models.base import RedBearModelConfig
+            config = RedBearModelConfig(
+                model_name=api_key_obj.model_name,
+                provider=api_key_obj.provider,
+                api_key=api_key_obj.api_key,
+                base_url=api_key_obj.api_base or None,
+                timeout=60,
+                max_retries=3,
+            )
+
+            result = service.find_best_match(
+                query=message,
+                annotations=annotations,
+                threshold=setting.similarity_threshold,
+                model_config=config,
+                app_id=app_id,
+                source=source,
+            )
+
+            return result
+        except Exception as e:
+            logger.warning(f"标注匹配检查失败: {e}")
+            return None
 
     @staticmethod
     def prepare_variables(
@@ -573,7 +634,8 @@ class AgentRunService:
             web_search: bool = True,
             memory: bool = True,
             sub_agent: bool = False,
-            files: Optional[List[FileInput]] = None  # 新增：多模态文件
+            files: Optional[List[FileInput]] = None,
+            source: str = ""
     ) -> Dict[str, Any]:
         """执行试运行（使用 LangChain Agent）
 
@@ -677,6 +739,44 @@ class AgentRunService:
                 opening_statement=opening,
                 suggested_questions=suggested_questions
             )
+
+            # 检查标注命中
+            if not sub_agent:
+                annotation_match = self._check_annotation_match(agent_config.app_id, message,
+                                                                source=source)
+                if annotation_match:
+                    elapsed_time = time.time() - start_time
+                    conv_uuid = uuid.UUID(conversation_id)
+                    from app.services.conversation_service import ConversationService
+                    conv_service = ConversationService(self.db)
+                    conv_service.add_message(
+                        conversation_id=conv_uuid,
+                        role="user",
+                        content=message,
+                        meta_data={"files": []}
+                    )
+                    conv_service.add_message(
+                        conversation_id=conv_uuid,
+                        role="assistant",
+                        content=annotation_match["answer"],
+                        meta_data={"usage": {}}
+                    )
+                    return {
+                        "message": annotation_match["answer"],
+                        "reasoning_content": None,
+                        "conversation_id": conversation_id,
+                        "usage": None,
+                        "elapsed_time": elapsed_time,
+                        "suggested_questions": [],
+                        "citations": [],
+                        "audio_url": None,
+                        "audio_status": None,
+                        "annotation_hit": {
+                            "annotation_id": str(annotation_match["annotation_id"]),
+                            "similarity": annotation_match["similarity"],
+                            "question": annotation_match["question"],
+                        }
+                    }
 
             model_info = ModelInfo(
                 model_name=api_key_config["model_name"],
@@ -921,10 +1021,11 @@ class AgentRunService:
             variables: Optional[Dict[str, Any]] = None,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
-            web_search: bool = True,  # 布尔类型默认值
-            memory: bool = True,  # 布尔类型默认值
-            sub_agent: bool = False,  # 是否是作为子Agent运行
-            files: Optional[List[FileInput]] = None  # 新增：多模态文件
+            web_search: bool = True,
+            memory: bool = True,
+            sub_agent: bool = False,
+            files: Optional[List[FileInput]] = None,
+            source: str = ""
 
     ) -> AsyncGenerator[str, None]:
         """执行试运行（流式返回，使用 LangChain Agent）
@@ -1019,6 +1120,44 @@ class AgentRunService:
                 suggested_questions=suggested_questions
             )
 
+            # 检查标注命中
+            if not sub_agent:
+                annotation_match = self._check_annotation_match(agent_config.app_id, message,
+                                                                source=source)
+                if annotation_match:
+                    elapsed_time = time.time() - start_time
+                    conv_uuid = uuid.UUID(conversation_id)
+                    from app.services.conversation_service import ConversationService
+                    conv_service = ConversationService(self.db)
+                    conv_service.add_message(
+                        conversation_id=conv_uuid,
+                        role="user",
+                        content=message,
+                        meta_data={"files": []}
+                    )
+                    conv_service.add_message(
+                        conversation_id=conv_uuid,
+                        role="assistant",
+                        content=annotation_match["answer"],
+                        meta_data={"usage": {}}
+                    )
+                    annotation_hit_data = {**annotation_match, "conversation_id": conversation_id}
+                    yield f"event: annotation_hit\ndata: {json.dumps(annotation_hit_data, default=str)}\n\n"
+                    end_data = {
+                        "conversation_id": conversation_id,
+                        "message": annotation_match["answer"],
+                        "answer": annotation_match["answer"],
+                        "usage": {},
+                        "elapsed_time": elapsed_time,
+                        "annotation_hit": {
+                            "annotation_id": str(annotation_match["annotation_id"]),
+                            "similarity": annotation_match["similarity"],
+                            "question": annotation_match["question"],
+                        }
+                    }
+                    yield self._format_sse_event("end", end_data)
+                    return
+
             model_info = ModelInfo(
                 model_name=api_key_config["model_name"],
                 provider=api_key_config["provider"],
@@ -1030,9 +1169,12 @@ class AgentRunService:
             )
 
             # 6. 加载历史消息
+            max_history = 10
+            if isinstance(memory_config, dict):
+                max_history = memory_config.get("max_history", 10)
             history = await self._load_conversation_history(
                 conversation_id=conversation_id,
-                max_history=memory_config.get("max_history", 10),
+                max_history=max_history,
                 current_provider=api_key_config.get("provider"),
                 current_is_omni=api_key_config.get("is_omni", False)
             )
@@ -1550,8 +1692,7 @@ class AgentRunService:
             return history
 
         except Exception as e:
-            # 新会话没有历史记录是正常的
-            logger.debug("加载会话历史失败（可能是新会话）", extra={"error": str(e)})
+            logger.warning("加载会话历史失败", extra={"conversation_id": conversation_id, "error": str(e)})
             return []
 
     async def _save_conversation_message(
@@ -2164,7 +2305,8 @@ class AgentRunService:
             user_rag_memory_id: Optional[str] = None,
             web_search: bool = True,
             memory: bool = True,
-            files: list[FileInput] | None = None
+            files: list[FileInput] | None = None,
+            source: str = ""
     ) -> Dict[str, Any]:
         """多模型对比试运行
 
@@ -2221,7 +2363,8 @@ class AgentRunService:
                             user_rag_memory_id=user_rag_memory_id,
                             web_search=web_search,
                             memory=memory,
-                            files=files
+                            files=files,
+                            source=source
                         ),
                         timeout=timeout
                     )
@@ -2390,7 +2533,8 @@ class AgentRunService:
             memory: bool = True,
             parallel: bool = True,
             timeout: int = 60,
-            files: list[FileInput] | None = None
+            files: list[FileInput] | None = None,
+            source: str = ""
     ) -> AsyncGenerator[str, None]:
         """多模型对比试运行（流式返回）
 
@@ -2481,7 +2625,8 @@ class AgentRunService:
                             user_rag_memory_id=user_rag_memory_id,
                             web_search=web_search,
                             memory=memory,
-                            files=files
+                            files=files,
+                            source=source
                     ):
                         # 解析原始事件
                         try:
@@ -2554,6 +2699,21 @@ class AgentRunService:
                                     "step_id": event_data.get("step_id"),
                                     "name": event_data.get("name", ""),
                                     "error": event_data.get("error"),
+                                }))
+
+                            if event_type == "annotation_hit" and event_data:
+                                conv_id_from_annotation = event_data.get("conversation_id")
+                                if conv_id_from_annotation:
+                                    returned_conversation_id = conv_id_from_annotation
+                                await event_queue.put(self._format_sse_event("model_annotation_hit", {
+                                    "model_index": idx,
+                                    "model_config_id": model_config_id,
+                                    "label": model_label,
+                                    "conversation_id": returned_conversation_id,
+                                    "annotation_id": event_data.get("annotation_id"),
+                                    "question": event_data.get("question"),
+                                    "answer": event_data.get("answer"),
+                                    "similarity": event_data.get("similarity"),
                                 }))
 
                             # 从 end 事件中提取 features 输出字段

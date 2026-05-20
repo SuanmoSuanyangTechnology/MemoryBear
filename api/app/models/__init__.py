@@ -38,6 +38,7 @@ from .ontology_class import OntologyClass
 from .ontology_scene import OntologyScene
 from .ontology_class import OntologyClass
 from .implicit_emotions_storage_model import ImplicitEmotionsStorage
+from .annotation_model import AppAnnotation, AppAnnotationSetting
 
 __all__ = [
     "Tenants",
@@ -96,5 +97,7 @@ __all__ = [
     "ModelBase",
     "LoadBalanceStrategy",
     "Skill",
-    "ImplicitEmotionsStorage"
+    "ImplicitEmotionsStorage",
+    "AppAnnotation",
+    "AppAnnotationSetting"
 ]

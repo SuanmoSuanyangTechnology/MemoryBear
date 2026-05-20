@@ -442,12 +442,13 @@ class MessageRepository:
         """
         stmt = select(Message).where(
             Message.conversation_id == conversation_id
-        ).order_by(Message.created_at)
+        ).order_by(Message.created_at.desc())
 
         if limit:
             stmt = stmt.limit(limit)
 
         messages = list(self.db.scalars(stmt).all())
+        messages.reverse()
 
         logger.info(
             "Fetched messages successfully",

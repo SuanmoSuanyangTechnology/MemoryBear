@@ -44,6 +44,64 @@ class AppChatService:
         self.agent_service = AgentRunService(db)
         self.workflow_service = WorkflowService(db)
 
+    def _check_annotation_match(self, app_id: uuid.UUID, message: str, source: str = "") -> Optional[dict]:
+        """检查是否命中标注
+
+        Args:
+            app_id: 应用ID
+            message: 用户消息
+            source: 来源（用于记录命中来源）
+
+        Returns:
+            命中返回标注结果字典，未命中返回None
+        """
+        try:
+            from app.services.annotation_service import AnnotationService
+            service = AnnotationService(self.db)
+            setting = service.get_setting(app_id)
+            if not setting or not setting.enabled:
+                return None
+            if not setting.model_config_id:
+                return None
+
+            annotations = service.repo.get_all_active_by_app(app_id)
+            if not annotations:
+                return None
+
+            from app.models.models_model import ModelConfig
+            model_cfg = self.db.query(ModelConfig).filter(
+                ModelConfig.id == setting.model_config_id
+            ).first()
+            if not model_cfg:
+                return None
+
+            api_key_obj = ModelApiKeyService.get_available_api_key(self.db, setting.model_config_id)
+            if not api_key_obj:
+                return None
+
+            from app.core.models.base import RedBearModelConfig
+            model_config = RedBearModelConfig(
+                model_name=api_key_obj.model_name,
+                provider=api_key_obj.provider,
+                api_key=api_key_obj.api_key,
+                base_url=api_key_obj.api_base or None,
+                timeout=60,
+                max_retries=3,
+            )
+
+            result = service.find_best_match(
+                query=message,
+                annotations=annotations,
+                threshold=setting.similarity_threshold,
+                model_config=model_config,
+                app_id=app_id,
+                source=source,
+            )
+            return result
+        except Exception as e:
+            logger.error(f"标注匹配失败: {e}")
+            return None
+
     async def agnet_chat(
             self,
             message: str,
@@ -56,10 +114,47 @@ class AppChatService:
             memory: bool = True,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
-            workspace_id: Optional[str] = None
+            workspace_id: Optional[str] = None,
+            source: str = ""
     ) -> Dict[str, Any]:
         """聊天（非流式）"""
         start_time = time.time()
+
+        # 检查标注命中
+        from app.models.annotation_model import HitLogSource
+        annotation_match = self._check_annotation_match(
+            config.app_id,
+            message,
+            source=source or HitLogSource.EXTERNAL
+        )
+        if annotation_match:
+            message_id = uuid.uuid4()
+            self.conversation_service.add_message(
+                conversation_id=conversation_id,
+                role="user",
+                content=message,
+                meta_data={"files": []}
+            )
+            ai_message = self.conversation_service.add_message(
+                message_id=message_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=annotation_match["answer"],
+                meta_data={"usage": {}}
+            )
+            elapsed_time = time.time() - start_time
+            return {
+                "conversation_id": str(conversation_id),
+                "message_id": str(message_id),
+                "message": annotation_match["answer"],
+                "reasoning_content": None,
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                "elapsed_time": elapsed_time,
+                "suggested_questions": [],
+                "citations": [],
+                "audio_url": None,
+                "audio_status": None
+            }
 
         # 应用 features 配置
         features_config: dict = config.features or {}
@@ -411,13 +506,40 @@ class AppChatService:
             memory: bool = True,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
-            workspace_id: Optional[str] = None
+            workspace_id: Optional[str] = None,
+            source: str = ""
     ) -> AsyncGenerator[str, None]:
         """聊天（流式）"""
 
         try:
             start_time = time.time()
             message_id = uuid.uuid4()
+
+            # 检查标注命中
+            from app.models.annotation_model import HitLogSource
+            annotation_match = self._check_annotation_match(
+                config.app_id,
+                message,
+                source=source or HitLogSource.EXTERNAL
+            )
+            if annotation_match:
+                self.conversation_service.add_message(
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=message,
+                    meta_data={"files": []}
+                )
+                ai_message = self.conversation_service.add_message(
+                    message_id=message_id,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=annotation_match["answer"],
+                    meta_data={"usage": {}}
+                )
+                yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id)}, ensure_ascii=False)}\n\n"
+                yield f"event: message\ndata: {json.dumps({'content': annotation_match['answer']}, ensure_ascii=False)}\n\n"
+                yield f"event: done\ndata: {json.dumps({'elapsed_time': time.time() - start_time, 'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}}, ensure_ascii=False)}\n\n"
+                return
 
             # 应用 features 配置
             features_config: dict = config.features or {}
@@ -1024,6 +1146,7 @@ class AppChatService:
             memory: bool = True,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
+            source: str = "",
     ) -> Dict[str, Any]:
         """聊天（非流式）"""
         payload = DraftRunRequest(
@@ -1040,6 +1163,7 @@ class AppChatService:
             config=config,
             workspace_id=workspace_id,
             release_id=release_id,
+            source=source,
         )
 
     async def workflow_chat_stream(
@@ -1057,7 +1181,8 @@ class AppChatService:
             memory: bool = True,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
-            public=False
+            public=False,
+            source: str = "",
 
     ) -> AsyncGenerator[dict, None]:
         """聊天（流式）"""
@@ -1075,7 +1200,8 @@ class AppChatService:
                 config=config,
                 workspace_id=workspace_id,
                 release_id=release_id,
-                public=public
+                public=public,
+                source=source
         ):
             yield event
 
