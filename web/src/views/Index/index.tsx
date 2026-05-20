@@ -100,8 +100,8 @@ const Index = () => {
 
   return (
     <Flex gap={12} wrap="nowrap" className="rb:w-full! rb:h-full! rb:overflow-y-auto">
-      <div className="rb:flex-1 rb:min-w-0 rb:min-h-0 rb:space-y-3 rb:flex rb:flex-col">
-        {/* <Flex vertical> */}
+      <div className="rb:flex-1 rb:min-w-0">
+        <Flex vertical>
           <div className='rb:w-full rb:h-26 rb:p-4 rb:bg-cover rb:bg-[url("@/assets/images/index/index_bg.png")] rb:rounded-xl rb:overflow-hidden'>
             <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-white rb:text-[18px] rb:leading-7">
               {t('index.spaceTitle')}
@@ -110,11 +110,9 @@ const Index = () => {
               {t('index.spaceSubTitle')}
             </div>
           </div>
-          <div className='rb:shrink-0'>
-            {/* 统计卡片 */}
-            <TopCardList data={dashboardData} />
-          </div>
-          <div className="rb:flex-1 rb:rounded-xl rb:bg-white rb:pt-3 rb:px-3 rb:overflow-y-hidden">
+          {/* 统计卡片 */}
+          <TopCardList data={dashboardData} />
+          <div className="rb:rounded-xl rb:bg-white rb:pt-3 rb:px-3 rb:overflow-y-hidden rb:my-3 rb:flex-1">
             <Table
               ref={tableRef}
               apiUrl={tableApi}
@@ -125,19 +123,13 @@ const Index = () => {
               pagination={{pagesize: 10}}
             />
           </div>
-        {/* </Flex> */}
+        </Flex>
       </div>
-      <div className="rb:w-82! rb:flex rb:flex-col rb:min-h-0 rb:space-y-3">
+      <div className="rb:w-82!">
         {/* 引导 */}
-        <div className='rb:shrink-0'>
-          <GuideCard />
-        </div>
-        <div className='rb:flex-1'>
-          <VersionCard />
-        </div>
-        <div className='rb:shrink-0'>
-          <QuickActions onNavigate={navigate} />
-        </div>
+        <GuideCard />
+        <VersionCard />
+        <QuickActions onNavigate={navigate} />
       </div>
     </Flex>
   );

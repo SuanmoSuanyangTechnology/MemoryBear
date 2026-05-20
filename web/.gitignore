@@ -27,5 +27,3 @@ package-lock.json
 # Yalc 本地调试缓存
 .yalc
 yalc.lock
-
-.npmrc
