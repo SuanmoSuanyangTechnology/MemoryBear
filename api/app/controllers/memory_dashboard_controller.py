@@ -135,17 +135,28 @@ def get_workspace_end_users(
         memory_configs_map = {}
 
     # 触发按需初始化：为 implicit_emotions_storage / interest_distribution 中没有记录的用户异步生成数据
+    # 使用 Redis SET NX 节流：同一 workspace 60秒内只触发一次，避免刷新页面导致重复提交
     try:
-        from app.celery_app import celery_app as _celery_app
-        _celery_app.send_task(
-            "app.tasks.init_implicit_emotions_for_users",
-            kwargs={"end_user_ids": end_user_ids},
+        import redis as _sync_redis
+        from app.core.config import settings as _settings
+        _throttle_redis = _sync_redis.Redis(
+            host=_settings.REDIS_HOST, port=_settings.REDIS_PORT,
+            password=_settings.REDIS_PASSWORD, db=_settings.REDIS_DB,
         )
-        _celery_app.send_task(
-            "app.tasks.init_interest_distribution_for_users",
-            kwargs={"end_user_ids": end_user_ids},
-        )
-        api_logger.info(f"已触发按需初始化任务，候选用户数: {len(end_user_ids)}")
+        _throttle_key = f"dashboard:init_tasks:throttle:{workspace_id}"
+        if _throttle_redis.set(_throttle_key, "1", nx=True, ex=60):
+            from app.celery_app import celery_app as _celery_app
+            _celery_app.send_task(
+                "app.tasks.init_implicit_emotions_for_users",
+                kwargs={"end_user_ids": end_user_ids},
+            )
+            _celery_app.send_task(
+                "app.tasks.init_interest_distribution_for_users",
+                kwargs={"end_user_ids": end_user_ids},
+            )
+            api_logger.info(f"已触发按需初始化任务，候选用户数: {len(end_user_ids)}")
+        else:
+            api_logger.info(f"按需初始化任务节流中，跳过: workspace_id={workspace_id}")
     except Exception as e:
         api_logger.warning(f"触发按需初始化任务失败（不影响主流程）: {e}")
 
@@ -172,13 +183,18 @@ def get_workspace_end_users(
         })
 
     # 触发社区聚类补全任务（异步，不阻塞接口响应）
+    # 使用 Redis SET NX 节流：同一 workspace 60秒内只触发一次
     try:
-        from app.celery_app import celery_app as _celery_app
-        _celery_app.send_task(
-            "app.tasks.init_community_clustering_for_users",
-            kwargs={"end_user_ids": end_user_ids, "workspace_id": str(workspace_id)},
-        )
-        api_logger.info(f"已触发社区聚类补全任务，候选用户数: {len(end_user_ids)}")
+        _cluster_throttle_key = f"dashboard:cluster_task:throttle:{workspace_id}"
+        if _throttle_redis.set(_cluster_throttle_key, "1", nx=True, ex=60):
+            from app.celery_app import celery_app as _celery_app
+            _celery_app.send_task(
+                "app.tasks.init_community_clustering_for_users",
+                kwargs={"end_user_ids": end_user_ids, "workspace_id": str(workspace_id)},
+            )
+            api_logger.info(f"已触发社区聚类补全任务，候选用户数: {len(end_user_ids)}")
+        else:
+            api_logger.info(f"社区聚类补全任务节流中，跳过: workspace_id={workspace_id}")
     except Exception as e:
         api_logger.warning(f"触发社区聚类补全任务失败（不影响主流程）: {str(e)}")
 
