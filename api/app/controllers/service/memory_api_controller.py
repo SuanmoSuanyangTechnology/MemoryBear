@@ -42,14 +42,14 @@ async def get_memory_info():
     return success(data={}, msg="Memory API - Coming Soon")
 
 
-@router.post("/writer_service")
+@router.post("/write/sync")
 @require_api_key(scopes=["memory"])
 @check_end_user_quota
 async def write_memory_sync(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
-    message: str = Body(None, description="Request body"),
+    body_placeholder: str = Body(None, description="Placeholder - actual body parsed via request.json()"),
     language_type: str = Header(default=None, alias="X-Language-Type"),
 ):
     """
@@ -75,13 +75,13 @@ async def write_memory_sync(
     return _encode_result(result)
 
 
-@router.post("/read_service")
+@router.post("/read/sync")
 @require_api_key(scopes=["memory"])
 async def read_memory_sync(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
-    message: str = Body(None, description="Request body"),
+    body_placeholder: str = Body(None, description="Placeholder - actual body parsed via request.json()"),
 ):
     """
     Read memory synchronously.
@@ -105,21 +105,21 @@ async def read_memory_sync(
     return _encode_result(result)
 
 
-@router.post("/writer_service_async")
+@router.post("/write")
 @require_api_key(scopes=["memory"])
 @check_end_user_quota
 async def write_memory_async(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
-    message: str = Body(None, description="Request body"),
+    body_placeholder: str = Body(None, description="Placeholder - actual body parsed via request.json()"),
     language_type: str = Header(default=None, alias="X-Language-Type"),
 ):
     """
     Write memory asynchronously (Celery task).
 
     Requires API Key with 'memory' scope.
-    Returns task_id for polling via GET /write_result/.
+    Returns task_id for polling via GET /write/status.
     """
     body = await request.json()
     payload = Write_UserInput(**body)
@@ -138,19 +138,19 @@ async def write_memory_async(
     return _encode_result(result)
 
 
-@router.post("/read_service_async")
+@router.post("/read")
 @require_api_key(scopes=["memory"])
 async def read_memory_async(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
-    message: str = Body(None, description="Request body"),
+    body_placeholder: str = Body(None, description="Placeholder - actual body parsed via request.json()"),
 ):
     """
     Read memory asynchronously (Celery task).
 
     Requires API Key with 'memory' scope.
-    Returns task_id for polling via GET /read_result/.
+    Returns task_id for polling via GET /read/status.
     """
     body = await request.json()
     payload = UserInput(**body)
@@ -167,7 +167,7 @@ async def read_memory_async(
     )
     return _encode_result(result)
 
-@router.get("/write_result")
+@router.get("/write/status")
 @require_api_key(scopes=["memory"])
 async def get_write_task_status(
     request: Request,
@@ -186,7 +186,7 @@ async def get_write_task_status(
     return _encode_result(result)
 
 
-@router.get("/read_result")
+@router.get("/read/status")
 @require_api_key(scopes=["memory"])
 async def get_read_task_status(
     request: Request,
