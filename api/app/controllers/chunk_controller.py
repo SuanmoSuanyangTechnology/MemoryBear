@@ -727,7 +727,7 @@ async def retrieve_chunks(
                     seen_ids.add(doc.metadata["doc_id"])
                     unique_rs.append(doc)
             rs = vector_service.rerank(query=retrieve_data.query, docs=unique_rs, top_k=retrieve_data.top_k) if unique_rs else []
-            rerank_threshold = retrieve_data.rerank_score_threshold if retrieve_data.rerank_score_threshold is not None else 0.1
+            rerank_threshold = retrieve_data.rerank_score_threshold if retrieve_data.rerank_score_threshold is not None else (retrieve_data.vector_similarity_weight if retrieve_data.vector_similarity_weight is not None else 0.1)
             rs = [doc for doc in rs if doc.metadata.get("score", 0) > rerank_threshold]
             if retrieve_data.retrieve_type == chunk_schema.RetrieveType.Graph:
                 kb_ids = [str(kb_id) for kb_id in private_kb_ids]
