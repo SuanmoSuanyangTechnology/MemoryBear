@@ -2458,6 +2458,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           addClassName: 'Add Classification',
           unset: 'Classification Not Set',
           set: 'Set',
+          vision: 'Vision',
         },
         loop: {
           cycle_vars: 'Loop Variables',
@@ -2597,6 +2598,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         'if-else.cases': 'Condition',
         'question-classifier.model_id': 'Model',
         'question-classifier.input_variable': 'Input variable',
+        'question-classifier.vision_input': 'Vision Variable',
         'question-classifier.categories': 'Categories',
         'iteration.input': 'Input variable',
         'iteration.output': 'Output variable',

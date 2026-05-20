@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-19 14:53:00
+ * @Last Modified time: 2026-05-19 15:25:17
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -292,6 +292,13 @@ export const nodeLibrary: NodeLibrary[] = [
           input_variable: {
             type: 'variableList',
             required: true,
+          },
+          vision: {
+            type: 'switch'
+          },
+          vision_input: {
+            type: 'variableList',
+            onFilterVariableType: ['array[file]', 'file']
           },
           categories: {
             type: 'categoryList',

@@ -2423,6 +2423,7 @@ export const zh = {
           addClassName: '添加分类',
           unset: '分类未设置',
           set: '已设置',
+          vision: '视觉',
         },
         loop: {
           cycle_vars: '循环变量',
@@ -2565,6 +2566,7 @@ export const zh = {
         'if-else.cases': '条件',
         'question-classifier.model_id': '模型',
         'question-classifier.input_variable': '输入变量',
+        'question-classifier.vision_input': '视觉变量',
         'question-classifier.categories': '分类',
         'iteration.input': '输入变量',
         'iteration.output': '输出变量',
