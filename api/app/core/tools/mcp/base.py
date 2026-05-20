@@ -17,30 +17,49 @@ class MCPTool(BaseTool):
         self.server_url = config.get("server_url", "")
         self.connection_config = config.get("connection_config", {})
         self.available_tools = config.get("available_tools", [])
-    
-    @property
-    def name(self) -> str:
-        return f"mcp_tool_{self.tool_id[:8]}"
-    
-    @property
-    def description(self) -> str:
-        return f"MCP工具 - 连接到 {self.server_url}"
+        self._current_tool_name: str | None = None  # 当前工具名称
     
     @property
     def tool_type(self) -> ToolType:
         return ToolType.MCP
     
+    def _get_tool_info(self, tool_name: str) -> Dict[str, Any] | None:
+        """从available_tools中获取指定工具的信息"""
+        if not self.available_tools or not tool_name:
+            return None
+        
+        for tool_item in self.available_tools:
+            if tool_name in tool_item:
+                return tool_item[tool_name]
+        return None
+    
+    @property
+    def name(self) -> str:
+        # 返回当前工具名称，如果没有设置则返回默认名称
+        if self._current_tool_name:
+            return self._current_tool_name
+        return f"mcp_tool_{self.tool_id[:8]}"
+    
+    @property
+    def description(self) -> str:
+        # 从 available_tools 中获取当前工具的描述
+        if self._current_tool_name and self.available_tools:
+            tool_info = self._get_tool_info(self._current_tool_name)
+            if tool_info:
+                return tool_info.get("description", f"MCP工具 - {self._current_tool_name}")
+        return f"MCP工具 - 连接到 {self.server_url}"
+    
     @property
     def parameters(self) -> List[ToolParameter]:
         """根据工具名称返回对应参数"""
-        # 如果有指定的工具名称，从 available_tools 中获取参数
-        tool_name = getattr(self, '_current_tool_name', None)
-        if tool_name and self.available_tools:
-            for tool_info in self.available_tools:
-                if tool_info.get("tool_name") == tool_name:
-                    arguments = tool_info.get("arguments", {})
-                    return self._generate_parameters_from_schema(arguments)
+        tool_name = getattr(self, '_current_tool_name', self.name)
+        tool_info = self._get_tool_info(tool_name)
         
+        if tool_info:
+            input_schema = tool_info.get("inputSchema", {})
+            if input_schema:
+                return self._generate_parameters_from_schema(input_schema)
+
         # 默认返回通用参数
         return [
             ToolParameter(
@@ -58,10 +77,10 @@ class MCPTool(BaseTool):
             )
         ]
     
-    def _generate_parameters_from_schema(self, arguments: Dict[str, Any]) -> List[ToolParameter]:
-        """从参数schema生成参数列表"""
-        properties = arguments.get("properties", {})
-        required_fields = arguments.get("required", [])
+    def _generate_parameters_from_schema(self, input_schema: Dict[str, Any]) -> List[ToolParameter]:
+        """从inputSchema生成参数列表"""
+        properties = input_schema.get("properties", {})
+        required_fields = input_schema.get("required", [])
         
         params = []
         for param_name, param_def in properties.items():
@@ -101,11 +120,10 @@ class MCPTool(BaseTool):
         start_time = time.time()
         
         try:
-            tool_name = kwargs.get("tool_name")
-            if not tool_name:
-                raise Exception("未指定工具名称")
-            
-            arguments = kwargs.get("arguments", {})
+            # 确定要调用的工具名称
+            # 优先使用参数中的 tool_name，否则使用当前工具名（从 available_tools 提取）
+            tool_name = kwargs.pop("tool_name", None) or self.name
+            arguments = kwargs  # 剩余参数作为工具参数
             
             from .client import SimpleMCPClient
             

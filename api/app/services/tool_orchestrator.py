@@ -83,28 +83,50 @@ def _build_tools_info(tools: Dict[str, Any]) -> str:
         desc = getattr(tool, "description", "") or ""
         if _is_single_call_tool(name):
             desc = f"[{desc}][仅调用一次，结果不匹配时请换用其他工具]"
-        schema = getattr(tool, "args_schema", None)
-        if schema:
+        
+        param_parts = []
+        
+        # 1. 优先从 tool_instance.parameters 获取（MCP/Custom 工具）
+        tool_instance = getattr(tool, "tool_instance", None)
+        if tool_instance and hasattr(tool_instance, "parameters"):
+            params = tool_instance.parameters
+            for p in params:
+                # 过滤 operation 参数（已通过工具名后缀指定）
+                if p.name == "operation":
+                    continue
+                type_name = p.type.value if hasattr(p.type, "value") else str(p.type)
+                part = f"{p.name}({type_name}"
+                if p.description:
+                    part += f", 说明: {p.description}"
+                if p.default is not None:
+                    part += f", 默认: {p.default}"
+                if p.enum:
+                    part += f", 可选值: {p.enum}"
+                part += ")"
+                param_parts.append(part)
+        
+        # 2. 回退到 args_schema（@tool 装饰器生成的工具）
+        elif hasattr(tool, "args_schema") and tool.args_schema:
             try:
                 from pydantic_core import PydanticUndefined
-                fields = schema.model_fields
-                param_parts = []
+                fields = tool.args_schema.model_fields
                 for k, v in fields.items():
                     type_name = v.annotation.__name__ if hasattr(v.annotation, '__name__') else str(v.annotation)
-                    param_desc = v.description or ""
-                    default = v.default
                     part = f"{k}({type_name}"
-                    if param_desc:
-                        part += f", 说明: {param_desc}"
-                    if default is not None and default is not PydanticUndefined:
-                        part += f", 默认: {default}"
+                    if v.description:
+                        part += f", 说明: {v.description}"
+                    if v.default is not None and v.default is not PydanticUndefined:
+                        part += f", 默认: {v.default}"
                     part += ")"
                     param_parts.append(part)
-                lines.append(f"- {name}[{', '.join(param_parts)}]: {desc}")
             except Exception:
-                lines.append(f"- {name}: {desc}")
+                pass
+        
+        if param_parts:
+            lines.append(f"- {name}[{', '.join(param_parts)}]: {desc}")
         else:
             lines.append(f"- {name}: {desc}")
+    
     return "\n".join(lines)
 
 
@@ -160,7 +182,7 @@ class ToolOrchestrator:
         model_config: Any,
         effective_params: Dict[str, Any],
         processed_files: Optional[List[Dict]] = None,
-        max_rounds: int = 5,
+        max_rounds: int = 10,
     ) -> Tuple[str, List[Dict]]:
         """
         创建编排器并执行 ReAct 循环。
