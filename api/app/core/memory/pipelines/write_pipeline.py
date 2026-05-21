@@ -206,7 +206,7 @@ class WritePipeline:
                     WriteSnapshotRecorder,
                 )
 
-                self._recorder = WriteSnapshotRecorder("new")
+                self._recorder = WriteSnapshotRecorder(self.end_user_id)
 
                 # Step 1: 预处理 - 消息分块 + AI消息语义剪枝
                 async with bear.step(1, 5, "预处理", "消息分块") as s:
@@ -335,7 +335,7 @@ class WritePipeline:
         ontology_types = self._load_ontology_types()
 
         # 复用 run() 中已创建的 recorder（剪枝阶段已使用同一实例）
-        recorder = getattr(self, "_recorder", None) or WriteSnapshotRecorder("new")
+        recorder = getattr(self, "_recorder", None) or WriteSnapshotRecorder(self.end_user_id)
         self._recorder = recorder
 
         # ── 新编排器：LLM 萃取 + 数据赋值 ──

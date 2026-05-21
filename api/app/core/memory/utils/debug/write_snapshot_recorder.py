@@ -4,7 +4,7 @@
 让 Pipeline 只做编排，不关心调试输出的数据格式。
 
 Pipeline 侧调用示例：
-    recorder = WriteSnapshotRecorder()
+    recorder = WriteSnapshotRecorder(end_user_id="abc123")
     recorder.record_stage_outputs(orchestrator.last_stage_outputs)
     recorder.record_graph_before_dedup(graph)
     recorder.record_dedup_result(dedup_result)
@@ -30,8 +30,8 @@ class WriteSnapshotRecorder:
     当 PIPELINE_SNAPSHOT_ENABLED=false 时，所有方法均为空操作（no-op）。
     """
 
-    def __init__(self, pipeline_name: str = "new"):
-        self._snapshot = PipelineSnapshot(pipeline_name)
+    def __init__(self, end_user_id: str):
+        self._snapshot = PipelineSnapshot(end_user_id)
 
     # ── 属性 ──
 

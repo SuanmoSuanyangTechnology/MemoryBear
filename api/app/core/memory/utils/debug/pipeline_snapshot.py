@@ -1,14 +1,14 @@
 """Pipeline stage snapshot — dump each extraction stage's output to OSS for comparison.
 
 Usage:
-    snapshot = PipelineSnapshot("new")
+    snapshot = PipelineSnapshot(end_user_id="abc123-def456")
     snapshot.save_stage("1_statements", data)
     snapshot.save_stage("2_triplets", data)
     ...
 
 Output structure (OSS):
     redbear-files/snapshot/
-        new_20260422_123456/
+        {end_user_id}_{YYYYmmdd_HHMMSS}/
             0_summary.json
             1_statements.json
             2_triplets.json
@@ -77,18 +77,18 @@ def _safe_serialize(obj: Any) -> Any:
 class PipelineSnapshot:
     """Dump each pipeline stage's output to OSS."""
 
-    def __init__(self, pipeline_name: str):
+    def __init__(self, end_user_id: str):
         """
         Args:
-            pipeline_name: e.g. "new", used as directory prefix.
+            end_user_id: 终端用户 ID，用于快照目录命名以便快速定位。
         """
         self.enabled = _is_enabled()
-        self.pipeline_name = pipeline_name
+        self.end_user_id = end_user_id
         self._oss_prefix: Optional[str] = None
 
         if self.enabled:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self._oss_prefix = f"{_OSS_SNAPSHOT_PREFIX}/{pipeline_name}_{ts}"
+            self._oss_prefix = f"{_OSS_SNAPSHOT_PREFIX}/{end_user_id}_{ts}"
             logger.debug(f"[Snapshot] 已启用，OSS 前缀: {self._oss_prefix}")
 
     @property
@@ -125,7 +125,7 @@ class PipelineSnapshot:
             return
 
         summary = {
-            "pipeline": self.pipeline_name,
+            "end_user_id": self.end_user_id,
             "timestamp": datetime.now().isoformat(),
             "stats": stats,
         }
