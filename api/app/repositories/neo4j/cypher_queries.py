@@ -1826,7 +1826,7 @@ LIMIT $limit
 
 SEARCH_ENITITES_BY_RELATIONSHIP = """
 MATCH (n:ExtractedEntity)-[r]-(m:ExtractedEntity)
-WHERE (n.end_user_id = $end_user_id AND n.id = $source_id AND r.predicate IN $predicates)
+WHERE (n.end_user_id = $end_user_id AND n.id = $source_id AND r.predicate_id IN $predicates)
 RETURN m.id AS id,
        n.name AS source_name,
        r.predicate AS relation_predicate,
@@ -1869,6 +1869,129 @@ RETURN n.description AS description,
        n.traits AS traits,
        n.id AS id
 """
+
+# -------------------
+# cosine similarity search (vector.similarity.cosine in Cypher)
+# -------------------
+COSINE_STATEMENT_SEARCH = """
+MATCH (s:Statement)
+WHERE s.end_user_id = $end_user_id AND s.statement_embedding IS NOT NULL
+WITH s, vector.similarity.cosine(s.statement_embedding, $embedding) AS score
+WHERE score > 0
+RETURN s.id AS id,
+       s.statement AS statement,
+       s.end_user_id AS end_user_id,
+       s.chunk_id AS chunk_id,
+       s.created_at AS created_at,
+       s.valid_at AS valid_at,
+       properties(s)['invalid_at'] AS invalid_at,
+       COALESCE(s.activation_value, s.importance_score, 0.5) AS activation_value,
+       COALESCE(s.importance_score, 0.5) AS importance_score,
+       s.last_access_time AS last_access_time,
+       COALESCE(s.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC LIMIT $limit
+"""
+
+COSINE_ENTITY_SEARCH = """
+MATCH (e:ExtractedEntity)
+WHERE e.end_user_id = $end_user_id AND e.name_embedding IS NOT NULL
+WITH e, vector.similarity.cosine(e.name_embedding, $embedding) AS score
+WHERE score > 0
+RETURN e.id AS id,
+       e.name AS name,
+       e.end_user_id AS end_user_id,
+       e.entity_type AS entity_type,
+       e.description AS description,
+       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
+       COALESCE(e.importance_score, 0.5) AS importance_score,
+       e.last_access_time AS last_access_time,
+       COALESCE(e.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC LIMIT $limit
+"""
+
+COSINE_CHUNK_SEARCH = """
+MATCH (c:Chunk)
+WHERE c.end_user_id = $end_user_id AND c.chunk_embedding IS NOT NULL
+WITH c, vector.similarity.cosine(c.chunk_embedding, $embedding) AS score
+WHERE score > 0
+RETURN c.id AS id,
+       c.end_user_id AS end_user_id,
+       c.content AS content,
+       c.dialog_id AS dialog_id,
+       COALESCE(c.activation_value, 0.5) AS activation_value,
+       c.last_access_time AS last_access_time,
+       COALESCE(c.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC LIMIT $limit
+"""
+
+COSINE_MEMORY_SUMMARY_SEARCH = """
+MATCH (m:MemorySummary)
+WHERE m.end_user_id = $end_user_id AND m.summary_embedding IS NOT NULL
+WITH m, vector.similarity.cosine(m.summary_embedding, $embedding) AS score
+WHERE score > 0
+RETURN m.id AS id,
+       m.name AS name,
+       m.end_user_id AS end_user_id,
+       m.dialog_id AS dialog_id,
+       m.chunk_ids AS chunk_ids,
+       m.content AS content,
+       m.created_at AS created_at,
+       COALESCE(m.activation_value, m.importance_score, 0.5) AS activation_value,
+       COALESCE(m.importance_score, 0.5) AS importance_score,
+       m.last_access_time AS last_access_time,
+       COALESCE(m.access_count, 0) AS access_count,
+       score
+ORDER BY score DESC LIMIT $limit
+"""
+
+COSINE_COMMUNITY_SEARCH = """
+MATCH (c:Community)
+WHERE c.end_user_id = $end_user_id AND c.summary_embedding IS NOT NULL
+WITH c, vector.similarity.cosine(c.summary_embedding, $embedding) AS score
+WHERE score > 0
+RETURN c.community_id AS id,
+       c.name AS name,
+       c.summary AS content,
+       c.core_entities AS core_entities,
+       c.member_count AS member_count,
+       c.end_user_id AS end_user_id,
+       c.updated_at AS updated_at,
+       score
+ORDER BY score DESC LIMIT $limit
+"""
+
+COSINE_PERCEPTUAL_SEARCH = """
+MATCH (p:Perceptual)
+WHERE p.end_user_id = $end_user_id AND p.summary_embedding IS NOT NULL
+WITH p, vector.similarity.cosine(p.summary_embedding, $embedding) AS score
+WHERE score > 0
+RETURN p.id AS id,
+       p.end_user_id AS end_user_id,
+       p.perceptual_type AS perceptual_type,
+       p.file_path AS file_path,
+       p.file_name AS file_name,
+       p.file_ext AS file_ext,
+       p.summary AS summary,
+       p.keywords AS keywords,
+       p.topic AS topic,
+       p.domain AS domain,
+       p.created_at AS created_at,
+       p.file_type AS file_type,
+       score
+ORDER BY score DESC LIMIT $limit
+"""
+
+COSINE_SEARCH_CYPHER_MAPPING = {
+    Neo4jNodeType.STATEMENT: COSINE_STATEMENT_SEARCH,
+    Neo4jNodeType.EXTRACTEDENTITY: COSINE_ENTITY_SEARCH,
+    Neo4jNodeType.CHUNK: COSINE_CHUNK_SEARCH,
+    Neo4jNodeType.MEMORYSUMMARY: COSINE_MEMORY_SUMMARY_SEARCH,
+    Neo4jNodeType.COMMUNITY: COSINE_COMMUNITY_SEARCH,
+    Neo4jNodeType.PERCEPTUAL: COSINE_PERCEPTUAL_SEARCH,
+}
 
 FULLTEXT_QUERY_CYPHER_MAPPING = {
     Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_KEYWORD,
