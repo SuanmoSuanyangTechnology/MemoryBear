@@ -49,7 +49,7 @@ async def write_memory_sync(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
-    message: str = Body(None, description="Request body"),
+    body_placeholder: str = Body(None, description="Placeholder - actual body parsed via request.json()"),
     language_type: str = Header(default=None, alias="X-Language-Type"),
 ):
     """
@@ -81,7 +81,7 @@ async def read_memory_sync(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
-    message: str = Body(None, description="Request body"),
+    body_placeholder: str = Body(None, description="Placeholder - actual body parsed via request.json()"),
 ):
     """
     Read memory synchronously.
@@ -105,38 +105,37 @@ async def read_memory_sync(
     return _encode_result(result)
 
 
-# NOTE: 内部 memory_agent_controller.write_server_async 当前已注释，V1 端同步注释，待恢复后同步启用
-#
-# @router.post("/write")
-# @require_api_key(scopes=["memory"])
-# async def write_memory_async(
-#     request: Request,
-#     api_key_auth: ApiKeyAuth = None,
-#     db: Session = Depends(get_db),
-#     message: str = Body(None, description="Request body"),
-#     language_type: str = Header(default=None, alias="X-Language-Type"),
-# ):
-#     """
-#     Write memory asynchronously (Celery task).
-#
-#     Requires API Key with 'memory' scope.
-#     Returns task_id for polling via GET /write/status.
-#     """
-#     body = await request.json()
-#     payload = Write_UserInput(**body)
-#
-#     current_user = get_current_user_from_api_key(db, api_key_auth)
-#     validate_end_user_in_workspace(db, payload.end_user_id, api_key_auth.workspace_id)
-#
-#     logger.info(f"V1 memory write (async) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
-#
-#     result = await memory_agent_controller.write_server_async(
-#         user_input=payload,
-#         language_type=language_type,
-#         db=db,
-#         current_user=current_user,
-#     )
-#     return _encode_result(result)
+@router.post("/write")
+@require_api_key(scopes=["memory"])
+@check_end_user_quota
+async def write_memory_async(
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+    body_placeholder: str = Body(None, description="Placeholder - actual body parsed via request.json()"),
+    language_type: str = Header(default=None, alias="X-Language-Type"),
+):
+    """
+    Write memory asynchronously (Celery task).
+
+    Requires API Key with 'memory' scope.
+    Returns task_id for polling via GET /write/status.
+    """
+    body = await request.json()
+    payload = Write_UserInput(**body)
+
+    current_user = get_current_user_from_api_key(db, api_key_auth)
+    validate_end_user_in_workspace(db, payload.end_user_id, api_key_auth.workspace_id)
+
+    logger.info(f"V1 memory write (async) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
+
+    result = await memory_agent_controller.write_server_async(
+        user_input=payload,
+        language_type=language_type,
+        db=db,
+        current_user=current_user,
+    )
+    return _encode_result(result)
 
 
 @router.post("/read")
@@ -145,7 +144,7 @@ async def read_memory_async(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
-    message: str = Body(None, description="Request body"),
+    body_placeholder: str = Body(None, description="Placeholder - actual body parsed via request.json()"),
 ):
     """
     Read memory asynchronously (Celery task).
@@ -168,24 +167,23 @@ async def read_memory_async(
     )
     return _encode_result(result)
 
-# NOTE: /write/status 已禁用，因为其生产者（POST /write → write_server_async）当前已注释。
-# 恢复时需同时启用 POST /write 和 GET /write/status 两个端点。
-#
-# @router.get("/write/status")
-# @require_api_key(scopes=["memory"])
-# async def get_write_task_status(
-#     request: Request,
-#     task_id: str = Query(..., description="Celery task ID"),
-#     api_key_auth: ApiKeyAuth = None,
-#     db: Session = Depends(get_db),
-# ):
-#     """查询异步写入任务状态"""
-#     logger.info(f"V1 write task status - task_id: {task_id}")
-#
-#     from app.celery_task_scheduler import scheduler
-#     result = scheduler.get_task_status(task_id)
-#
-#     return success(data=jsonable_encoder(result), msg="Task status retrieved")
+@router.get("/write/status")
+@require_api_key(scopes=["memory"])
+async def get_write_task_status(
+    request: Request,
+    task_id: str = Query(..., description="Celery task ID"),
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+):
+    """查询异步写入任务状态"""
+    logger.info(f"V1 write task status - task_id: {task_id}")
+
+    current_user = get_current_user_from_api_key(db, api_key_auth)
+    result = await memory_agent_controller.get_write_task_result(
+        task_id=task_id,
+        current_user=current_user,
+    )
+    return _encode_result(result)
 
 
 @router.get("/read/status")
@@ -196,14 +194,12 @@ async def get_read_task_status(
     api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
 ):
-    """
-    Check the status of a memory read task.
-
-    Requires API Key with 'memory' scope.
-    """
+    """查询异步读取任务状态"""
     logger.info(f"V1 read task status - task_id: {task_id}")
 
-    from app.services.task_service import get_task_memory_read_result
-    result = get_task_memory_read_result(task_id)
-
-    return success(data=jsonable_encoder(result), msg="Task status retrieved")
+    current_user = get_current_user_from_api_key(db, api_key_auth)
+    result = await memory_agent_controller.get_read_task_result(
+        task_id=task_id,
+        current_user=current_user,
+    )
+    return _encode_result(result)
