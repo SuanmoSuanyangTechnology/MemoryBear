@@ -2470,6 +2470,10 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           subtract: '-=',
           multiply: '*=',
           divide: '/=',
+          append: 'Append',
+          remove_last: 'Remove Last',
+          remove_first: 'Remove First',
+          extend: 'Extend',
         },
         iteration: {
           input: 'Input Variable',

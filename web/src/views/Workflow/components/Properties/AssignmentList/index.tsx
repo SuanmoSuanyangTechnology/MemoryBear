@@ -28,26 +28,45 @@ const operationsObj = {
     { value: 'clear', label: 'workflow.config.assigner.clear' },
     { value: 'assign', label: 'workflow.config.assigner.assign' },
   ],
+  array: [
+    { value: 'cover', label: 'workflow.config.assigner.cover' },
+    { value: 'clear', label: 'workflow.config.assigner.clear' },
+    { value: 'assign', label: 'workflow.config.assigner.assign' },
+    { value: 'append', label: 'workflow.config.assigner.append' },
+    { value: 'extend', label: 'workflow.config.assigner.extend' },
+    { value: 'remove_first', label: 'workflow.config.assigner.remove_first' },
+    { value: 'remove_last', label: 'workflow.config.assigner.remove_last' },
+  ],
 }
 
-const filterByDataType = (options: Suggestion[], dataType: string): Suggestion[] =>
-  options.reduce<Suggestion[]>((acc, vo) => {
+const filterByDataType = (options: Suggestion[], dataType: string, curOperation?: string): Suggestion[] => {
+  // When curOperation is 'append', extract the inner type from array[type]
+  let targetType = dataType;
+  if (curOperation === 'append' && dataType?.includes('array[')) {
+    const match = dataType.match(/array\[(\w+)\]/);
+    if (match) {
+      targetType = match[1];
+    }
+  }
+
+  return options.reduce<Suggestion[]>((acc, vo) => {
     if (vo.children?.length) {
       const children = vo.children.reduce<Suggestion[]>((cacc, child) => {
         if (child.children?.length) {
-          const grandchildren = child.children.filter(gc => gc.dataType === dataType);
+          const grandchildren = child.children.filter(gc => gc.dataType === targetType);
           if (grandchildren.length) cacc.push({ ...child, children: grandchildren });
-        } else if (child.dataType === dataType) {
+        } else if (child.dataType === targetType) {
           cacc.push(child);
         }
         return cacc;
       }, []);
       if (children.length) acc.push({ ...vo, children });
-    } else if (vo.dataType === dataType) {
+    } else if (vo.dataType === targetType) {
       acc.push(vo);
     }
     return acc;
   }, []);
+};
 
 const AssignmentList: FC<AssignmentListProps> = ({
   parentName,
@@ -82,7 +101,7 @@ const AssignmentList: FC<AssignmentListProps> = ({
                 ?? options.flatMap(o => o.children ?? []).find(child => `{{${child.value}}}` === variableSelector)
                 ?? options.flatMap(o => o.children ?? []).flatMap((c: any) => c.children ?? []).find((gc: any) => `{{${gc.value}}}` === variableSelector);
               const dataType = selectedOption?.dataType;
-              const operationOptions = dataType === 'number' ? operationsObj.number : operationsObj.default;
+              const operationOptions = dataType?.includes('array') ? operationsObj.array : dataType === 'number' ? operationsObj.number : operationsObj.default;
               
               return (
                 <Flex key={key} gap={4} align="start">
@@ -129,7 +148,7 @@ const AssignmentList: FC<AssignmentListProps> = ({
                     <Form.Item shouldUpdate noStyle>
                       {(form) => {
                         const operation = form.getFieldValue([parentName, name, 'operation']);
-                        if (operation === 'clear') return null;
+                        if (['clear', 'remove_last', 'remove_first'].includes(operation)) return null;
 
                         return (
                           <Form.Item
@@ -171,7 +190,7 @@ const AssignmentList: FC<AssignmentListProps> = ({
                                   </>
                                   : <VariableSelect
                                     placeholder={t('common.pleaseSelect')}
-                                    options={dataType ? filterByDataType(options, dataType) : options}
+                                    options={dataType ? filterByDataType(options, dataType, operation) : options}
                                     size={size}
                                     className="rb:flex-1!"
                                     variant="filled"

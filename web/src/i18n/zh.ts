@@ -2434,6 +2434,10 @@ export const zh = {
           subtract: '-=',
           multiply: '*=',
           divide: '/=',
+          append: '追加',
+          remove_last: '移除末项',
+          remove_first: '移除首项',
+          extend: '扩展',
         },
         iteration: {
           input: '输入变量',
