@@ -1807,19 +1807,20 @@ def extract_emotion_batch_task(
 
         await asyncio.gather(*[_extract_one(s) for s in statements])
 
-        # 快照落盘（worker 端）：不影响 Neo4j 写入流程，失败只打日志
-        if snapshot_outputs is not None:
+        # 快照落盘（worker 端）：上传到 OSS，不影响 Neo4j 写入流程，失败只打日志
+        if snapshot_outputs is not None and snapshot_dir:
             try:
-                from pathlib import Path as _Path
                 import json as _json
+                from app.core.memory.utils.debug.pipeline_snapshot import _get_oss_bucket
 
-                _dir = _Path(snapshot_dir)
-                _dir.mkdir(parents=True, exist_ok=True)
-                _path = _dir / "4_emotion_outputs.json"
-                with open(_path, "w", encoding="utf-8") as _f:
-                    _json.dump(snapshot_outputs, _f, ensure_ascii=False, indent=2, default=str)
+                _json_bytes = _json.dumps(
+                    snapshot_outputs, ensure_ascii=False, indent=2, default=str
+                ).encode("utf-8")
+                _oss_key = f"{snapshot_dir}/4_emotion_outputs.json"
+                _bucket = _get_oss_bucket()
+                _bucket.put_object(_oss_key, _json_bytes)
                 logger.info(
-                    f"[Emotion][Snapshot] 已落盘 {len(snapshot_outputs)} 条情绪结果 → {_path}"
+                    f"[Emotion][Snapshot] 已落盘 {len(snapshot_outputs)} 条情绪结果 → oss://{_oss_key}"
                 )
             except Exception as _e:
                 logger.warning(
@@ -2546,19 +2547,20 @@ def extract_metadata_batch_task(
         finally:
             await connector.close()
 
-        # 快照落盘
+        # 快照落盘：上传到 OSS
         if snapshot_outputs is not None and snapshot_dir:
             try:
-                from pathlib import Path as _Path
                 import json as _json
+                from app.core.memory.utils.debug.pipeline_snapshot import _get_oss_bucket
 
-                _dir = _Path(snapshot_dir)
-                _dir.mkdir(parents=True, exist_ok=True)
-                _path = _dir / "9_metadata_outputs.json"
-                with open(_path, "w", encoding="utf-8") as _f:
-                    _json.dump(snapshot_outputs, _f, ensure_ascii=False, indent=2, default=str)
+                _json_bytes = _json.dumps(
+                    snapshot_outputs, ensure_ascii=False, indent=2, default=str
+                ).encode("utf-8")
+                _oss_key = f"{snapshot_dir}/9_metadata_outputs.json"
+                _bucket = _get_oss_bucket()
+                _bucket.put_object(_oss_key, _json_bytes)
                 logger.info(
-                    f"[Metadata][Snapshot] 已落盘 {len(snapshot_outputs)} 条元数据结果 → {_path}"
+                    f"[Metadata][Snapshot] 已落盘 {len(snapshot_outputs)} 条元数据结果 → oss://{_oss_key}"
                 )
             except Exception as _e:
                 logger.warning(

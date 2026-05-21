@@ -1,23 +1,18 @@
-"""Pipeline stage snapshot — dump each extraction stage's output to JSON for comparison.
+"""Pipeline stage snapshot — dump each extraction stage's output to OSS for comparison.
 
 Usage:
-    snapshot = PipelineSnapshot("legacy")   # or "new"
+    snapshot = PipelineSnapshot("new")
     snapshot.save_stage("1_statements", data)
     snapshot.save_stage("2_triplets", data)
     ...
 
-Output structure:
-    logs/memory-output/snapshots/
-        legacy_20260422_123456/
+Output structure (OSS):
+    redbear-files/snapshot/
+        new_20260422_123456/
+            0_summary.json
             1_statements.json
             2_triplets.json
-            3_nodes_edges.json
-            4_dedup.json
-        new_20260422_123500/
-            1_statements.json
-            2_triplets.json
-            3_nodes_edges.json
-            4_dedup.json
+            ...
 
 Controlled by env var PIPELINE_SNAPSHOT_ENABLED (default: false).
 """
@@ -28,12 +23,15 @@ import json
 import logging
 import os
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 _ENABLED: Optional[bool] = None
+_OSS_BUCKET: Optional[Any] = None
+
+# OSS 上快照文件的根前缀（对应 bucket 内的 "目录"）
+_OSS_SNAPSHOT_PREFIX = "snapshot"
 
 
 def _is_enabled() -> bool:
@@ -41,6 +39,18 @@ def _is_enabled() -> bool:
     if _ENABLED is None:
         _ENABLED = os.getenv("PIPELINE_SNAPSHOT_ENABLED", "false").lower() == "true"
     return _ENABLED
+
+
+def _get_oss_bucket():
+    """获取 oss2.Bucket 单例（同步），用于快照上传。"""
+    global _OSS_BUCKET
+    if _OSS_BUCKET is None:
+        import oss2
+        from app.core.config import settings
+
+        auth = oss2.Auth(settings.OSS_ACCESS_KEY_ID, settings.OSS_ACCESS_KEY_SECRET)
+        _OSS_BUCKET = oss2.Bucket(auth, settings.OSS_ENDPOINT, settings.OSS_BUCKET_NAME)
+    return _OSS_BUCKET
 
 
 def _safe_serialize(obj: Any) -> Any:
@@ -65,51 +75,53 @@ def _safe_serialize(obj: Any) -> Any:
 
 
 class PipelineSnapshot:
-    """Dump each pipeline stage's output to a timestamped directory."""
+    """Dump each pipeline stage's output to OSS."""
 
     def __init__(self, pipeline_name: str):
         """
         Args:
-            pipeline_name: "legacy" or "new", used as directory prefix.
+            pipeline_name: e.g. "new", used as directory prefix.
         """
         self.enabled = _is_enabled()
         self.pipeline_name = pipeline_name
-        self._dir: Optional[Path] = None
+        self._oss_prefix: Optional[str] = None
 
         if self.enabled:
-            from app.core.config import settings
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self._dir = Path(settings.MEMORY_OUTPUT_DIR) / "snapshots" / f"{pipeline_name}_{ts}"
-            self._dir.mkdir(parents=True, exist_ok=True)
-            logger.debug(f"[Snapshot] 已启用，输出目录: {self._dir}")
+            self._oss_prefix = f"{_OSS_SNAPSHOT_PREFIX}/{pipeline_name}_{ts}"
+            logger.debug(f"[Snapshot] 已启用，OSS 前缀: {self._oss_prefix}")
 
     @property
     def directory(self) -> Optional[str]:
-        """Absolute path (str) of this snapshot's output directory, or None when disabled."""
-        return str(self._dir) if self._dir is not None else None
+        """OSS 前缀路径，未启用时返回 None。"""
+        return self._oss_prefix
 
     def save_stage(self, stage_name: str, data: Any) -> None:
-        """Save a stage's output as JSON.
+        """Save a stage's output as JSON to OSS.
 
         Args:
             stage_name: e.g. "1_statements", "2_triplets"
             data: Any serializable data (Pydantic models, dicts, lists, dataclasses)
         """
-        if not self.enabled or self._dir is None:
+        if not self.enabled or self._oss_prefix is None:
             return
 
         try:
-            path = self._dir / f"{stage_name}.json"
             serialized = _safe_serialize(data)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(serialized, f, ensure_ascii=False, indent=2, default=str)
-            logger.debug(f"[Snapshot] {stage_name} → {path}")
+            json_bytes = json.dumps(
+                serialized, ensure_ascii=False, indent=2, default=str
+            ).encode("utf-8")
+
+            oss_key = f"{self._oss_prefix}/{stage_name}.json"
+            bucket = _get_oss_bucket()
+            bucket.put_object(oss_key, json_bytes)
+            logger.debug(f"[Snapshot] {stage_name} → oss://{oss_key}")
         except Exception as e:
             logger.warning(f"[Snapshot] 保存 {stage_name} 失败: {e}")
 
     def save_summary(self, stats: Dict[str, Any]) -> None:
         """Save a summary with pipeline metadata and stats."""
-        if not self.enabled or self._dir is None:
+        if not self.enabled or self._oss_prefix is None:
             return
 
         summary = {
