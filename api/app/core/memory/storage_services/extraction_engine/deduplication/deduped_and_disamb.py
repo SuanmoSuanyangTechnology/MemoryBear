@@ -257,11 +257,11 @@ def _normalize_special_entity_names(
         if name_lower in _USER_PLACEHOLDER_NAMES:
             ent.name = _CANONICAL_USER_NAME
             ent.entity_type = _CANONICAL_USER_TYPE
-            # type_id 保持不变（LLM 提取时已正确设置为"生命体"对应的 1）
+            ent.type_id = 1  # "生命体" 对应的本体 ID
         elif name_lower in _ASSISTANT_PLACEHOLDER_NAMES:
             ent.name = _CANONICAL_ASSISTANT_NAME
             ent.entity_type = _CANONICAL_ASSISTANT_TYPE
-            # type_id 保持不变
+            ent.type_id = 1  # "生命体" 对应的本体 ID
 
     # 第二步：清洗用户/AI助手之间的别名交叉污染（复用 clean_cross_role_aliases）
     clean_cross_role_aliases(entity_nodes)

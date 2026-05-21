@@ -61,8 +61,8 @@ class EntityRepository(BaseNeo4jRepository[ExtractedEntityNode]):
         n['last_access_time'] = n.get('last_access_time')
         n['access_count'] = n.get('access_count', 0)
         
-        # 确保 type_id 字段存在（历史数据可能没有此属性，根据 entity_type 反查）
-        if 'type_id' not in n or n['type_id'] is None:
+        # 确保 type_id 字段存在（历史数据可能没有此属性或为 0，根据 entity_type 反查）
+        if not n.get('type_id'):
             n['type_id'] = get_type_id(n.get('entity_type', ''))
         
         return ExtractedEntityNode(**n)
@@ -79,4 +79,3 @@ class EntityRepository(BaseNeo4jRepository[ExtractedEntityNode]):
         """
         return await self.find({"entity_type": entity_type}, limit=limit)
     
-
