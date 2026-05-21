@@ -1483,6 +1483,8 @@ export const en = {
       allow_download: 'Allow downloading cited source text',
       invalidVariablesTitle: "The following undefined variables are referenced in the conversation opening. Do you want to save the opening configuration?",
       deep_thinking: 'Enable Deep Thinking',
+      promptInvalidVariablesTitle: 'The following undefined variables are referenced in the conversation opening. Do you want to save the opening configuration?',
+      addNewVariable: 'Add New Variable',
 
       apps: 'My Apps',
       sharing: 'Sharing',

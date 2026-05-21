@@ -2,12 +2,12 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 18:04:49
+ * @Last Modified time: 2026-05-19 17:12:37
  */
-import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useMemo } from 'react';
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom';
-import { Row, Col, Space, Form, Input, Button, App, Flex } from 'antd'
+import { Row, Col, Space, Form, Button, App, Flex } from 'antd'
 
 import Chat from './components/Chat'
 import RbCard from '@/components/RbCard/Card'
@@ -45,6 +45,8 @@ import DescWrapper from '@/components/FormItem/DescWrapper'
 import FeaturesConfig from './components/FeaturesConfig'
 import { getListLogoUrl } from '@/views/ModelManagement/utils';
 import type { ChatItem } from '@/components/Chat/types'
+import Editor from './components/Editor'
+import Tag from '@/components/Tag'
 
 export const replaceVariables = (statement: string, variables: Variable[]) => {
   return statement.replace(/\{\{([^}]+)\}\}/g, (match, name) => {
@@ -60,7 +62,7 @@ export const replaceVariables = (statement: string, variables: Variable[]) => {
 const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void }>(({ onFeaturesLoad }, ref) => {
   const { t } = useTranslation()
   const { id } = useParams();
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const [form] = Form.useForm()
   const [data, setData] = useState<Config | null>(null);
   const modelConfigModalRef = useRef<ModelConfigModalRef>(null)
@@ -310,7 +312,8 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
    * Update prompt and extract variables
    * @param value - New prompt value
    */
-  const updatePrompt = (value: string) => {
+  const updatePrompt = (value?: string) => {
+    if (!value) return
     form.setFieldValue('system_prompt', value)
     const variables = value.match(/\{\{([^}]+)\}\}/g)?.map(match => match.slice(2, -2)) || []
     const uniqueVariables = [...new Set(variables)]
@@ -415,8 +418,35 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
       })
     }
   }, [defaultModel, chatList.length, form.getFieldValue(['features', 'opening_statement']), chatVariables])
-  
-  console.log('agent values', values)
+
+  const updateVariables = useCallback((value?: string) => {
+    if (!value) return
+    const usedVars = [...new Set([...value.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]))]
+    const validNames = new Set(chatVariables.map((v: Variable) => v.name))
+    const invalid = usedVars.filter(v => !validNames.has(v))
+
+    if (invalid.length > 0) {
+      modal.confirm({
+        title: t('application.promptInvalidVariablesTitle'),
+        content: <Flex gap={8} wrap>{invalid.map((vo, index) => <Tag key={index}>{'{{'}{vo}{'}}'}</Tag>)}</Flex>,
+        okText: t('common.confirm'),
+        cancelText: t('common.cancel'),
+        onOk: () => {
+          const uniqueVariables = [...new Set(invalid)]
+          const newVariableList: Variable[] = uniqueVariables.map((name, index) => ({
+            index,
+            type: 'text',
+            name,
+            display_name: name,
+            required: false
+          }))
+
+          updateVariableList([...chatVariables, ...newVariableList])
+        },
+      })
+    }
+  }, [chatVariables])
+
   return (
     <>
       <Row className="rb:h-full!" gutter={12}>
@@ -468,15 +498,12 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
                   </div>
 
                   <Form.Item name="system_prompt" className="rb:mb-0!">
-                    <Input.TextArea
+                    <Editor
+                      options={chatVariables.map(v => ({ label: v.display_name, value: `{{${v.name}}}` }))}
                       placeholder={t('application.promptPlaceholder')}
-                      styles={{
-                        textarea: {
-                          minHeight: '200px',
-                          borderRadius: '8px',
-                          padding: '12px'
-                        },
-                      }}
+                      className="rb:h-50 rb:bg-[#FFFFFF]"
+                      onBlur={updateVariables}
+                      disabled={false}
                     />
                   </Form.Item>
                 </Card>
