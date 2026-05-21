@@ -1,4 +1,5 @@
 from enum import StrEnum
+from typing import Optional
 
 
 # ── 本体 ID 映射（与 extract_triplet.jinja2 中的枚举一一对应） ──
@@ -36,14 +37,14 @@ PREDICATE_TO_ID: dict[str, int] = {
 }
 
 
-def get_type_id(entity_type: str) -> int:
-    """根据实体类型中文标签获取本体 ID。找不到时返回 0。"""
-    return ENTITY_TYPE_TO_ID.get((entity_type or "").strip(), 0)
+def get_type_id(entity_type: str) -> Optional[int]:
+    """根据实体类型中文标签获取本体 ID。找不到时返回 None。"""
+    return ENTITY_TYPE_TO_ID.get((entity_type or "").strip())
 
 
-def get_predicate_id(predicate: str) -> int:
-    """根据关系谓词中文标签获取本体 ID。找不到时返回 0。"""
-    return PREDICATE_TO_ID.get((predicate or "").strip(), 0)
+def get_predicate_id(predicate: str) -> Optional[int]:
+    """根据关系谓词中文标签获取本体 ID。找不到时返回 None。"""
+    return PREDICATE_TO_ID.get((predicate or "").strip())
 
 
 # Use jinja template.render
@@ -266,4 +267,3 @@ class TemporalInfo(StrEnum):
 class RelevenceInfo(StrEnum):
     RELEVANT = "RELEVANT"
     IRRELEVANT = "IRRELEVANT"
-

@@ -6,7 +6,7 @@ Embedding generation, and shared types used across stages.
 Malformed LLM JSON will raise ``ValidationError`` and trigger stage-level retry.
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -76,7 +76,7 @@ class EntityItem(BaseModel):
     entity_idx: int
     name: str
     type: str
-    type_id: int
+    type_id: Optional[int] = None
     type_description: str = ""
     description: str
     is_explicit_memory: bool = False
@@ -88,7 +88,7 @@ class TripletItem(BaseModel):
     subject_name: str
     subject_id: int
     predicate: str
-    predicate_id: int
+    predicate_id: Optional[int] = None
     predicate_surface: str
     predicate_description: str = ""
     object_name: str
