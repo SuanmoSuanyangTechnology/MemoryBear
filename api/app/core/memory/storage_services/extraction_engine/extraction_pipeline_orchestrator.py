@@ -759,13 +759,16 @@ class NewExtractionOrchestrator:
     ) -> List[Dict[str, str]]:
         """Collect user statements for async emotion extraction.
 
+        Only includes statements where has_emotional_state=True,
+        indicating the statement reflects user's emotional state.
+
         Returns a list of dicts ready to be sent as Celery task payload.
         """
         statements_payload: List[Dict[str, str]] = []
         for _dialog_id, chunk_stmts in all_stmt_results.items():
             for _chunk_id, stmts in chunk_stmts.items():
                 for s in stmts:
-                    if s.speaker == "user":
+                    if s.speaker == "user" and s.has_emotional_state:
                         statements_payload.append({
                             "statement_id": s.statement_id,
                             "statement_text": s.statement_text,
