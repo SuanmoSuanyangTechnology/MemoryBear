@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-05-07 18:37:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-19 15:15:56
+ * @Last Modified time: 2026-05-20 14:41:28
  */
 import { type FC, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -65,7 +65,7 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
 
   // Recursively collect all {{nodeId.var}} references from nodeData, excluding conv. vars
   const extractVarRefs = (val: any, refs = new Set<string>()): Set<string> => {
-    if (val.type === 'start') {
+    if (val?.type === 'start') {
       return refs
     }
     if (typeof val === 'string') {
@@ -84,7 +84,7 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
   const varRefs = extractVarRefs(nodeData)
   const visionInputRef = isLlm ? nodeData.config.vision_input?.defaultValue?.match(/\{\{([^}]+)\}\}/)?.[1] : undefined
   const contextInputRef = isLlm ? nodeData.config.context?.defaultValue?.match(/\{\{([^}]+)\}\}/)?.[1] : undefined
-  const inputVars: Suggestion[] = nodeData.type === 'start'
+  const inputVars: Suggestion[] = nodeData?.type === 'start'
     ? (nodeData.config?.variables?.defaultValue || []).map((item: Variable) => ({
       label: item.description,
       value: item.name,
