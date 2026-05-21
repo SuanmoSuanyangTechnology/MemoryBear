@@ -1,10 +1,12 @@
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, InputNumber, Checkbox } from 'antd';
+import { Form, Input, InputNumber, Checkbox, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { VariableConfigModalRef } from '../../types'
 import type { Variable } from '../Properties/VariableList/types'
 import RbModal from '@/components/RbModal'
+import FileVarInput from '../SingleNodeRun/FileVarInput'
+import CodeMirrorEditor from '@/components/CodeMirrorEditor';
 
 interface VariableEditModalProps {
   refresh: (values: Variable[]) => void;
@@ -66,6 +68,16 @@ const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModal
             <>
               {fields.map(({ name }, index) => {
                 const field = initialValues[index]
+                if (field.type.includes('file')) {
+                  return (
+                    <FileVarInput
+                      name={[name, 'value'] as string[]}
+                      dataType={field.type}
+                      form={form}
+                      defaultValue={field.defaultValue || []}
+                    />
+                  )
+                }
                 return (
                   <Form.Item
                     key={name}
@@ -75,16 +87,32 @@ const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModal
                     rules={[
                       { required: field.required, message: field.type === 'boolean' ? t('common.pleaseSelect') : t('common.pleaseEnter') },
                     ]}
+                    layout={field.type.includes('file') || field.type === 'object' ? "vertical" : "horizontal"}
                   >
-                    {
-                      (field.type === 'string' || field.type === 'text') && <Input placeholder={t('common.pleaseEnter')} />
-                    }
-                    { field.type === 'paragraph' && <Input.TextArea placeholder={t('common.pleaseEnter')} /> }
-                    {
-                      field.type === 'number' && <InputNumber placeholder={t('common.pleaseEnter')} style={{ width: '100%' }} onChange={(value) => form.setFieldValue(['variables', name, 'value'], value)} />
-                    }
-                    {
-                      field.type === 'boolean' && <Checkbox>{`${field.name}·${field.display_name || field.description}`}</Checkbox>
+                    {field.type === 'object'
+                      ? <CodeMirrorEditor
+                          language="json"
+                          variant="outlined"
+                        />
+                      :field.ui_type === 'select' && Array.isArray(field.options)
+                      ? <Select
+                        placeholder={t('common.pleaseSelect')}
+                        options={field.options.map(item => ({ label: item, value: item }))}
+                        popupMatchSelectWidth={false}
+                      />
+                      : (field.type === 'string' || field.type === 'text')
+                      ? <Input placeholder={t('common.pleaseEnter')} />
+                      : (field.ui_type === 'paragraph' || field.type === 'paragraph')
+                      ? <Input.TextArea placeholder={t('common.pleaseEnter')} />
+                      : field.type === 'number'
+                      ? <InputNumber
+                        placeholder={t('common.pleaseEnter')}
+                        style={{ width: '100%' }}
+                        onChange={(value) => form.setFieldValue(['variables', name, 'value'], value)}
+                      />
+                      : field.type === 'boolean'
+                      ? <Checkbox>{`${field.name}·${field.display_name || field.description}`}</Checkbox>
+                      : null
                     }
                   </Form.Item>
                 )

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-07 18:36:31
+ * @Last Modified time: 2026-05-19 14:54:29
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -936,13 +936,11 @@ const Properties: FC<PropertiesProps> = ({
                                             options={(() => {
                                               const baseVariableList = getFilteredVariableList(selectedNode?.data?.type, key);
                                               // Apply filtering if specified in config
-                                              if (config.filterNodeTypes || config.filterVariableNames) {
+                                              if (config.filterNodeTypes) {
                                                 return baseVariableList.filter(variable => {
                                                   const nodeTypeMatch = !config.filterNodeTypes ||
                                                     (Array.isArray(config.filterNodeTypes) && config.filterNodeTypes.includes(variable.nodeData?.type));
-                                                  const variableNameMatch = !config.filterVariableNames ||
-                                                    (Array.isArray(config.filterVariableNames) && config.filterVariableNames.includes(variable.label));
-                                                  return nodeTypeMatch || variableNameMatch;
+                                                  return nodeTypeMatch;
                                                 });
                                               }
                                               if (config.onFilterVariableType) {

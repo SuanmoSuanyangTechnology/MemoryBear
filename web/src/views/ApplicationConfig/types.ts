@@ -438,7 +438,7 @@ interface FileSetttings {
   document_enabled: boolean;
   document_max_size_mb: number;
   document_allowed_extensions: string[];
-  document_image_recognition: boolean;
+  document_image_recognition?: boolean;
   video_enabled: boolean;
   video_max_size_mb: number;
   video_allowed_extensions: string[];
