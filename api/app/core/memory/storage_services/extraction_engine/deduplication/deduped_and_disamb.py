@@ -16,6 +16,7 @@ from app.core.memory.models.graph_models import (
     StatementEntityEdge,
 )
 from app.core.memory.models.variate_config import DedupConfig
+from app.core.memory.utils.data.ontology import get_type_id
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +33,13 @@ def _unify_entity_type(canonical: ExtractedEntityNode, losing: ExtractedEntityNo
     canonical_type = (getattr(canonical, "entity_type", "") or "").strip()
     losing_type = (getattr(losing, "entity_type", "") or "").strip()
     
+    new_type = None
     if suggested_type and suggested_type.strip():
         # 优先使用LLM建议的类型
-        canonical.entity_type = suggested_type.strip()
+        new_type = suggested_type.strip()
     elif canonical_type.upper() == "UNKNOWN" and losing_type.upper() != "UNKNOWN":
         # 如果canonical是UNKNOWN，使用losing的类型
-        canonical.entity_type = losing_type
+        new_type = losing_type
     elif canonical_type.upper() != "UNKNOWN" and losing_type.upper() == "UNKNOWN":
         # 如果losing是UNKNOWN，保持canonical的类型（无需操作）
         pass
@@ -55,14 +57,19 @@ def _unify_entity_type(canonical: ExtractedEntityNode, losing: ExtractedEntityNo
         
         if canonical_is_generic and not losing_is_generic:
             # canonical是通用类型，losing是具体类型，使用losing
-            canonical.entity_type = losing_type
+            new_type = losing_type
         elif not canonical_is_generic and losing_is_generic:
             # losing是通用类型，canonical是具体类型，保持canonical（无需操作）
             pass
         elif len(losing_type) > len(canonical_type):
             # 两者都是具体类型或都是通用类型，选择更长的（通常更具体）
-            canonical.entity_type = losing_type
+            new_type = losing_type
         # 否则保持canonical的类型
+
+    # 同步更新 entity_type 和 type_id
+    if new_type is not None:
+        canonical.entity_type = new_type
+        canonical.type_id = get_type_id(new_type)
 
 
 # 模块级属性融合工具函数（统一行为）
@@ -250,9 +257,11 @@ def _normalize_special_entity_names(
         if name_lower in _USER_PLACEHOLDER_NAMES:
             ent.name = _CANONICAL_USER_NAME
             ent.entity_type = _CANONICAL_USER_TYPE
+            # type_id 保持不变（LLM 提取时已正确设置为"生命体"对应的 1）
         elif name_lower in _ASSISTANT_PLACEHOLDER_NAMES:
             ent.name = _CANONICAL_ASSISTANT_NAME
             ent.entity_type = _CANONICAL_ASSISTANT_TYPE
+            # type_id 保持不变
 
     # 第二步：清洗用户/AI助手之间的别名交叉污染（复用 clean_cross_role_aliases）
     clean_cross_role_aliases(entity_nodes)

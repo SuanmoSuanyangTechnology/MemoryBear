@@ -1,6 +1,51 @@
 from enum import StrEnum
 
 
+# ── 本体 ID 映射（与 extract_triplet.jinja2 中的枚举一一对应） ──
+
+ENTITY_TYPE_TO_ID: dict[str, int] = {
+    "生命体": 1,
+    "组织": 2,
+    "群体": 3,
+    "角色职业": 4,
+    "地点设施": 5,
+    "物品设备": 6,
+    "软件平台": 7,
+    "识别联系信息": 8,
+    "文档媒体": 9,
+    "知识能力": 10,
+    "偏好习惯": 11,
+    "具体目标": 12,
+    "称呼别名": 13,
+}
+
+PREDICATE_TO_ID: dict[str, int] = {
+    "别名属于": 1,
+    "属于类型": 2,
+    "位于": 3,
+    "前往": 4,
+    "组成部分": 5,
+    "拥有": 6,
+    "使用": 7,
+    "创建了": 8,
+    "了解": 9,
+    "偏好": 10,
+    "负责": 11,
+    "沟通于": 12,
+    "关联于": 13,
+}
+
+
+def get_type_id(entity_type: str) -> int:
+    """根据实体类型中文标签获取本体 ID。找不到时返回 0。"""
+    return ENTITY_TYPE_TO_ID.get((entity_type or "").strip(), 0)
+
+
+def get_predicate_id(predicate: str) -> int:
+    """根据关系谓词中文标签获取本体 ID。找不到时返回 0。"""
+    return PREDICATE_TO_ID.get((predicate or "").strip(), 0)
+
+
 # Use jinja template.render
 PREDICATE_DEFINITIONS = {
     # Core Relationships
