@@ -316,7 +316,7 @@ _OPENAI_COMPATIBLE_PROVIDERS = frozenset({
     ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.VOLCANO,
 })
 
-_PARAM_PROVIDER_SUPPORT: dict[str, frozenset[str]] = {
+_PARAM_PROVIDER_SUPPORT: dict[str, frozenset[ModelProvider]] = {
     "top_k": frozenset({ModelProvider.OLLAMA, ModelProvider.DASHSCOPE, ModelProvider.BEDROCK}),
     "repetition_penalty": frozenset({ModelProvider.OLLAMA, ModelProvider.DASHSCOPE}),
     "seed": frozenset({
@@ -358,6 +358,11 @@ def validate_llm_param_constraints(
     provider_lower = provider.lower() if provider else ""
     capability_set = set(capability) if capability else set()
 
+    try:
+        provider_enum = ModelProvider(provider_lower)
+    except ValueError:
+        provider_enum = None
+
     # --- 模型能力限制校验 ---
     if config.thinking.enable:
         required = _PARAM_CAPABILITY_REQUIREMENTS["thinking"]
@@ -382,24 +387,27 @@ def validate_llm_param_constraints(
             warnings.append(_PARAM_CAPABILITY_WARNINGS["response_format_json"])
 
     # --- 提供商支持限制校验 ---
+    if provider_enum is None:
+        return warnings
+
     if config.top_k.enable:
         supported = _PARAM_PROVIDER_SUPPORT["top_k"]
-        if provider_lower not in supported:
+        if provider_enum not in supported:
             warnings.append(_PARAM_PROVIDER_WARNINGS["top_k"])
 
     if config.repetition_penalty.enable:
         supported = _PARAM_PROVIDER_SUPPORT["repetition_penalty"]
-        if provider_lower not in supported:
+        if provider_enum not in supported:
             warnings.append(_PARAM_PROVIDER_WARNINGS["repetition_penalty"])
 
     if config.seed.enable:
         supported = _PARAM_PROVIDER_SUPPORT["seed"]
-        if provider_lower not in supported:
+        if provider_enum not in supported:
             warnings.append(_PARAM_PROVIDER_WARNINGS["seed"])
 
     if config.search:
         supported = _PARAM_PROVIDER_SUPPORT["search"]
-        if provider_lower not in supported:
+        if provider_enum not in supported:
             warnings.append(_PARAM_PROVIDER_WARNINGS["search"])
 
     return warnings

@@ -99,12 +99,12 @@ class LLMNode(BaseNode):
 
     def _is_inside_reasoning_block(self, text: str, pos: int) -> bool:
         import re
-        think_ranges = [(m.start(), m.end()) for m in re.finditer(r'anzia(.*?)fin', text, re.DOTALL)]
+        think_ranges = [(m.start(), m.end()) for m in re.finditer(r' thinking(.*?) response', text, re.DOTALL)]
         for start, end in think_ranges:
             if start <= pos < end:
                 return True
-        last_open = text.rfind('anzia')
-        last_close = text.rfind('fin')
+        last_open = text.rfind(' thinking')
+        last_close = text.rfind(' response')
         if last_open != -1 and (last_close == -1 or last_open > last_close) and pos >= last_open:
             return True
         return False
