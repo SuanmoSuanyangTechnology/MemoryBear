@@ -3,8 +3,6 @@ import logging
 import time
 from typing import Any, Dict, List, Optional, Coroutine
 
-import numpy as np
-
 from app.core.memory.enums import Neo4jNodeType
 from app.core.memory.llm_tools import OpenAIEmbedderClient
 from app.core.memory.utils.data.text_utils import escape_lucene_query
@@ -23,48 +21,20 @@ from app.repositories.neo4j.cypher_queries import (
     SEARCH_STATEMENTS_L_CREATED_AT,
     SEARCH_STATEMENTS_L_VALID_AT,
     SEARCH_PERCEPTUALS_BY_KEYWORD,
-    SEARCH_PERCEPTUAL_BY_IDS,
-    SEARCH_PERCEPTUAL_BY_USER_ID,
     FULLTEXT_QUERY_CYPHER_MAPPING,
-    USER_ID_QUERY_CYPHER_MAPPING,
     NODE_ID_QUERY_CYPHER_MAPPING,
-    SEARCH_USER_METADATA, SEARCH_ENITITES_BY_RELATIONSHIP, SEARCH_RELATION_BETWEEN_ENTITIES
+    COSINE_SEARCH_CYPHER_MAPPING,
+    SEARCH_USER_METADATA,
+    SEARCH_ENITITES_BY_RELATIONSHIP,
+    SEARCH_RELATION_BETWEEN_ENTITIES,
+    SEARCH_RELATIONS_BETWEEN_ENTITY_PAIRS,
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 logger = logging.getLogger(__name__)
 
 
-def cosine_similarity_search(
-        query: list[float],
-        vectors: list[list[float]],
-        limit: int
-) -> dict[int, float]:
-    if not vectors:
-        return {}
-    vectors: np.ndarray = np.array(vectors, dtype=np.float32)
-    vectors_norm = vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
-    query: np.ndarray = np.array(query, dtype=np.float32)
-    norm = np.linalg.norm(query)
-    if norm == 0:
-        return {}
-    query_norm = query / norm
-
-    similarities = vectors_norm @ query_norm
-    similarities = np.clip(similarities, 0, 1)
-    top_k = min(limit, similarities.shape[0])
-    if top_k <= 0:
-        return {}
-    top_indices = np.argpartition(-similarities, top_k - 1)[:top_k]
-    top_indices = top_indices[np.argsort(-similarities[top_indices])]
-    result = {}
-    for idx in top_indices:
-        result[idx] = float(similarities[idx])
-    return result
-
-
 async def _update_activation_values_batch(
-        connector: Neo4jConnector,
         nodes: List[Dict[str, Any]],
         node_label: str,
         end_user_id: Optional[str] = None,
@@ -86,67 +56,68 @@ async def _update_activation_values_batch(
     Returns:
         List[Dict[str, Any]]: 成功更新的节点列表
     """
-    if not nodes:
-        return []
+    async with Neo4jConnector() as connector:
+        if not nodes:
+            return []
 
-    # 延迟导入以避免循环依赖
-    from app.core.memory.storage_services.forgetting_engine.access_history_manager import (
-        AccessHistoryManager,
-    )
-    from app.core.memory.storage_services.forgetting_engine.actr_calculator import (
-        ACTRCalculator,
-    )
-
-    # 创建计算器和管理器实例
-    actr_calculator = ACTRCalculator()
-    access_manager = AccessHistoryManager(
-        connector=connector,
-        actr_calculator=actr_calculator,
-        max_retries=max_retries
-    )
-
-    # 提取节点ID列表并去重（保持原始顺序）
-    seen_ids = set()
-    unique_node_ids = []
-    for node in nodes:
-        node_id = node.get('id')
-        if node_id and node_id not in seen_ids:
-            seen_ids.add(node_id)
-            unique_node_ids.append(node_id)
-
-    if not unique_node_ids:
-        logger.warning("批量更新激活值：没有有效的节点ID")
-        return nodes
-
-    # 记录去重信息（仅针对具有有效 ID 的节点）
-    id_nodes_count = sum(1 for n in nodes if n.get("id"))
-    if len(unique_node_ids) < id_nodes_count:
-        logger.info(
-            f"批量更新激活值：检测到重复节点，具有有效ID的节点数量={id_nodes_count}, "
-            f"去重后唯一ID数量={len(unique_node_ids)}"
+        # 延迟导入以避免循环依赖
+        from app.core.memory.storage_services.forgetting_engine.access_history_manager import (
+            AccessHistoryManager,
+        )
+        from app.core.memory.storage_services.forgetting_engine.actr_calculator import (
+            ACTRCalculator,
         )
 
-    # 批量记录访问
-    try:
-        updated_nodes = await access_manager.record_batch_access(
-            node_ids=unique_node_ids,
-            node_label=node_label,
-            end_user_id=end_user_id
+        # 创建计算器和管理器实例
+        actr_calculator = ACTRCalculator()
+        access_manager = AccessHistoryManager(
+            connector=connector,
+            actr_calculator=actr_calculator,
+            max_retries=max_retries
         )
 
-        logger.info(
-            f"批量更新激活值成功: {node_label}, "
-            f"更新数量={len(updated_nodes)}/{len(unique_node_ids)}"
-        )
+        # 提取节点ID列表并去重（保持原始顺序）
+        seen_ids = set()
+        unique_node_ids = []
+        for node in nodes:
+            node_id = node.get('id')
+            if node_id and node_id not in seen_ids:
+                seen_ids.add(node_id)
+                unique_node_ids.append(node_id)
 
-        return updated_nodes
+        if not unique_node_ids:
+            logger.warning("批量更新激活值：没有有效的节点ID")
+            return nodes
 
-    except Exception as e:
-        logger.error(
-            f"批量更新激活值失败: {node_label}, 错误: {str(e)}"
-        )
-        # 失败时返回原始节点列表
-        return nodes
+        # 记录去重信息（仅针对具有有效 ID 的节点）
+        id_nodes_count = sum(1 for n in nodes if n.get("id"))
+        if len(unique_node_ids) < id_nodes_count:
+            logger.info(
+                f"批量更新激活值：检测到重复节点，具有有效ID的节点数量={id_nodes_count}, "
+                f"去重后唯一ID数量={len(unique_node_ids)}"
+            )
+
+        # 批量记录访问
+        try:
+            updated_nodes = await access_manager.record_batch_access(
+                node_ids=unique_node_ids,
+                node_label=node_label,
+                end_user_id=end_user_id
+            )
+
+            logger.debug(
+                f"批量更新激活值成功: {node_label}, "
+                f"更新数量={len(updated_nodes)}/{len(unique_node_ids)}"
+            )
+
+            return updated_nodes
+
+        except Exception as e:
+            logger.error(
+                f"批量更新激活值失败: {node_label}, 错误: {str(e)}"
+            )
+            # 失败时返回原始节点列表
+            return nodes
 
 
 async def _update_search_results_activation(
@@ -186,7 +157,6 @@ async def _update_search_results_activation(
         if key in results and results[key]:
             update_tasks.append(
                 _update_activation_values_batch(
-                    connector=connector,
                     nodes=results[key],
                     node_label=label,
                     end_user_id=end_user_id
@@ -194,62 +164,70 @@ async def _update_search_results_activation(
             )
             update_keys.append(key)
 
-    if not update_tasks:
-        return results
+    async def _run_updates(tasks):
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for idx, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(
+                    "后台激活更新任务失败: task_index=%s exception=%r",
+                    idx,
+                    result,
+                )
 
-    # 并行执行所有更新
-    update_results = await asyncio.gather(*update_tasks, return_exceptions=True)
+    if update_tasks:
+        asyncio.create_task(_run_updates(update_tasks))
+    return results
 
-    # 更新结果字典，保留原始搜索分数
-    updated_results = results.copy()
-    for key, update_result in zip(update_keys, update_results):
-        if not isinstance(update_result, Exception):
-            # 更新成功，合并原始搜索结果和更新后的激活值数据
-            # 保留原始的 score 字段（BM25/Embedding 分数）
-            original_nodes = results[key]
-            updated_nodes = update_result
+    # # 更新结果字典，保留原始搜索分数
+    # updated_results = results.copy()
+    # for key, update_result in zip(update_keys, update_results):
+    #     if not isinstance(update_result, Exception):
+    #         # 更新成功，合并原始搜索结果和更新后的激活值数据
+    #         # 保留原始的 score 字段（BM25/Embedding 分数）
+    #         original_nodes = results[key]
+    #         updated_nodes = update_result
+    #
+    #         # 创建 ID 到更新节点的映射（用于快速查找激活值数据）
+    #         updated_map = {node.get('id'): node for node in updated_nodes if node.get('id')}
+    #
+    #         # 合并数据：保留所有原始节点（包括重复的），用更新后的激活值数据填充
+    #         merged_nodes = []
+    #         for original_node in original_nodes:
+    #             node_id = original_node.get('id')
+    #             if node_id and node_id in updated_map:
+    #                 # 从原始节点开始，用更新后的激活值数据覆盖
+    #                 merged_node = original_node.copy()
+    #
+    #                 # 更新激活值相关字段
+    #                 activation_fields = {
+    #                     'activation_value',
+    #                     'access_history',
+    #                     'last_access_time',
+    #                     'access_count',
+    #                     'importance_score',
+    #                     'version',
+    #                     'statement',  # Statement 节点的内容字段
+    #                     'content'  # MemorySummary 节点的内容字段
+    #                 }
+    #
+    #                 # 只更新激活值相关字段，保留原始节点的其他字段
+    #                 for field in activation_fields:
+    #                     if field in updated_map[node_id]:
+    #                         merged_node[field] = updated_map[node_id][field]
+    #
+    #                 merged_nodes.append(merged_node)
+    #             else:
+    #                 # 如果没有更新数据，保留原始节点
+    #                 merged_nodes.append(original_node)
+    #
+    #         updated_results[key] = merged_nodes
+    #     else:
+    #         # 更新失败，记录错误但保留原始结果
+    #         logger.warning(
+    #             f"更新 {key} 激活值失败: {str(update_result)}"
+    #         )
 
-            # 创建 ID 到更新节点的映射（用于快速查找激活值数据）
-            updated_map = {node.get('id'): node for node in updated_nodes if node.get('id')}
-
-            # 合并数据：保留所有原始节点（包括重复的），用更新后的激活值数据填充
-            merged_nodes = []
-            for original_node in original_nodes:
-                node_id = original_node.get('id')
-                if node_id and node_id in updated_map:
-                    # 从原始节点开始，用更新后的激活值数据覆盖
-                    merged_node = original_node.copy()
-
-                    # 更新激活值相关字段
-                    activation_fields = {
-                        'activation_value',
-                        'access_history',
-                        'last_access_time',
-                        'access_count',
-                        'importance_score',
-                        'version',
-                        'statement',  # Statement 节点的内容字段
-                        'content'  # MemorySummary 节点的内容字段
-                    }
-
-                    # 只更新激活值相关字段，保留原始节点的其他字段
-                    for field in activation_fields:
-                        if field in updated_map[node_id]:
-                            merged_node[field] = updated_map[node_id][field]
-
-                    merged_nodes.append(merged_node)
-                else:
-                    # 如果没有更新数据，保留原始节点
-                    merged_nodes.append(original_node)
-
-            updated_results[key] = merged_nodes
-        else:
-            # 更新失败，记录错误但保留原始结果
-            logger.warning(
-                f"更新 {key} 激活值失败: {str(update_result)}"
-            )
-
-    return updated_results
+    # return updated_results
 
 
 async def search_perceptual_by_fulltext(
@@ -283,46 +261,19 @@ async def search_perceptual_by_embedding(
         end_user_id: Optional[str] = None,
         limit: int = 10,
 ) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Search Perceptual memory nodes using embedding-based semantic search.
-
-    Uses cosine similarity on summary_embedding via the perceptual_summary_embedding_index.
-
-    Args:
-        connector: Neo4j connector
-        embedder_client: Embedding client with async response() method
-        query_text: Query text to embed
-        end_user_id: Optional user filter
-        limit: Max results
-
-    Returns:
-        Dictionary with 'perceptuals' key containing matched perceptual memory nodes
-    """
+    """Search Perceptual nodes using gds.similarity.cosine in Cypher."""
     embeddings = await embedder_client.response([query_text])
     if not embeddings or not embeddings[0]:
         logger.warning(f"search_perceptual_by_embedding: embedding generation failed for '{query_text[:50]}'")
         return {"perceptuals": []}
 
-    embedding = embeddings[0]
-
     try:
         perceptuals = await connector.execute_query(
-            SEARCH_PERCEPTUAL_BY_USER_ID,
+            COSINE_SEARCH_CYPHER_MAPPING[Neo4jNodeType.PERCEPTUAL],
             end_user_id=end_user_id,
+            embedding=embeddings[0],
+            limit=limit,
         )
-        ids = [item['id'] for item in perceptuals]
-        vectors = [item['summary_embedding'] for item in perceptuals]
-        sim_res = cosine_similarity_search(embedding, vectors, limit=limit)
-        perceptual_res = {
-            ids[idx]: score
-            for idx, score in sim_res.items()
-        }
-        perceptuals = await connector.execute_query(
-            SEARCH_PERCEPTUAL_BY_IDS,
-            ids=list(perceptual_res.keys())
-        )
-        for perceptual in perceptuals:
-            perceptual["score"] = perceptual_res[perceptual["id"]]
     except Exception as e:
         logger.warning(f"search_perceptual_by_embedding: vector search failed: {e}")
         perceptuals = []
@@ -357,28 +308,16 @@ async def search_by_embedding(
         query_embedding: list[float],
         limit: int = 10,
 ) -> list[dict[str, Any]]:
+    """Cosine similarity search using gds.similarity.cosine in Cypher, single query."""
     try:
         records = await connector.execute_query(
-            USER_ID_QUERY_CYPHER_MAPPING[node_type],
+            COSINE_SEARCH_CYPHER_MAPPING[node_type],
             end_user_id=end_user_id,
+            embedding=query_embedding,
+            limit=limit,
         )
-        records = [record for record in records if record and record.get("embedding") is not None]
-        ids = [item['id'] for item in records]
-        vectors = [item['embedding'] for item in records]
-        sim_res = cosine_similarity_search(query_embedding, vectors, limit=limit)
-        records_score_map = {
-            ids[idx]: score
-            for idx, score in sim_res.items()
-        }
-        records = await connector.execute_query(
-            NODE_ID_QUERY_CYPHER_MAPPING[node_type],
-            ids=list(records_score_map.keys()),
-            json_format=True
-        )
-        for record in records:
-            record["score"] = records_score_map[record["id"]]
     except Exception as e:
-        logger.warning(f"search_graph_by_embedding: vector search failed: {e}, node_type:{node_type.value}",
+        logger.warning(f"search_by_embedding: vector search failed: {e}, node_type:{node_type.value}",
                        exc_info=True)
         records = []
 
@@ -409,6 +348,21 @@ async def get_relation_between_entities(
         end_user_id=end_user_id,
         source_id=source_id,
         target_id=target_id
+    )
+
+
+async def get_relations_between_entity_pairs(
+        connector: Neo4jConnector,
+        end_user_id: str,
+        pairs: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    """Batch query relations for multiple (source_id, target_id) pairs using UNWIND."""
+    if not pairs:
+        return []
+    return await connector.execute_query(
+        SEARCH_RELATIONS_BETWEEN_ENTITY_PAIRS,
+        end_user_id=end_user_id,
+        pairs=pairs,
     )
 
 
@@ -586,13 +540,13 @@ async def search_graph_by_relationship(
         connector: Neo4jConnector,
         end_user_id: str,
         source_id: str,
-        predicate: str
+        predicates: list[int],
 ):
     related_node = await connector.execute_query(
         SEARCH_ENITITES_BY_RELATIONSHIP,
         end_user_id=end_user_id,
         source_id=source_id,
-        predicate=predicate,
+        predicates=predicates,
     )
     return related_node
 
