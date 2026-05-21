@@ -30,6 +30,7 @@ from app.schemas import file_schema
 from app.schemas.response_schema import ApiResponse
 from app.services import knowledge_service, document_service
 from app.services import file_service
+from app.services.file_service import _is_qa_doc, _build_qa_export
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
 from app.services.model_service import ModelConfigService
 from app.core.quota_stub import check_knowledge_capacity_quota
@@ -289,12 +290,21 @@ async def kb_batch_download(
             detail="该知识库下没有可下载的文件",
         )
 
+    # 预取 QA 文档内容
+    pre_fetched: dict[str, bytes] = {}
+    for f in files:
+        if _is_qa_doc(db, f.id):
+            result = _build_qa_export(db, f.id, f.kb_id)
+            if result:
+                content, _, _ = result
+                pre_fetched[f.file_key] = content
+
     entries = file_service.build_zip_arcnames(files)
     zip_name = file_service.make_zip_filename(files, request_body.zip_filename, base_name=db_knowledge.name)
 
     from urllib.parse import quote
     return StreamingResponse(
-        file_service.stream_zip_files(entries, storage_service, api_logger),
+        file_service.stream_zip_files(entries, storage_service, api_logger, pre_fetched),
         media_type="application/zip",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}",
