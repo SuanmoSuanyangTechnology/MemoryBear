@@ -791,7 +791,7 @@ class WritePipeline:
                             snap.file_name = memory.file_name
                             snap.file_ext = memory.file_ext
                             snap.perceptual_type = memory.perceptual_type
-                            snap.end_user_id = memory.end_user_id
+                            snap.end_user_id = self.end_user_id  # 使用当前 pipeline 的 end_user_id，确保 Perceptual 节点归属当前用户
                             snap.created_time = memory.created_time
                             file_object = snap
                         else:
@@ -813,8 +813,12 @@ class WritePipeline:
                             continue
 
                         # 注入 summary 到 content
+                        # 跳过已包含 summary 的情况（API 路径在写入 memory_messages 前已注入）
                         if file_object.summary:
-                            msg["content"] = (msg.get("content") or "") + f"<input-file-summary>{file_object.summary}</input-file-summary>"
+                            summary_tag = f"<input-file-summary>{file_object.summary}</input-file-summary>"
+                            current_content = msg.get("content") or ""
+                            if summary_tag not in current_content:
+                                msg["content"] = current_content + summary_tag
 
                         msg["file_content"].append((file_object, file_info.get("type", "")))
 
@@ -823,6 +827,90 @@ class WritePipeline:
                         f"[WritePipeline] 文件预处理失败: url={url}, err={e}",
                         exc_info=True,
                     )
+
+    async def _prune_target_message_user_side(
+        self,
+        messages: List[dict],
+        context_after_original: List[dict],
+        conversation_id: str,
+        pruning_pipeline: "PruningPipeline",
+    ) -> None:
+        """对 target_message 执行 User 侧 pruning（规整）。
+
+        当 target_message 的 content 包含 <input-file-summary> 标签或长文复制内容时，
+        pruning LLM 会判断 should_process_user_msg=true 并返回 processed_user_msg。
+        此时用 processed_user_msg 替换 target_message 的 content 进入后续流程。
+
+        配对逻辑：使用 context_after 中第一条原始 assistant 消息作为配对。
+        若 context_after 中没有 assistant 消息，则跳过 pruning。
+
+        Args:
+            messages: [target_message] 列表（原地修改）
+            context_after_original: 原始（未剪枝）的下文消息列表
+            conversation_id: 对话 ID
+            pruning_pipeline: 已初始化的 PruningPipeline 实例
+        """
+        if not messages:
+            return
+
+        target_msg = messages[0]
+        target_content = target_msg.get("content", "")
+
+        # 只有 content 中包含 <input-file-summary> 或内容较长时才需要 User 侧规整
+        if "<input-file-summary>" not in target_content and len(target_content) < 500:
+            logger.debug(
+                f"[WritePipeline] target_message User 侧 pruning 跳过: "
+                f"无 <input-file-summary> 且长度 {len(target_content)} < 500"
+            )
+            return
+
+        # 从原始 context_after 中找第一条 assistant 消息作为配对
+        assistant_content = ""
+        assistant_seq = 0
+        for msg in (context_after_original or []):
+            if msg.get("role") == "assistant":
+                assistant_content = msg.get("content", "")
+                assistant_seq = msg.get("message_seq", 0)
+                break
+
+        if not assistant_content:
+            # 没有配对的 assistant 消息，跳过 User 侧 pruning
+            logger.debug(
+                f"[WritePipeline] target_message User 侧 pruning 跳过: "
+                f"context_after 中无 assistant 消息"
+            )
+            return
+
+        logger.info(
+            f"[WritePipeline] target_message User 侧 pruning 开始: "
+            f"content_len={len(target_content)}, assistant_seq={assistant_seq}"
+        )
+
+        try:
+            # 直接调用 LLM 剪枝，不走缓存（避免与 _build_pruned_context 的缓存冲突）
+            _, _, should_process, processed_msg = await pruning_pipeline._call_llm_prune(
+                content=assistant_content,
+                user_content=target_content,
+            )
+
+            if should_process and processed_msg and processed_msg.strip():
+                logger.info(
+                    f"[WritePipeline] target_message User 侧规整完成: "
+                    f"原文长度={len(target_content)}, 规整后长度={len(processed_msg)}, "
+                    f"规整结果='{processed_msg[:80]}'"
+                )
+                messages[0]["content"] = processed_msg
+            else:
+                logger.info(
+                    f"[WritePipeline] target_message User 侧 pruning: LLM 判断无需规整 "
+                    f"(should_process={should_process})"
+                )
+        except Exception as e:
+            logger.warning(
+                f"[WritePipeline] target_message User 侧 pruning 失败（不影响主流程）: "
+                f"conv={conversation_id}, err={e}",
+                exc_info=True,
+            )
 
     # ──────────────────────────────────────────────
     # 辅助方法
@@ -985,6 +1073,21 @@ class WritePipeline:
         if not ref_id:
             ref_id = uuid.uuid4().hex
 
+        # 根据用户消息内容自动检测语言，确保输出语言与输入语言一致
+        import re
+        import langid
+        # 从目标消息和上下文中提取 user 内容进行语言检测
+        all_messages = (context_before or []) + [target_message] + (context_after or [])
+        user_content = " ".join(
+            re.sub(r"<input-file-summary>.*?</input-file-summary>", "", msg.get("content", ""), flags=re.DOTALL).strip()
+            for msg in all_messages
+            if isinstance(msg, dict) and msg.get("role") == "user" and msg.get("content")
+        )
+        if user_content:
+            detected = langid.classify(user_content)[0]
+            self.language = detected if detected in ("zh", "en") else "en"
+            logger.info(f"[LanguageDetect][run_with_window] detected={detected}, language={self.language}, text_len={len(user_content)}")
+
         _dialog_at = (
             dispatch_at
             or target_message.get("created_at", "")
@@ -1033,6 +1136,7 @@ class WritePipeline:
                         conversation_id=conversation_id,
                         pruning_pipeline=pruning_pipeline,
                         pruning_records=pruning_records,
+                        preceding_user_content=target_message.get("content", ""),
                     )
                     s.metadata(
                         before_count=len(context_before_pruned),
@@ -1050,6 +1154,17 @@ class WritePipeline:
                 await self._preprocess_files(messages)
                 await self._preprocess_files(context_before_pruned)
                 await self._preprocess_files(context_after_pruned)
+
+                # target_message User 侧 pruning：
+                # 如果 target_message 的 content 包含 <input-file-summary> 或长文复制内容，
+                # 使用 context_after 中紧邻的第一条原始 assistant 消息作为配对进行 User 侧规整。
+                # 规整后用 processed_user_msg 替换 target_message 的 content。
+                await self._prune_target_message_user_side(
+                    messages=messages,
+                    context_after_original=_after,
+                    conversation_id=conversation_id,
+                    pruning_pipeline=pruning_pipeline,
+                )
 
                 async with bear.step(2, 5, "预处理", "消息分块") as s:
                     from app.core.memory.agent.utils.get_dialogs import get_chunked_dialogs
@@ -1116,6 +1231,7 @@ class WritePipeline:
         conversation_id: str,
         pruning_pipeline: "PruningPipeline",
         pruning_records: Optional[list] = None,
+        preceding_user_content: str = "",
     ) -> List[dict]:
         """将消息列表中的 assistant 消息替换为剪枝后版本（A'），同时处理 user 消息规整。
 
@@ -1130,6 +1246,8 @@ class WritePipeline:
             conversation_id: 对话 ID
             pruning_pipeline: 已初始化的 PruningPipeline 实例
             pruning_records: 可选的列表，若传入则将剪枝记录追加到其中
+            preceding_user_content: 列表之前紧邻的 user 消息内容（用于 context_after
+                场景，将 target_message 的 content 传入，使列表首条 assistant 能配对）
 
         Returns:
             替换后的消息列表（Pruned_Context）
@@ -1137,7 +1255,7 @@ class WritePipeline:
         Requirements: 2.1, 2.3
         """
         # 预计算每条 assistant 消息紧邻的 user 消息内容
-        last_user_content = ""
+        last_user_content = preceding_user_content
         last_user_idx = -1
         prune_tasks: list = []  # (index, user_idx, coroutine)
         result: List[Optional[dict]] = [None] * len(messages)
