@@ -16,7 +16,7 @@ from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.enums import HttpErrorHandle
-from app.core.workflow.nodes.llm.config import LLMNodeConfig
+from app.core.workflow.nodes.llm.config import LLMNodeConfig, validate_llm_param_constraints
 from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_db_context
 from app.models import ModelType
@@ -78,11 +78,51 @@ class LLMNode(BaseNode):
         self.model_info: ModelInfo | None = None
 
     def _output_types(self) -> dict[str, VariableType]:
-        return {"output": VariableType.STRING, "branch_signal": VariableType.STRING}
+        return {
+            "output": VariableType.STRING,
+            "branch_signal": VariableType.STRING,
+            "reasoning_content": VariableType.STRING,
+            "token_usage": VariableType.OBJECT,
+        }
 
     def _render_context(self, message: str, variable_pool: VariablePool):
         context = f"<context>{self._render_template(self.typed_config.context, variable_pool)}</context>"
         return message.replace("{{context}}", context)
+
+    def _extract_reasoning_content(self, content: str) -> tuple[str, str]:
+        import re
+        pattern = r'<think>(.*?)</think>'
+        matches = re.findall(pattern, content, re.DOTALL)
+        reasoning_content = '\n'.join(matches)
+        cleaned_content = re.sub(pattern, '', content, flags=re.DOTALL).strip()
+        return cleaned_content, reasoning_content
+
+    def _is_inside_reasoning_block(self, text: str, pos: int) -> bool:
+        import re
+        think_ranges = [(m.start(), m.end()) for m in re.finditer(r'anzia(.*?)fin', text, re.DOTALL)]
+        for start, end in think_ranges:
+            if start <= pos < end:
+                return True
+        last_open = text.rfind('anzia')
+        last_close = text.rfind('fin')
+        if last_open != -1 and (last_close == -1 or last_open > last_close) and pos >= last_open:
+            return True
+        return False
+
+    def _apply_stop_sequences(self, text: str) -> tuple[str, bool]:
+        if not (self.typed_config.stop.enable and self.typed_config.stop.value):
+            return text, False
+        stop_sequences = self.typed_config.stop.value[:4]
+        for seq in stop_sequences:
+            idx = 0
+            while True:
+                pos = text.find(seq, idx)
+                if pos == -1:
+                    break
+                if not self._is_inside_reasoning_block(text, pos):
+                    return text[:pos], True
+                idx = pos + len(seq)
+        return text, False
 
     async def _prepare_llm(
             self,
@@ -127,13 +167,63 @@ class LLMNode(BaseNode):
             )
             self.model_info = model_info
 
+        param_warnings = validate_llm_param_constraints(
+            config=self.typed_config,
+            capability=model_info.capability or [],
+            provider=model_info.provider or "",
+            is_omni=model_info.is_omni,
+        )
+        if param_warnings:
+            for w in param_warnings:
+                logger.warning(f"节点 {self.node_id} 参数限制警告: {w} (模型={model_info.model_name}, 提供商={model_info.provider})")
+            self._param_warnings = param_warnings
+
         # 4. 创建 LLM 实例（使用已提取的数据）
         # 注意：对于流式输出，需要在模型初始化时设置 streaming=True
         extra_params: dict[str, Any] = {"streaming": stream} if stream else {}
+        
         if self.typed_config.temperature is not None:
             extra_params["temperature"] = self.typed_config.temperature
         if self.typed_config.max_tokens is not None:
             extra_params["max_tokens"] = self.typed_config.max_tokens
+        
+        if self.typed_config.top_p.enable and self.typed_config.top_p.value is not None:
+            extra_params["top_p"] = self.typed_config.top_p.value
+        if self.typed_config.top_k.enable and self.typed_config.top_k.value is not None:
+            extra_params["top_k"] = self.typed_config.top_k.value
+        if self.typed_config.seed.enable and self.typed_config.seed.value is not None:
+            extra_params["seed"] = self.typed_config.seed.value
+        if self.typed_config.repetition_penalty.enable and self.typed_config.repetition_penalty.value is not None:
+            extra_params["repetition_penalty"] = self.typed_config.repetition_penalty.value
+        if self.typed_config.frequency_penalty.enable and self.typed_config.frequency_penalty.value is not None:
+            extra_params["frequency_penalty"] = self.typed_config.frequency_penalty.value
+        if self.typed_config.presence_penalty.enable and self.typed_config.presence_penalty.value is not None:
+            extra_params["presence_penalty"] = self.typed_config.presence_penalty.value
+        if self.typed_config.stop.enable and self.typed_config.stop.value:
+            extra_params["stop"] = self.typed_config.stop.value[:4]
+        
+        if self.typed_config.search:
+            extra_params["enable_search"] = True
+
+        deep_thinking = self.typed_config.thinking.enable
+        thinking_budget_tokens = self.typed_config.thinking.budget.value if (
+            self.typed_config.thinking.budget.enable and self.typed_config.thinking.budget.value is not None
+        ) else None
+
+        json_output = self.typed_config.json_output or (
+            self.typed_config.response_format.enable and
+            self.typed_config.response_format.value == "json_object"
+        )
+        if self.typed_config.response_format.enable and self.typed_config.response_format.value == "text":
+            json_output = False
+
+        if self.typed_config.extra_headers.enable and self.typed_config.extra_headers.value:
+            try:
+                import json
+                extra_headers_dict = json.loads(self.typed_config.extra_headers.value)
+                extra_params["default_headers"] = extra_headers_dict
+            except json.JSONDecodeError as e:
+                logger.warning(f"节点 {self.node_id}: 额外请求头 JSON 解析失败: {e}")
 
         llm = RedBearLLM(
             RedBearModelConfig(
@@ -141,10 +231,12 @@ class LLMNode(BaseNode):
                 provider=model_info.provider,
                 api_key=model_info.api_key,
                 base_url=model_info.api_base,
-                extra_params=extra_params,
                 is_omni=model_info.is_omni,
                 capability=model_info.capability,
-                json_output=self.typed_config.json_output,
+                deep_thinking=deep_thinking,
+                thinking_budget_tokens=thinking_budget_tokens,
+                json_output=json_output,
+                extra_params=extra_params,
             ),
             type=model_info.model_type
         )
@@ -229,7 +321,7 @@ class LLMNode(BaseNode):
 
         # ChatTongyi 要求 messages 含 'json' 字样才能使用 response_format，在 system prompt 中注入
         # VOLCANO 模型不支持 response_format，同样需要 system prompt 注入
-        need_json_prompt = self.typed_config.json_output and (
+        need_json_prompt = json_output and (
             (model_info.provider.lower() == ModelProvider.DASHSCOPE and not model_info.is_omni)
             or model_info.provider.lower() == ModelProvider.VOLCANO
         )
@@ -253,33 +345,62 @@ class LLMNode(BaseNode):
             dict: {"llm_result": AIMessage, "branch_signal": "SUCCESS"} on success,
                   {"llm_result": None, "branch_signal": "ERROR"} on branch error
         """
-        try:
-            # self.typed_config = LLMNodeConfig(**self.config)
-            llm = await self._prepare_llm(state, variable_pool, False)
+        import asyncio
+        
+        llm = await self._prepare_llm(state, variable_pool, False)
+        max_attempts = self.typed_config.retry.max_attempts + 1 if self.typed_config.retry.enable else 1
+        last_error = None
+        
+        for attempt in range(max_attempts):
+            try:
+                logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（非流式），尝试 {attempt + 1}/{max_attempts}")
 
-            logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（非流式）")
+                response = await llm.ainvoke(self.messages)
+                
+                if hasattr(response, 'content'):
+                    content = self.process_model_output(response.content)
+                else:
+                    content = str(response)
+                
+                reasoning_content = ""
+                if self.typed_config.enable_reasoning_content_extraction:
+                    additional_kwargs = getattr(response, 'additional_kwargs', None) or {}
+                    reasoning_content = additional_kwargs.get("reasoning_content") or additional_kwargs.get("reasoning", "")
+                    if reasoning_content:
+                        content, _ = self._extract_reasoning_content(content)
+                    else:
+                        content, reasoning_content = self._extract_reasoning_content(content)
 
-            # 调用 LLM（支持字符串或消息列表）
-            response = await llm.ainvoke(self.messages)
-            # 提取内容
-            if hasattr(response, 'content'):
-                content = self.process_model_output(response.content)
-            else:
-                content = str(response)
+                content, _ = self._apply_stop_sequences(content)
 
-            logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(content)}")
+                logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(content)}")
 
-            # 返回 AIMessage（包含响应元数据）
-            return {
-                "llm_result": AIMessage(content=content, response_metadata={
-                    **response.response_metadata,
-                    "token_usage": getattr(response, 'usage_metadata', None) or response.response_metadata.get('token_usage')
-                }),
-                "branch_signal": "SUCCESS",
-            }
-        except Exception as e:
-            logger.error(f"节点 {self.node_id} LLM 调用失败: {e}")
-            return self._handle_llm_error(e)
+                result = {
+                    "llm_result": AIMessage(content=content, response_metadata={
+                        **response.response_metadata,
+                        "token_usage": getattr(response, 'usage_metadata', None) or response.response_metadata.get('token_usage'),
+                        "reasoning_content": reasoning_content if reasoning_content else None
+                    }),
+                    "branch_signal": "SUCCESS",
+                }
+                
+                result["reasoning_content"] = reasoning_content
+                
+                if hasattr(self, '_param_warnings') and self._param_warnings:
+                    result["param_warnings"] = self._param_warnings
+                
+                return result
+                
+            except Exception as e:
+                last_error = e
+                logger.error(f"节点 {self.node_id} LLM 调用失败（尝试 {attempt + 1}/{max_attempts}）: {e}")
+                
+                if attempt < max_attempts - 1 and self.typed_config.retry.enable:
+                    await asyncio.sleep(self.typed_config.retry.retry_interval / 1000)
+                else:
+                    break
+        
+        return self._handle_llm_error(last_error)
 
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """提取输入数据（用于记录）"""
@@ -311,24 +432,38 @@ class LLMNode(BaseNode):
         """从业务结果中提取输出变量
         
         支持新旧两种格式：
-        - 新格式：{"llm_result": AIMessage, "branch_signal": "SUCCESS"}
+        - 新格式：{"llm_result": AIMessage, "branch_signal": "SUCCESS", "reasoning_content": "..."}
         - 旧格式：AIMessage（向后兼容）
         """
         if isinstance(business_result, dict) and "branch_signal" in business_result:
             llm_result = business_result.get("llm_result")
+            result = {}
             if isinstance(llm_result, AIMessage):
-                return {
+                result = {
                     "output": llm_result.content,
                     "branch_signal": business_result["branch_signal"],
                 }
-            return {
-                "output": str(llm_result) if llm_result else "",
-                "branch_signal": business_result["branch_signal"],
-            }
+            else:
+                result = {
+                    "output": str(llm_result) if llm_result else "",
+                    "branch_signal": business_result["branch_signal"],
+                }
+            result["reasoning_content"] = business_result.get("reasoning_content") or ""
+            if business_result.get("param_warnings"):
+                result["param_warnings"] = business_result["param_warnings"]
+            token_usage = self._extract_token_usage(business_result)
+            result["token_usage"] = token_usage or {}
+            return result
         # 旧格式向后兼容
         if isinstance(business_result, AIMessage):
-            return {"output": business_result.content, "branch_signal": "SUCCESS"}
-        return {"output": str(business_result), "branch_signal": "SUCCESS"}
+            result = {
+                "output": business_result.content,
+                "branch_signal": "SUCCESS",
+                "reasoning_content": "",
+                "token_usage": self._extract_token_usage(business_result) or {},
+            }
+            return result
+        return {"output": str(business_result), "branch_signal": "SUCCESS", "reasoning_content": "", "token_usage": {}}
 
     def _extract_token_usage(self, business_result: Any) -> dict[str, int] | None:
         """从业务结果中提取 token 使用情况"""
@@ -403,6 +538,8 @@ class LLMNode(BaseNode):
             # 累积完整响应
             full_response = ""
             chunk_count = 0
+            full_reasoning_content = ""
+            stop_sequences = self.typed_config.stop.value[:4] if (self.typed_config.stop.enable and self.typed_config.stop.value) else None
 
             # 调用 LLM（流式，支持字符串或消息列表）
             last_meta_data = {}
@@ -416,10 +553,37 @@ class LLMNode(BaseNode):
                     last_meta_data = chunk.response_metadata
                 if hasattr(chunk, 'usage_metadata') and chunk.usage_metadata:
                     last_usage_metadata = chunk.usage_metadata
-
+                if self.typed_config.enable_reasoning_content_extraction:
+                    additional_kwargs = getattr(chunk, 'additional_kwargs', None) or {}
+                    reasoning_chunk = additional_kwargs.get("reasoning_content") or additional_kwargs.get("reasoning", "")
+                    if reasoning_chunk:
+                        full_reasoning_content += reasoning_chunk
+                
                 # 只有当内容不为空时才处理
                 if content:
                     full_response += content
+                    
+                    if stop_sequences:
+                        truncated = False
+                        truncated_pos = -1
+                        for seq in stop_sequences:
+                            idx = 0
+                            while True:
+                                pos = full_response.find(seq, idx)
+                                if pos == -1:
+                                    break
+                                if not self._is_inside_reasoning_block(full_response, pos):
+                                    truncated_pos = pos
+                                    truncated = True
+                                    break
+                                idx = pos + len(seq)
+                            if truncated:
+                                break
+                        if truncated:
+                            full_response = full_response[:truncated_pos]
+                            chunk_count += 1
+                            break
+
                     chunk_count += 1
 
                     # 流式返回每个文本片段
@@ -433,6 +597,17 @@ class LLMNode(BaseNode):
                 "chunk": "",
                 "done": True
             }
+            
+            reasoning_content = ""
+            if self.typed_config.enable_reasoning_content_extraction:
+                if full_reasoning_content:
+                    reasoning_content = full_reasoning_content
+                    full_response, _ = self._extract_reasoning_content(full_response)
+                else:
+                    full_response, reasoning_content = self._extract_reasoning_content(full_response)
+            
+            full_response, _ = self._apply_stop_sequences(full_response)
+            
             logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(full_response)}, 总 chunks: {chunk_count}")
 
             # 构建完整的 AIMessage（包含元数据）
@@ -440,12 +615,18 @@ class LLMNode(BaseNode):
                 content=full_response,
                 response_metadata={
                     **last_meta_data,
-                    "token_usage": last_usage_metadata or last_meta_data.get('token_usage')
+                    "token_usage": last_usage_metadata or last_meta_data.get('token_usage'),
+                    "reasoning_content": reasoning_content if reasoning_content else None
                 }
             )
 
-            # yield 完成标记
-            yield {"__final__": True, "result": {"llm_result": final_message, "branch_signal": "SUCCESS"}}
+            result = {"llm_result": final_message, "branch_signal": "SUCCESS"}
+            result["reasoning_content"] = reasoning_content
+            
+            if hasattr(self, '_param_warnings') and self._param_warnings:
+                result["param_warnings"] = self._param_warnings
+            
+            yield {"__final__": True, "result": result}
         except Exception as e:
             logger.error(f"节点 {self.node_id} LLM 流式调用失败: {e}")
             error_result = self._handle_llm_error(e)
