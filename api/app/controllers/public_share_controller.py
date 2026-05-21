@@ -19,7 +19,7 @@ from app.models.app_model import AppType
 from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.workflow_repository import WorkflowConfigRepository
-from app.schemas import release_share_schema, conversation_schema
+from app.schemas import release_share_schema, conversation_schema, app_schema
 from app.schemas.response_schema import PageData, PageMeta
 from app.services import workspace_service
 from app.services.app_chat_service import AppChatService, get_app_chat_service
@@ -32,6 +32,8 @@ from app.services.workflow_service import WorkflowService
 from app.models.file_metadata_model import FileMetadata
 from app.utils.app_config_utils import workflow_config_4_app_release, \
     agent_config_4_app_release, multi_agent_config_4_app_release
+from app.services.message_feedback_service import FeedbackService
+from app.models import Message
 
 router = APIRouter(prefix="/public/share", tags=["Public Share"])
 logger = get_business_logger()
@@ -307,10 +309,38 @@ def get_conversation(
         m = messages[idx]
         m.meta_data["audio_status"] = file_status_map.get(file_id, "unknown")
 
+    # 批量查询当前用户对所有助手消息的反馈
+    message_ids = [m.id for m in messages if m.role == "assistant"]
+    user_feedback_map = {}
+    if message_ids:
+        from app.models.message_feedback_model import MessageFeedback
+        feedbacks = db.query(MessageFeedback).filter(
+            MessageFeedback.message_id.in_(message_ids),
+            MessageFeedback.user_id == share_data.user_id,
+        ).all()
+        user_feedback_map = {f.message_id: (f.feedback_type, f.feedback_content) for f in feedbacks}
+
+    # 构建消息响应列表
+    message_responses = []
+    for m in messages:
+        feedback_type, feedback_content = (None, None)
+        if m.role == "assistant" and m.id in user_feedback_map:
+            feedback_type, feedback_content = user_feedback_map[m.id]
+        
+        message_responses.append(conversation_schema.Message(
+            id=m.id,
+            conversation_id=m.conversation_id,
+            role=m.role,
+            content=m.content,
+            status=m.status,
+            meta_data=m.meta_data,
+            created_at=m.created_at,
+            feedback_type=feedback_type,
+            feedback_content=feedback_content,
+        ))
+
     conv_dict = conversation_schema.Conversation.model_validate(conversation).model_dump(mode="json")
-    conv_dict["messages"] = [
-        conversation_schema.Message.model_validate(m) for m in messages
-    ]
+    conv_dict["messages"] = message_responses
 
     return success(data=conv_dict)
 
@@ -685,3 +715,60 @@ async def config_query(
     else:
         return fail(msg="Unsupported app type", code=BizCode.APP_TYPE_NOT_SUPPORTED)
     return success(data=content)
+
+
+# ---------- 消息反馈接口 ----------
+
+@router.post(
+    "/messages/{message_id}/feedback",
+    summary="提交消息反馈"
+)
+async def submit_message_feedback(
+        message_id: uuid.UUID,
+        payload: app_schema.MessageFeedbackRequest,
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
+):
+    """点赞/点踩 AI 回复（公开分享场景）
+
+    幂等设计：重复点击可切换取消
+    - 点赞：用户对满意的 AI 回复给予正面反馈
+    - 点踩：用户对不满意的 AI 回复给予负面反馈，可附加文字说明
+    """
+    # 验证消息存在
+    message = db.get(Message, message_id)
+    if not message:
+        raise BusinessException("消息不存在", BizCode.NOT_FOUND)
+
+    # 通过 share_token 获取 workspace_id
+    service = SharedChatService(db)
+    share, release = service.get_release_by_share_token(share_data.share_token, None)
+    workspace_id = release.app.workspace_id
+
+    feedback_service = FeedbackService(db)
+    result = feedback_service.submit_feedback(
+        message_id=message_id,
+        conversation_id=message.conversation_id,
+        workspace_id=workspace_id,
+        user_id=share_data.user_id,
+        feedback_type=payload.feedback_type,
+        feedback_content=payload.feedback_content,
+    )
+
+    return success(data=app_schema.MessageFeedbackResponse(**result))
+
+
+@router.get(
+    "/messages/{message_id}/feedback",
+    summary="获取用户对消息的反馈"
+)
+async def get_user_feedback(
+        message_id: uuid.UUID,
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
+):
+    """获取当前用户对某条消息的反馈状态"""
+    feedback_service = FeedbackService(db)
+    result = feedback_service.get_user_feedback(message_id, share_data.user_id)
+
+    return success(data=result)

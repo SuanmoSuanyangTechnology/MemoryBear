@@ -1,9 +1,14 @@
+import asyncio
+import logging
+
 from app.core.memory.enums import SearchStrategy, StorageType
 from app.core.memory.models.service_models import MemorySearchResult
 from app.core.memory.pipelines.base_pipeline import ModelClientMixin, DBRequiredPipeline
 from app.core.memory.read_services.generate_engine.query_preprocessor import QueryPreprocessor
 from app.core.memory.read_services.generate_engine.retrieval_summary import RetrievalSummaryProcessor
 from app.core.memory.read_services.search_engine.content_search import Neo4jSearchService, RAGSearchService
+
+logger = logging.getLogger(__name__)
 
 
 class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
@@ -16,7 +21,7 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
             includes=None
     ) -> MemorySearchResult:
         memory_l0 = None
-        if self.ctx.storage_type == StorageType.NEO4J:  
+        if self.ctx.storage_type == StorageType.NEO4J:
             memory_l0 = await self._get_search_service(includes).memory_l0()
 
         query = QueryPreprocessor.process(query)
@@ -40,6 +45,7 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
             return Neo4jSearchService(
                 self.ctx,
                 self.get_embedding_client(self.db, self.ctx.memory_config.embedding_model_id),
+                self.get_llm_client(self.db, self.ctx.memory_config.llm_model_id),
                 includes=includes,
             )
         else:
@@ -57,8 +63,22 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
         )
         query_results = []
         for question in questions:
-            search_results = await search_service.search(question, limit)
-            query_results.append(search_results)
+            hybrid_task = search_service.hybrid_search(question, limit)
+            relation_task = search_service.relation_search(question)
+            hybrid_search_results, relation_results = await asyncio.gather(
+                hybrid_task, relation_task, return_exceptions=True
+            )
+
+            if isinstance(hybrid_search_results, Exception):
+                logger.warning(f"[DeepRead] hybrid search error: {hybrid_search_results}")
+                hybrid_search_results = MemorySearchResult(memories=[])
+
+            if isinstance(relation_results, Exception):
+                logger.warning(f"[DeepRead] relation search error: {relation_results}")
+                relation_results = MemorySearchResult(memories=[])
+
+            merged = hybrid_search_results + relation_results
+            query_results.append(merged)
         results = sum(query_results, start=MemorySearchResult(memories=[]))
         results.memories.sort(key=lambda x: x.score, reverse=True)
         results.content_str = await RetrievalSummaryProcessor.summary(
@@ -77,7 +97,7 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
         )
         query_results = []
         for question in questions:
-            search_results = await search_service.search(question, limit)
+            search_results = await search_service.hybrid_search(question, limit)
             query_results.append(search_results)
         results = sum(query_results, start=MemorySearchResult(memories=[]))
         results.memories.sort(key=lambda x: x.score, reverse=True)
@@ -90,4 +110,4 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
 
     async def _quick_read(self, query: str, limit: int, includes=None) -> MemorySearchResult:
         search_service = self._get_search_service(includes)
-        return await search_service.search(query, limit)
+        return await search_service.hybrid_search(query, limit)

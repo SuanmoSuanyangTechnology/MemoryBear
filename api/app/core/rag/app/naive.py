@@ -48,7 +48,7 @@ def by_mineru(filename, binary=None, from_page=0, to_page=100000, lang="Chinese"
     mineru_api = os.environ.get("MINERU_APISERVER", "http://host.docker.internal:9987")
     pdf_parser = MinerUParser(mineru_path=mineru_executable, mineru_api=mineru_api)
 
-    if not pdf_parser.check_installation():
+    if not pdf_parser.check_installation()[0]:
         callback(-1, "MinerU not found.")
         return None, None, pdf_parser
 

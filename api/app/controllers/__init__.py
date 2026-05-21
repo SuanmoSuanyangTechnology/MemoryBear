@@ -34,6 +34,7 @@ from . import (
     memory_short_term_controller,
     memory_storage_controller,
     memory_working_controller,
+    message_interaction_controller,
     model_controller,
     multi_agent_controller,
     prompt_optimizer_controller,
@@ -103,5 +104,6 @@ manager_router.include_router(skill_controller.router)
 manager_router.include_router(i18n_controller.router)
 manager_router.include_router(tenant_subscription_controller.router)
 manager_router.include_router(tenant_subscription_controller.public_router)
+manager_router.include_router(message_interaction_controller.router)  # 消息交互功能
 
 __all__ = ["manager_router"]

@@ -1,9 +1,9 @@
-"""Ontology 服务接口 �?基于 API Key 认证
+"""Ontology 服务接口 基于 API Key 认证
 
-包装 ontology_controller.py 中的内部接口，提供基�?API Key 认证的对外服务�?
+包装 ontology_controller.py 中的内部接口，提供基API Key 认证的对外服务
 
 路由前缀: /memory/ontology
-最终路�? /v1/memory/ontology/...
+最终路 /v1/memory/ontology/...
 认证方式: API Key (@require_api_key)
 """
 

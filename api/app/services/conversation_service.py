@@ -3,7 +3,7 @@ import os
 import uuid
 from datetime import datetime, timedelta
 from typing import Annotated
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Any
 
 import json_repair
 from fastapi import Depends
@@ -452,6 +452,134 @@ class ConversationService:
         )
 
         return conversation
+
+    async def delete_message(
+            self,
+            message_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+    ) -> None:
+        """删除单条消息（逻辑删除）
+
+        Args:
+            message_id: 消息ID
+            workspace_id: 工作空间ID
+        """
+        message = self.db.get(Message, message_id)
+        if not message:
+            raise BusinessException("消息不存在", BizCode.NOT_FOUND)
+
+        # 权限校验：验证会话属于当前工作空间
+        conv = self.db.get(Conversation, message.conversation_id)
+        if conv.workspace_id != workspace_id:
+            raise BusinessException("无权删除此消息", BizCode.PERMISSION_DENIED)
+
+        message.is_deleted = True
+        self.db.commit()
+
+        logger.info(
+            "消息已删除",
+            extra={
+                "message_id": str(message_id),
+                "workspace_id": str(workspace_id),
+            }
+        )
+
+    def get_message_versions(
+            self,
+            message_id: uuid.UUID,
+    ) -> List[Dict[str, Any]]:
+        """获取消息的所有版本
+
+        Args:
+            message_id: 消息ID
+
+        Returns:
+            List[Dict]: 版本列表
+        """
+        message = self.db.get(Message, message_id)
+        if not message:
+            raise BusinessException("消息不存在", BizCode.NOT_FOUND)
+
+        # 查询同一 parent_message_id 下的所有版本
+        if message.parent_message_id:
+            versions = self.db.query(Message).filter(
+                Message.parent_message_id == message.parent_message_id,
+                Message.role == "assistant",
+                Message.is_deleted == False,
+            ).order_by(Message.version).all()
+        else:
+            # 如果没有 parent_message_id，则只返回自己
+            versions = [message]
+
+        return [
+            {
+                "message_id": str(v.id),
+                "version": v.version,
+                "is_current": v.is_current,
+                "content": v.content,
+                "created_at": int(v.created_at.timestamp() * 1000),
+            }
+            for v in versions
+        ]
+
+    def switch_message_version(
+            self,
+            message_id: uuid.UUID,
+            version: int,
+            workspace_id: uuid.UUID,
+    ) -> Dict[str, Any]:
+        """切换消息版本
+
+        Args:
+            message_id: 当前消息ID
+            version: 目标版本号
+            workspace_id: 工作空间ID
+
+        Returns:
+            Dict: 切换后的消息信息
+        """
+        current_msg = self.db.get(Message, message_id)
+        if not current_msg:
+            raise BusinessException("消息不存在", BizCode.NOT_FOUND)
+
+        # 验证权限
+        conv = self.db.get(Conversation, current_msg.conversation_id)
+        if conv.workspace_id != workspace_id:
+            raise BusinessException("无权操作此消息", BizCode.PERMISSION_DENIED)
+
+        # 查找目标版本
+        if current_msg.parent_message_id:
+            target_msg = self.db.query(Message).filter(
+                Message.parent_message_id == current_msg.parent_message_id,
+                Message.role == "assistant",
+                Message.version == version,
+                Message.is_deleted == False,
+            ).first()
+        else:
+            target_msg = current_msg if current_msg.version == version else None
+
+        if not target_msg:
+            raise BusinessException("版本不存在", BizCode.NOT_FOUND)
+
+        # 切换 is_current
+        if current_msg.parent_message_id:
+            # 先将所有版本设为非当前
+            all_versions = self.db.query(Message).filter(
+                Message.parent_message_id == current_msg.parent_message_id,
+                Message.role == "assistant",
+            ).all()
+            for v in all_versions:
+                v.is_current = False
+
+            # 设置目标版本为当前
+            target_msg.is_current = True
+            self.db.commit()
+
+        return {
+            "message_id": str(target_msg.id),
+            "version": target_msg.version,
+            "content": target_msg.content,
+        }
 
     async def get_conversation_detail(
             self,

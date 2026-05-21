@@ -52,12 +52,12 @@ class MemoryConfig(Base):
     chunker_strategy = Column(String, default="RecursiveChunker", comment="分块策略")
 
     # 剪枝配置
-    pruning_enabled = Column(Boolean, default=False, comment="是否启动智能语义剪枝")
+    pruning_enabled = Column(Boolean, default=True, comment="是否启动智能语义剪枝")
     pruning_scene = Column(String, nullable=True, comment="智能剪枝场景：education/online_service/outbound")
     pruning_threshold = Column(Float, nullable=True, comment="智能语义剪枝阈值（0-0.9）")
 
     # 自我反思配置
-    enable_self_reflexion = Column(Boolean, default=False, comment="是否启用自我反思")
+    enable_self_reflexion = Column(Boolean, default=True, comment="是否启用自我反思")
     iteration_period = Column(String, default="3", comment="反思迭代周期")
     reflexion_range = Column(String, default="partial", comment="反思范围：部分/全部")
     baseline = Column(String, default="TIME", comment="基线：时间/事实/时间和事实")

@@ -1,4 +1,6 @@
 import asyncio
+import csv as csv_module
+import io
 import struct
 import uuid
 import zlib
@@ -93,19 +95,93 @@ def delete_file_by_id(db: Session, file_id: uuid.UUID, current_user: User) -> No
         raise
 
 
+def _is_qa_doc(db: Session, file_id: uuid.UUID) -> bool:
+    """文件关联的文档是否为 QA CSV/XLSX 导入类型"""
+    from app.models.document_model import Document
+    doc = db.query(Document).filter(Document.file_id == file_id).first()
+    if not doc or not doc.parser_config:
+        return False
+    return doc.parser_config.get("doc_type") == "qa"
+
+
+def _build_qa_export(db: Session, file_id: uuid.UUID, kb_id: uuid.UUID) -> tuple[bytes, str, str] | None:
+    """从 ES 导出 QA 问答对，保留原始文件格式（CSV 或 XLSX）。
+    返回 (content_bytes, filename, media_type)，文档非 QA 类型或无数据时返回 None。
+    """
+    from app.models.document_model import Document
+    from app.models.knowledge_model import Knowledge
+    from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
+
+    db_file = db.query(File).filter(File.id == file_id).first()
+    doc = db.query(Document).filter(Document.file_id == file_id).first()
+    if not db_file or not doc:
+        return None
+
+    db_knowledge = db.query(Knowledge).filter(Knowledge.id == kb_id).first()
+    if not db_knowledge:
+        return None
+
+    vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+    _, items = vector_service.search_by_segment(
+        document_id=str(doc.id), pagesize=10000, page=1, asc=True
+    )
+
+    qa_pairs = []
+    for item in items:
+        if (item.metadata or {}).get("chunk_type") == "qa":
+            qa_pairs.append({
+                "question": (item.metadata or {}).get("question", ""),
+                "answer": (item.metadata or {}).get("answer", ""),
+            })
+
+    if not qa_pairs:
+        return None
+
+    file_ext_lower = db_file.file_ext.lower() if db_file.file_ext else ".csv"
+    is_xlsx = file_ext_lower in (".xlsx", ".xls")
+
+    if is_xlsx:
+        import openpyxl
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["question", "answer"])
+        for pair in qa_pairs:
+            ws.append([pair["question"], pair["answer"]])
+        output = io.BytesIO()
+        wb.save(output)
+        content = output.getvalue()
+        wb.close()
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    else:
+        text_output = io.StringIO()
+        writer = csv_module.writer(text_output)
+        writer.writerow(["question", "answer"])
+        for pair in qa_pairs:
+            writer.writerow([pair["question"], pair["answer"]])
+        content = text_output.getvalue().encode("utf-8-sig")
+        media_type = "text/csv"
+
+    return content, db_file.file_name, media_type
+
+
 def build_zip_arcnames(files: list[Any]) -> list[tuple[str, str, str]]:
     """同名文件自动去重，返回 [(file_name, file_key, arc_name), ...]"""
-    name_counter: dict[str, int] = {}
+    seen: set[str] = set()
     result: list[tuple[str, str, str]] = []
 
     def unique_name(original: str) -> str:
-        if original not in name_counter:
-            name_counter[original] = 0
+        if original not in seen:
+            seen.add(original)
             return original
-        name_counter[original] += 1
         stem, *ext_parts = original.rsplit(".", 1)
         ext = f".{ext_parts[0]}" if ext_parts else ""
-        return f"{stem}_{name_counter[original]}{ext}"
+        counter = 1
+        while True:
+            candidate = f"{stem}_{counter}{ext}"
+            if candidate not in seen:
+                seen.add(candidate)
+                return candidate
+            counter += 1
 
     for f in files:
         result.append((f.file_name, f.file_key, unique_name(f.file_name)))
@@ -130,9 +206,13 @@ async def stream_zip_files(
     entries: list[tuple[str, str, str]],  # [(file_name, file_key, arc_name), ...]
     storage_service: Any,
     logger: Logger,
+    pre_fetched: dict[str, bytes] | None = None,
 ) -> AsyncGenerator[bytes, None]:
     """逐文件下载 → 实时 deflate 压缩 → yield ZIP 数据块，全程不落盘。
-    单个文件下载失败时跳过并记录，最终 ZIP 内含 _skipped_files.txt 清单。"""
+    单个文件下载失败时跳过并记录，最终 ZIP 内含 _skipped_files.txt 清单。
+
+    pre_fetched: key=file_key 的预取内容字典，QA 文档命中时直接用，不走 storage 下载。
+    """
 
     central_entries: list[tuple[bytes, int, int, int, int]] = []
     skipped_files: list[str] = []
@@ -140,34 +220,37 @@ async def stream_zip_files(
 
     for file_name, file_key, arc_name in entries:
         try:
-            async with asyncio.timeout(120):
-                content = await storage_service.download_file(file_key)
+            if pre_fetched and file_key in pre_fetched:
+                content = pre_fetched[file_key]
+            else:
+                async with asyncio.timeout(120):
+                    content = await storage_service.download_file(file_key)
+
+            arc_name_bytes = arc_name.encode("utf-8")
+            crc = zlib.crc32(content) & 0xFFFFFFFF
+            uncompressed_size = len(content)
+            compressor = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -15)
+            compressed_data = compressor.compress(content) + compressor.flush()
+            compressed_size = len(compressed_data)
+
+            local_header = struct.pack(
+                "<4sHHHHHIIIHH",
+                b"PK\x03\x04", 20, 0x08, 8, 0, 0, 0, 0, 0, len(arc_name_bytes), 0,
+            ) + arc_name_bytes
+
+            yield local_header
+            yield compressed_data
+
+            descriptor = struct.pack("<III", crc, compressed_size, uncompressed_size)
+            yield descriptor
+
+            header_data_len = len(local_header) + compressed_size
+            central_entries.append((arc_name_bytes, crc, compressed_size, uncompressed_size, offset))
+            offset += header_data_len + 12
         except Exception as e:
             logger.warning(f"跳过文件 {file_name}: {e}")
             skipped_files.append(file_name)
             continue
-
-        arc_name_bytes = arc_name.encode("utf-8")
-        crc = zlib.crc32(content) & 0xFFFFFFFF
-        uncompressed_size = len(content)
-        compressor = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -15)
-        compressed_data = compressor.compress(content) + compressor.flush()
-        compressed_size = len(compressed_data)
-
-        local_header = struct.pack(
-            "<4sHHHHHIIIHH",
-            b"PK\x03\x04", 20, 0x08, 8, 0, 0, 0, 0, 0, len(arc_name_bytes), 0,
-        ) + arc_name_bytes
-
-        yield local_header
-        yield compressed_data
-
-        descriptor = struct.pack("<III", crc, compressed_size, uncompressed_size)
-        yield descriptor
-
-        header_data_len = len(local_header) + compressed_size
-        central_entries.append((arc_name_bytes, crc, compressed_size, uncompressed_size, offset))
-        offset += header_data_len + 12
 
     # --- skipped_files manifest ---
     if skipped_files:

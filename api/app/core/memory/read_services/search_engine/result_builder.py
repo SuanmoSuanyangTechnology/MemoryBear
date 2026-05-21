@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import TypeVar
 
 from app.core.memory.enums import Neo4jNodeType
+from app.core.memory.models.service_models import RelationMemory
 
 
 class BaseBuilder(ABC):
@@ -144,7 +145,7 @@ class PerceptualBuilder(BaseBuilder):
 
     @property
     def content(self) -> str:
-        parts = ["<history-file-info>"]
+        parts = ["<history-file-input>"]
         fields = [
             ("file-name", self.record.get("file_name", "")),
             ("file-path", self.record.get("file_path", "")),
@@ -157,7 +158,7 @@ class PerceptualBuilder(BaseBuilder):
         for tag, value in fields:
             if value:
                 parts.append(f"<{tag}>{value}</{tag}>")
-        parts.append("</history-file-info>")
+        parts.append("</history-file-input>")
         return "".join(parts)
 
 
@@ -205,7 +206,7 @@ class MetadataBuilder(BaseBuilder):
     def content(self) -> str:
         parts = ["<user-info>"]
         fields = [
-            ("description", self.record.get("description", "")),
+            # ("description", self.record.get("description", "")),
             ("aliases", self.record.get("aliases", [])),
             ("anchors", self.record.get("anchors", [])),
             ("beliefs_or_stances", self.record.get("beliefs_or_stances", [])),
@@ -239,3 +240,18 @@ def data_builder_factory(node_type, data: dict) -> T:
             return CommunityBuilder(data)
         case _:
             raise KeyError(f"Unknown node_type: {node_type}")
+
+
+def build_relation_content(rel: RelationMemory) -> str:
+    parts = ["<relationship>"]
+    fields = [
+        ("source", rel.source),
+        ("relation", rel.relation),
+        ("target", rel.target),
+        ("target_desc", rel.target_desc),
+    ]
+    for tag, value in fields:
+        if value:
+            parts.append(f"<{tag}>{value}</{tag}>")
+    parts.append("</relationship>")
+    return "".join(parts)

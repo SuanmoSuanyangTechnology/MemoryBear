@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 15:09:57
+ * @Last Modified time: 2026-05-15 18:52:30
  */
 /**
  * Conversation Page
@@ -18,7 +18,7 @@ import { Flex, Skeleton, App, Tooltip, Space } from 'antd'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 
-import { getConversationHistory, sendConversation, getConversationDetail, getShareToken, getExperienceConfig } from '@/api/application'
+import { getConversationHistory, sendConversation, getConversationDetail, getShareToken, getExperienceConfig, feedbackMessage } from '@/api/application'
 import type { HistoryItem } from './types'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
@@ -680,6 +680,26 @@ const Conversation: FC = () => {
     )
   }
 
+  const handleFeedback = (feedbackType: 'like' | 'dislike', id?: string) => {
+    if (!token || !conversation_id || !id) return
+    feedbackMessage(token, id, { feedback_type: feedbackType })
+      .then((res) => {
+        const { feedback_type } = res as { feedback_type: 'like' | 'dislike' | null; }
+        messageApi.success( feedback_type === 'dislike'
+          ? t('memoryConversation.dislikeMsg')
+          : feedback_type === 'like'
+          ? t('memoryConversation.likeMsg')
+          : t('memoryConversation.cancelMsg')
+        )
+        setChatList(prev => prev.map(item => item.id === id
+          ? {
+            ...item,
+            feedback_type,
+          }
+          : item))
+      })
+  }
+
   console.log(chatList)
   return (
     <Flex className="rb:w-full rb:p-[-16px]!">
@@ -753,6 +773,7 @@ const Conversation: FC = () => {
               toolbarRef.current?.setFiles(list || [])
             }}
             isSupportTools={true}
+            handleFeedback={handleFeedback}
           >
           <ChatToolbar
             ref={toolbarRef}

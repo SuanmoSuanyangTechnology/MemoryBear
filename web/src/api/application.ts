@@ -2,11 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-06 15:09:49
+ * @Last Modified time: 2026-05-20 15:55:16
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
-import type { Config, AppSharingForm } from '@/views/ApplicationConfig/types'
+import type { Config, AppSharingForm, AnnotationSettingForm, AnnotationForm } from '@/views/ApplicationConfig/types'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
 import type { QueryParams } from '@/views/Conversation/types'
 import type { WorkflowConfig } from '@/views/Workflow/types'
@@ -108,6 +108,15 @@ export const getConversationDetail = (share_token: string, conversation_id: stri
     }
   })
 }
+// Like/Dislike AI response
+export const feedbackMessage = (share_token: string, message_id: string, data: { feedback_type: 'like' | 'dislike' }) => {
+  console.log('token', share_token, `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`)
+  return request.post(`/public/share/messages/${message_id}/feedback`, data, {
+    headers: {
+      'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
+    }
+  })
+}
 // Get share token
 export const getShareToken = (share_token: string, user_id: string) => {
   return request.post(`/public/share/${share_token}/token`, { user_id })
@@ -182,4 +191,46 @@ export const resetAppModelConfig = (app_id: string) => {
 // Single node test run
 export const nodeRun = (app_id: string, node_id: string, values: Record<string, unknown>) => {
   return request.post(`/apps/${app_id}/workflow/nodes/${node_id}/run`, values)
+}
+// Configure annotation settings
+export const updateAnnotationsSettings = (app_id: string, data: AnnotationSettingForm) => {
+  return request.put(`/apps/${app_id}/annotations/settings`, data)
+}
+// Get current application annotation settings
+export const getAnnotationsSettings = (app_id: string) => {
+  return request.get(`/apps/${app_id}/annotations/settings`)
+}
+// Get annotation list
+export const getAnnotationsListUrl = (app_id: string) => `/apps/${app_id}/annotations`
+export const getAnnotationsList = (app_id: string, data: { search?: string, page?: number, pagesize?: number }) => {
+  return request.get(getAnnotationsListUrl(app_id), data)
+}
+// Create QA annotation pair
+export const createAnnotations = (app_id: string, data: AnnotationForm) => {
+  return request.post(`/apps/${app_id}/annotations`, data)
+}
+// Edit annotation pair
+export const editAnnotations = (app_id: string, annotation_id: string, data: AnnotationForm) => {
+  return request.put(`/apps/${app_id}/annotations/${annotation_id}`, data)
+}
+// Delete annotation
+export const deleteAnnotations = (app_id: string, annotation_id: string) => {
+  return request.delete(`/apps/${app_id}/annotations/${annotation_id}`)
+}
+// Batch delete all annotations
+export const deleteAllAnnotations = (app_id: string) => {
+  return request.delete(`/apps/${app_id}/annotations`)
+}
+// Batch export annotations (CSV / JSON)
+export const exportAnnotation = (app_id: string, format: 'csv' | 'jsonl') => {
+  return request.getDownloadFile(`/apps/${app_id}/annotations/export?format=${format}`, `annotations.${format}`)
+}
+// Batch import annotations (CSV)
+export const importAnnotation = (app_id: string, formData: FormData) => {
+  return request.uploadFile(`/apps/${app_id}/annotations/import`, formData)
+}
+// Get annotation hit history
+export const getAnnotationHitHistoryUrl = (app_id: string, annotation_id: string) => `/apps/${app_id}/annotations/${annotation_id}/hit-logs`
+export const getAnnotationHitHistory = (app_id: string, annotation_id: string) => {
+  return request.get(getAnnotationHitHistoryUrl(app_id, annotation_id))
 }

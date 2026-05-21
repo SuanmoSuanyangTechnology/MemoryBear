@@ -48,6 +48,9 @@ class Message(BaseModel):
     status: str
     meta_data: Optional[Dict[str, Any]] = None
     created_at: datetime.datetime
+    # 反馈信息（仅助手消息有效，由 controller 注入）
+    feedback_type: Optional[str] = Field(None, description="反馈类型: like/dislike")
+    feedback_content: Optional[str] = Field(None, description="反馈内容")
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):

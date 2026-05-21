@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 16:35:08
+ * @Last Modified time: 2026-05-15 18:31:53
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -37,6 +37,7 @@ const ChatContent: FC<ChatContentProps> = ({
   userIcon,
   assistantIcon,
   isSupportTools = false,
+  handleFeedback,
 }) => {
   const { t } = useTranslation()
   // Scroll container reference for controlling auto-scroll to bottom
@@ -274,14 +275,20 @@ const ChatContent: FC<ChatContentProps> = ({
                                 />
                             }
                           </>}
-                          {/* {isSupportTools && item.role === 'assistant' && <>
-                            <div className="rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/like.svg')]"
-                              onClick={() => handleLike(item?.id)}
+                          {isSupportTools && item.role === 'assistant' && <>
+                            <div
+                              className={clsx("rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/like.svg')]", {
+                                "rb:bg-[url('@/assets/images/conversation/like_active.svg')]": item.feedback_type === 'like',
+                              })}
+                              onClick={() => handleFeedback?.('like', item?.id)}
                             ></div>
-                            <div className="rb:size-3.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/unlike.svg')]"
-                              onClick={() => handleUnlike(item?.id)}
+                            <div
+                              className={clsx("rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/like.svg')] rb:scale-y-[-1]", {
+                                "rb:bg-[url('@/assets/images/conversation/like_active.svg')]": item.feedback_type === 'dislike',
+                              })}
+                              onClick={() => handleFeedback?.('dislike', item?.id)}
                             ></div>
-                          </>} */}
+                          </>}
                         </Flex>
                       }
                       {item.meta_data?.suggested_questions && item.meta_data?.suggested_questions?.length > 0 &&
