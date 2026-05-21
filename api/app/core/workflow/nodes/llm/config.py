@@ -297,7 +297,7 @@ class LLMNodeConfig(BaseNodeConfig):
         }
 
 
-_PARAM_CAPABILITY_REQUIREMENTS: dict[str, list[str]] = {
+_PARAM_CAPABILITY_REQUIREMENTS: dict[str, list[ModelCapability]] = {
     "thinking": [ModelCapability.THINKING, ModelCapability.THINKING_ONLY],
     "thinking_budget": [ModelCapability.THINKING],
     "json_output": [ModelCapability.JSON_OUTPUT],
