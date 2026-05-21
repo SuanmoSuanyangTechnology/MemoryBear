@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:29:46 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 17:55:15
+ * @Last Modified time: 2026-05-20 15:39:39
  */
 /**
  * RbTable Component
@@ -183,6 +183,7 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
   useImperativeHandle(ref, () => ({
     loadData,
     getList,
+    total: total,
   }));
 
   /** Calculate scroll configuration based on props */
