@@ -169,7 +169,7 @@ Context:
 - confidence: 决策的置信度，范围0.0-1.0
 - block_pair: 是否阻断该对在其他模糊/启发式合并中出现（true/false）
 - suggested_type: 建议的统一类型（字符串或null）
-- reason: 决策理由的简短说明
+- reason: 决策理由的简短说明（不超过50字）
   {% else %}
   返回JSON格式，必须包含以下字段：
   {
@@ -184,7 +184,7 @@ Context:
 - same_entity: 两个实体是否指向同一真实世界实体（true/false）
 - canonical_idx: 规范实体的索引，0表示实体A，1表示实体B
 - confidence: 决策的置信度，范围0.0-1.0
-- reason: 决策理由的简短说明
+- reason: 决策理由的简短说明（不超过50字）
   {% endif %}
   {% else %}
   {% if disambiguation_mode %}

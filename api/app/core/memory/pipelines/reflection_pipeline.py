@@ -24,6 +24,31 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _create_log_repo():
+    """创建自动 commit + close 的日志仓库，避免 session 泄漏"""
+    from app.repositories.reflection_log_repository import ReflectionLogRepository
+    from app.db import SessionLocal
+
+    class _AutoCommitLogRepo:
+        """包装 ReflectionLogRepository，create 后自动 commit 并关闭 session"""
+        def __init__(self):
+            self._db = SessionLocal()
+            self._repo = ReflectionLogRepository(self._db)
+
+        def create(self, **kwargs):
+            try:
+                result = self._repo.create(**kwargs)
+                self._db.commit()
+                return result
+            except Exception:
+                self._db.rollback()
+                raise
+            finally:
+                self._db.close()
+
+    return _AutoCommitLogRepo()
+
+
 class ReflectionPipeline:
     """反思引擎流水线
 
@@ -70,7 +95,7 @@ class ReflectionPipeline:
     async def run_layer2(self, baseline: str = "HYBRID") -> Dict[str, Any]:
         """Layer 2 离线巡检 — 由高频定时任务调用（如每 10 分钟）
 
-        执行顺序：子问题 1→2→5→3→6→4（当前只实现子问题 6）
+        执行顺序：子问题 1→2→5→3→6→4（当前只实现子问题 3 和 6）
         """
         self._lazy_init()
 
@@ -79,13 +104,6 @@ class ReflectionPipeline:
 
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         from app.core.memory.storage_services.reflection_engine.layer2_inspector import Layer2Inspector
-
-        def _create_log_repo():
-            """每次写日志时创建新 session，避免 session 生命周期问题"""
-            from app.repositories.reflection_log_repository import ReflectionLogRepository
-            from app.db import get_db_context
-            db = get_db_context().__enter__()
-            return ReflectionLogRepository(db)
 
         connector = Neo4jConnector()
         inspector = Layer2Inspector(
@@ -100,6 +118,28 @@ class ReflectionPipeline:
                 baseline=baseline,
                 language=self.language,
             )
+        finally:
+            await connector.close()
+
+    async def run_dedup_full_scan(self) -> Dict[str, Any]:
+        """方案B：低频全量扫描去重 — 由每天一次的定时任务调用"""
+        self._lazy_init()
+
+        if not self._llm_client:
+            return {"status": "skipped", "reason": "no llm_id configured"}
+
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+        from app.core.memory.storage_services.reflection_engine.layer2_inspector import Layer2Inspector
+
+        connector = Neo4jConnector()
+        inspector = Layer2Inspector(
+            neo4j_connector=connector,
+            llm_client=self._llm_client,
+            log_repo_factory=_create_log_repo,
+        )
+
+        try:
+            return await inspector._run_dedup_full_scan(self.end_user_id)
         finally:
             await connector.close()
 

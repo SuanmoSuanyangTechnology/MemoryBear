@@ -2106,7 +2106,7 @@ def post_store_dedup_and_alias_merge_task(
 @celery_app.task(
     name="app.tasks.layer2_reflection_task",
     bind=True,
-    ignore_result=True,
+    ignore_result=False,
     max_retries=0,
     acks_late=False,
     time_limit=600,
@@ -2184,7 +2184,23 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
                     f"反思引擎Layer2 巡检遍历完成: 处理 {processed_users} 个用户, "
                     f"跳过 {skipped_configs} 个未启用反思的配置"
                 )
-                return {"status": "SUCCESS", "results": all_results}
+
+                # 统计汇总（不返回每个用户的详细结果，避免 result 过大）
+                total_dedup_merged = sum(
+                    r.get("result", {}).get("entity_dedup", {}).get("merged_count", 0)
+                    for r in all_results
+                )
+                total_desc_merged = sum(
+                    r.get("result", {}).get("description_merge", {}).get("merged_count", 0)
+                    for r in all_results
+                )
+                return {
+                    "status": "SUCCESS",
+                    "processed_users": processed_users,
+                    "skipped_configs": skipped_configs,
+                    "total_dedup_merged": total_dedup_merged,
+                    "total_desc_merged": total_desc_merged,
+                }
 
             except Exception as e:
                 logger.error(f"反思引擎Layer2 定时任务失败: {e}", exc_info=True)
@@ -2201,6 +2217,100 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
     result["elapsed_time"] = time.time() - start_time
     result["task_id"] = self.request.id
     logger.info(f"反思引擎Layer2 任务完成，耗时 {result['elapsed_time']:.1f}s")
+    return result
+    
+@celery_app.task(
+    name="app.tasks.layer2_dedup_full_scan_task",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=1800,
+    soft_time_limit=1740,
+)
+def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
+    """方案B：低频全量扫描去重（每天一次）
+
+    复用 layer2_reflection_task 的调度模式：
+    遍历所有 workspace → app → end_user，检查 enable_self_reflexion 配置。
+    """
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.models.workspace_model import Workspace
+        from app.services.memory_reflection_service import WorkspaceAppService
+        from app.core.memory.memory_service import MemoryService
+
+        with get_db_context() as db:
+            workspaces = db.query(Workspace).all()
+            if not workspaces:
+                return {"status": "SUCCESS", "message": "无工作空间"}
+
+            processed_users = 0
+            skipped_configs = 0
+            total_merged = 0
+
+            for workspace in workspaces:
+                service = WorkspaceAppService(db)
+                result = service.get_workspace_apps_detailed(str(workspace.id))
+
+                for data in result['apps_detailed_info']:
+                    if not data['memory_configs']:
+                        continue
+
+                    for config in data['memory_configs']:
+                        # 检查反思引擎是否开启
+                        if not config.get('enable_self_reflexion'):
+                            skipped_configs += 1
+                            continue
+
+                        config_id = config['config_id']
+                        end_users = data['end_users']
+
+                        for user in end_users:
+                            try:
+                                memory_service = MemoryService(
+                                    db=db,
+                                    config_id=config_id,
+                                    end_user_id=str(user['id']),
+                                    workspace_id=str(workspace.id),
+                                )
+                                r = await memory_service.run_dedup_full_scan()
+                                processed_users += 1
+                                merged = r.get("merged_count", 0)
+                                total_merged += merged
+                                if merged > 0:
+                                    logger.info(
+                                        f"方案B全量扫描 用户 {user['id']} "
+                                        f"扫描类型 {r.get('scanned_types', 0)}, "
+                                        f"合并 {merged} 对"
+                                    )
+                            except Exception as e:
+                                logger.error(f"方案B全量扫描失败 user={user['id']}: {e}")
+
+            logger.info(
+                f"方案B全量扫描完成: 处理 {processed_users} 用户, "
+                f"跳过 {skipped_configs} 个未启用配置, "
+                f"总合并 {total_merged} 对"
+            )
+            return {
+                "status": "SUCCESS",
+                "processed_users": processed_users,
+                "skipped_configs": skipped_configs,
+                "total_merged": total_merged,
+            }
+
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(_run())
+    except Exception as e:
+        result = {"status": "FAILED", "error": str(e)}
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+    result["elapsed_time"] = time.time() - start_time
+    result["task_id"] = self.request.id
+    logger.info(f"反思引擎去重消岐全量扫描任务完成，耗时 {result['elapsed_time']:.1f}s")
     return result
 
 def _sync_end_user_info_pg(

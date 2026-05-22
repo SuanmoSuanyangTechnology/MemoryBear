@@ -1,0 +1,147 @@
+===Task===
+{% if language == "zh" %}
+你是一个实体去重专家。你将被提供同一用户下同一类型的多个实体信息。
+请严格根据指引，找出其中可能指向同一真实世界实体的重复对。
+
+类型: {{ entity_type }}
+实体数量: {{ entities | length }}
+{% else %}
+You are an entity deduplication expert. You will be provided with multiple entities of the same type belonging to the same user.
+Please strictly follow the guidelines to identify pairs that likely refer to the same real-world entity.
+
+Type: {{ entity_type }}
+Entity Count: {{ entities | length }}
+{% endif %}
+
+===Input===
+{% if language == "zh" %}
+## 实体列表
+
+{% for e in entities %}
+{{ loop.index }}. 名称: "{{ e.name | default('') }}"
+   - 描述: "{{ e.description | default('') }}"
+   - 别名: {{ e.aliases | default([]) }}
+{% endfor %}
+{% else %}
+## Entity List
+
+{% for e in entities %}
+{{ loop.index }}. Name: "{{ e.name | default('') }}"
+   - Description: "{{ e.description | default('') }}"
+   - Aliases: {{ e.aliases | default([]) }}
+{% endfor %}
+{% endif %}
+
+===Guidelines===
+{% if language == "zh" %}
+## 判断规则
+
+1. **别名匹配（最高优先级）**:
+   - 如果一个实体的名称出现在另一个实体的别名列表中，应视为高置信度匹配
+   - 如果两个实体的别名列表有交集，这是强烈的同一性信号
+   - 别名匹配的权重应高于单纯的名称文本相似度
+
+2. **名称相似**:
+   - 名称字面相似（如"张三"和"张三丰"包含关系）
+   - 名称语义相似（如"张三"和"张总"可能是同一人的不同称呼）
+   - 中英文对应（如"北京"和"Beijing"）
+
+3. **描述一致**:
+   - 描述内容高度重叠，指向同一个对象
+   - 描述互补但不矛盾（如一个说"后端工程师"，另一个说"负责微服务架构"）
+
+4. **保守决策**:
+   - 不确定时不要配对
+   - 同名但描述明显矛盾的不配对（如"张三-后端工程师" vs "张三-前端设计师"可能是不同人）
+   - 名称有包含关系但语义不同的不配对（如"上海" vs "上海马拉松"）
+
+5. **唯一性约束（必须遵守）**:
+   - 每个序号只能出现在一个配对中，不允许重复
+   - 错误示例：[[1,2],[1,3]] ← 序号1出现了两次，违规
+   - 正确示例：[[1,2],[6,7]] ← 每个序号只出现一次
+   - 如果实体A同时与B和C相似，只输出最确定的一对，另一对留给下次处理
+
+6. **其他注意事项**:
+   - 只找同一真实世界实体的重复，不要把相关但不同的实体配对
+   - 不确定时不要配对
+{% else %}
+## Judgment Rules
+
+1. **Alias Matching (Highest Priority)**:
+   - If one entity's name appears in another entity's alias list, it should be considered a high-confidence match
+   - If two entities' alias lists have intersections, this is a strong signal of identity
+   - Alias matching weight should be higher than pure name text similarity
+
+2. **Name Similarity**:
+   - Literal name similarity (e.g., "Zhang San" contains "Zhang")
+   - Semantic name similarity (e.g., "Zhang San" and "Boss Zhang" may be the same person)
+   - Cross-language correspondence (e.g., "北京" and "Beijing")
+
+3. **Description Consistency**:
+   - Highly overlapping descriptions pointing to the same object
+   - Complementary but non-contradictory descriptions (e.g., "backend engineer" and "responsible for microservice architecture")
+
+4. **Conservative Decision**:
+   - Do not pair when uncertain
+   - Do not pair entities with same name but clearly contradictory descriptions
+   - Do not pair entities with name containment but different semantics (e.g., "Shanghai" vs "Shanghai Marathon")
+
+5. **Uniqueness Constraint (MUST follow)**:
+   - Each index can only appear in ONE pair, no duplicates allowed
+   - WRONG: [[1,2],[1,3]] ← index 1 appears twice, violation
+   - CORRECT: [[1,2],[6,7]] ← each index appears only once
+   - If entity A is similar to both B and C, only output the most confident pair, leave the other for next round
+
+6. **Other Notes**:
+   - Only find duplicates of the same real-world entity, do not pair related but different entities
+   - Do not pair when uncertain
+{% endif %}
+
+===Output===
+{% if language == "zh" %}
+返回JSON格式，必须包含以下字段：
+{
+  "results": [
+    {"pair": [1, 3], "confidence": 0.95, "reason": "阿里巴巴的别名包含阿里"},
+    {"pair": [2, 5], "confidence": 0.88, "reason": "描述高度一致"}
+  ]
+}
+
+**字段说明**:
+- results: 重复对列表，每项包含：
+  - pair: 两个实体的序号（从1开始）
+  - confidence: 置信度（0.0~1.0）
+  - reason: 简短判定理由（不超过50字，使用实体名称而非序号（如实体x））
+
+如果没有发现重复对，返回：
+{"results": []}
+{% else %}
+Return JSON format with the following required fields:
+{
+  "results": [
+    {"pair": [1, 3], "confidence": 0.95, "reason": "Alibaba's alias contains Ali"},
+    {"pair": [2, 5], "confidence": 0.88, "reason": "descriptions highly consistent"}
+  ]
+}
+
+**Field Descriptions**:
+- results: List of duplicate pairs, each containing:
+  - pair: two entity indices (starting from 1)
+  - confidence: confidence score (0.0~1.0)
+  - reason: brief judgment reason (max 50 chars, use entity names not indices like "entity 3")
+
+If no duplicates found, return:
+{"results": []}
+{% endif %}
+
+**CRITICAL JSON FORMATTING REQUIREMENTS:**
+1. Use only standard ASCII double quotes (") for JSON structure - never use Chinese quotation marks ("") or other Unicode quotes
+2. Ensure all JSON strings are properly closed and comma-separated
+3. Do not include line breaks within JSON string values
+4. The indices in pairs must be valid (between 1 and {{ entities | length }})
+
+{% if language == "zh" %}
+输出语言应始终与输入语言相同。
+{% else %}
+The output language should always be the same as the input language.
+{% endif %}
