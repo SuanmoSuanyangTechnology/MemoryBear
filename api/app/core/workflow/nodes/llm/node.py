@@ -23,7 +23,7 @@ from app.db import get_db_context
 from app.models import ModelType
 from app.schemas.model_schema import ModelInfo
 from app.services.model_service import ModelConfigService
-from app.models.models_model import ModelProvider
+from app.models.models_model import ModelCapability, ModelProvider
 
 logger = logging.getLogger(__name__)
 
@@ -323,9 +323,11 @@ class LLMNode(BaseNode):
 
         # ChatTongyi 要求 messages 含 'json' 字样才能使用 response_format，在 system prompt 中注入
         # VOLCANO 模型不支持 response_format，同样需要 system prompt 注入
+        # thinking（A类）模型启用深度思考时，工厂会跳过 response_format 以避免 API 冲突，需要 prompt 注入兜底
         need_json_prompt = json_output and (
             (model_info.provider.lower() == ModelProvider.DASHSCOPE and not model_info.is_omni)
             or model_info.provider.lower() == ModelProvider.VOLCANO
+            or (deep_thinking and ModelCapability.THINKING in model_info.capability)
         )
         if need_json_prompt:
             system_msg = next((m for m in self.messages if m["role"] == "system"), None)
