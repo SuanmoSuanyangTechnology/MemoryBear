@@ -46,7 +46,7 @@ class Conversation(Base):
     message_count = Column(Integer, default=0, comment="消息数量")
 
     # 滑动窗口写入游标：最后一条已处理的 memory_messages 表中消息的 message_seq；should_memorize=FALSE 时也推进
-    write_cursor = Column(Integer, nullable=False, default=0, comment="最后一条已处理的 memory_messages 表中消息的 message_seq；should_memorize=FALSE 时也推进")
+    write_cursor = Column(Integer, nullable=False, default=0, server_default="0", comment="最后一条已处理的 memory_messages 表中消息的 message_seq；should_memorize=FALSE 时也推进")
 
     # 状态
     is_active = Column(Boolean, default=True, nullable=False, comment="是否活跃")
