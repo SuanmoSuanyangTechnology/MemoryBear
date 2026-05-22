@@ -184,7 +184,8 @@ class MemoryAPIService:
                 "message": messages,
                 "config_id": config_id,
                 "storage_type": storage_type,
-                "user_rag_memory_id": user_rag_memory_id or ""
+                "user_rag_memory_id": user_rag_memory_id or "",
+                "workspace_id": str(workspace_id),
             }
         )
 

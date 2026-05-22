@@ -58,6 +58,11 @@ class Write_UserInput(BaseModel):
     messages: List[WriteMessageItem] = Field(..., description="消息列表")
     end_user_id: str
     config_id: Optional[str] = None
+    conversation_id: Optional[str] = Field(
+        None,
+        description="对话 ID（可选）。传入时使用该会话存储消息；"
+                    "不传时后端按 (workspace_id, end_user_id) 自动查找或创建虚拟会话。",
+    )
 
 
 class WriteMemoryRequest(BaseModel):
@@ -68,17 +73,11 @@ class WriteMemoryRequest(BaseModel):
     storage_type: StorageType = StorageType.NEO4J
     user_rag_memory_id: str = ""
     language: Language = Language.ZH
-
-
-class AgentMemory_Long_Term(ABC):
-    """长期记忆配置常量"""
-    STORAGE_NEO4J = "neo4j"
-    STORAGE_RAG = "rag"
-    STRATEGY_AGGREGATE = "aggregate"
-    STRATEGY_CHUNK = "chunk"
-    STRATEGY_TIME = "time"
-    DEFAULT_SCOPE = 6
-    TIME_SCOPE = 5
+    conversation_id: Optional[str] = Field(
+        None,
+        description="对话 ID（可选）。传入时使用该会话存储消息；"
+                    "不传时后端按 (workspace_id, end_user_id) 自动查找或创建虚拟会话。",
+    )
 
 
 class AgentMemoryDataset(ABC):

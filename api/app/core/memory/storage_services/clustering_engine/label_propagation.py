@@ -71,11 +71,13 @@ class LabelPropagationEngine:
         connector: Neo4jConnector,
         llm_model_id: Optional[str] = None,
         embedding_model_id: Optional[str] = None,
+        language: str = "zh",
     ):
         self.connector = connector
         self.repo = CommunityRepository(connector)
         self.llm_model_id = llm_model_id
         self.embedding_model_id = embedding_model_id
+        self.language = language
         # 缓存客户端实例，避免重复初始化
         self._llm_client = None
         self._embedder_client = None
@@ -526,18 +528,32 @@ class LabelPropagationEngine:
                         for r in relationships
                         if r.get("subject") and r.get("predicate") and r.get("object")
                     ]
-                    rel_section = (
-                        f"\n实体间关系：\n" + "\n".join(rel_lines)
-                        if rel_lines else ""
-                    )
-                    prompt = (
-                        f"以下是一组语义相关的实体：\n{entity_list_str}{rel_section}\n\n"
-                        f"请为这组实体所代表的主题：\n"
-                        f"1. 起一个简洁的中文名称（不超过10个字）\n"
-                        f"2. 写一句话摘要（不超过80个字）\n\n"
-                        f"严格按以下格式输出，不要有其他内容：\n"
-                        f"名称：<名称>\n摘要：<摘要>"
-                    )
+                    if self.language == "en":
+                        rel_section = (
+                            f"\nRelationships between entities:\n" + "\n".join(rel_lines)
+                            if rel_lines else ""
+                        )
+                        prompt = (
+                            f"The following is a group of semantically related entities:\n{entity_list_str}{rel_section}\n\n"
+                            f"For the topic represented by this group of entities:\n"
+                            f"1. Give a concise name (no more than 10 words)\n"
+                            f"2. Write a one-sentence summary (no more than 80 words)\n\n"
+                            f"Output strictly in the following format, nothing else:\n"
+                            f"Name: <name>\nSummary: <summary>"
+                        )
+                    else:
+                        rel_section = (
+                            f"\n实体间关系：\n" + "\n".join(rel_lines)
+                            if rel_lines else ""
+                        )
+                        prompt = (
+                            f"以下是一组语义相关的实体：\n{entity_list_str}{rel_section}\n\n"
+                            f"请为这组实体所代表的主题：\n"
+                            f"1. 起一个简洁的中文名称（不超过10个字）\n"
+                            f"2. 写一句话摘要（不超过80个字）\n\n"
+                            f"严格按以下格式输出，不要有其他内容：\n"
+                            f"名称：<名称>\n摘要：<摘要>"
+                        )
 
                 return {
                     "community_id": cid,
@@ -612,6 +628,10 @@ class LabelPropagationEngine:
                                 meta["name"] = line[3:].strip()
                             elif line.startswith("摘要："):
                                 meta["summary"] = line[3:].strip()
+                            elif line.startswith("Name:"):
+                                meta["name"] = line[5:].strip()
+                            elif line.startswith("Summary:"):
+                                meta["summary"] = line[8:].strip()
                     
                     logger.info(f"[Clustering] LLM 批量生成完成")
 

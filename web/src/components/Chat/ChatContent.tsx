@@ -2,18 +2,18 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 18:31:53
+ * @Last Modified time: 2026-05-22 14:14:39
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
-
-import { Spin, Flex, Button } from 'antd'
-import { SoundOutlined } from '@ant-design/icons'
+import { Spin, Flex, Button, Pagination, Tooltip } from 'antd'
+import { SoundOutlined, WarningOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 
 import Markdown from '@/components/Markdown'
-import type { ChatContentProps, ChatItem } from './types'
+import type { ChatContentProps, ChatItem, CitationItem } from './types'
 import MessageFiles from './MessageFiles'
+import MoreDropdown from '@/components/MoreDropdown'
 
 const getFileUrl = (file: any) => {
   return file.thumbUrl || file.url || (file.originFileObj ? URL.createObjectURL(file.originFileObj) : undefined)
@@ -38,6 +38,11 @@ const ChatContent: FC<ChatContentProps> = ({
   assistantIcon,
   isSupportTools = false,
   handleFeedback,
+  isEnded = true,
+  deleteMsg,
+  reportMsg,
+  regenerateMessages,
+  handleVersionChange,
 }) => {
   const { t } = useTranslation()
   // Scroll container reference for controlling auto-scroll to bottom
@@ -59,7 +64,8 @@ const ChatContent: FC<ChatContentProps> = ({
 
   const isReasoningExpanded = (index: number) => {
     if (manualToggledReasoning.has(index)) return expandedReasoning.has(index)
-    return !data[index]?.content
+    const item = Array.isArray(data[index]) ? data[index].find(item => item.is_current) : data[index]
+    return !item?.content
   }
   const [playingIndex, setPlayingIndex] = useState<string | null>(null)
 
@@ -109,7 +115,10 @@ const ChatContent: FC<ChatContentProps> = ({
   // When data array length changes, auto-scroll to bottom
   // If already scrolled to bottom, will auto-scroll to bottom
   useEffect(() => {
-    if (playingIndex && !data.some(item => item.meta_data?.audio_url === playingIndex)) {
+    if (playingIndex && !data.some(vo => {
+      const item: ChatItem | undefined = Array.isArray(vo) ? vo.find(item => item.is_current) : vo
+      return item?.meta_data?.audio_url === playingIndex
+    })) {
       audioRef.current?.pause()
       setPlayingIndex(null)
     }
@@ -143,11 +152,36 @@ const ChatContent: FC<ChatContentProps> = ({
       ? item.content
         : errorDesc ?? ''
   }
+  const moreDropdownItems = (item: ChatItem) => {
+    const items = []
+    if (deleteMsg) {
+      items.push({
+        key: 'delete',
+        icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red_big.svg')]" />,
+        label: t('common.delete'),
+        onClick: () => deleteMsg(item)
+      })
+    }
+    if (reportMsg) {
+      items.push({
+        key: 'report',
+        icon: <WarningOutlined />,
+        label: t('memoryConversation.report'),
+        onClick: () => reportMsg(item)
+      })
+    }
+    return items
+  }
+  const handlePageChange = (page: number, item: ChatItem) => {
+    handleVersionChange?.(page, item)
+  }
   return (
     <div ref={scrollContainerRef} className={clsx("rb:relative rb:overflow-y-auto", classNames)}>
       {data.length === 0 
         ? empty // Display empty state
-        : data.map((item, index) => {
+        : data.map((vo, index) => {
+          const item: ChatItem | undefined = Array.isArray(vo) ? vo?.find(v => v.is_current) : vo;
+
           if (!item) return null
           return (
             <div key={index} className={clsx("rb:relative", {
@@ -166,7 +200,7 @@ const ChatContent: FC<ChatContentProps> = ({
                     {/* Assistant icon */}
                     {item.role === 'assistant' && assistantIcon}
                     <div
-                      className="rb:flex-1"
+                      className={item.role === 'assistant' && assistantIcon ? "rb:flex-1" : "rb:w-full!"}
                     >
                       {/* Top label (such as timestamp, username, etc.) */}
                       {labelPosition === 'top' &&
@@ -217,10 +251,10 @@ const ChatContent: FC<ChatContentProps> = ({
                           {isReasoningExpanded(index) && <Markdown content={item.meta_data.reasoning_content} className="rb:text-[#5B6167] rb:text-[12px]" />}
                           </div>
                         }
-                        {(item.status || typeof item.meta_data?.error === 'string') &&
-                          <div className={clsx("rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/conversation/exclamation_circle.svg')] rb:absolute rb:-left-7", {
-                            'rb:-left-7': item.status && item.role === 'user',
-                            'rb:left-0': item.role === 'assistant' && typeof item.meta_data?.error === 'string',
+                        {((item.status && item.status !== 'completed') || typeof item.meta_data?.error === 'string') &&
+                          <div className={clsx("rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/conversation/exclamation_circle.svg')] rb:absolute", {
+                            'rb:-left-7!': item.status && item.status !== 'completed' && item.role === 'user',
+                            'rb:left-0!': item.role === 'assistant' && typeof item.meta_data?.error === 'string',
                           })}></div>
                         }
                         {item.subContent && renderRuntime && renderRuntime(item, index)}
@@ -233,7 +267,7 @@ const ChatContent: FC<ChatContentProps> = ({
                         {item.meta_data?.citations && item.meta_data?.citations.length > 0 &&
                           <Flex vertical gap={4} className="rb:mt-1! rb:pt-3! rb-border-t rb:mb-2!">
                             <div className="rb:font-medium">{t('memoryConversation.citations')}</div>
-                            {item.meta_data?.citations?.map((citation, idx) => (
+                            {item.meta_data?.citations?.map((citation: CitationItem, idx: number) => (
                               <Flex key={idx} align="center" gap={12}>
                                 <div
                                   className="rb:text-[#155EEF] rb:leading-5 rb:underline rb:cursor-pointer"
@@ -254,7 +288,7 @@ const ChatContent: FC<ChatContentProps> = ({
                         }
                       </div>
                       {/* Bottom label (such as timestamp, username, etc.) */}
-                      {(labelPosition === 'bottom' || item.meta_data?.audio_url) &&
+                      {(labelPosition === 'bottom' || item.meta_data?.audio_url || isSupportTools) &&
                         <Flex gap={16} align="center" justify={item.role === 'user' ? 'end' : 'start'}>
                           {labelPosition === 'bottom' &&
                             <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
@@ -275,25 +309,65 @@ const ChatContent: FC<ChatContentProps> = ({
                                 />
                             }
                           </>}
-                          {isSupportTools && item.role === 'assistant' && <>
-                            <div
-                              className={clsx("rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/like.svg')]", {
-                                "rb:bg-[url('@/assets/images/conversation/like_active.svg')]": item.feedback_type === 'like',
-                              })}
-                              onClick={() => handleFeedback?.('like', item?.id)}
-                            ></div>
-                            <div
-                              className={clsx("rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/like.svg')] rb:scale-y-[-1]", {
-                                "rb:bg-[url('@/assets/images/conversation/like_active.svg')]": item.feedback_type === 'dislike',
-                              })}
-                              onClick={() => handleFeedback?.('dislike', item?.id)}
-                            ></div>
+                          {isSupportTools && item.role === 'assistant' && !(!isEnded && index === data.length - 1) && !item.is_hidden_refresh && <>
+                            {Array.isArray(vo) && item.version &&
+                              <Pagination
+                                key={item.id}
+                                size="small"
+                                simple
+                                pageSize={1}
+                                current={item.version}
+                                defaultCurrent={item.version}
+                                total={vo.length}
+                                onChange={(page) => handlePageChange(page, item)}
+                              />
+                            }
+                            {handleFeedback && <>
+                              <Tooltip title={t('memoryConversation.like')}>
+                                <div
+                                  className={clsx("rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/like.svg')]", {
+                                    "rb:bg-[url('@/assets/images/conversation/like_active.svg')]": item.feedback_type === 'like',
+                                  })}
+                                  onClick={() => handleFeedback?.('like', item?.id)}
+                                ></div>
+                              </Tooltip>
+                              <Tooltip title={t('memoryConversation.dislike')}>
+                                <div
+                                  className={clsx("rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/conversation/like.svg')] rb:scale-y-[-1]", {
+                                    "rb:bg-[url('@/assets/images/conversation/like_active.svg')]": item.feedback_type === 'dislike',
+                                  })}
+                                  onClick={() => handleFeedback?.('dislike', item?.id)}
+                                ></div>
+                              </Tooltip>
+                            </>}
+                            {index === data.length - 1 && !item.is_hidden_refresh && regenerateMessages &&
+                              <Tooltip title={t('memoryConversation.refresh')}>
+                                <div
+                                  className="rb:size-4 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/refresh_gray.svg')]"
+                                  onClick={() => regenerateMessages(item)}
+                                ></div>
+                              </Tooltip>
+                            }
+
+                            {moreDropdownItems(item).length > 0
+                              ? <MoreDropdown
+                                items={moreDropdownItems(item)}
+                              />
+                              : null
+                            }
                           </>}
+
+                          {isSupportTools && item.role === 'user' && deleteMsg &&
+                            <div
+                              className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/delete_big.svg')] rb:hover:bg-[url('@/assets/images/common/delete_red_big.svg')]"
+                              onClick={() => deleteMsg(item)}
+                            ></div>
+                          }
                         </Flex>
                       }
                       {item.meta_data?.suggested_questions && item.meta_data?.suggested_questions?.length > 0 &&
                         <Flex wrap gap={8} className="rb:my-1!">
-                          {item.meta_data?.suggested_questions?.map((question, idx) => (
+                          {item.meta_data?.suggested_questions?.map((question: string, idx: number) => (
                             <Button key={idx} size="small" className="rb:text-[12px]! rb:text-[#155EEF]!"
                               onClick={() => onSend?.(question)}
                             >{question}</Button>

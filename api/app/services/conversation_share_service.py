@@ -70,7 +70,7 @@ class ConversationShareService:
         self.db.commit()
         self.db.refresh(share)
 
-        share_url = f"{settings.FILE_LOCAL_SERVER_URL}/share/{share_uuid}"
+        share_url = f"{settings.FILE_LOCAL_SERVER_URL}/apps/share/{share_uuid}"
 
         logger.info(
             "创建分享链接",
@@ -145,6 +145,9 @@ class ConversationShareService:
                     "role": msg.role,
                     "content": msg.content,
                     "created_at": int(msg.created_at.timestamp() * 1000),
+                    "meta_data": msg.meta_data,
+                    "feedback_type": msg.feedbacks[0].feedback_type if msg.feedbacks else None,
+                    "feedback_content": msg.feedbacks[0].feedback_content if msg.feedbacks else None
                 }
                 for msg in messages
             ],

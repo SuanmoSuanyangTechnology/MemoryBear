@@ -107,7 +107,14 @@ function App() {
 
   useEffect(() => {
     const authToken = cookieUtils.get('authToken')
-    if (!authToken && !window.location.hash.includes('#/login') && !window.location.hash.includes('#/conversation/') && !window.location.hash.includes('#/jump') && !window.location.hash.includes('#/invite-register')) {
+    if (
+      !authToken && !window.location.hash.includes('#/login')
+      && !window.location.hash.includes('#/conversation/')
+      && !window.location.hash.includes('#/chat-box/')
+      && !window.location.hash.includes('#/share-chat/')
+      && !window.location.hash.includes('#/jump')
+      && !window.location.hash.includes('#/invite-register')
+    ) {
       window.location.href = `/#/login`;
     } else {
       checkJump()

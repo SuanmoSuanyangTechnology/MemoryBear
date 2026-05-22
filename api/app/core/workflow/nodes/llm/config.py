@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.core.workflow.nodes.base_config import BaseNodeConfig, VariableDefinition
 from app.core.workflow.nodes.enums import HttpErrorHandle
 from app.core.workflow.variable.base_variable import VariableType
+from app.models.models_model import ModelCapability, ModelProvider
 
 
 class MessageConfig(BaseModel):
@@ -64,6 +65,87 @@ class LLMErrorHandleConfig(BaseModel):
     )
 
 
+class LLMRetryConfig(BaseModel):
+    """LLM 节点失败重试配置"""
+
+    enable: bool = Field(
+        default=False,
+        description="是否启用失败重试"
+    )
+
+    max_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="最大重试次数"
+    )
+
+    retry_interval: int = Field(
+        default=100,
+        ge=10,
+        le=60000,
+        description="重试间隔（毫秒）"
+    )
+
+
+class LLMTopPConfig(BaseModel):
+    enable: bool = Field(default=False, description="是否启用 Top-p 参数")
+    value: float | None = Field(default=None, ge=0.0, le=1.0, description="Top-p 采样参数")
+
+
+class LLMTopKConfig(BaseModel):
+    enable: bool = Field(default=False, description="是否启用取样数量")
+    value: int | None = Field(default=None, ge=1, le=100, description="取样数量（Top-k 采样）")
+
+
+class LLMSeedConfig(BaseModel):
+    enable: bool = Field(default=False, description="是否启用随机种子")
+    value: int | None = Field(default=None, ge=0, le=18446744073709551615, description="随机种子")
+
+
+class LLMRepetitionPenaltyConfig(BaseModel):
+    enable: bool = Field(default=False, description="是否启用重复惩罚")
+    value: float | None = Field(default=None, ge=0.0, le=2.0, description="重复惩罚")
+
+
+class LLMFrequencyPenaltyConfig(BaseModel):
+    enable: bool = Field(default=False, description="是否启用频率惩罚")
+    value: float | None = Field(default=None, ge=-2.0, le=2.0, description="频率惩罚")
+
+
+class LLMPresencePenaltyConfig(BaseModel):
+    enable: bool = Field(default=False, description="是否启用存在惩罚")
+    value: float | None = Field(default=None, ge=-2.0, le=2.0, description="存在惩罚")
+
+
+class LLMThinkingBudgetConfig(BaseModel):
+    enable: bool = Field(default=False, description="是否启用思考长度限制")
+    value: int | None = Field(default=None, ge=128, le=65536, description="思考长度限制")
+
+
+class LLMThinkingConfig(BaseModel):
+    enable: bool = Field(default=False, description="是否启用思考模式")
+    budget: LLMThinkingBudgetConfig = Field(default_factory=LLMThinkingBudgetConfig, description="思考长度限制配置")
+
+
+class LLMResponseFormatConfig(BaseModel):
+    enable: bool = Field(default=False, description="是否启用回复格式")
+    value: str | None = Field(default=None, description="回复格式（如：json_object, text）")
+
+
+class LLMExtraHeadersConfig(BaseModel):
+    enable: bool = Field(default=False, description="是否启用额外请求头")
+    value: str | None = Field(default=None, description="额外请求头，JSON 字符串格式")
+
+
+class LLMStopConfig(BaseModel):
+    enable: bool = Field(default=False, description="是否启用停止序列")
+    value: list[str] | None = Field(default=None, description="停止序列（最多4个）")
+
+
+
+
+
 class LLMNodeConfig(BaseNodeConfig):
     """LLM 节点配置
     
@@ -109,7 +191,7 @@ class LLMNodeConfig(BaseNodeConfig):
         description="消息列表（消息模式），支持多轮对话"
     )
 
-    # 模型参数
+    # 模型参数（始终生效）
     temperature: float | None = Field(
         default=0.7,
         ge=0.0,
@@ -124,30 +206,33 @@ class LLMNodeConfig(BaseNodeConfig):
         description="最大生成 token 数"
     )
 
-    top_p: float | None = Field(
-        default=None,
-        ge=0.0,
-        le=1.0,
-        description="Top-p 采样参数"
-    )
+    # 模型参数（需开关控制）
+    top_p: LLMTopPConfig = Field(default_factory=LLMTopPConfig, description="Top-p 采样参数配置")
+    top_k: LLMTopKConfig = Field(default_factory=LLMTopKConfig, description="取样数量配置")
+    seed: LLMSeedConfig = Field(default_factory=LLMSeedConfig, description="随机种子配置")
+    repetition_penalty: LLMRepetitionPenaltyConfig = Field(default_factory=LLMRepetitionPenaltyConfig, description="重复惩罚配置")
+    frequency_penalty: LLMFrequencyPenaltyConfig = Field(default_factory=LLMFrequencyPenaltyConfig, description="频率惩罚配置")
+    presence_penalty: LLMPresencePenaltyConfig = Field(default_factory=LLMPresencePenaltyConfig, description="存在惩罚配置")
+
+    search: bool = Field(default=False, description="是否启用联网搜索")
+    thinking: LLMThinkingConfig = Field(default_factory=LLMThinkingConfig, description="思考模式配置")
+    response_format: LLMResponseFormatConfig = Field(default_factory=LLMResponseFormatConfig, description="回复格式配置")
+    extra_headers: LLMExtraHeadersConfig = Field(default_factory=LLMExtraHeadersConfig, description="额外请求头配置")
+    stop: LLMStopConfig = Field(default_factory=LLMStopConfig, description="停止序列配置")
 
     json_output: bool = Field(
         default=False,
         description="是否以 JSON 格式输出"
     )
 
-    frequency_penalty: float | None = Field(
-        default=None,
-        ge=-2.0,
-        le=2.0,
-        description="频率惩罚"
+    enable_reasoning_content_extraction: bool = Field(
+        default=False,
+        description="是否启用推理标签分离（从 think 标签提取内容到 reasoning_content 字段）"
     )
 
-    presence_penalty: float | None = Field(
-        default=None,
-        ge=-2.0,
-        le=2.0,
-        description="存在惩罚"
+    retry: LLMRetryConfig = Field(
+        default_factory=LLMRetryConfig,
+        description="失败重试配置"
     )
 
     # 输出变量定义
@@ -157,6 +242,11 @@ class LLMNodeConfig(BaseNodeConfig):
                 name="output",
                 type=VariableType.STRING,
                 description="LLM 生成的文本输出"
+            ),
+            VariableDefinition(
+                name="reasoning_content",
+                type=VariableType.STRING,
+                description="推理内容（启用推理标签分离后，从 think 标签提取的内容）"
             ),
             VariableDefinition(
                 name="token_usage",
@@ -205,3 +295,121 @@ class LLMNodeConfig(BaseNodeConfig):
                 }
             ]
         }
+
+
+_PARAM_CAPABILITY_REQUIREMENTS: dict[str, list[ModelCapability]] = {
+    "thinking": [ModelCapability.THINKING, ModelCapability.THINKING_ONLY],
+    "thinking_budget": [ModelCapability.THINKING],
+    "json_output": [ModelCapability.JSON_OUTPUT],
+    "response_format_json": [ModelCapability.JSON_OUTPUT],
+}
+
+_PARAM_CAPABILITY_WARNINGS: dict[str, str] = {
+    "thinking": "模型不具备思考能力，思考模式参数不会生效",
+    "thinking_budget": "thinking_only 类型模型不支持思考长度限制，该参数不会生效",
+    "thinking_budget_no_thinking": "模型不具备思考能力，思考长度限制参数不会生效",
+    "json_output": "模型不支持 JSON 输出能力，JSON 输出参数不会生效",
+    "response_format_json": "模型不支持 JSON 输出能力，回复格式(JSON)参数不会生效",
+}
+
+_OPENAI_COMPATIBLE_PROVIDERS = frozenset({
+    ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.VOLCANO,
+})
+
+_PARAM_PROVIDER_SUPPORT: dict[str, frozenset[ModelProvider]] = {
+    "top_k": frozenset({ModelProvider.OLLAMA, ModelProvider.DASHSCOPE, ModelProvider.BEDROCK}),
+    "repetition_penalty": frozenset({ModelProvider.OLLAMA, ModelProvider.DASHSCOPE}),
+    "seed": frozenset({
+        ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
+        ModelProvider.OLLAMA, ModelProvider.VOLCANO, ModelProvider.DASHSCOPE,
+    }),
+    "search": frozenset({ModelProvider.DASHSCOPE}),
+}
+
+_PARAM_PROVIDER_WARNINGS: dict[str, str] = {
+    "top_k": "当前提供商不支持取样数量(top_k)参数，该参数不会生效",
+    "repetition_penalty": "当前提供商不支持重复惩罚参数，该参数不会生效",
+    "seed": "当前提供商不支持随机种子参数，该参数不会生效",
+    "search": "当前提供商不支持联网搜索参数，该参数不会生效",
+}
+
+
+def validate_llm_param_constraints(
+    config: LLMNodeConfig,
+    capability: list[str],
+    provider: str,
+    is_omni: bool = False,
+) -> list[str]:
+    """校验 LLM 节点参数设置是否受模型能力或提供商支持限制。
+
+    当用户启用了模型不具备的能力参数或提供商不支持的参数时，
+    返回对应的警告消息列表。
+
+    Args:
+        config: LLM 节点配置（含各参数的 enable/value 开关）
+        capability: 模型能力列表（如 ['thinking', 'json_output']）
+        provider: 模型提供商（如 'openai', 'dashscope'）
+        is_omni: 是否为 Omni 模型（影响 DashScope 参数路由）
+
+    Returns:
+        警告消息列表，无问题时返回空列表
+    """
+    warnings: list[str] = []
+    provider_lower = provider.lower() if provider else ""
+    capability_set = set(capability) if capability else set()
+
+    try:
+        provider_enum = ModelProvider(provider_lower)
+    except ValueError:
+        provider_enum = None
+
+    # --- 模型能力限制校验 ---
+    if config.thinking.enable:
+        required = _PARAM_CAPABILITY_REQUIREMENTS["thinking"]
+        if not any(c in capability_set for c in required):
+            warnings.append(_PARAM_CAPABILITY_WARNINGS["thinking"])
+
+    if config.thinking.budget.enable:
+        required_budget = _PARAM_CAPABILITY_REQUIREMENTS["thinking_budget"]
+        if ModelCapability.THINKING_ONLY in capability_set:
+            warnings.append(_PARAM_CAPABILITY_WARNINGS["thinking_budget"])
+        elif not any(c in capability_set for c in required_budget):
+            warnings.append(_PARAM_CAPABILITY_WARNINGS["thinking_budget_no_thinking"])
+
+    if config.json_output:
+        required = _PARAM_CAPABILITY_REQUIREMENTS["json_output"]
+        if not any(c in capability_set for c in required):
+            warnings.append(_PARAM_CAPABILITY_WARNINGS["json_output"])
+
+    if config.response_format.enable and config.response_format.value == "json_object":
+        required = _PARAM_CAPABILITY_REQUIREMENTS["response_format_json"]
+        if not any(c in capability_set for c in required):
+            warnings.append(_PARAM_CAPABILITY_WARNINGS["response_format_json"])
+
+    # --- 提供商支持限制校验 ---
+    if provider_enum is None:
+        return warnings
+
+    if config.top_k.enable:
+        supported = _PARAM_PROVIDER_SUPPORT["top_k"]
+        if provider_enum not in supported:
+            warnings.append(_PARAM_PROVIDER_WARNINGS["top_k"])
+
+    if config.repetition_penalty.enable:
+        supported = _PARAM_PROVIDER_SUPPORT["repetition_penalty"]
+        if provider_enum not in supported:
+            warnings.append(_PARAM_PROVIDER_WARNINGS["repetition_penalty"])
+
+    if config.seed.enable:
+        supported = _PARAM_PROVIDER_SUPPORT["seed"]
+        if provider_enum not in supported:
+            warnings.append(_PARAM_PROVIDER_WARNINGS["seed"])
+
+    if config.search:
+        supported = _PARAM_PROVIDER_SUPPORT["search"]
+        if provider_enum not in supported:
+            warnings.append(_PARAM_PROVIDER_WARNINGS["search"])
+
+    return warnings
+
+

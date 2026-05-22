@@ -45,6 +45,7 @@ import SingleNodeRun from '../SingleNodeRun'
 import { cannotRunNodes } from '../../constant'
 import RadioGroupBtn from './RadioGroupBtn'
 import type { Model } from '@/views/ModelManagement/types';
+import Retry from './Retry'
 
 /**
  * Props for Properties component
@@ -674,7 +675,7 @@ const Properties: FC<PropertiesProps> = ({
                       }
 
                       if (key === 'model_id' && selectedNode?.data?.type === 'llm') {
-                        return <ModelConfig key={key} />
+                        return <ModelConfig key={key} variableOptions={getFilteredVariableList(selectedNode?.data?.type)} />
                       }
                       if (selectedNode?.data?.type === 'llm' && key === 'messages' && config.type === 'define') {
                         // 为llm节点且isArray=true时添加context变量支持
@@ -751,6 +752,11 @@ const Properties: FC<PropertiesProps> = ({
                         return null
                       }
 
+                      if (config.type === 'retry') {
+                        return (
+                          <Retry key={key} />
+                        )
+                      }
                       if (config.type === 'knowledge') {
                         return (
                           <Form.Item
@@ -786,7 +792,6 @@ const Properties: FC<PropertiesProps> = ({
                               label={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
                             />
                           </Form.Item>
-
                         )
                       }
                       if (config.type === 'groupVariableList') {
@@ -920,6 +925,7 @@ const Properties: FC<PropertiesProps> = ({
                               ? <span className="rb:text-[10px] rb:text-[#5B6167] rb:leading-3.5 rb:-mb-1!">{t(`workflow.config.${selectedNode?.data?.type}.${key}`)}</span>
                               : t(`workflow.config.${selectedNode?.data?.type}.${key}`)
                           }
+                          tooltip={config.tip ? t(config.tip) : undefined}
                           layout={config.type === 'switch' ? 'horizontal' : 'vertical'}
                           className={
                             key === 'parallel' && values?.parallel
@@ -981,13 +987,11 @@ const Properties: FC<PropertiesProps> = ({
                                             options={(() => {
                                               const baseVariableList = getFilteredVariableList(selectedNode?.data?.type, key);
                                               // Apply filtering if specified in config
-                                              if (config.filterNodeTypes || config.filterVariableNames) {
+                                              if (config.filterNodeTypes) {
                                                 return baseVariableList.filter(variable => {
                                                   const nodeTypeMatch = !config.filterNodeTypes ||
                                                     (Array.isArray(config.filterNodeTypes) && config.filterNodeTypes.includes(variable.nodeData?.type));
-                                                  const variableNameMatch = !config.filterVariableNames ||
-                                                    (Array.isArray(config.filterVariableNames) && config.filterVariableNames.includes(variable.label));
-                                                  return nodeTypeMatch || variableNameMatch;
+                                                  return nodeTypeMatch;
                                                 });
                                               }
                                               if (config.onFilterVariableType) {

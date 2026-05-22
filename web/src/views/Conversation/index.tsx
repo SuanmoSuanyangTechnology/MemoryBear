@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 18:52:30
+ * @Last Modified time: 2026-05-22 14:20:00
  */
 /**
  * Conversation Page
@@ -10,7 +10,7 @@
  * Supports conversation history, streaming responses, and memory/web search features
  */
 
-import { type FC, useState, useEffect, useRef } from 'react'
+import { type FC, useState, useEffect, useRef, useMemo } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import InfiniteScroll from 'react-infinite-scroll-component';
@@ -18,8 +18,11 @@ import { Flex, Skeleton, App, Tooltip, Space } from 'antd'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 
-import { getConversationHistory, sendConversation, getConversationDetail, getShareToken, getExperienceConfig, feedbackMessage } from '@/api/application'
-import type { HistoryItem } from './types'
+import {
+  getConversationHistory, sendConversation, getConversationDetail, getShareToken, getExperienceConfig,
+  feedbackMessage, accessShareConversation, deleteConversationMessage, regenerateMessage, switchMessageVersion,
+} from '@/api/application'
+import type { HistoryItem, ShareModalRef, ReportModalRef } from './types'
 import Empty from '@/components/Empty'
 import { formatDateTime } from '@/utils/format';
 import { randomString } from '@/utils/common'
@@ -33,11 +36,13 @@ import type { Variable } from '@/views/Workflow/components/Properties/VariableLi
 import type { Variable as AppVariable } from '@/views/ApplicationConfig/components/VariableList/types'
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
 import { replaceVariables } from '@/views/ApplicationConfig/Agent'
+import ShareModal from './components/ShareModal'
+import ReportModal from './components/ReportModal'
 
 const Conversation: FC = () => {
   const { t } = useTranslation()
   const { message: messageApi, modal } = App.useApp()
-  const { token } = useParams()
+  const { token, shareUuid } = useParams()
   const location = useLocation()
   const searchParams = new URLSearchParams(location.search)
   const userId = searchParams.get('user_id')
@@ -47,7 +52,7 @@ const Conversation: FC = () => {
   const [conversation_id, setConversationId] = useState<string | null>(null)
   const [historyList, setHistoryList] = useState<HistoryItem[]>([])
   const [groupHistoryList, setGroupHistoryList] = useState<Record<string, HistoryItem[]>>({})
-  const [chatList, setChatList] = useState<ChatItem[]>([])
+  const [chatList, setChatList] = useState<Array<ChatItem | ChatItem[]>>([])
   const [pageLoading, setPageLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
@@ -93,7 +98,19 @@ const Conversation: FC = () => {
     }
   }, [])
 
+  const [isShare, setIsShare] = useState(false)
   useEffect(() => {
+    if (!shareUuid) return
+    setIsShare(true)
+    accessShareConversation(shareUuid)
+      .then(res => {
+        const response = res as { messages: ChatItem[] } || {}
+        setChatList(response.messages ?? [])
+      })
+  }, [shareUuid])
+
+  useEffect(() => {
+    if (!token) return
     const shareToken = localStorage.getItem(`shareToken_${token}`)
     setShareToken(shareToken)
     if (shareToken && shareToken !== '') return
@@ -175,32 +192,48 @@ const Conversation: FC = () => {
     abortRef.current = null
   }
 
+  const getChatDetail = () => {
+    if (!conversation_id) return
+    getConversationDetail(token as string, conversation_id)
+      .then(res => {
+        const response = res as { messages: ChatItem[] }
+        const messages = response?.messages || []
+        const historyAudioUrls = new Set(messages.map(m => m.meta_data?.audio_url).filter(Boolean))
+        audioPollingRef.current.forEach((timer, key) => {
+          if (!historyAudioUrls.has(key)) {
+            clearInterval(timer)
+            audioPollingRef.current.delete(key)
+          }
+        })
+        messages.forEach(msg => {
+          if (Array.isArray(msg)
+            ? msg.some(item => item.is_current && item.role === 'assistant' && item.meta_data?.audio_url && item.meta_data?.audio_status === 'pending')
+            : msg.role === 'assistant' && msg.meta_data?.audio_url && msg.meta_data?.audio_status === 'pending'
+          ) {
+            const audio_url = Array.isArray(msg) ? msg.find(item => item.is_current)?.meta_data?.audio_url : msg.meta_data?.audio_url
+            startAudioPolling(audio_url, audio_url)
+          }
+        })
+        setChatList(messages.map(msg => {
+          if (Array.isArray(msg)) {
+            return msg.map(item => {
+              if (item.role === 'assistant' && item.meta_data?.audio_url && audioPollingRef.current.has(item.meta_data.audio_url)) {
+
+                return { ...item, meta_data: { ...item.meta_data, audio_status: 'pending' } }
+              }
+              return item
+            })
+          } else if (msg.role === 'assistant' && msg.meta_data?.audio_url && audioPollingRef.current.has(msg.meta_data.audio_url)) {
+            return { ...msg, meta_data: { ...msg.meta_data, audio_status: 'pending' } }
+          }
+          msg.status = msg.role === 'user' ? undefined : msg.status
+          return msg
+        }))
+      })
+  }
   useEffect(() => {
     if (conversation_id) {
-      getConversationDetail(token as string, conversation_id)
-        .then(res => {
-          const response = res as { messages: ChatItem[] }
-          const messages = response?.messages || []
-          const historyAudioUrls = new Set(messages.map(m => m.meta_data?.audio_url).filter(Boolean))
-          audioPollingRef.current.forEach((timer, key) => {
-            if (!historyAudioUrls.has(key)) {
-              clearInterval(timer)
-              audioPollingRef.current.delete(key)
-            }
-          })
-          messages.forEach(msg => {
-            if (msg.role === 'assistant' && msg.meta_data?.audio_url && msg.meta_data?.audio_status === 'pending') {
-              startAudioPolling(msg.meta_data.audio_url, msg.meta_data.audio_url)
-            }
-          })
-          setChatList(messages.map(msg => {
-            if (msg.role === 'assistant' && msg.meta_data?.audio_url && audioPollingRef.current.has(msg.meta_data.audio_url)) {
-              return { ...msg, meta_data: { ...msg.meta_data, audio_status: 'pending' } }
-            }
-            msg.status = msg.role === 'user' ? undefined : msg.status
-            return msg
-          }))
-        })
+      getChatDetail()
     } else {
       if (features?.opening_statement?.enabled && features?.opening_statement?.statement) {
         const variables = toolbarRef.current?.getVariables() || []
@@ -210,7 +243,8 @@ const Conversation: FC = () => {
           created_at: Date.now(),
           meta_data: {
             suggested_questions: features.opening_statement?.suggested_questions
-          }
+          },
+          is_hidden_refresh: true
         }])
       } else {
         setChatList([])
@@ -230,58 +264,105 @@ const Conversation: FC = () => {
     }])
   }
 
-  const addAssistantMessage = () => {
-    setChatList(prev => [...prev, {
+  const addAssistantMessage = (message_id?: string) => {
+    const assistantMsg: ChatItem = {
       created_at: Date.now(),
       role: 'assistant',
-      content: ''
-    }])
+      content: '',
+      is_current: true,
+    }
+    if (message_id) {
+      setChatList(prev => {
+        const lastChatList = [...prev]
+        const filterIndex = lastChatList.findIndex(item => Array.isArray(item) ? item.some(i => i.id === message_id) : item.id === message_id)
+        if (filterIndex !== -1) {
+          const filterItem = Array.isArray(lastChatList[filterIndex]) ? lastChatList[filterIndex][0] : lastChatList[filterIndex]
+          const newFilterItem = [
+            ...(Array.isArray(lastChatList[filterIndex]) ? [...lastChatList[filterIndex].map(v => ({ ...v, is_current: false })), filterItem] : [{...filterItem, is_current: false}]),
+            {
+              ...assistantMsg,
+              version: Array.isArray(lastChatList[filterIndex]) ? lastChatList[filterIndex].length + 2 : 2
+            }
+          ]
+          lastChatList[filterIndex] = newFilterItem
+          return [...lastChatList]
+        }
+        return prev
+      })
+    } else {
+      setChatList(prev => [
+        ...prev,
+        assistantMsg
+      ])
+    }
   }
 
-  const updateAssistantMessage = (content: string = '', audio_url?: string, audio_status?: string, citations?: any[], suggested_questions?: any[], error?: string) => {
+  const updateAssistantMessage = (
+    content: string = '',
+    audio_url?: string,
+    audio_status?: string,
+    citations?: any[],
+    suggested_questions?: any[],
+    error?: string,
+    message_id?: string
+  ) => {
     if (!content && !audio_url && (!citations || citations?.length < 1) && (!suggested_questions || suggested_questions?.length < 1) && typeof error !== 'string') return
     if (streamLoadingRef.current) streamLoadingRef.current = false
     setChatList(prev => {
       const lastList = [...prev]
       const lastIndex = lastList.length - 1
-      const lastMsg = lastList[lastIndex]
+      const lastChatList = Array.isArray(lastList[lastIndex]) ? lastList[lastIndex] : [lastList[lastIndex]]
+      const lastChatIndex = lastChatList.length - 1
+      const lastMsg = lastChatList[lastChatIndex]
+      const assistantMsg: ChatItem = {
+        id: message_id,
+        ...lastMsg,
+        content: lastMsg.content + content,
+        meta_data: {
+          ...(lastMsg.meta_data || {}),
+          audio_url: audio_url || lastMsg.meta_data?.audio_url,
+          audio_status: audio_status || lastMsg.meta_data?.audio_status,
+          citations: citations || lastMsg.meta_data?.citations,
+          suggested_questions: suggested_questions || lastMsg.meta_data?.suggested_questions,
+          error: error || lastMsg.meta_data?.error
+        }
+      }
       if (lastMsg?.role === 'assistant') {
         return [
           ...lastList.slice(0, lastIndex),
-          {
-            ...lastMsg,
-            content: lastMsg.content + content,
-            meta_data: {
-              ...(lastMsg.meta_data || {}),
-              audio_url: audio_url || lastMsg.meta_data?.audio_url,
-              audio_status: audio_status || lastMsg.meta_data?.audio_status,
-              citations: citations || lastMsg.meta_data?.citations,
-              suggested_questions: suggested_questions || lastMsg.meta_data?.suggested_questions,
-              error: error || lastMsg.meta_data?.error
-            }
-          }
+          message_id
+          ? [
+            ...lastChatList.slice(0, lastChatIndex),
+            assistantMsg
+          ] : assistantMsg
         ]
       }
       return prev
     })
   }
-  const updateAssistantReasoningMessage = (content: string = '') => {
+  const updateAssistantReasoningMessage = (content: string = '', message_id?: string) => {
     if (!content) return
     if (streamLoadingRef.current) streamLoadingRef.current = false
     setChatList(prev => {
       const lastList = [...prev]
       const lastIndex = lastList.length - 1
-      const lastMsg = lastList[lastIndex]
+      const lastChatList = Array.isArray(lastList[lastIndex]) ? lastList[lastIndex] : [lastList[lastIndex]]
+      const lastChatIndex = lastChatList.length - 1
+      const lastMsg = lastChatList[lastChatIndex]
       if (lastMsg?.role === 'assistant') {
         return [
           ...lastList.slice(0, lastIndex),
-          {
-            ...lastMsg,
-            meta_data: {
-              ...(lastMsg.meta_data || {}),
-              reasoning_content: (lastMsg.meta_data?.reasoning_content || '') + content
+          [
+            ...lastChatList.slice(0, lastChatIndex),
+            {
+              id: message_id,
+              ...lastMsg,
+              meta_data: {
+                ...(lastMsg.meta_data || {}),
+                reasoning_content: (lastMsg.meta_data?.reasoning_content || '') + content
+              }
             }
-          }
+          ]
         ]
       }
       return prev
@@ -290,14 +371,25 @@ const Conversation: FC = () => {
   useEffect(() => {
     if (!Object.keys(audioStatusMap).length) return
     setChatList(prev => prev.map(msg => {
-      if (msg.role === 'assistant' && msg.meta_data?.audio_url && audioStatusMap[msg.meta_data.audio_url]) {
-        return {
-          ...msg,
-          meta_data: {
-            ...msg.meta_data,
-            audio_status: audioStatusMap[msg.meta_data.audio_url]
+      if (Array.isArray(msg)
+          ? msg.some(i => i.role === 'assistant' && i.meta_data?.audio_url && audioStatusMap[i.meta_data.audio_url])
+          : msg.role === 'assistant' && msg.meta_data?.audio_url && audioStatusMap[msg.meta_data.audio_url]
+        ) {
+          return Array.isArray(msg)
+            ? msg.map(i => ({
+              ...i,
+              meta_data: {
+                ...i.meta_data,
+                audio_status: audioStatusMap[i.meta_data?.audio_url || '']
+              }
+            }))
+          : {
+            ...msg,
+            meta_data: {
+              ...msg.meta_data,
+              audio_status: audioStatusMap[msg.meta_data?.audio_url || '']
+            }
           }
-        }
       }
       return msg
     }))
@@ -325,6 +417,7 @@ const Conversation: FC = () => {
     audioPollingRef.current.set(idToPoll, timer)
   }
 
+  const chatIsEnded = useRef(true)
   /** Send message and handle streaming response */
   const handleSend = (msg?: string) => {
     if (!token || !shareToken) return
@@ -349,6 +442,7 @@ const Conversation: FC = () => {
     if (!isCanSend) return
 
     setLoading(true)
+    chatIsEnded.current = false
     streamLoadingRef.current = true
     addUserMessage(msg || message, files)
     addAssistantMessage()
@@ -377,7 +471,7 @@ const Conversation: FC = () => {
             setChatList(prev => {
               const lastList = [...prev]
               const lastIndex = lastList.length - 1
-              const lastMsg = lastList[lastIndex]
+              const lastMsg = lastList[lastIndex] as ChatItem
               if (lastMsg?.role === 'assistant') {
                 return [
                   ...lastList.slice(0, lastIndex),
@@ -422,6 +516,7 @@ const Conversation: FC = () => {
             if (currentConversationId && currentConversationId !== conversation_id) {
               setConversationId(currentConversationId)
             }
+            chatIsEnded.current = true
             break
         }
       })
@@ -453,10 +548,12 @@ const Conversation: FC = () => {
       .catch(() => {
         setLoading(false)
         streamLoadingRef.current = false
+        chatIsEnded.current = true
       })
       .finally(() => {
         setLoading(false)
         streamLoadingRef.current = false
+        chatIsEnded.current = true
       })
   }
 
@@ -481,7 +578,7 @@ const Conversation: FC = () => {
 
   const handleChangeVariables = (variables: Variable[]) => {
     setChatList(prev => {
-      const firstMsg = prev[0]
+      const firstMsg = prev[0] as ChatItem
       if (firstMsg && firstMsg.role === 'assistant' && firstMsg.content && features?.opening_statement?.enabled && features?.opening_statement.statement && variables.length > 0) {
         firstMsg.content = replaceVariables(features?.opening_statement.statement, variables as unknown as AppVariable[])
         return [firstMsg, ...prev.slice(1)]
@@ -490,8 +587,201 @@ const Conversation: FC = () => {
     })
   }
 
+  const deleteMessage = (vo: ChatItem) => {
+    if (!token || !vo.id) return
+    modal.confirm({
+      title: t('common.confirmDelete'),
+      okText: t('common.delete'),
+      cancelText: t('common.cancel'),
+      okType: 'danger',
+      onOk: () => {
+        deleteConversationMessage(token, vo.id as string)
+          .then(() => {
+            getChatDetail()
+            messageApi.success(t('common.deleteSuccess'))
+          })
+      }
+    })
+  }
+  const reportMsg = (vo: ChatItem) => {
+    reportModalRef.current?.handleOpen(vo)
+  }
+  const regenerateMessages = (vo: ChatItem) => {
+    if (!token || !vo.id) return
+    const variables = toolbarRef.current?.getVariables() || []
+    let isCanSend = true
+    const params: Record<string, any> = {}
+    if (variables.length > 0) {
+      const needRequired: string[] = []
+      variables.forEach(vo => {
+        params[vo.name] = vo.value ?? vo.defaultValue
+        if (vo.required && (params[vo.name] === null || params[vo.name] === undefined || params[vo.name] === '')) {
+          isCanSend = false
+          needRequired.push(vo.name)
+        }
+      })
+
+      if (needRequired.length) {
+        messageApi.error(`${needRequired.join(',')} ${t('workflow.variableRequired')}`)
+      }
+    }
+    if (!isCanSend) return
+
+    setLoading(true)
+    chatIsEnded.current = false
+    streamLoadingRef.current = true
+    addAssistantMessage(vo.id)
+
+    let currentConversationId: string | null = null
+    const handleStreamMessage = (data: SSEMessage[]) => {
+      data.forEach((item) => {
+        const { content, conversation_id: curId, audio_url, citations, suggested_questions, error } = item.data as {
+          content: string; conversation_id: string; audio_url?: string;
+          citations?: {
+            document_id: string;
+            file_name: string;
+            knowledge_id: string;
+            score: string;
+          }[];
+          error?: string;
+          suggested_questions?: string[];
+        }
+        switch (item.event) {
+          case 'start':
+          case 'node_start':
+            const { conversation_id: newId, message_id } = item.data as { conversation_id: string; message_id: string }
+            currentConversationId = newId
+            setChatList(prev => {
+              const lastList = [...prev]
+              const lastIndex = lastList.length - 1
+              const lastChatList = Array.isArray(lastList[lastIndex]) ? lastList[lastIndex] : [lastList[lastIndex]]
+              const lastChatIndex = lastChatList.length - 1
+              const lastMsg = lastChatList[lastChatIndex]
+              if (lastMsg?.role === 'assistant') {
+                return [
+                  ...lastList.slice(0, lastIndex),
+                  [
+                    ...lastChatList.slice(0, lastChatIndex),
+                    {
+                      id: message_id,
+                      ...lastMsg,
+                    }
+                  ],
+                ]
+              }
+              return prev
+            })
+            break
+          case 'reasoning':
+            updateAssistantReasoningMessage(content, vo.id)
+            if (curId) currentConversationId = curId;
+            break
+          case 'message':
+            updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined, undefined, undefined, undefined, vo.id)
+            if (curId) currentConversationId = curId;
+            break
+          case 'end':
+          case 'workflow_end':
+            if (audio_url) {
+              updateAssistantMessage(content, audio_url, 'pending', citations, suggested_questions, error, vo.id)
+              const { file_id } = item.data as { file_id?: string }
+              const idToPoll = file_id || audio_url || ''
+              const fileId = audio_url.split('/').pop()
+              if (fileId && idToPoll) {
+                startAudioPolling(audio_url, idToPoll)
+              }
+            } else {
+              getHistory(true)
+              if (currentConversationId && currentConversationId !== conversation_id) {
+                setConversationId(currentConversationId)
+              }
+            }
+            if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0) || error) {
+              updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions, error, vo.id)
+            }
+            setLoading(false)
+            getHistory(true)
+            if (currentConversationId && currentConversationId !== conversation_id) {
+              setConversationId(currentConversationId)
+            }
+            chatIsEnded.current = true
+            break
+        }
+      })
+    };
+
+    regenerateMessage(vo.id as string, {
+      web_search: webSearch,
+      memory,
+      stream: true,
+      variables: params,
+      thinking,
+    }, handleStreamMessage, token, (abort) => { abortRef.current = abort })
+      .catch(() => {
+        setLoading(false)
+        streamLoadingRef.current = false
+        chatIsEnded.current = true
+      })
+      .finally(() => {
+        setLoading(false)
+        streamLoadingRef.current = false
+        chatIsEnded.current = true
+      })
+  }
+  // 切换到指定版本的消息
+  const handleVersionChange = (page: number, item: ChatItem) => {
+    if (!token || !item.id) return
+    switchMessageVersion(token, item.id, page)
+      .then(() => {
+        getChatDetail()
+        messageApi.success(t('common.operateSuccess'))
+      })
+  }
+  const shareModalRef = useRef<ShareModalRef>(null)
+  const reportModalRef = useRef<ReportModalRef>(null)
+  const handleShare = () => {
+    if (!conversation_id) return;
+    shareModalRef.current?.handleOpen()
+  }
+
+  const handleFeedback = (feedbackType: 'like' | 'dislike', id?: string) => {
+    if (!token || !conversation_id || !id) return
+    feedbackMessage(token, id, { feedback_type: feedbackType })
+      .then((res) => {
+        const { feedback_type } = res as { feedback_type: 'like' | 'dislike' | null; }
+        messageApi.success( feedback_type === 'dislike'
+          ? t('memoryConversation.dislikeMsg')
+          : feedback_type === 'like'
+          ? t('memoryConversation.likeMsg')
+          : t('memoryConversation.cancelMsg')
+        )
+        setChatList(prev => {
+          const lastList = [...prev]
+          const filterIndex = lastList.findIndex(item => Array.isArray(item) ? item.filter(msg => msg.id === id).length > 0 : item.id === id)
+          if (filterIndex === -1) return lastList
+          const filterItem = lastList[filterIndex]
+          if (Array.isArray(filterItem)) {
+            filterItem.forEach(msg => {
+              if (msg.id === id) {
+                msg.feedback_type = feedback_type
+              }
+            })
+          } else {
+            filterItem.feedback_type = feedback_type
+          }
+          lastList[filterIndex] = filterItem
+          return [...lastList]
+        })
+      })
+  }
+
   const [showHistory, setShowHistory] = useState(false)
   const isFloatBtn = windowType === 'floatBtn'
+
+  const chatTitle = useMemo(() => {
+    const conversation = historyList.find(item => item.id === conversation_id)
+    return conversation?.title
+  }, [conversation_id, historyList])
 
   if (isIframe || isSmallScreen) {
     return (
@@ -500,8 +790,9 @@ const Conversation: FC = () => {
         'rb:w-full rb:h-full': !isFloatBtn,
       })}>
         <div className="rb:flex-1">
+          {!isShare &&
             <Flex
-              justify={isFloatBtn ? "space-between" : 'end'}
+              justify={isFloatBtn || isSmallScreen ? "space-between" : 'end'}
               className={clsx("rb:p-3! rb:h-11.25! rb:w-full! rb-border-b", {
                 'rb:bg-[#171719] rb:text-[#FFFFFF]': isFloatBtn,
                 'rb:text-[#171719]': !isFloatBtn,
@@ -509,7 +800,8 @@ const Conversation: FC = () => {
                 'rb:rounded-tl-2xl rb:rounded-tr-2xl': !showHistory && isFloatBtn
               })}
             >
-              {isFloatBtn && <span className=" rb:font-medium">{config.app_name}</span>}
+              {isFloatBtn && config.app_name && <span className="rb:font-medium">{config.app_name}</span>}
+              {isSmallScreen && <span className="rb:font-medium">{chatTitle || t('memoryConversation.newConversation')}</span>}
               <Space size={12}>
                 {!isIframe && isSmallScreen && historyList.length > 0 &&
                   <Tooltip title={t('memoryConversation.history')}>
@@ -518,6 +810,14 @@ const Conversation: FC = () => {
                         "rb:bg-[url('@/assets/images/conversation/history_white.svg')]": isFloatBtn,
                       })}
                       onClick={() => setShowHistory(true)}
+                    ></div>
+                  </Tooltip>
+                }
+                {chatTitle &&
+                  <Tooltip title={t('memoryConversation.shareConversation')}>
+                    <div
+                      className="rb:cursor-pointer rb:size-4.5 rb:bg-cover rb:bg-[url('@/assets/images/conversation/share.svg')]"
+                      onClick={handleShare}
                     ></div>
                   </Tooltip>
                 }
@@ -540,13 +840,21 @@ const Conversation: FC = () => {
                 }
               </Space>
             </Flex>
+          }
 
-          <div className="rb:h-[calc(100%-45px)] rb:px-4">
+          <div className={clsx("rb:px-4", {
+            "rb:h-[calc(100%-45px)]": !isShare,
+            'rb:h-full': isShare,
+          })}>
             <Chat
-              userIcon={<div className="rb:size-8 rb:bg-cover rb:bg-[url(@/assets/images/conversation/user.png)]"></div>}
-              assistantIcon={<div className="rb:size-8 rb:bg-cover rb:bg-[url(@/assets/images/conversation/ai.png)]"></div>}
-              empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
-              contentClassName={!fileList.length ? "rb:h-[calc(100%-144px)] rb:w-full" : "rb:h-[calc(100%-208px)] rb:w-full"}
+              userIcon={(isShare) ? null : <div className="rb:size-8 rb:bg-cover rb:bg-[url(@/assets/images/conversation/user.png)]"></div>}
+              assistantIcon={isShare ? null : <div className="rb:size-8 rb:bg-cover rb:bg-[url(@/assets/images/conversation/ai.png)]"></div>}
+              empty={isShare ? null : <Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')}subTitle={t('memoryConversation.emptyDesc')} />}
+              contentClassName={clsx({
+                'rb:h-full rb:w-full': isShare,
+                'rb:h-[calc(100%-144px)] rb:w-full': !fileList.length && !isShare,
+                'rb:h-[calc(100%-208px)] rb:w-full': fileList.length && !isShare,
+              })}
               data={chatList}
               streamLoading={streamLoadingRef.current}
               loading={loading}
@@ -559,6 +867,14 @@ const Conversation: FC = () => {
                 setFileList(list || [])
                 toolbarRef.current?.setFiles(list || [])
               }}
+              isSupportTools={config.app_type === 'agent' && !isShare}
+              handleFeedback={handleFeedback}
+              isEnded={chatIsEnded.current}
+              readOnly={isShare}
+              deleteMsg={deleteMessage}
+              reportMsg={reportMsg}
+              regenerateMessages={config.app_type === 'agent' ? regenerateMessages : undefined}
+              handleVersionChange={config.app_type === 'agent' ? handleVersionChange : undefined}
             >
               <ChatToolbar
                 ref={toolbarRef}
@@ -680,86 +996,89 @@ const Conversation: FC = () => {
     )
   }
 
-  const handleFeedback = (feedbackType: 'like' | 'dislike', id?: string) => {
-    if (!token || !conversation_id || !id) return
-    feedbackMessage(token, id, { feedback_type: feedbackType })
-      .then((res) => {
-        const { feedback_type } = res as { feedback_type: 'like' | 'dislike' | null; }
-        messageApi.success( feedback_type === 'dislike'
-          ? t('memoryConversation.dislikeMsg')
-          : feedback_type === 'like'
-          ? t('memoryConversation.likeMsg')
-          : t('memoryConversation.cancelMsg')
-        )
-        setChatList(prev => prev.map(item => item.id === id
-          ? {
-            ...item,
-            feedback_type,
-          }
-          : item))
-      })
-  }
-
   console.log(chatList)
   return (
     <Flex className="rb:w-full rb:p-[-16px]!">
-      <div className="rb:w-80 rb:h-screen rb:bg-[#F6F6F6] rb:overflow-hidden">
-        <Flex align="center" gap={8} className="rb:p-5!">
-          <div className="rb:size-6 rb:bg-cover rb:bg-[url('@/assets/images/conversation/redbear.png')]"></div>
-          <div className="rb:text-[16px] rb:leading-5 rb:font-[Gilroy-Extrabold] rb:font-extrabold">{t('memoryConversation.chatTitle')}</div>
-        </Flex>
+      {!isShare &&
+        <div className="rb:w-80 rb:h-screen rb:bg-[#F6F6F6] rb:overflow-hidden">
+          <Flex align="center" gap={8} className="rb:p-5!">
+            <div className="rb:size-6 rb:bg-cover rb:bg-[url('@/assets/images/conversation/redbear.png')]"></div>
+            <div className="rb:text-[16px] rb:leading-5 rb:font-[Gilroy-Extrabold] rb:font-extrabold">{t('memoryConversation.chatTitle')}</div>
+          </Flex>
 
-        <Flex align="center" gap={12}
-          className="rb:cursor-pointer rb:border rb:border-[#155EEF] rb:rounded-xl rb:p-3! rb:mx-4! rb:text-[16px] rb:font-medium rb:text-[#155EEF] rb:h-12! rb:mb-5!"
-          onClick={() => handleChangeHistory(null)}
-        >
-          <div
-            className="rb:w-5 rb:h-5 rb:cursor-pointer rb:mr-2 rb:bg-cover rb:bg-[url('@/assets/images/conversation/conversation.svg')] rb:group-hover:bg-[url('@/assets/images/conversation/conversation_hover.svg')]"
-          ></div>
-          {t('memoryConversation.startANewConversation')}
-        </Flex>
-        {historyList.length > 0 &&
-          <div
-            ref={scrollRef}
-            id="scrollableDiv"
-            className="rb:overflow-y-auto rb:h-[calc(100vh-144px)] rb:px-3!"
+          <Flex align="center" gap={12}
+            className="rb:cursor-pointer rb:border rb:border-[#155EEF] rb:rounded-xl rb:p-3! rb:mx-4! rb:text-[16px] rb:font-medium rb:text-[#155EEF] rb:h-12! rb:mb-5!"
+            onClick={() => handleChangeHistory(null)}
           >
-            <InfiniteScroll
-              dataLength={historyList.length}
-              next={getHistory}
-              hasMore={hasMore}
-              loader={<Skeleton active />}
-              scrollableTarget="scrollableDiv"
+            <div
+              className="rb:w-5 rb:h-5 rb:cursor-pointer rb:mr-2 rb:bg-cover rb:bg-[url('@/assets/images/conversation/conversation.svg')] rb:group-hover:bg-[url('@/assets/images/conversation/conversation_hover.svg')]"
+            ></div>
+            {t('memoryConversation.startANewConversation')}
+          </Flex>
+          {historyList.length > 0 &&
+            <div
+              ref={scrollRef}
+              id="scrollableDiv"
+              className="rb:overflow-y-auto rb:h-[calc(100vh-144px)] rb:px-3!"
             >
-              {Object.entries(groupHistoryList).map(([date, items]) => (
-                <div key={date} className="rb:mt-6 rb:first:mt-0">
-                  <div className="rb:leading-5 rb:text-[#5B6167] rb:mb-2 rb:pl-1 rb:font-regular">{date.replace(/\u200e|\u200f/g, '')}</div>
+              <InfiniteScroll
+                dataLength={historyList.length}
+                next={getHistory}
+                hasMore={hasMore}
+                loader={<Skeleton active />}
+                scrollableTarget="scrollableDiv"
+              >
+                {Object.entries(groupHistoryList).map(([date, items]) => (
+                  <div key={date} className="rb:mt-6 rb:first:mt-0">
+                    <div className="rb:leading-5 rb:text-[#5B6167] rb:mb-2 rb:pl-1 rb:font-regular">{date.replace(/\u200e|\u200f/g, '')}</div>
 
-                  <Flex vertical gap={4}>
-                    {items.map(item => (
-                    <div key={item.updated_at} className="rb:mb-3">
-                      <div className={clsx("rb:p-[8px_13px] rb:rounded-lg rb:leading-5 rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
-                        'rb:bg-[#FFFFFF] rb:shadow-[0px_2px_4px_0px_rgba(0,0,0,0.15)] rb:font-medium rb:hover:bg-[#FFFFFF]!': item.id === conversation_id,
-                      })}
-                        onClick={() => handleChangeHistory(item.id)}
-                      >
-                        {item.title}
-                      </div>
-                    </div>
-                    ))}
-                  </Flex>
-                </div>
-              ))}
-            </InfiniteScroll>
-          </div>
-        }
-      </div>
+                    <Flex vertical gap={4}>
+                      {items.map(item => (
+                        <div key={item.updated_at} className="rb:mb-3">
+                          <div className={clsx("rb:p-[8px_13px] rb:rounded-lg rb:leading-5 rb:cursor-pointer rb:hover:bg-[#F0F3F8]", {
+                            'rb:bg-[#FFFFFF] rb:shadow-[0px_2px_4px_0px_rgba(0,0,0,0.15)] rb:font-medium rb:hover:bg-[#FFFFFF]!': item.id === conversation_id,
+                          })}
+                            onClick={() => handleChangeHistory(item.id)}
+                          >
+                            {item.title}
+                          </div>
+                        </div>
+                      ))}
+                    </Flex>
+                  </div>
+                ))}
+              </InfiniteScroll>
+            </div>
+          }
+        </div>
+      }
 
       <div className="rb:relative rb:h-screen rb:px-4 rb:flex-[1_1_auto]">
-        <div className='rb:w-190  rb:h-screen rb:mx-auto rb:pt-10 rb:pb-3'>
+        {!isShare &&
+          <div className="rb:text-[#212332] rb:text-[16px] rb:leading-6 rb:font-medium rb:text-center rb:h-16 rb:py-5 rb:relative">
+            <div className="rb:w-190 rb:mx-auto">{chatTitle || t('memoryConversation.newConversation')}</div>
+
+            {chatTitle &&
+              <Tooltip title={t('memoryConversation.shareConversation')}>
+                <div
+                  className="rb:absolute rb:right-6 rb:top-5 rb:cursor-pointer rb:size-6 rb:bg-cover rb:bg-[url('@/assets/images/conversation/share.svg')]"
+                  onClick={handleShare}
+                ></div>
+              </Tooltip>
+            }
+          </div>
+        }
+        <div className={clsx("rb:w-190 rb:mx-auto rb:pb-3", {
+          'rb:h-[calc(100vh-64px)]': !isShare,
+          'rb:h-full': isShare,
+        })}>
           <Chat
             empty={<Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')} subTitle={t('memoryConversation.emptyDesc')} />}
-            contentClassName={!fileList.length ? "rb:h-[calc(100%-144px)] rb:w-full" : "rb:h-[calc(100%-208px)] rb:w-full"}
+            contentClassName={clsx({
+              'rb:h-full rb:w-full': isShare,
+              'rb:h-[calc(100%-144px)] rb:w-full': !fileList.length && !isShare,
+              'rb:h-[calc(100%-208px)] rb:w-full': fileList.length && !isShare,
+            })}
             data={chatList}
             streamLoading={streamLoadingRef.current}
             loading={loading}
@@ -772,8 +1091,14 @@ const Conversation: FC = () => {
               setFileList(list || [])
               toolbarRef.current?.setFiles(list || [])
             }}
-            isSupportTools={true}
+            isSupportTools={config.app_type === 'agent' && !isShare}
             handleFeedback={handleFeedback}
+            isEnded={chatIsEnded.current}
+            readOnly={isShare}
+            deleteMsg={deleteMessage}
+            reportMsg={reportMsg}
+            regenerateMessages={config.app_type === 'agent' ? regenerateMessages : undefined}
+            handleVersionChange={config.app_type === 'agent' ? handleVersionChange : undefined}
           >
           <ChatToolbar
             ref={toolbarRef}
@@ -847,6 +1172,17 @@ const Conversation: FC = () => {
           </Chat>
         </div>
       </div>
+
+      <ShareModal
+        ref={shareModalRef}
+        conversationId={conversation_id as string}
+        chatList={chatList}
+        streamLoading={streamLoadingRef.current}
+      />
+      <ReportModal
+        ref={reportModalRef}
+        token={token as string}
+      />
     </Flex>
   )
 }

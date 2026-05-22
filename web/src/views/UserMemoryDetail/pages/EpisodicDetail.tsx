@@ -148,7 +148,7 @@ const EpisodicDetail: FC = () => {
   }
 
   return (
-    <Row gutter={16} className="rb:h-full!">
+    <Row gutter={16} wrap={false} className="rb:h-full!">
       <Col flex="400px" className="rb:h-full!">
         <RbCard
           title={<div className="rb:leading-5.5!">

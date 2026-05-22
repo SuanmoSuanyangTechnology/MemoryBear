@@ -205,7 +205,7 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
                     'rb:bg-[#f5f7fc]': isEnabled
                   })}
                 >
-                  <Row gutter={12}>
+                  <Row gutter={12} wrap={false}>
                     <Col flex="36px" className="rb:self-center">{option.icon}</Col>
                     <Col flex="1">
                       <Flex align="center" justify="space-between">

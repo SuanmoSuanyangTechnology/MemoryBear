@@ -1,11 +1,13 @@
 export interface Variable {
   name: string;
-  display_name?: string;
+  description: string;
+  ui_type: string;
   type: string;
   required: boolean;
-  description: string;
   max_length?: number;
-  default?: string;
+  default?: string | Record<string, any> | Array<Record<string, any>>;
+  options?: string[];
+  display_name?: string;
   readonly?: boolean;
   defaultValue?: any;
   value?: any;

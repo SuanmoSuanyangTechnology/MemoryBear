@@ -24,7 +24,7 @@ def _is_single_call_tool(name: str) -> bool:
 
 # 解析模型输出的 Thought/Action/Input 三段式
 _ACTION_PATTERN = re.compile(
-    r"Thought[：:]\s*(.*?)\s*Action[：:]\s*(\S+)\s*Input[：:]\s*([\s\S]*?\{[\s\S]*?})",
+    r"Thought[：:]\s*(.*?)\s*Action[：:]\s*(\S+)\s*Input[：:]\s*([\s\S]*?\{[\s\S]*?\})",
     re.DOTALL,
 )
 
@@ -34,24 +34,45 @@ _REACT_SYSTEM_TEMPLATE = """\
 # 可用工具列表
 {all_tools_info}
 
+# 核心原则：历史信息复用优先
+在决定调用工具前，**必须先检查历史对话中是否已有相关信息**：
+1. 查看历史中的 Observation 字段，那里包含之前工具调用的完整结果
+2. 只有当历史信息不足或与当前问题无关时，才考虑调用新工具
+
 # 基础规则
 1. 只能从上面列出的工具中选择，严禁编造不存在的工具名称。
 2. 每一轮思考**只能调用一个工具**，不允许一轮同时列出多个工具。
 3. 若任务需要多个步骤、依赖多个工具（如先查时间再查天气），必须分多轮依次调用。
-4. 参考历史已有的工具返回结果，自动复用已有信息，无需重复调用工具。
-5. 如果用户问题不需要任何工具就能回答，直接给出最终答案，不输出工具调用格式。
-6. 工具参数缺失时，不要编造参数，正常推理是否需要继续调用或询问用户。
+4. **严格禁止重复调用同一工具获取相同信息**，如有结果不满足请换用其他工具或直接回答。
+5. 如果用户问题不需要任何工具就能回答（或历史中已有答案），直接给出最终答案，不输出工具调用格式。
+6. 工具参数缺失时，不要编造参数，正常推理是否需要继续调用。
 
-# 输出格式（强制严格遵守，只能按以下三段式输出，禁止额外多余话术）
+# 输出规范
+## 调用工具时，**必须严格使用以下固定三段式格式输出**，一字不差遵守排版：
 Thought：你的思考过程，分析用户需求、是否需要调用工具、应该选哪个工具、缺少什么信息
 Action：选中的工具名称（必须和工具列表里的名称完全一致）
 Input：JSON格式工具入参，无参数则填空对象 {{}}
 
+## 无需调用工具、信息充足可以直接回答用户时：
+**直接输出纯自然语言回答即可，严禁输出 Thought、Action、Input 任何字段，不使用任何固定格式**。
+
 # 终止条件
-当已经收集到全部所需信息、无需再调用任何工具时，直接整理信息给出自然语言最终回答，不再输出 Thought/Action/Input 格式。
+当已经收集到全部所需信息、无需再调用任何工具时，直接整理信息用普通自然语言回复用户，彻底停止三段式格式输出。
 
 # 上下文说明
 你能看到历史对话和上一轮工具返回的观察结果，请基于已有结果继续推理下一步动作。\
+"""
+
+# 最终回答专用提示词（给最终大模型使用，不含工具调用指令）
+_FINAL_ANSWER_SYSTEM_TEMPLATE = """\
+你是专业、友好、准确的智能助手。
+请严格基于下方提供的【工具调用过程与结果】来回答用户问题。
+
+规则：
+1. 只使用工具返回的信息回答，不编造、不脑补、不扩展无关内容
+2. 回答语言自然、通顺、礼貌，符合正常对话风格
+3. 如果工具返回结果为空或失败，请如实告知用户
+4. 不要输出任何 Thought/Action/Input 格式内容，只输出自然语言回答
 """
 
 
@@ -62,28 +83,50 @@ def _build_tools_info(tools: Dict[str, Any]) -> str:
         desc = getattr(tool, "description", "") or ""
         if _is_single_call_tool(name):
             desc = f"[{desc}][仅调用一次，结果不匹配时请换用其他工具]"
-        schema = getattr(tool, "args_schema", None)
-        if schema:
+
+        param_parts = []
+
+        # 1. 优先从 tool_instance.parameters 获取（MCP/Custom 工具）
+        tool_instance = getattr(tool, "tool_instance", None)
+        if tool_instance and hasattr(tool_instance, "parameters"):
+            params = tool_instance.parameters
+            for p in params:
+                # 过滤 operation 参数（已通过工具名后缀指定）
+                if p.name == "operation":
+                    continue
+                type_name = p.type.value if hasattr(p.type, "value") else str(p.type)
+                part = f"{p.name}({type_name}"
+                if p.description:
+                    part += f", 说明: {p.description}"
+                if p.default is not None:
+                    part += f", 默认: {p.default}"
+                if p.enum:
+                    part += f", 可选值: {p.enum}"
+                part += ")"
+                param_parts.append(part)
+
+        # 2. 回退到 args_schema（@tool 装饰器生成的工具）
+        elif hasattr(tool, "args_schema") and tool.args_schema:
             try:
                 from pydantic_core import PydanticUndefined
-                fields = schema.model_fields
-                param_parts = []
+                fields = tool.args_schema.model_fields
                 for k, v in fields.items():
                     type_name = v.annotation.__name__ if hasattr(v.annotation, '__name__') else str(v.annotation)
-                    param_desc = v.description or ""
-                    default = v.default
                     part = f"{k}({type_name}"
-                    if param_desc:
-                        part += f", 说明: {param_desc}"
-                    if default is not None and default is not PydanticUndefined:
-                        part += f", 默认: {default}"
+                    if v.description:
+                        part += f", 说明: {v.description}"
+                    if v.default is not None and v.default is not PydanticUndefined:
+                        part += f", 默认: {v.default}"
                     part += ")"
                     param_parts.append(part)
-                lines.append(f"- {name}[{', '.join(param_parts)}]: {desc}")
             except Exception:
-                lines.append(f"- {name}: {desc}")
+                pass
+
+        if param_parts:
+            lines.append(f"- {name}[{', '.join(param_parts)}]: {desc}")
         else:
             lines.append(f"- {name}: {desc}")
+
     return "\n".join(lines)
 
 
@@ -139,7 +182,7 @@ class ToolOrchestrator:
         model_config: Any,
         effective_params: Dict[str, Any],
         processed_files: Optional[List[Dict]] = None,
-        max_rounds: int = 5,
+        max_rounds: int = 10,
     ) -> Tuple[str, List[Dict]]:
         """
         创建编排器并执行 ReAct 循环。
@@ -176,7 +219,7 @@ class ToolOrchestrator:
                     item.get("text", "") if isinstance(item, dict) else str(item)
                     for item in content
                 )
-            return content
+            return content.strip()
 
         react_message = (
             [{"type": "text", "text": message}] + processed_files
@@ -191,8 +234,9 @@ class ToolOrchestrator:
         logger.info("ReAct 工具调用完成", extra={"final_answer_len": len(final_answer)})
 
         updated_system_prompt = (
-            react_system_prompt + trajectory_context
-            + f"\n\n工具调用已完成，调用结果：{final_answer}\n请直接将以上答案整理后回复用户，不要再输出 Thought/Action/Input 格式。"
+            system_prompt + f"\n\n{_FINAL_ANSWER_SYSTEM_TEMPLATE}"
+            + trajectory_context
+            + f"\n\n工具调用已完成，调用结果：{final_answer}"
         )
         return updated_system_prompt, node_executions
 
@@ -213,7 +257,7 @@ class ToolOrchestrator:
         if _is_single_call_tool(name):
             self._single_call_counts[name] = self._single_call_counts.get(name, 0) + 1
             if self._single_call_counts[name] > 1:
-                return f"[{name}] 已调用过一次，请勿重复调用，如结果不满足需求请换用其他工具补充信息。"
+                return {"success": False, "output": "", "error": f"[{name}] 已调用过一次，请勿重复调用，如结果不满足需求请换用其他工具补充信息。"}
         tool = self.tools.get(name)
         if not tool:
             return {"success": False, "output": "", "error": f"工具 '{name}' 不存在"}

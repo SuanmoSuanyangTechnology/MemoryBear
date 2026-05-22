@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-19 17:00:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-07 18:36:58
+ * @Last Modified time: 2026-05-20 18:17:00
  */
 /**
  * useVariableList Hook
@@ -36,7 +36,10 @@ export const fileSubVariable = [
  * Maps node types to their available output variables
  */
 const NODE_VARIABLES = {
-  llm: [{ label: 'output', dataType: 'string', field: 'output' }],
+  llm: [
+    { label: 'output', dataType: 'string', field: 'output' },
+    { label: 'reasoning_content', dataType: 'string', field: 'reasoning_content' }
+  ],
   'jinja-render': [{ label: 'output', dataType: 'string', field: 'output' }],
   tool: [{ label: 'data', dataType: 'string', field: 'data' }],
   'knowledge-retrieval': [{ label: 'output', dataType: 'array[object]', field: 'output' }],
@@ -154,7 +157,22 @@ const processNodeVariables = (
     case 'start':
       // Add start node variables
       [...(config?.variables?.defaultValue ?? []), ...(config?.variables?.value ?? [])].forEach((v: any) => {
-        if (v?.name) addVariable(variableList, addedKeys, `${dataNodeId}_${v.name}`, v.name, v.type, `${dataNodeId}.${v.name}`, nodeData, undefined, v.defaultValue ?? v.default);
+        if (v?.name) {
+          addVariable(
+            variableList,
+            addedKeys,
+            `${dataNodeId}_${v.name}`,
+            v.name,
+            v.type,
+            `${dataNodeId}.${v.name}`,
+            nodeData,
+            {
+              ui_type: v.ui_type,
+              options: v.options,
+            },
+            v.defaultValue ?? v.default,
+          );
+        }
       });
       // Add system variables
       config?.variables?.sys?.forEach((v: any) => {
