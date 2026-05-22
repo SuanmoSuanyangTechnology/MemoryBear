@@ -3,10 +3,11 @@ from collections import defaultdict
 from app.core.rag.models.chunk import DocumentChunk, ChildDocumentChunk
 
 
-def _clean_chunk_meta(chunk: dict) -> dict:
-    """过滤掉不可序列化的字段（如 PIL.Image），返回适合 JSON 响应的 metadata。"""
-    meta = dict(chunk)
-    meta.pop("image", None)
+def _clean_chunk_meta(chunk: dict, chunk_type: str, sort_id: int | None = None) -> dict:
+    """提取 preview 所需的最小 metadata，丢弃原始 chunk 的冗余字段。"""
+    meta = {"chunk_type": chunk_type}
+    if sort_id is not None:
+        meta["sort_id"] = sort_id
     return meta
 
 
@@ -44,10 +45,10 @@ def _build_normal_hierarchy(chunks: list[dict]) -> list[DocumentChunk]:
     return [
         DocumentChunk(
             page_content=chunk.get("content_with_weight", ""),
-            metadata={**_clean_chunk_meta(chunk), "chunk_type": chunk.get("chunk_type", "chunk")},
+            metadata=_clean_chunk_meta(chunk, chunk_type="chunk", sort_id=idx),
             children=[],
         )
-        for chunk in chunks
+        for idx, chunk in enumerate(chunks)
     ]
 
 
@@ -74,7 +75,7 @@ def _build_parent_child_hierarchy(
         children = [
             ChildDocumentChunk(
                 page_content=child.get("content_with_weight", ""),
-                metadata={**_clean_chunk_meta(child), "chunk_type": "child", "sort_id": child_idx},
+                metadata=_clean_chunk_meta(child, chunk_type="child", sort_id=child_idx),
             )
             for child_idx, child in sorted(
                 parent_to_children.get(parent_idx, []),
@@ -84,7 +85,7 @@ def _build_parent_child_hierarchy(
         result.append(
             DocumentChunk(
                 page_content=parent_chunk.get("content_with_weight", ""),
-                metadata={**_clean_chunk_meta(parent_chunk), "chunk_type": "parent", "sort_id": parent_idx},
+                metadata=_clean_chunk_meta(parent_chunk, chunk_type="parent", sort_id=parent_idx),
                 children=children,
             )
         )
@@ -107,14 +108,14 @@ def _build_qa_hierarchy(chunks: list[dict]) -> list[DocumentChunk]:
             children.append(
                 ChildDocumentChunk(
                     page_content=answer.get("content_with_weight", ""),
-                    metadata={**_clean_chunk_meta(answer), "chunk_type": "qa_answer"},
+                    metadata=_clean_chunk_meta(answer, chunk_type="qa_answer"),
                 )
             )
 
         result.append(
             DocumentChunk(
                 page_content=question.get("content_with_weight", ""),
-                metadata={**_clean_chunk_meta(question), "chunk_type": "qa_question"},
+                metadata=_clean_chunk_meta(question, chunk_type="qa_question"),
                 children=children,
             )
         )
