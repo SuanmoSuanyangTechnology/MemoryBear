@@ -601,6 +601,8 @@ class ConversationService:
     ) -> None:
         """删除单条消息（逻辑删除）
 
+        如果消息有多个版本，则一起删除所有版本。
+
         Args:
             message_id: 消息ID
             workspace_id: 工作空间ID
@@ -614,7 +616,20 @@ class ConversationService:
         if conv.workspace_id != workspace_id:
             raise BusinessException("无权删除此消息", BizCode.PERMISSION_DENIED)
 
+        # 删除当前消息
         message.is_deleted = True
+
+        # 如果是 assistant 消息且有 parent_message_id，删除同一 parent 下的所有版本
+        if message.role == "assistant" and message.parent_message_id:
+            sibling_messages = self.db.query(Message).filter(
+                Message.parent_message_id == message.parent_message_id,
+                Message.role == "assistant",
+                Message.is_deleted == False,
+            ).all()
+
+            for sibling in sibling_messages:
+                sibling.is_deleted = True
+
         self.db.commit()
 
         logger.info(
