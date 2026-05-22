@@ -790,7 +790,8 @@ class DifyConverter(BaseConverter):
         result = ParameterExtractorNodeConfig.model_construct(
             text=self._process_list_variable_literal(node_data["query"]),
             params=params,
-            prompt=node_data.get("instruction")
+            prompt=node_data.get("instruction"),
+            inference_mode="prompt",
         ).model_dump()
 
         self.config_validate(node["id"], node["data"]["title"], ParameterExtractorNodeConfig, result)
