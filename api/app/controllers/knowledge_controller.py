@@ -256,8 +256,9 @@ async def get_knowledge_chunk_policy(
 ):
     """
     查询知识库的分块策略锁定状态
-    - 如果该知识库下已有文档使用父子分块策略，返回 parent_child_mode: true
-    - 前端据此判断新上传文档是否允许切换分块策略
+    - 知识库为空（无文档）→ parent_child_mode: null，未锁定，可自由选择
+    - 知识库有文档且使用普通分块 → parent_child_mode: false，锁定为普通模式
+    - 知识库有文档且使用父子分块 → parent_child_mode: true，锁定为父子模式
     """
     api_logger.info(f"Query knowledge base chunk policy: knowledge_id={knowledge_id}, username: {current_user.username}")
 
@@ -272,12 +273,17 @@ async def get_knowledge_chunk_policy(
     # 2. 查询该知识库下所有文档的 parser_config
     try:
         documents = db.query(Document).filter(Document.kb_id == knowledge_id).all()
-        has_parent_child = any(
-            doc.parser_config.get("parent_child_mode", False)
-            for doc in documents
-        )
-        api_logger.info(f"Knowledge base chunk policy: knowledge_id={knowledge_id}, parent_child_mode={has_parent_child}, doc_count={len(documents)}")
-        return success(data={"parent_child_mode": has_parent_child}, msg="Successfully obtained knowledge base chunk policy")
+
+        if not documents:
+            # 无文档 → 未锁定
+            api_logger.info(f"Knowledge base chunk policy: knowledge_id={knowledge_id}, locked=null, doc_count=0")
+            return success(data={"parent_child_mode": None}, msg="Successfully obtained knowledge base chunk policy")
+
+        # 有文档 → 取第一个文档的分块模式作为锁定模式
+        # （正常情况下同一知识库下所有文档分块模式一致）
+        first_doc_mode = documents[0].parser_config.get("parent_child_mode", False)
+        api_logger.info(f"Knowledge base chunk policy: knowledge_id={knowledge_id}, parent_child_mode={first_doc_mode}, doc_count={len(documents)}")
+        return success(data={"parent_child_mode": first_doc_mode}, msg="Successfully obtained knowledge base chunk policy")
     except Exception as e:
         api_logger.error(f"Failed to query knowledge base chunk policy: knowledge_id={knowledge_id} - {str(e)}")
         raise HTTPException(
