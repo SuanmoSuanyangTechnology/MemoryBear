@@ -253,7 +253,8 @@ class ConversationService:
     def get_messages(
             self,
             conversation_id: uuid.UUID,
-            limit: Optional[int] = None
+            limit: Optional[int] = None,
+            current_only: bool = True
     ) -> List[Message]:
         """
         Retrieve messages for a conversation.
@@ -261,16 +262,85 @@ class ConversationService:
         Args:
             conversation_id (uuid.UUID): Conversation UUID.
             limit (Optional[int]): Optional maximum number of messages.
+            current_only (bool): If True, only return current version messages.
+                                If False, return all versions.
 
         Returns:
             List[Message]: List of messages ordered by creation time.
         """
         messages = self.message_repo.get_message_by_conversation_id(
             conversation_id,
-            limit
+            limit,
+            current_only=current_only
         )
 
         return messages
+
+    def get_conversation_with_messages(
+            self,
+            conversation_id: uuid.UUID,
+            workspace_id: Optional[uuid.UUID] = None
+    ) -> List[Message]:
+        """获取会话及其所有消息（包含多版本），按 parent_message_id 分组
+
+        Args:
+            conversation_id: 会话ID
+            workspace_id: 工作空间ID（可选，用于权限验证）
+
+        Returns:
+            List: 扁平化的消息列表
+                  只有最后一条 user 消息的 assistant 回复可能展示多版本
+        """
+        # 获取 is_current=True 的消息
+        current_messages = self.message_repo.get_message_by_conversation_id(
+            conversation_id,
+            current_only=True
+        )
+        
+        # 找到最后一条 user 消息
+        last_user_msg = None
+        for msg in reversed(current_messages):
+            if msg.role == "user":
+                last_user_msg = msg
+                break
+        
+        # 查询最后一条 user 消息的所有 assistant 版本
+        last_user_all_versions = []
+        if last_user_msg:
+            from sqlalchemy import select
+            all_versions = self.db.scalars(
+                select(Message)
+                .where(
+                    Message.conversation_id == conversation_id,
+                    Message.role == "assistant",
+                    Message.parent_message_id == last_user_msg.id,
+                    Message.is_deleted == False,
+                )
+                .order_by(Message.version)
+            ).all()
+            last_user_all_versions = list(all_versions)
+        
+        # 构建结果
+        result_messages = []
+        for msg in current_messages:
+            if msg.role == "user":
+                result_messages.append(msg)
+            elif msg.role == "assistant":
+                # 检查是否是最后一条 user 的回复
+                if last_user_msg and msg.parent_message_id == last_user_msg.id:
+                    # 已经处理过了，跳过
+                    continue
+                else:
+                    result_messages.append(msg)
+        
+        # 在最后添加最后一条 user 的所有 assistant 版本
+        if last_user_all_versions:
+            if len(last_user_all_versions) == 1:
+                result_messages.append(last_user_all_versions[0])
+            else:
+                result_messages.append(last_user_all_versions)
+        
+        return result_messages
 
     async def get_conversation_history(
             self,

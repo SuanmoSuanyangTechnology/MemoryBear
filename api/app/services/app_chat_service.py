@@ -11,15 +11,16 @@ from sqlalchemy.orm import Session
 from app.core.agent.langchain_agent import LangChainAgent
 from app.core.logging_config import get_business_logger
 from app.core.memory.agent.langgraph_graph.write_graph import write_long_term
+from app.core.exceptions import BusinessException
+from app.core.error_codes import BizCode
 from app.db import get_db
-from app.models import MultiAgentConfig, AgentConfig, ModelType
-from app.models import WorkflowConfig
-from app.models.models_model import ModelCapability
-from app.models.agent_execution_model import AgentExecution
+from app.models import (
+    MultiAgentConfig, AgentConfig, ModelType, WorkflowConfig,
+    ModelCapability, AgentExecution, Message, Conversation)
 from app.repositories.agent_execution_repository import AgentExecutionRepository
 from app.repositories.tool_repository import ToolRepository
 from app.schemas import DraftRunRequest
-from app.schemas.app_schema import FileInput, FileType
+from app.schemas.app_schema import FileInput, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 from app.services.conversation_service import ConversationService
@@ -44,7 +45,7 @@ class AppChatService:
         self.agent_service = AgentRunService(db)
         self.workflow_service = WorkflowService(db)
 
-    async def agnet_chat(
+    async def agent_chat(
             self,
             message: str,
             conversation_id: uuid.UUID,
@@ -56,10 +57,15 @@ class AppChatService:
             memory: bool = True,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
-            workspace_id: Optional[str] = None
+            workspace_id: Optional[str] = None,
+            history: Optional[List[Dict[str, Any]]] = None,  # 外部传入的历史消息
+            skip_save: bool = False,  # 是否新版本消息保存（用于重新生成场景）
+            parent_message_id: Optional[uuid.UUID] = None,  # 父消息ID（用于重新生成版本）
+            version: int = 1,  # 版本号（用于重新生成版本）
     ) -> Dict[str, Any]:
         """聊天（非流式）"""
         start_time = time.time()
+        message_id = uuid.uuid4()
 
         # 应用 features 配置
         features_config: dict = config.features or {}
@@ -122,12 +128,14 @@ class AppChatService:
         )
 
         # 加载历史消息（包含开场白）
-        history = await self.conversation_service.get_conversation_history(
-            conversation_id=conversation_id,
-            max_history=10,
-            current_provider=api_key_obj.provider,
-            current_is_omni=api_key_obj.is_omni
-        )
+        if history is None:
+            # 没有外部传入的历史，从数据库加载
+            history = await self.conversation_service.get_conversation_history(
+                conversation_id=conversation_id,
+                max_history=10,
+                current_provider=api_key_obj.provider,
+                current_is_omni=api_key_obj.is_omni
+            )
 
         # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
         is_new_conversation = len(history) == 0
@@ -333,7 +341,6 @@ class AppChatService:
                 "is_omni": api_key_obj.is_omni
             }
 
-        # 保存消息
         if audio_url:
             assistant_meta["audio_url"] = audio_url
         if memory_flag:
@@ -356,19 +363,39 @@ class AppChatService:
                     user_rag_memory_id,
                     memory_config_id
                 )
-        self.conversation_service.add_message(
-            conversation_id=conversation_id,
-            role="user",
-            content=message,
-            meta_data=human_meta
-        )
-        ai_message = self.conversation_service.add_message(
-            conversation_id=conversation_id,
-            role="assistant",
-            content=result["content"],
-            meta_data=assistant_meta
-        )
-        message_id = ai_message.id
+
+        # 保存消息
+        if not skip_save:
+            self.conversation_service.add_message(
+                conversation_id=conversation_id,
+                role="user",
+                content=message,
+                meta_data=human_meta
+            )
+            self.conversation_service.add_message(
+                message_id=message_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=result["content"],
+                meta_data=assistant_meta
+            )
+        else:
+            new_msg = Message(
+                id=message_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=result["content"],
+                version=version,
+                is_current=True,
+                parent_message_id=parent_message_id,
+                meta_data=assistant_meta,
+            )
+            self.db.add(new_msg)
+            conv = self.db.get(Conversation, conversation_id)
+            if conv:
+                conv.message_count += 1
+
+            self.db.commit()
 
         # 更新 Agent 执行记录为 completed
         node_executions = orchestrator_node_executions + result.get("node_executions", [])
@@ -398,7 +425,7 @@ class AppChatService:
             "audio_status": "pending" if audio_url else None
         }
 
-    async def agnet_chat_stream(
+    async def agent_chat_stream(
             self,
             message: str,
             conversation_id: uuid.UUID,
@@ -410,7 +437,11 @@ class AppChatService:
             memory: bool = True,
             storage_type: Optional[str] = None,
             user_rag_memory_id: Optional[str] = None,
-            workspace_id: Optional[str] = None
+            workspace_id: Optional[str] = None,
+            history: Optional[List[Dict[str, Any]]] = None,  # 外部传入的历史消息
+            skip_save: bool = False,  # 是否新版本消息保存（用于重新生成场景）
+            parent_message_id: Optional[uuid.UUID] = None,  # 父消息ID（用于重新生成版本）
+            version: int = 1,  # 版本号（用于重新生成版本）
     ) -> AsyncGenerator[str, None]:
         """聊天（流式）"""
 
@@ -482,12 +513,14 @@ class AppChatService:
             )
 
             # 加载历史消息（包含开场白）
-            history = await self.conversation_service.get_conversation_history(
-                conversation_id=conversation_id,
-                max_history=10,
-                current_provider=api_key_obj.provider,
-                current_is_omni=api_key_obj.is_omni
-            )
+            if history is None:
+                # 没有外部传入的历史，从数据库加载
+                history = await self.conversation_service.get_conversation_history(
+                    conversation_id=conversation_id,
+                    max_history=10,
+                    current_provider=api_key_obj.provider,
+                    current_is_omni=api_key_obj.is_omni
+                )
 
             # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
             is_new_conversation = len(history) == 0
@@ -756,19 +789,38 @@ class AppChatService:
                         user_rag_memory_id,
                         memory_config_id
                     )
-            self.conversation_service.add_message(
-                conversation_id=conversation_id,
-                role="user",
-                content=message,
-                meta_data=human_meta
-            )
-            self.conversation_service.add_message(
-                message_id=message_id,
-                conversation_id=conversation_id,
-                role="assistant",
-                content=full_content,
-                meta_data=assistant_meta
-            )
+            # 保存消息
+            if not skip_save:
+                self.conversation_service.add_message(
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=message,
+                    meta_data=human_meta
+                )
+                self.conversation_service.add_message(
+                    message_id=message_id,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=full_content,
+                    meta_data=assistant_meta
+                )
+            else:
+                new_msg = Message(
+                    id=message_id,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=full_content,
+                    version=version,
+                    is_current=True,
+                    parent_message_id=parent_message_id,
+                    meta_data=assistant_meta,
+                )
+                self.db.add(new_msg)
+                conv = self.db.get(Conversation, conversation_id)
+                if conv:
+                    conv.message_count += 1
+
+                self.db.commit()
 
             # 更新 Agent 执行记录为 completed
             all_node_executions = orchestrator_node_executions + node_executions
@@ -1076,6 +1128,344 @@ class AppChatService:
                 public=public
         ):
             yield event
+
+    # ==================== 重新生成功能 ====================
+
+    async def regenerate(
+            self,
+            message_id: uuid.UUID,
+            config,
+            workspace_id: uuid.UUID,
+            user_id: str,
+            variables: Optional[Dict[str, Any]] = None,
+            web_search: bool = False,
+            memory: bool = True,
+            storage_type: Optional[str] = None,
+            user_rag_memory_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """重新生成回复（非流式，多版本支持）
+
+        Args:
+            message_id: 原 AI 回复的消息ID
+            config: AgentConfig
+            workspace_id: 工作空间ID
+            user_id: 用户ID
+            variables: 变量参数
+            web_search: 是否启用网络搜索
+            memory: 是否启用长期记忆
+            storage_type: 存储类型
+            user_rag_memory_id: RAG 记忆ID
+
+        Returns:
+            Dict: 包含新消息ID、内容、版本号等
+        """
+        # 1. 获取原消息
+        original_msg = self.db.get(Message, message_id)
+        if not original_msg or original_msg.role != "assistant":
+            raise BusinessException("只能重新生成 AI 回复", BizCode.BAD_REQUEST)
+        if original_msg.is_deleted:
+            raise BusinessException("消息已被删除", BizCode.BAD_REQUEST)
+
+        # 2. 获取父用户消息
+        parent_msg_id = original_msg.parent_message_id
+        if not parent_msg_id:
+            from sqlalchemy import select
+            parent_msg = self.db.scalars(
+                select(Message)
+                .where(
+                    Message.conversation_id == original_msg.conversation_id,
+                    Message.role == "user",
+                    Message.created_at < original_msg.created_at,
+                    Message.is_deleted == False,
+                )
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            ).first()
+            if not parent_msg:
+                raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
+            original_msg.parent_message_id = parent_msg.id
+            self.db.commit()
+            parent_msg_id = parent_msg.id
+        else:
+            parent_msg = self.db.get(Message, parent_msg_id)
+
+        user_message_content = parent_msg.content if parent_msg else ""
+
+        # 3. 查询同一 parent_message_id 下的所有版本，获取最大版本号
+        from sqlalchemy import select, func
+        max_version_result = self.db.scalars(
+            select(func.max(Message.version))
+            .where(
+                Message.conversation_id == original_msg.conversation_id,
+                Message.parent_message_id == parent_msg_id,
+                Message.role == "assistant",
+                Message.is_deleted == False,
+            )
+        ).first()
+        max_version = max_version_result or 0
+        new_version = max_version + 1
+
+        # 4. 将同一 parent_message_id 下所有版本标记为非当前
+        self.db.query(Message).filter(
+            Message.conversation_id == original_msg.conversation_id,
+            Message.parent_message_id == parent_msg_id,
+            Message.role == "assistant",
+        ).update({"is_current": False})
+        self.db.commit()
+
+        # 5. 提取父消息中的文件信息
+        files = None
+        if parent_msg and parent_msg.meta_data:
+            meta_files = parent_msg.meta_data.get("files", [])
+            if meta_files:
+                files = []
+                for f in meta_files:
+                    try:
+                        file_input = FileInput(
+                            type=FileType(f.get("type", "document")),
+                            transfer_method=TransferMethod.REMOTE_URL if f.get("url") else TransferMethod.LOCAL_FILE,
+                            url=f.get("url"),
+                            file_type=f.get("file_type"),
+                            name=f.get("name"),
+                            size=f.get("size"),
+                        )
+                        files.append(file_input)
+                    except Exception as e:
+                        logger.warning(f"转换文件信息失败: {e}")
+
+        # 6. 加载上下文（到父消息为止）
+        conversation_id = original_msg.conversation_id
+        max_history = config.memory.get("max_history", 10) if config.memory else 10
+        filtered_history = await self._load_history_before_message(
+            conversation_id=conversation_id,
+            before_time=parent_msg.created_at,
+            max_history=max_history
+        )
+
+        # 7. 调用 agent_chat（传入版本参数，由 agent_chat 保存）
+        result = await self.agent_chat(
+            message=user_message_content,
+            conversation_id=conversation_id,
+            config=config,
+            files=files,
+            user_id=user_id,
+            variables=variables,
+            web_search=web_search,
+            memory=memory,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+            workspace_id=str(workspace_id),
+            history=filtered_history,
+            skip_save=True,
+            parent_message_id=parent_msg_id,
+            version=new_version,
+        )
+
+        logger.info(
+            "重新生成回复成功",
+            extra={
+                "original_message_id": str(message_id),
+                "new_message_id": result["message_id"],
+                "version": new_version,
+            }
+        )
+
+        return {
+            "message_id": result["message_id"],
+            "message": result["message"],
+            "reasoning_content": result.get("reasoning_content"),
+            "version": new_version,
+            "conversation_id": str(conversation_id),
+            "suggested_questions": result.get("suggested_questions", []),
+            "citations": result.get("citations", []),
+            "audio_url": result.get("audio_url"),
+            "audio_status": result.get("audio_status"),
+        }
+
+    async def regenerate_stream(
+            self,
+            message_id: uuid.UUID,
+            config,
+            workspace_id: uuid.UUID,
+            user_id: str,
+            variables: Optional[Dict[str, Any]] = None,
+            web_search: bool = False,
+            memory: bool = True,
+            storage_type: Optional[str] = None,
+            user_rag_memory_id: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """重新生成回复（流式输出，多版本支持）
+
+        Args:
+            message_id: 原 AI 回复的消息ID
+            config: AgentConfig
+            workspace_id: 工作空间ID
+            user_id: 用户ID
+            variables: 变量参数
+            web_search: 是否启用网络搜索
+            memory: 是否启用长期记忆
+            storage_type: 存储类型
+            user_rag_memory_id: RAG 记忆ID
+
+        Yields:
+            str: SSE 格式的事件数据
+        """
+        from app.models import Message, Conversation
+        from app.core.error_codes import BizCode
+        from app.core.exceptions import BusinessException
+        from app.schemas.app_schema import FileType, TransferMethod
+
+        # 1. 获取原消息
+        original_msg = self.db.get(Message, message_id)
+        if not original_msg or original_msg.role != "assistant":
+            raise BusinessException("只能重新生成 AI 回复", BizCode.BAD_REQUEST)
+        if original_msg.is_deleted:
+            raise BusinessException("消息已被删除", BizCode.BAD_REQUEST)
+
+        # 2. 获取父用户消息
+        parent_msg_id = original_msg.parent_message_id
+        if not parent_msg_id:
+            from sqlalchemy import select
+            parent_msg = self.db.scalars(
+                select(Message)
+                .where(
+                    Message.conversation_id == original_msg.conversation_id,
+                    Message.role == "user",
+                    Message.created_at < original_msg.created_at,
+                    Message.is_deleted == False,
+                )
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            ).first()
+            if not parent_msg:
+                raise BusinessException("无法找到原始用户消息", BizCode.NOT_FOUND)
+            original_msg.parent_message_id = parent_msg.id
+            self.db.commit()
+            parent_msg_id = parent_msg.id
+        else:
+            parent_msg = self.db.get(Message, parent_msg_id)
+
+        user_message_content = parent_msg.content if parent_msg else ""
+
+        # 3. 查询同一 parent_message_id 下的所有版本，获取最大版本号
+        from sqlalchemy import select, func
+        max_version_result = self.db.scalars(
+            select(func.max(Message.version))
+            .where(
+                Message.conversation_id == original_msg.conversation_id,
+                Message.parent_message_id == parent_msg_id,
+                Message.role == "assistant",
+                Message.is_deleted == False,
+            )
+        ).first()
+        max_version = max_version_result or 0
+        new_version = max_version + 1
+
+        # 4. 将同一 parent_message_id 下所有版本标记为非当前
+        self.db.query(Message).filter(
+            Message.conversation_id == original_msg.conversation_id,
+            Message.parent_message_id == parent_msg_id,
+            Message.role == "assistant",
+        ).update({"is_current": False})
+        self.db.commit()
+
+        # 5. 提取父消息中的文件信息
+        files = None
+        if parent_msg and parent_msg.meta_data:
+            meta_files = parent_msg.meta_data.get("files", [])
+            if meta_files:
+                files = []
+                for f in meta_files:
+                    try:
+                        file_input = FileInput(
+                            type=FileType(f.get("type", "document")),
+                            transfer_method=TransferMethod.REMOTE_URL if f.get("url") else TransferMethod.LOCAL_FILE,
+                            url=f.get("url"),
+                            file_type=f.get("file_type"),
+                            name=f.get("name"),
+                            size=f.get("size"),
+                        )
+                        files.append(file_input)
+                    except Exception as e:
+                        logger.warning(f"转换文件信息失败: {e}")
+
+        # 6. 加载上下文
+        conversation_id = original_msg.conversation_id
+        max_history = config.memory.get("max_history", 10) if config.memory else 10
+        filtered_history = await self._load_history_before_message(
+            conversation_id=conversation_id,
+            before_time=parent_msg.created_at,
+            max_history=max_history
+        )
+
+        # 7. 流式调用（传入版本参数，由 agent_chat_stream 保存）
+        async for event_str in self.agent_chat_stream(
+                message=user_message_content,
+                conversation_id=conversation_id,
+                config=config,
+                files=files,
+                user_id=user_id,
+                variables=variables,
+                web_search=web_search,
+                memory=memory,
+                storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+                workspace_id=str(workspace_id),
+                history=filtered_history,
+                skip_save=True,
+                parent_message_id=parent_msg_id,
+                version=new_version,
+        ):
+            yield event_str
+
+        logger.info(
+            "重新生成回复成功（流式）",
+            extra={
+                "original_message_id": str(message_id),
+                "version": new_version,
+            }
+        )
+
+    async def _load_history_before_message(
+            self,
+            conversation_id: uuid.UUID,
+            before_time,
+            max_history: int = 10
+    ) -> List[Dict[str, Any]]:
+        """加载指定时间之前的历史消息（用于重新生成场景）"""
+        from sqlalchemy import select
+        from app.models import Message
+
+        history_msgs = self.db.scalars(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation_id,
+                Message.is_current == True,
+                Message.created_at < before_time,
+                Message.is_deleted == False,
+            )
+            .order_by(Message.created_at.asc())
+            .limit(max_history)
+        ).all()
+
+        filtered_history = []
+        for msg in history_msgs:
+            msg_dict = {
+                "role": msg.role,
+                "content": [{"type": "text", "text": msg.content}]
+            }
+            if msg.role == "user" and msg.meta_data:
+                history_files = msg.meta_data.get("history_files", {})
+                if history_files and history_files.get("content"):
+                    msg_dict["content"].extend(history_files.get("content"))
+            filtered_history.append(msg_dict)
+
+        logger.debug(
+            "加载指定时间前的历史消息",
+            extra={"conversation_id": str(conversation_id), "loaded_count": len(filtered_history)}
+        )
+
+        return filtered_history
 
 
 # ==================== 依赖注入函数 ====================
