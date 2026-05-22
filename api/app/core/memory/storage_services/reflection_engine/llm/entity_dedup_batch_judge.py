@@ -5,7 +5,7 @@ import logging
 import os
 from typing import Any, Dict, List, Tuple
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from jinja2 import Environment, FileSystemLoader
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ class DedupResultItem(BaseModel):
 
 class BatchDedupOutput(BaseModel):
     """LLM 分组判定输出"""
-    results: List[DedupResultItem] = []
+    results: List[DedupResultItem] = Field(default_factory=list)
 
 
 async def judge_batch_dedup(

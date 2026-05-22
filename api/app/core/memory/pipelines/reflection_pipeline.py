@@ -139,7 +139,7 @@ class ReflectionPipeline:
         )
 
         try:
-            return await inspector._run_dedup_full_scan(self.end_user_id)
+            return await inspector.run_dedup_full_scan(self.end_user_id)
         finally:
             await connector.close()
 

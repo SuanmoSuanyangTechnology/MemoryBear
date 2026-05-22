@@ -41,7 +41,6 @@ class EntityDedupConfig(BaseModel):
 
     # === 方案B：低频分组 LLM ===
     min_entities_for_scan: int = 3      # 少于此数不扫描
-    scan_interval_hours: int = 24       # 扫描间隔
     max_pairs_per_run: int = 20         # 单次最多合并对数
 
 
@@ -199,6 +198,7 @@ class Layer2Inspector:
         # 6. 合并执行（全部经 LLM 确认后才合并）
         merged_count = 0
         recorded_count = 0
+        rejected_pairs = []
         for pair, decision in llm_results:
             if merged_count >= config.max_merges_per_run:
                 break
@@ -207,8 +207,8 @@ class Layer2Inspector:
                 if success:
                     merged_count += 1
             else:
-                # LLM 拒绝或 confidence 不够 → 写丢弃缓存 + 写 recorded 日志
-                await cache_discarded(end_user_id, [pair])
+                # LLM 拒绝或 confidence 不够 → 收集待写缓存 + 写 recorded 日志
+                rejected_pairs.append(pair)
                 reason = decision.reason if decision else "LLM 判定失败"
                 conf = decision.confidence if decision else 0.0
                 entity_a = {"entity_id": pair.a_id, "name": pair.a_name, "entity_type": pair.entity_type,
@@ -235,8 +235,13 @@ class Layer2Inspector:
                     },
                     reason=reason,
                     status="recorded", strategy="NO_OP",
+                    baseline=baseline,
                 )
                 recorded_count += 1
+
+        # 批量写入丢弃缓存（一次 Redis 往返）
+        if rejected_pairs:
+            await cache_discarded(end_user_id, rejected_pairs)
 
         return {
             "status": "success",
@@ -247,6 +252,10 @@ class Layer2Inspector:
             "recorded_count": recorded_count,
         }
 
+
+    async def run_dedup_full_scan(self, end_user_id: str) -> Dict[str, Any]:
+        """子问题 3 复杂去重 方案B：低频全量扫描去重（公共入口）"""
+        return await self._run_dedup_full_scan(end_user_id)
 
     async def _run_dedup_full_scan(self, end_user_id: str) -> Dict[str, Any]:
         """子问题 3 复杂去重 方案B：低频全量扫描去重"""
@@ -346,7 +355,8 @@ class Layer2Inspector:
     def _write_dedup_log(self, end_user_id: str, keeper: Dict, loser: Dict,
                          entity_type: str, merged_name: str, merged_aliases: List,
                          confidence: float, execution_detail: Dict, reason: str = "",
-                         status: str = "resolved", strategy: str = "MERGE"):
+                         status: str = "resolved", strategy: str = "MERGE",
+                         baseline: str = "HYBRID"):
         """写去重 ReflectionLog（方案A和B共用，支持 resolved/recorded）"""
         if status == "resolved":
             changes = [c for c in [
@@ -383,7 +393,7 @@ class Layer2Inspector:
             end_user_id=end_user_id,
             sub_problem="entity_dedup",
             trigger_type="scheduled",
-            baseline="HYBRID",
+            baseline=baseline,
             strategy=strategy,
             confidence=confidence,
             status=status,
@@ -456,6 +466,7 @@ class Layer2Inspector:
             confidence=llm_decision.confidence if llm_decision else pair.probability,
             execution_detail=tracker.to_dict(),
             reason=llm_decision.reason if llm_decision else "",
+            baseline=baseline,
         )
         return True
 

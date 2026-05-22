@@ -272,7 +272,9 @@ class Settings:
     LAYER2_REFLECTION_INTERVAL_MINUTES: int = TypeAdapter(
         Annotated[int, Field(ge=1, description="Layer 2 reflection interval in minutes, must be >= 1")]
     ).validate_python(int(os.getenv("LAYER2_REFLECTION_INTERVAL_MINUTES", "10")))
-    LAYER2_DEDUP_FULL_SCAN_HOUR: int = int(os.getenv("LAYER2_DEDUP_FULL_SCAN_HOUR", "3"))  # 每天几点执行（0-23）
+    LAYER2_DEDUP_FULL_SCAN_HOUR: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=23, description="Layer 2 dedup full scan hour, must be 0-23")]
+    ).validate_python(int(os.getenv("LAYER2_DEDUP_FULL_SCAN_HOUR", "3")))
     # Memory Module Configuration (internal)
     
     MEMORY_OUTPUT_DIR: str = os.getenv("MEMORY_OUTPUT_DIR", "logs/memory-output")

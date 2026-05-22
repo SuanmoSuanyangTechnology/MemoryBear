@@ -2163,7 +2163,11 @@ MATCH (keeper:ExtractedEntity {id: $keeper_id, end_user_id: $end_user_id})
 MATCH (loser:ExtractedEntity {id: $loser_id, end_user_id: $end_user_id})
 SET keeper.name = $merged_name,
     keeper.aliases = $merged_aliases,
-    keeper.description = keeper.description + '；' + loser.description,
+    keeper.description = CASE
+      WHEN coalesce(keeper.description, '') = '' THEN coalesce(loser.description, '')
+      WHEN coalesce(loser.description, '') = '' THEN coalesce(keeper.description, '')
+      ELSE keeper.description + '；' + loser.description
+    END,
     keeper.connect_strength = CASE
       WHEN keeper.connect_strength = 'both' OR loser.connect_strength = 'both' THEN 'both'
       WHEN keeper.connect_strength <> loser.connect_strength THEN 'both'
@@ -2174,16 +2178,18 @@ SET keeper.name = $merged_name,
       THEN loser.importance_score ELSE keeper.importance_score END,
     keeper.access_count = coalesce(keeper.access_count, 0) + coalesce(loser.access_count, 0),
     keeper.created_at = CASE
+      WHEN keeper.created_at IS NULL THEN loser.created_at
+      WHEN loser.created_at IS NULL THEN keeper.created_at
       WHEN loser.created_at < keeper.created_at THEN loser.created_at
       ELSE keeper.created_at END,
-    keeper.core_facts = coll.distinct(coalesce(keeper.core_facts,[]) + coalesce(loser.core_facts,[])),
-    keeper.traits = coll.distinct(coalesce(keeper.traits,[]) + coalesce(loser.traits,[])),
-    keeper.relations = coll.distinct(coalesce(keeper.relations,[]) + coalesce(loser.relations,[])),
-    keeper.goals = coll.distinct(coalesce(keeper.goals,[]) + coalesce(loser.goals,[])),
-    keeper.interests = coll.distinct(coalesce(keeper.interests,[]) + coalesce(loser.interests,[])),
-    keeper.beliefs_or_stances = coll.distinct(coalesce(keeper.beliefs_or_stances,[]) + coalesce(loser.beliefs_or_stances,[])),
-    keeper.anchors = coll.distinct(coalesce(keeper.anchors,[]) + coalesce(loser.anchors,[])),
-    keeper.events = coll.distinct(coalesce(keeper.events,[]) + coalesce(loser.events,[]))
+    keeper.core_facts = apoc.coll.toSet(coalesce(keeper.core_facts,[]) + coalesce(loser.core_facts,[])),
+    keeper.traits = apoc.coll.toSet(coalesce(keeper.traits,[]) + coalesce(loser.traits,[])),
+    keeper.relations = apoc.coll.toSet(coalesce(keeper.relations,[]) + coalesce(loser.relations,[])),
+    keeper.goals = apoc.coll.toSet(coalesce(keeper.goals,[]) + coalesce(loser.goals,[])),
+    keeper.interests = apoc.coll.toSet(coalesce(keeper.interests,[]) + coalesce(loser.interests,[])),
+    keeper.beliefs_or_stances = apoc.coll.toSet(coalesce(keeper.beliefs_or_stances,[]) + coalesce(loser.beliefs_or_stances,[])),
+    keeper.anchors = apoc.coll.toSet(coalesce(keeper.anchors,[]) + coalesce(loser.anchors,[])),
+    keeper.events = apoc.coll.toSet(coalesce(keeper.events,[]) + coalesce(loser.events,[]))
 WITH keeper, loser
 OPTIONAL MATCH (s:Statement)-[r:REFERENCES_ENTITY]->(loser)
 WHERE NOT (s)-[:REFERENCES_ENTITY]->(keeper)

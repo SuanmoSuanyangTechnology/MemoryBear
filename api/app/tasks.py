@@ -2132,9 +2132,10 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
                     return {"status": "SUCCESS", "message": "无工作空间"}
 
                 logger.info(f"反思引擎Layer2 巡检开始，共 {len(workspaces)} 个工作空间")
-                all_results = []
                 processed_users = 0
                 skipped_configs = 0
+                total_dedup_merged = 0
+                total_desc_merged = 0
 
                 for workspace in workspaces:
                     service = WorkspaceAppService(db)
@@ -2165,18 +2166,23 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
                                         baseline=baseline,
                                     )
                                     processed_users += 1
-                                    # 只在有实际合并时输出详细日志
+                                    # 增量统计
+                                    dedup_info = r.get("entity_dedup", {})
                                     merge_info = r.get("description_merge", {})
+                                    total_dedup_merged += dedup_info.get("merged_count", 0)
+                                    total_desc_merged += merge_info.get("merged_count", 0)
+                                    # 只在有实际合并时输出详细日志
                                     if merge_info.get("merged_count", 0) > 0:
                                         logger.info(
-                                            f"反思引擎Layer2 用户 {user['id']} 合并完成: "
+                                            f"反思引擎Layer2 用户 {user['id']} 描述合并: "
                                             f"候选 {merge_info['candidate_count']}, "
                                             f"合并 {merge_info['merged_count']}"
                                         )
-                                    all_results.append({
-                                        "end_user_id": str(user['id']),
-                                        "result": r,
-                                    })
+                                    if dedup_info.get("merged_count", 0) > 0:
+                                        logger.info(
+                                            f"反思引擎Layer2 用户 {user['id']} 去重合并: "
+                                            f"合并 {dedup_info['merged_count']}"
+                                        )
                                 except Exception as e:
                                     logger.error(f"反思引擎Layer2 巡检失败 user={user['id']}: {e}")
 
@@ -2185,15 +2191,6 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
                     f"跳过 {skipped_configs} 个未启用反思的配置"
                 )
 
-                # 统计汇总（不返回每个用户的详细结果，避免 result 过大）
-                total_dedup_merged = sum(
-                    r.get("result", {}).get("entity_dedup", {}).get("merged_count", 0)
-                    for r in all_results
-                )
-                total_desc_merged = sum(
-                    r.get("result", {}).get("description_merge", {}).get("merged_count", 0)
-                    for r in all_results
-                )
                 return {
                     "status": "SUCCESS",
                     "processed_users": processed_users,
