@@ -11,10 +11,11 @@ from app.core.models import RedBearLLM, RedBearModelConfig
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
-from app.core.workflow.nodes.parameter_extractor.config import ParameterExtractorNodeConfig
+from app.core.workflow.nodes.parameter_extractor.config import ParameterExtractorNodeConfig, InferenceMode
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 from app.db import get_db_read
 from app.models import ModelType
+from app.models.models_model import ModelCapability
 from app.services.model_service import ModelConfigService
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ class ParameterExtractorNode(BaseNode):
         self.typed_config: ParameterExtractorNodeConfig | None = None
         self.response_metadata = {}
         self._last_messages: list = []
+        self._model_capability: list[str] = []
 
     def _extract_token_usage(self, business_result: Any) -> dict[str, int] | None:
         if self.response_metadata:
@@ -44,12 +46,14 @@ class ParameterExtractorNode(BaseNode):
             "prompt": self._render_template(self.typed_config.prompt, variable_pool),
             "params": [param.model_dump(mode="json") for param in self.typed_config.params],
             "model_id": str(self.typed_config.model_id),
+            "inference_mode": self.typed_config.inference_mode,
         }
 
     def _extract_extra_fields(self, business_result: Any) -> dict:
         return {"process": {
             "messages": self._last_messages,
             "model_id": str(self.typed_config.model_id) if self.typed_config else None,
+            "inference_mode": str(self.typed_config.inference_mode) if self.typed_config else None,
         }}
 
     def _extract_output(self, business_result: Any) -> Any:
@@ -125,6 +129,8 @@ class ParameterExtractorNode(BaseNode):
             capability = api_config.capability
             model_type = config.type
 
+        self._model_capability = capability or []
+
         llm = RedBearLLM(
             RedBearModelConfig(
                 model_name=model_name,
@@ -163,56 +169,101 @@ class ParameterExtractorNode(BaseNode):
             field_type[param.name] = f'{param.type}, required:{str(param.required)}'
         return field_type
 
-    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
-        """
-        Main execution function for this node.
+    def _build_tool_schema(self) -> dict:
+        properties = {}
+        required = []
+        type_mapping = {
+            "string": "string",
+            "number": "number",
+            "boolean": "boolean",
+            "array[string]": ("array", "string"),
+            "array[number]": ("array", "number"),
+            "array[boolean]": ("array", "boolean"),
+            "array[object]": ("array", "object"),
+        }
+        for param in self.typed_config.params:
+            mapped = type_mapping.get(param.type, "string")
+            if isinstance(mapped, tuple):
+                prop = {"type": mapped[0], "items": {"type": mapped[1]}, "description": param.desc}
+            else:
+                prop = {"type": mapped, "description": param.desc}
+            properties[param.name] = prop
+            if param.required:
+                required.append(param.name)
 
-        Workflow:
-        1. Retrieve LLM instance with valid credentials.
-        2. Render user prompt template with field descriptions, types, and input text.
-        3. Send system and user prompts to LLM asynchronously.
-        4. Repair LLM JSON output safely.
-        5. Return output dictionary.
+        return {
+            "type": "function",
+            "function": {
+                "name": "extract_parameters",
+                "description": "Extract structured parameters from the input text",
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                },
+            },
+        }
 
-        Notes:
-        - JSON repair is used to handle minor formatting errors in LLM output.
-        - Exceptions are raised explicitly if parsing fails, to prevent silent workflow failures.
-        - Rendering uses self._render_template for dynamic substitution from workflow state.
+    def _resolve_inference_mode(self) -> InferenceMode:
+        mode = self.typed_config.inference_mode
+        if mode == InferenceMode.FUNCTION_CALLING:
+            if ModelCapability.FUNCTION_CALL not in self._model_capability:
+                logger.warning(
+                    f"node: {self.node_id} model does not support function_call, "
+                    f"falling back to prompt mode"
+                )
+                return InferenceMode.PROMPT
+        return mode
 
-        Args:
-            state (WorkflowState): Current state of the workflow, used for template rendering.
-            variable_pool (VariablePool): Used for accessing and setting variables during execution.
+    async def _execute_function_calling(self, llm: RedBearLLM, variable_pool: VariablePool) -> dict:
+        tool_schema = self._build_tool_schema()
+        llm_with_tools = llm.bind_tools([tool_schema])
 
-        Returns:
-            dict[str, Any]: Dictionary containing extracted parameters under the "output" key.
+        text_input = self._render_template(self.typed_config.text, variable_pool)
+        messages = [
+            ("system", "You are a parameter extraction engine. Extract the required parameters from the user's text by calling the extract_parameters tool."),
+        ]
+        if self.typed_config.prompt:
+            messages.append(("user", self._render_template(self.typed_config.prompt, variable_pool)))
+        messages.append(("user", text_input))
 
-        Raises:
-            BusinessException: If LLM output cannot be parsed as valid JSON.
-        """
-        self.typed_config = ParameterExtractorNodeConfig(**self.config)
-        llm = self._get_llm_instance()
+        self._last_messages = [{"role": r, "content": c} for r, c in messages]
+
+        response = await llm_with_tools.ainvoke(messages)
+        self.response_metadata = {
+            **response.response_metadata,
+            "token_usage": getattr(response, 'usage_metadata', None) or response.response_metadata.get('token_usage')
+        }
+
+        if hasattr(response, 'tool_calls') and response.tool_calls:
+            result = response.tool_calls[0].get("args", {})
+            logger.info(f"node: {self.node_id} function_calling params:{result}")
+            return result
+
+        logger.warning(f"node: {self.node_id} function_calling returned no tool_calls, falling back to content parsing")
+        content = self.process_model_output(response.content)
+        result = json_repair.repair_json(content, return_objects=True)
+        return result
+
+    async def _execute_prompt(self, llm: RedBearLLM, variable_pool: VariablePool) -> dict:
         system_prompt, user_prompt = self._get_prompt()
 
-        user_prompt_teplate = Template(user_prompt)
-        rendered_user_prompt = user_prompt_teplate.render(
+        user_prompt_template = Template(user_prompt)
+        rendered_user_prompt = user_prompt_template.render(
             field_descriptions=str(self._get_field_desc()),
             field_type=str(self._get_field_type()),
             text_input=self._render_template(self.typed_config.text, variable_pool)
         )
 
-        messages = [
-            ("system", system_prompt),
-
-        ]
+        messages = [("system", system_prompt)]
         if self.typed_config.prompt:
             messages.extend([
                 ("user", self._render_template(self.typed_config.prompt, variable_pool)),
                 ("user", rendered_user_prompt),
             ])
         else:
-            messages.extend([
-                ("user", rendered_user_prompt),
-            ])
+            messages.append(("user", rendered_user_prompt))
+
         self._last_messages = [{"role": r, "content": c} for r, c in messages]
 
         model_resp = await llm.ainvoke(messages)
@@ -222,6 +273,16 @@ class ParameterExtractorNode(BaseNode):
         }
         model_message = self.process_model_output(model_resp.content)
         result = json_repair.repair_json(model_message, return_objects=True)
-        logger.info(f"node: {self.node_id} get params:{result}")
-
+        logger.info(f"node: {self.node_id} prompt mode params:{result}")
         return result
+
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
+        self.typed_config = ParameterExtractorNodeConfig(**self.config)
+        llm = self._get_llm_instance()
+
+        actual_mode = self._resolve_inference_mode()
+        logger.info(f"node: {self.node_id} inference_mode={actual_mode}")
+
+        if actual_mode == InferenceMode.FUNCTION_CALLING:
+            return await self._execute_function_calling(llm, variable_pool)
+        return await self._execute_prompt(llm, variable_pool)

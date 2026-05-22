@@ -103,6 +103,17 @@ class RedBearModelConfig(BaseModel):
         return self
 
 
+def _map_budget_to_reasoning_effort(budget_tokens: Optional[int]) -> str:
+    if budget_tokens is None:
+        return "medium"
+    if budget_tokens <= 2048:
+        return "low"
+    elif budget_tokens <= 4096:
+        return "medium"
+    else:
+        return "high"
+
+
 class RedBearModelFactory:
     """模型工厂类"""
 
@@ -221,11 +232,12 @@ class RedBearModelFactory:
             # - thinking（A类）：混合思考，流式和非流式均可开关
             if ModelCapability.THINKING in config.capability:
                 if provider == ModelProvider.VOLCANO:
-                    thinking_config: Dict[str, Any] = {"type": "enabled" if config.deep_thinking else "disabled"}
-                    if config.deep_thinking and config.thinking_budget_tokens:
-                        thinking_config["budget_tokens"] = config.thinking_budget_tokens
                     extra_body = params.setdefault("extra_body", {})
-                    extra_body["thinking"] = thinking_config
+                    if config.deep_thinking:
+                        extra_body["thinking"] = {"type": "enabled"}
+                        params["reasoning_effort"] = _map_budget_to_reasoning_effort(config.thinking_budget_tokens)
+                    else:
+                        extra_body["thinking"] = {"type": "disabled"}
                 else:
                     extra_body = params.setdefault("extra_body", {})
                     if config.deep_thinking:
