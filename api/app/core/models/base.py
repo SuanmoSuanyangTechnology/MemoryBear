@@ -103,9 +103,9 @@ class RedBearModelConfig(BaseModel):
         return self
 
 
-def _map_budget_to_reasoning_effort(budget_tokens: Optional[int]) -> str:
+def _map_budget_to_reasoning_effort(budget_tokens: Optional[int]) -> Optional[str]:
     if budget_tokens is None:
-        return "medium"
+        return None
     if budget_tokens <= 2048:
         return "low"
     elif budget_tokens <= 4096:
@@ -235,7 +235,9 @@ class RedBearModelFactory:
                     extra_body = params.setdefault("extra_body", {})
                     if config.deep_thinking:
                         extra_body["thinking"] = {"type": "enabled"}
-                        params["reasoning_effort"] = _map_budget_to_reasoning_effort(config.thinking_budget_tokens)
+                        effort = _map_budget_to_reasoning_effort(config.thinking_budget_tokens)
+                        if effort is not None:
+                            params["reasoning_effort"] = effort
                     else:
                         extra_body["thinking"] = {"type": "disabled"}
                 else:
