@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:28:46 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 14:28:08
+ * @Last Modified time: 2026-05-22 11:56:45
  */
 /**
  * Release Share Modal
@@ -31,8 +31,8 @@ const types = ['iframe', 'scripts']
 
 const scriptsContent = `<script>
  window.redbearaiChatbotConfig = {
-  token: {{share_token}},
-  baseUrl: {{origin}}
+  token: "{{share_token}}",
+  baseUrl: "{{origin}}"
  }
 </script>
 <script
