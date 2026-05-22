@@ -134,6 +134,7 @@ celery_app.conf.update(
         # Beat/periodic tasks → periodic_tasks queue (dedicated periodic worker)
         'app.tasks.workspace_reflection_task': {'queue': 'periodic_tasks'},
         'app.tasks.layer2_reflection_task': {'queue': 'periodic_tasks'},
+        'app.tasks.layer2_dedup_full_scan_task': {'queue': 'periodic_tasks'},
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
         'app.tasks.run_forgetting_cycle_task': {'queue': 'periodic_tasks'},
         'app.tasks.write_all_workspaces_memory_task': {'queue': 'periodic_tasks'},
@@ -164,6 +165,7 @@ implicit_emotions_update_schedule = crontab(
     minute=settings.IMPLICIT_EMOTIONS_UPDATE_MINUTE,
 )
 layer2_reflection_schedule = timedelta(minutes=settings.LAYER2_REFLECTION_INTERVAL_MINUTES)
+layer2_dedup_full_scan_schedule = crontab(hour=settings.LAYER2_DEDUP_FULL_SCAN_HOUR, minute=0)
 # 构建定时任务配置
 beat_schedule_config = {
     # "run-workspace-reflection": {
@@ -194,8 +196,13 @@ beat_schedule_config = {
         "args": (),
     },
     "run-layer2-reflection": {
-        "task": "app.tasks.layer2_reflection_task",
-        "schedule": layer2_reflection_schedule,
+            "task": "app.tasks.layer2_reflection_task",
+            "schedule": layer2_reflection_schedule,
+            "args": (),
+    },
+    "run-layer2-dedup-full-scan": {
+        "task": "app.tasks.layer2_dedup_full_scan_task",
+        "schedule": layer2_dedup_full_scan_schedule,
         "args": (),
     },
     "scan-idle-conversations": {

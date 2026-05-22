@@ -2106,3 +2106,138 @@ SET e.description = "",
     e.description_timeline = $timeline
 RETURN e.id
 """
+# --- Reflection Engine Layer 2: Entity Dedup ---
+#来源一：名称相似度
+DEDUP_CANDIDATES_BY_NAME = """
+MATCH (e1:ExtractedEntity)
+WHERE e1.end_user_id = $end_user_id
+  AND NOT toLower(e1.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
+WITH e1
+MATCH (e2:ExtractedEntity)
+WHERE e2.end_user_id = $end_user_id
+  AND e2.entity_type = e1.entity_type
+  AND elementId(e1) < elementId(e2)
+  AND NOT toLower(e2.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
+  AND (
+    toLower(e1.name) CONTAINS toLower(e2.name)
+    OR toLower(e2.name) CONTAINS toLower(e1.name)
+    OR any(a IN coalesce(e1.aliases, []) WHERE a IN coalesce(e2.aliases, []))
+    OR e1.name IN coalesce(e2.aliases, [])
+    OR e2.name IN coalesce(e1.aliases, [])
+  )
+RETURN e1.id AS a_id, e2.id AS b_id,
+       e1.name AS a_name, e2.name AS b_name,
+       e1.entity_type AS entity_type,
+       e1.description AS a_desc, e2.description AS b_desc,
+       e1.aliases AS a_aliases, e2.aliases AS b_aliases,
+       e1.name_embedding AS a_embed, e2.name_embedding AS b_embed
+LIMIT $candidate_cap
+"""
+
+#路径B 通过name_embedding 相似度检索
+DEDUP_CANDIDATES_BY_EMBED = """
+MATCH (e1:ExtractedEntity)
+WHERE e1.end_user_id = $end_user_id
+  AND e1.name_embedding IS NOT NULL
+  AND NOT toLower(e1.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
+CALL db.index.vector.queryNodes('entity_embedding_index', $top_k, e1.name_embedding)
+YIELD node AS e2, score
+WHERE e2.end_user_id = $end_user_id
+  AND e2.entity_type = e1.entity_type
+  AND elementId(e1) < elementId(e2)
+  AND score >= $theta_embed_floor
+  AND NOT toLower(e2.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
+RETURN e1.id AS a_id, e2.id AS b_id,
+       e1.name AS a_name, e2.name AS b_name,
+       e1.entity_type AS entity_type,
+       e1.description AS a_desc, e2.description AS b_desc,
+       e1.aliases AS a_aliases, e2.aliases AS b_aliases,
+       score AS sim_embed
+LIMIT $candidate_cap
+"""
+
+
+#去重两个实体合并
+DEDUP_MERGE_ENTITIES = """
+MATCH (keeper:ExtractedEntity {id: $keeper_id, end_user_id: $end_user_id})
+MATCH (loser:ExtractedEntity {id: $loser_id, end_user_id: $end_user_id})
+SET keeper.name = $merged_name,
+    keeper.aliases = $merged_aliases,
+    keeper.description = CASE
+      WHEN coalesce(keeper.description, '') = '' THEN coalesce(loser.description, '')
+      WHEN coalesce(loser.description, '') = '' THEN coalesce(keeper.description, '')
+      ELSE keeper.description + '；' + loser.description
+    END,
+    keeper.connect_strength = CASE
+      WHEN keeper.connect_strength = 'both' OR loser.connect_strength = 'both' THEN 'both'
+      WHEN keeper.connect_strength <> loser.connect_strength THEN 'both'
+      ELSE coalesce(keeper.connect_strength, loser.connect_strength, 'weak')
+    END,
+    keeper.importance_score = CASE
+      WHEN coalesce(loser.importance_score, 0) > coalesce(keeper.importance_score, 0)
+      THEN loser.importance_score ELSE keeper.importance_score END,
+    keeper.access_count = coalesce(keeper.access_count, 0) + coalesce(loser.access_count, 0),
+    keeper.created_at = CASE
+      WHEN keeper.created_at IS NULL THEN loser.created_at
+      WHEN loser.created_at IS NULL THEN keeper.created_at
+      WHEN loser.created_at < keeper.created_at THEN loser.created_at
+      ELSE keeper.created_at END,
+    keeper.core_facts = apoc.coll.toSet(coalesce(keeper.core_facts,[]) + coalesce(loser.core_facts,[])),
+    keeper.traits = apoc.coll.toSet(coalesce(keeper.traits,[]) + coalesce(loser.traits,[])),
+    keeper.relations = apoc.coll.toSet(coalesce(keeper.relations,[]) + coalesce(loser.relations,[])),
+    keeper.goals = apoc.coll.toSet(coalesce(keeper.goals,[]) + coalesce(loser.goals,[])),
+    keeper.interests = apoc.coll.toSet(coalesce(keeper.interests,[]) + coalesce(loser.interests,[])),
+    keeper.beliefs_or_stances = apoc.coll.toSet(coalesce(keeper.beliefs_or_stances,[]) + coalesce(loser.beliefs_or_stances,[])),
+    keeper.anchors = apoc.coll.toSet(coalesce(keeper.anchors,[]) + coalesce(loser.anchors,[])),
+    keeper.events = apoc.coll.toSet(coalesce(keeper.events,[]) + coalesce(loser.events,[]))
+WITH keeper, loser
+OPTIONAL MATCH (s:Statement)-[r:REFERENCES_ENTITY]->(loser)
+WHERE NOT (s)-[:REFERENCES_ENTITY]->(keeper)
+FOREACH (_ IN CASE WHEN r IS NOT NULL THEN [1] ELSE [] END |
+  CREATE (s)-[:REFERENCES_ENTITY]->(keeper)
+)
+WITH keeper, loser
+OPTIONAL MATCH (loser)-[r:EXTRACTED_RELATIONSHIP]->(target)
+WHERE target <> keeper AND NOT (keeper)-[:EXTRACTED_RELATIONSHIP]->(target)
+FOREACH (_ IN CASE WHEN r IS NOT NULL THEN [1] ELSE [] END |
+  CREATE (keeper)-[:EXTRACTED_RELATIONSHIP {relation_type: r.relation_type}]->(target)
+)
+WITH keeper, loser
+OPTIONAL MATCH (source)-[r:EXTRACTED_RELATIONSHIP]->(loser)
+WHERE source <> keeper AND NOT (source)-[:EXTRACTED_RELATIONSHIP]->(keeper)
+FOREACH (_ IN CASE WHEN r IS NOT NULL THEN [1] ELSE [] END |
+  CREATE (source)-[:EXTRACTED_RELATIONSHIP {relation_type: r.relation_type}]->(keeper)
+)
+WITH keeper, loser
+DETACH DELETE loser
+RETURN keeper.id AS merged_id
+"""
+
+# 方案B：查出指定类型下所有实体（全量送 LLM 分组判定）
+DEDUP_FULL_SCAN_ENTITIES = """
+MATCH (e:ExtractedEntity)
+WHERE e.end_user_id = $end_user_id
+  AND e.entity_type = $entity_type
+  AND NOT toLower(e.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
+RETURN e.id AS entity_id, e.name AS name, e.entity_type AS entity_type,
+       e.description AS description, e.aliases AS aliases, e.created_at AS created_at
+ORDER BY e.created_at
+"""
+
+# 方案B：查上次扫描后新增的实体数（增量判断，new_count=0 则跳过该类型）
+DEDUP_FULL_SCAN_NEW_COUNT = """
+MATCH (e:ExtractedEntity)
+WHERE e.end_user_id = $end_user_id
+  AND e.entity_type = $entity_type
+  AND e.created_at > $last_scan_time
+  AND NOT toLower(e.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
+RETURN count(e) AS new_count
+"""
+
+# 方案B：查该用户所有 entity_type 及数量（决定遍历哪些类型）
+DEDUP_FULL_SCAN_ENTITY_TYPES = """
+MATCH (e:ExtractedEntity)
+WHERE e.end_user_id = $end_user_id
+  AND NOT toLower(e.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
+RETURN DISTINCT e.entity_type AS entity_type, count(e) AS count
+"""
