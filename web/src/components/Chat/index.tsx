@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 17:20:31
+ * @Last Modified time: 2026-05-22 14:10:59
  */
 import { type FC } from 'react'
 import ChatInput from './ChatInput'
@@ -34,6 +34,11 @@ const Chat: FC<ChatProps> = ({
   isSupportTools = false,
   handleFeedback,
   isEnded = true,
+  readOnly = false,
+  deleteMsg,
+  reportMsg,
+  regenerateMessages,
+  handleVersionChange,
 }) => {
   return (
     <div className={`rb:h-full rb:relative rb:pt-2 ${className}`}>
@@ -53,18 +58,24 @@ const Chat: FC<ChatProps> = ({
         isSupportTools={isSupportTools}
         handleFeedback={handleFeedback}
         isEnded={isEnded}
+        deleteMsg={deleteMsg}
+        reportMsg={reportMsg}
+        regenerateMessages={regenerateMessages}
+        handleVersionChange={handleVersionChange}
       />
 
       {/* Chat input area */}
-      <ChatInput
-        fileList={fileList}
-        onChange={onChange}
-        onSend={onSend}
-        loading={loading}
-        fileChange={fileChange}
-      >
-        {children}
-      </ChatInput>
+      {!readOnly &&
+        <ChatInput
+          fileList={fileList}
+          onChange={onChange}
+          onSend={onSend}
+          loading={loading}
+          fileChange={fileChange}
+        >
+          {children}
+        </ChatInput>
+      }
     </div>
   )
 }
