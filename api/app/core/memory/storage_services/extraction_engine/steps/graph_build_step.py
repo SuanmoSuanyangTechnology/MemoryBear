@@ -119,6 +119,7 @@ async def build_graph_nodes_and_edges(
     perceptual_edges: List[PerceptualEdge] = []
 
     entity_id_set: set = set()
+    perceptual_id_set: set = set()
     total_dialogs = len(dialog_data_list)
     processed_dialogs = 0
 
@@ -159,6 +160,11 @@ async def build_graph_nodes_and_edges(
 
             # ── 感知节点 ──
             for p, file_type in chunk.files:
+                perceptual_key = str(p.id)
+                if perceptual_key in perceptual_id_set:
+                    continue
+                perceptual_id_set.add(perceptual_key)
+
                 meta = p.meta_data or {}
                 content_meta = meta.get("content", {})
 

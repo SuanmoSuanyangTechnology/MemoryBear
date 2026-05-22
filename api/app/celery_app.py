@@ -141,6 +141,13 @@ celery_app.conf.update(
         'app.tasks.init_implicit_emotions_for_users': {'queue': 'periodic_tasks'},
         'app.tasks.init_interest_distribution_for_users': {'queue': 'periodic_tasks'},
         'app.tasks.init_community_clustering_for_users': {'queue': 'periodic_tasks'},
+
+        # Sliding window write tasks → memory_tasks queue (IO-bound async tasks)
+        'app.tasks.sliding_window_write': {'queue': 'memory_tasks'},
+        'app.tasks.flush_conversation': {'queue': 'memory_tasks'},
+
+        # Sliding window idle scan → periodic_tasks queue (Beat scheduler)
+        'app.tasks.scan_idle_conversations': {'queue': 'periodic_tasks'},
     },
 )
 
@@ -187,9 +194,14 @@ beat_schedule_config = {
         "args": (),
     },
     "run-layer2-reflection": {
-    "task": "app.tasks.layer2_reflection_task",
-    "schedule": layer2_reflection_schedule,
-    "args": (),
+        "task": "app.tasks.layer2_reflection_task",
+        "schedule": layer2_reflection_schedule,
+        "args": (),
+    },
+    "scan-idle-conversations": {
+        "task": "app.tasks.scan_idle_conversations",
+        "schedule": 60.0,
+        "options": {"queue": "periodic_tasks"},
     },
 }
 

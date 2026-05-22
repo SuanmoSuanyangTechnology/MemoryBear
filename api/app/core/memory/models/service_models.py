@@ -10,7 +10,7 @@ class MemoryContext(BaseModel):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     end_user_id: str
-    memory_config: MemoryConfig
+    memory_config: MemoryConfig | None = None
     storage_type: StorageType = StorageType.NEO4J
     user_rag_memory_id: str | None = None
     language: str = "zh"
