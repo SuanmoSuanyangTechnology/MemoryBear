@@ -94,20 +94,10 @@ async def get_preview_chunks(
         )
 
     from app.services.file_storage_service import FileStorageService
-    import asyncio
     storage_service = FileStorageService()
 
-    async def _download():
-        return await storage_service.download_file(db_file.file_key)
-
     try:
-        file_binary = asyncio.run(_download())
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        try:
-            file_binary = loop.run_until_complete(_download())
-        finally:
-            loop.close()
+        file_binary = await storage_service.download_file(db_file.file_key)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -277,20 +267,10 @@ async def get_preview_chunks_hierarchy(
         )
 
     from app.services.file_storage_service import FileStorageService
-    import asyncio
     storage_service = FileStorageService()
 
-    async def _download():
-        return await storage_service.download_file(db_file.file_key)
-
     try:
-        file_binary = asyncio.run(_download())
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        try:
-            file_binary = loop.run_until_complete(_download())
-        finally:
-            loop.close()
+        file_binary = await storage_service.download_file(db_file.file_key)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
