@@ -32,6 +32,7 @@ export interface NodeConfig {
   cycle?: string;
   cycle_vars?: Array<{ name: string; type: string; value: string; input_type: string; }>
   required?: boolean;
+  tip?: string;
   [key: string]: unknown;
 }
 
