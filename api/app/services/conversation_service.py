@@ -352,14 +352,12 @@ class ConversationService:
 
     def get_conversation_with_messages(
             self,
-            conversation_id: uuid.UUID,
-            workspace_id: Optional[uuid.UUID] = None
+            conversation_id: uuid.UUID
     ) -> List[Message]:
         """获取会话及其所有消息（包含多版本），按 parent_message_id 分组
 
         Args:
             conversation_id: 会话ID
-            workspace_id: 工作空间ID（可选，用于权限验证）
 
         Returns:
             List: 扁平化的消息列表
