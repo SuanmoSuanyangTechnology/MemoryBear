@@ -217,6 +217,7 @@ async def get_preview_chunks_hierarchy(
         page: int = Query(1, gt=0),
         pagesize: int = Query(20, gt=0, le=100),
         keywords: Optional[str] = Query(None, description="The keywords used to match chunk content"),
+        parser_config_param: Optional[str] = Query(None, description="JSON string of parser config overrides, e.g. {\"layout_recognize\":\"mineru\",\"chunk_token_num\":130,\"parent_child_mode\":true}"),
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
@@ -289,7 +290,21 @@ async def get_preview_chunks_hierarchy(
     )
     from app.core.rag.app.naive import chunk, chunk_parent_child
 
-    parser_config = db_document.parser_config
+    parser_config = dict(db_document.parser_config)
+
+    # 如果传入了覆盖参数，解析并合并
+    if parser_config_param:
+        import json
+        try:
+            overrides = json.loads(parser_config_param)
+            if isinstance(overrides, dict):
+                parser_config.update(overrides)
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid parser_config JSON format"
+            )
+
     chunk_mode = parser_config.get("chunk_mode", "normal")
     parent_child_mode = parser_config.get("parent_child_mode", False)
 

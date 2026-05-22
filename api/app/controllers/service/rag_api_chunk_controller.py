@@ -65,7 +65,8 @@ async def get_preview_chunks_hierarchy(
     db: Session = Depends(get_db),
     page: int = Query(1, gt=0),
     pagesize: int = Query(20, gt=0, le=100),
-    keywords: Optional[str] = Query(None, description="The keywords used to match chunk content")
+    keywords: Optional[str] = Query(None, description="The keywords used to match chunk content"),
+    parser_config_param: Optional[str] = Query(None, description="JSON string of parser config overrides")
 ):
     """
     分页查询文档分块预览（嵌套结构）
@@ -83,6 +84,7 @@ async def get_preview_chunks_hierarchy(
         page=page,
         pagesize=pagesize,
         keywords=keywords,
+        parser_config_param=parser_config_param,
         db=db,
         current_user=current_user
     )
