@@ -84,6 +84,7 @@ class LLMNode(BaseNode):
             "branch_signal": VariableType.STRING,
             "reasoning_content": VariableType.STRING,
             "token_usage": VariableType.OBJECT,
+            "param_warnings": VariableType.ARRAY_STRING,
         }
 
     def _render_context(self, message: str, variable_pool: VariablePool):
@@ -523,7 +524,7 @@ class LLMNode(BaseNode):
         raise error
 
     async def execute_stream(self, state: WorkflowState, variable_pool: VariablePool):
-        """流式执行 LLM 调用
+        """流式执行 LLM 调用（支持失败重试）
         
         Args:
             state: 工作流状态
@@ -532,106 +533,116 @@ class LLMNode(BaseNode):
         Yields:
             文本片段（chunk）或完成标记
         """
+        import asyncio as _asyncio
+
         self.typed_config = LLMNodeConfig(**self.config)
+        max_attempts = self.typed_config.retry.max_attempts + 1 if self.typed_config.retry.enable else 1
+        last_error = None
 
-        try:
-            llm = await self._prepare_llm(state, variable_pool, True)
+        for attempt in range(max_attempts):
+            try:
+                llm = await self._prepare_llm(state, variable_pool, True)
 
-            logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（流式）")
+                logger.info(f"节点 {self.node_id} 开始执行 LLM 调用（流式），尝试 {attempt + 1}/{max_attempts}")
 
-            # 累积完整响应
-            full_response = ""
-            chunk_count = 0
-            full_reasoning_content = ""
-            stop_sequences = self.typed_config.stop.value[:4] if (self.typed_config.stop.enable and self.typed_config.stop.value) else None
+                full_response = ""
+                chunk_count = 0
+                full_reasoning_content = ""
+                stop_sequences = self.typed_config.stop.value[:4] if (self.typed_config.stop.enable and self.typed_config.stop.value) else None
+                buffered_chunks = []
 
-            # 调用 LLM（流式，支持字符串或消息列表）
-            last_meta_data = {}
-            last_usage_metadata = {}
-            async for chunk in llm.astream(self.messages):
-                if hasattr(chunk, 'content'):
-                    content = self.process_model_output(chunk.content)
-                else:
-                    content = str(chunk)
-                if hasattr(chunk, 'response_metadata') and chunk.response_metadata:
-                    last_meta_data = chunk.response_metadata
-                if hasattr(chunk, 'usage_metadata') and chunk.usage_metadata:
-                    last_usage_metadata = chunk.usage_metadata
-                if self.typed_config.enable_reasoning_content_extraction:
-                    additional_kwargs = getattr(chunk, 'additional_kwargs', None) or {}
-                    reasoning_chunk = additional_kwargs.get("reasoning_content") or additional_kwargs.get("reasoning", "")
-                    if reasoning_chunk:
-                        full_reasoning_content += reasoning_chunk
-                
-                # 只有当内容不为空时才处理
-                if content:
-                    full_response += content
-                    
-                    if stop_sequences:
-                        truncated = False
-                        truncated_pos = -1
-                        for seq in stop_sequences:
-                            idx = 0
-                            while True:
-                                pos = full_response.find(seq, idx)
-                                if pos == -1:
+                last_meta_data = {}
+                last_usage_metadata = {}
+                async for chunk in llm.astream(self.messages):
+                    if hasattr(chunk, 'content'):
+                        content = self.process_model_output(chunk.content)
+                    else:
+                        content = str(chunk)
+                    if hasattr(chunk, 'response_metadata') and chunk.response_metadata:
+                        last_meta_data = chunk.response_metadata
+                    if hasattr(chunk, 'usage_metadata') and chunk.usage_metadata:
+                        last_usage_metadata = chunk.usage_metadata
+                    if self.typed_config.enable_reasoning_content_extraction:
+                        additional_kwargs = getattr(chunk, 'additional_kwargs', None) or {}
+                        reasoning_chunk = additional_kwargs.get("reasoning_content") or additional_kwargs.get("reasoning", "")
+                        if reasoning_chunk:
+                            full_reasoning_content += reasoning_chunk
+
+                    if content:
+                        full_response += content
+
+                        if stop_sequences:
+                            truncated = False
+                            truncated_pos = -1
+                            for seq in stop_sequences:
+                                idx = 0
+                                while True:
+                                    pos = full_response.find(seq, idx)
+                                    if pos == -1:
+                                        break
+                                    if not self._is_inside_reasoning_block(full_response, pos):
+                                        truncated_pos = pos
+                                        truncated = True
+                                        break
+                                    idx = pos + len(seq)
+                                if truncated:
                                     break
-                                if not self._is_inside_reasoning_block(full_response, pos):
-                                    truncated_pos = pos
-                                    truncated = True
-                                    break
-                                idx = pos + len(seq)
                             if truncated:
+                                full_response = full_response[:truncated_pos]
+                                chunk_count += 1
                                 break
-                        if truncated:
-                            full_response = full_response[:truncated_pos]
-                            chunk_count += 1
-                            break
 
-                    chunk_count += 1
+                        chunk_count += 1
+                        buffered_chunks.append(content)
 
-                    # 流式返回每个文本片段
-                    yield {
-                        "__final__": False,
-                        "chunk": content
-                    }
+                for c in buffered_chunks:
+                    yield {"__final__": False, "chunk": c}
 
-            yield {
-                "__final__": False,
-                "chunk": "",
-                "done": True
-            }
-            
-            reasoning_content = ""
-            if self.typed_config.enable_reasoning_content_extraction:
-                if full_reasoning_content:
-                    reasoning_content = full_reasoning_content
-                    full_response, _ = self._extract_reasoning_content(full_response)
-                else:
-                    full_response, reasoning_content = self._extract_reasoning_content(full_response)
-            
-            full_response, _ = self._apply_stop_sequences(full_response)
-            
-            logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(full_response)}, 总 chunks: {chunk_count}")
-
-            # 构建完整的 AIMessage（包含元数据）
-            final_message = AIMessage(
-                content=full_response,
-                response_metadata={
-                    **last_meta_data,
-                    "token_usage": last_usage_metadata or last_meta_data.get('token_usage'),
-                    "reasoning_content": reasoning_content if reasoning_content else None
+                yield {
+                    "__final__": False,
+                    "chunk": "",
+                    "done": True
                 }
-            )
 
-            result = {"llm_result": final_message, "branch_signal": "SUCCESS"}
-            result["reasoning_content"] = reasoning_content
-            
-            if hasattr(self, '_param_warnings') and self._param_warnings:
-                result["param_warnings"] = self._param_warnings
-            
-            yield {"__final__": True, "result": result}
-        except Exception as e:
-            logger.error(f"节点 {self.node_id} LLM 流式调用失败: {e}")
-            error_result = self._handle_llm_error(e)
-            yield {"__final__": True, "result": error_result}
+                reasoning_content = ""
+                if self.typed_config.enable_reasoning_content_extraction:
+                    if full_reasoning_content:
+                        reasoning_content = full_reasoning_content
+                        full_response, _ = self._extract_reasoning_content(full_response)
+                    else:
+                        full_response, reasoning_content = self._extract_reasoning_content(full_response)
+
+                full_response, _ = self._apply_stop_sequences(full_response)
+
+                logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(full_response)}, 总 chunks: {chunk_count}")
+
+                final_message = AIMessage(
+                    content=full_response,
+                    response_metadata={
+                        **last_meta_data,
+                        "token_usage": last_usage_metadata or last_meta_data.get('token_usage'),
+                        "reasoning_content": reasoning_content if reasoning_content else None
+                    }
+                )
+
+                result = {"llm_result": final_message, "branch_signal": "SUCCESS"}
+                result["reasoning_content"] = reasoning_content
+
+                if hasattr(self, '_param_warnings') and self._param_warnings:
+                    result["param_warnings"] = self._param_warnings
+
+                yield {"__final__": True, "result": result}
+                return
+
+            except Exception as e:
+                last_error = e
+                logger.error(f"节点 {self.node_id} LLM 流式调用失败（尝试 {attempt + 1}/{max_attempts}）: {e}")
+
+                if attempt < max_attempts - 1 and self.typed_config.retry.enable:
+                    await _asyncio.sleep(self.typed_config.retry.retry_interval / 1000)
+                else:
+                    break
+
+        logger.error(f"节点 {self.node_id} LLM 流式调用最终失败，已重试 {max_attempts} 次")
+        error_result = self._handle_llm_error(last_error)
+        yield {"__final__": True, "result": error_result}
