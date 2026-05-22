@@ -51,6 +51,10 @@ class Message(BaseModel):
     # 反馈信息（仅助手消息有效，由 controller 注入）
     feedback_type: Optional[str] = Field(None, description="反馈类型: like/dislike")
     feedback_content: Optional[str] = Field(None, description="反馈内容")
+    # 多版本支持
+    version: Optional[int] = Field(1, description="消息版本号")
+    is_current: Optional[bool] = Field(True, description="是否当前版本")
+    parent_message_id: Optional[uuid.UUID] = Field(None, description="父消息ID（assistant消息指向user消息）")
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
