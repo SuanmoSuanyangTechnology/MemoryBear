@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from app.core.agent.langchain_agent import LangChainAgent
 from app.core.logging_config import get_business_logger
-from app.core.memory.agent.langgraph_graph.write_graph import write_long_term
 from app.db import get_db
 from app.models import MultiAgentConfig, AgentConfig, ModelType
 from app.models import WorkflowConfig
@@ -24,7 +23,6 @@ from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 from app.services.conversation_service import ConversationService
 from app.services.draft_run_service import AgentRunService
-from app.services.memory_agent_service import get_end_user_connected_config
 from app.services.model_service import ModelApiKeyService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
 from app.services.multimodal_service import MultimodalService
@@ -101,9 +99,8 @@ class AppChatService:
         kb_tools, citations_collector = self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval,
                                                                                            user_id)
         tools.extend(kb_tools)
-        memory_flag = False
         if memory:
-            memory_tools, memory_flag = self.agent_service.load_memory_config(
+            memory_tools, _ = self.agent_service.load_memory_config(
                 config.memory, user_id, storage_type, user_rag_memory_id
             )
             tools.extend(memory_tools)
@@ -336,37 +333,21 @@ class AppChatService:
         # 保存消息
         if audio_url:
             assistant_meta["audio_url"] = audio_url
-        if memory_flag:
-            connected_config = get_end_user_connected_config(user_id, self.db)
-            memory_config_id: str = connected_config.get("memory_config_id")
-            file_list = []
-            for file in files:
-                file_dict = file.model_dump()
-                file_dict["upload_file_id"] = str(file_dict["upload_file_id"]) if file_dict["upload_file_id"] else None
-                file_list.append(file_dict)
-            messages = [
-                {"role": "user", "content": message, "files": file_list},
-                {"role": "assistant", "content": result["content"]}
-            ]
-            if memory_config_id:
-                await write_long_term(
-                    storage_type,
-                    user_id,
-                    messages,
-                    user_rag_memory_id,
-                    memory_config_id
-                )
+        # 长期记忆写入由 conversation_service.add_message → MemoryService.sync_message
+        # → SlidingWindowScheduler 统一接管，这里不再触发老的 write_long_term 路径。
         self.conversation_service.add_message(
             conversation_id=conversation_id,
             role="user",
             content=message,
-            meta_data=human_meta
+            meta_data=human_meta,
+            should_memorize=memory,
         )
         ai_message = self.conversation_service.add_message(
             conversation_id=conversation_id,
             role="assistant",
             content=result["content"],
-            meta_data=assistant_meta
+            meta_data=assistant_meta,
+            should_memorize=memory,
         )
         message_id = ai_message.id
 
@@ -461,9 +442,8 @@ class AppChatService:
                 config.knowledge_retrieval, user_id)
             tools.extend(kb_tools)
             # 添加长期记忆工具
-            memory_flag = False
             if memory:
-                memory_tools, memory_flag = self.agent_service.load_memory_config(
+                memory_tools, _ = self.agent_service.load_memory_config(
                     config.memory, user_id, storage_type, user_rag_memory_id
                 )
                 tools.extend(memory_tools)
@@ -736,38 +716,22 @@ class AppChatService:
             if stream_audio_url:
                 assistant_meta["audio_url"] = stream_audio_url
 
-            if memory_flag:
-                connected_config = get_end_user_connected_config(user_id, self.db)
-                memory_config_id: str = connected_config.get("memory_config_id")
-                file_list = []
-                for file in files:
-                    file_dict = file.model_dump()
-                    file_dict["upload_file_id"] = str(file_dict["upload_file_id"]) if file_dict["upload_file_id"] else None
-                    file_list.append(file_dict)
-                messages = [
-                    {"role": "user", "content": message, "files": file_list},
-                    {"role": "assistant", "content": full_content}
-                ]
-                if memory_config_id:
-                    await write_long_term(
-                        storage_type,
-                        user_id,
-                        messages,
-                        user_rag_memory_id,
-                        memory_config_id
-                    )
+            # 长期记忆写入由 conversation_service.add_message → MemoryService.sync_message
+            # → SlidingWindowScheduler 统一接管，这里不再触发老的 write_long_term 路径。
             self.conversation_service.add_message(
                 conversation_id=conversation_id,
                 role="user",
                 content=message,
-                meta_data=human_meta
+                meta_data=human_meta,
+                should_memorize=memory,
             )
             self.conversation_service.add_message(
                 message_id=message_id,
                 conversation_id=conversation_id,
                 role="assistant",
                 content=full_content,
-                meta_data=assistant_meta
+                meta_data=assistant_meta,
+                should_memorize=memory,
             )
 
             # 更新 Agent 执行记录为 completed

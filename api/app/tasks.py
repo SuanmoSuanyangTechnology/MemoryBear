@@ -1478,7 +1478,9 @@ def write_message_task(
         config_id: str | int,
         storage_type: str,
         user_rag_memory_id: str,
-        language: str = "zh"
+        language: str = "zh",
+        conversation_id: str = "",
+        workspace_id: str = "",
 ) -> Dict[str, Any]:
     """Celery task to process a write message via MemoryAgentService.
     Args:
@@ -1488,6 +1490,8 @@ def write_message_task(
         storage_type: Storage type (neo4j or rag)
         user_rag_memory_id: User RAG memory ID
         language: 语言类型 ("zh" 中文, "en" 英文)
+        conversation_id: 对话 ID（用于候选池消费模式）
+        workspace_id: 工作空间 ID（候选池消费模式加载 memory_config 时使用）
 
     Returns:
         Dict containing the result and metadata
@@ -1498,7 +1502,9 @@ def write_message_task(
     logger.info(
         f"[CELERY WRITE] Starting write task - end_user_id={end_user_id}, "
         f"config_id={config_id} (type: {type(config_id).__name__}), "
-        f"storage_type={storage_type}, language={language}")
+        f"storage_type={storage_type}, language={language}, "
+        f"conversation_id={conversation_id or '-'}, "
+        f"workspace_id={workspace_id or '-'}")
     start_time = time.time()
 
     # Convert config_id to UUID
@@ -1533,7 +1539,30 @@ def write_message_task(
             # Log but continue - will fail later with proper error
             pass
 
-    async def _run() -> str:
+    async def _run() -> str | dict:
+        """两种模式：
+        - 候选池消费模式：message 为空且 conversation_id 非空 → 直接执行 Layer 2
+        - 完整写入模式：走 MemoryAgentService.write_memory（API write 路径专用）
+        """
+        # 候选池消费模式（Agent 对话 / 工作流 MemoryWriteNode 路径）
+        if (not message) and conversation_id:
+            from app.core.memory.sliding_window.window_utils import execute_pending_from_pool
+
+            logger.info(
+                f"[CELERY WRITE] 候选池消费模式: "
+                f"conv={conversation_id}, end_user_id={end_user_id}, "
+                f"workspace_id={workspace_id}"
+            )
+            processed = await execute_pending_from_pool(
+                conversation_id=conversation_id,
+                end_user_id=end_user_id,
+                config_id=str(actual_config_id) if actual_config_id else "",
+                workspace_id=workspace_id,
+                language=language,
+            )
+            return {"status": "success", "processed": processed}
+
+        # 完整写入模式（API write 路径，带 messages）
         with get_db_context() as db:
             logger.info(
                 f"[CELERY WRITE] Executing MemoryAgentService.write_memory "
@@ -1554,6 +1583,7 @@ def write_message_task(
                     storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id,
                     language=language,
+                    conversation_id=conversation_id,
                 ),
                 db,
             )
@@ -1563,6 +1593,7 @@ def write_message_task(
     redis_client = get_sync_redis_client()
     lock = None
     loop = None
+    lock_token = None
     if redis_client is not None:
         lock = RedisFairLock(
             key=f"memory_write:{end_user_id}",
@@ -1581,6 +1612,10 @@ def write_message_task(
                 "elapsed_time": time.time() - start_time,
                 "task_id": self.request.id,
             }
+
+        # 标记当前上下文已持有锁，防止下游 MemoryAgentService.write_memory 重复加锁
+        from app.services.memory_agent_service import _set_write_lock_holder
+        lock_token = _set_write_lock_holder(end_user_id)
 
     try:
         task_start_time = int(time.time())
@@ -1640,6 +1675,12 @@ def write_message_task(
             "task_id": self.request.id
         }
     finally:
+        if lock_token is not None:
+            try:
+                from app.services.memory_agent_service import _reset_write_lock_holder
+                _reset_write_lock_holder(lock_token)
+            except Exception as e:
+                logger.warning(f"[CELERY WRITE] 重置锁标记失败: {e}")
         if lock is not None:
             try:
                 lock.release()
@@ -3153,197 +3194,6 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
 
 
 # =============================================================================
-# Long-term Memory Storage Tasks (Batched Write Strategies)
-# =============================================================================
-
-# @celery_app.task(name="app.core.memory.agent.long_term_storage.time", bind=True)
-# def long_term_storage_time_task(
-#     self,
-#     end_user_id: str,
-#     config_id: str,
-#     time_window: int = 5
-# ) -> Dict[str, Any]:
-#     """Celery task for time-based long-term memory storage.
-
-#     Retrieves recent sessions from Redis within time window and writes to Neo4j.
-
-#     Args:
-#         end_user_id: End user identifier
-#         config_id: Memory configuration ID
-#         time_window: Time window in minutes for retrieving recent sessions
-
-#     Returns:
-#         Dict containing task status and metadata
-#     """
-#     from app.core.logging_config import get_logger
-#     logger = get_logger(__name__)
-
-#     logger.info(f"[LONG_TERM_TIME] Starting task - end_user_id={end_user_id}, time_window={time_window}")
-#     start_time = time.time()
-
-#     async def _run() -> Dict[str, Any]:
-#         from app.core.memory.agent.langgraph_graph.routing.write_router import memory_long_term_storage
-#         from app.services.memory_config_service import MemoryConfigService
-
-#         db = next(get_db())
-#         try:
-#             # Load memory config
-#             config_service = MemoryConfigService(db)
-#             memory_config = config_service.load_memory_config(
-#                 config_id=config_id,
-#                 service_name="LongTermStorageTask"
-#             )
-
-#             # Execute time-based storage
-#             await memory_long_term_storage(end_user_id, memory_config, time_window)
-
-#             return {"status": "SUCCESS", "strategy": "time", "time_window": time_window}
-#         finally:
-#             db.close()
-
-#     try:
-#         import nest_asyncio
-#         nest_asyncio.apply()
-#     except ImportError:
-#         pass
-
-#     try:
-#         loop = asyncio.get_event_loop()
-#         if loop.is_closed():
-#             loop = asyncio.new_event_loop()
-#             asyncio.set_event_loop(loop)
-#     except RuntimeError:
-#         loop = asyncio.new_event_loop()
-#         asyncio.set_event_loop(loop)
-
-#     try:
-#         result = loop.run_until_complete(_run())
-#         elapsed_time = time.time() - start_time
-
-#         logger.info(f"[LONG_TERM_TIME] Task completed - elapsed_time={elapsed_time:.2f}s")
-
-#         return {
-#             **result,
-#             "end_user_id": end_user_id,
-#             "config_id": config_id,
-#             "elapsed_time": elapsed_time,
-#             "task_id": self.request.id
-#         }
-#     except Exception as e:
-#         elapsed_time = time.time() - start_time
-#         logger.error(f"[LONG_TERM_TIME] Task failed - error={str(e)}", exc_info=True)
-
-#         return {
-#             "status": "FAILURE",
-#             "strategy": "time",
-#             "error": str(e),
-#             "end_user_id": end_user_id,
-#             "config_id": config_id,
-#             "elapsed_time": elapsed_time,
-#             "task_id": self.request.id
-#         }
-
-
-# @celery_app.task(name="app.core.memory.agent.long_term_storage.aggregate", bind=True)
-# def long_term_storage_aggregate_task(
-#     self,
-#     end_user_id: str,
-#     langchain_messages: List[Dict[str, Any]],
-#     config_id: str
-# ) -> Dict[str, Any]:
-#     """Celery task for aggregate-based long-term memory storage.
-
-#     Uses LLM to determine if new messages describe the same event as history.
-#     Only writes to Neo4j if messages represent new information (not duplicates).
-
-#     Args:
-#         end_user_id: End user identifier
-#         langchain_messages: List of messages [{"role": "user/assistant", "content": "..."}]
-#         config_id: Memory configuration ID
-
-#     Returns:
-#         Dict containing task status, is_same_event flag, and metadata
-#     """
-#     from app.core.logging_config import get_logger
-#     logger = get_logger(__name__)
-
-#     logger.info(f"[LONG_TERM_AGGREGATE] Starting task - end_user_id={end_user_id}")
-#     start_time = time.time()
-
-#     async def _run() -> Dict[str, Any]:
-#         from app.core.memory.agent.langgraph_graph.routing.write_router import aggregate_judgment
-#         from app.core.memory.agent.langgraph_graph.tools.write_tool import chat_data_format
-#         from app.core.memory.agent.utils.redis_tool import write_store
-#         from app.services.memory_config_service import MemoryConfigService
-
-#         db = next(get_db())
-#         try:
-#             # Save to Redis buffer first
-#             write_store.save_session_write(end_user_id, await chat_data_format(langchain_messages))
-
-#             # Load memory config
-#             config_service = MemoryConfigService(db)
-#             memory_config = config_service.load_memory_config(
-#                 config_id=config_id,
-#                 service_name="LongTermStorageTask"
-#             )
-
-#             # Execute aggregate judgment
-#             result = await aggregate_judgment(end_user_id, langchain_messages, memory_config)
-
-#             return {
-#                 "status": "SUCCESS",
-#                 "strategy": "aggregate",
-#                 "is_same_event": result.get("is_same_event", False),
-#                 "wrote_to_neo4j": not result.get("is_same_event", False)
-#             }
-#         finally:
-#             db.close()
-
-#     try:
-#         import nest_asyncio
-#         nest_asyncio.apply()
-#     except ImportError:
-#         pass
-
-#     try:
-#         loop = asyncio.get_event_loop()
-#         if loop.is_closed():
-#             loop = asyncio.new_event_loop()
-#             asyncio.set_event_loop(loop)
-#     except RuntimeError:
-#         loop = asyncio.new_event_loop()
-#         asyncio.set_event_loop(loop)
-
-#     try:
-#         result = loop.run_until_complete(_run())
-#         elapsed_time = time.time() - start_time
-
-#         logger.info(f"[LONG_TERM_AGGREGATE] Task completed - is_same_event={result.get('is_same_event')}, elapsed_time={elapsed_time:.2f}s")
-
-#         return {
-#             **result,
-#             "end_user_id": end_user_id,
-#             "config_id": config_id,
-#             "elapsed_time": elapsed_time,
-#             "task_id": self.request.id
-#         }
-#     except Exception as e:
-#         elapsed_time = time.time() - start_time
-#         logger.error(f"[LONG_TERM_AGGREGATE] Task failed - error={str(e)}", exc_info=True)
-
-#         return {
-#             "status": "FAILURE",
-#             "strategy": "aggregate",
-#             "error": str(e),
-#             "end_user_id": end_user_id,
-#             "config_id": config_id,
-#             "elapsed_time": elapsed_time,
-#             "task_id": self.request.id
-#         }
-
-
-# =============================================================================
 # 隐性记忆和情绪数据更新定时任务
 # =============================================================================
 
@@ -4096,3 +3946,365 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
 
 
 # unused task
+
+
+# =============================================================================
+# Sliding Window Write Tasks
+# =============================================================================
+
+
+@celery_app.task(
+    bind=True,
+    name="app.tasks.sliding_window_write",
+    queue="memory_tasks",
+    max_retries=0,
+    acks_late=True,
+)
+def sliding_window_write_task(
+    self,
+    conversation_id: str,
+    message_seq: int,
+    context_before: List[dict],
+    context_after: List[dict],
+    target_message: dict,
+    config_id: str,
+    end_user_id: str,
+    workspace_id: str,
+    language: str,
+    dispatch_at: str,
+) -> None:
+    """滑动窗口写入任务。
+
+    1. 从数据库加载 memory_config
+    2. 初始化 WritePipeline
+    3. 调用 WritePipeline.run_with_window()
+    4. 任务完成后（无论成功或失败）删除幂等锁 write_task:{conversation_id}:{message_seq}
+
+    Fire-and-forget：异常时记录日志，不重试。
+    """
+    async def _run() -> None:
+        from app.core.memory.pipelines.write_pipeline import WritePipeline
+        from app.services.memory_config_service import MemoryConfigService
+        from app.models.conversation_model import Conversation
+        from sqlalchemy import select
+
+        with get_db_context() as db:
+            config_service = MemoryConfigService(db)
+
+            # config_id 为空时，通过 conversation_id 查出 workspace_id 作为 fallback
+            _config_id = config_id if config_id else None
+            _workspace_id = workspace_id if workspace_id else None
+
+            if not _workspace_id and conversation_id:
+                row = db.execute(
+                    select(Conversation.workspace_id).where(
+                        Conversation.id == conversation_id
+                    )
+                ).scalar_one_or_none()
+                if row:
+                    _workspace_id = str(row)
+
+            memory_config = config_service.load_memory_config(
+                config_id=_config_id,
+                workspace_id=_workspace_id,
+                service_name="SlidingWindowWriteTask",
+            )
+
+        pipeline = WritePipeline(
+            memory_config=memory_config,
+            end_user_id=end_user_id,
+            language=language,
+        )
+        await pipeline.run_with_window(
+            target_message=target_message,
+            context_before=context_before,
+            context_after=context_after,
+            conversation_id=conversation_id,
+            message_seq=message_seq,
+            dispatch_at=dispatch_at,
+        )
+
+    try:
+        asyncio.run(_run())
+    except Exception as e:
+        logger.error(
+            f"[SlidingWindowWrite] 失败: conv={conversation_id}, seq={message_seq}, err={e}",
+            exc_info=True,
+        )
+    finally:
+        redis_client = get_sync_redis_client()
+        if redis_client:
+            try:
+                redis_client.delete(f"write_task:{conversation_id}:{message_seq}")
+            except Exception as e:
+                logger.warning(
+                    f"[SlidingWindowWrite] 删除幂等锁失败: conv={conversation_id}, seq={message_seq}, err={e}"
+                )
+
+
+# ──────────────────────────────────────────────
+# 滑动窗口写入相关常量
+# ──────────────────────────────────────────────
+
+# Redis key 前缀
+CONV_ACTIVE_KEY_PREFIX = "conv_active:"
+FLUSH_LOCK_KEY_PREFIX = "flush_lock:"
+
+# Flush 任务幂等锁 TTL（秒）：派发 flush_conversation_task 时 SETNX 这把锁
+# 防止同一对话被并发兜底，FlushTask 完成（成功或失败）会主动 DELETE 释放
+FLUSH_LOCK_TTL_SECONDS = 600
+
+
+@celery_app.task(
+    bind=True,
+    name="app.tasks.flush_conversation",
+    queue="memory_tasks",
+    max_retries=0,
+    acks_late=True,
+)
+def flush_conversation_task(self, conversation_id: str) -> None:
+    """兜底写入任务：逐条处理 write_cursor 后的所有未写入消息。
+
+    使用 memory_write:{end_user_id} 锁与其他写入路径互斥，保证同一 user 串行。
+    完成后（无论成功或失败）删除 flush_lock:{conversation_id}。
+    Fire-and-forget：异常时记录日志，不重试。
+    """
+    # 提前查 end_user_id 用于加锁
+    end_user_id_for_lock: Optional[str] = None
+    try:
+        from sqlalchemy import select
+
+        from app.models.conversation_model import Conversation
+
+        with get_db_context() as db:
+            row = db.execute(
+                select(Conversation.user_id).where(Conversation.id == conversation_id)
+            ).scalar_one_or_none()
+            if row:
+                end_user_id_for_lock = str(row)
+    except Exception as e:
+        logger.warning(
+            f"[FlushTask] 查询 end_user_id 失败，将以无锁模式执行: conv={conversation_id}, err={e}"
+        )
+
+    async def _run() -> None:
+        from app.core.memory.sliding_window.flush_task import FlushTask
+
+        await FlushTask().run(conversation_id)
+
+    redis_client = get_sync_redis_client()
+    write_lock = None
+    write_lock_token = None
+    if redis_client is not None and end_user_id_for_lock:
+        write_lock = RedisFairLock(
+            key=f"memory_write:{end_user_id_for_lock}",
+            redis_client=redis_client,
+            expire=600,
+            timeout=3600,
+            auto_renewal=True,
+        )
+        if not write_lock.acquire():
+            logger.warning(
+                f"[FlushTask] 获取锁超时，跳过本次 flush: "
+                f"conv={conversation_id}, end_user_id={end_user_id_for_lock}"
+            )
+            # 释放幂等锁，后续 Beat 会重新派发
+            try:
+                redis_client.delete(f"{FLUSH_LOCK_KEY_PREFIX}{conversation_id}")
+            except Exception:
+                pass
+            return
+
+        from app.services.memory_agent_service import _set_write_lock_holder
+        write_lock_token = _set_write_lock_holder(end_user_id_for_lock)
+
+    try:
+        asyncio.run(_run())
+    except Exception as e:
+        logger.error(
+            f"[FlushTask] 失败: conv={conversation_id}, err={e}",
+            exc_info=True,
+        )
+    finally:
+        if write_lock_token is not None:
+            try:
+                from app.services.memory_agent_service import _reset_write_lock_holder
+                _reset_write_lock_holder(write_lock_token)
+            except Exception as e:
+                logger.warning(f"[FlushTask] 重置锁标记失败: {e}")
+        if write_lock is not None:
+            try:
+                write_lock.release()
+            except Exception as e:
+                logger.warning(f"[FlushTask] 释放写入锁失败: {e}")
+        if redis_client:
+            try:
+                redis_client.delete(f"{FLUSH_LOCK_KEY_PREFIX}{conversation_id}")
+            except Exception as e:
+                logger.warning(
+                    f"[FlushTask] 删除 flush_lock 失败: conv={conversation_id}, err={e}"
+                )
+
+
+@celery_app.task(
+    name="app.tasks.scan_idle_conversations",
+    queue="periodic_tasks",
+    max_retries=0,
+    acks_late=False,
+)
+def scan_idle_conversations_task() -> None:
+    """Celery Beat 定时任务（每 60 秒）：扫描空闲对话并派发兜底写入任务。
+
+    优先从 Redis Set (pending_conversations) 获取候选对话 ID，避免全表 JOIN 扫描。
+    若 Set 不可用则回退到数据库查询。
+
+    扫描条件（三者同时满足才派发 flush_conversation_task）：
+    1. 对话存在未写入消息（来自 Redis Set 或 DB 查询）
+    2. Redis 中 conv_active:{conversation_id} 已过期或不存在（对话空闲 >5 分钟）
+    3. Redis 中 flush_lock:{conversation_id} 不存在（无正在执行的 Flush_Task）
+
+    满足条件时：原子写入 flush_lock（TTL=600s），再派发 flush_conversation_task。
+
+    注意：conv_active key 由 MemoryService._refresh_active_key 写在
+    settings.REDIS_DB（DB 13），而 flush_lock 与其他 Celery 共享数据写在
+    settings.REDIS_DB_CELERY_BACKEND（DB 15）——两者 DB 不同，扫描时需要
+    分别从对应 DB 读取。
+    """
+    from sqlalchemy import func, select, text
+
+    from app.models.conversation_model import Conversation
+
+    redis_client = get_sync_redis_client()
+    if redis_client is None:
+        logger.error("[ScanIdle] Redis 不可用，跳过本次扫描")
+        return
+
+    # 单独构造一个连接到 settings.REDIS_DB 的客户端，用于读取 conv_active key 和 pending_conversations Set
+    active_redis_client = None
+    try:
+        active_redis_client = redis.StrictRedis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB,
+            password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
+            decode_responses=True,
+        )
+        active_redis_client.ping()
+    except Exception as e:
+        logger.warning(
+            f"[ScanIdle] 无法连接 conv_active 所在 Redis DB（settings.REDIS_DB），"
+            f"将跳过空闲检查（所有对话视为活跃）: err={e}"
+        )
+        active_redis_client = None
+
+    dispatched = 0
+    skipped_active = 0
+    skipped_locked = 0
+
+    try:
+        # 优先从 Redis Set 获取候选对话 ID（O(N) SMEMBERS，避免全表 JOIN）
+        candidate_conv_ids: list[str] | None = None
+        if active_redis_client is not None:
+            try:
+                from app.core.memory.sliding_window.window_utils import PENDING_CONVERSATIONS_SET_KEY
+                candidates = active_redis_client.smembers(PENDING_CONVERSATIONS_SET_KEY)
+                if candidates:
+                    candidate_conv_ids = list(candidates)
+                    logger.info(f"[ScanIdle] 从 Redis Set 获取 {len(candidate_conv_ids)} 个候选对话")
+            except Exception as e:
+                logger.warning(f"[ScanIdle] 读取 pending_conversations Set 失败，回退到 DB 查询: {e}")
+
+        # 回退：Redis Set 不可用或为空时，走数据库查询
+        if candidate_conv_ids is None:
+            with get_db_context() as db:
+                from app.models.memory_message_model import MemoryMessage
+
+                max_seq_subq = (
+                    select(
+                        MemoryMessage.conversation_id,
+                        func.max(MemoryMessage.message_seq).label("max_seq"),
+                    )
+                    .where(MemoryMessage.conversation_id.isnot(None))
+                    .group_by(MemoryMessage.conversation_id)
+                    .subquery()
+                )
+
+                rows = (
+                    db.execute(
+                        select(Conversation.id)
+                        .join(
+                            max_seq_subq,
+                            Conversation.id == max_seq_subq.c.conversation_id,
+                        )
+                        .where(max_seq_subq.c.max_seq > Conversation.write_cursor)
+                    )
+                    .scalars()
+                    .all()
+                )
+                candidate_conv_ids = [str(r) for r in rows]
+
+        logger.info(f"[ScanIdle] 发现 {len(candidate_conv_ids)} 个对话存在未写入消息")
+
+        for conv_id_str in candidate_conv_ids:
+            # 检查 conv_active key 是否存在（存在则对话仍活跃，跳过）
+            # conv_active 写在 settings.REDIS_DB（DB 13），需要用专属 client 读取
+            if active_redis_client is not None:
+                try:
+                    active_key = f"{CONV_ACTIVE_KEY_PREFIX}{conv_id_str}"
+                    if active_redis_client.exists(active_key):
+                        skipped_active += 1
+                        continue
+                except Exception as e:
+                    logger.warning(f"[ScanIdle] 检查 conv_active 失败: conv={conv_id_str}, err={e}")
+                    # 检查失败时保守起见跳过——避免误派发兜底
+                    skipped_active += 1
+                    continue
+            else:
+                # 拿不到 active client：保守起见全部视为活跃，跳过派发
+                skipped_active += 1
+                continue
+
+            # 原子写入 flush_lock（nx=True 保证只有一个 worker 能成功）
+            try:
+                flush_lock_key = f"{FLUSH_LOCK_KEY_PREFIX}{conv_id_str}"
+                acquired = redis_client.set(
+                    flush_lock_key, "1",
+                    ex=FLUSH_LOCK_TTL_SECONDS, nx=True,
+                )
+                if not acquired:
+                    # 锁已存在，说明已有 Flush_Task 在处理
+                    skipped_locked += 1
+                    continue
+            except Exception as e:
+                logger.warning(f"[ScanIdle] 写入 flush_lock 失败: conv={conv_id_str}, err={e}")
+                continue
+
+            # 派发 flush_conversation_task
+            try:
+                flush_conversation_task.apply_async(
+                    kwargs={"conversation_id": conv_id_str},
+                    queue="memory_tasks",
+                )
+                dispatched += 1
+                logger.info(f"[ScanIdle] 派发 FlushTask: conv={conv_id_str}")
+            except Exception as e:
+                # 派发失败时释放锁，避免死锁
+                logger.error(f"[ScanIdle] 派发 FlushTask 失败: conv={conv_id_str}, err={e}")
+                try:
+                    redis_client.delete(flush_lock_key)
+                except Exception:
+                    pass
+
+    except Exception as e:
+        logger.error(f"[ScanIdle] 扫描任务失败: err={e}", exc_info=True)
+    finally:
+        # 释放专属于 DB 13 的 Redis client，避免长跑 Beat 进程慢慢累积 socket fd
+        if active_redis_client is not None:
+            try:
+                active_redis_client.close()
+            except Exception:
+                pass
+
+    logger.info(
+        f"[ScanIdle] 扫描完成: 派发={dispatched}, 跳过(活跃)={skipped_active}, 跳过(已锁)={skipped_locked}"
+    )
