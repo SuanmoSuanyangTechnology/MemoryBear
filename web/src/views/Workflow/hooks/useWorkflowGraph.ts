@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-14 13:59:06
+ * @Last Modified time: 2026-05-19 15:16:10
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection, type Edge } from '@antv/x6';
 import { register as registerReactShape } from '@antv/x6-react-shape';
@@ -121,6 +121,7 @@ export const useWorkflowGraph = ({
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isHandMode, setIsHandMode] = useState(true);
+  const isHandModeRef = useRef(true)
   const [config, setConfig] = useState<WorkflowConfig | null>(null);
   const [chatVariables, setChatVariables] = useState<ChatVariable[]>([])
   const featuresRef = useRef<FeaturesConfigForm | undefined>(undefined)
@@ -263,6 +264,12 @@ export const useWorkflowGraph = ({
           name,
           data: { ...node, ...nodeLibraryConfig, ...((type === 'if-else' || type === 'question-classifier') ? { chatVariables } : {}) },
           ...position,
+        }
+
+        if (type === 'start' && config?.variables && Array.isArray(config.variables)) {
+          config?.variables?.forEach(item => {
+            item.ui_type = item.ui_type || (item.type === 'string' ? 'text-input' : item.type === 'number' ? 'number' : 'boolean')
+          })
         }
 
         if (type === 'notes') {
@@ -758,8 +765,8 @@ export const useWorkflowGraph = ({
     graphRef.current.on('history:redo', () => { if (!isSyncingRef.current) syncChildRelationshipsRef.current() })
   };
 
-  // 控制框选：isHandMode = false 时启用框选
   useEffect(() => {
+    isHandModeRef.current = isHandMode
     if (!graphRef.current) return;
     if (isHandMode) {
       graphRef.current?.enablePanning();
@@ -925,7 +932,7 @@ export const useWorkflowGraph = ({
   const copyEvent = () => {
     if (!graphRef.current) return false;
     let selectedNodes = []
-    if (isHandMode) {
+    if (isHandModeRef.current) {
       selectedNodes = graphRef.current.getNodes().filter(node => node.getData()?.isSelected);
     } else {
      selectedNodes = graphRef.current.getSelectedCells();
@@ -941,6 +948,7 @@ export const useWorkflowGraph = ({
    */
   const parseEvent = () => {
     if (!graphRef.current?.isClipboardEmpty()) {
+      graphRef.current?.startBatch('copy');
       const pastedNodes = graphRef.current?.paste({ offset: 32 }) ?? [];
       pastedNodes.forEach(cell => {
         if (cell.isNode()) {
@@ -950,6 +958,7 @@ export const useWorkflowGraph = ({
         }
       });
       blankClick();
+      graphRef.current?.stopBatch('copy');
     }
     return false;
   };

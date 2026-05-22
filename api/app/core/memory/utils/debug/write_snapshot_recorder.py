@@ -80,6 +80,7 @@ class WriteSnapshotRecorder:
                         "id": e.id,
                         "name": e.name,
                         "entity_type": e.entity_type,
+                        "type_id": e.type_id,
                         "description": e.description,
                     }
                     for e in graph.entity_nodes
@@ -89,6 +90,8 @@ class WriteSnapshotRecorder:
                         "source": e.source,
                         "target": e.target,
                         "relation_type": e.relation_type,
+                        "relation_type_id": e.relation_type_id,
+                        "relation_type_surface": e.relation_type_surface,
                         "statement": e.statement,
                     }
                     for e in graph.entity_entity_edges

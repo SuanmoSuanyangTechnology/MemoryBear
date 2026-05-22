@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import math
 import uuid
@@ -7,8 +8,13 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from neo4j import Session
 
 from app.core.memory.enums import Neo4jNodeType, TripletPredicate
-from app.core.memory.models.service_models import Memory, MemorySearchResult, RelationMemory, RelationSearchResult, \
+from app.core.memory.models.service_models import (
+    Memory,
+    MemorySearchResult,
+    RelationMemory,
+    RelationSearchResult,
     EntityPair
+)
 from app.core.memory.models.service_models import MemoryContext
 from app.core.memory.prompt import prompt_manager
 from app.core.memory.read_services.search_engine.result_builder import MetadataBuilder
@@ -30,7 +36,7 @@ DEFAULT_FULLTEXT_SCORE_THRESHOLD = 1.5
 DEFAULT_COSINE_SCORE_THRESHOLD = 0.5
 DEFAULT_CONTENT_SCORE_THRESHOLD = 0.5
 
-RELATIONSHIP_LOOP_LIMIT = 5
+RELATIONSHIP_LOOP_LIMIT = 6
 
 
 class Neo4jSearchService:
@@ -195,6 +201,7 @@ class Neo4jSearchService:
         system_prompt = prompt_manager.render(
             name="relation_search",
             predicates=[p.to_dict() for p in TripletPredicate],
+            loop_limit=RELATIONSHIP_LOOP_LIMIT - 1
         )
 
         tools = [self.relation_search_tool, self.entity_search_tool]
@@ -204,7 +211,6 @@ class Neo4jSearchService:
         messages: list[SystemMessage | HumanMessage | AIMessage | ToolMessage] = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=(
-                f"<current-entity></current-entity>"
                 f"<user-query>{query}</user-query>"
             ))
         ]
@@ -216,13 +222,25 @@ class Neo4jSearchService:
             if not response.tool_calls:
                 break
 
-            for tc in response.tool_calls:
+            async def run_tool(tc):
                 tool = tool_map[tc["name"]]
-                tool_result = await tool.ainvoke(tc["args"])
-                messages.append(ToolMessage(
-                    content=str(tool_result),
-                    tool_call_id=tc["id"],
-                ))
+                try:
+                    result = await tool.ainvoke(tc["args"])
+                    return ToolMessage(
+                        content=json.dumps(result, ensure_ascii=False),
+                        tool_call_id=tc["id"],
+                    )
+                except Exception as e:
+                    return ToolMessage(
+                        content=json.dumps({"error": str(e)}),
+                        tool_call_id=tc["id"],
+                    )
+
+            tool_messages = await asyncio.gather(*[
+                run_tool(tc) for tc in response.tool_calls
+            ])
+
+            messages.extend(tool_messages)
 
         final_message = next(
             (m for m in reversed(messages) if isinstance(m, AIMessage)),
@@ -233,13 +251,13 @@ class Neo4jSearchService:
         except Exception:
             logger.debug(
                 "[RelationSearch] LLM final message parsing failed, "
-                "falling back to tool-call extraction"
+                "falling back to tool-call extraction", exc_info=True
             )
             return self._extract_pairs_from_messages(messages)
 
     @staticmethod
     def _extract_pairs_from_messages(
-        messages: list[SystemMessage | HumanMessage | AIMessage | ToolMessage],
+            messages: list[SystemMessage | HumanMessage | AIMessage | ToolMessage],
     ) -> RelationSearchResult:
         """Extract EntityPairs from relation_search_tool results when LLM output is unusable."""
         import ast

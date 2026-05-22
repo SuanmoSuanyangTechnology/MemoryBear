@@ -160,6 +160,8 @@ class EntityEntityEdge(Edge):
         invalid_at: Optional end date of temporal validity
     """
     relation_type: str = Field(..., description="Relation type as defined in ontology")
+    relation_type_id: Optional[int] = Field(default=None, description="Ontology ID for predicate (1-13). None indicates unknown/unmapped predicate.")
+    relation_type_surface: str = Field(..., description="Source-text relation phrase expressing this predicate")
     relation_type_description: str = Field(default="", description="Chinese definition of the relation type from ontology")
     relation_value: Optional[str] = Field(None, description="Value of the relation")
     statement: str = Field(..., description='The statement of the edge.')
@@ -411,6 +413,7 @@ class ExtractedEntityNode(Node):
     entity_idx: int = Field(..., description="Unique identifier for the entity")
     statement_id: str = Field(..., description="Statement this entity was extracted from")
     entity_type: str = Field(..., description="Type of the entity")
+    type_id: Optional[int] = Field(default=None, description="Ontology ID for entity type (1-13). None indicates unknown/unmapped type.")
     type_description: str = Field(default="", description="Chinese definition of the entity type from ontology")
     description: str = Field(..., description="Entity description")
     example: str = Field(

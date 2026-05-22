@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:25:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-26 11:18:04
+ * @Last Modified time: 2026-05-18 12:24:31
  */
 /**
  * Rich text editor component using Lexical framework
@@ -22,6 +22,8 @@ import InitialValuePlugin from './plugin/InitialValuePlugin'
 import LineBreakPlugin from './plugin/LineBreakPlugin';
 import InsertTextPlugin from './plugin/InsertTextPlugin';
 import EditablePlugin from './plugin/EditablePlugin';
+import AutocompletePlugin from './plugin/AutocompletePlugin';
+import BlurPlugin from './plugin/BlurPlugin';
 
 /**
  * Editor ref methods exposed to parent components
@@ -52,6 +54,8 @@ interface LexicalEditorProps {
   /** Editor height in pixels */
   height?: number;
   disabled?: boolean;
+  options?: Array<{label: string, value: string}>
+  onBlur?: (value?: string) => void;
 }
 
 /**
@@ -73,7 +77,9 @@ const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
   value,
   placeholder = "Please enter content...",
   onChange,
-  disabled
+  disabled,
+  options = [],
+  onBlur,
 }, ref) => {
   const [editor] = useLexicalComposerContext();
   
@@ -136,14 +142,13 @@ const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
         contentEditable={
           <ContentEditable
             className={clsx(
-              "rb:outline-none rb:resize-none rb:text-[14px] rb:leading-5 rb:px-4 rb:py-5 rb:bg-[#FBFDFF] rb-border rb:rounded-lg rb:overflow-auto",
-              disabled && "rb:cursor-not-allowed rb:bg-[#F6F8FC] rb:text-[#5B6167]",
-              className
-            )}
+              "rb:outline-none rb:resize-none rb:text-[14px] rb:leading-5 rb:px-4 rb:py-5 rb:bg-[#FBFDFF] rb-border rb:rounded-lg rb:overflow-auto",{
+              "rb:cursor-not-allowed rb:bg-[#F6F8FC] rb:text-[#5B6167]": disabled,
+            }, className)}
           />
         }
         placeholder={
-          <div className="rb:absolute rb:top-0 rb:px-4 rb:py-5 rb:text-[14px] rb:text-[#5B6167] rb:leading-5 rb:pointer-none">
+          <div className="rb:absolute rb:top-0 rb:px-4 rb:py-5 rb:text-[14px] rb:text-[rgba(23,23,25,0.25)] rb:leading-5 rb:pointer-none">
             {placeholder}
           </div>
         }
@@ -153,6 +158,8 @@ const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
       <InitialValuePlugin value={value} />
       <InsertTextPlugin />
       <EditablePlugin disabled={disabled} />
+      <AutocompletePlugin options={options} />
+      <BlurPlugin onBlur={onBlur} />
     </div>
   );
 });

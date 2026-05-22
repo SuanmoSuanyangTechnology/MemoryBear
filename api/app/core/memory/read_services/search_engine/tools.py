@@ -17,7 +17,7 @@ class EntitySearchInput(BaseModel):
 
 class RelationSearchInput(BaseModel):
     source_id: str | None = Field(default=None, description="Starting node ID for relation node query")
-    relation_predicates: list[str] = Field(description="Relational predicate types to be retrieved, supports searching multiple relations at once")
+    relation_predicates: list[int] = Field(description="Relational predicate IDs to retrieve, supports searching multiple relations at once. Must use numeric IDs: 1=别名属于, 2=属于类型, 3=位于, 4=前往, 5=组成部分, 6=拥有, 7=使用, 8=创建了, 9=了解, 10=偏好, 11=负责, 12=沟通于, 13=关联于")
 
 
 def make_entity_search_tool(ctx: MemoryContext):
@@ -46,14 +46,16 @@ def make_entity_search_tool(ctx: MemoryContext):
 
 def make_relation_search_tool(ctx: MemoryContext):
     @tool(args_schema=RelationSearchInput)
-    async def relation_search_tool(relation_predicates: list[str], source_id: str | None = None) -> list[dict]:
-        """Query the knowledge graph for entities connected to a source node by one or more relation predicates.
+    async def relation_search_tool(relation_predicates: list[int], source_id: str | None = None) -> list[dict]:
+        """Query the knowledge graph for entities connected to a source node by one or more relation predicate IDs.
 
         Omit source_id to start from the user's own entity node. Use this to discover what the user owns, knows, prefers, uses, created, visits, or is related to.
 
         Args:
             source_id: Starting entity node ID, defaults to the user entity if omitted.
-            relation_predicates: Relationship types to query, must match predefined predicate values. Supports multiple predicates at once.
+            relation_predicates: Numeric predicate IDs to query. Supports multiple predicates at once.
+                1=别名属于, 2=属于类型, 3=位于, 4=前往, 5=组成部分, 6=拥有, 7=使用,
+                8=创建了, 9=了解, 10=偏好, 11=负责, 12=沟通于, 13=关联于
 
         Returns:
             [{"id": "target entity id", "source_name": "source entity name", "relation_predicate": "predicate used", "target_name": "target entity name"}, ...]

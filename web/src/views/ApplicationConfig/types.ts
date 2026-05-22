@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 13:47:17
+ * @Last Modified time: 2026-05-20 15:33:17
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
@@ -438,7 +438,7 @@ interface FileSetttings {
   document_enabled: boolean;
   document_max_size_mb: number;
   document_allowed_extensions: string[];
-  document_image_recognition: boolean;
+  document_image_recognition?: boolean;
   video_enabled: boolean;
   video_max_size_mb: number;
   video_allowed_extensions: string[];
@@ -507,4 +507,33 @@ export interface LogDetailModalRef {
 }
 export interface EmbedWebsiteModalRef {
   handleOpen: () => void;
+}
+export interface AnnotationItem {
+  id: string;
+  question: string;
+  answer: string;
+  hit_count: number;
+  created_at: number;
+  updated_at: number;
+}
+export interface AnnotationSettingForm {
+  /** Similarity threshold */
+  similarity_threshold?: number;
+  /** Model configuration ID */
+  model_config_id?: string;
+  /** Whether enabled */
+  enabled: 1 | 0;
+}
+export interface AnnotationSettingModalRef {
+  handleOpen: () => void;
+}
+export interface AnnotationFormModalRef {
+  handleOpen: (vo?: AnnotationItem) => void;
+}
+export interface AnnotationForm {
+  question: string;
+  answer: string;
+}
+export interface HitHistoryDetailRef {
+  handleOpen: (id: string, annotation_id: string) => void;
 }

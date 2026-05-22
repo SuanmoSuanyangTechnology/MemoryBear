@@ -114,14 +114,14 @@ const Index = () => {
             {/* 统计卡片 */}
             <TopCardList data={dashboardData} />
           </div>
-          <div className="rb:flex-1 rb:rounded-xl rb:bg-white rb:pt-3 rb:px-3 rb:overflow-y-hidden">
+          <div className="rb:flex-1 rb:min-h-0 rb:rounded-xl rb:bg-white rb:pt-3 rb:px-3 rb:overflow-hidden">
             <Table
               ref={tableRef}
               apiUrl={tableApi}
               columns={columns}
               rowKey="id"
               bordered={false}
-              scrollY="100%"
+              fillHeight
               pagination={{pagesize: 10}}
             />
           </div>
@@ -132,7 +132,7 @@ const Index = () => {
         <div className='rb:shrink-0'>
           <GuideCard />
         </div>
-        <div className='rb:flex-1'>
+        <div className='rb:flex-1 rb:min-h-0'>
           <VersionCard />
         </div>
         <div className='rb:shrink-0'>

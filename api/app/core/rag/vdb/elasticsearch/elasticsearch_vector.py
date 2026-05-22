@@ -215,6 +215,9 @@ class ElasticSearchVector(BaseVector):
                         logger.warning(f"Document not found for deletion: {doc_id}")
                     else:
                         logger.error(f"Error deleting document: {error}")
+                        raise
+
+        return True
 
     def delete(self):
         if self._client.indices.exists(index=self._collection_name):
@@ -300,7 +303,7 @@ class ElasticSearchVector(BaseVector):
             if chunk_type == "qa":
                 metadata["question"] = source.get(Field.QUESTION.value, "")
                 metadata["answer"] = source.get(Field.ANSWER.value, "")
-                page_content = f"Q: {metadata['question']}\nA: {metadata['answer']}"
+                page_content = f"question: {metadata['question']}\nanswer: {metadata['answer']}"
 
             docs_and_scores.append((DocumentChunk(page_content=page_content, vector=vector, metadata=metadata), score))
 
@@ -526,7 +529,7 @@ class ElasticSearchVector(BaseVector):
             if chunk_type == "qa":
                 question = source.get(Field.QUESTION.value, "")
                 answer = source.get(Field.ANSWER.value, "")
-                page_content = f"Q: {question}\nA: {answer}"
+                page_content = f"question: {question}\nanswer: {answer}"
                 metadata["chunk_type"] = "qa"
                 metadata["question"] = question
                 metadata["answer"] = answer
@@ -619,7 +622,7 @@ class ElasticSearchVector(BaseVector):
             if chunk_type == "qa":
                 question = source.get(Field.QUESTION.value, "")
                 answer = source.get(Field.ANSWER.value, "")
-                page_content = f"Q: {question}\nA: {answer}"
+                page_content = f"question: {question}\nanswer: {answer}"
                 metadata["chunk_type"] = "qa"
                 metadata["question"] = question
                 metadata["answer"] = answer

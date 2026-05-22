@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:45:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 18:44:14
+ * @Last Modified time: 2026-05-18 11:19:34
  */
 import { type ReactNode } from 'react'
 
@@ -76,6 +76,8 @@ export interface ChatProps {
   assistantIcon?: ReactNode;
   isSupportTools?: boolean;
   handleFeedback?: (feedbackType: 'like' | 'dislike', id?: string) => void;
+
+  isEnded?: boolean;
 }
 
 /**
@@ -124,4 +126,5 @@ export interface ChatContentProps {
   assistantIcon?: ReactNode;
   isSupportTools?: boolean;
   handleFeedback?: (feedbackType: 'like' | 'dislike', id?: string) => void;
+  isEnded?: boolean;
 }

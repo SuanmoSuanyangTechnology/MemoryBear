@@ -22,7 +22,7 @@ import Timeline from '../components/Timeline'
 const PerceptualDetail: FC = () => {
 
   return (
-    <Row gutter={12} className="rb:h-full!">
+    <Row gutter={12} wrap={false} className="rb:h-full!">
       <Col flex="480px" className="rb:h-full!">
         <PerceptualLastInfo />
       </Col>

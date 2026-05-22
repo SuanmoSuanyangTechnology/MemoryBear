@@ -31,7 +31,7 @@ const RbSlider: React.FC<SliderSingleProps> = ({
           max={max}
           step={step as number}
           value={curValue}
-          className="rb:my-0! rb:ml-2.5!"
+          className="rb:my-1.75! rb:ml-2.5!"
           classNames={{
             rail: 'rb:h-[6px]!',
             track: 'rb:h-[6px]!'
