@@ -4,7 +4,7 @@ import io
 from typing import Any, Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+from fastapi import APIRouter, Body, Depends, HTTPException, status, Query, UploadFile, File
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
@@ -210,14 +210,14 @@ async def get_preview_chunks(
     return success(data=jsonable_encoder(result), msg="Querying the document block preview list succeeded")
 
 
-@router.get("/{kb_id}/{document_id}/preview", response_model=ApiResponse)
+@router.post("/{kb_id}/{document_id}/preview", response_model=ApiResponse)
 async def get_preview_chunks_hierarchy(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
         page: int = Query(1, gt=0),
         pagesize: int = Query(20, gt=0, le=100),
         keywords: Optional[str] = Query(None, description="The keywords used to match chunk content"),
-        parser_config_param: Optional[str] = Query(None, description="JSON string of parser config overrides, e.g. {\"layout_recognize\":\"mineru\",\"chunk_token_num\":130,\"parent_child_mode\":true}"),
+        parser_config_param: Optional[dict] = Body(None, description="Parser config overrides, e.g. {\"layout_recognize\":\"mineru\",\"chunk_token_num\":130,\"parent_child_mode\":true}"),
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
@@ -292,18 +292,9 @@ async def get_preview_chunks_hierarchy(
 
     parser_config = dict(db_document.parser_config)
 
-    # 如果传入了覆盖参数，解析并合并
-    if parser_config_param:
-        import json
-        try:
-            overrides = json.loads(parser_config_param)
-            if isinstance(overrides, dict):
-                parser_config.update(overrides)
-        except json.JSONDecodeError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid parser_config JSON format"
-            )
+    # 如果传入了覆盖参数，直接合并
+    if parser_config_param and isinstance(parser_config_param, dict):
+        parser_config.update(parser_config_param)
 
     chunk_mode = parser_config.get("chunk_mode", "normal")
     parent_child_mode = parser_config.get("parent_child_mode", False)
