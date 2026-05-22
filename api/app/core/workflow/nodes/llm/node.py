@@ -5,6 +5,7 @@ LLM 节点实现
 """
 
 import logging
+from copy import deepcopy
 from typing import Any
 
 from langchain_core.messages import AIMessage
@@ -294,7 +295,8 @@ class LLMNode(BaseNode):
 
             if self.typed_config.memory.enable:
                 history_message = []
-                for message in state["messages"][-self.typed_config.memory.window_size:]:
+                history_messages = deepcopy(state["messages"][-self.typed_config.memory.window_size:])
+                for message in history_messages:
                     if isinstance(message["content"], list):
                         file_content = []
                         for file in message["content"]:

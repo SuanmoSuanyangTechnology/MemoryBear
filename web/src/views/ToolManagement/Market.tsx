@@ -458,7 +458,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
   };
 
   return (
-    <Row gutter={16}>
+    <Row gutter={16} wrap={false}>
       <Col flex="380px">
         <Flex vertical gap={16}>
           <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5">{t('tool.mcpMarket')}</div>

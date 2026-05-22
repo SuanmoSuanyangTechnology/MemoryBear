@@ -61,7 +61,7 @@ interface PageScrollListProps<T, Q = Record<string, unknown>> {
   onTotalChange?: (total: number) => void;
 }
 
-const defaultHeightClass = 'rb:h-[calc(100vh-116px)]!';
+const defaultHeightClass = 'rb:h-[calc(100vh-118px)]!';
 
 /** Infinite scroll list component with pagination support */
 const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({

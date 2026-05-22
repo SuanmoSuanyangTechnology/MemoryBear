@@ -220,8 +220,6 @@ class RedBearModelFactory:
             # - thinking（A类）：混合思考，流式和非流式均可开关
             if ModelCapability.THINKING in config.capability:
                 if provider == ModelProvider.VOLCANO:
-                    # Volcano thinking 参数在流式和非流式下均可传递
-                    # 格式: extra_body={"thinking": {"type": "enabled/disabled", "budget_tokens": N}}
                     thinking_config: Dict[str, Any] = {"type": "enabled" if config.deep_thinking else "disabled"}
                     if config.deep_thinking and config.thinking_budget_tokens:
                         thinking_config["budget_tokens"] = config.thinking_budget_tokens

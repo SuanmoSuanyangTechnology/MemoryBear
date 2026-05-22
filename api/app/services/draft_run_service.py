@@ -27,7 +27,7 @@ from app.core.memory.memory_service import MemoryService
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_db_context
 from app.models import AgentConfig, ModelConfig
-from app.models.models_model import ModelCapability
+from app.models.models_model import ModelCapability, ModelType
 from app.models.agent_execution_model import AgentExecution
 from app.repositories.agent_execution_repository import AgentExecutionRepository
 from app.repositories.tool_repository import ToolRepository
@@ -1754,20 +1754,29 @@ class AgentRunService:
         if not isinstance(sq_config, dict) or not sq_config.get("enabled"):
             return []
         try:
-            from langchain_openai import ChatOpenAI
-            from langchain_core.messages import HumanMessage, SystemMessage
-            llm = ChatOpenAI(
-                model=api_key_config["model_name"],
-                api_key=api_key_config["api_key"],
-                base_url=api_key_config.get("api_base"),
-                temperature=0.5,
-                max_tokens=200,
+            from langchain_core.messages import HumanMessage
+            from app.core.models import RedBearLLM, RedBearModelConfig
+            llm = RedBearLLM(
+                RedBearModelConfig(
+                    model_name=api_key_config["model_name"],
+                    provider=api_key_config.get("provider", "openai"),
+                    api_key=api_key_config["api_key"],
+                    base_url=api_key_config.get("api_base"),
+                    capability=api_key_config.get("capability", []),
+                    is_omni=api_key_config.get("is_omni", False),
+                    extra_params={"temperature": 0.5, "max_tokens": 200}
+                ),
+                type=ModelType.CHAT
             )
             prompt = (
                 f"根据以下AI回复，生成3个用户可能继续追问的简短问题，每行一个，不加序号：\n\n{assistant_message}"
             )
             resp = await llm.ainvoke([HumanMessage(content=prompt)])
-            lines = [l.strip() for l in resp.content.strip().split("\n") if l.strip()]
+            content = resp.content
+            # 兼容 content 为 list 的情况（部分模型返回结构化内容）
+            if isinstance(content, list):
+                content = "".join(str(c) if isinstance(c, str) else c.get("text", "") for c in content)
+            lines = [l.strip() for l in content.strip().split("\n") if l.strip()]
             return lines[:3]
         except Exception as e:
             logger.warning(f"生成建议问题失败: {e}")

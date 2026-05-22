@@ -155,7 +155,7 @@ const WorkingDetail: FC = () => {
         : data.length === 0
         ? <Empty />
         :(
-          <Row gutter={16} className="rb:h-full!">
+          <Row gutter={16} wrap={false} className="rb:h-full!">
             <Col span={5} className="rb:h-full!">
               <RbCard
                 title={t('workingDetail.conversation')}

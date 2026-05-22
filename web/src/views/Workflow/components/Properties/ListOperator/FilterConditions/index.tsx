@@ -1,5 +1,4 @@
 import { type FC } from 'react'
-import clsx from 'clsx'
 import { useTranslation } from 'react-i18next';
 import { Form, Button, Select, type SelectProps, Flex, Row, Col } from 'antd'
 
@@ -114,7 +113,7 @@ const FilterConditions: FC<FilterConditionsProps> = ({
                             />
                           </Form.Item>
                         }
-                        <Row gutter={8}>
+                        <Row gutter={8} wrap={false}>
                           <Col flex={hideValueField ? '1' : "96px"}>
                             <Form.Item name={[field.name, 'comparison_operator']} noStyle>
                               <Select

@@ -151,7 +151,7 @@ const LogDetailModal = forwardRef<LogDetailModalRef, { source: string }>(({ sour
         {t('workingDetail.conversationStream')}
         <Button className="rb:h-6!" onClick={getDetail}>{t('workingDetail.refresh')}</Button>
       </Flex>
-      <div className="rb-border rb:p-3 rb:rounded-xl rb:mt-3 rb:h-116.5 rb:overflow-y-auto">
+      <div className="rb-border rb:p-3 rb:rounded-xl rb:mt-3 rb:h-[calc(100%-48px)] rb:overflow-y-auto">
       {loading
         ? <Skeleton active />
         : data.messages?.length === 0

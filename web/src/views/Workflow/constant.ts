@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-07 18:17:40
+ * @Last Modified time: 2026-05-19 15:25:17
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -33,7 +33,6 @@ export const hasProcessNodes = [
 ]
 // support single run node
 export const cannotRunNodes = [
-  'start',
   'end',
   'output',
 ]
@@ -178,6 +177,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           query: {
             type: 'variableList',
+            required: true,
           },
           knowledge_retrieval: {
             type: 'knowledge',
@@ -294,6 +294,13 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'variableList',
             required: true,
           },
+          vision: {
+            type: 'switch'
+          },
+          vision_input: {
+            type: 'variableList',
+            onFilterVariableType: ['array[file]', 'file']
+          },
           categories: {
             type: 'categoryList',
             required: true,
@@ -315,8 +322,8 @@ export const nodeLibrary: NodeLibrary[] = [
           input: {
             type: 'variableList',
             required: true,
-            filterNodeTypes: ['knowledge-retrieval', 'iteration', 'loop', 'parameter-extractor', 'code', 'CONVERSATION'],
-            filterVariableNames: ['message']
+            filterNodeTypes: ['start', 'knowledge-retrieval', 'iteration', 'loop', 'parameter-extractor', 'code', 'CONVERSATION'],
+            // filterVariableNames: ['message']
           },
           parallel: {
             type: 'switch',
