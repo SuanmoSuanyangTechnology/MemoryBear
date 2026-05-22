@@ -83,9 +83,9 @@ def _build_tools_info(tools: Dict[str, Any]) -> str:
         desc = getattr(tool, "description", "") or ""
         if _is_single_call_tool(name):
             desc = f"[{desc}][仅调用一次，结果不匹配时请换用其他工具]"
-        
+
         param_parts = []
-        
+
         # 1. 优先从 tool_instance.parameters 获取（MCP/Custom 工具）
         tool_instance = getattr(tool, "tool_instance", None)
         if tool_instance and hasattr(tool_instance, "parameters"):
@@ -104,7 +104,7 @@ def _build_tools_info(tools: Dict[str, Any]) -> str:
                     part += f", 可选值: {p.enum}"
                 part += ")"
                 param_parts.append(part)
-        
+
         # 2. 回退到 args_schema（@tool 装饰器生成的工具）
         elif hasattr(tool, "args_schema") and tool.args_schema:
             try:
@@ -121,12 +121,12 @@ def _build_tools_info(tools: Dict[str, Any]) -> str:
                     param_parts.append(part)
             except Exception:
                 pass
-        
+
         if param_parts:
             lines.append(f"- {name}[{', '.join(param_parts)}]: {desc}")
         else:
             lines.append(f"- {name}: {desc}")
-    
+
     return "\n".join(lines)
 
 

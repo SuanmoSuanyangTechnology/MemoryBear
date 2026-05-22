@@ -428,7 +428,8 @@ class MessageRepository:
     def get_message_by_conversation_id(
             self,
             conversation_id: uuid.UUID,
-            limit: Optional[int] = None
+            limit: Optional[int] = None,
+            current_only: bool = True
     ) -> list[Message]:
         """
         Retrieve messages by conversation ID.
@@ -436,13 +437,21 @@ class MessageRepository:
         Args:
             conversation_id: The UUID of the conversation.
             limit: Optional limit on the number of messages returned.
+            current_only: If True, only return messages where is_current=True.
+                         If False, return all messages (including all versions).
 
         Returns:
             List[Message]: List of Message instances.
         """
         stmt = select(Message).where(
-            Message.conversation_id == conversation_id
-        ).order_by(Message.created_at.desc())
+            Message.conversation_id == conversation_id,
+            Message.is_deleted == False,
+        )
+        
+        if current_only:
+            stmt = stmt.where(Message.is_current == True)
+        
+        stmt = stmt.order_by(Message.created_at)
 
         if limit:
             stmt = stmt.limit(limit)
@@ -454,7 +463,8 @@ class MessageRepository:
             "Fetched messages successfully",
             extra={
                 "conversation_id": str(conversation_id),
-                "returned": len(messages)
+                "returned": len(messages),
+                "current_only": current_only
             }
         )
         return messages

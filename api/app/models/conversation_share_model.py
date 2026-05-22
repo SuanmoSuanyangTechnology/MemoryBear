@@ -22,7 +22,7 @@ class ConversationShare(Base):
     conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=False, comment="会话ID")
     share_uuid = Column(String(36), unique=True, nullable=False, comment="分享唯一标识")
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False, comment="工作空间ID")
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, comment="创建人ID")
+    created_by = Column(UUID(as_uuid=True), nullable=False, comment="创建人ID")
 
     # 访问控制
     password = Column(String(100), comment="访问密码（可选）")
@@ -37,4 +37,3 @@ class ConversationShare(Base):
 
     # 关联关系
     conversation = relationship("Conversation", back_populates="shares")
-    creator = relationship("User", foreign_keys=[created_by])

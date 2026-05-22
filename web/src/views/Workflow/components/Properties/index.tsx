@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-19 14:54:29
+ * @Last Modified time: 2026-05-22 15:14:47
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -43,6 +43,9 @@ import MappingList from "./MappingList";
 import ErrorHandle from './ErrorHandle'
 import SingleNodeRun from '../SingleNodeRun'
 import { cannotRunNodes } from '../../constant'
+import RadioGroupBtn from './RadioGroupBtn'
+import type { Model } from '@/views/ModelManagement/types';
+import Retry from './Retry'
 
 /**
  * Props for Properties component
@@ -90,10 +93,12 @@ const Properties: FC<PropertiesProps> = ({
   const [configs, setConfigs] = useState<Record<string, NodeConfig>>({} as Record<string, NodeConfig>)
   const values = Form.useWatch([], form);
   const variableList = useVariableList(selectedNode, graphRef, chatVariables)
+  const data = selectedNode.getData() || {}
 
   useEffect(() => {
     if (selectedNode?.getData()?.id) {
       setOutputCollapsed(true)
+      setAdvancedSettingsCollapsed(false)
     }
     form.resetFields()
   }, [selectedNode?.getData()?.id])
@@ -405,10 +410,6 @@ const Properties: FC<PropertiesProps> = ({
 
       return filteredList
     }
-    if (nodeType === 'parameter-extractor' && key === 'prompt') {
-      let filteredList = addParentIterationVars(variableList).filter(variable => variable.dataType === 'string' || variable.dataType === 'number');
-      return filteredList;
-    }
 
     if ((nodeType === 'iteration' && key === 'output')) {
       if (!selectedNode) return [];
@@ -558,6 +559,14 @@ const Properties: FC<PropertiesProps> = ({
         setIsRun(true)
       })
   }
+  const [advancedSettingsCollapsed, setAdvancedSettingsCollapsed] = useState(false)
+  const [modelOptions, setModelOptions] = useState<Model[]>([])
+
+  const handleChangeModel = (_value: string, option: any) => {
+    if (!option?.capability?.includes('function_call') && data.type === 'parameter-extractor') {
+      form.setFieldValue('inference_mode', 'prompt')
+    }
+  }
 
   return (
     <>
@@ -666,7 +675,7 @@ const Properties: FC<PropertiesProps> = ({
                       }
 
                       if (key === 'model_id' && selectedNode?.data?.type === 'llm') {
-                        return <ModelConfig key={key} />
+                        return <ModelConfig key={key} variableOptions={getFilteredVariableList(selectedNode?.data?.type)} />
                       }
                       if (selectedNode?.data?.type === 'llm' && key === 'messages' && config.type === 'define') {
                         // 为llm节点且isArray=true时添加context变量支持
@@ -704,10 +713,50 @@ const Properties: FC<PropertiesProps> = ({
                       if (selectedNode?.data?.type === 'iteration' && key === 'output_type') {
                         return (<Form.Item key={key} name={key} hidden />)
                       }
+                      if (key === 'inference_mode') {
+                        const modelCapability: string[] = modelOptions.find((item) => item.id === values?.model_id)?.capability || []
+                        const options = modelCapability.includes('function_call') && config.options
+                          ? [...config.options]
+                          : config.options
+                          ? config.options.filter((item) => item.value !== 'function_calling')
+                          : []
+
+                        return (
+                          <div key={key} className="rb:text-[12px] rb:leading-4.5">
+                            <Flex align="center" className="rb:font-medium rb:cursor-pointer rb:mb-2!" onClick={() => setAdvancedSettingsCollapsed(!advancedSettingsCollapsed)}>
+                              {t('workflow.config.parameter-extractor.advanced_settings')}
+                              <div
+                                className={clsx("rb:size-3 rb:bg-cover rb:bg-[url('@/assets/images/common/caret_right_outlined.svg')]", {
+                                  'rb:rotate-90': !advancedSettingsCollapsed
+                                })}
+                              ></div>
+                            </Flex>
+                            <Form.Item
+                              name="inference_mode"
+                              label={t('workflow.config.parameter-extractor.inference_mode')}
+                              hidden={!advancedSettingsCollapsed}
+                              tooltip={t('workflow.config.parameter-extractor.inference_mode_tip')}
+                            >
+                              <RadioGroupBtn
+                                options={options.map((item) => ({
+                                  ...item,
+                                  label: t(item.label)
+                                }))}
+                                type="outer"
+                              />
+                            </Form.Item>
+                          </div>
+                        )
+                      }
                       if (config.type === 'define') {
                         return null
                       }
 
+                      if (config.type === 'retry') {
+                        return (
+                          <Retry key={key} />
+                        )
+                      }
                       if (config.type === 'knowledge') {
                         return (
                           <Form.Item
@@ -743,7 +792,6 @@ const Properties: FC<PropertiesProps> = ({
                               label={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
                             />
                           </Form.Item>
-
                         )
                       }
                       if (config.type === 'groupVariableList') {
@@ -877,6 +925,7 @@ const Properties: FC<PropertiesProps> = ({
                               ? <span className="rb:text-[10px] rb:text-[#5B6167] rb:leading-3.5 rb:-mb-1!">{t(`workflow.config.${selectedNode?.data?.type}.${key}`)}</span>
                               : t(`workflow.config.${selectedNode?.data?.type}.${key}`)
                           }
+                          tooltip={config.tip ? t(config.tip) : undefined}
                           layout={config.type === 'switch' ? 'horizontal' : 'vertical'}
                           className={
                             key === 'parallel' && values?.parallel
@@ -919,6 +968,8 @@ const Properties: FC<PropertiesProps> = ({
                                         params={config.params}
                                         size="small"
                                         className="rb:w-full!"
+                                        updateOptions={setModelOptions}
+                                        onChange={handleChangeModel}
                                       />
                                       : config.type === 'customSelect'
                                         ? <CustomSelect

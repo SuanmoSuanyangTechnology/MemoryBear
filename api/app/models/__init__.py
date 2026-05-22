@@ -6,7 +6,8 @@ from .document_model import Document
 from .file_model import File
 from .file_metadata_model import FileMetadata
 from .generic_file_model import GenericFile
-from .models_model import ModelConfig, ModelProvider, ModelType, ModelApiKey, ModelBase, LoadBalanceStrategy
+from .models_model import ModelConfig, ModelProvider, ModelType, ModelApiKey, ModelBase, LoadBalanceStrategy, \
+    ModelCapability
 from .memory_short_model import ShortTermMemory, LongTermMemory
 from .knowledgeshare_model import KnowledgeShare
 from .mcp_market_model import McpMarket
@@ -107,7 +108,8 @@ __all__ = [
     "Skill",
     "ImplicitEmotionsStorage",
     "AppAnnotation",
-    "AppAnnotationSetting"
+    "AppAnnotationSetting",
+    "ModelCapability",
     "MemoryMessage",
     "MemoryReflectionLog"
 ]

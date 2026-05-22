@@ -13,7 +13,9 @@ from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user, cur_workspace_access_guard
 from app.models import User, Message
+from app.models.message_report_model import MessageReportType
 from app.schemas import app_schema
+from app.schemas.memory_storage_schema import ApiResponse
 from app.services.conversation_service import ConversationService
 from app.services.message_feedback_service import FeedbackService
 from app.services.message_report_service import ReportService
@@ -285,6 +287,12 @@ async def report_message(
     return success(data=app_schema.MessageReportResponse(**result))
 
 
+@router.get("/enums/message_report_types", summary="获取举报类型枚举")
+async def get_message_report_types():
+    """获取举报类型枚举"""
+    return success(data=MessageReportType.get_all_types_with_labels())
+
+
 # ========== 删除消息 ==========
 
 @router.delete("/{app_id}/messages/{message_id}", summary="删除消息")
@@ -305,3 +313,115 @@ async def delete_message(
     await conv_service.delete_message(message_id, workspace_id)
 
     return success(msg="消息已删除")
+
+
+# ========== 举报审核接口（运营后台） ==========
+
+@router.get("/messages/reports", summary="获取举报列表（待审核）")
+@cur_workspace_access_guard()
+async def get_reports_for_review(
+        status: Optional[str] = None,
+        severity: Optional[str] = None,
+        page: int = 1,
+        pagesize: int = 20,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """获取待审核举报列表（运营后台）
+
+    支持按状态和严重程度过滤，按创建时间倒序排列
+    """
+    workspace_id = current_user.current_workspace_id
+
+    report_service = ReportService(db)
+    reports, total = report_service.get_reports_for_review(
+        workspace_id=workspace_id,
+        status=status,
+        severity=severity,
+        page=page,
+        pagesize=pagesize,
+    )
+
+    from app.schemas.response_schema import PageData, PageMeta
+    items = [
+        {
+            "id": str(r.id),
+            "message_id": str(r.message_id),
+            "conversation_id": str(r.conversation_id),
+            "report_type": r.report_type,
+            "report_reason": r.report_reason,
+            "severity": r.severity,
+            "status": r.status,
+            "selected_text": r.selected_text,
+            "text_start_offset": r.text_start_offset,
+            "text_end_offset": r.text_end_offset,
+            "created_at": int(r.created_at.timestamp() * 1000) if r.created_at else None,
+        }
+        for r in reports
+    ]
+    meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
+
+    return success(data=PageData(page=meta, items=items))
+
+
+@router.post("/reports/{report_id}/review", summary="审核举报")
+@cur_workspace_access_guard()
+async def review_report(
+        report_id: uuid.UUID,
+        payload: app_schema.ReportReviewRequest,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """审核举报（运营后台）
+
+    审核人根据严重程度和处理措施进行审核，支持备注说明
+    """
+    report_service = ReportService(db)
+    result = report_service.review_report(
+        report_id=report_id,
+        reviewer_id=current_user.id,
+        severity=payload.severity,
+        action_taken=payload.action_taken,
+        review_note=payload.review_note,
+    )
+
+    return success(data=result)
+
+
+@router.get("/messages/reports/statistics", summary="获取举报统计")
+@cur_workspace_access_guard()
+async def get_reports_statistics(
+        start_date: Optional[int] = None,
+        end_date: Optional[int] = None,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """获取举报统计（平台侧）
+
+    按类型、严重程度、状态分组统计，支持时间范围筛选
+    """
+    workspace_id = current_user.current_workspace_id
+
+    def parse_datetime(value):
+        from datetime import datetime as dt
+        if not value:
+            return None
+        try:
+            if value > 1e12:
+                return dt.fromtimestamp(value / 1000)
+            return dt.fromtimestamp(value)
+        except (ValueError, TypeError):
+            return None
+
+    # 解析日期参数
+    start_dt = parse_datetime(start_date)
+    end_dt = parse_datetime(end_date)
+
+    report_service = ReportService(db)
+    result = report_service.get_reports_statistics(
+        workspace_id=workspace_id,
+        start_date=start_dt,
+        end_date=end_dt,
+    )
+
+    return success(data=result)

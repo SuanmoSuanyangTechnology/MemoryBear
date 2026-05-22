@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>编组</title>
+    <g id="空间里层页面优化" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="多模态对话-2" transform="translate(-1392, -20)" stroke="#171719" stroke-width="1.2">
+            <g id="编组" transform="translate(1392, 20)">
+                <g id="编组-64" transform="translate(5, 5)">
+                    <path d="M14,7.01752764 L14,10 C14,12.209139 12.209139,14 10,14 L4,14 C1.790861,14 0,12.209139 0,10 L0,4 C0,1.790861 1.790861,4.4408921e-16 4,0 L7.00818778,0 L7.00818778,0" id="路径"></path>
+                    <path d="M4.42870143,9.11730496 C4.42870143,7.64004798 4.97761402,1.90642708 13.807105,2.36238493" id="路径-56"></path>
+                    <polyline id="路径" points="11.5404004 -1.49129693e-14 14 2.44854011 11.5404004 4.89708022"></polyline>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

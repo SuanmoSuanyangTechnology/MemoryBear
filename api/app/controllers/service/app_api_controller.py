@@ -175,7 +175,7 @@ async def chat(
         # 流式返回
         if payload.stream:
             async def event_generator():
-                async for event in app_chat_service.agnet_chat_stream(
+                async for event in app_chat_service.agent_chat_stream(
                         message=payload.message,
                         conversation_id=conversation.id,  # 使用已创建的会话 ID
                         user_id=end_user_id,  # 转换为字符串
@@ -201,7 +201,7 @@ async def chat(
             )
 
         # 非流式返回
-        result = await app_chat_service.agnet_chat(
+        result = await app_chat_service.agent_chat(
             message=payload.message,
             conversation_id=conversation.id,  # 使用已创建的会话 ID
             user_id=end_user_id,  # 转换为字符串
@@ -211,7 +211,7 @@ async def chat(
             memory=memory,
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
-            workspace_id=workspace_id,
+            workspace_id=str(workspace_id),
             files=payload.files  # 传递多模态文件
         )
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))

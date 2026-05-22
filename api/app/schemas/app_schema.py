@@ -841,9 +841,43 @@ class MessageVersion(BaseModel):
     created_at: int
 
 
+class RegenerateRequest(BaseModel):
+    """重新生成请求"""
+    variables: Optional[Dict[str, Any]] = Field(default=None, description="变量参数")
+    web_search: bool = Field(default=False, description="是否启用网络搜索")
+    memory: bool = Field(default=True, description="是否启用长期记忆")
+    stream: bool = Field(default=False, description="是否流式返回")
+
+
 class RegenerateResponse(BaseModel):
     """重新生成响应"""
     message_id: uuid.UUID
     message: str
     version: int
     conversation_id: str
+
+
+# ========== 消息审核功能 Schema ==========
+
+class ReportListRequest(BaseModel):
+    """举报列表查询请求"""
+    status: Optional[str] = Field(None, description="状态过滤: pending/reviewed/resolved/rejected")
+    severity: Optional[str] = Field(None, description="严重程度过滤: low/medium/high/critical")
+    page: int = Field(default=1, ge=1, description="页码")
+    pagesize: int = Field(default=20, ge=1, le=100, description="每页数量")
+
+
+class ReportReviewRequest(BaseModel):
+    """举报审核请求"""
+    severity: str = Field(..., description="严重程度: low/medium/high/critical")
+    action_taken: str = Field(
+        ...,
+        description="处理措施: no_action/warning/content_removed/user_banned"
+    )
+    review_note: Optional[str] = Field(None, description="审核备注")
+
+
+class ReportStatisticsRequest(BaseModel):
+    """举报统计查询请求"""
+    start_date: Optional[datetime.datetime] = Field(None, description="开始日期")
+    end_date: Optional[datetime.datetime] = Field(None, description="结束日期")
