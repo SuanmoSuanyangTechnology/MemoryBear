@@ -72,11 +72,13 @@ class ChunkUpdate(BaseModel):
 class ChunkRetrieve(BaseModel):
     query: str
     kb_ids: list[uuid.UUID]
+    ex_ids: list[str] | None = Field(None)
     file_names_filter: list[str] | None = Field(None)
     similarity_threshold: float | None = Field(None)
     vector_similarity_weight: float | None = Field(None)
     top_k: int | None = Field(None)
     retrieve_type: RetrieveType | None = Field(None)
+    rerank_score_threshold: float | None = Field(None, ge=0, le=1)
 
 
 class ChunkBatchCreate(BaseModel):

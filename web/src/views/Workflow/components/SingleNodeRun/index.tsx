@@ -20,6 +20,7 @@ import FileVarInput from './FileVarInput'
 import type { Suggestion } from '../Editor/plugin/AutocompletePlugin'
 import Markdown from '@/components/Markdown'
 import RbAlert from '@/components/RbAlert'
+import { hasProcessNodes } from '../../constant'
 
 interface RunResult {
   status: 'completed' | 'failed' | 'running';
@@ -32,6 +33,7 @@ interface RunResult {
     completion_tokens: number;
     total_tokens: number;
   };
+  process?: any;
   elapsed_time?: number;
   error?: string | null;
 }
@@ -245,8 +247,6 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
                 const visionVar = ref ? variableList.find(v => v.value === ref) : undefined
                 const dataType = visionVar?.dataType ?? 'array[file]'
 
-                // if (!visionVar) return null
-                console.log('visionVar', ref)
                 return (
                   <Form.Item
                     name={['inputs', ref.replace('{{', '').replace('}}', '')]}
@@ -288,8 +288,8 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
               )}
 
               {/* Input / Output code blocks */}
-              {result && (['inputs', 'outputs'] as const).map(key => {
-                // if (nodeData.type !== 'http-request' && key === 'process') return null
+              {result && (['inputs', 'process', 'outputs'] as const).map(key => {
+                if (!hasProcessNodes.includes(nodeData.type) && key === 'process') return null
                 const content = typeof result[key as keyof RunResult] === 'object' && result[key as keyof RunResult] ? JSON.stringify(result[key as keyof RunResult], null, 2) : result[key as keyof RunResult] ? result[key as keyof RunResult] : '{}'
                 return (
                   <div key={key} className="rb:bg-[#EBEBEB] rb:rounded-lg">

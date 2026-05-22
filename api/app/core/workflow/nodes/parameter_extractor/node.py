@@ -25,6 +25,7 @@ class ParameterExtractorNode(BaseNode):
         super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: ParameterExtractorNodeConfig | None = None
         self.response_metadata = {}
+        self._last_messages: list = []
 
     def _extract_token_usage(self, business_result: Any) -> dict[str, int] | None:
         if self.response_metadata:
@@ -44,6 +45,12 @@ class ParameterExtractorNode(BaseNode):
             "params": [param.model_dump(mode="json") for param in self.typed_config.params],
             "model_id": str(self.typed_config.model_id),
         }
+
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        return {"process": {
+            "messages": self._last_messages,
+            "model_id": str(self.typed_config.model_id) if self.typed_config else None,
+        }}
 
     def _extract_output(self, business_result: Any) -> Any:
         final_output = {}
@@ -206,6 +213,7 @@ class ParameterExtractorNode(BaseNode):
             messages.extend([
                 ("user", rendered_user_prompt),
             ])
+        self._last_messages = [{"role": r, "content": c} for r, c in messages]
 
         model_resp = await llm.ainvoke(messages)
         self.response_metadata = {

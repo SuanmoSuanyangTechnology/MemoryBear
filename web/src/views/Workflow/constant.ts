@@ -16,7 +16,22 @@ import NoteNode from './components/Nodes/NoteNode';
 import { memoryConfigListUrl } from '@/api/memory';
 import type { NodeLibrary } from './types';
 
-
+// Nodes with Data Processing in Execution Results
+export const hasProcessNodes = [
+  'llm',
+  'knowledge-retrieval',
+  'parameter-extractor',
+  'memory-read',
+  'memory-write',
+  'question-classifier',
+  'if-else',
+  'assigner',
+  'http-request',
+  'tool',
+  'code',
+  'document-extractor',
+]
+// support single run node
 export const cannotRunNodes = [
   'start',
   'end',
@@ -163,6 +178,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           query: {
             type: 'variableList',
+            required: true,
           },
           knowledge_retrieval: {
             type: 'knowledge',

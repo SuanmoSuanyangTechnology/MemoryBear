@@ -12,19 +12,18 @@ MemoryService — 记忆模块统一入口（Facade）
 """
 
 import logging
-from typing import  Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
 from app.core.memory.enums import SearchStrategy, StorageType
+from app.core.memory.models.message_models import DialogData
 from app.core.memory.models.service_models import MemoryContext, MemorySearchResult
 from app.core.memory.pipelines.memory_read import ReadPipeLine
-from app.db import get_db_context
-from app.services.memory_config_service import MemoryConfigService
-
 from app.core.memory.pipelines.pilot_write_pipeline import PilotWriteResult
 from app.core.memory.pipelines.write_pipeline import WriteResult
-from app.core.memory.models.message_models import DialogData
+from app.db import get_db_context
+from app.services.memory_config_service import MemoryConfigService
 
 logger = logging.getLogger(__name__)
 
@@ -151,9 +150,27 @@ class MemoryService:
         """遗忘：识别低激活节点并融合"""
         raise NotImplementedError("ForgettingPipeline 尚未实现")
 
-    async def reflect(self) -> dict:
-        """反思：检测事实冲突并修正"""
-        raise NotImplementedError("ReflectionPipeline 尚未实现")
+    async def run_reflection_layer2(self, baseline: str = "HYBRID", language: str = "zh") -> dict:
+        """反思引擎 Layer 2 离线巡检
+
+        由 Celery 定时任务调用（每 10 分钟），执行描述合并等子问题。
+        """
+        from app.core.memory.pipelines.reflection_pipeline import ReflectionPipeline
+
+        pipeline = ReflectionPipeline(
+            memory_config=self.ctx.memory_config,
+            end_user_id=self.ctx.end_user_id,
+            language=language,
+        )
+        return await pipeline.run_layer2(baseline=baseline)
+
+    async def run_reflection_layer3(self) -> dict:
+        """反思引擎 Layer 3 知识综合
+
+        由 Celery 定时任务调用（每天一次）。
+        TODO: Observation 合成、Opinion 演化、模式反馈
+        """
+        raise NotImplementedError("Layer 3 尚未实现")
 
     # async def cluster(self, new_entity_ids: list[str] = None) -> None:
     #     """聚类：全量初始化或增量更新社区"""

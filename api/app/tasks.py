@@ -285,14 +285,29 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         from app.core.rag.app.naive import chunk
         logger.info(f"[ParseDoc] file_binary size={len(file_binary)} bytes, type={type(file_binary).__name__}, bool={bool(file_binary)}")
-        res = chunk(filename=file_name,
-                    binary=file_binary,
-                    from_page=0,
-                    to_page=DEFAULT_PARSE_TO_PAGE,
-                    callback=progress_callback,
-                    vision_model=vision_model,
-                    parser_config=db_document.parser_config,
-                    is_root=False)
+
+        parent_child_mode = db_document.parser_config.get("parent_child_mode", False)
+        if parent_child_mode:
+            from app.core.rag.app.naive import chunk_parent_child
+            child_res, parent_res, parent_id_map = chunk_parent_child(
+                filename=file_name,
+                binary=file_binary,
+                from_page=0,
+                to_page=DEFAULT_PARSE_TO_PAGE,
+                callback=progress_callback,
+                vision_model=vision_model,
+                parser_config=db_document.parser_config,
+                is_root=False,
+            )
+        else:
+            res = chunk(filename=file_name,
+                        binary=file_binary,
+                        from_page=0,
+                        to_page=DEFAULT_PARSE_TO_PAGE,
+                        callback=progress_callback,
+                        vision_model=vision_model,
+                        parser_config=db_document.parser_config,
+                        is_root=False)
 
         progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Finish parsing.")
         db_document.progress = 0.8
@@ -301,7 +316,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         db.refresh(db_document)
 
         # 2. Document vectorization and storage
-        total_chunks = len(res)
+        total_chunks = (len(child_res) + len(parent_res)) if parent_child_mode else len(res)
         progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Generate {total_chunks} chunks.")
 
         if total_chunks == 0:
@@ -329,7 +344,57 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             # 预先构建所有 batch 的 chunks，保证 sort_id 全局有序
             all_batch_chunks: list[list[DocumentChunk]] = []
 
-            if auto_questions_topn:
+            if parent_child_mode:
+                # 父子分块模式：parent chunks + child chunks
+                parent_chunks_list = []
+                parent_id_to_doc_id = {}
+
+                for idx, item in enumerate(parent_res):
+                    parent_doc_id = uuid.uuid4().hex
+                    parent_id_to_doc_id[idx] = parent_doc_id
+                    meta = {
+                        "doc_id": parent_doc_id,
+                        "file_id": str(db_document.file_id),
+                        "file_name": db_document.file_name,
+                        "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                        "document_id": str(db_document.id),
+                        "knowledge_id": str(db_document.kb_id),
+                        "sort_id": idx,
+                        "status": 1,
+                        "chunk_type": "parent",
+                    }
+                    parent_chunks_list.append(
+                        DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+
+                child_chunks_list = []
+                for idx, item in enumerate(child_res):
+                    parent_idx = parent_id_map.get(idx)
+                    parent_doc_id = parent_id_to_doc_id.get(parent_idx, "")
+                    meta = {
+                        "doc_id": uuid.uuid4().hex,
+                        "file_id": str(db_document.file_id),
+                        "file_name": db_document.file_name,
+                        "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                        "document_id": str(db_document.id),
+                        "knowledge_id": str(db_document.kb_id),
+                        "sort_id": idx,
+                        "status": 1,
+                        "chunk_type": "child",
+                        "parent_id": parent_doc_id,
+                    }
+                    child_chunks_list.append(
+                        DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+
+                all_chunks = parent_chunks_list + child_chunks_list
+                for batch_start in range(0, len(all_chunks), EMBEDDING_BATCH_SIZE):
+                    batch_end = min(batch_start + EMBEDDING_BATCH_SIZE, len(all_chunks))
+                    all_batch_chunks.append(all_chunks[batch_start:batch_end])
+
+                progress_lines.append(
+                    f"{datetime.now().strftime('%H:%M:%S')} Parent-child mode: {len(parent_chunks_list)} parent chunks + "
+                    f"{len(child_chunks_list)} child chunks prepared.")
+
+            elif auto_questions_topn:
                 # QA 模式（FastGPT 方案）：
                 # 1. 原 chunk 标记为 source（保留供 GraphRAG 使用，不参与检索）
                 # 2. LLM 生成 QA 对，每个 QA 对独立存储为 qa chunk
@@ -1473,6 +1538,13 @@ def write_message_task(
             logger.info(
                 f"[CELERY WRITE] Executing MemoryAgentService.write_memory "
                 f"with config_id = {actual_config_id} (type: {type(actual_config_id).__name__}), language={language}")
+
+            from datetime import datetime, timezone
+            _default_dialog_at = datetime.now(timezone.utc).isoformat()
+            for msg in message:
+                if isinstance(msg, dict) and not msg.get("dialog_at"):
+                    msg["dialog_at"] = _default_dialog_at
+
             service = MemoryAgentService()
             result = await service.write_memory(
                 WriteMemoryRequest(
@@ -1990,6 +2062,105 @@ def post_store_dedup_and_alias_merge_task(
         if loop:
             _shutdown_loop_gracefully(loop)
 
+@celery_app.task(
+    name="app.tasks.layer2_reflection_task",
+    bind=True,
+    ignore_result=True,
+    max_retries=0,
+    acks_late=False,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def layer2_reflection_task(self) -> Dict[str, Any]:
+    """Layer 2 离线巡检（描述合并等）— 每 10 分钟
+
+    遍历所有 workspace → app → end_user，对每个启用了 enable_self_reflexion 的配置
+    调用 MemoryService.run_reflection_layer2()。
+    """
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.models.workspace_model import Workspace
+        from app.services.memory_reflection_service import WorkspaceAppService
+        from app.core.memory.memory_service import MemoryService
+
+        with get_db_context() as db:
+            try:
+                workspaces = db.query(Workspace).all()
+                if not workspaces:
+                    return {"status": "SUCCESS", "message": "无工作空间"}
+
+                logger.info(f"反思引擎Layer2 巡检开始，共 {len(workspaces)} 个工作空间")
+                all_results = []
+                processed_users = 0
+                skipped_configs = 0
+
+                for workspace in workspaces:
+                    service = WorkspaceAppService(db)
+                    result = service.get_workspace_apps_detailed(str(workspace.id))
+
+                    for data in result['apps_detailed_info']:
+                        if not data['memory_configs']:
+                            continue
+
+                        for config in data['memory_configs']:
+                            if not config.get('enable_self_reflexion'):
+                                skipped_configs += 1
+                                continue
+
+                            config_id = config['config_id']
+                            baseline = config.get('baseline', 'HYBRID')
+                            end_users = data['end_users']
+
+                            for user in end_users:
+                                try:
+                                    memory_service = MemoryService(
+                                        db=db,
+                                        config_id=config_id,
+                                        end_user_id=str(user['id']),
+                                        workspace_id=str(workspace.id),
+                                    )
+                                    r = await memory_service.run_reflection_layer2(
+                                        baseline=baseline,
+                                    )
+                                    processed_users += 1
+                                    # 只在有实际合并时输出详细日志
+                                    merge_info = r.get("description_merge", {})
+                                    if merge_info.get("merged_count", 0) > 0:
+                                        logger.info(
+                                            f"反思引擎Layer2 用户 {user['id']} 合并完成: "
+                                            f"候选 {merge_info['candidate_count']}, "
+                                            f"合并 {merge_info['merged_count']}"
+                                        )
+                                    all_results.append({
+                                        "end_user_id": str(user['id']),
+                                        "result": r,
+                                    })
+                                except Exception as e:
+                                    logger.error(f"反思引擎Layer2 巡检失败 user={user['id']}: {e}")
+
+                logger.info(
+                    f"反思引擎Layer2 巡检遍历完成: 处理 {processed_users} 个用户, "
+                    f"跳过 {skipped_configs} 个未启用反思的配置"
+                )
+                return {"status": "SUCCESS", "results": all_results}
+
+            except Exception as e:
+                logger.error(f"反思引擎Layer2 定时任务失败: {e}", exc_info=True)
+                return {"status": "FAILED", "error": str(e)}
+
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(_run())
+    except Exception as e:
+        result = {"status": "FAILED", "error": str(e)}
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+    result["elapsed_time"] = time.time() - start_time
+    result["task_id"] = self.request.id
+    logger.info(f"反思引擎Layer2 任务完成，耗时 {result['elapsed_time']:.1f}s")
+    return result
 
 def _sync_end_user_info_pg(
     end_user_id: str,
@@ -3679,6 +3850,7 @@ def run_incremental_clustering(
     new_entity_ids: List[str],
     llm_model_id: Optional[str] = None,
     embedding_model_id: Optional[str] = None,
+    language: str = "zh",
 ) -> Dict[str, Any]:
     """增量聚类任务：处理新增实体的社区分配和元数据生成。
     
@@ -3689,6 +3861,7 @@ def run_incremental_clustering(
         new_entity_ids: 新增实体 ID 列表
         llm_model_id: LLM 模型 ID（可选）
         embedding_model_id: Embedding 模型 ID（可选）
+        language: 语言类型 ("zh" | "en")
     
     Returns:
         包含任务执行结果的字典
@@ -3712,6 +3885,7 @@ def run_incremental_clustering(
                 connector=connector,
                 llm_model_id=llm_model_id,
                 embedding_model_id=embedding_model_id,
+                language=language,
             )
 
             # 执行增量聚类

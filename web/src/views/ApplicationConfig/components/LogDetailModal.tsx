@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-24 16:31:24 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-24 17:49:58
+ * @Last Modified time: 2026-05-15 13:38:06
  */
 import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
 import { Flex, Button, Empty, Skeleton } from 'antd';
@@ -27,7 +27,7 @@ type Data = LogItem & {
 }
 
 /** Modal component for displaying conversation log details */
-const LogDetailModal = forwardRef<LogDetailModalRef>((_props, ref) => {
+const LogDetailModal = forwardRef<LogDetailModalRef, { source: string }>(({ source }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false)
@@ -61,21 +61,60 @@ const LogDetailModal = forwardRef<LogDetailModalRef>((_props, ref) => {
     setLoading(true)
     getAppLogDetail(vo.app_id, vo.id).then(res => {
       const { node_executions_map, messages, ...rest } = res as Data;
-      let hasSubContentMessages = messages
+      let hasSubContentMessages = messages.map((item: any) => ({ ...item, status: item.role === 'user' ? null : item.status  }))
       if (messages && messages.length > 0 && node_executions_map && Object.keys(node_executions_map).length > 0) {
-        hasSubContentMessages = messages.map(item => {
+        hasSubContentMessages = messages.map((item: any) => {
           if (item.id && node_executions_map[item.id]) {
-            item.subContent = node_executions_map[item.id]?.map(({ input, output, cycle_items = [], error, process, ...node }: any) => {
-              const converted: any = { ...node, icon: nodeIconMap[node.node_type], content: { input, output, process, error } }
-              if (node.node_type === 'loop' && Array.isArray(cycle_items) && cycle_items.length > 0) {
-                converted.subContent = cycle_items.map(({ input: cInput, output: cOutput, error: cError, process: cProcess, ...cNode }: any) => ({
-                  ...cNode,
-                  icon: nodeIconMap[cNode.node_type],
-                  content: { input: cInput, output: cOutput, process: cProcess, error: cError }
-                }))
-              }
-              return converted
-            })
+            const executions = node_executions_map[item.id] || []
+            const lastExecution = executions?.[executions.length - 1]
+            const meta = lastExecution?.meta
+            let sourceList: any[] = []
+            
+            if (meta?.sources?.length > 0 && (meta?.tool_type === 'knowledge_retrieval' || meta?.tool_type === 'skill')) {
+              const groupedSources = meta?.sources.reduce((acc: any, source: any) => {
+                const key = source.knowledge_name || source.knowledge_id || source.name || source.id || 'default';
+                if (!acc[key]) {
+                  acc[key] = { ...source, name: source.knowledge_name || source.name, contentList: [source.content] };
+                } else {
+                  acc[key].contentList.push(source.content);
+                }
+                return acc;
+              }, {});
+              sourceList = Object.values(groupedSources).map((group: any) => ({
+                ...lastExecution,
+                icon: nodeIconMap[lastExecution?.node_type],
+                node_name: group.name,
+                content: {
+                  input: lastExecution?.input || '',
+                  output: group.contentList.join('\n') || lastExecution?.output,
+                  error: lastExecution?.error
+                }
+              }));
+            } else if (meta?.sources?.length > 0) {
+              sourceList = meta?.sources?.map((source: any) => ({
+                ...lastExecution,
+                icon: nodeIconMap[lastExecution?.node_type],
+                name: source.name || 'default',
+                content: {
+                  input: lastExecution?.input || '',
+                  output: source.content || lastExecution?.output,
+                  error: lastExecution?.error
+                }
+              }));
+            } else {
+              sourceList = executions.map(({ input, output, cycle_items = [], error, process, ...node }: any) => {
+                const converted: any = { ...node, icon: nodeIconMap[node.node_type], content: { input, output, process, error } }
+                if (node.node_type === 'loop' && Array.isArray(cycle_items) && cycle_items.length > 0) {
+                  converted.subContent = cycle_items.map(({ input: cInput, output: cOutput, error: cError, process: cProcess, ...cNode }: any) => ({
+                    ...cNode,
+                    icon: nodeIconMap[cNode.node_type],
+                    content: { input: cInput, output: cOutput, process: cProcess, error: cError }
+                  }))
+                }
+                return converted
+              })
+            }
+            item.subContent = sourceList
           }
           return { ...item }
         })
@@ -112,7 +151,7 @@ const LogDetailModal = forwardRef<LogDetailModalRef>((_props, ref) => {
         {t('workingDetail.conversationStream')}
         <Button className="rb:h-6!" onClick={getDetail}>{t('workingDetail.refresh')}</Button>
       </Flex>
-      <div className="rb-border rb:p-3 rb:rounded-xl rb:mt-3 rb:h-116.5 rb:overflow-y-auto">
+      <div className="rb-border rb:p-3 rb:rounded-xl rb:mt-3 rb:h-[calc(100%-48px)] rb:overflow-y-auto">
       {loading
         ? <Skeleton active />
         : data.messages?.length === 0
@@ -123,7 +162,7 @@ const LogDetailModal = forwardRef<LogDetailModalRef>((_props, ref) => {
               data={data.messages || []}
               streamLoading={false}
               labelFormat={(item) => formatDateTime(item.created_at)}
-              renderRuntime={(item, index) => <Runtime item={item} index={index} />}
+              renderRuntime={(item, index) => <Runtime source={source} item={item} index={index} />}
             />
           )
       }

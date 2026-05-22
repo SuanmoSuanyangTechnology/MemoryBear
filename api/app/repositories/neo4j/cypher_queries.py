@@ -1821,6 +1821,36 @@ ORDER BY score DESC
 LIMIT $limit
 """
 
+SEARCH_ENITITES_BY_RELATIONSHIP = """
+MATCH (n:ExtractedEntity)-[r]-(m:ExtractedEntity)
+WHERE (n.end_user_id = $end_user_id AND n.id = $source_id AND r.predicate IN $predicates)
+RETURN m.id AS id,
+       n.name AS source_name,
+       r.predicate AS relation_predicate,
+       m.name AS target_name
+"""
+
+SEARCH_RELATION_BETWEEN_ENTITIES = """
+MATCH (n:ExtractedEntity)-[r]-(m:ExtractedEntity)
+WHERE n.end_user_id = $end_user_id AND n.id = $source_id AND m.id = $target_id
+RETURN n.id AS source_id,
+       n.name AS source_name,
+       r.predicate AS relation_predicate,
+       m.id AS target_id,
+       m.name AS target_name
+"""
+
+SEARCH_RELATIONS_BETWEEN_ENTITY_PAIRS = """
+UNWIND $pairs AS pair
+MATCH (n:ExtractedEntity)-[r]-(m:ExtractedEntity)
+WHERE n.end_user_id = $end_user_id AND n.id = pair.source_id AND m.id = pair.target_id
+RETURN n.id AS source_id,
+       n.name AS source_name,
+       r.predicate AS relation_predicate,
+       m.id AS target_id,
+       m.name AS target_name
+"""
+
 SEARCH_USER_METADATA = """
 MATCH (n:ExtractedEntity)
 WHERE (n.end_user_id = $end_user_id AND n.entity_type ='用户')
@@ -1833,7 +1863,8 @@ RETURN n.description AS description,
        n.goals AS goals,
        n.interests AS interests,
        n.relations AS relations,
-       n.traits AS traits
+       n.traits AS traits,
+       n.id AS id
 """
 
 FULLTEXT_QUERY_CYPHER_MAPPING = {
@@ -1921,4 +1952,31 @@ ON CREATE SET r.id = edge.id,
     r.run_id = edge.run_id,
     r.created_at = edge.created_at
 RETURN elementId(r) AS uuid
+"""
+# --- Reflection Engine Layer 2: Description Merge ---
+
+# Find entities whose description has accumulated >= min_fragments
+REFLECTION_DESC_MERGE_CANDIDATES = """
+MATCH (e:ExtractedEntity)
+WHERE e.end_user_id = $end_user_id
+  AND e.description IS NOT NULL
+  AND e.description <> ""
+  AND size(split(e.description, '；')) >= $min_fragments
+RETURN e.id AS entity_id,
+       e.name AS name,
+       e.entity_type AS entity_type,
+       e.description AS description,
+       e.description_summary AS description_summary,
+       e.description_timeline AS description_timeline
+ORDER BY size(split(e.description, '；')) DESC
+LIMIT $batch_size
+"""
+
+# Clear description, write summary and timeline
+REFLECTION_DESC_UPDATE = """
+MATCH (e:ExtractedEntity {id: $entity_id})
+SET e.description = "",
+    e.description_summary = $summary,
+    e.description_timeline = $timeline
+RETURN e.id
 """

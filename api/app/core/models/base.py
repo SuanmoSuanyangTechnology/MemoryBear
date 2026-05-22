@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
-from app.models.models_model import ModelProvider, ModelType
+from app.models.models_model import ModelProvider, ModelType, ModelCapability
 from app.core.models.compatible_chat import CompatibleChatOpenAI
 
 T = TypeVar("T")
@@ -41,13 +41,22 @@ class RedBearModelConfig(BaseModel):
     def _resolve_capabilities(self) -> "RedBearModelConfig":
         from app.core.logging_config import get_business_logger
         logger = get_business_logger()
-        if self.deep_thinking and "thinking" not in self.capability:
+
+        has_thinking = ModelCapability.THINKING in self.capability
+        has_thinking_only = ModelCapability.THINKING_ONLY in self.capability
+
+        if self.deep_thinking and not has_thinking and not has_thinking_only:
             logger.warning(
-                f"模型 {self.model_name} 不支持深度思考（capability 中无 'thinking'），已自动关闭 deep_thinking"
+                f"模型 {self.model_name} 不支持深度思考（capability 中无 'thinking'/'thinking_only'），已自动关闭 deep_thinking"
             )
             self.deep_thinking = False
             self.thinking_budget_tokens = None
-        if self.json_output and "json_output" not in self.capability:
+
+        # thinking_only 模型始终处于思考状态，deep_thinking 标志强制为 True
+        if has_thinking_only:
+            self.deep_thinking = True
+
+        if self.json_output and ModelCapability.JSON_OUTPUT not in self.capability:
             logger.warning(
                 f"模型 {self.model_name} 不支持 JSON 输出（capability 中无 'json_output'），已自动关闭 json_output"
             )
@@ -92,15 +101,18 @@ class RedBearModelFactory:
             is_streaming = bool(config.extra_params.get("streaming"))
             if is_streaming:
                 params["stream_usage"] = True
-            # 支持 thinking 的模型始终传 enable_thinking，关闭时显式传 False 避免模型默认开启思考
-            if "thinking" in config.capability:
+            # thinking 参数处理：
+            # - thinking_only（B类）：不能传 enable_thinking，不做任何处理
+            # - thinking（A类）：混合思考，流式可开关，非流式必须关闭
+            if ModelCapability.THINKING in config.capability:
                 extra_body = params.setdefault("extra_body", {})
-                if config.deep_thinking:
-                    extra_body["enable_thinking"] = False
-                    if is_streaming:
-                        extra_body["enable_thinking"] = True
+                if config.deep_thinking and is_streaming:
+                    extra_body["enable_thinking"] = True
                     if config.thinking_budget_tokens:
                         extra_body["thinking_budget"] = config.thinking_budget_tokens
+                else:
+                    # 非流式或未开启思考：显式关闭，避免模型默认开启
+                    extra_body["enable_thinking"] = False
             # JSON 输出模式
             if config.json_output:
                 model_kwargs = params.setdefault("model_kwargs", {})
@@ -130,22 +142,24 @@ class RedBearModelFactory:
             is_streaming = bool(config.extra_params.get("streaming"))
             if is_streaming:
                 params["stream_usage"] = True
-            # 支持 thinking 的模型始终传 enable_thinking，关闭时显式传 False 避免模型默认开启思考
-            if "thinking" in config.capability:
-                # VOLCANO 深度思考仅流式支持
+            # thinking 参数处理：
+            # - thinking_only（B类）：不能传 enable_thinking，不做任何处理
+            # - thinking（A类）：混合思考，流式可开关，非流式必须关闭
+            if ModelCapability.THINKING in config.capability:
                 if provider == ModelProvider.VOLCANO:
+                    # Volcano 思考仅流式支持，非流式不传任何 thinking 参数
                     thinking_config: Dict[str, Any] = {"type": "enabled" if config.deep_thinking else "disabled"}
                     if config.deep_thinking and config.thinking_budget_tokens:
                         thinking_config["budget_tokens"] = config.thinking_budget_tokens
                     params["extra_body"] = {"thinking": thinking_config}
                 else:
                     extra_body = params.setdefault("extra_body", {})
-                    if config.deep_thinking:
-                        extra_body["enable_thinking"] = False
-                        if is_streaming:
-                            extra_body["enable_thinking"] = True
+                    if config.deep_thinking and is_streaming:
+                        extra_body["enable_thinking"] = True
                         if config.thinking_budget_tokens:
                             extra_body["thinking_budget"] = config.thinking_budget_tokens
+                    else:
+                        extra_body["enable_thinking"] = False
             # JSON 输出模式
             if config.json_output:
                 model_kwargs = params.setdefault("model_kwargs", {})
@@ -160,17 +174,20 @@ class RedBearModelFactory:
                 "max_retries": config.max_retries,
                 **config.extra_params
             }
-            # 支持 thinking 的模型始终传 enable_thinking，关闭时显式传 False 避免模型默认开启思考
-            if "thinking" in config.capability:
+            # thinking 参数处理：
+            # - thinking_only（B类）：不能传 enable_thinking，不做任何处理
+            # - thinking（A类）：混合思考，流式可开关，非流式必须关闭
+            if ModelCapability.THINKING in config.capability:
                 is_streaming = bool(config.extra_params.get("streaming"))
                 model_kwargs = params.setdefault("model_kwargs", {})
-                if config.deep_thinking:
-                    model_kwargs["enable_thinking"] = False
-                    if is_streaming:
-                        model_kwargs["enable_thinking"] = True
-                        model_kwargs["incremental_output"] = True
+                if config.deep_thinking and is_streaming:
+                    model_kwargs["enable_thinking"] = True
                     if config.thinking_budget_tokens:
                         model_kwargs["thinking_budget"] = config.thinking_budget_tokens
+                    model_kwargs["incremental_output"] = True
+                else:
+                    # 非流式或未开启思考：显式关闭，避免模型默认开启
+                    model_kwargs["enable_thinking"] = False
             if config.json_output:
                 model_kwargs = params.setdefault("model_kwargs", {})
                 model_kwargs["response_format"] = {"type": "json_object"}

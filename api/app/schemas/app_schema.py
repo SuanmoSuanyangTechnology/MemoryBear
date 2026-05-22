@@ -769,3 +769,68 @@ class DraftRunCompareResponse(BaseModel):
 
     fastest_model: Optional[str] = None
     cheapest_model: Optional[str] = None
+
+
+# ========== 消息交互功能 Schema ==========
+
+class MessageFeedbackRequest(BaseModel):
+    """消息反馈请求（点赞/点踩）"""
+    feedback_type: str = Field(..., pattern="^(like|dislike)$", description="反馈类型: like/dislike")
+    feedback_content: Optional[str] = Field(None, description="反馈内容（点踩时填写原因）")
+
+
+class MessageFeedbackResponse(BaseModel):
+    """消息反馈响应"""
+    action: str = Field(..., description="操作: created/updated/cancelled")
+    feedback_type: Optional[str] = Field(None, description="当前反馈类型")
+
+
+class MessageReportRequest(BaseModel):
+    """消息举报请求（含选中反馈）"""
+    report_type: str = Field(
+        ...,
+        description="举报类型: politics/porn/violence/fake/ad/quality/other"
+    )
+    report_reason: Optional[str] = Field(None, description="举报原因详细描述")
+    text_start_offset: Optional[int] = Field(None, description="选中文本起始位置")
+    text_end_offset: Optional[int] = Field(None, description="选中文本结束位置")
+    selected_text: Optional[str] = Field(None, description="选中的违规文本片段")
+
+
+class MessageReportResponse(BaseModel):
+    """消息举报响应"""
+    report_id: str = Field(..., description="举报ID")
+    status: str = Field(..., description="状态: pending")
+
+
+class ShareConversationRequest(BaseModel):
+    """分享会话请求"""
+    password: Optional[str] = Field(None, description="访问密码（可选）")
+    expire_hours: Optional[int] = Field(None, ge=1, le=720, description="过期时长（小时）")
+    allow_copy: bool = Field(True, description="是否允许复制内容")
+
+
+class ShareConversationResponse(BaseModel):
+    """分享会话响应"""
+    share_id: str = Field(..., description="分享ID")
+    share_uuid: str = Field(..., description="分享唯一标识")
+    share_url: str = Field(..., description="分享链接")
+    expire_at: Optional[int] = Field(None, description="过期时间（毫秒时间戳）")
+    has_password: bool = Field(..., description="是否有密码")
+
+
+class MessageVersion(BaseModel):
+    """消息版本"""
+    message_id: uuid.UUID
+    version: int
+    is_current: bool
+    content: str
+    created_at: int
+
+
+class RegenerateResponse(BaseModel):
+    """重新生成响应"""
+    message_id: uuid.UUID
+    message: str
+    version: int
+    conversation_id: str

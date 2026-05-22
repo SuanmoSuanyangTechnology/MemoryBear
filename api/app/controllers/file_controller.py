@@ -4,7 +4,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Query
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -228,11 +228,53 @@ async def get_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found in storage")
 
     import mimetypes
+    from urllib.parse import quote
     media_type = mimetypes.guess_type(db_file.file_name)[0] or "application/octet-stream"
+    filename_encoded = quote(db_file.file_name)
     return Response(
         content=content,
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{db_file.file_name}"'}
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename_encoded}"}
+    )
+
+
+@router.post("/batch-download")
+async def batch_download_files(
+        request_body: file_schema.BatchDownloadRequest,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+        storage_service: FileStorageService = Depends(get_file_storage_service),
+):
+    """批量下载文件，边打包边推流（streaming ZIP，内存占用恒定）"""
+
+    files = db.query(file_model.File).filter(
+        file_model.File.id.in_(request_body.file_ids)
+    ).all()
+
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="未找到任何文件",
+        )
+
+    valid_files = [f for f in files if f.file_key]
+    if not valid_files:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="所选文件均无有效存储Key",
+        )
+
+    entries = file_service.build_zip_arcnames(valid_files)
+    zip_name = file_service.make_zip_filename(valid_files, request_body.zip_filename)
+
+    from urllib.parse import quote
+    return StreamingResponse(
+        file_service.stream_zip_files(entries, storage_service, api_logger),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}",
+            "X-Total-Files": str(len(valid_files)),
+        },
     )
 
 

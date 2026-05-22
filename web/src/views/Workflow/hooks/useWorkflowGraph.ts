@@ -2,9 +2,9 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-07 18:22:14
+ * @Last Modified time: 2026-05-14 13:59:06
  */
-import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, type Edge } from '@antv/x6';
+import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection, type Edge } from '@antv/x6';
 import { register as registerReactShape } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 import { App } from 'antd';
@@ -121,6 +121,7 @@ export const useWorkflowGraph = ({
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isHandMode, setIsHandMode] = useState(true);
+  const isHandModeRef = useRef(true)
   const [config, setConfig] = useState<WorkflowConfig | null>(null);
   const [chatVariables, setChatVariables] = useState<ChatVariable[]>([])
   const featuresRef = useRef<FeaturesConfigForm | undefined>(undefined)
@@ -705,6 +706,16 @@ export const useWorkflowGraph = ({
       }),
     );
     graphRef.current.use(
+      new Selection({
+        enabled: false,
+        multiple: true,
+        rubberband: true,
+        movable: true,
+        showNodeSelectionBox: true,
+        showEdgeSelectionBox: true,
+      })
+    )
+    graphRef.current.use(
       new History({
         enabled: false,
         beforeAddCommand(_event, args: any) {
@@ -747,6 +758,19 @@ export const useWorkflowGraph = ({
     graphRef.current.on('history:undo', () => { if (!isSyncingRef.current) syncChildRelationshipsRef.current() })
     graphRef.current.on('history:redo', () => { if (!isSyncingRef.current) syncChildRelationshipsRef.current() })
   };
+
+  useEffect(() => {
+    isHandModeRef.current = isHandMode
+    if (!graphRef.current) return;
+    if (isHandMode) {
+      graphRef.current?.enablePanning();
+      graphRef.current?.disableSelection();
+      graphRef.current?.cleanSelection()
+    } else {
+      graphRef.current?.disablePanning();
+      graphRef.current?.enableSelection();
+    }
+  }, [isHandMode, graphRef.current]);
   // 显示/隐藏连接桩
   // const showPorts = (show: boolean) => {
   //   const container = containerRef.current!;
@@ -901,7 +925,12 @@ export const useWorkflowGraph = ({
    */
   const copyEvent = () => {
     if (!graphRef.current) return false;
-    const selectedNodes = graphRef.current.getNodes().filter(node => node.getData()?.isSelected);
+    let selectedNodes = []
+    if (isHandModeRef.current) {
+      selectedNodes = graphRef.current.getNodes().filter(node => node.getData()?.isSelected);
+    } else {
+     selectedNodes = graphRef.current.getSelectedCells();
+    }
     if (selectedNodes.length) {
       graphRef.current.copy(selectedNodes);
     }
@@ -913,6 +942,7 @@ export const useWorkflowGraph = ({
    */
   const parseEvent = () => {
     if (!graphRef.current?.isClipboardEmpty()) {
+      graphRef.current?.startBatch('copy');
       const pastedNodes = graphRef.current?.paste({ offset: 32 }) ?? [];
       pastedNodes.forEach(cell => {
         if (cell.isNode()) {
@@ -922,6 +952,7 @@ export const useWorkflowGraph = ({
         }
       });
       blankClick();
+      graphRef.current?.stopBatch('copy');
     }
     return false;
   };

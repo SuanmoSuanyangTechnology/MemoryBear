@@ -24,6 +24,7 @@ from .api_key_model import ApiKey, ApiKeyLog, ApiKeyType
 from .memory_config_model import MemoryConfig
 from .multi_agent_model import MultiAgentConfig, AgentInvocation
 from .workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution
+from .agent_execution_model import AgentExecution
 from .retrieval_info import RetrievalInfo
 from .prompt_optimizer_model import PromptOptimizerSession, PromptOptimizerSessionHistory
 from .tool_model import (
@@ -37,6 +38,10 @@ from .ontology_class import OntologyClass
 from .ontology_scene import OntologyScene
 from .ontology_class import OntologyClass
 from .implicit_emotions_storage_model import ImplicitEmotionsStorage
+from .reflection_log_model import MemoryReflectionLog
+from .message_feedback_model import MessageFeedback
+from .message_report_model import MessageReport
+from .conversation_share_model import ConversationShare
 
 __all__ = [
     "Tenants",
@@ -66,6 +71,9 @@ __all__ = [
     "ReleaseShare",
     "Conversation",
     "Message",
+    "MessageFeedback",
+    "MessageReport",
+    "ConversationShare",
     "ApiKey",
     "ApiKeyLog",
     "ApiKeyType",
@@ -75,6 +83,7 @@ __all__ = [
     "WorkflowConfig",
     "WorkflowExecution",
     "WorkflowNodeExecution",
+    "AgentExecution",
     "RetrievalInfo",
     "PromptOptimizerSession",
     "PromptOptimizerSessionHistory",
@@ -94,5 +103,6 @@ __all__ = [
     "ModelBase",
     "LoadBalanceStrategy",
     "Skill",
-    "ImplicitEmotionsStorage"
+    "ImplicitEmotionsStorage",
+    "MemoryReflectionLog"
 ]

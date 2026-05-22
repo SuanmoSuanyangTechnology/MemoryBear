@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-24 18:13:22
+ * @Last Modified time: 2026-05-15 13:35:55
  */
 /**
  * Workflow Chat Component
@@ -117,6 +117,13 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
    * Closes the drawer and resets all state
    */
   const handleClose = () => {
+    setChatHistory(conversationIdRef.current, chatList.map((item: ChatItem) => ({
+      ...item,
+      subContent: item.subContent?.map(sub => ({
+        ...sub,
+        status: sub.status === 'running' ? undefined : sub.status
+      }))
+    })))
     abortRef.current?.()
     abortRef.current = null;
     setOpen(false)
@@ -454,6 +461,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
   }, [chatList.length, features?.opening_statement, variables])
 
   useEffect(() => {
+    if (chatList.length < 1) return
     setChatHistory(conversationIdRef.current, chatList)
   }, [chatList])
 
@@ -478,7 +486,7 @@ const Chat = forwardRef<ChatRef, { appId: string; graphRef: GraphRef; data: Work
         labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
         // errorDesc={t('application.ReplyException')}
         renderRuntime={(item, index) => {
-          return <Runtime item={item} index={index} />
+          return <Runtime item={item} index={index} source="workflow" />
         }}
         onSend={handleSend}
       />

@@ -272,15 +272,15 @@ def content_tagging(chat_mdl, content, all_tags, examples, topn=3):
     return res
 
 
-def vision_llm_describe_prompt(page=None) -> str:
+def vision_llm_describe_prompt(page=None, lang="Chinese") -> str:
     template = PROMPT_JINJA_ENV.from_string(VISION_LLM_DESCRIBE_PROMPT)
 
-    return template.render(page=page)
+    return template.render(page=page, lang=lang)
 
 
-def vision_llm_figure_describe_prompt() -> str:
+def vision_llm_figure_describe_prompt(lang="Chinese") -> str:
     template = PROMPT_JINJA_ENV.from_string(VISION_LLM_FIGURE_DESCRIBE_PROMPT)
-    return template.render()
+    return template.render(lang=lang)
 
 
 def tool_schema(tools_description: list[dict], complete_task=False):

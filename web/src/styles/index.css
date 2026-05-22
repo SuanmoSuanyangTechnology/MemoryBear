@@ -348,6 +348,12 @@ body {
   min-height: 100%;
   max-height: 100%;
 }
+.x6-widget-selection-inner,
+.x6-widget-selection-box {
+  border-color: #171719;
+  border-width: 1px;
+  border-radius: 16px;
+}
 
 .ͼ2 .cm-gutters {
   background-color: transparent;
@@ -373,20 +379,27 @@ body {
 .cm-editor-filled .ͼ1 .cm-lineNumbers .cm-gutterElement {
   color: #212332;
 }
+
+* {
+  scrollbar-width: auto !important;
+}
+div::-webkit-scrollbar,
 ::-webkit-scrollbar {
   width: 6px;
   height: 8px;
+  display: block !important;
 }
-
+div::-webkit-scrollbar-track,
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 
+div::-webkit-scrollbar-thumb,
 ::-webkit-scrollbar-thumb {
   background: #DFE4ED;
   border-radius: 3px;
 }
-
+div::-webkit-scrollbar-thumb:hover,
 ::-webkit-scrollbar-thumb:hover {
   background: #DFE4ED;
 }
@@ -492,4 +505,7 @@ input:-webkit-autofill:active {
   -webkit-box-shadow: 0 0 0px 1000px #0A0A0A inset !important;
   -webkit-text-fill-color: #FFFFFF !important;
   transition: background-color 5000s ease-in-out 0s !important;
+}
+.ant-app {
+  height: 100%;
 }

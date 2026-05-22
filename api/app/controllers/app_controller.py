@@ -5,7 +5,7 @@ from typing import Optional, Annotated
 
 import yaml
 from fastapi import APIRouter, Depends, Path, Form, UploadFile, File
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.orm import Session
 from urllib.parse import quote
 
@@ -27,6 +27,7 @@ from app.services import app_service, workspace_service
 from app.services.agent_config_helper import enrich_agent_config
 from app.services.app_service import AppService
 from app.services.app_statistics_service import AppStatisticsService
+from app.services.file_storage_service import FileStorageService, get_file_storage_service
 from app.services.workflow_import_service import WorkflowImportService
 from app.services.workflow_service import WorkflowService, get_workflow_service
 from app.services.app_dsl_service import AppDslService
@@ -56,6 +57,7 @@ def list_apps(
         visibility: str | None = None,
         status: str | None = None,
         search: str | None = None,
+        tag_search: str | None = None,
         include_shared: bool = True,
         shared_only: bool = False,
         page: int = 1,
@@ -70,6 +72,7 @@ def list_apps(
     - 设置 include_shared=false 可以只查看本工作空间的应用
     - 当提供 ids 参数时，按逗号分割获取指定应用，不分页
     - search 参数支持：应用名称模糊搜索、API Key 精确搜索
+    - tag_search 参数支持：应用标签模糊搜索
     """
     from sqlalchemy import select as sa_select
     from app.models.api_key_model import ApiKey
@@ -114,6 +117,7 @@ def list_apps(
         visibility=visibility,
         status=status,
         search=search,
+        tag_search=tag_search,
         include_shared=include_shared,
         shared_only=shared_only,
         page=page,
@@ -1312,7 +1316,7 @@ async def export_app(
     return StreamingResponse(
         file_stream,
         media_type="application/octet-stream; charset=utf-8",
-        headers={"Content-Disposition": f"attachment; filename={encoded}",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}",
                  "Content-Length": str(len(yaml_bytes))}
     )
 
@@ -1359,16 +1363,14 @@ async def import_app(
 async def download_citation_file(
         document_id: uuid.UUID = Path(..., description="引用文档ID"),
         db: Session = Depends(get_db),
+        storage_service: FileStorageService = Depends(get_file_storage_service),
 ):
     """
     下载引用文档的原始文件。
     仅当应用功能特性 citation.allow_download=true 时，前端才会展示此下载链接。
     路由本身不做权限校验，由业务层通过 allow_download 开关控制入口。
     """
-    import os
     from fastapi import HTTPException, status as http_status
-    from fastapi.responses import FileResponse
-    from app.core.config import settings
     from app.models.document_model import Document
     from app.models.file_model import File as FileModel
 
@@ -1380,19 +1382,15 @@ async def download_citation_file(
     if not file_record:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="原始文件不存在")
 
-    file_path = os.path.join(
-        settings.FILE_PATH,
-        str(file_record.kb_id),
-        str(file_record.parent_id),
-        f"{file_record.id}{file_record.file_ext}"
-    )
-    if not os.path.exists(file_path):
+    try:
+        content = await storage_service.download_file(file_record.file_key)
+    except Exception as e:
+        logger.error(f"Storage download failed: {e}")
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="文件未找到")
 
     encoded_name = quote(doc.file_name)
-    return FileResponse(
-        path=file_path,
-        filename=doc.file_name,
+    return Response(
+        content=content,
         media_type="application/octet-stream",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"}
     )

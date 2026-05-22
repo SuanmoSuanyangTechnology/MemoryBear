@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-13 17:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-24 18:14:25
+ * @Last Modified time: 2026-05-15 15:09:29
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -175,7 +175,7 @@ const TestChat: FC<TestChatProps> = ({
     }])
   }
 
-  const updateAssistantMessage = (content: string, audio_url?: string, audio_status?: string, citations?: NodeData['citations']) => {
+  const updateAssistantMessage = (content: string, audio_url?: string, audio_status?: string, citations?: NodeData['citations'], suggested_questions?: string[] | undefined) => {
     setChatList(prev => {
       const newList = [...prev]
       const lastMsg = newList[newList.length - 1]
@@ -187,7 +187,8 @@ const TestChat: FC<TestChatProps> = ({
             ...(lastMsg.meta_data || {}),
             audio_url: audio_url || lastMsg.meta_data?.audio_url,
             audio_status: audio_status || lastMsg.meta_data?.audio_status,
-            citations: citations || lastMsg.meta_data?.citations
+            citations: citations || lastMsg.meta_data?.citations,
+            suggested_questions: suggested_questions || lastMsg.meta_data?.suggested_questions
           }
         }
       }
@@ -217,12 +218,109 @@ const TestChat: FC<TestChatProps> = ({
   }
 
   const updateErrorAssistantMessage = (message_length: number) => {
-    if (message_length > 0) return
+    if (message_length > 0) {
+      setChatList(prev => {
+        const newList = [...prev]
+        const lastMsg = newList[newList.length - 1]
+        const subContent = lastMsg.subContent || []
+        const hasFailed = subContent.some(vo => vo.status === 'failed')
+        lastMsg.status = hasFailed ? 'failed' : 'completed'
+        return newList
+      })
+      return
+    }
     setChatList(prev => {
       const newList = [...prev]
       const lastMsg = newList[newList.length - 1]
       if (lastMsg.role === 'assistant') {
         lastMsg.content = null
+      }
+      return newList
+    })
+  }
+  const addRunStartMessage = (data: any) => {
+    const { name, input } = data || {}
+    setChatList(prev => {
+      const newList = [...prev]
+      const lastMsg = newList[newList.length - 1]
+      if (lastMsg?.role === 'assistant') {
+        newList[newList.length - 1] = {
+          ...lastMsg,
+          subContent: [
+            ...(lastMsg.subContent || []),
+            {
+              node_id: `${name}`,
+              node_type: 'tool',
+              node_name: name,
+              status: 'pending',
+              content: {
+                input
+              }
+            }
+          ]
+        }
+      }
+      return newList
+    })
+  }
+  const addRunEndMessage = (data: any) => {
+    const { meta, output, error } = data || {}
+    setChatList(prev => {
+      const newList = [...prev]
+      const lastMsg = newList[newList.length - 1]
+      const lastSubContent = lastMsg.subContent || []
+      const lastSubContentItem = lastSubContent[lastSubContent.length - 1]
+      if (lastMsg?.role === 'assistant') {
+        let sourceList: any[] = []
+        if (meta?.sources?.length > 0 && (meta?.tool_type === 'knowledge_retrieval' || meta?.tool_type === 'skill')) {
+          const groupedSources = meta?.sources.reduce((acc: any, source: any) => {
+            const key = source.knowledge_name || source.knowledge_id || source.name || source.id || 'default';
+            if (!acc[key]) {
+              acc[key] = { ...source, name: source.knowledge_name || source.name, contentList: [source.content] };
+            } else {
+              acc[key].contentList.push(source.content);
+            }
+            return acc;
+          }, {});
+          sourceList = Object.values(groupedSources).map((group: any) => ({
+            ...lastSubContentItem,
+            status: error ? 'failed' : 'completed',
+            node_name: group.name,
+            content: {
+              input: lastSubContentItem.content?.input || '',
+              output: group.contentList.join('\n') || output,
+              error
+            }
+          }));
+        } else if (meta?.sources?.length > 0) {
+          sourceList = meta?.sources?.map((source: any) => ({
+            ...lastSubContentItem,
+            status: error ? 'failed' : 'completed',
+            name: source.name || 'default',
+            content: {
+              input: lastSubContentItem.content?.input || '',
+              output: source.content || output,
+              error
+            }
+          }));
+        } else {
+          sourceList = [{
+            ...lastSubContentItem,
+            status: error ? 'failed' : 'completed',
+            content: {
+              input: lastSubContentItem.content?.input || '',
+              output: output || '',
+              error
+            }
+          }]
+        }
+        newList[newList.length - 1] = {
+          ...lastMsg,
+          subContent: [
+            ...lastSubContent.slice(0, -1),
+            ...sourceList
+          ]
+        }
       }
       return newList
     })
@@ -298,13 +396,20 @@ const TestChat: FC<TestChatProps> = ({
 
   const handleStreamMessage = (data: SSEMessage[]) => {
     data.map(item => {
-      const { conversation_id, content, message_length, audio_url, citations } = item.data as {
+      const { conversation_id, content, message_length, audio_url, citations, suggested_questions } = item.data as {
         conversation_id: string, content: string, message_length: number; audio_url?: string;
-        citations?: NodeData['citations']
+        citations?: NodeData['citations'];
+        suggested_questions?: string[]
       };
       switch (item.event) {
         case 'start':
           if (conversation_id && conversationId !== conversation_id) setConversationId(conversation_id)
+          break
+        case 'tool_start': 
+          addRunStartMessage(item.data)
+          break
+        case 'tool_end': 
+          addRunEndMessage(item.data)
           break
         case 'reasoning':
           updateAssistantReasoningMessage(content)
@@ -322,7 +427,7 @@ const TestChat: FC<TestChatProps> = ({
             }))
           }
           if (audio_url) {
-            updateAssistantMessage(content || '', audio_url, 'pending')
+            updateAssistantMessage(content || '', audio_url, 'pending', citations, suggested_questions)
             const { file_id } = item.data as { file_id?: string }
             const idToPoll = file_id || audio_url || ''
             const fileId = audio_url.split('/').pop()
@@ -348,8 +453,8 @@ const TestChat: FC<TestChatProps> = ({
               audioPollingRef.current.set(idToPoll, timer)
             }
           }
-          if (citations && citations.length > 0) {
-            updateAssistantMessage(content, audio_url, undefined, citations)
+          if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0)) {
+            updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions)
           }
           updateErrorAssistantMessage(message_length)
           streamLoadingRef.current = false
@@ -599,6 +704,7 @@ const TestChat: FC<TestChatProps> = ({
     }
   }, [chatList.length, features?.opening_statement, variables])
 
+  console.log(chatList)
   return (
     <div className="rb:w-250 rb:mx-auto rb:h-full">
       <RbCard
@@ -625,7 +731,7 @@ const TestChat: FC<TestChatProps> = ({
           }}
           labelFormat={(item) => item.role === 'user' ? t('application.you') : dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
           // errorDesc={t('application.ReplyException')}
-          renderRuntime={application?.type === 'workflow' ? (item, index) => <Runtime item={item} index={index} /> : undefined}
+          renderRuntime={application?.type && ['workflow', 'agent'].includes(application?.type) ? (item, index) => <Runtime item={item} index={index} source={application.type} /> : undefined}
         >
           <ChatToolbar
             ref={toolbarRef}

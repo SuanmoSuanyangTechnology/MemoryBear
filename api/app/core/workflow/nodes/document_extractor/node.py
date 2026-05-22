@@ -117,6 +117,15 @@ class DocExtractorNode(BaseNode):
             "images": VariableType.ARRAY_FILE,
         }
 
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        if isinstance(business_result, dict):
+            return {"process": {
+                "files_count": len(business_result.get("chunks", [])),
+                "total_chars": sum(len(c) for c in business_result.get("chunks", [])),
+                "images_count": len(business_result.get("images", [])),
+            }}
+        return {}
+
     def _extract_output(self, business_result: Any) -> Any:
         return business_result
 

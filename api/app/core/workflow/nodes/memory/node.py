@@ -18,6 +18,10 @@ class MemoryReadNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
         super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: MemoryReadNodeConfig | None = None
+        self._process: dict = {}
+
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        return {"process": self._process}
 
     def _output_types(self) -> dict[str, VariableType]:
         return {
@@ -40,11 +44,14 @@ class MemoryReadNode(BaseNode):
                 end_user_id=end_user_id,
                 user_rag_memory_id=state["user_rag_memory_id"],
             )
+            query = self._render_template(self.typed_config.message, variable_pool)
+            self._process = {"query": query, "config_id": str(self.typed_config.config_id)}
             # TODO: Historical Messages -> Used to refer to coreference resolution
             search_result = await memory_service.read(
-                self._render_template(self.typed_config.message, variable_pool),
+                query,
                 search_switch=SearchStrategy(self.typed_config.search_switch)
             )
+            self._process["memories_count"] = len(search_result.memories)
             return {
                 "answer": search_result.content,
                 "intermediate_outputs": [_.model_dump() for _ in search_result.memories]
@@ -66,6 +73,10 @@ class MemoryWriteNode(BaseNode):
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
         super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: MemoryWriteNodeConfig | None = None
+        self._process: dict = {}
+
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        return {"process": self._process}
 
     def _output_types(self) -> dict[str, VariableType]:
         return {"output": VariableType.STRING}
@@ -138,6 +149,11 @@ class MemoryWriteNode(BaseNode):
                 "user_rag_memory_id": state["user_rag_memory_id"]
             }
         )
+        self._process = {
+            "config_id": str(self.typed_config.config_id),
+            "messages": messages,
+            "messages_count": len(messages),
+        }
         # write_message_task.delay(
         #     end_user_id=end_user_id,
         #     message=messages,

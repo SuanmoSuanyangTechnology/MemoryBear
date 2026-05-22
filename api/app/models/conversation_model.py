@@ -56,6 +56,7 @@ class Conversation(Base):
     app = relationship("App", back_populates="conversations")
     workspace = relationship("Workspace")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
+    shares = relationship("ConversationShare", back_populates="conversation", cascade="all, delete-orphan")
 
 
 class ConversationDetail(Base):
@@ -84,11 +85,29 @@ class Message(Base):
     role = Column(String(20), nullable=False, comment="角色: user/assistant/system")
     content = Column(Text, nullable=False, comment="消息内容")
 
+    # === 版本化支持（重新生成功能） ===
+    version = Column(Integer, default=1, comment="版本号（重新生成时递增）")
+    is_current = Column(Boolean, default=True, comment="是否为当前展示版本")
+    parent_message_id = Column(UUID(as_uuid=True), comment="父消息ID（用于重新生成时关联原用户消息）")
+
+    # === 逻辑删除 ===
+    is_deleted = Column(Boolean, default=False, comment="逻辑删除标记")
+
+    # === 统计字段（冗余，便于查询） ===
+    like_count = Column(Integer, default=0, comment="点赞数")
+    dislike_count = Column(Integer, default=0, comment="点踩数")
+    report_count = Column(Integer, default=0, comment="举报数")
+
     # 元数据（避免使用 metadata 保留字）
     meta_data = Column(JSON, comment="消息元数据（如模型、token使用等）")
+
+    # 状态
+    status = Column(String(20), nullable=False, server_default="completed", comment="消息状态: completed/failed")
 
     # 时间戳
     created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")
 
     # 关联关系
     conversation = relationship("Conversation", back_populates="messages")
+    feedbacks = relationship("MessageFeedback", back_populates="message", cascade="all, delete-orphan")
+    reports = relationship("MessageReport", back_populates="message", cascade="all, delete-orphan")

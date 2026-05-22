@@ -252,19 +252,20 @@ async def delete_document(
                 detail="The document does not exist or you do not have permission to access it"
             )
         file_id = db_document.file_id
+        kb_id = db_document.kb_id
 
-        # 2. Delete document
+        # 2. Delete vector index (non-404 failures raise, caught by except below)
+        db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+        vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
+        vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
+
+        # 3. Delete file (storage errors are swallowed internally)
+        await file_controller._delete_file(db=db, file_id=file_id, current_user=current_user, storage_service=storage_service)
+
+        # 4. Delete document from DB (last — if DB fails, external resources are already cleaned)
         api_logger.debug(f"Perform document delete: {db_document.file_name} (ID: {document_id})")
         db.delete(db_document)
         db.commit()
-
-        # 3. Delete file
-        await file_controller._delete_file(db=db, file_id=file_id, current_user=current_user, storage_service=storage_service)
-
-        # 4. Delete vector index
-        db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=db_document.kb_id, current_user=current_user)
-        vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
-        vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
 
         api_logger.info(f"The document has been successfully deleted: {db_document.file_name} (ID: {document_id})")
         return success(msg="The document has been successfully deleted")

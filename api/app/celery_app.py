@@ -133,6 +133,7 @@ celery_app.conf.update(
 
         # Beat/periodic tasks → periodic_tasks queue (dedicated periodic worker)
         'app.tasks.workspace_reflection_task': {'queue': 'periodic_tasks'},
+        'app.tasks.layer2_reflection_task': {'queue': 'periodic_tasks'},
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
         'app.tasks.run_forgetting_cycle_task': {'queue': 'periodic_tasks'},
         'app.tasks.write_all_workspaces_memory_task': {'queue': 'periodic_tasks'},
@@ -155,14 +156,14 @@ implicit_emotions_update_schedule = crontab(
     hour=settings.IMPLICIT_EMOTIONS_UPDATE_HOUR,
     minute=settings.IMPLICIT_EMOTIONS_UPDATE_MINUTE,
 )
-
+layer2_reflection_schedule = timedelta(minutes=settings.LAYER2_REFLECTION_INTERVAL_MINUTES)
 # 构建定时任务配置
 beat_schedule_config = {
-    "run-workspace-reflection": {
-        "task": "app.tasks.workspace_reflection_task",
-        "schedule": workspace_reflection_schedule,
-        "args": (),
-    },
+    # "run-workspace-reflection": {
+    #     "task": "app.tasks.workspace_reflection_task",
+    #     "schedule": workspace_reflection_schedule,
+    #     "args": (),
+    # },
     "regenerate-memory-cache": {
         "task": "app.tasks.regenerate_memory_cache",
         "schedule": memory_cache_regeneration_schedule,
@@ -184,6 +185,11 @@ beat_schedule_config = {
         "task": "app.tasks.update_implicit_emotions_storage",
         "schedule": implicit_emotions_update_schedule,
         "args": (),
+    },
+    "run-layer2-reflection": {
+    "task": "app.tasks.layer2_reflection_task",
+    "schedule": layer2_reflection_schedule,
+    "args": (),
     },
 }
 

@@ -31,7 +31,6 @@ STRICT RULES:
 7. If the file content is insufficient, infer the best possible answer based on context.
 8. Ensure the JSON is syntactically correct.
 {% endraw %}
-9. Output using the language {{ language }}
 {% raw %}
 Required JSON format:
 
@@ -51,3 +50,4 @@ Required JSON format:
 }
 
 Now analyze the following file and return the JSON result.{% endraw %}
+# [IMPORTANT]: OUTPUT USE LANGUAGE {{ language }}

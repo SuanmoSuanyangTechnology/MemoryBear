@@ -139,7 +139,7 @@ const ApplicationConfig: React.FC = () => {
         {activeTab === 'release' && <ReleasePage data={application as Application} refresh={getApplicationInfo} />}
         {activeTab === 'statistics' && <Statistics application={application} />}
         {activeTab === 'test' && <TestChat application={application} config={config} />}
-        {activeTab === 'log' && <Logs />}
+        {activeTab === 'log' && <Logs application={application as Application} />}
       </div>
     </Flex>
   );

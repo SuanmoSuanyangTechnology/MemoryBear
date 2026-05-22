@@ -64,6 +64,7 @@
     "element": "NoAuthLayout",
     "children": [
       { "path": "/conversation/:token", "element": "Conversation" },
+      { "path": "/chat-box/:token", "element": "Conversation" },
       { "path": "/jump", "element": "Jump" }
     ]
   },

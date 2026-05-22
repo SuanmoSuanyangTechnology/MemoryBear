@@ -124,14 +124,63 @@ async def get_preview_chunks(
             base_url=db_knowledge.image2text.api_keys[0].api_base
         )
     from app.core.rag.app.naive import chunk
-    res = chunk(filename=db_file.file_name,
-                binary=file_binary,
-                from_page=0,
-                to_page=5,
-                callback=progress_callback,
-                vision_model=vision_model,
-                parser_config=db_document.parser_config,
-                is_root=False)
+    parent_child_mode = db_document.parser_config.get("parent_child_mode", False)
+
+    if parent_child_mode:
+        from app.core.rag.app.naive import chunk_parent_child
+        child_res, parent_res, parent_id_map = chunk_parent_child(
+            filename=db_file.file_name,
+            binary=file_binary,
+            from_page=0,
+            to_page=5,
+            callback=progress_callback,
+            vision_model=vision_model,
+            parser_config=db_document.parser_config,
+            is_root=False,
+        )
+        # Combine parent and child chunks for preview
+        parent_id_to_doc_id = {}
+        all_preview = []
+        for idx, item in enumerate(parent_res):
+            pid = uuid.uuid4().hex
+            parent_id_to_doc_id[idx] = pid
+            meta = {
+                "doc_id": pid,
+                "file_id": str(db_document.file_id),
+                "file_name": db_document.file_name,
+                "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                "document_id": str(db_document.id),
+                "knowledge_id": str(db_document.kb_id),
+                "sort_id": idx,
+                "status": 1,
+                "chunk_type": "parent",
+            }
+            all_preview.append(DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+        for idx, item in enumerate(child_res):
+            parent_idx = parent_id_map.get(idx)
+            meta = {
+                "doc_id": uuid.uuid4().hex,
+                "file_id": str(db_document.file_id),
+                "file_name": db_document.file_name,
+                "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                "document_id": str(db_document.id),
+                "knowledge_id": str(db_document.kb_id),
+                "sort_id": idx,
+                "status": 1,
+                "chunk_type": "child",
+                "parent_id": parent_id_to_doc_id.get(parent_idx, ""),
+            }
+            all_preview.append(DocumentChunk(page_content=item["content_with_weight"], metadata=meta))
+        res = all_preview
+    else:
+        res = chunk(filename=db_file.file_name,
+                    binary=file_binary,
+                    from_page=0,
+                    to_page=5,
+                    callback=progress_callback,
+                    vision_model=vision_model,
+                    parser_config=db_document.parser_config,
+                    is_root=False)
 
     start_index = (page - 1) * pagesize
     end_index = start_index + pagesize
@@ -139,17 +188,21 @@ async def get_preview_chunks(
     paginated_chunk_str_list = res[start_index:end_index]
     chunks = []
     for idx, item in enumerate(paginated_chunk_str_list):
-        metadata = {
-            "doc_id": uuid.uuid4().hex,
-            "file_id": str(db_document.file_id),
-            "file_name": db_document.file_name,
-            "file_created_at": int(db_document.created_at.timestamp() * 1000),
-            "document_id": str(db_document.id),
-            "knowledge_id": str(db_document.kb_id),
-            "sort_id": idx,
-            "status": 1,
-        }
-        chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=metadata))
+        if parent_child_mode:
+            # item is already a DocumentChunk in parent-child mode
+            chunks.append(item)
+        else:
+            metadata = {
+                "doc_id": uuid.uuid4().hex,
+                "file_id": str(db_document.file_id),
+                "file_name": db_document.file_name,
+                "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                "document_id": str(db_document.id),
+                "knowledge_id": str(db_document.kb_id),
+                "sort_id": idx,
+                "status": 1,
+            }
+            chunks.append(DocumentChunk(page_content=item["content_with_weight"], metadata=metadata))
 
     # 8. Return structured response
     total = len(res)
@@ -593,8 +646,19 @@ async def retrieve_chunks(
     """
     api_logger.info(f"retrieve chunk: query={retrieve_data.query}, username: {current_user.username}")
 
+    # Resolve ex_ids to kb_ids and merge (union)
+    kb_ids = list(retrieve_data.kb_ids)
+    if retrieve_data.ex_ids:
+        resolved_ids = knowledge_service.get_knowledge_ids_by_external_ids(
+            db=db,
+            external_ids=retrieve_data.ex_ids,
+            workspace_id=current_user.current_workspace_id,
+            current_user=current_user
+        )
+        kb_ids = list(set(kb_ids + resolved_ids))
+
     filters = [
-        knowledge_model.Knowledge.id.in_(retrieve_data.kb_ids),
+        knowledge_model.Knowledge.id.in_(kb_ids),
         knowledge_model.Knowledge.permission_id == knowledge_model.PermissionType.Private,
         knowledge_model.Knowledge.chunk_num > 0,
         knowledge_model.Knowledge.status == 1
@@ -607,7 +671,7 @@ async def retrieve_chunks(
     private_kb_ids = [item[0] for item in private_items]
     private_workspace_ids = [item[1] for item in private_items]
     filters = [
-        knowledge_model.Knowledge.id.in_(retrieve_data.kb_ids),
+        knowledge_model.Knowledge.id.in_(kb_ids),
         knowledge_model.Knowledge.permission_id == knowledge_model.PermissionType.Share,
         knowledge_model.Knowledge.chunk_num > 0,
         knowledge_model.Knowledge.status == 1
@@ -619,7 +683,7 @@ async def retrieve_chunks(
     )
     if items:
         filters = [
-            knowledgeshare_model.KnowledgeShare.target_kb_id.in_(retrieve_data.kb_ids)
+            knowledgeshare_model.KnowledgeShare.target_kb_id.in_(kb_ids)
         ]
         share_items = knowledgeshare_service.get_source_kb_ids_by_target_kb_id(
             db=db,
@@ -663,6 +727,8 @@ async def retrieve_chunks(
                     seen_ids.add(doc.metadata["doc_id"])
                     unique_rs.append(doc)
             rs = vector_service.rerank(query=retrieve_data.query, docs=unique_rs, top_k=retrieve_data.top_k) if unique_rs else []
+            rerank_threshold = retrieve_data.rerank_score_threshold if retrieve_data.rerank_score_threshold is not None else (retrieve_data.vector_similarity_weight if retrieve_data.vector_similarity_weight is not None else 0.1)
+            rs = [doc for doc in rs if doc.metadata.get("score", 0) > rerank_threshold]
             if retrieve_data.retrieve_type == chunk_schema.RetrieveType.Graph:
                 kb_ids = [str(kb_id) for kb_id in private_kb_ids]
                 workspace_ids = [str(workspace_id) for workspace_id in private_workspace_ids]

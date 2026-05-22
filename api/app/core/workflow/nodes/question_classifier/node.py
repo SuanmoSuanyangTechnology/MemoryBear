@@ -27,6 +27,15 @@ class QuestionClassifierNode(BaseNode):
         self.typed_config: QuestionClassifierNodeConfig | None = None
         self.category_to_case_map = {}
         self.response_metadata = {}
+        self._last_messages: list = []
+        self._classification_result: str = ""
+
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        return {"process": {
+            "messages": self._last_messages,
+            "classification_result": self._classification_result,
+            "model_id": str(self.typed_config.model_id) if self.typed_config else None,
+        }}
 
     def _extract_token_usage(self, business_result: Any) -> dict[str, int] | None:
         if self.response_metadata:
@@ -133,9 +142,11 @@ class QuestionClassifierNode(BaseNode):
                 ("system", self.typed_config.system_prompt),
                 ("user", user_prompt),
             ]
+            self._last_messages = [{"role": r, "content": c} for r, c in messages]
 
             response = await llm.ainvoke(messages)
             result = self.process_model_output(response.content)
+            self._classification_result = result
             self.response_metadata = {
                 **response.response_metadata,
                 "token_usage": getattr(response, 'usage_metadata', None) or response.response_metadata.get('token_usage')

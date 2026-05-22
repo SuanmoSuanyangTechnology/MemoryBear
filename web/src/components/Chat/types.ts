@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:45:54 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-08 14:10:42
+ * @Last Modified time: 2026-05-18 11:19:34
  */
 import { type ReactNode } from 'react'
 
@@ -23,6 +23,7 @@ export interface ChatItem {
   status?: string;
   subContent?: Record<string, any>[];
   error?: string;
+  feedback_type?: 'like' | 'dislike' | null;
   meta_data?: {
     audio_url?: string | null;
     audio_status?: string;
@@ -70,6 +71,13 @@ export interface ChatProps {
   className?: string;
   renderRuntime?: (item: ChatItem, index: number) => ReactNode;
   conversationId?: string | null;
+
+  userIcon?: ReactNode;
+  assistantIcon?: ReactNode;
+  isSupportTools?: boolean;
+  handleFeedback?: (feedbackType: 'like' | 'dislike', id?: string) => void;
+
+  isEnded?: boolean;
 }
 
 /**
@@ -114,4 +122,9 @@ export interface ChatContentProps {
   renderRuntime?: (item: ChatItem, index: number) => ReactNode;
   /** Send message callback */
   onSend?: (msg: string) => void;
+  userIcon?: ReactNode;
+  assistantIcon?: ReactNode;
+  isSupportTools?: boolean;
+  handleFeedback?: (feedbackType: 'like' | 'dislike', id?: string) => void;
+  isEnded?: boolean;
 }
