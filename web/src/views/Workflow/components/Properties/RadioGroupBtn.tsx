@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:19:30 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-03 11:09:23
+ * @Last Modified time: 2026-05-20 17:55:51
  */
 /**
  * RadioGroupCard Component
@@ -51,7 +51,7 @@ interface RadioCardProps extends Omit<RadioGroupProps, 'onChange'> {
   allowClear?: boolean;
   /** Whether to display cards in block (vertical) layout */
   block?: boolean;
-  type?: 'inner';
+  type?: 'inner' | 'outer';
 }
 
 /** Radio group card component that displays options as selectable cards */
@@ -93,8 +93,9 @@ const RadioGroupBtn: FC<RadioCardProps> = ({
         <div key={String(option.value)} className={clsx("rb:border rb:w-full rb:leading-4.5 rb:px-2.5  rb:text-center rb:text-[12px] rb:font-medium rb:cursor-pointer", {
           'rb:opacity-[0.75]': option.disabled,
           'rb:rounded-lg rb:bg-[#F6F6F6] rb:border-[#F6F6F6] rb:py-1.25': !type,
+          'rb:rounded-lg rb-border rb:py-1.25 rb:hover:bg-[#F6F6F6]': type === 'outer',
           'rb:bg-white rb:rounded-md rb:border-white rb:py-px': type === 'inner',
-          'rb:border-[#171719]! rb:bg-white': option.value === value,
+          'rb:border-[#171719]! rb:bg-white rb:hover:bg-white': option.value === value,
         })} onClick={() => handleChange(option)}>
           {option.label}
         </div>

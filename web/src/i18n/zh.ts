@@ -1336,7 +1336,7 @@ export const zh = {
       is_thinking: '支持深度思考',
       thinking_only: '仅支持思考',
       json_output: '支持JSON格式化输出',
-      function_call: '工具调用/外部函数调用',
+      function_call: '函数/工具调用',
     },
     timezones: {
       'Asia/Shanghai': '中国标准时间 (UTC+8)',
@@ -2343,6 +2343,11 @@ export const zh = {
           'object': 'Object',
           addParams: '添加提取变量',
           promptPlaceholder: '在此处编写提示，输入“{”插入变量，输入“insert”插入',
+          advanced_settings: '高级设置',
+          inference_mode: '推理模式',
+          inference_mode_tip: '你可以根据模型对于 Function calling 或 Prompt 的指令响应能力选择合适的推理模式',
+          promptCall: '提示词',
+          function_calling: '函数/工具调用',
         },
         'var-aggregator': {
           group: '聚合分组',

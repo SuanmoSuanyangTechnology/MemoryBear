@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-07 18:17:40
+ * @Last Modified time: 2026-05-20 17:51:36
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -208,6 +208,14 @@ export const nodeLibrary: NodeLibrary[] = [
             titleVariant: 'borderless',
             placeholder: 'workflow.config.parameter-extractor.promptPlaceholder'
           },
+          inference_mode: {
+            type: 'define',
+            defaultValue: 'prompt',
+            options: [
+              { value: 'function_calling', label: 'workflow.config.parameter-extractor.function_calling' },
+              { value: 'prompt', label: 'workflow.config.parameter-extractor.promptCall' },
+            ]
+          }
         }
       }
     ]
