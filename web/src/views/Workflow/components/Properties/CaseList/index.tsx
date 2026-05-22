@@ -174,7 +174,7 @@ const ArrayFileSubConditions: FC<ArrayFileSubConditionsProps> = ({ conditionFiel
   }, [subValues])
 
   return (
-    <div className="rb:bg-white rb:rounded-lg rb:p-1 rb:w-62">
+    <div className="rb:bg-white rb:rounded-lg rb:p-1 rb:w-60">
       <Form.List name={[conditionFieldName, 'sub_variable_condition', 'conditions']}>
         {(subFields, { add: addSub, remove: removeSub }) => {
           const subLogicalOperator = form.getFieldValue([name, caseIndex, 'expressions', conditionIndex, 'sub_variable_condition', 'logical_operator']) || 'and';
@@ -208,7 +208,7 @@ const ArrayFileSubConditions: FC<ArrayFileSubConditionsProps> = ({ conditionFiel
                         'rb:w-43.5': subFields.length > 1,
                         'rb:w-54.5': subFields.length === 1
                       })}>
-                        <Row className={clsx('rb:p-1!', { 'rb-border-b': !hideSubRight })}>
+                        <Row wrap={false} className={clsx('rb:p-1!', { 'rb-border-b': !hideSubRight })}>
                           <Col flex="100px">
                             <Form.Item name={[subField.name, 'key']} noStyle>
                               <Select
@@ -508,7 +508,7 @@ const CaseList: FC<CaseListProps> = ({
                   {(conditionFields, { add: addCondition, remove: removeCondition }) => {
                     const logicalOperator = form.getFieldValue(name)?.[caseIndex]?.logical_operator || 'and'
                     return (
-                      <Row className="rb:text-[12px] rb:mb-4!">
+                      <Row wrap={false} className="rb:text-[12px] rb:mb-4!">
                         <Col flex="44px">
                           <div className="rb:font-medium rb:leading-4.5">{caseIndex === 0 ? 'IF' : 'ELIF'}</div>
                           {caseFields.length > 1 && <div className="rb:text-[10px] rb:text-[#5B6167] rb:leading-2.5"> {`CASE ${caseIndex + 1}`}</div>}
@@ -549,7 +549,7 @@ const CaseList: FC<CaseListProps> = ({
                               return (
                                 <Flex key={conditionField.key} gap={4} align="start" className="rb:mb-2!">
                                   <div className="rb:flex-1 rb:bg-[#F6F6F6] rb:rounded-lg">
-                                    <Row className={clsx("rb:px-1!", {
+                                    <Row wrap={false} className={clsx("rb:px-1!", {
                                       'rb-border-b': !hideRightField
                                     })}>
                                       <Col flex="144px">
@@ -658,7 +658,7 @@ const CaseList: FC<CaseListProps> = ({
                               )
                             })}
                           </div>
-                          <Row>
+                          <Row wrap={false}>
                             <Col flex="1">
                               <Button
                                 onClick={() => {

@@ -149,6 +149,7 @@ dependencies = [
     "python-magic-bin>=0.4.14; sys_platform=='win32'",
     "volcengine-python-sdk[ark]==5.0.19",
     "pymupdf>=1.27.2.2",
+    "langid>=1.1.6",
 ]
 
 [tool.pytest.ini_options]

@@ -157,7 +157,22 @@ const processNodeVariables = (
     case 'start':
       // Add start node variables
       [...(config?.variables?.defaultValue ?? []), ...(config?.variables?.value ?? [])].forEach((v: any) => {
-        if (v?.name) addVariable(variableList, addedKeys, `${dataNodeId}_${v.name}`, v.name, v.type, `${dataNodeId}.${v.name}`, nodeData, undefined, v.defaultValue ?? v.default);
+        if (v?.name) {
+          addVariable(
+            variableList,
+            addedKeys,
+            `${dataNodeId}_${v.name}`,
+            v.name,
+            v.type,
+            `${dataNodeId}.${v.name}`,
+            nodeData,
+            {
+              ui_type: v.ui_type,
+              options: v.options,
+            },
+            v.defaultValue ?? v.default,
+          );
+        }
       });
       // Add system variables
       config?.variables?.sys?.forEach((v: any) => {

@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 from urllib.parse import urlparse, unquote
 
 import json_repair
-from jinja2 import Template
+import langid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -27,6 +27,7 @@ from app.schemas.memory_perceptual_schema import (
 from app.schemas.model_schema import ModelInfo
 from app.services.model_service import ModelApiKeyService
 from app.services.multimodal_service import MultimodalService
+from app.services.prompt import prompt_manager
 
 business_logger = get_business_logger()
 
@@ -265,10 +266,11 @@ class MemoryPerceptualService:
             return None
         file_message = file_message[0]
         try:
-            prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prompt')
-            with open(os.path.join(prompt_path, 'perceptual_summary_system.jinja2'), 'r', encoding='utf-8') as f:
-                opt_system_prompt = f.read()
-            rendered_system_message = Template(opt_system_prompt).render(file_type=file.type)
+            rendered_system_message = prompt_manager.render(
+                'perceptual_summary_system',
+                file_type=file.type,
+                language=langid.classify(content)[0] if content else "zh"
+            )
         except FileNotFoundError as e:
             business_logger.error(f"Failed to generate perceptual memory: {str(e)}")
             return None
@@ -276,7 +278,7 @@ class MemoryPerceptualService:
             {"role": RoleType.SYSTEM.value, "content": [{"type": "text", "text": rendered_system_message}]},
             {"role": RoleType.USER.value, "content": [
                 file_message,
-                {"type": "text", "text": f"<content>{content if content else 'zh'}</content>"}
+                {"type": "text", "text": f"Generate a summary of the file's content"}
             ]}
         ]
         try:

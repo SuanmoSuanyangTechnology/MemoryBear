@@ -379,20 +379,27 @@ body {
 .cm-editor-filled .ͼ1 .cm-lineNumbers .cm-gutterElement {
   color: #212332;
 }
+
+* {
+  scrollbar-width: auto !important;
+}
+div::-webkit-scrollbar,
 ::-webkit-scrollbar {
   width: 6px;
   height: 8px;
+  display: block !important;
 }
-
+div::-webkit-scrollbar-track,
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 
+div::-webkit-scrollbar-thumb,
 ::-webkit-scrollbar-thumb {
   background: #DFE4ED;
   border-radius: 3px;
 }
-
+div::-webkit-scrollbar-thumb:hover,
 ::-webkit-scrollbar-thumb:hover {
   background: #DFE4ED;
 }

@@ -113,6 +113,14 @@ Each output item should be a structured candidate memory statement.
 - 仅提取陈述句。
 - 不要提取问题、命令、问候语或对话填充词。
 
+感知记忆文件摘要处理：
+
+- 如果 `target_content` 中包含 `<input-file-summary>...</input-file-summary>` 标签，标签内的内容是用户上传文件（图片、视频、文档等）的系统预处理摘要。
+- 对于这类内容，必须以"用户"为主语改写成陈述句，表达用户上传/分享了什么内容。
+- 例如：`<input-file-summary>这张图片展示了一朵盛开的粉色莲花</input-file-summary>` 应提取为 `"用户分享了一张盛开的粉色莲花的图片，背景是蓝色的墙壁。"`
+- 不要原样保留 `<input-file-summary>` 标签在 statement_text 中。
+- 不要把文件摘要当作独立的客观描述输出（如"一张图片展示了..."），必须关联到用户行为。
+
 speaker：
 
 - `speaker` 表示该 statement 在 `target_content` 中的直接说话来源。
@@ -223,6 +231,14 @@ Filtering:
 
 - Extract only declarative statements.
 - Do not extract questions, commands, greetings, or conversational filler.
+
+Perceptual memory file summary handling:
+
+- If `target_content` contains `<input-file-summary>...</input-file-summary>` tags, the content inside is a system-preprocessed summary of a file uploaded by the user (image, video, document, etc.).
+- For such content, you must rewrite it as a declarative statement with "the user" as the subject, expressing what the user uploaded or shared.
+- Example: `<input-file-summary>This image shows a blooming pink lotus</input-file-summary>` should be extracted as `"The user shared an image of a blooming pink lotus with a blue wall in the background."`
+- Do not keep `<input-file-summary>` tags in statement_text.
+- Do not output file summaries as standalone objective descriptions (e.g., "An image shows..."). They must be linked to the user's action.
 
 speaker:
 

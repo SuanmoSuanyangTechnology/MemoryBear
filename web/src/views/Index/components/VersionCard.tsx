@@ -4,7 +4,7 @@
  * @Author: yujiangping
  * @Date: 2026-01-12 16:34:59
  * @LastEditors: yujiangping
- * @LastEditTime: 2026-05-15 15:59:15
+ * @LastEditTime: 2026-05-21 12:39:12
  */
 import React, { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -40,7 +40,7 @@ const VersionCard: React.FC = () => {
   }, []);
     
   return (
-    <div className='rb:w-full rb:h-full rb:p-3 rb:bg-white rb:rounded-xl'>
+    <div className='rb:w-full rb:h-full rb:p-3 rb:bg-white rb:rounded-xl rb:flex rb:flex-col'>
       <Flex gap={4} className="rb:mb-3">
         <span className="rb:font-[MiSans-Bold] rb:font-bold rb:leading-5">{t('index.latestUpdate')}</span>
         {versionInfo?.version && 
@@ -54,7 +54,7 @@ const VersionCard: React.FC = () => {
           <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:mt-1 rb:mb-2">
             {t('version.releaseDate')}: {formatDateTime(introduction.releaseDate, 'YYYY-MM-DD')} | {t('version.name')}: {introduction.codeName}
           </div>
-          <div className="rb:max-h-76 rb:overflow-y-auto">
+          <div className="rb:flex-1 rb:min-h-0 rb:overflow-y-auto">
             <p
               className='rb:text-[12px] rb:leading-4.5'
               dangerouslySetInnerHTML={{ __html: introduction.upgradePosition?.replace(/\n/g, '<br>') }}

@@ -21,7 +21,7 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
             includes=None
     ) -> MemorySearchResult:
         memory_l0 = None
-        if self.ctx.storage_type == StorageType.NEO4J:  
+        if self.ctx.storage_type == StorageType.NEO4J:
             memory_l0 = await self._get_search_service(includes).memory_l0()
 
         query = QueryPreprocessor.process(query)

@@ -135,7 +135,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
               </Form.Item>
 
               {/* Show when retrieve_type = semantic or hybrid */}
-              {(retrieveType === 'semantic' || retrieveType === 'hybrid') && (
+              {(retrieveType === 'participle' || retrieveType === 'hybrid') && (
                   <Form.Item name="similarity_threshold" label={t('knowledgeBase.similarityThreshold')}>
                       <Select
                           options={[
@@ -156,7 +156,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
               )}
 
               {/* Show when retrieve_type = participle or hybrid */}
-              {(retrieveType === 'participle' || retrieveType === 'hybrid') && (
+              {(retrieveType === 'semantic' || retrieveType === 'hybrid') && (
                   <Form.Item name="vector_similarity_weight" label={t('knowledgeBase.semanticSimilarity')}>
                       <Select
                           options={[
