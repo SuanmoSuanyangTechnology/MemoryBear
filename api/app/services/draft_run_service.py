@@ -288,6 +288,7 @@ def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collec
     # 挂载工具元数据，供 Agent 执行记录使用
     knowledge_retrieval_tool._tool_meta = {
         "tool_type": "knowledge_retrieval",
+        "sources": [{"id": item["id"], "name": item["name"], "knowledge_name": item["name"]} for item in (kb_names or [])],
     }
     return knowledge_retrieval_tool
 
@@ -403,6 +404,22 @@ class AgentRunService:
                     Knowledge.id.in_(kb_ids)
                 ).all()
                 kb_names = [{"id": str(r.id), "name": r.name} for r in rows]
+
+                # 对于共享知识库，chunk元数据中的knowledge_id是source_kb_id，
+                # 需要将source_kb_id也映射到名称，否则会显示为ID
+                from app.models.knowledgeshare_model import KnowledgeShare
+                target_kb_ids = [uuid.UUID(kid) for kid in kb_ids]
+                share_rows = self.db.query(
+                    KnowledgeShare.source_kb_id, KnowledgeShare.target_kb_id
+                ).filter(
+                    KnowledgeShare.target_kb_id.in_(target_kb_ids)
+                ).all()
+                if share_rows:
+                    id_to_name = {str(r.id): r.name for r in rows}
+                    for sr in share_rows:
+                        source_name = id_to_name.get(str(sr.target_kb_id))
+                        if source_name:
+                            kb_names.append({"id": str(sr.source_kb_id), "name": source_name})
             except Exception:
                 kb_names = [{"id": kid, "name": kid} for kid in kb_ids]
 
@@ -1298,6 +1315,10 @@ class AgentRunService:
 
         except Exception as e:
             logger.error("流式 Agent 调用失败", extra={"error": str(e)}, exc_info=True)
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
             # 保存失败的消息，使前端可以展示失败状态
             if not sub_agent:
                 try:
