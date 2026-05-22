@@ -801,6 +801,7 @@ class WorkflowService:
             role="user",
             content=human_message,
             meta_data=human_meta,
+            sync_memory=False,
         )
         self.conversation_service.add_message(
             **({"message_id": message_id} if message_id else {}),
@@ -808,6 +809,7 @@ class WorkflowService:
             role="assistant",
             content="",
             meta_data={"error": error},
+            sync_memory=False,
         )
 
     def _get_history_info(self, conversation_id: uuid.UUID) -> tuple[dict, list] | None:
@@ -1026,7 +1028,8 @@ class WorkflowService:
                         conversation_id=conversation_id_uuid,
                         role="assistant",
                         content=statement,
-                        meta_data={"suggested_questions": suggested_questions}
+                        meta_data={"suggested_questions": suggested_questions},
+                        sync_memory=False,
                     )
                     # 注入到 conv_messages，让 LLM 感知开场白
                     input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
@@ -1070,7 +1073,8 @@ class WorkflowService:
                     conversation_id=conversation_id_uuid,
                     role="user",
                     content=human_message,
-                    meta_data=human_meta
+                    meta_data=human_meta,
+                    sync_memory=False,
                 )
                 # 过滤 citations
                 citations = result.get("citations", [])
@@ -1093,7 +1097,8 @@ class WorkflowService:
                     conversation_id=conversation_id_uuid,
                     role="assistant",
                     content=assistant_message,
-                    meta_data=assistant_meta
+                    meta_data=assistant_meta,
+                    sync_memory=False,
                 )
                 self.update_execution_status(
                     execution.execution_id,
@@ -1343,7 +1348,8 @@ class WorkflowService:
                         conversation_id=conversation_id_uuid,
                         role="assistant",
                         content=statement,
-                        meta_data={"suggested_questions": suggested_questions}
+                        meta_data={"suggested_questions": suggested_questions},
+                        sync_memory=False,
                     )
                     # 注入到 conv_messages，让 LLM 感知开场白
                     input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
@@ -1396,7 +1402,8 @@ class WorkflowService:
                             conversation_id=conversation_id_uuid,
                             role="user",
                             content=human_message,
-                            meta_data=human_meta
+                            meta_data=human_meta,
+                            sync_memory=False,
                         )
                         # 过滤 citations
                         citations = event.get("data", {}).get("citations", [])
@@ -1419,7 +1426,8 @@ class WorkflowService:
                             conversation_id=conversation_id_uuid,
                             role="assistant",
                             content=assistant_message,
-                            meta_data=assistant_meta
+                            meta_data=assistant_meta,
+                            sync_memory=False,
                         )
                         self.update_execution_status(
                             execution.execution_id,

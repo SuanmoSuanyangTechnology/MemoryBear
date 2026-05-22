@@ -174,7 +174,7 @@ class MinerUParser(RAGPdfParser):
             self._run_mineru_executable(input_path, output_dir, method, backend, lang, server_url, callback)
 
     def _run_mineru_api(self, input_path: Path, output_dir: Path, method: str = "auto", backend: str = "pipeline", lang: Optional[str] = None, callback: Optional[Callable] = None):
-        OUTPUT_ZIP_PATH = os.path.join(str(output_dir), "output.zip")
+        OUTPUT_ZIP_PATH = tempfile.mktemp(suffix=".zip", prefix="mineru_zip_")
 
         pdf_file_path = str(input_path)
 
@@ -455,9 +455,9 @@ class MinerUParser(RAGPdfParser):
         temp_pdf = None
         created_tmp_dir = False
 
-        # remove spaces, or mineru crash, and _read_output fail too
+        # Sanitize filename: remove chars that cause API/handler mismatches
         file_path = Path(filepath)
-        pdf_file_name = file_path.stem.replace(" ", "") + ".pdf"
+        pdf_file_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', file_path.stem) + ".pdf"
         pdf_file_path_valid = os.path.join(file_path.parent, pdf_file_name)
 
         if binary:

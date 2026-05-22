@@ -2624,6 +2624,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         'llm.messages': 'Messages',
         'llm.vision_input': 'Vision Variable',
         'end.output': 'Output',
+        'knowledge-retrieval.query': 'Query Variable',
         'knowledge-retrieval.knowledge_retrieval': 'Knowledge bases',
         'parameter-extractor.model_id': 'Model',
         'parameter-extractor.text': 'Input variable',

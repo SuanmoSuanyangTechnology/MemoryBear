@@ -177,6 +177,7 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           query: {
             type: 'variableList',
+            required: true,
           },
           knowledge_retrieval: {
             type: 'knowledge',

@@ -22,7 +22,7 @@ interface VariableSelectProps {
   placeholder?: string;
   variant?: 'outlined' | 'borderless' | 'filled';
   className?: string;
-  onChange?: (value: string | string[], option: Suggestion | Suggestion[] | undefined) => void;
+  onChange?: (value?: string | string[], option?: Suggestion | Suggestion[] | undefined) => void;
 }
 
 const VariableSelect: FC<VariableSelectProps> = ({
@@ -277,7 +277,7 @@ const VariableSelect: FC<VariableSelectProps> = ({
 
   const handleClear = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onChange?.(multiple ? [] : '', multiple ? [] : undefined);
+    onChange?.(multiple ? [] : undefined, multiple ? [] : undefined);
   };
   const sep = <span className="rb:text-[#DFE4ED] rb:mx-0.5">/</span>;
   const isConversation = (parentOfSelected ?? selectedSuggestion)?.group === 'CONVERSATION' ||

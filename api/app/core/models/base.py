@@ -148,11 +148,10 @@ class RedBearModelFactory:
             if ModelCapability.THINKING in config.capability:
                 if provider == ModelProvider.VOLCANO:
                     # Volcano 思考仅流式支持，非流式不传任何 thinking 参数
-                    if is_streaming:
-                        thinking_config: Dict[str, Any] = {"type": "enabled" if config.deep_thinking else "disabled"}
-                        if config.deep_thinking and config.thinking_budget_tokens:
-                            thinking_config["budget_tokens"] = config.thinking_budget_tokens
-                        params["extra_body"] = {"thinking": thinking_config}
+                    thinking_config: Dict[str, Any] = {"type": "enabled" if config.deep_thinking else "disabled"}
+                    if config.deep_thinking and config.thinking_budget_tokens:
+                        thinking_config["budget_tokens"] = config.thinking_budget_tokens
+                    params["extra_body"] = {"thinking": thinking_config}
                 else:
                     extra_body = params.setdefault("extra_body", {})
                     if config.deep_thinking and is_streaming:

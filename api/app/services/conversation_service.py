@@ -1,5 +1,4 @@
 """会话服务"""
-import os
 import uuid
 from datetime import datetime, timedelta
 from typing import Annotated
@@ -8,6 +7,7 @@ from typing import Optional, List, Tuple, Dict, Any
 import json_repair
 from fastapi import Depends
 from jinja2 import Template
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -24,6 +24,7 @@ from app.schemas.conversation_schema import ConversationOut
 from app.schemas.model_schema import ModelInfo
 from app.services import workspace_service
 from app.services.model_service import ModelConfigService
+from app.services.prompt import prompt_manager
 
 logger = get_business_logger()
 
@@ -184,6 +185,8 @@ class ConversationService:
             meta_data: Optional[dict] = None,
             message_id: Optional[uuid.UUID] = None,
             status: str = "completed",
+            sync_memory: bool = True,
+            should_memorize: bool = True,
     ) -> Message:
         """
         Add a message to a conversation using UnitOfWork.
@@ -195,6 +198,11 @@ class ConversationService:
             meta_data (Optional[dict]): Optional metadata.
             message_id (Optional[uuid.UUID]): Optional custom message UUID.
             status (str): Message status, default "completed".
+            should_memorize (bool): 会话级记忆开关——用户在会话中切换的"记忆"按钮状态。
+                True → memory_messages.should_memorize=true，会触发 Write_Pipeline；
+                False → memory_messages.should_memorize=false，cursor 只推进不萃取。
+                由调用方根据请求 payload.memory 透传。
+                注：仅当 sync_memory=True 时生效；sync_memory=False 时本参数被忽略。
 
         Returns:
             Message: Newly created Message instance.
@@ -222,6 +230,9 @@ class ConversationService:
                         content[:50] + ("..." if len(content) > 50 else "")
                 )
 
+            if sync_memory:
+                self._dispatch_memory_sync(message, conversation, should_memorize)
+
             self.db.commit()
             self.db.refresh(message)
 
@@ -232,6 +243,8 @@ class ConversationService:
                     "message_id": str(message.id),
                     "role": role,
                     "content_length": len(content),
+                    "sync_memory": sync_memory,
+                    "should_memorize": should_memorize,
                 },
             )
 
@@ -249,6 +262,66 @@ class ConversationService:
             raise BusinessException(
                 f"Error adding message, conversation_id={conversation_id}",
                 code=BizCode.DB_ERROR
+            )
+
+    @staticmethod
+    def _dispatch_memory_sync(
+        message: Message,
+        conversation: Conversation,
+        should_memorize: bool = True,
+    ) -> None:
+        """触发 MemoryService.sync_message 把消息同步到 memory_messages 表。
+
+        fire-and-forget：失败仅记录 warning，不影响 messages 表的主写入流程。
+        在已有事件循环中走 ensure_future（附加 done_callback 记录异常），
+        否则 run_until_complete。
+
+        Args:
+            message: Message 实例（尚未 commit）
+            conversation: 该消息所属的 Conversation，用于读取 app_id / workspace_id /
+                is_draft / user_id（即 end_user_id）
+            should_memorize: 透传给 MemoryMessage.should_memorize（会话级记忆开关）
+        """
+        try:
+            import asyncio
+            from app.core.memory.memory_service import MemoryService
+
+            workspace_id = str(conversation.workspace_id) if conversation.workspace_id else ""
+            end_user_id = str(conversation.user_id) if conversation.user_id else ""
+            coro = MemoryService.sync_message(
+                conversation_id=str(message.conversation_id),
+                message=message,
+                app_id=str(conversation.app_id),
+                is_draft=conversation.is_draft,
+                config_id="",
+                workspace_id=workspace_id,
+                end_user_id=end_user_id,
+                should_memorize=should_memorize,
+            )
+
+            def _on_task_done(task: asyncio.Task) -> None:
+                """回调：记录 fire-and-forget 协程中未被捕获的异常。"""
+                if task.cancelled():
+                    return
+                exc = task.exception()
+                if exc is not None:
+                    logger.warning(
+                        f"[ConversationService] MemoryService.sync_message 异步执行失败: "
+                        f"conv={message.conversation_id}, err={exc}",
+                        exc_info=exc,
+                    )
+
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                task = asyncio.ensure_future(coro)
+                task.add_done_callback(_on_task_done)
+            else:
+                loop.run_until_complete(coro)
+        except Exception as e:
+            logger.warning(
+                f"[ConversationService] MemoryService.sync_message 调度失败（不影响主流程）: "
+                f"conv={message.conversation_id}, err={e}",
+                exc_info=True,
             )
 
     def get_messages(
@@ -693,14 +766,9 @@ class ConversationService:
                 takeaways=[],
                 info_score=0,
             )
-        prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prompt')
-        with open(os.path.join(prompt_path, 'conversation_summary_system.jinja2'), 'r', encoding='utf-8') as f:
-            system_prompt = f.read()
-        rendered_system_message = Template(system_prompt).render()
-
-        with open(os.path.join(prompt_path, 'conversation_summary_user.jinja2'), 'r', encoding='utf-8') as f:
-            user_prompt = f.read()
-        rendered_user_message = Template(user_prompt).render(
+        rendered_system_message = prompt_manager.render('conversation_summary_system')
+        rendered_user_message = prompt_manager.render(
+            'conversation_summary_user',
             language=language,
             conversation=str(conversation_messages)
         )

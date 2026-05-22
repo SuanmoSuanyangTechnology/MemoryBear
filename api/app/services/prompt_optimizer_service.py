@@ -1,9 +1,8 @@
-import os
 import re
 import uuid
 from typing import Any, AsyncGenerator
+import langid
 
-from jinja2 import Template
 from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
@@ -23,6 +22,7 @@ from app.repositories.prompt_optimizer_repository import (
 )
 from app.schemas.prompt_optimizer_schema import OptimizePromptResult
 from app.services.model_service import ModelApiKeyService
+from app.services.prompt import prompt_manager
 
 logger = get_business_logger()
 
@@ -188,23 +188,22 @@ class PromptOptimizerService:
             capability=api_config.capability,
         ), type=ModelType(model_config.type))
         try:
-            prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prompt')
-            with open(os.path.join(prompt_path, 'prompt_optimizer_system.jinja2'), 'r', encoding='utf-8') as f:
-                opt_system_prompt = f.read()
-            rendered_system_message = Template(opt_system_prompt).render(skill=skill)
-
-            with open(os.path.join(prompt_path, 'prompt_optimizer_user.jinja2'), 'r', encoding='utf-8') as f:
-                opt_user_prompt = f.read()
+            rendered_system_message = prompt_manager.render(
+                'prompt_optimizer_system',
+                skill=skill,
+                language=langid.classify(user_require)[0]
+            )
+            rendered_user_message = prompt_manager.render(
+                'prompt_optimizer_user',
+                current_prompt=current_prompt,
+                user_require=user_require
+            )
         except FileNotFoundError:
-            raise BusinessException(message="System prompt template not found", code=BizCode.NOT_FOUND)
-
+            logger.error("Prompt optimizer not found.", exc_info=True)
+            raise BusinessException(message="Pompt template not found", code=BizCode.NOT_FOUND)
         except Exception as e:
-            logger.error(f"Failed to load system prompt template: {e}")
+            logger.error(f"Failed to load prompt template.", exc_info=True)
             raise BusinessException(message="Internal server error", code=BizCode.INTERNAL_ERROR)
-        rendered_user_message = Template(opt_user_prompt).render(
-            current_prompt=current_prompt,
-            user_require=user_require
-        )
 
         # build message
         messages = [

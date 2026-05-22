@@ -269,6 +269,9 @@ class Settings:
     IMPLICIT_EMOTIONS_UPDATE_HOUR: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_HOUR", "2"))
     # implicit_emotions_update: 每天几分执行（分钟，0-59）
     IMPLICIT_EMOTIONS_UPDATE_MINUTE: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_MINUTE", "0"))  
+    LAYER2_REFLECTION_INTERVAL_MINUTES: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="Layer 2 reflection interval in minutes, must be >= 1")]
+    ).validate_python(int(os.getenv("LAYER2_REFLECTION_INTERVAL_MINUTES", "10")))
     # Memory Module Configuration (internal)
     
     MEMORY_OUTPUT_DIR: str = os.getenv("MEMORY_OUTPUT_DIR", "logs/memory-output")

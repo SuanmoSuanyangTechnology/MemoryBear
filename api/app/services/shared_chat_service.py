@@ -499,7 +499,8 @@ class SharedChatService:
             self.conversation_service.add_message(
                 conversation_id=conversation.id,
                 role="user",
-                content=message
+                content=message,
+                should_memorize=memory,
             )
 
             self.conversation_service.add_message(
@@ -509,7 +510,8 @@ class SharedChatService:
                 meta_data={
                     "model": api_key_obj.model_name,
                     "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens}
-                }
+                },
+                should_memorize=memory,
             )
 
             ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
@@ -650,7 +652,8 @@ class SharedChatService:
         self.conversation_service.add_message(
             conversation_id=conversation.id,
             role="user",
-            content=message
+            content=message,
+            should_memorize=memory,
         )
 
         self.conversation_service.add_message(
@@ -661,7 +664,8 @@ class SharedChatService:
                 "mode": result.get("mode"),
                 "elapsed_time": result.get("elapsed_time"),
                 "sub_results": result.get("sub_results")
-            }
+            },
+            should_memorize=memory,
         )
 
         return {
@@ -787,7 +791,8 @@ class SharedChatService:
             self.conversation_service.add_message(
                 conversation_id=conversation.id,
                 role="user",
-                content=message
+                content=message,
+                should_memorize=memory,
             )
 
             self.conversation_service.add_message(
@@ -796,7 +801,8 @@ class SharedChatService:
                 content=full_content,
                 meta_data={
                     "elapsed_time": elapsed_time
-                }
+                },
+                should_memorize=memory,
             )
 
             logger.info(

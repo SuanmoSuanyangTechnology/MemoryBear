@@ -703,7 +703,7 @@ const CreateDataset = () => {
           </div>
           {source === 'csv' &&
             <a
-              href="@/assets/csv_template.csv"
+              href="csv_template.csv"
               download="csv_template.csv"
               className='rb:mx-6 rb:text-sm rb:font-medium rb:text-gray-800 rb:-mt-6!'
             >
