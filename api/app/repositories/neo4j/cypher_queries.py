@@ -2079,3 +2079,30 @@ ON CREATE SET r.id = edge.id,
     r.created_at = edge.created_at
 RETURN elementId(r) AS uuid
 """
+# --- Reflection Engine Layer 2: Description Merge ---
+
+# Find entities whose description has accumulated >= min_fragments
+REFLECTION_DESC_MERGE_CANDIDATES = """
+MATCH (e:ExtractedEntity)
+WHERE e.end_user_id = $end_user_id
+  AND e.description IS NOT NULL
+  AND e.description <> ""
+  AND size(split(e.description, '；')) >= $min_fragments
+RETURN e.id AS entity_id,
+       e.name AS name,
+       e.entity_type AS entity_type,
+       e.description AS description,
+       e.description_summary AS description_summary,
+       e.description_timeline AS description_timeline
+ORDER BY size(split(e.description, '；')) DESC
+LIMIT $batch_size
+"""
+
+# Clear description, write summary and timeline
+REFLECTION_DESC_UPDATE = """
+MATCH (e:ExtractedEntity {id: $entity_id})
+SET e.description = "",
+    e.description_summary = $summary,
+    e.description_timeline = $timeline
+RETURN e.id
+"""

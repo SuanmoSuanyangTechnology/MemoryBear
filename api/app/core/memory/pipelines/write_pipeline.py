@@ -172,6 +172,19 @@ class WritePipeline:
         if not ref_id:
             ref_id = uuid.uuid4().hex
 
+        # 根据用户消息内容自动检测语言，确保输出语言与输入语言一致
+        import re
+        import langid
+        user_content = " ".join(
+            re.sub(r"<input-file-summary>.*?</input-file-summary>", "", msg.get("content", ""), flags=re.DOTALL).strip()
+            for msg in messages
+            if isinstance(msg, dict) and msg.get("role") == "user" and msg.get("content")
+        )
+        if user_content:
+            detected = langid.classify(user_content)[0]
+            self.language = detected if detected in ("zh", "en") else "en"
+            logger.info(f"[LanguageDetect] detected={detected}, language={self.language}, text_len={len(user_content)}")
+
         mode = "试运行" if is_pilot_run else "正式"
         extraction_result = None
 
@@ -658,6 +671,7 @@ class WritePipeline:
                         if self.memory_config.embedding_model_id
                         else None
                     ),
+                    "language": self.language,
                 },
                 priority=3,
             )

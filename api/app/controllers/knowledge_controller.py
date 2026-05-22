@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
 from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.logging_config import get_api_logger
 from app.core.rag.common import settings
 from app.core.rag.integrations.feishu.client import FeishuAPIClient
@@ -273,10 +274,7 @@ async def kb_batch_download(
         db, knowledge_id=kb_id, current_user=current_user
     )
     if not db_knowledge:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="知识库不存在或无权访问",
-        )
+        raise BusinessException("知识库不存在或无权访问", BizCode.NOT_FOUND)
 
     files = db.query(file_model.File).filter(
         file_model.File.kb_id == kb_id,
@@ -285,10 +283,7 @@ async def kb_batch_download(
     ).all()
 
     if not files:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="该知识库下没有可下载的文件",
-        )
+        raise BusinessException("该知识库下没有可下载的文件", BizCode.NOT_FOUND)
 
     # 预取 QA 文档内容
     pre_fetched: dict[str, bytes] = {}

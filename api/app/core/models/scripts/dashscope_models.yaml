@@ -241,6 +241,23 @@ models:
   - 翻译模型
   - agent-thought
   logo: dashscope
+- name: qwen-plus
+  type: llm
+  provider: dashscope
+  description: qwen-plus大语言模型，支持多工具调用、智能体思考、流式工具调用，131072上下文窗口，对话模式，支持联网搜索
+  is_deprecated: false
+  is_official: true
+  capability:
+  - thinking
+  - json_output
+  - function_call
+  is_omni: false
+  tags:
+  - 大语言模型
+  - multi-tool-call
+  - agent-thought
+  - stream-tool-call
+  logo: dashscope
 - name: qwen-plus-0112
   type: llm
   provider: dashscope

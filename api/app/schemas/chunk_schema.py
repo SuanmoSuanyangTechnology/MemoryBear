@@ -78,6 +78,7 @@ class ChunkRetrieve(BaseModel):
     vector_similarity_weight: float | None = Field(None)
     top_k: int | None = Field(None)
     retrieve_type: RetrieveType | None = Field(None)
+    rerank_score_threshold: float | None = Field(None, ge=0, le=1)
 
 
 class ChunkBatchCreate(BaseModel):

@@ -114,7 +114,7 @@ const MySharing: React.FC = () => {
 
   return (
     <BodyWrapper loading={loading} empty={data.length === 0}>
-      <Row gutter={12}>
+      <Row gutter={12} wrap={false}>
         <Col flex="384px">
           <Flex vertical gap={12}>
             {grouped.map(({ workspace, items }) => (
