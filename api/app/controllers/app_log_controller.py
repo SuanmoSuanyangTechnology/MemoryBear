@@ -9,7 +9,7 @@ from app.core.logging_config import get_business_logger
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user, cur_workspace_access_guard
-from app.schemas.app_log_schema import AppLogConversation, AppLogConversationDetail, AppLogMessage
+from app.schemas.app_log_schema import AppLogConversation, AppLogConversationDetail, AppLogMessage, LogFileInfo
 from app.schemas.response_schema import PageData, PageMeta
 from app.services.app_service import AppService
 from app.services.app_log_service import AppLogService
@@ -52,7 +52,6 @@ def list_app_logs(
         pagesize=pagesize,
         is_draft=is_draft,
         keyword=keyword,
-        app_type=app.type,
     )
 
     items = [AppLogConversation.model_validate(c) for c in conversations]
@@ -98,8 +97,29 @@ def get_app_log_detail(
         # 工作流：已经是 AppLogMessage 实例
         msg_list = messages
     else:
-        # Agent：ORM Message 对象逐个转换
-        msg_list = [AppLogMessage.model_validate(m) for m in messages]
+        # Agent：ORM Message 对象逐个转换，提取 files
+        msg_list = []
+        for m in messages:
+            files = []
+            if isinstance(m.meta_data, dict) and "files" in m.meta_data:
+                for f in m.meta_data["files"]:
+                    if isinstance(f, dict) and f.get("url"):
+                        files.append(LogFileInfo(
+                            type=f.get("type", ""),
+                            url=f["url"],
+                            name=f.get("name"),
+                            size=f.get("size"),
+                            file_type=f.get("file_type"),
+                        ))
+            msg_list.append(AppLogMessage(
+                id=m.id,
+                conversation_id=m.conversation_id,
+                role=m.role,
+                content=m.content,
+                meta_data=m.meta_data,
+                files=files,
+                created_at=m.created_at,
+            ))
 
     detail = AppLogConversationDetail(
         **base.model_dump(),

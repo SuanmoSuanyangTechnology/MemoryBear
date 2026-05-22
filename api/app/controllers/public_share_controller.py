@@ -14,6 +14,7 @@ from app.core.quota_manager import check_end_user_quota
 from app.core.response_utils import success, fail
 from app.db import get_db, get_db_read
 from app.dependencies import get_share_user_id, ShareTokenData
+from app.models.annotation_model import HitLogSource
 from app.models.app_model import AppType
 from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
@@ -542,6 +543,7 @@ async def chat(
             agent_config.model_parameters["deep_thinking"] = False
 
         if payload.stream:
+            source = HitLogSource.EXTERNAL
             async def event_generator():
                 async for event in app_chat_service.agent_chat_stream(
                         message=payload.message,
@@ -554,7 +556,8 @@ async def chat(
                         storage_type=storage_type,
                         user_rag_memory_id=user_rag_memory_id,
                         workspace_id=workspace_id,
-                        files=payload.files  # 传递多模态文件
+                        files=payload.files,  # 传递多模态文件
+                        source=source
                 ):
                     yield event
 
@@ -567,6 +570,7 @@ async def chat(
                     "X-Accel-Buffering": "no"
                 }
             )
+        source = HitLogSource.EXTERNAL
         result = await app_chat_service.agent_chat(
             message=payload.message,
             conversation_id=conversation.id,  # 使用已创建的会话 ID
@@ -578,7 +582,8 @@ async def chat(
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
             workspace_id=workspace_id,
-            files=payload.files  # 传递多模态文件
+            files=payload.files,  # 传递多模态文件
+            source=source
         )
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type == AppType.MULTI_AGENT:
@@ -633,6 +638,7 @@ async def chat(
                 config.id = source_config.id
         config.id = uuid.UUID(config.id)
         if payload.stream:
+            source = HitLogSource.EXTERNAL
             async def event_generator():
                 async for event in app_chat_service.workflow_chat_stream(
                         message=payload.message,
@@ -648,7 +654,8 @@ async def chat(
                         app_id=release.app_id,
                         workspace_id=workspace_id,
                         release_id=release.id,
-                        public=True
+                        public=True,
+                        source=source
                 ):
                     event_type = event.get("event", "message")
                     event_data = event.get("data", {})
@@ -668,6 +675,7 @@ async def chat(
             )
 
         # 多 Agent 非流式返回
+        source = HitLogSource.EXTERNAL
         result = await app_chat_service.workflow_chat(
             message=payload.message,
             conversation_id=conversation.id,  # 使用已创建的会话 ID
@@ -681,7 +689,8 @@ async def chat(
             user_rag_memory_id=user_rag_memory_id,
             app_id=release.app_id,
             workspace_id=workspace_id,
-            release_id=release.id
+            release_id=release.id,
+            source=source
         )
         logger.debug(
             "工作流试运行返回结果",

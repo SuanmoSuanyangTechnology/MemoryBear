@@ -440,26 +440,25 @@ class ConversationService:
 
         history = []
         for msg in messages:
+            history_files = msg.meta_data.get("history_files", {}) if msg.meta_data else {}
+
+            has_files = bool(history_files and current_provider and current_is_omni is not None)
+            if has_files:
+                stored_provider = history_files.get("provider")
+                stored_is_omni = history_files.get("is_omni")
+
+                if stored_provider != current_provider or stored_is_omni != current_is_omni:
+                    continue
+
+                content = [{"type": "text", "text": msg.content}]
+                content.extend(history_files.get("content", []))
+            else:
+                content = msg.content
+
             msg_dict = {
                 "role": msg.role,
-                "content": [{"type": "text", "text": msg.content}]
+                "content": content
             }
-
-            # 处理用户消息中的多模态文件
-            if msg.role == "user" and msg.meta_data:
-                history_files = msg.meta_data.get("history_files", {})
-
-                if history_files and current_provider and current_is_omni is not None:
-                    # 检查是否需要重新处理文件
-                    stored_provider = history_files.get("provider")
-                    stored_is_omni = history_files.get("is_omni")
-
-                    # 如果provider或is_omni不匹配，需要重新处理
-                    if stored_provider != current_provider or stored_is_omni != current_is_omni:
-                        continue
-
-                    # provider和is_omni匹配，直接使用存储的内容
-                    msg_dict["content"].extend(history_files.get("content"))
 
             history.append(msg_dict)
 
