@@ -25,6 +25,7 @@ from app.db import get_db
 from app.dependencies import get_current_user
 from app.models import knowledge_model
 from app.models import file_model
+from app.models.document_model import Document
 from app.models.user_model import User
 from app.schemas import knowledge_schema
 from app.schemas import file_schema
@@ -245,6 +246,44 @@ async def get_knowledge(
     except Exception as e:
         api_logger.error(f"Knowledge base query failed: knowledge_id={knowledge_id} - {str(e)}")
         raise
+
+
+@router.get("/{knowledge_id}/chunk-policy", response_model=ApiResponse)
+async def get_knowledge_chunk_policy(
+        knowledge_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """
+    查询知识库的分块策略锁定状态
+    - 如果该知识库下已有文档使用父子分块策略，返回 parent_child_mode: true
+    - 前端据此判断新上传文档是否允许切换分块策略
+    """
+    api_logger.info(f"Query knowledge base chunk policy: knowledge_id={knowledge_id}, username: {current_user.username}")
+
+    # 1. 验证知识库存在
+    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=knowledge_id, current_user=current_user)
+    if not db_knowledge:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The knowledge base does not exist or access is denied"
+        )
+
+    # 2. 查询该知识库下所有文档的 parser_config
+    try:
+        documents = db.query(Document).filter(Document.kb_id == knowledge_id).all()
+        has_parent_child = any(
+            doc.parser_config.get("parent_child_mode", False)
+            for doc in documents
+        )
+        api_logger.info(f"Knowledge base chunk policy: knowledge_id={knowledge_id}, parent_child_mode={has_parent_child}, doc_count={len(documents)}")
+        return success(data={"parent_child_mode": has_parent_child}, msg="Successfully obtained knowledge base chunk policy")
+    except Exception as e:
+        api_logger.error(f"Failed to query knowledge base chunk policy: knowledge_id={knowledge_id} - {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to query chunk policy: {str(e)}"
+        )
 
 
 @router.put("/{knowledge_id}", response_model=ApiResponse)
