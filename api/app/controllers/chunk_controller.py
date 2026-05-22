@@ -294,7 +294,10 @@ async def get_preview_chunks_hierarchy(
 
     # 如果传入了覆盖参数，直接合并
     if parser_config_param and isinstance(parser_config_param, dict):
-        parser_config.update(parser_config_param)
+        # 兼容 {"parser_config": {...}} 和直接 {...} 两种传法
+        actual_config = parser_config_param.get("parser_config", parser_config_param)
+        if isinstance(actual_config, dict):
+            parser_config.update(actual_config)
 
     chunk_mode = parser_config.get("chunk_mode", "normal")
     parent_child_mode = parser_config.get("parent_child_mode", False)
