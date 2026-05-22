@@ -2,13 +2,13 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-20 15:55:16
+ * @Last Modified time: 2026-05-22 14:10:41
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
 import type { Config, AppSharingForm, AnnotationSettingForm, AnnotationForm } from '@/views/ApplicationConfig/types'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
-import type { QueryParams } from '@/views/Conversation/types'
+import type { QueryParams, ReportMessageData } from '@/views/Conversation/types'
 import type { WorkflowConfig } from '@/views/Workflow/types'
 
 // Application list
@@ -140,6 +140,61 @@ export const completeImportWorkflow = (data: { temp_id: string; name?: string; d
 // Get experience config
 export const getExperienceConfig = (share_token: string) => {
   return request.get(`/public/share/config`, {}, {
+    headers: {
+      'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
+    }
+  })
+}
+// Generate conversation share link
+export const generateShareLink = (share_token: string, conversation_id: string, data: { allow_copy: boolean; password?: string; expire_hours?: number }) => {
+  return request.post(`/public/share/conversations/${conversation_id}/share`, data, {
+    headers: {
+      'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
+    }
+  })
+}
+// Access conversation via share link
+export const accessShareConversation = (share_uuid: string) => {
+  return request.get(`/apps/share/${share_uuid}`)
+}
+// Delete single message
+export const deleteConversationMessage = (share_token: string, message_id: string) => {
+  return request.delete(`/public/share/messages/${message_id}`, {
+    headers: {
+      'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
+    }
+  })
+}
+// Get report type enum
+export const reportTypesUrl = `/apps/enums/message_report_types`
+export const getReportTypes = () => {
+  return request.get(reportTypesUrl)
+}
+// Report content in message
+export const reportMessage = (share_token: string, message_id: string, data: ReportMessageData) => {
+  return request.post(`/public/share/messages/${message_id}/report`, data, {
+    headers: {
+      'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
+    }
+  })
+}
+// Regenerate AI response
+export const regenerateMessage = (
+  message_id: string,
+  values: QueryParams,
+  onMessage: (data: SSEMessage[]) => void,
+  share_token: string,
+  onAbort?: (abort: () => void) => void
+) => {
+  return handleSSE(`/public/share/messages/${message_id}/regenerate`, values, onMessage, {
+    headers: {
+      'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
+    }
+  }, onAbort)
+}
+// Switch to specified version message
+export const switchMessageVersion = (share_token: string, message_id: string, version: number) => {
+  return request.post(`/public/share/messages/${message_id}/switch-version/${version}`, { version }, {
     headers: {
       'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
     }
