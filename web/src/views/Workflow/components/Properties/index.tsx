@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-22 15:09:54
+ * @Last Modified time: 2026-05-22 15:14:47
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -721,7 +721,7 @@ const Properties: FC<PropertiesProps> = ({
                           : []
 
                         return (
-                          <div className="rb:text-[12px] rb:leading-4.5">
+                          <div key={key} className="rb:text-[12px] rb:leading-4.5">
                             <Flex align="center" className="rb:font-medium rb:cursor-pointer rb:mb-2!" onClick={() => setAdvancedSettingsCollapsed(!advancedSettingsCollapsed)}>
                               {t('workflow.config.parameter-extractor.advanced_settings')}
                               <div
