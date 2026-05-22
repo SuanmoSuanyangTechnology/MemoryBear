@@ -65,10 +65,35 @@ class ApiKeyService:
                         BizCode.BAD_REQUEST
                     )
 
-            # SERVICE 类型的 resource_id 指向 workspace，非应用，跳过应用发布校验
-            if data.resource_id and data.type != ApiKeyType.SERVICE.value:
+            if data.type == ApiKeyType.SERVICE.value:
+                if "app" in data.scopes:
+                    raise BusinessException("SERVICE 类型 API Key 的权限范围不能包含 app", BizCode.BAD_REQUEST)
+                if not data.resource_id:
+                    raise BusinessException("SERVICE 类型 API Key 必须指定 resource_id（指向 workspace）", BizCode.BAD_REQUEST)
+            else:
+                if "app" not in data.scopes:
+                    raise BusinessException(f"{data.type} 类型 API Key 的权限范围必须包含 app", BizCode.BAD_REQUEST)
+                if not data.resource_id:
+                    raise BusinessException(f"{data.type} 类型 API Key 必须指定 resource_id（指向应用）", BizCode.BAD_REQUEST)
+
+                from app.models.app_model import AppType
+
+                type_app_type_map = {
+                    ApiKeyType.AGENT.value: AppType.AGENT.value,
+                    ApiKeyType.CLUSTER.value: AppType.MULTI_AGENT.value,
+                    ApiKeyType.WORKFLOW.value: AppType.WORKFLOW.value,
+                }
+                expected_app_type = type_app_type_map.get(data.type)
+
                 app = db.get(App, data.resource_id)
-                if not app or not app.current_release_id:
+                if not app:
+                    raise BusinessException("关联的应用不存在", BizCode.BAD_REQUEST)
+                if expected_app_type and app.type != expected_app_type:
+                    raise BusinessException(
+                        f"API Key 类型 {data.type} 与应用类型 {app.type} 不匹配，期望应用类型为 {expected_app_type}",
+                        BizCode.BAD_REQUEST
+                    )
+                if not app.current_release_id:
                     raise BusinessException("该应用未发布", BizCode.APP_NOT_PUBLISHED)
 
             # 生成 API Key
