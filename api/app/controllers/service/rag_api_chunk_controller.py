@@ -55,6 +55,39 @@ async def get_preview_chunks(
                                                      current_user=current_user)
 
 
+@router.get("/{kb_id}/{document_id}/preview", response_model=ApiResponse)
+@require_api_key(scopes=["rag"])
+async def get_preview_chunks_hierarchy(
+    kb_id: uuid.UUID,
+    document_id: uuid.UUID,
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+    page: int = Query(1, gt=0),
+    pagesize: int = Query(20, gt=0, le=100),
+    keywords: Optional[str] = Query(None, description="The keywords used to match chunk content")
+):
+    """
+    分页查询文档分块预览（嵌套结构）
+    - 支持普通分块、父子分块、QA 分块三种模式
+    - 返回嵌套的 DocumentChunk 结构，children 字段包含子块
+    """
+    # 0. Obtain the creator of the api key
+    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
+    current_user = api_key.creator
+    current_user.current_workspace_id = api_key_auth.workspace_id
+
+    return await chunk_controller.get_preview_chunks_hierarchy(
+        kb_id=kb_id,
+        document_id=document_id,
+        page=page,
+        pagesize=pagesize,
+        keywords=keywords,
+        db=db,
+        current_user=current_user
+    )
+
+
 @router.get("/{kb_id}/{document_id}/chunks", response_model=ApiResponse)
 @require_api_key(scopes=["rag"])
 async def get_chunks(
