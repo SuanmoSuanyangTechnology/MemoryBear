@@ -843,6 +843,24 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
     return res
 
 
+FULL_DOC_MAX_TOKENS = 10000
+
+
+def truncate_to_tokens(text: str, max_tokens: int) -> str:
+    """按 token 数截断文本，保留前半部分。使用二分查找定位截断点。"""
+    if num_tokens_from_string(text) <= max_tokens:
+        return text
+
+    low, high = 0, len(text)
+    while low < high:
+        mid = (low + high + 1) // 2
+        if num_tokens_from_string(text[:mid]) <= max_tokens:
+            low = mid
+        else:
+            high = mid - 1
+    return text[:low]
+
+
 def chunk_parent_child(
     filename, binary=None, from_page=0, to_page=100000,
     lang="Chinese", callback=None, vision_model=None, **kwargs
@@ -878,7 +896,19 @@ def chunk_parent_child(
     )
     logging.info(f"[ParentChild] child: token_num={child_token_num}, chunk_count={len(child_res)}")
 
-    # Build parents by merging consecutive children
+    parent_chunk_mode = parser_config.get("parent_chunk_mode", "paragraph")
+
+    # Full-doc mode: single parent chunk, truncated to FULL_DOC_MAX_TOKENS
+    if parent_chunk_mode == "full-doc":
+        all_texts = [child["content_with_weight"] for child in child_res]
+        full_text = "\n\n".join(all_texts)
+        truncated = truncate_to_tokens(full_text, FULL_DOC_MAX_TOKENS)
+        parent_res = [{"content_with_weight": truncated, "image": None}]
+        parent_id_map = {i: 0 for i in range(len(child_res))}
+        logging.info(f"[ParentChild] parent: mode=full-doc, max_tokens={FULL_DOC_MAX_TOKENS}, chunk_count=1")
+        return child_res, parent_res, parent_id_map
+
+    # Paragraph mode (default): merge consecutive children up to parent_token_num
     parent_res: list[dict] = []
     parent_id_map: dict[int, int] = {}
     buf_texts: list[str] = []
@@ -916,8 +946,7 @@ def chunk_parent_child(
     if buf_texts:
         flush_parent()
 
-    logging.info(f"[ParentChild] parent: token_num={parent_token_num}, chunk_count={len(parent_res)}")
-
+    logging.info(f"[ParentChild] parent: mode=paragraph, token_num={parent_token_num}, chunk_count={len(parent_res)}")
     return child_res, parent_res, parent_id_map
 
 
