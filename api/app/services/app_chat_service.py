@@ -546,8 +546,8 @@ class AppChatService:
                     meta_data={"usage": {}}
                 )
                 yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id)}, ensure_ascii=False)}\n\n"
-                yield f"event: message\ndata: {json.dumps({'content': annotation_match['answer']}, ensure_ascii=False)}\n\n"
-                yield f"event: done\ndata: {json.dumps({'elapsed_time': time.time() - start_time, 'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}}, ensure_ascii=False)}\n\n"
+                yield f"event: message\ndata: {json.dumps({'content': annotation_match['answer'], 'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
+                yield f"event: end\ndata: {json.dumps({'elapsed_time': time.time() - start_time, 'message_length': len(annotation_match['answer']), 'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}}, ensure_ascii=False)}\n\n"
                 return
 
             # 应用 features 配置

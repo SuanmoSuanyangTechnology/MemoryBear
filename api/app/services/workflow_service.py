@@ -1273,18 +1273,35 @@ class WorkflowService:
             execution.completed_at = datetime.datetime.now()
             self.db.commit()
 
-            yield {
-                "event": "annotation_hit",
-                "data": {**annotation_match, "conversation_id": str(conversation_id_uuid)}
+            start_internal_event = {
+                "event": "workflow_start",
+                "data": {
+                    "conversation_id": str(conversation_id_uuid),
+                    "message_id": str(message_id)
+                }
             }
+            start_event = self._emit(public, start_internal_event)
+            if start_event:
+                yield start_event
+
+            answer = annotation_match["answer"]
+            yield {
+                "event": "message",
+                "data": {
+                    "content": answer,
+                    "conversation_id": str(conversation_id_uuid),
+                }
+            }
+
             end_internal_event = {
                 "event": "workflow_end",
                 "data": {
                     "conversation_id": str(conversation_id_uuid),
-                    "answer": annotation_match["answer"],
+                    "output": answer,
                     "usage": {},
                     "elapsed_time": 0,
                     "status": "completed",
+                    "error": "",
                     "annotation_hit": {
                         "annotation_id": str(annotation_match["annotation_id"]),
                         "similarity": annotation_match["similarity"],

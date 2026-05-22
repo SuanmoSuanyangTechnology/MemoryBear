@@ -95,7 +95,7 @@ class LLMTopPConfig(BaseModel):
 
 class LLMTopKConfig(BaseModel):
     enable: bool = Field(default=False, description="是否启用取样数量")
-    value: int | None = Field(default=None, ge=1, le=100, description="取样数量（Top-k 采样）")
+    value: int | None = Field(default=None, ge=0, le=100, description="取样数量（Top-k 采样）")
 
 
 class LLMSeedConfig(BaseModel):
@@ -261,6 +261,13 @@ class LLMNodeConfig(BaseNodeConfig):
         default_factory=LLMErrorHandleConfig,
         description="LLM 异常处理配置",
     )
+
+    @field_validator("response_format", mode="before")
+    @classmethod
+    def coerce_response_format(cls, v):
+        if isinstance(v, str):
+            return LLMResponseFormatConfig(enable=True, value=v)
+        return v
 
     @field_validator("messages", "prompt")
     @classmethod

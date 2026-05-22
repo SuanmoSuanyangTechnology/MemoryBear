@@ -1171,14 +1171,21 @@ class AgentRunService:
                         content=annotation_match["answer"],
                         meta_data={"usage": {}}
                     )
-                    annotation_hit_data = {**annotation_match, "conversation_id": conversation_id}
-                    yield f"event: annotation_hit\ndata: {json.dumps(annotation_hit_data, default=str)}\n\n"
+                    yield self._format_sse_event("start", {
+                        "conversation_id": conversation_id,
+                        "timestamp": time.time()
+                    })
+                    yield self._format_sse_event("message", {
+                        "content": annotation_match["answer"],
+                        "conversation_id": conversation_id,
+                    })
                     end_data = {
                         "conversation_id": conversation_id,
                         "message": annotation_match["answer"],
                         "answer": annotation_match["answer"],
                         "usage": {},
                         "elapsed_time": elapsed_time,
+                        "message_length": len(annotation_match["answer"]),
                         "annotation_hit": {
                             "annotation_id": str(annotation_match["annotation_id"]),
                             "similarity": annotation_match["similarity"],
@@ -2810,21 +2817,6 @@ class AgentRunService:
                                     "step_id": event_data.get("step_id"),
                                     "name": event_data.get("name", ""),
                                     "error": event_data.get("error"),
-                                }))
-
-                            if event_type == "annotation_hit" and event_data:
-                                conv_id_from_annotation = event_data.get("conversation_id")
-                                if conv_id_from_annotation:
-                                    returned_conversation_id = conv_id_from_annotation
-                                await event_queue.put(self._format_sse_event("model_annotation_hit", {
-                                    "model_index": idx,
-                                    "model_config_id": model_config_id,
-                                    "label": model_label,
-                                    "conversation_id": returned_conversation_id,
-                                    "annotation_id": event_data.get("annotation_id"),
-                                    "question": event_data.get("question"),
-                                    "answer": event_data.get("answer"),
-                                    "similarity": event_data.get("similarity"),
                                 }))
 
                             # 从 end 事件中提取 features 输出字段
