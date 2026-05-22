@@ -641,7 +641,7 @@ export const en = {
       is_thinking: 'Deep Thinking Support',
       thinking_only: 'Only Thinking Support',
       json_output: 'Support JSON formatted output',
-      function_call: 'Tool Call/External Function Call',
+      function_call: 'Function/Tool Calling',
     },
     knowledgeBase: {
       home: 'Home',
@@ -2461,6 +2461,11 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           'object': 'Object',
           addParams: 'Add Extract Variable',
           promptPlaceholder: 'Write prompts here, type "{" to insert variables, type "insert" to insert',
+          advanced_settings: 'Advanced Settings',
+          inference_mode: 'Inference Mode',
+          inference_mode_tip: 'You can choose the inference mode based on the model\'s ability to handle Function calling or Prompt instructions.',
+          promptCall: 'Prompt',
+          function_calling: 'Function/Tool Calling',
         },
         'var-aggregator': {
           group: 'Aggregation Group',

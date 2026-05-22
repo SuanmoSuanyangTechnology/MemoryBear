@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:05 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-26 15:51:08
+ * @Last Modified time: 2026-05-22 15:17:07
  */
 /**
  * Model Management Main Page
@@ -28,13 +28,13 @@ import { modelTypeUrl, modelProviderUrl } from '@/api/models'
 /**
  * Available tab keys
  */
-const tabKeys = ['group', 'list', 'square']
+const tabKeys = ['square', 'group', 'list']
 
 /**
  * Model management main component
  */const ModelManagement: FC = () => {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState('group');
+  const [activeTab, setActiveTab] = useState('square');
   const configModalRef = useRef<GroupModelModalRef>(null)
   const customModelModalRef = useRef<CustomModelModalRef>(null)
   const groupRef = useRef<BaseRef>(null)

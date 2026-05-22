@@ -318,6 +318,14 @@ export const nodeLibrary: NodeLibrary[] = [
             titleVariant: 'borderless',
             placeholder: 'workflow.config.parameter-extractor.promptPlaceholder'
           },
+          inference_mode: {
+            type: 'define',
+            defaultValue: 'prompt',
+            options: [
+              { value: 'function_calling', label: 'workflow.config.parameter-extractor.function_calling' },
+              { value: 'prompt', label: 'workflow.config.parameter-extractor.promptCall' },
+            ]
+          }
         }
       }
     ]
