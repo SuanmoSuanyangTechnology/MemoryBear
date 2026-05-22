@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-19 17:00:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-19 15:11:10
+ * @Last Modified time: 2026-05-20 18:17:00
  */
 /**
  * useVariableList Hook
@@ -36,7 +36,10 @@ export const fileSubVariable = [
  * Maps node types to their available output variables
  */
 const NODE_VARIABLES = {
-  llm: [{ label: 'output', dataType: 'string', field: 'output' }],
+  llm: [
+    { label: 'output', dataType: 'string', field: 'output' },
+    { label: 'reasoning_content', dataType: 'string', field: 'reasoning_content' }
+  ],
   'jinja-render': [{ label: 'output', dataType: 'string', field: 'output' }],
   tool: [{ label: 'data', dataType: 'string', field: 'data' }],
   'knowledge-retrieval': [{ label: 'output', dataType: 'array[object]', field: 'output' }],
