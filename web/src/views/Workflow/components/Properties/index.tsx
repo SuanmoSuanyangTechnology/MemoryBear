@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-07 18:36:31
+ * @Last Modified time: 2026-05-21 17:34:35
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -43,6 +43,7 @@ import MappingList from "./MappingList";
 import ErrorHandle from './ErrorHandle'
 import SingleNodeRun from '../SingleNodeRun'
 import { cannotRunNodes } from '../../constant'
+import Retry from './Retry'
 
 /**
  * Props for Properties component
@@ -666,7 +667,7 @@ const Properties: FC<PropertiesProps> = ({
                       }
 
                       if (key === 'model_id' && selectedNode?.data?.type === 'llm') {
-                        return <ModelConfig key={key} />
+                        return <ModelConfig key={key} variableOptions={getFilteredVariableList(selectedNode?.data?.type)} />
                       }
                       if (selectedNode?.data?.type === 'llm' && key === 'messages' && config.type === 'define') {
                         // 为llm节点且isArray=true时添加context变量支持
@@ -708,6 +709,11 @@ const Properties: FC<PropertiesProps> = ({
                         return null
                       }
 
+                      if (config.type === 'retry') {
+                        return (
+                          <Retry key={key} />
+                        )
+                      }
                       if (config.type === 'knowledge') {
                         return (
                           <Form.Item
@@ -743,7 +749,6 @@ const Properties: FC<PropertiesProps> = ({
                               label={t(`workflow.config.${selectedNode?.data?.type}.${key}`)}
                             />
                           </Form.Item>
-
                         )
                       }
                       if (config.type === 'groupVariableList') {
@@ -877,6 +882,7 @@ const Properties: FC<PropertiesProps> = ({
                               ? <span className="rb:text-[10px] rb:text-[#5B6167] rb:leading-3.5 rb:-mb-1!">{t(`workflow.config.${selectedNode?.data?.type}.${key}`)}</span>
                               : t(`workflow.config.${selectedNode?.data?.type}.${key}`)
                           }
+                          tooltip={config.tip ? t(config.tip) : undefined}
                           layout={config.type === 'switch' ? 'horizontal' : 'vertical'}
                           className={
                             key === 'parallel' && values?.parallel
