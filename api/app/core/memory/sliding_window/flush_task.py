@@ -58,8 +58,20 @@ class FlushTask:
 
         Requirements: 4.3, 4.5
         """
+        from app.core.memory.sliding_window.window_utils import unmark_conversation_pending
+
         logger.info(f"[FlushTask] 开始处理: conv={conversation_id}")
 
+        try:
+            await self._run_inner(conversation_id)
+        finally:
+            # 兜底清理 Redis Set：本次 flush 已尽力处理（无论成功/早退/异常）
+            # 后续若有新消息写入，实时路径会重新 mark；若处理失败但还需处理，
+            # ScanIdle 的 DB 回退查询（max_seq > write_cursor）仍能发现并派发。
+            unmark_conversation_pending(conversation_id)
+
+    async def _run_inner(self, conversation_id: str) -> None:
+        """run() 的内部实现，提取出来便于 try/finally 统一收尾。"""
         # Step 1: 查询对话信息（end_user_id + workspace_id）
         conversation_info = self._get_conversation_info(conversation_id)
         if conversation_info is None:

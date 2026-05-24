@@ -731,6 +731,8 @@ async def execute_pending_from_pool(
             f"[execute_pending_from_pool] 无待处理消息: "
             f"conv={conversation_id}, write_cursor={write_cursor}"
         )
+        # cursor 已追上 max_seq，主动清理 Redis Set 残留，避免后续 ScanIdle 反复派发空 flush
+        unmark_conversation_pending(conversation_id)
         return 0
 
     logger.info(
@@ -807,9 +809,13 @@ async def execute_pending_from_pool(
         f"[execute_pending_from_pool] 完成: conv={conversation_id}, processed={processed}"
     )
 
-    # 如果所有 pending 消息都已处理完毕，从 Redis Set 中移除该对话
-    # （下次有新消息写入时会重新 mark）
-    if processed >= len([m for m in pending if m.get("role") == "user" or not m.get("should_memorize", True)]):
+    # 清理 Redis Set 时机：本轮所有"应处理"的消息（user 或 should_memorize=false）都已处理完
+    # processed/expected 同为 0 时也应清理（说明 pending 中只剩 assistant 消息或本轮无可处理）
+    expected = sum(
+        1 for m in pending
+        if m.get("role") == "user" or not m.get("should_memorize", True)
+    )
+    if processed >= expected:
         unmark_conversation_pending(conversation_id)
 
     return processed
