@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-25 15:37:59 
+ * @Last Modified time: 2026-05-25 16:03:54
  */
 /**
  * Conversation Page
@@ -270,6 +270,7 @@ const Conversation: FC = () => {
       role: 'assistant',
       content: '',
       is_current: true,
+      version: 0
     }
     if (message_id) {
       setChatList(prev => {
@@ -733,7 +734,22 @@ const Conversation: FC = () => {
     if (!token || token === '' || !item.id) return
     switchMessageVersion(token, item.id, page)
       .then(() => {
-        getChatDetail()
+        setChatList(prev => {
+          const lastList = [...prev]
+          const filterIndex = lastList.findIndex(vo => Array.isArray(vo) && vo.filter(msg => msg.id === item.id).length > 0)
+          
+          if (filterIndex < 0) return lastList
+          
+          const currentItem: ChatItem[] = lastList[filterIndex] as ChatItem[]
+          lastList[filterIndex] = currentItem.map(msg => {
+            return {
+              ...msg,
+              is_current: msg.id === item.id,
+            }
+          })
+
+          return [...lastList]
+        })
         messageApi.success(t('common.operateSuccess'))
       })
   }
