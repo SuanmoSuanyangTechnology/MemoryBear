@@ -29,7 +29,6 @@ interface RecallTestResultProps {
   onItemClick?: (item: RecallTestData, index: number) => void; // Click item callback
   parserMode?: number; // Parser mode, 1 means QA format
   handleCopy?: (text?: string) => void;
-  parentChunkMode?: boolean | null;
 }
 
 const RecallTestResult = ({ 
@@ -44,7 +43,6 @@ const RecallTestResult = ({
   onItemClick,
   parserMode = 0,
   handleCopy,
-  parentChunkMode,
 }: RecallTestResultProps) => {
   const { t } = useTranslation();
   const { modal, message } = App.useApp()
@@ -196,11 +194,11 @@ const RecallTestResult = ({
         return (
           <div
             key={`${item.metadata?.sort_id || index}-${index}`}
-            className={`rb:flex rb:flex-col rb:mb-4 rb:rounded-xl rb:bg-[#F6F6F6] rb:p-4 rb:pt-2 rb:pb-3 rb:relative rb:group/edit ${editable ? 'rb:cursor-pointer rb:transition-all hover:rb:border-[#155EEF] hover:rb:shadow-md' : ''}`}
+            className={`rb:flex rb:flex-col rb:mb-4 rb:rounded-xl rb:bg-[#F6F6F6] rb:p-4 rb:pt-2 rb:pb-3 rb:relative rb:group ${editable ? 'rb:cursor-pointer rb:transition-all hover:rb:border-[#155EEF] hover:rb:shadow-md' : ''}`}
             onClick={(e) => handleItemClick(e, item, index)}
           >
             {editable && (
-              <div className='rb:absolute rb:top-2 rb:right-2 rb:opacity-0 group/edit-hover:rb:opacity-100 rb:transition-opacity'>
+              <div className='rb:absolute rb:top-2 rb:right-2 rb:opacity-0 group-hover:rb:opacity-100 rb:transition-opacity'>
                 <EditOutlined className='rb:text-[#155EEF] rb:text-base' />
               </div>
             )}
@@ -226,24 +224,6 @@ const RecallTestResult = ({
             <div className='rb:flex rb:text-left rb:px-4 rb:py-3 rb:bg-white rb:rounded-lg rb:mt-2'>
               <div className='rb:text-gray-800 rb:text-sm rb:whitespace-pre-wrap rb:wrap-break-word rb:w-full'>
                 {(() => {
-                  if (parentChunkMode) {
-                    return (
-                      <div>
-                        {renderTextContent(item.page_content)}
-                        <div className="rb:my-3">子分段</div>
-                        <Flex vertical gap={8} className="rb:border-l-2 rb:border-[#155EEF] rb:pl-2!">
-                          <Flex key={1} className="rb:group rb:overflow-hidden">
-                            <span className="rb:bg-[#E1E2E7] rb:p-1 rb:group-hover:bg-[#155EEF] rb:group-hover:text-[#FFFFFF]">c-1</span>
-                            <div className="rb:bg-[#F6F6F6] rb:p-1 rb:group-hover:bg-[rgba(21,94,239,0.25)]">子分段内容</div>
-                          </Flex>
-                          <Flex key={2} className="rb:group rb:overflow-hidden">
-                            <span className="rb:bg-[#E1E2E7] rb:p-1 rb:group-hover:bg-[#155EEF] rb:group-hover:text-[#FFFFFF]">c-2</span>
-                            <div className="rb:bg-[#F6F6F6] rb:p-1 rb:group-hover:bg-[rgba(21,94,239,0.25)]">子分段内容</div>
-                          </Flex>
-                        </Flex>
-                      </div>
-                    )
-                  }
                   const qaContent = parseQAContent(item.page_content);
                   if (qaContent) {
                     const formattedContent = formatQAContent(qaContent.question, qaContent.answer);
