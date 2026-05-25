@@ -113,26 +113,27 @@ const ShareModal = forwardRef<ShareModalRef, ShareModalProps>(({
             {t('common.copy')}
           </Button>
         </Flex>
-        <Flex align="center" wrap={false} gap={10} className="rb:leading-5 rb:my-4! rb:font-medium">
+        <Flex align="center" wrap={false} gap={10} className="rb:leading-5 rb:mt-4! rb:mb-2! rb:font-medium">
           {t('memoryConversation.shareImage')}
 
           <Button type="primary" loading={loading} onClick={exportAsImage}>
             {t('memoryConversation.generateShareImage')}
           </Button>
         </Flex>
+        <div className="rb:bg-[#F6F6F6] rb:rounded-lg rb:overflow-auto rb:mb-4 rb:max-h-62.5">
+          <div ref={chatContentRef}>
+            <ChatContent
+              classNames="rb:p-3"
+              data={chatList}
+              streamLoading={streamLoading}
+              labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
+            />
+          </div>
+        </div>
         <RbAlert color="orange" icon={<ExclamationCircleFilled />}>
           {t('memoryConversation.shareLinkTip')}
         </RbAlert>
       </>
-
-      <div ref={chatContentRef} className="rb:fixed rb:-z-1000">
-        <ChatContent
-          classNames="rb:p-3"
-          data={chatList}
-          streamLoading={streamLoading}
-          labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
-        />
-      </div>
     </RbModal>
   );
 });
