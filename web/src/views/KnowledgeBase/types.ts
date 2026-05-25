@@ -97,11 +97,6 @@ export interface ParserConfig {
   html4excel?: boolean; // 是否为Excel文件
   graphrag?: GraphragConfig; // 知识图谱生成
 
-
-  parent_chunk_mode?: 'paragraph' | 'full-doc';
-  parent_chunk_delimiter?: string;
-  parent_chunk_token_num?: number;
-
   doc_type?: string;
   
   // Web 类型特有字段
