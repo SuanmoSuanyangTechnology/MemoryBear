@@ -268,4 +268,4 @@ def decode_access_token(token: str) -> dict:
             "share_token": payload["share_token"]
         }
     except jwt.InvalidTokenError:
-        raise BusinessException(t("auth.token.invalid"), BizCode.INVALID_TOKEN)
+        raise BusinessException(t("auth.token.invalid"), BizCode.TOKEN_INVALID)

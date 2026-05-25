@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-22 14:14:39
+ * @Last Modified time: 2026-05-25 15:58:38
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -172,8 +172,8 @@ const ChatContent: FC<ChatContentProps> = ({
     }
     return items
   }
-  const handlePageChange = (page: number, item: ChatItem) => {
-    handleVersionChange?.(page, item)
+  const handlePageChange = (page: number, item: ChatItem[]) => {
+    handleVersionChange?.(page, item[page - 1])
   }
   return (
     <div ref={scrollContainerRef} className={clsx("rb:relative rb:overflow-y-auto", classNames)}>
@@ -309,8 +309,7 @@ const ChatContent: FC<ChatContentProps> = ({
                                 />
                             }
                           </>}
-                          {isSupportTools && item.role === 'assistant' && !(!isEnded && index === data.length - 1) && !item.is_hidden_refresh && <>
-                            {Array.isArray(vo) && item.version &&
+                          {Array.isArray(vo) && typeof item.version === 'number' && handleVersionChange &&
                               <Pagination
                                 key={item.id}
                                 size="small"
@@ -319,9 +318,10 @@ const ChatContent: FC<ChatContentProps> = ({
                                 current={item.version}
                                 defaultCurrent={item.version}
                                 total={vo.length}
-                                onChange={(page) => handlePageChange(page, item)}
+                                onChange={(page) => handlePageChange(page, vo)}
                               />
                             }
+                          {isSupportTools && item.role === 'assistant' && !(!isEnded && index === data.length - 1) && !item.is_hidden_refresh && <>
                             {handleFeedback && <>
                               <Tooltip title={t('memoryConversation.like')}>
                                 <div
