@@ -4356,32 +4356,26 @@ def scan_idle_conversations_task() -> None:
         if candidate_conv_ids:
             try:
                 from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
-                from sqlalchemy import distinct
 
                 with get_db_context() as db:
-                    valid_workspace_ids = {
-                        str(wid) for wid in db.execute(
-                            select(distinct(MemoryConfigModel.workspace_id))
-                            .where(MemoryConfigModel.state.is_(True))
+                    # 单条 JOIN 查询：直接按"存在活跃 memory_config"过滤候选对话
+                    # distinct 防止 workspace 配置多条 active 记录导致 conv_id 重复
+                    valid_conv_ids = [
+                        str(cid) for cid in db.execute(
+                            select(Conversation.id)
+                            .join(
+                                MemoryConfigModel,
+                                MemoryConfigModel.workspace_id == Conversation.workspace_id,
+                            )
+                            .where(
+                                Conversation.id.in_(candidate_conv_ids),
+                                MemoryConfigModel.state.is_(True),
+                            )
+                            .distinct()
                         ).scalars().all()
-                    }
+                    ]
 
-                    workspace_map = {
-                        str(cid): str(wid) for cid, wid in db.execute(
-                            select(Conversation.id, Conversation.workspace_id)
-                            .where(Conversation.id.in_(candidate_conv_ids))
-                        ).all()
-                    }
-
-                valid_conv_ids: list[str] = []
-                skipped_no_config = 0
-                for cid in candidate_conv_ids:
-                    ws_id = workspace_map.get(cid)
-                    if ws_id and ws_id in valid_workspace_ids:
-                        valid_conv_ids.append(cid)
-                    else:
-                        skipped_no_config += 1
-
+                skipped_no_config = len(candidate_conv_ids) - len(valid_conv_ids)
                 if skipped_no_config:
                     logger.info(
                         f"[ScanIdle] 跳过 {skipped_no_config} 个无活跃 memory_config 的对话"
