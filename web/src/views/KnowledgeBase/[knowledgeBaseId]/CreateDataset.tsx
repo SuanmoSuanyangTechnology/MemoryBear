@@ -1,4 +1,4 @@
-import { useMemo,useRef, useState, useEffect } from 'react';
+import {  useMemo,useRef, useState, useEffect } from 'react';
 import { Button, Flex, Radio, Steps, Modal, Input, Checkbox, Select, Form, Progress, App } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -10,37 +10,36 @@ import type { ColumnsType } from 'antd/es/table';
 import type { UploadFile } from 'antd';
 import UploadFiles from '@/components/Upload/UploadFiles';
 import type { UploadRequestOption } from 'rc-upload/lib/interface';
-import { uploadFile, uploadQaFile, getDocumentList, parseDocument, updateDocument, deleteDocument, createDocumentAndUpload, knowledgesChunkPolicy } from '@/api/knowledgeBase';
+import { uploadFile, uploadQaFile, getDocumentList, parseDocument, updateDocument, deleteDocument, createDocumentAndUpload } from '@/api/knowledgeBase';
 import exitIcon from '@/assets/images/knowledgeBase/exit.png';
 
 import SliderInput from '@/components/SliderInput';
 import DelimiterSelector from '../components/DelimiterSelector';
-import ParentChildBlockConfig, { parentChildBlockConfigValues, type ParentChildBlockConfigValues } from '../components/ParentChildBlockConfig';
 
 const { TextArea } = Input;
 
-const style: React.CSSProperties = {
-  display: 'flex',
-  gap: 16,
-};
-const radioWrapperBaseStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'flex-start',
-  columnGap: 14, // Wider gap between dot and text
-  width: '100%',
-  border: '1px solid #E5E5E5',
-  borderRadius: 12,
-  padding: 16,
-};
-const getActiveRadioStyle = (active: boolean): React.CSSProperties => ({
-  ...radioWrapperBaseStyle,
-  border: active ? '1px solid #171719' : radioWrapperBaseStyle.border,
-  backgroundColor: active ? '#FAFAFA' : 'transparent',
-});
+  const style: React.CSSProperties = {
+    display: 'flex',
+    gap: 16,
+  };
+  const radioWrapperBaseStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'flex-start',
+    columnGap: 14, // Wider gap between dot and text
+    width: '100%',
+    border: '1px solid #E5E5E5',
+    borderRadius: 12,
+    padding: 16,
+  };
+  const getActiveRadioStyle = (active: boolean): React.CSSProperties => ({
+    ...radioWrapperBaseStyle,
+    border: active ? '1px solid #171719' : radioWrapperBaseStyle.border,
+    backgroundColor: active ? '#FAFAFA' : 'transparent',
+  });
 
 
 type SourceType = 'local' | 'link' | 'text' | 'csv';
-type ProcessingMethod = 'directBlock' | 'qaExtract' | 'parentChildBlock';
+type ProcessingMethod = 'directBlock' | 'qaExtract';
 type ParameterSettings = 'defaultSettings' | 'customSettings';
 const stepKeys = ['selectFile', 'parameterSettings', 'dataPreview', 'confirmUpload'] as const;
 type StepKey = typeof stepKeys[number];
@@ -100,8 +99,6 @@ const CreateDataset = () => {
   const [parameterSettings, setParameterSettings] = useState<ParameterSettings>('defaultSettings');
   const [pdfEnhancementEnabled, setPdfEnhancementEnabled] = useState<boolean>(true);
   const [pdfEnhancementMethod, setPdfEnhancementMethod] = useState<string>('mineru');
-  const [parentChildConfig, setParentChildConfig] = useState<ParentChildBlockConfigValues>(parentChildBlockConfigValues);
-  
   const steps = useMemo(
     () => [
       { title: t('knowledgeBase.selectFile') },
@@ -161,24 +158,17 @@ const CreateDataset = () => {
         // handlePreview(data[0],0) 
         if(parameterSettings === 'customSettings' || processingMethod === 'qaExtract' || pdfEnhancementEnabled){
             rechunkFileIds.map((id) => {
-              let parser_config = {
-                layout_recognize: pdfEnhancementMethod || 'DeepDOC',
-                delimiter: delimiter,
-                chunk_token_num: blockSize,
-                auto_questions: processingMethod === 'parentChildBlock' || processingMethod === 'directBlock' ? 0 : 1,
-                qa_prompt: qaPrompt,
-              }
-              if (processingMethod === 'parentChildBlock') {
-                parser_config = {
-                  ...parser_config,
-                  ...parentChildConfig || {}
+                const params = {
+                  progress: 0,
+                  parser_config: {
+                      layout_recognize: pdfEnhancementMethod || 'DeepDOC',
+                      delimiter: delimiter,
+                      chunk_token_num: blockSize,
+                      auto_questions: processingMethod === 'directBlock' ? 0 : 1,
+                      qa_prompt: qaPrompt
+                  }
                 }
-              }
-              const params = {
-                progress: 0,
-                parser_config
-              }
-              updateDocument(id, params)
+                updateDocument(id, params)
             })
         }
 
@@ -552,20 +542,6 @@ const CreateDataset = () => {
       messageApi.error(`${t('common.deleteFailed')}`);
     }
   };
-
-  const [isParentChildMode, setIsParentChildMode] = useState<boolean | null>(null)
-  const getKbChunkPolicy = () => {
-    if (!knowledgeBaseId) return
-    knowledgesChunkPolicy(knowledgeBaseId)
-      .then(res => {
-        setIsParentChildMode((res as { parent_child_mode: boolean | null }).parent_child_mode)
-      })
-
-  }
-  useEffect(() => {
-    getKbChunkPolicy()
-  },[knowledgeBaseId])
-
   // When navigating from other pages with fileIds, load corresponding document data
   // useEffect(() => {
   //   if (initialFileIds.length > 0 && initialStepKey !== 'selectFile' && knowledgeBaseId && parentId) {
@@ -789,31 +765,24 @@ const CreateDataset = () => {
                   {t('knowledgeBase.processingMethod')}
               </div>
               <Radio.Group
-                value={processingMethod}
-                onChange={(e) => setProcessingMethod(e.target.value)}
-                style={style}
+                  value={processingMethod}
+                  onChange={(e) => setProcessingMethod(e.target.value)}
+                  style={style}
               >
-                <Radio value='directBlock' disabled={isParentChildMode === true} style={getActiveRadioStyle(processingMethod === 'directBlock')}>
-                    <Flex gap='small' vertical>
-                        <span className='rb:text-base rb:font-medium rb:text-gray-800'>
-                            {t('knowledgeBase.directBlock')}
-                        </span>
-                    </Flex>
-                </Radio>
-                <Radio value='qaExtract' disabled={isParentChildMode === true} style={getActiveRadioStyle(processingMethod === 'qaExtract')}>
-                    <Flex gap='small' vertical>
-                        <span className='rb:text-base rb:font-medium rb:text-gray-800'>
-                        {t('knowledgeBase.qaExtract')}
-                        </span>
-                    </Flex>
-                </Radio>
-                <Radio value='parentChildBlock' disabled={isParentChildMode === false} style={getActiveRadioStyle(processingMethod === 'parentChildBlock')}>
-                  <Flex gap='small' vertical>
-                    <span className='rb:text-base rb:font-medium rb:text-gray-800'>
-                      {t('knowledgeBase.parentChildBlock')}
-                    </span>
-                  </Flex>
-                </Radio>
+                  <Radio value='directBlock' style={getActiveRadioStyle(processingMethod === 'directBlock')}>
+                      <Flex gap='small' vertical>
+                          <span className='rb:text-base rb:font-medium rb:text-gray-800'>
+                              {t('knowledgeBase.directBlock')}
+                          </span>
+                      </Flex>
+                  </Radio>
+                  <Radio value='qaExtract' style={getActiveRadioStyle(processingMethod === 'qaExtract')}>
+                      <Flex gap='small' vertical>
+                          <span className='rb:text-base rb:font-medium rb:text-gray-800'>
+                          {t('knowledgeBase.qaExtract')}
+                          </span>
+                      </Flex>
+                  </Radio>
               </Radio.Group>
               <div className='rb:font-medium rb:text-gray-500 rb:mt-4 rb:mb-3'>
                   {t('knowledgeBase.parameterSettings')}
@@ -840,7 +809,7 @@ const CreateDataset = () => {
                       </Flex>
                   </Radio>
               </Radio.Group>
-              {parameterSettings === 'customSettings' && processingMethod !== 'parentChildBlock' && (<>
+              {parameterSettings === 'customSettings' && (<>
                 <div className='rb:grid rb:grid-cols-2 rb:mt-5 rb-border rb:rounded-xl rb:px-6 rb:py-4 rb:gap-10'> 
                   <div>
                     <div className='rb:w-full rb:text-[#5B6167] rb:leading-5 rb:mb-2'>
@@ -857,9 +826,6 @@ const CreateDataset = () => {
                   <Input.TextArea value={qaPrompt} rows={6} onChange={(e) => setQaPrompt(e.target.value)} />
                 </div>
               </>)}
-              {parameterSettings === 'customSettings' && processingMethod === 'parentChildBlock' &&
-                <ParentChildBlockConfig initialValue={parentChildConfig} onChange={setParentChildConfig} />
-              }
           </div>
         )}
 
