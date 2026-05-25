@@ -23,7 +23,7 @@ class AppLogMessage(BaseModel):
     conversation_id: uuid.UUID
     role: str = Field(description="角色: user / assistant / system")
     content: str
-    status: Optional[str] = Field(default=None, description="执行状态（工作流专用）: completed / failed")
+    status: Optional[str] = Field(default=None, description="消息状态: completed / failed")
     meta_data: Optional[Dict[str, Any]] = None
     files: List[LogFileInfo] = Field(default_factory=list, description="用户上传的文件列表")
     created_at: datetime.datetime

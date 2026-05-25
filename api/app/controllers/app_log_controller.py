@@ -116,6 +116,7 @@ def get_app_log_detail(
                 conversation_id=m.conversation_id,
                 role=m.role,
                 content=m.content,
+                status=m.status,
                 meta_data=m.meta_data,
                 files=files,
                 created_at=m.created_at,
