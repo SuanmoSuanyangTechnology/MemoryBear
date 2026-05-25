@@ -231,7 +231,8 @@ class FlushTask:
         except Exception as e:
             logger.warning(
                 f"[FlushTask] memory_config 预校验异常（继续执行）: "
-                f"workspace={workspace_id}, err={e}"
+                f"workspace={workspace_id}, err={e}",
+                exc_info=True,
             )
             return True
 
