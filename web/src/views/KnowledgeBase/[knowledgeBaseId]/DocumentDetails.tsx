@@ -11,7 +11,7 @@ import { useNavigate, useParams, useLocation, useSearchParams } from 'react-rout
 import { useTranslation } from 'react-i18next';
 import { useBreadcrumbManager, type BreadcrumbPath } from '@/hooks/useBreadcrumbManager';
 import { Button, Spin, message, Switch, App } from 'antd';
-import { getDocumentDetail, getDocumentChunkList, downloadFile, updateDocument, updateDocumentChunk, createDocumentChunk } from '@/api/knowledgeBase';
+import { getDocumentDetail, getDocumentChunkList, downloadFile, updateDocument, updateDocumentChunk, createDocumentChunk, knowledgeChunkPolicy } from '@/api/knowledgeBase';
 import type { KnowledgeBaseDocumentData, RecallTestData } from '@/views/KnowledgeBase/types';
 import { formatDateTime } from '@/utils/format';
 import InfoPanel, { type InfoItem } from '../components/InfoPanel';
@@ -68,6 +68,17 @@ const DocumentDetails: FC = () => {
       </div>
     );
   }
+  const [parentChunkMode, setIsParentChunkMode] = useState<boolean | null>(null)
+  const getParentChunkMode = () => {
+    if (!knowledgeBaseId) return;
+    knowledgeChunkPolicy(knowledgeBaseId)
+      .then(res => {
+        setIsParentChunkMode((res as { parent_chunk_mode: boolean | null }).parent_chunk_mode)
+      })
+  }
+  useEffect(() => {
+    getParentChunkMode()
+  }, [knowledgeBaseId])
   
   useEffect(() => {
     if (documentId) {
@@ -158,11 +169,12 @@ const DocumentDetails: FC = () => {
     setLoading(true);
     try {
       const response = await getDocumentDetail(documentId);
+      const { parser_config } = response;
       setDocument(response);
       setInfoItems(formatDocumentInfo(response));
       const url = `${window.location.origin}/api/files/${response.file_id}`;
       setFileUrl(url);
-      setParserMode(response?.parser_config?.auto_questions || 0)
+      setParserMode(parser_config?.auto_questions || 0)
       // ChunkList will be called automatically in useEffect based on document.progress
     } catch (error) {
       console.error('Failed to fetch document details:', error);
@@ -440,6 +452,7 @@ const DocumentDetails: FC = () => {
             onItemClick={handleChunkClick}
             parserMode={parserMode}
             handleCopy={handleCopy}
+            parentChunkMode={parentChunkMode}
           />
         </div>
       </div>

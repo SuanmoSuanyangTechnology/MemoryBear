@@ -2,11 +2,11 @@
 import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
 import { Form, Input,  Select, Button, InputNumber } from 'antd';
 import { useTranslation } from 'react-i18next';
+
 import type { RecallTestDrawerRef, RecallTestData, RecallTestParams } from '@/views/KnowledgeBase/types';
 // import refreshIcon from '@/assets/images/knowledgeBase/refresh-blue.png';
 import RecallTestResult from './RecallTestResult';
-import { reChunks, getRetrievalModeType } from '@/api/knowledgeBase';
-import { hybrid } from 'react-syntax-highlighter/dist/esm/styles/hljs';
+import { reChunks, getRetrievalModeType, knowledgeChunkPolicy } from '@/api/knowledgeBase';
 
 const { TextArea } = Input;
 
@@ -26,6 +26,17 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
         { label: t('knowledgeBase.hybrid'), value: true },
         { label: t('knowledgeBase.vector'), value: false },
     ]);
+    const [parentChunkMode, setIsParentChunkMode] = useState<boolean | null>(null)
+    const getParentChunkMode = () => {
+        if (!knowledgeBaseId) return;
+        knowledgeChunkPolicy(knowledgeBaseId)
+        .then(res => {
+        setIsParentChunkMode((res as { parent_chunk_mode: boolean | null }).parent_chunk_mode)
+        })
+    }
+    useEffect(() => {
+        getParentChunkMode()
+    }, [knowledgeBaseId])
 
     // Get retrieval mode options
     useEffect(() => {
@@ -100,7 +111,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
     }));
   return (
     <div className='rb:w-full rb:h-full rb:flex rb:flex-col rb:overflow-hidden'>
-      <div className='rb:flex-shrink-0'>
+      <div className='rb:shrink-0'>
         <div className='rb:flexx rb:mb-2 rb:items-center rb:justify-between'>
           <span className='rb:font-medium'>{ t('knowledgeBase.testQuestion')}</span>
           {/* <div className='rb:flex rb:items-center rb:justify-end'>
@@ -189,7 +200,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
         </Form>
       </div>
       <div className='rb:flex-1 rb:overflow-y-auto rb:min-h-0'>
-          <RecallTestResult data={data} showEmpty={true} />
+          <RecallTestResult data={data} showEmpty={true} parentChunkMode={parentChunkMode} />
       </div>
       
     </div>

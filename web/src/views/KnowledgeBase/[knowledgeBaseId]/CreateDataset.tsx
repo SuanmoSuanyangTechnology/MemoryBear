@@ -10,7 +10,7 @@ import type { ColumnsType } from 'antd/es/table';
 import type { UploadFile } from 'antd';
 import UploadFiles from '@/components/Upload/UploadFiles';
 import type { UploadRequestOption } from 'rc-upload/lib/interface';
-import { uploadFile, uploadQaFile, getDocumentList, parseDocument, updateDocument, deleteDocument, createDocumentAndUpload, knowledgesChunkPolicy } from '@/api/knowledgeBase';
+import { uploadFile, uploadQaFile, getDocumentList, parseDocument, updateDocument, deleteDocument, createDocumentAndUpload, knowledgeChunkPolicy } from '@/api/knowledgeBase';
 import exitIcon from '@/assets/images/knowledgeBase/exit.png';
 
 import SliderInput from '@/components/SliderInput';
@@ -86,7 +86,7 @@ const CreateDataset = () => {
   const tableRef = useRef<TableRef>(null);
 
   const [form] = Form.useForm<ContentFormData>();
-  const [data, setData] = useState<KnowledgeBaseDocumentData[]>([]);
+  // const [data, setData] = useState<KnowledgeBaseDocumentData[]>([]);
   const [rechunkFileIds, setRechunkFileIds] = useState<string[]>(initialFileIds);
   const [textFormValid, setTextFormValid] = useState<boolean>(false);
 
@@ -167,6 +167,7 @@ const CreateDataset = () => {
                 chunk_token_num: blockSize,
                 auto_questions: processingMethod === 'parentChildBlock' || processingMethod === 'directBlock' ? 0 : 1,
                 qa_prompt: qaPrompt,
+                parent_child_mode: processingMethod === 'parentChildBlock'
               }
               if (processingMethod === 'parentChildBlock') {
                 parser_config = {
@@ -280,12 +281,12 @@ const CreateDataset = () => {
       title: t('knowledgeBase.status'),
       dataIndex: 'progress',
       key: 'progress',
-      render: (value: number, record: any) => {
+      render: (value: number) => {
         // When value >= 1 it's complete, when 0～1 show progress bar
         if (value >= 1) {
           return (
             <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
-              <span className="rb:inline-block rb:w-[5px] rb:h-[5px] rb:mr-2 rb:rounded-full" style={{ backgroundColor: '#369F21' }}></span>
+              <span className="rb:inline-block rb:size-1.25 rb:mr-2 rb:rounded-full" style={{ backgroundColor: '#369F21' }}></span>
               <span>{t('knowledgeBase.completed')}</span>
             </span>
           );
@@ -309,7 +310,7 @@ const CreateDataset = () => {
           // value = 0 or other cases, show pending
           return (
             <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
-              <span className="rb:inline-block rb:w-[5px] rb:h-[5px] rb:mr-2 rb:rounded-full" style={{ backgroundColor: '#FF8A4C' }}></span>
+              <span className="rb:inline-block rb:size-1.25 rb:mr-2 rb:rounded-full" style={{ backgroundColor: '#FF8A4C' }}></span>
               <span>{t('knowledgeBase.pending')}</span>
             </span>
           );
@@ -475,7 +476,7 @@ const CreateDataset = () => {
     })
     .then((res: any) => {
       const documents = res.items || [];
-      setData(documents);
+      // setData(documents);
       
       // 只在 confirmUpload 步骤刷新表格数据
       if (current === 2) {
@@ -542,29 +543,31 @@ const CreateDataset = () => {
       }
   }
   // 删除已上传的文件
-  const handleDeleteFile = async (fileId: string) => {
-    try {
-      await deleteDocument(fileId);
-      // Delete successful, remove the id from rechunkFileIds
-      setRechunkFileIds((prev) => prev.filter((id) => id !== fileId));
-      console.log(`${t('common.deleteSuccess')}`);
-    } catch (error) {
-      messageApi.error(`${t('common.deleteFailed')}`);
-    }
-  };
+  // const handleDeleteFile = async (fileId: string) => {
+  //   try {
+  //     await deleteDocument(fileId);
+  //     // Delete successful, remove the id from rechunkFileIds
+  //     setRechunkFileIds((prev) => prev.filter((id) => id !== fileId));
+  //     console.log(`${t('common.deleteSuccess')}`);
+  //   } catch (error) {
+  //     messageApi.error(`${t('common.deleteFailed')}`);
+  //   }
+  // };
 
   const [isParentChildMode, setIsParentChildMode] = useState<boolean | null>(null)
-  const getKbChunkPolicy = () => {
-    if (!knowledgeBaseId) return
-    knowledgesChunkPolicy(knowledgeBaseId)
-      .then(res => {
-        setIsParentChildMode((res as { parent_child_mode: boolean | null }).parent_child_mode)
-      })
+  // const getKbChunkPolicy = () => {
+  //   if (!knowledgeBaseId) return
+  //   knowledgeChunkPolicy(knowledgeBaseId)
+  //     .then(res => {
+  //       const response = res as { parent_child_mode: boolean | null }
+  //       setIsParentChildMode(response.parent_child_mode)
+  //       setProcessingMethod(response.parent_child_mode ? 'parentChildBlock' : 'directBlock')
+  //     })
 
-  }
-  useEffect(() => {
-    getKbChunkPolicy()
-  },[knowledgeBaseId])
+  // }
+  // useEffect(() => {
+  //   getKbChunkPolicy()
+  // },[knowledgeBaseId])
 
   // When navigating from other pages with fileIds, load corresponding document data
   // useEffect(() => {
@@ -739,7 +742,7 @@ const CreateDataset = () => {
         {current === 1 && (
           <div className='rb:flex rb:flex-col rb:mt-10 rb:px-40'>
               {rechunkFileIds.length > 0 && (
-                <div className='rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-[8px] rb:px-3 rb:py-2 rb:mb-4 rb:text-xs rb:text-gray-600 rb:flex rb:items-center rb:flex-wrap rb:gap-2'>
+                <div className='rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:px-3 rb:py-2 rb:mb-4 rb:text-xs rb:text-gray-600 rb:flex rb:items-center rb:flex-wrap rb:gap-2'>
                     <span className='rb:text-gray-700 rb:font-medium'>{t('knowledgeBase.rechunking')}:</span>
                     {rechunkFileIds.map((id) => (
                       <span key={id} className='rb:px-2 rb:py-0.5 rb:bg-white rb:border rb:border-[#DFE4ED] rb:rounded'>{id}</span>
@@ -761,7 +764,7 @@ const CreateDataset = () => {
                     onChange={(e) => setPdfEnhancementEnabled(e.target.checked)}
                     className='rb:mr-3'
                   >
-                    <span className='rb:text-base rb:font-medium rb:text-gray-800 rb:pl-[22px]'>
+                    <span className='rb:text-base rb:font-medium rb:text-gray-800 rb:pl-5.5'>
                       {t('knowledgeBase.pdfEnhancementAnalysis')}
                     </span>
                   </Checkbox>
@@ -770,7 +773,7 @@ const CreateDataset = () => {
                       <Select
                         value={pdfEnhancementMethod}
                         onChange={(value) => setPdfEnhancementMethod(value)}
-                        className='rb:w-[300px]'
+                        className='rb:w-75'
                         options={[
                           { value: 'deepdoc', label: 'DeepDoc' },
                           { value: 'mineru', label: 'MinerU' },
@@ -807,13 +810,13 @@ const CreateDataset = () => {
                         </span>
                     </Flex>
                 </Radio>
-                <Radio value='parentChildBlock' disabled={isParentChildMode === false} style={getActiveRadioStyle(processingMethod === 'parentChildBlock')}>
+                {/* <Radio value='parentChildBlock' disabled={isParentChildMode === false} style={getActiveRadioStyle(processingMethod === 'parentChildBlock')}>
                   <Flex gap='small' vertical>
                     <span className='rb:text-base rb:font-medium rb:text-gray-800'>
                       {t('knowledgeBase.parentChildBlock')}
                     </span>
                   </Flex>
-                </Radio>
+                </Radio> */}
               </Radio.Group>
               <div className='rb:font-medium rb:text-gray-500 rb:mt-4 rb:mb-3'>
                   {t('knowledgeBase.parameterSettings')}
