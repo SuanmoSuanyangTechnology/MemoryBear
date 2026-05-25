@@ -630,7 +630,7 @@ const DocumentPreview: FC<DocumentPreviewProps> = ({
                     disabled={pdfScale <= 0.5}
                     onClick={() => handlePdfZoom(-0.25)}
                   />
-                  <span className="rb:text-sm rb:text-gray-600 rb:min-w-[48px] rb:text-center">
+                  <span className="rb:text-sm rb:text-gray-600 rb:min-w-12 rb:text-center">
                     {Math.round(pdfScale * 100)}%
                   </span>
                   <Button

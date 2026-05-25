@@ -346,6 +346,6 @@ export const batchDownloadFilesByKb = async (kb_id: string, fileName: string, ca
   return response;
 };
 // 知识库分块模式
-export const knowledgesChunkPolicy = async (kb_id: string) => {
+export const knowledgeChunkPolicy = async (kb_id: string) => {
   return request.get(`/knowledges/${kb_id}/chunk-policy`);
 }
