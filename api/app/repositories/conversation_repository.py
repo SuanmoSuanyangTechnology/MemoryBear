@@ -457,7 +457,6 @@ class MessageRepository:
             stmt = stmt.limit(limit)
 
         messages = list(self.db.scalars(stmt).all())
-        messages.reverse()
 
         logger.info(
             "Fetched messages successfully",
