@@ -54,6 +54,15 @@ Entity Count: {{ entities | length }}
    - 不确定时不要配对
    - 同名但描述明显矛盾的不配对（如"张三-后端工程师" vs "张三-前端设计师"可能是不同人）
    - 名称有包含关系但语义不同的不配对（如"上海" vs "上海马拉松"）
+   - 以下关系类型虽然高度相关，但不是同一实体，禁止配对：
+     · 上位-下位（如"体能" vs "核心力量"，后者是前者的子维度）
+     · 整体-部分（如"教材系列" vs "选修2-2"，后者是前者的一册）
+     · 系统-组件（如"Celery" vs "消息代理"，后者是前者的组件）
+     · 条件-目标（如"导数为零" vs "临界点"，前者是求后者的条件）
+     · 活动-记录（如"晨跑" vs "30天晨跑记录"，后者是前者的量化记录）
+     · 角色-属性（如"经理" vs "价值放大器"，后者是前者的角色定位）
+     · 通用概念-具体实现（如"向量索引" vs "Neo4j向量索引配置方法"）
+   - 判断标准：如果合并后会丢失其中一方的独立语义，就不该合并
 
 5. **唯一性约束（必须遵守）**:
    - 每个序号只能出现在一个配对中，不允许重复
@@ -85,6 +94,15 @@ Entity Count: {{ entities | length }}
    - Do not pair when uncertain
    - Do not pair entities with same name but clearly contradictory descriptions
    - Do not pair entities with name containment but different semantics (e.g., "Shanghai" vs "Shanghai Marathon")
+   - The following relationship types are highly related but NOT the same entity, do NOT pair:
+     · Hypernym-Hyponym (e.g., "fitness" vs "core strength", latter is a sub-dimension)
+     · Whole-Part (e.g., "textbook series" vs "volume 2-2", latter is one book in the series)
+     · System-Component (e.g., "Celery" vs "message broker", latter is a component of former)
+     · Condition-Target (e.g., "derivative equals zero" vs "critical point", former is condition for latter)
+     · Activity-Record (e.g., "morning run" vs "30-day running streak", latter is a quantified record)
+     · Role-Attribute (e.g., "manager" vs "value multiplier", latter is a role positioning)
+     · Generic-Specific (e.g., "vector index" vs "Neo4j vector index configuration")
+   - Rule of thumb: if merging would lose the independent meaning of either entity, do not pair
 
 5. **Uniqueness Constraint (MUST follow)**:
    - Each index can only appear in ONE pair, no duplicates allowed
