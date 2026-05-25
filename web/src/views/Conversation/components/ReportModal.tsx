@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-05-21 14:00:00 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-21 14:14:19
+ * @Last Modified time: 2026-05-25 15:38:12 
  */
 /**
  * ReportModal Component
@@ -30,7 +30,9 @@ interface ReportModalProps {
 }
 
 /** Report modal component for reporting inappropriate messages */
-const ReportModal = forwardRef<ReportModalRef, ReportModalProps>((props, ref) => {
+const ReportModal = forwardRef<ReportModalRef, ReportModalProps>(({
+  token,
+}, ref) => {
   const { t } = useTranslation()
   const { message } = App.useApp()
   const [visible, setVisible] = useState(false)
@@ -55,10 +57,10 @@ const ReportModal = forwardRef<ReportModalRef, ReportModalProps>((props, ref) =>
   const onSubmit = () => {
     form.validateFields()
       .then((values) => {
-        if (!currentItem?.id || !props.token) return
+        if (!currentItem?.id || !token || token === '') return
         
         setLoading(true)
-        reportMessage(props.token, currentItem.id as string, {
+        reportMessage(token, currentItem.id as string, {
           report_type: values.reportType,
           report_reason: values.description || '',
           selected_text: currentItem.content || '',
