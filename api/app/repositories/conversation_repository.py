@@ -411,7 +411,9 @@ class MessageRepository:
             List[Message]: 消息列表
         """
         stmt = select(Message).where(
-            Message.conversation_id == conversation_id
+            Message.conversation_id == conversation_id,
+            Message.is_deleted == False,
+            Message.is_current == True,
         ).order_by(Message.created_at)
 
         messages = list(self.db.scalars(stmt).all())
