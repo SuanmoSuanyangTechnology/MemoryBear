@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-25 16:03:54
+ * @Last Modified time: 2026-05-25 16:39:52
  */
 /**
  * Conversation Page
@@ -863,8 +863,6 @@ const Conversation: FC = () => {
             'rb:h-full': isShare,
           })}>
             <Chat
-              userIcon={(isShare) ? null : <div className="rb:size-8 rb:bg-cover rb:bg-[url(@/assets/images/conversation/user.png)]"></div>}
-              assistantIcon={isShare ? null : <div className="rb:size-8 rb:bg-cover rb:bg-[url(@/assets/images/conversation/ai.png)]"></div>}
               empty={isShare ? null : <Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')}subTitle={t('memoryConversation.emptyDesc')} />}
               contentClassName={clsx({
                 'rb:h-full rb:w-full': isShare,
@@ -876,7 +874,7 @@ const Conversation: FC = () => {
               loading={loading}
               onChange={setMessage}
               onSend={handleSend}
-              labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
+              labelFormat={(item) => isFloatBtn ? dayjs(item.created_at).format('HH:mm') : dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
               conversationId={conversation_id}
               fileList={fileList}
               fileChange={(list) => {
