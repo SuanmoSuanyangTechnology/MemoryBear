@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-22 14:20:00
+ * @Last Modified time: 2026-05-25 15:37:59 
  */
 /**
  * Conversation Page
@@ -129,7 +129,7 @@ const Conversation: FC = () => {
   }, [token, shareToken, page, hasMore, historyList])
 
   useEffect(() => {
-    if (shareToken && token) {
+    if (token && token !== '') {
       getExperienceConfig(token)
         .then(res => {
           const response = res as { variables: Variable[]; features: FeaturesConfigForm; model_parameters?: Record<string, any>; app_type: string; memory: boolean; }
@@ -142,7 +142,7 @@ const Conversation: FC = () => {
     } else {
       setChatList([])
     }
-  }, [shareToken, token])
+  }, [token])
 
   /** Group conversation history by date */
   const groupHistoryByDate = (items: HistoryItem[]): Record<string, HistoryItem[]> => {
@@ -159,7 +159,7 @@ const Conversation: FC = () => {
 
   /** Fetch conversation history with pagination */
   const getHistory = (flag: boolean = false) => {
-    if (!token || (pageLoading || !hasMore) && !flag) return
+    if (!token || token === '' || (pageLoading || !hasMore) && !flag) return
     setPageLoading(true);
     getConversationHistory(token, { page: flag ? 1 : page, pagesize: 20 })
       .then(res => {
@@ -193,8 +193,8 @@ const Conversation: FC = () => {
   }
 
   const getChatDetail = () => {
-    if (!conversation_id) return
-    getConversationDetail(token as string, conversation_id)
+    if (!conversation_id || !token || token === '') return
+    getConversationDetail(token, conversation_id)
       .then(res => {
         const response = res as { messages: ChatItem[] }
         const messages = response?.messages || []
@@ -420,7 +420,7 @@ const Conversation: FC = () => {
   const chatIsEnded = useRef(true)
   /** Send message and handle streaming response */
   const handleSend = (msg?: string) => {
-    if (!token || !shareToken) return
+    if (!token || token === '' || !shareToken || shareToken === '') return
     const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
     const variables = toolbarRef.current?.getVariables() || []
     let isCanSend = true
@@ -588,7 +588,7 @@ const Conversation: FC = () => {
   }
 
   const deleteMessage = (vo: ChatItem) => {
-    if (!token || !vo.id) return
+    if (!token || token === '' || !vo.id) return
     modal.confirm({
       title: t('common.confirmDelete'),
       okText: t('common.delete'),
@@ -607,7 +607,7 @@ const Conversation: FC = () => {
     reportModalRef.current?.handleOpen(vo)
   }
   const regenerateMessages = (vo: ChatItem) => {
-    if (!token || !vo.id) return
+    if (!token || token === '' || !vo.id) return
     const variables = toolbarRef.current?.getVariables() || []
     let isCanSend = true
     const params: Record<string, any> = {}
@@ -730,7 +730,7 @@ const Conversation: FC = () => {
   }
   // 切换到指定版本的消息
   const handleVersionChange = (page: number, item: ChatItem) => {
-    if (!token || !item.id) return
+    if (!token || token === '' || !item.id) return
     switchMessageVersion(token, item.id, page)
       .then(() => {
         getChatDetail()
@@ -745,7 +745,7 @@ const Conversation: FC = () => {
   }
 
   const handleFeedback = (feedbackType: 'like' | 'dislike', id?: string) => {
-    if (!token || !conversation_id || !id) return
+    if (!token || token === '' || !conversation_id || !id) return
     feedbackMessage(token, id, { feedback_type: feedbackType })
       .then((res) => {
         const { feedback_type } = res as { feedback_type: 'like' | 'dislike' | null; }

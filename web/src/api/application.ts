@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-22 14:10:41
+ * @Last Modified time: 2026-05-25 15:37:35 
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
@@ -110,7 +110,6 @@ export const getConversationDetail = (share_token: string, conversation_id: stri
 }
 // Like/Dislike AI response
 export const feedbackMessage = (share_token: string, message_id: string, data: { feedback_type: 'like' | 'dislike' }) => {
-  console.log('token', share_token, `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`)
   return request.post(`/public/share/messages/${message_id}/feedback`, data, {
     headers: {
       'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
