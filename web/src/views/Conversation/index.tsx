@@ -992,6 +992,17 @@ const Conversation: FC = () => {
             </div>
           </div>
         }
+
+        <ShareModal
+          ref={shareModalRef}
+          conversationId={conversation_id as string}
+          chatList={chatList}
+          streamLoading={streamLoadingRef.current}
+        />
+        <ReportModal
+          ref={reportModalRef}
+          token={token as string}
+        />
       </Flex>
     )
   }
