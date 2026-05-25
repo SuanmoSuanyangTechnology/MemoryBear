@@ -1,3 +1,9 @@
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2026-05-22 14:07:42 
+ * @Last Modified by:   ZhaoYing 
+ * @Last Modified time: 2026-05-25 15:38:24 
+ */
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { Button, App, Flex } from 'antd';
 import { ExclamationCircleFilled } from '@ant-design/icons';
@@ -48,7 +54,7 @@ const ShareModal = forwardRef<ShareModalRef, ShareModalProps>(({
 
   /** Open modal and generate share link */
   const handleOpen = () => {
-    if (!conversationId || !token) {
+    if (!conversationId || !token || token === '') {
       return
     }
     setLoading(true)
