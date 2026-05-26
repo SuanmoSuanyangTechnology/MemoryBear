@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 11:12:02
+ * @Last Modified time: 2026-05-26 11:20:55
  */
 /**
  * Conversation Page
@@ -347,14 +347,31 @@ const Conversation: FC = () => {
     setChatList(prev => {
       const lastList = [...prev]
       const lastIndex = lastList.length - 1
-      const lastChatList = Array.isArray(lastList[lastIndex]) ? lastList[lastIndex] : [lastList[lastIndex]]
-      const lastChatIndex = lastChatList.length - 1
-      const lastMsg = lastChatList[lastChatIndex]
-      if (lastMsg?.role === 'assistant') {
-        return [
-          ...lastList.slice(0, lastIndex),
-          [
-            ...lastChatList.slice(0, lastChatIndex),
+      if (Array.isArray(lastList[lastIndex])) {
+        const lastChatList = lastList[lastIndex]
+        const lastChatIndex = lastChatList.length - 1
+        const lastMsg = lastChatList[lastChatIndex]
+        if (lastMsg?.role === 'assistant') {
+          return [
+            ...lastList.slice(0, lastIndex),
+            [
+              ...lastChatList.slice(0, lastChatIndex),
+              {
+                id: message_id,
+                ...lastMsg,
+                meta_data: {
+                  ...(lastMsg.meta_data || {}),
+                  reasoning_content: (lastMsg.meta_data?.reasoning_content || '') + content
+                }
+              }
+            ]
+          ]
+        }
+      } else {
+        const lastMsg = lastList[lastIndex]
+        if (lastMsg?.role === 'assistant') {
+          return [
+            ...lastList.slice(0, lastIndex),
             {
               id: message_id,
               ...lastMsg,
@@ -364,7 +381,7 @@ const Conversation: FC = () => {
               }
             }
           ]
-        ]
+        }
       }
       return prev
     })
