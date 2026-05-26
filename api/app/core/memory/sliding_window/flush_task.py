@@ -12,11 +12,14 @@ Requirements: 4.3, 4.4, 4.5
 from __future__ import annotations
 
 import logging
-from typing import List, Optional, Tuple
+import uuid
+from typing import List, Tuple
 
 from sqlalchemy import select
 
 from app.db import get_db_context
+from app.models.app_model import App
+from app.models.app_release_model import AppRelease
 from app.models.conversation_model import Conversation
 from app.models.memory_message_model import MemoryMessage
 
@@ -80,11 +83,21 @@ class FlushTask:
 
         write_cursor, end_user_id, workspace_id = conversation_info
 
-        # Step 1.5: 提前校验 memory_config，避免下层抛 ConfigurationError 产生 ERROR 日志噪音
-        if not self._has_active_memory_config(workspace_id):
+        # Step 1.5: 解析当前应用 release 中绑定的 memory_config_id
+        # 路径: conversation.app_id → app.current_release_id → app_releases.config.memory.memory_config_id
+        release_config_id = self._resolve_release_memory_config_id(conversation_id)
+        if release_config_id is None:
             logger.warning(
-                f"[FlushTask] workspace 无活跃记忆配置，跳过 flush: "
+                f"[FlushTask] 未能从应用发布配置解析到 memory_config_id，跳过 flush: "
                 f"conv={conversation_id}, workspace={workspace_id}"
+            )
+            return
+
+        # Step 1.6: 校验该 memory_config 仍然存在且处于活跃状态，避免下层 ERROR 日志噪音
+        if not self._has_active_memory_config(release_config_id):
+            logger.warning(
+                f"[FlushTask] memory_config 不存在或未启用，跳过 flush: "
+                f"conv={conversation_id}, config_id={release_config_id}"
             )
             return
 
@@ -98,7 +111,8 @@ class FlushTask:
         user_processed = await execute_pending_from_pool(
             conversation_id=conversation_id,
             end_user_id=end_user_id,
-            workspace_id=workspace_id,
+            config_id=str(release_config_id),
+            workspace_id=workspace_id or "",
             enforce_window=False,  # 兜底路径，详见 execute_pending_from_pool docstring
         )
         logger.info(
@@ -122,13 +136,11 @@ class FlushTask:
             logger.info(f"[FlushTask] 处理完成: conv={conversation_id}")
             return
 
-        memory_config = self._load_memory_config(
-            end_user_id=end_user_id,
-            workspace_id=workspace_id,
-        )
+        memory_config = self._load_memory_config(config_id=release_config_id)
         if memory_config is None:
             logger.error(
-                f"[FlushTask] 无法加载 memory_config 处理 assistant 消息: conv={conversation_id}"
+                f"[FlushTask] 无法加载 memory_config 处理 assistant 消息: "
+                f"conv={conversation_id}, config_id={release_config_id}"
             )
             return
 
@@ -205,27 +217,24 @@ class FlushTask:
             )
             return None
 
-    def _has_active_memory_config(self, workspace_id: str | None) -> bool:
-        """检查 workspace 是否存在活跃的 memory_config。
+    def _has_active_memory_config(self, config_id: uuid.UUID | None) -> bool:
+        """检查指定 memory_config 是否存在。
 
         用于在执行 flush 前预校验，避免下层抛 ConfigurationError 产生 ERROR 日志噪音。
         校验自身出错时返回 True（不阻断主流程，让下层兜底处理）。
 
+        说明：``MemoryConfig.state`` 表示"是否为 workspace 当前激活的默认配置"，
+        而 release 中绑定的配置通常并非 workspace 默认（可能是用户自建配置），
+        因此这里只检查存在性，不再过滤 ``state=True``。
+
         Args:
-            workspace_id: 对话所属工作空间 ID（字符串形式）
+            config_id: release 中绑定的 memory_config_id（UUID）
 
         Returns:
-            True 表示 workspace 存在活跃配置或校验失败；False 表示明确无配置应跳过。
+            True 表示配置存在或校验过程异常；False 表示明确不存在应跳过。
         """
-        if not workspace_id:
-            return True
-
-        import uuid as _uuid
-
-        try:
-            ws_uuid = _uuid.UUID(workspace_id)
-        except (ValueError, AttributeError):
-            return True
+        if not config_id:
+            return False
 
         try:
             from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
@@ -233,20 +242,98 @@ class FlushTask:
             with get_db_context() as db:
                 exists = db.execute(
                     select(MemoryConfigModel.config_id)
-                    .where(
-                        MemoryConfigModel.workspace_id == ws_uuid,
-                        MemoryConfigModel.state.is_(True),
-                    )
+                    .where(MemoryConfigModel.config_id == config_id)
                     .limit(1)
                 ).scalar_one_or_none()
                 return exists is not None
         except Exception as e:
             logger.warning(
                 f"[FlushTask] memory_config 预校验异常（继续执行）: "
-                f"workspace={workspace_id}, err={e}",
+                f"config_id={config_id}, err={e}",
                 exc_info=True,
             )
             return True
+
+    def _resolve_release_memory_config_id(
+        self, conversation_id: str
+    ) -> uuid.UUID | None:
+        """从应用当前发布版本的 config 中解析 memory_config_id。
+
+        查询链路：
+            conversations.id → conversations.app_id
+            → apps.current_release_id
+            → app_releases.config["memory"]["memory_config_id"]
+
+        通过 ``MemoryConfigService.extract_memory_config_id`` 解析 release 配置，
+        从而兼容 agent / workflow 类型应用以及旧的 int 形态 config_id_old。
+
+        Args:
+            conversation_id: 对话 ID
+
+        Returns:
+            解析出的 memory_config_id（UUID）；未配置或解析失败时返回 None。
+        """
+        try:
+            from app.services.memory_config_service import MemoryConfigService
+
+            with get_db_context() as db:
+                row = db.execute(
+                    select(
+                        App.id,
+                        App.type,
+                        App.current_release_id,
+                        AppRelease.config,
+                    )
+                    .select_from(Conversation)
+                    .join(App, App.id == Conversation.app_id)
+                    .outerjoin(AppRelease, AppRelease.id == App.current_release_id)
+                    .where(Conversation.id == conversation_id)
+                ).one_or_none()
+
+                if row is None:
+                    logger.warning(
+                        f"[FlushTask] 未找到对话对应的 app 或 release: conv={conversation_id}"
+                    )
+                    return None
+
+                app_id, app_type, current_release_id, release_config = row
+
+                if not current_release_id:
+                    logger.warning(
+                        f"[FlushTask] 应用尚未发布，无法解析 memory_config_id: "
+                        f"conv={conversation_id}, app={app_id}"
+                    )
+                    return None
+
+                if not isinstance(release_config, dict) or not release_config:
+                    logger.warning(
+                        f"[FlushTask] release.config 为空或格式异常: "
+                        f"conv={conversation_id}, app={app_id}, "
+                        f"release={current_release_id}"
+                    )
+                    return None
+
+                config_id, is_legacy_int = MemoryConfigService(db).extract_memory_config_id(
+                    app_type=str(app_type) if app_type else "",
+                    config=release_config,
+                )
+
+                if config_id is None:
+                    logger.warning(
+                        f"[FlushTask] release.config 中未配置 memory_config_id: "
+                        f"conv={conversation_id}, app={app_id}, "
+                        f"release={current_release_id}, is_legacy_int={is_legacy_int}"
+                    )
+                    return None
+
+                return config_id
+        except Exception as e:
+            logger.error(
+                f"[FlushTask] 解析 release memory_config_id 异常: "
+                f"conv={conversation_id}, err={e}",
+                exc_info=True,
+            )
+            return None
 
     def _get_write_cursor(self, conversation_id: str) -> int | None:
         """查询 write_cursor。"""
@@ -298,91 +385,30 @@ class FlushTask:
             )
             return []
 
-    def _load_memory_config(
-        self,
-        end_user_id: str | None = None,
-        workspace_id: str | None = None,
-    ):
-        """加载 memory_config。
+    def _load_memory_config(self, config_id: uuid.UUID):
+        """按指定 ``config_id`` 加载完整 ``MemoryConfig``。
 
-        优先通过 workspace_id 直接加载（workspace 默认配置）。
-        若 workspace_id 为空，回退到通过 end_user_id 查关联配置。
+        ``config_id`` 由 ``_resolve_release_memory_config_id`` 从应用 release
+        中提取，绕过 workspace 默认配置。
 
         Args:
-            end_user_id: 终端用户 ID（回退路径）
-            workspace_id: 工作空间 ID（优先路径）
+            config_id: 要加载的记忆配置 UUID
 
         Returns:
-            MemoryConfig 对象，加载失败时返回 None
+            MemoryConfig 对象；加载失败时返回 None。
         """
         try:
             from app.services.memory_config_service import MemoryConfigService
-            import uuid as _uuid
-
-            # 优先路径：直接用 workspace_id 加载 workspace 默认配置
-            if workspace_id:
-                try:
-                    ws_uuid = _uuid.UUID(str(workspace_id))
-                    with get_db_context() as db:
-                        memory_config = MemoryConfigService(db).load_memory_config(
-                            config_id=None,
-                            workspace_id=ws_uuid,
-                            service_name="FlushTask",
-                        )
-                    return memory_config
-                except Exception as e:
-                    logger.warning(
-                        f"[FlushTask] 通过 workspace_id 加载配置失败，尝试 end_user_id 回退: "
-                        f"workspace_id={workspace_id}, err={e}"
-                    )
-
-            # 回退路径：通过 end_user_id 查关联配置
-            if not end_user_id:
-                logger.error("[FlushTask] workspace_id 和 end_user_id 均为空，无法加载配置")
-                return None
-
-            from app.services.memory_agent_service import get_end_user_connected_config
 
             with get_db_context() as db:
-                connected_config = get_end_user_connected_config(end_user_id, db)
-
-            config_id_raw = connected_config.get("memory_config_id")
-            workspace_id_raw = connected_config.get("workspace_id")
-
-            config_id = None
-            if config_id_raw and config_id_raw != "None":
-                try:
-                    config_id = _uuid.UUID(str(config_id_raw))
-                except (ValueError, AttributeError):
-                    config_id = None
-
-            fallback_workspace_id = None
-            if workspace_id_raw and workspace_id_raw != "None":
-                try:
-                    fallback_workspace_id = _uuid.UUID(str(workspace_id_raw))
-                except (ValueError, AttributeError):
-                    fallback_workspace_id = None
-
-            if config_id is None and fallback_workspace_id is None:
-                logger.error(
-                    f"[FlushTask] 无法解析 config_id 和 workspace_id: "
-                    f"end_user_id={end_user_id}"
-                )
-                return None
-
-            with get_db_context() as db:
-                memory_config = MemoryConfigService(db).load_memory_config(
+                return MemoryConfigService(db).load_memory_config(
                     config_id=config_id,
-                    workspace_id=fallback_workspace_id,
+                    workspace_id=None,
                     service_name="FlushTask",
                 )
-
-            return memory_config
-
         except Exception as e:
             logger.error(
-                f"[FlushTask] 加载 memory_config 失败: "
-                f"end_user_id={end_user_id}, workspace_id={workspace_id}, err={e}",
+                f"[FlushTask] 加载 memory_config 失败: config_id={config_id}, err={e}",
                 exc_info=True,
             )
             return None
