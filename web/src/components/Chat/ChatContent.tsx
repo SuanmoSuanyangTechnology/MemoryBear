@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-25 16:39:35
+ * @Last Modified time: 2026-05-26 11:21:55
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -309,7 +309,7 @@ const ChatContent: FC<ChatContentProps> = ({
                                 />
                             }
                           </>}
-                          {Array.isArray(vo) && typeof item.version === 'number' && handleVersionChange &&
+                          {Array.isArray(vo) && vo.length > 1 && typeof item.version === 'number' && handleVersionChange &&
                               <Pagination
                                 key={item.id}
                                 size="small"
