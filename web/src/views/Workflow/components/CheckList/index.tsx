@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-04-09 18:58:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-19 15:30:03
+ * @Last Modified time: 2026-05-26 15:55:51
  */
 import { useState, useCallback, useEffect, useRef, type FC } from 'react'
 import { Popover, Flex } from 'antd'
@@ -74,7 +74,7 @@ const specialValidators: Record<string, (val: any) => boolean> = {
     if (!Array.isArray(val) || !val.length) return false
     return val.some(a => {
       if (!a?.variable_selector || !a?.operation) return true
-      if (a.operation === 'clear') return false
+      if (a.operation === 'clear' || a.operation === 'remove_first' || a.operation === 'remove_last') return false
       return a.value === undefined || a.value === null || a.value === ''
     })
   },
