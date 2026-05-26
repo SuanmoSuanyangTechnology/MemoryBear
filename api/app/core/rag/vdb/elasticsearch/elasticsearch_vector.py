@@ -223,7 +223,7 @@ class ElasticSearchVector(BaseVector):
         if self._client.indices.exists(index=self._collection_name):
             self._client.indices.delete(index=self._collection_name, ignore=[400, 404])
 
-    def search_by_segment(self, document_id: str | None = None, query: str | None = None, pagesize: int = 10, page: int = 1, asc: bool = True, **kwargs) -> tuple[int, list[DocumentChunk]]:  # 返回 (total, results):
+    def search_by_segment(self, document_id: str | None = None, query: str | None = None, pagesize: int = 10, page: int = 1, asc: bool = True, chunk_types: list[str] | str | None = None, parent_ids: list[str] | str | None = None, **kwargs) -> tuple[int, list[DocumentChunk]]:  # 返回 (total, results):
         """
         Search documents by segment (pagination) with optional keyword query.
 
@@ -232,6 +232,8 @@ class ElasticSearchVector(BaseVector):
             query: Optional keywords used to match chunk content.
             pagesize: Number of documents per page.
             page: 1-based page number.
+            chunk_types: If provided, filter by chunk_type (e.g., "parent", "child", or ["parent", "child"]).
+            parent_ids: If provided, filter by metadata.parent_id (for child chunks under specific parents).
             **kwargs: Additional search parameters (e.g., indices).
 
         Returns:
@@ -270,6 +272,22 @@ class ElasticSearchVector(BaseVector):
                         "query": query,
                         "analyzer": "ik_max_word"  # Use the same analyzer as in create_collection
                     }
+                }
+            })
+
+        if chunk_types:
+            types = chunk_types if isinstance(chunk_types, list) else [chunk_types]
+            query_str["query"]["bool"]["must"].append({
+                "terms": {
+                    Field.CHUNK_TYPE.value: types
+                }
+            })
+
+        if parent_ids:
+            pids = parent_ids if isinstance(parent_ids, list) else [parent_ids]
+            query_str["query"]["bool"]["must"].append({
+                "terms": {
+                    f"metadata.{Field.PARENT_ID.value}": pids
                 }
             })
 

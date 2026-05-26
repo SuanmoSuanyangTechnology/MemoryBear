@@ -121,7 +121,7 @@ async def get_knowledges(
     - Return paging metadata + file list
     """
     api_logger.info(f"Query knowledge base list: workspace_id={current_user.current_workspace_id}, page={page}, pagesize={pagesize}, keywords={keywords}, kb_ids={kb_ids}, username: {current_user.username}")
-    
+
     # 1. parameter validation
     if page < 1 or pagesize < 1:
         api_logger.warning(f"Error in paging parameters: page={page}, pagesize={pagesize}")
@@ -198,7 +198,7 @@ async def create_knowledge(
     create knowledge
     """
     api_logger.info(f"Request to create a knowledge base: name={create_data.name}, workspace_id={current_user.current_workspace_id}, username: {current_user.username}")
-    
+
     try:
         api_logger.debug(f"Start creating the knowledge base: {create_data.name}")
         # 1. Check if the knowledge base name already exists
@@ -227,7 +227,7 @@ async def get_knowledge(
     Retrieve knowledge base information based on knowledge_id
     """
     api_logger.info(f"Obtain details of the knowledge base: knowledge_id={knowledge_id}, username: {current_user.username}")
-    
+
     try:
         # 1. Query knowledge base information from the database
         api_logger.debug(f"Query knowledge base: {knowledge_id}")
@@ -238,7 +238,7 @@ async def get_knowledge(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="The knowledge base does not exist or access is denied"
             )
-        
+
         api_logger.info(f"Knowledge base query successful: {db_knowledge.name} (ID: {db_knowledge.id})")
         return success(data=jsonable_encoder(knowledge_schema.Knowledge.model_validate(db_knowledge)), msg="Successfully obtained knowledge base information")
     except HTTPException:
@@ -270,20 +270,11 @@ async def get_knowledge_chunk_policy(
             detail="The knowledge base does not exist or access is denied"
         )
 
-    # 2. 查询该知识库下所有文档的 parser_config
+    # 2. 查询该知识库下第一个文档的 parser_config（同 KB 下文档分块策略一致，取第一个即可）
     try:
-        documents = db.query(Document).filter(Document.kb_id == knowledge_id).all()
-
-        if not documents:
-            # 无文档 → 未锁定
-            api_logger.info(f"Knowledge base chunk policy: knowledge_id={knowledge_id}, locked=null, doc_count=0")
-            return success(data={"parent_child_mode": None}, msg="Successfully obtained knowledge base chunk policy")
-
-        # 有文档 → 取第一个文档的分块模式作为锁定模式
-        # （正常情况下同一知识库下所有文档分块模式一致）
-        first_doc_mode = documents[0].parser_config.get("parent_child_mode", False)
-        api_logger.info(f"Knowledge base chunk policy: knowledge_id={knowledge_id}, parent_child_mode={first_doc_mode}, doc_count={len(documents)}")
-        return success(data={"parent_child_mode": first_doc_mode}, msg="Successfully obtained knowledge base chunk policy")
+        result_map = {0: None,    1: False,    2: True}
+        api_logger.info(f"Knowledge base chunk policy: knowledge_id={knowledge_id}, parent_child_mode={result_map[db_knowledge.chunk_mode]}")
+        return success(data={"parent_child_mode": result_map[db_knowledge.chunk_mode]}, msg="Successfully obtained knowledge base chunk policy")
     except Exception as e:
         api_logger.error(f"Failed to query knowledge base chunk policy: knowledge_id={knowledge_id} - {str(e)}")
         raise HTTPException(
@@ -405,10 +396,10 @@ async def _update_knowledge(
                     # update value
                     setattr(db_knowledge, field, value)
                     updated_fields.append(f"{field}: {old_value} -> {value}")
-        
+
         if updated_fields:
             api_logger.debug(f"updated fields: {', '.join(updated_fields)}")
-        
+
         db_knowledge.updated_at = datetime.datetime.now()
 
         # 3. Save to database
@@ -439,7 +430,7 @@ async def delete_knowledge(
     Soft-delete knowledge base
     """
     api_logger.info(f"Request to delete knowledge base: knowledge_id={knowledge_id}, username: {current_user.username}")
-    
+
     try:
         # 1. Check whether the knowledge base exists
         api_logger.debug(f"Check whether the knowledge base exists: {knowledge_id}")

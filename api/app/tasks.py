@@ -286,7 +286,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         from app.core.rag.app.naive import chunk
         logger.info(f"[ParseDoc] file_binary size={len(file_binary)} bytes, type={type(file_binary).__name__}, bool={bool(file_binary)}")
 
-        parent_child_mode = db_document.parser_config.get("parent_child_mode", False)
+        parent_child_mode = db_document.is_parent_child_mode
         if parent_child_mode:
             from app.core.rag.app.naive import chunk_parent_child
             child_res, parent_res, parent_id_map = chunk_parent_child(

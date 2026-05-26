@@ -6,6 +6,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.celery_app import celery_app
 from app.controllers import file_controller
@@ -186,16 +187,42 @@ async def update_document(
             detail="The document does not exist or you do not have permission to access it"
         )
 
-    # 2. If updating the status, synchronize the document status switch to whether it can be retrieved from the vector database
+    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=db_document.kb_id, current_user=current_user)
+
+    # 2. 校验并处理 parser_config 更新
     update_dict = update_data.dict(exclude_unset=True)
+    if "parser_config" in update_dict:
+        new_config = update_dict["parser_config"]
+        # 与 Document.is_parent_child_mode 保持一致的计算逻辑
+        if "parent_child_mode" in new_config:
+            new_mode_is_parent = new_config["parent_child_mode"]
+        else:
+            new_mode_is_parent = new_config.get("parent_chunk_mode", None) in ["paragraph", "full-doc"]
+        kb_mode = db_knowledge.chunk_mode
+        if kb_mode == 0:
+            # 知识库未设置分块模式：首次设定，同步到知识库
+            db_knowledge.parser_config.update(new_config)
+            flag_modified(db_knowledge, "parser_config")
+        elif (kb_mode == 1 and new_mode_is_parent) or (kb_mode == 2 and not new_mode_is_parent):
+            # 已锁定且不一致：拒绝
+            api_logger.warning(
+                f"Document chunk mode deviates from knowledge base config: "
+                f"document_id={document_id}, kb_mode={kb_mode}, new_mode={new_mode_is_parent}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="禁止变更分块模式"
+            )
+        # kb_mode=1 且 new=False，或 kb_mode=2 且 new=True：通过，不改知识库
+
+    # 3.1 If updating the status, synchronize the document status switch to whether it can be retrieved from the vector database
     if "status" in update_dict:
         new_status = update_dict["status"]
         if new_status != db_document.status:
-            db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=db_document.kb_id, current_user=current_user)
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
             vector_service.change_status_by_document_id(document_id=str(document_id), status=new_status)
 
-    # 3. Update fields (only update non-null fields)
+    # 3.2 Update fields (only update non-null fields)
     api_logger.debug(f"Start updating the document fields: {document_id}")
     updated_fields = []
     for field, value in update_dict.items():
