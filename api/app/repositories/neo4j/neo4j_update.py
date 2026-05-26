@@ -1,6 +1,9 @@
 from app.repositories import Neo4jConnector
 
-neo4j_connector = Neo4jConnector()
+
+# Neo4j connector — lazy via driver_provider (Phase 1)
+def _get_neo4j_connector():
+    return Neo4jConnector()
 
 async def update_neo4j_data(neo4j_dict_data, update_databases):
     """
@@ -55,7 +58,7 @@ async def update_neo4j_data(neo4j_dict_data, update_databases):
         print(f"参数: {params}")
 
         # 执行更新
-        result = await neo4j_connector.execute_query(cypher_query, **params)
+        result = await _get_neo4j_connector().execute_query(cypher_query, **params)
 
         if result:
             updated_count = result[0].get('updated_count', 0)
@@ -126,7 +129,7 @@ async def update_neo4j_data_edge(neo4j_dict_data, update_databases):
         print(f"参数: {params}")
 
         # 执行更新
-        result = await neo4j_connector.execute_query(cypher_query, **params)
+        result = await _get_neo4j_connector().execute_query(cypher_query, **params)
 
         if result:
             updated_count = result[0].get('updated_count', 0)

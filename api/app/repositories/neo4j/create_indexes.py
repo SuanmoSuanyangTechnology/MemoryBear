@@ -212,6 +212,30 @@ async def create_unique_constraints():
             """
         )
 
+        # Phase 4: ExtractedEntity (end_user_id, name_lower) 唯一约束
+        # 杜绝同一 end_user_id 下出现重复的特殊实体（"用户"/"AI助手"）
+        # 注意：此约束要求所有 ExtractedEntity 节点都有 name_lower 属性，
+        # 首次创建前需确保已有数据已补充该字段（通过迁移脚本）。
+        import os
+        if os.getenv("NEO4J_ENTITY_UNIQUE_CONSTRAINT", "false").lower() == "true":
+            try:
+                await connector.execute_query(
+                    """
+                    CREATE CONSTRAINT entity_user_name_unique IF NOT EXISTS
+                    FOR (e:ExtractedEntity) REQUIRE (e.end_user_id, e.name_lower) IS UNIQUE
+                    """
+                )
+                import logging
+                logging.getLogger(__name__).info(
+                    "[Indexes] entity_user_name_unique constraint created"
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"[Indexes] Failed to create entity unique constraint "
+                    f"(may need data migration first): {e}"
+                )
+
     finally:
         await connector.close()
 

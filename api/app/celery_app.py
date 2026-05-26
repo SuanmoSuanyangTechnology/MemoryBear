@@ -120,6 +120,15 @@ celery_app.conf.update(
         # Post-store dedup + alias merge → memory_tasks queue
         'app.tasks.post_store_dedup_and_alias_merge': {'queue': 'memory_tasks'},
 
+        # Phase 2: Batch post-store task → memory_tasks queue
+        'app.tasks.batch_post_store_task': {'queue': 'memory_tasks'},
+
+        # Phase 2: Scan pending post-store → periodic_tasks queue
+        'app.tasks.scan_pending_post_store': {'queue': 'periodic_tasks'},
+
+        # Phase 2: Force consume pending post-store → periodic_tasks queue
+        'app.tasks.force_consume_pending_post_store': {'queue': 'periodic_tasks'},
+
         # Async metadata extraction → memory_tasks queue
         'app.tasks.extract_metadata_batch': {'queue': 'memory_tasks'},
 
@@ -210,6 +219,40 @@ beat_schedule_config = {
         "schedule": 60.0,
         "options": {"queue": "periodic_tasks"},
     },
+    # Phase 2: 批量后处理超时扫描
+    "scan-pending-post-store": {
+        "task": "app.tasks.scan_pending_post_store",
+        "schedule": 60.0,
+        "options": {"queue": "periodic_tasks"},
+    },
 }
 
 celery_app.conf.beat_schedule = beat_schedule_config
+
+# ─── Phase 1: Neo4j Driver 生命周期管理 ─────────────────────────────────────
+# prefork worker 子进程启动/关闭时重建/清理 Neo4j driver。
+# memory_tasks 用 --pool=threads，所有线程共享父进程 driver，此信号不触发。
+# document_tasks / periodic_tasks 是 prefork，子进程必须重建。
+
+from celery.signals import worker_process_init, worker_process_shutdown
+
+
+@worker_process_init.connect
+def _init_worker_neo4j(**_):
+    """prefork 子进程启动时重建 Neo4j driver。"""
+    from app.repositories.neo4j.driver_provider import reset_driver_for_fork, get_driver_sync
+    reset_driver_for_fork()
+    get_driver_sync()
+
+
+@worker_process_shutdown.connect
+def _shutdown_worker_neo4j(**_):
+    """prefork 子进程关闭时清理 driver。"""
+    import asyncio
+    from app.repositories.neo4j.driver_provider import close_driver
+    try:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(close_driver())
+        loop.close()
+    except Exception:
+        pass

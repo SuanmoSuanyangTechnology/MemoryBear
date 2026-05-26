@@ -560,15 +560,14 @@ class WritePipeline:
     # ──────────────────────────────────────────────
 
     async def _post_store_async_tasks(self, result: ExtractionResult) -> None:
-        """提交写入后的异步 Celery 任务（全部 fire-and-forget，失败不影响主流程）：
+        """写入后处理：累积到 Redis 或回退旧逻辑。
 
-        1. Neo4j 别名归并 + 第二层去重
-        2. 异步情绪提取
-        3. 异步元数据提取
+        Phase 2 改造：
+          - 第二层去重 + 聚类 + 元数据 → Redis 累积，达阈值触发 batch_post_store_task
+          - 情绪提取 → 仍然每轮触发（轻量，不涉及实体竞争）
+          - Redis 不可用或 Feature Flag 关闭 → 回退旧逻辑
         """
-        from app.core.memory.storage_services.extraction_engine.knowledge_extraction.metadata_extractor import (
-            collect_user_entities_for_metadata,
-        )
+        from app.core.memory.utils.batch_accumulator import is_batch_enabled
 
         llm_model_id = (
             str(self.memory_config.llm_model_id)
@@ -582,19 +581,37 @@ class WritePipeline:
             else None
         )
 
-        # ── 1. Neo4j 别名归并 + 第二层去重 ──
-        self._submit_celery_task(
-            "PostStore",
-            "app.tasks.post_store_dedup_and_alias_merge",
-            {
-                "end_user_id": self.end_user_id,
-                "entity_ids": [e.id for e in result.entity_nodes],
-                "llm_model_id": llm_model_id,
-                "snapshot_dir": snapshot_dir,
-            },
-        )
+        # ── 1. 第二层去重 + 聚类 + 元数据：累积或回退 ──
+        if is_batch_enabled():
+            try:
+                from app.core.memory.utils.batch_accumulator import BatchPostStoreAccumulator
+                from app.tasks import get_sync_redis_client
+                redis_client = get_sync_redis_client()
 
-        # ── 2. 异步情绪提取 ──
+                if redis_client is not None:
+                    accumulator = BatchPostStoreAccumulator(redis_client)
+                    should_dispatch = accumulator.accumulate(
+                        end_user_id=self.end_user_id,
+                        entity_ids=[e.id for e in result.entity_nodes],
+                        llm_model_id=llm_model_id,
+                        language=self.language,
+                        snapshot_dir=snapshot_dir,
+                    )
+                    if should_dispatch:
+                        self._submit_celery_task(
+                            "BatchPostStore",
+                            "app.tasks.batch_post_store_task",
+                            {"end_user_id": self.end_user_id},
+                        )
+                else:
+                    self._fallback_post_store(result, llm_model_id, snapshot_dir)
+            except Exception as e:
+                logger.warning(f"[BatchAccumulator] 累积失败，回退旧逻辑: {e}")
+                self._fallback_post_store(result, llm_model_id, snapshot_dir)
+        else:
+            self._fallback_post_store(result, llm_model_id, snapshot_dir)
+
+        # ── 2. 异步情绪提取（仍每轮触发，轻量且不涉及实体竞争）──
         emotion_statements = getattr(self, "_emotion_statements", [])
         if emotion_statements and llm_model_id:
             self._submit_celery_task(
@@ -608,7 +625,25 @@ class WritePipeline:
                 },
             )
 
-        # ── 3. 异步元数据提取 ──
+    def _fallback_post_store(
+        self, result: ExtractionResult, llm_model_id: Optional[str], snapshot_dir: Optional[str]
+    ) -> None:
+        """回退到旧逻辑：每轮触发 dedup + metadata。"""
+        from app.core.memory.storage_services.extraction_engine.knowledge_extraction.metadata_extractor import (
+            collect_user_entities_for_metadata,
+        )
+
+        self._submit_celery_task(
+            "PostStore",
+            "app.tasks.post_store_dedup_and_alias_merge",
+            {
+                "end_user_id": self.end_user_id,
+                "entity_ids": [e.id for e in result.entity_nodes],
+                "llm_model_id": llm_model_id,
+                "snapshot_dir": snapshot_dir,
+            },
+        )
+
         user_entities = collect_user_entities_for_metadata(result.entity_nodes)
         if user_entities and llm_model_id:
             self._submit_celery_task(
@@ -643,51 +678,14 @@ class WritePipeline:
 
     async def _cluster(self, result: ExtractionResult) -> None:
         """
-        聚类：提交 Celery 异步任务进行增量社区更新。
+        聚类：Phase 2 改造后由 batch_post_store_task 统一执行。
 
-        聚类不阻塞主写入流程，失败不影响写入结果。
-        通过 Celery 异步执行，由 LabelPropagationEngine 完成实际计算。
-
-        注意：ExtractionResult.entity_nodes 已经是经过 _extract() 中
-        两阶段去重消歧（_run_dedup_and_write_summary）后的结果，
-        聚类直接基于去重后的实体 ID 执行。
+        此处不再每轮触发，避免与第二层去重并发竞争 Neo4j。
+        聚类将在累积 N 轮后由 batch_post_store_task 在去重完成后统一执行。
         """
-        if not result.entity_nodes:
-            return
-
-        try:
-            from app.tasks import run_incremental_clustering
-
-            new_entity_ids = [e.id for e in result.entity_nodes]
-            task = run_incremental_clustering.apply_async(
-                kwargs={
-                    "end_user_id": self.end_user_id,
-                    "new_entity_ids": new_entity_ids,
-                    "llm_model_id": (
-                        str(self.memory_config.llm_model_id)
-                        if self.memory_config.llm_model_id
-                        else None
-                    ),
-                    "embedding_model_id": (
-                        str(self.memory_config.embedding_model_id)
-                        if self.memory_config.embedding_model_id
-                        else None
-                    ),
-                    "language": self.language,
-                },
-                priority=3,
-            )
-            logger.info(
-                f"[Clustering] 增量聚类任务已提交 - "
-                f"task_id = {task.id}, "
-                f"entity_count = {len(new_entity_ids)}, "
-                f"source=dedup"
-            )
-        except Exception as e:
-            logger.error(
-                f"[Clustering] 提交聚类任务失败（不影响主流程）: {e}",
-                exc_info=True,
-            )
+        # Phase 2: 聚类已移至 batch_post_store_task，此处跳过
+        logger.info("[Clustering] 聚类已移至批量后处理任务，跳过每轮触发")
+        return
 
     # ──────────────────────────────────────────────
     # Step 5: 摘要
@@ -699,7 +697,7 @@ class WritePipeline:
         摘要：生成情景记忆摘要 → 写入 Neo4j。
 
         摘要生成失败不影响主流程（try/except 吞掉异常）。
-        使用独立的 Neo4j 连接器，避免与主连接器的事务冲突。
+        Phase 1 改造：复用主连接器，不再创建独立 connector。
         """
         from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import (
             memory_summary_generation,
@@ -708,7 +706,6 @@ class WritePipeline:
             add_memory_summary_statement_edges,
         )
         from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
-        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
         try:
             summaries = await memory_summary_generation(
@@ -717,15 +714,8 @@ class WritePipeline:
                 embedder_client=self._embedder_client,
                 language=self.language,
             )
-            ms_connector = Neo4jConnector()
-            try:
-                await add_memory_summary_nodes(summaries, ms_connector)
-                await add_memory_summary_statement_edges(summaries, ms_connector)
-            finally:
-                try:
-                    await ms_connector.close()
-                except Exception:
-                    pass
+            await add_memory_summary_nodes(summaries, self._neo4j_connector)
+            await add_memory_summary_statement_edges(summaries, self._neo4j_connector)
         except Exception as e:
             logger.error(f"Memory summary step failed: {e}", exc_info=True)
 
@@ -1088,8 +1078,10 @@ class WritePipeline:
             self.language = detected if detected in ("zh", "en") else "en"
             logger.info(f"[LanguageDetect][run_with_window] detected={detected}, language={self.language}, text_len={len(user_content)}")
 
+        # 优先级：用户传入的 dialog_at > dispatch_at（任务派发时刻） > created_at > 空字符串
         _dialog_at = (
-            dispatch_at
+            target_message.get("dialog_at", "")
+            or dispatch_at
             or target_message.get("created_at", "")
             or ""
         )

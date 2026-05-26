@@ -90,9 +90,14 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
     e.type_id = entity.type_id,
     e.type_description = CASE WHEN entity.type_description IS NOT NULL AND entity.type_description <> '' THEN entity.type_description ELSE coalesce(e.type_description, '') END,
     e.description = CASE
-        WHEN entity.description IS NOT NULL AND entity.description <> ''
-         AND (e.description IS NULL OR size(e.description) = 0 OR size(entity.description) > size(e.description))
-        THEN entity.description ELSE e.description END,
+        WHEN entity.description IS NOT NULL AND entity.description <> '' THEN
+            CASE
+                WHEN e.description IS NULL OR e.description = '' THEN entity.description
+                WHEN e.description CONTAINS entity.description THEN e.description
+                ELSE e.description + '；' + entity.description
+            END
+        ELSE coalesce(e.description, '')
+    END,
     e.example = CASE 
         WHEN entity.example IS NOT NULL AND entity.example <> '' 
         THEN entity.example 

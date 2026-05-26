@@ -200,6 +200,11 @@ def message_to_dict(message: MemoryMessage) -> dict:
             if message.created_at is not None
             else None
         ),
+        "dialog_at": (
+            message.dialog_at.isoformat()
+            if message.dialog_at is not None
+            else None
+        ),
         "files": message.files,
     }
 
@@ -443,6 +448,23 @@ async def write_batch_to_memory_messages(
             if not content.strip():
                 continue
 
+            # 解析用户传入的 dialog_at（ISO 8601）
+            _dialog_at_raw = msg.get("dialog_at")
+            _dialog_at_dt = None
+            if _dialog_at_raw:
+                try:
+                    if isinstance(_dialog_at_raw, str):
+                        _dialog_at_dt = datetime.fromisoformat(
+                            _dialog_at_raw.replace("Z", "+00:00")
+                        )
+                    elif isinstance(_dialog_at_raw, datetime):
+                        _dialog_at_dt = _dialog_at_raw
+                except Exception as e:
+                    logger.warning(
+                        f"[WindowUtils] 解析 dialog_at 失败 (将回退 created_at): "
+                        f"value={_dialog_at_raw!r}, err={e}"
+                    )
+
             next_seq += 1
             mm = MemoryMessage(
                 id=uuid.uuid4(),
@@ -453,13 +475,15 @@ async def write_batch_to_memory_messages(
                 message_seq=next_seq,
                 should_memorize=True,
                 created_at=datetime.now(timezone.utc),
+                dialog_at=_dialog_at_dt,
                 files=msg.get("files"),
             )
             db.add(mm)
             written.append(mm)
             logger.debug(
                 f"[WindowUtils] 写入 memory_messages: "
-                f"conv={conversation_id}, seq={next_seq}, role={role}"
+                f"conv={conversation_id}, seq={next_seq}, role={role}, "
+                f"dialog_at={_dialog_at_dt.isoformat() if _dialog_at_dt else 'fallback'}"
             )
 
         db.commit()

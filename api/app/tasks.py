@@ -2103,6 +2103,447 @@ def post_store_dedup_and_alias_merge_task(
         if loop:
             _shutdown_loop_gracefully(loop)
 
+
+# =============================================================================
+# Phase 2: 批量后处理任务（Redis 累积触发）
+# =============================================================================
+
+
+@celery_app.task(
+    name="app.tasks.batch_post_store_task",
+    bind=True,
+    ignore_result=False,
+    max_retries=2,
+    default_retry_delay=60,
+    acks_late=True,
+    time_limit=1200,
+    soft_time_limit=1100,
+)
+def batch_post_store_task(self, end_user_id: str) -> Dict[str, Any]:
+    """批量后处理任务：消费累积队列，统一执行去重 + 聚类 + 元数据。
+
+    触发条件（三选一）：
+      1. 累积达到 BATCH_POST_STORE_THRESHOLD（默认 10 轮）
+      2. 超时 BATCH_POST_STORE_TIMEOUT（默认 300s）由 scan_pending 触发
+      3. FlushTask 对话结束时强制触发
+
+    执行流程：
+      1. 获取 per-user 写入锁
+      2. 从 Redis 消费所有累积记录
+      3. 合并所有 entity_ids（去重）
+      4. Neo4j 别名归并
+      5. 第二层去重（候选集 = N 轮合并，效果更好）
+      6. 增量聚类
+      7. 元数据提取
+      8. 同步 memory_count
+      9. 释放锁
+    """
+    start_time = time.time()
+    task_id = self.request.id
+    logger.info(f"[BatchPostStore] 开始: end_user_id={end_user_id}, task_id={task_id}")
+
+    # 获取 per-user 批量锁（与 API 写入锁分开，避免被 LLM 萃取阻塞）
+    # batch 任务只与其他 batch 任务互斥，与 API 的 WritePipeline 并行执行
+    redis_client = get_sync_redis_client()
+    lock = None
+    if redis_client is not None:
+        lock = RedisFairLock(
+            key=f"memory_batch:{end_user_id}",
+            redis_client=redis_client,
+            expire=1200,
+            timeout=600,
+            auto_renewal=True,
+        )
+        if not lock.acquire():
+            logger.warning(f"[BatchPostStore] 获取批量锁超时: end_user_id={end_user_id}")
+            return {"status": "SKIPPED", "reason": "lock_timeout", "task_id": task_id}
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.memory.utils.batch_accumulator import BatchPostStoreAccumulator
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+        # 1. 消费累积队列
+        accumulator = BatchPostStoreAccumulator(redis_client)
+        records = accumulator.consume_pending(end_user_id)
+
+        if not records:
+            return {"status": "EMPTY", "message": "no pending records"}
+
+        # 2. 合并所有 entity_ids（去重）
+        all_entity_ids = list(set(
+            eid
+            for record in records
+            for eid in record.get("entity_ids", [])
+        ))
+        llm_model_id = next(
+            (r["llm_model_id"] for r in reversed(records) if r.get("llm_model_id")),
+            None,
+        )
+        language = records[-1].get("language", "zh")
+
+        logger.info(
+            f"[BatchPostStore] 消费完成: end_user_id={end_user_id}, "
+            f"累积轮数={len(records)}, 合并实体数={len(all_entity_ids)}"
+        )
+
+        connector = Neo4jConnector()
+        result_info: Dict[str, Any] = {"rounds": len(records), "total_entities": len(all_entity_ids)}
+
+        try:
+            # 3. Neo4j 别名归并
+            try:
+                from app.repositories.neo4j.cypher_queries import (
+                    MERGE_ALIAS_BELONGS_TO,
+                    REDIRECT_ALIAS_EDGES,
+                    DELETE_ALIAS_NODES,
+                )
+                await connector.execute_query(MERGE_ALIAS_BELONGS_TO, end_user_id=end_user_id)
+                await connector.execute_query(REDIRECT_ALIAS_EDGES, end_user_id=end_user_id)
+                await connector.execute_query(DELETE_ALIAS_NODES, end_user_id=end_user_id)
+                result_info["alias_merge"] = "ok"
+                logger.info(f"[BatchPostStore] 别名归并完成: end_user_id={end_user_id}")
+            except Exception as e:
+                result_info["alias_merge_error"] = str(e)
+                logger.warning(f"[BatchPostStore] 别名归并失败: {e}")
+
+            # 3.5 description 全局去重（避免追加导致的重复增长）
+            try:
+                dedup_desc_cypher = """
+                UNWIND $entity_ids AS eid
+                MATCH (e:ExtractedEntity {id: eid})
+                WHERE e.description IS NOT NULL AND e.description CONTAINS '；'
+                WITH e, [item IN split(e.description, '；') WHERE trim(item) <> ''] AS parts
+                WITH e, reduce(acc = [], item IN parts |
+                    CASE WHEN trim(item) IN acc THEN acc ELSE acc + trim(item) END
+                ) AS unique_parts
+                SET e.description = apoc.text.join(unique_parts, '；')
+                RETURN count(e) AS count
+                """
+                # 不依赖 APOC 的退化版本（如果没装 APOC）
+                dedup_desc_cypher_fallback = """
+                UNWIND $entity_ids AS eid
+                MATCH (e:ExtractedEntity {id: eid})
+                WHERE e.description IS NOT NULL AND e.description CONTAINS '；'
+                WITH e, [item IN split(e.description, '；') WHERE trim(item) <> ''] AS parts
+                WITH e, reduce(acc = [], item IN parts |
+                    CASE WHEN trim(item) IN acc THEN acc ELSE acc + trim(item) END
+                ) AS unique_parts
+                WITH e, reduce(s = '', i IN range(0, size(unique_parts) - 1) |
+                    CASE WHEN i = 0 THEN unique_parts[i] ELSE s + '；' + unique_parts[i] END
+                ) AS new_desc
+                SET e.description = new_desc
+                RETURN count(e) AS count
+                """
+                try:
+                    dedup_count = await connector.execute_query(
+                        dedup_desc_cypher, entity_ids=all_entity_ids
+                    )
+                    result_info["desc_dedup_count"] = dedup_count[0].get("count", 0) if dedup_count else 0
+                except Exception:
+                    # APOC 不可用 fallback
+                    dedup_count = await connector.execute_query(
+                        dedup_desc_cypher_fallback, entity_ids=all_entity_ids
+                    )
+                    result_info["desc_dedup_count"] = dedup_count[0].get("count", 0) if dedup_count else 0
+                logger.info(
+                    f"[BatchPostStore] description 全局去重完成: "
+                    f"处理 {result_info.get('desc_dedup_count', 0)} 个实体"
+                )
+            except Exception as e:
+                result_info["desc_dedup_error"] = str(e)
+                logger.warning(f"[BatchPostStore] description 去重失败: {e}")
+
+            # 4. 第二层去重
+            try:
+                from app.core.memory.storage_services.extraction_engine.deduplication.second_layer_dedup import (
+                    second_layer_dedup_and_merge_with_neo4j,
+                    _row_to_entity,
+                )
+                from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
+                    clean_cross_role_aliases,
+                )
+                from app.repositories.neo4j.cypher_queries import EXTRACTED_ENTITY_NODE_SAVE
+
+                load_query = """
+                UNWIND $entity_ids AS eid
+                MATCH (e:ExtractedEntity {id: eid})
+                RETURN e {.*} AS entity
+                """
+                entity_records = await connector.execute_query(load_query, entity_ids=all_entity_ids)
+
+                current_entities = []
+                for rec in (entity_records or []):
+                    try:
+                        current_entities.append(_row_to_entity(rec.get("entity") or rec))
+                    except Exception:
+                        pass
+
+                if current_entities:
+                    llm_client = None
+                    if llm_model_id:
+                        try:
+                            from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
+                            from app.db import get_db_context
+                            with get_db_context() as db:
+                                factory = MemoryClientFactory(db)
+                                llm_client = factory.get_llm_client(llm_model_id)
+                        except Exception as e:
+                            logger.warning(f"[BatchPostStore] 构建 LLM client 失败: {e}")
+
+                    fused, _, _ = await second_layer_dedup_and_merge_with_neo4j(
+                        connector=connector,
+                        end_user_id=end_user_id,
+                        entity_nodes=current_entities,
+                        statement_entity_edges=[],
+                        entity_entity_edges=[],
+                        llm_client=llm_client,
+                    )
+                    clean_cross_role_aliases(fused)
+
+                    if fused:
+                        entity_data = [e.model_dump() for e in fused]
+                        await connector.execute_query(EXTRACTED_ENTITY_NODE_SAVE, entities=entity_data)
+
+                    result_info["layer2_input"] = len(current_entities)
+                    result_info["layer2_output"] = len(fused)
+                    logger.info(
+                        f"[BatchPostStore] 第二层去重完成: "
+                        f"{len(current_entities)} → {len(fused)} 个实体"
+                    )
+
+                    # 快照：第二层去重结果
+                    try:
+                        from app.core.memory.utils.debug.write_snapshot_recorder import WriteSnapshotRecorder
+                        # 找到最新的 snapshot 目录
+                        import glob
+                        snapshot_base = "logs/memory-output/snapshots"
+                        snapshot_dirs = sorted(glob.glob(f"{snapshot_base}/new_*"), reverse=True)
+                        if snapshot_dirs:
+                            latest_dir = snapshot_dirs[0]
+                            WriteSnapshotRecorder.save_alias_merge_result(
+                                latest_dir,
+                                [{"id": e.id, "name": e.name, "entity_type": e.entity_type,
+                                  "description": e.description, "aliases": e.aliases or []}
+                                 for e in fused],
+                            )
+                            logger.info(f"[BatchPostStore] 快照 8_after_alias_merge 已写入: {latest_dir}")
+                    except Exception as snap_e:
+                        logger.debug(f"[BatchPostStore] 快照写入失败（不影响主流程）: {snap_e}")
+                else:
+                    result_info["layer2_skipped"] = "no entities loaded"
+            except Exception as e:
+                result_info["layer2_error"] = str(e)
+                logger.warning(f"[BatchPostStore] 第二层去重失败: {e}", exc_info=True)
+
+            # 5. 增量聚类
+            try:
+                from app.core.memory.storage_services.clustering_engine import LabelPropagationEngine
+                engine = LabelPropagationEngine(connector, llm_model_id=llm_model_id)
+                await engine.run(end_user_id=end_user_id, new_entity_ids=all_entity_ids)
+                result_info["clustering"] = "ok"
+                logger.info(f"[BatchPostStore] 聚类完成: end_user_id={end_user_id}")
+            except Exception as e:
+                result_info["clustering_error"] = str(e)
+                logger.warning(f"[BatchPostStore] 聚类失败: {e}", exc_info=True)
+
+            # 6. 元数据提取（增强版：聚合用户实体关联的所有 Statement）
+            try:
+                from app.core.memory.storage_services.extraction_engine.knowledge_extraction.metadata_extractor import (
+                    collect_user_entities_for_metadata,
+                )
+                from app.core.memory.storage_services.extraction_engine.deduplication.second_layer_dedup import (
+                    _row_to_entity as _row_to_entity_for_meta,
+                )
+
+                # 从 Neo4j 加载 user 类型实体
+                user_entity_query = """
+                UNWIND $entity_ids AS eid
+                MATCH (e:ExtractedEntity {id: eid})
+                WHERE toLower(e.entity_type) IN ['用户', 'user']
+                RETURN e {.*} AS entity
+                """
+                user_records = await connector.execute_query(user_entity_query, entity_ids=all_entity_ids)
+
+                if user_records and llm_model_id:
+                    # 转为 ExtractedEntityNode 后调用 collect_user_entities_for_metadata
+                    user_entity_nodes = []
+                    for rec in user_records:
+                        try:
+                            user_entity_nodes.append(_row_to_entity_for_meta(rec.get("entity") or rec))
+                        except Exception:
+                            pass
+
+                    if user_entity_nodes:
+                        user_entities_payload = collect_user_entities_for_metadata(user_entity_nodes)
+
+                        # 增强：为每个用户实体聚合关联 Statement 的内容
+                        for ue in user_entities_payload:
+                            try:
+                                stmt_query = """
+                                MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e:ExtractedEntity {id: $entity_id})
+                                RETURN s.statement AS statement
+                                UNION
+                                MATCH (e:ExtractedEntity {id: $entity_id})-[:EXTRACTED_RELATIONSHIP]-(e2:ExtractedEntity)
+                                MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e2)
+                                RETURN s.statement AS statement
+                                """
+                                stmt_records = await connector.execute_query(
+                                    stmt_query, entity_id=ue["entity_id"]
+                                )
+                                if stmt_records:
+                                    stmt_texts = [
+                                        r["statement"] for r in stmt_records
+                                        if r.get("statement") and r["statement"].strip()
+                                    ]
+                                    # 去重后追加到 descriptions
+                                    existing_set = set(ue["descriptions"])
+                                    for st in stmt_texts:
+                                        if st not in existing_set:
+                                            ue["descriptions"].append(st)
+                                            existing_set.add(st)
+                                    logger.info(
+                                        f"[BatchPostStore] 元数据增强: entity={ue['entity_name']}, "
+                                        f"追加 {len(stmt_texts)} 条 Statement"
+                                    )
+                            except Exception as stmt_e:
+                                logger.debug(
+                                    f"[BatchPostStore] Statement 聚合失败（不影响主流程）: {stmt_e}"
+                                )
+
+                        if user_entities_payload:
+                            # 找到最新的 snapshot 目录传给元数据任务
+                            _meta_snapshot_dir = None
+                            try:
+                                import glob as _glob
+                                _snap_dirs = sorted(_glob.glob("logs/memory-output/snapshots/new_*"), reverse=True)
+                                if _snap_dirs:
+                                    _meta_snapshot_dir = _snap_dirs[0]
+                            except Exception:
+                                pass
+
+                            # 派发已有的 extract_metadata_batch_task
+                            celery_app.send_task(
+                                "app.tasks.extract_metadata_batch",
+                                kwargs={
+                                    "user_entities": user_entities_payload,
+                                    "llm_model_id": llm_model_id,
+                                    "language": language,
+                                    "snapshot_dir": _meta_snapshot_dir,
+                                },
+                            )
+                            result_info["metadata_dispatched"] = len(user_entities_payload)
+                            logger.info(f"[BatchPostStore] 元数据提取已派发: {len(user_entities_payload)} 个实体")
+            except Exception as e:
+                result_info["metadata_error"] = str(e)
+                logger.warning(f"[BatchPostStore] 元数据提取失败: {e}", exc_info=True)
+
+        finally:
+            await connector.close()
+
+        # 7. 同步 memory_count
+        try:
+            _count_connector = Neo4jConnector()
+            await sync_end_user_memory_count_from_neo4j(end_user_id, _count_connector)
+            await _count_connector.close()
+        except Exception as e:
+            logger.warning(f"[BatchPostStore] memory_count 同步失败: {e}")
+
+        return result_info
+
+    loop = None
+    try:
+        loop = set_asyncio_event_loop()
+        result = loop.run_until_complete(_run())
+        elapsed = time.time() - start_time
+        logger.info(f"[BatchPostStore] 完成: elapsed={elapsed:.2f}s, result={result}")
+        return {"status": "SUCCESS", **result, "elapsed_time": elapsed, "task_id": task_id}
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.error(f"[BatchPostStore] 失败: {e}, elapsed={elapsed:.2f}s", exc_info=True)
+        raise self.retry(exc=e)
+    finally:
+        if lock:
+            try:
+                lock.release()
+            except Exception:
+                pass
+        if redis_client:
+            try:
+                from app.core.memory.utils.batch_accumulator import BatchPostStoreAccumulator
+                BatchPostStoreAccumulator(redis_client).release_dispatch_lock(end_user_id)
+            except Exception:
+                pass
+        if loop:
+            _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(
+    name="app.tasks.scan_pending_post_store",
+    bind=True,
+    ignore_result=True,
+    max_retries=0,
+    time_limit=60,
+    soft_time_limit=50,
+)
+def scan_pending_post_store(self) -> None:
+    """定时扫描：对超时未触发的累积队列强制派发批量任务。
+
+    每 60s 由 Celery Beat 触发，扫描所有 post_store:pending:* 键，
+    检查最早记录的 pushed_at，若超过 BATCH_POST_STORE_TIMEOUT 则触发。
+    """
+    from app.core.memory.utils.batch_accumulator import (
+        BatchPostStoreAccumulator,
+        BATCH_TIMEOUT,
+    )
+
+    redis_client = get_sync_redis_client()
+    if redis_client is None:
+        return
+
+    accumulator = BatchPostStoreAccumulator(redis_client)
+    now = time.time()
+    triggered = 0
+
+    cursor = 0
+    while True:
+        cursor, keys = redis_client.scan(
+            cursor=cursor, match="post_store:pending:*", count=100
+        )
+        for key in keys:
+            # 从 key 中提取 end_user_id
+            # key 格式: post_store:pending:{end_user_id} 或 b'post_store:pending:{xxx}'
+            key_str = key if isinstance(key, str) else key.decode("utf-8")
+            # 去掉 hash tag 的花括号
+            end_user_id = key_str.split(":")[-1].strip("{}")
+
+            first_item = redis_client.lindex(key, 0)
+            if first_item is None:
+                continue
+
+            try:
+                record = json.loads(first_item)
+                pushed_at = record.get("pushed_at", 0)
+                if now - pushed_at > BATCH_TIMEOUT:
+                    if accumulator.set_dispatch_lock(end_user_id):
+                        celery_app.send_task(
+                            "app.tasks.batch_post_store_task",
+                            kwargs={"end_user_id": end_user_id},
+                        )
+                        triggered += 1
+                        logger.info(
+                            f"[ScanPending] 超时触发: end_user_id={end_user_id}, "
+                            f"age={now - pushed_at:.0f}s"
+                        )
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+        if cursor == 0:
+            break
+
+    if triggered > 0:
+        logger.info(f"[ScanPending] 本轮触发 {triggered} 个批量任务")
+
+
 @celery_app.task(
     name="app.tasks.layer2_reflection_task",
     bind=True,
@@ -4233,6 +4674,25 @@ def flush_conversation_task(self, conversation_id: str) -> None:
             exc_info=True,
         )
     finally:
+        # Phase 2: 对话结束时强制触发批量后处理
+        try:
+            from app.core.memory.utils.batch_accumulator import (
+                BatchPostStoreAccumulator,
+                is_batch_enabled,
+            )
+            if is_batch_enabled() and redis_client and end_user_id_for_lock:
+                acc = BatchPostStoreAccumulator(redis_client)
+                if acc.force_flush(end_user_id_for_lock):
+                    celery_app.send_task(
+                        "app.tasks.batch_post_store_task",
+                        kwargs={"end_user_id": end_user_id_for_lock},
+                    )
+                    logger.info(
+                        f"[FlushTask] 强制触发批量后处理: eu={end_user_id_for_lock}"
+                    )
+        except Exception as e:
+            logger.warning(f"[FlushTask] 强制触发批量后处理失败: {e}")
+
         if write_lock_token is not None:
             try:
                 from app.services.memory_agent_service import _reset_write_lock_holder

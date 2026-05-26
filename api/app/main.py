@@ -65,6 +65,11 @@ async def lifespan(app: FastAPI):
             logger.warning(f"加载预定义模型时出错: {str(e)}")
     else:
         logger.info("预定义模型加载已禁用 (LOAD_MODEL=false)")
+    # Phase 1: 初始化 Neo4j driver 单例
+    from app.repositories.neo4j.driver_provider import get_driver_sync, close_driver
+    get_driver_sync()
+    logger.info("[Neo4j] Driver 单例已初始化")
+
     await create_all_indexes()
     logger.info("All neo4j indexes and constraints created successfully!")
     logger.info("应用程序启动完成")
@@ -73,6 +78,8 @@ async def lifespan(app: FastAPI):
     yield
     # 应用关闭事件
     logger.info("应用程序正在关闭")
+    await close_driver()
+    logger.info("[Neo4j] Driver 已关闭")
 
 
 app = FastAPI(

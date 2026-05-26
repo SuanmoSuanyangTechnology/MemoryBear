@@ -474,6 +474,12 @@ class ExtractedEntityNode(Node):
     anchors: List[str] = Field(default_factory=list, description="Personally meaningful objects or symbols")
     events: List[str] = Field(default_factory=list, description="Durable personal experiences or milestones")
 
+    # Phase 4: 用于唯一约束的小写名称字段
+    name_lower: Optional[str] = Field(
+        default=None,
+        description="Lowercase version of entity name, used for unique constraint (end_user_id, name_lower)"
+    )
+
     @field_validator('aliases', mode='before')
     @classmethod
     def validate_aliases_field(cls, v):  # 字段验证器 自动清理和验证 aliases 字段
@@ -497,6 +503,18 @@ class ExtractedEntityNode(Node):
             >>> # Output: ["alias1", "123"]
         """
         return validate_aliases(v)
+
+    @field_validator('name_lower', mode='before')
+    @classmethod
+    def validate_name_lower(cls, v, info):
+        """Phase 4: 自动从 name 生成 name_lower。"""
+        if v is not None:
+            return v
+        # 从 info.data 中获取 name（Pydantic v2 mode='before' 时 data 可能不完整）
+        name = info.data.get('name') if info.data else None
+        if name:
+            return name.strip().lower()
+        return None
 
 
 class MemorySummaryNode(Node):

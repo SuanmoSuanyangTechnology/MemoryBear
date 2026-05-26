@@ -68,6 +68,11 @@ class MemoryMessage(Base):
 
     # 时间戳
     created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")
+    dialog_at = Column(
+        DateTime,
+        nullable=True,
+        comment="对话发生的实际时间（ISO 8601）。用户传入则使用，否则回退 created_at",
+    )
 
     # 关联关系
     conversation = relationship(

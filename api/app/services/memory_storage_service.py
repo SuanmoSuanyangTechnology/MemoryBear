@@ -40,7 +40,11 @@ config_logger = get_config_logger()
 
 # Load environment variables for Neo4j connector
 load_dotenv()
-_neo4j_connector = Neo4jConnector()
+
+
+# Neo4j connector — lazy via driver_provider (Phase 1)
+def _get_neo4j_connector():
+    return Neo4jConnector()
 
 
 class MemoryStorageService:
@@ -475,7 +479,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
 
 
 async def search_dialogue(end_user_id: Optional[str] = None) -> Dict[str, Any]:
-    result = await _neo4j_connector.execute_query(
+    result = await _get_neo4j_connector().execute_query(
         MemoryConfigRepository.SEARCH_FOR_DIALOGUE,
         end_user_id=end_user_id,
     )
@@ -484,7 +488,7 @@ async def search_dialogue(end_user_id: Optional[str] = None) -> Dict[str, Any]:
 
 
 async def search_chunk(end_user_id: Optional[str] = None) -> Dict[str, Any]:
-    result = await _neo4j_connector.execute_query(
+    result = await _get_neo4j_connector().execute_query(
         MemoryConfigRepository.SEARCH_FOR_CHUNK,
         end_user_id=end_user_id,
     )
@@ -493,7 +497,7 @@ async def search_chunk(end_user_id: Optional[str] = None) -> Dict[str, Any]:
 
 
 async def search_statement(end_user_id: Optional[str] = None) -> Dict[str, Any]:
-    result = await _neo4j_connector.execute_query(
+    result = await _get_neo4j_connector().execute_query(
         MemoryConfigRepository.SEARCH_FOR_STATEMENT,
         end_user_id=end_user_id,
     )
@@ -502,7 +506,7 @@ async def search_statement(end_user_id: Optional[str] = None) -> Dict[str, Any]:
 
 
 async def search_entity(end_user_id: Optional[str] = None) -> Dict[str, Any]:
-    result = await _neo4j_connector.execute_query(
+    result = await _get_neo4j_connector().execute_query(
         MemoryConfigRepository.SEARCH_FOR_ENTITY,
         end_user_id=end_user_id,
     )
@@ -515,7 +519,7 @@ async def kb_type_distribution(end_user_id: Optional[str] = None) -> Dict[str, A
 
     聚合 dialogue/chunk/statement/entity 四类计数，返回统一的分布结构，便于前端一次性消费。
     """
-    result = await _neo4j_connector.execute_query(
+    result = await _get_neo4j_connector().execute_query(
         MemoryConfigRepository.SEARCH_FOR_ALL,
         end_user_id=end_user_id,
     )
@@ -546,7 +550,7 @@ async def kb_type_distribution(end_user_id: Optional[str] = None) -> Dict[str, A
 
 
 async def search_detials(end_user_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    result = await _neo4j_connector.execute_query(
+    result = await _get_neo4j_connector().execute_query(
         MemoryConfigRepository.SEARCH_FOR_DETIALS,
         end_user_id=end_user_id,
     )
@@ -554,7 +558,7 @@ async def search_detials(end_user_id: Optional[str] = None) -> List[Dict[str, An
 
 
 async def search_edges(end_user_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    result = await _neo4j_connector.execute_query(
+    result = await _get_neo4j_connector().execute_query(
         MemoryConfigRepository.SEARCH_FOR_EDGES,
         end_user_id=end_user_id,
     )
@@ -574,7 +578,7 @@ async def search_all_batch(end_user_ids: List[str]) -> Dict[str, int]:
     if not end_user_ids:
         return {}
 
-    result = await _neo4j_connector.execute_query(
+    result = await _get_neo4j_connector().execute_query(
         MemoryConfigRepository.SEARCH_FOR_ALL_BATCH,
         end_user_ids=end_user_ids,
     )

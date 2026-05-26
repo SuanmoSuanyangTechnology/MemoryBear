@@ -29,8 +29,10 @@ from app.services.memory_short_service import ShortService
 
 logger = get_logger(__name__)
 
-# Neo4j connector instance for analytics functions
-_neo4j_connector = Neo4jConnector()
+# Neo4j connector — lazy via driver_provider (Phase 1)
+def _get_neo4j_connector():
+    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+    return Neo4jConnector()
 
 # Default LLM ID for fallback
 DEFAULT_LLM_ID = os.getenv("SELECTED_LLM_ID", "openai/qwen-plus")
@@ -1460,13 +1462,13 @@ async def analytics_node_statistics(
             WHERE n.end_user_id = $end_user_id
             RETURN count(n) as count
             """
-            result = await _neo4j_connector.execute_query(query, end_user_id=end_user_id)
+            result = await _get_neo4j_connector().execute_query(query, end_user_id=end_user_id)
         else:
             query = f"""
             MATCH (n:{node_type})
             RETURN count(n) as count
             """
-            result = await _neo4j_connector.execute_query(query)
+            result = await _get_neo4j_connector().execute_query(query)
         
         # 提取计数结果
         count = result[0]["count"] if result and len(result) > 0 else 0
@@ -1744,7 +1746,7 @@ async def analytics_graph_data(
                 "limit": limit
             }
         # 执行节点查询
-        node_results = await _neo4j_connector.execute_query(node_query, **node_params)
+        node_results = await _get_neo4j_connector().execute_query(node_query, **node_params)
         
         # 3. 格式化节点数据
         nodes = []
@@ -1785,7 +1787,7 @@ async def analytics_graph_data(
                 type(r) as rel_type,
                 properties(r) as properties
             """
-            edge_results = await _neo4j_connector.execute_query(
+            edge_results = await _get_neo4j_connector().execute_query(
                 edge_query,
                 node_ids=node_ids
             )
@@ -1886,7 +1888,7 @@ async def analytics_community_graph_data(
 
         # 查询社区节点、实体节点、BELONGS_TO_COMMUNITY 边、实体间关系
         from app.repositories.neo4j.cypher_queries import GET_COMMUNITY_GRAPH_DATA
-        rows = await _neo4j_connector.execute_query(GET_COMMUNITY_GRAPH_DATA, end_user_id=end_user_id)
+        rows = await _get_neo4j_connector().execute_query(GET_COMMUNITY_GRAPH_DATA, end_user_id=end_user_id)
 
         nodes_map: Dict[str, dict] = {}
         edges_map: Dict[str, dict] = {}
@@ -2032,7 +2034,7 @@ async  def _extract_node_properties(label: str, properties: Dict[str, Any],node_
     allowed_fields = field_whitelist.get(label, [])
 
     count_neo4j=f"""MATCH (n)-[r]-(m) WHERE elementId(n) ="{node_id}" RETURN count(r) AS rel_count;"""
-    node_results = await (_neo4j_connector.execute_query(count_neo4j))
+    node_results = await (_get_neo4j_connector().execute_query(count_neo4j))
     # 提取白名单中的字段
     filtered_props = {}
     for field in allowed_fields:
