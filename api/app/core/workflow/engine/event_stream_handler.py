@@ -119,6 +119,14 @@ class EventStreamHandler:
                 return
             current_output = end_info.outputs[end_info.cursor]
             if current_output.is_variable and current_output.depends_on_scope(node_id):
+                # Field-level matching: route real-time chunks only to the segment
+                # that references the same field. Chunks carrying "reasoning_content"
+                # flow to {{node.reasoning_content}}, "output" to {{node.output}}.
+                chunk_field = data.get("field", "output")
+                segment_field = current_output.get_field() or "output"
+                if chunk_field != segment_field:
+                    return
+
                 if data.get("done"):
                     end_info.cursor += 1
                     if end_info.cursor >= len(end_info.outputs):

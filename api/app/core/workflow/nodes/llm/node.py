@@ -322,15 +322,8 @@ class LLMNode(BaseNode):
             rendered = self._render_template(prompt_template, variable_pool)
             self.messages = [{"role": "user", "content": rendered}]
 
-        # ChatTongyi 要求 messages 含 'json' 字样才能使用 response_format，在 system prompt 中注入
-        # VOLCANO 模型不支持 response_format，同样需要 system prompt 注入
-        # thinking（A类）模型启用深度思考时，工厂会跳过 response_format 以避免 API 冲突，需要 prompt 注入兜底
-        need_json_prompt = json_output and (
-            (model_info.provider.lower() == ModelProvider.DASHSCOPE and not model_info.is_omni)
-            or model_info.provider.lower() == ModelProvider.VOLCANO
-            or (deep_thinking and ModelCapability.THINKING in model_info.capability)
-        )
-        if need_json_prompt:
+        # 所有 provider 统一注入 JSON prompt 兜底，确保即使 API 层 response_format 未生效也能引导 JSON 输出
+        if json_output:
             system_msg = next((m for m in self.messages if m["role"] == "system"), None)
             if system_msg:
                 system_msg["content"] += "\n请以JSON格式输出。"
@@ -567,6 +560,7 @@ class LLMNode(BaseNode):
                         reasoning_chunk = additional_kwargs.get("reasoning_content") or additional_kwargs.get("reasoning", "")
                         if reasoning_chunk:
                             full_reasoning_content += reasoning_chunk
+                            yield {"__final__": False, "chunk": reasoning_chunk, "field": "reasoning_content"}
 
                     if content:
                         full_response += content
