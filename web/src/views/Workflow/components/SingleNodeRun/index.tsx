@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-05-07 18:37:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-20 14:41:28
+ * @Last Modified time: 2026-05-26 12:09:21
  */
 import { type FC, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -215,6 +215,8 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
                           ? t('common.selectPlaceholder', { title: v.label })
                           : t('common.inputPlaceholder', { title: v.label })
                       }] : undefined}
+                      valuePropName={v.dataType.includes('boolean') ? 'checked' : 'value'}
+                      initialValue={v.dataType.includes('boolean') ? v.default || false : undefined}
                       className="rb:mb-0!"
                     >
                       {v.dataType === 'object'
