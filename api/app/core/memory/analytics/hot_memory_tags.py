@@ -218,7 +218,6 @@ async def get_raw_tags_batch(
     """
     批量查询多个用户的实体标签频率（单次 Cypher 查询替代 N 次循环）。
     
-    利用 end_user_id 上的 RANGE INDEX 进行高效 IN 查询，
     在数据库侧完成聚合和排序，减少网络往返和应用层计算。
 
     Args:

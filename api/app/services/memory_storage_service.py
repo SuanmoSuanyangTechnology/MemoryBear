@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.core.logging_config import get_config_logger, get_logger
 from app.core.memory.analytics.hot_memory_tags import (
     filter_tags_with_llm,
-    get_raw_tags_batch,  
+    get_raw_tags_batch,
 )
 from app.core.memory.analytics.recent_activity_stats import get_recent_activity_stats
 from app.models.user_model import User
@@ -622,8 +622,15 @@ async def analytics_hot_memory_tags(
     workspace_id = current_user.current_workspace_id
     raw_limit = limit * 4
 
+    from app.db import SessionLocal
     from app.services.memory_dashboard_service import get_workspace_end_users
-    end_users = await asyncio.to_thread(get_workspace_end_users, db, workspace_id, current_user)
+
+    def _get_end_users_in_thread():
+        """在独立线程中使用独立 session，避免跨线程共享连接"""
+        with SessionLocal() as thread_db:
+            return get_workspace_end_users(thread_db, workspace_id, current_user)
+
+    end_users = await asyncio.to_thread(_get_end_users_in_thread)
 
     if not end_users:
         return []
@@ -649,7 +656,8 @@ async def analytics_hot_memory_tags(
         filtered_tag_names = await filter_tags_with_llm(tag_names, first_end_user_id)
 
         # 根据 LLM 结果过滤，保留频率和顺序
-        final_tags = [(tag, freq) for tag, freq in sorted_tags if tag in filtered_tag_names]
+        filtered_set = set(filtered_tag_names)
+        final_tags = [(tag, freq) for tag, freq in sorted_tags if tag in filtered_set]
         top_tags = final_tags[:limit]
 
         return [{"name": t, "frequency": f} for t, f in top_tags]
