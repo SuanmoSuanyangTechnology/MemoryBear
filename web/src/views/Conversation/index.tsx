@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-25 16:39:52
+ * @Last Modified time: 2026-05-26 11:12:02
  */
 /**
  * Conversation Page
@@ -123,14 +123,14 @@ const Conversation: FC = () => {
   }, [token])
 
   useEffect(() => {
-    if (token && page === 1 && hasMore && historyList.length === 0 && shareToken) {
+    if (page === 1 && hasMore && historyList.length === 0 && shareToken) {
       getHistory()
     }
-  }, [token, shareToken, page, hasMore, historyList])
+  }, [shareToken, page, hasMore, historyList])
 
   useEffect(() => {
-    if (token && token !== '') {
-      getExperienceConfig(token)
+    if (shareToken && shareToken !== '') {
+      getExperienceConfig(shareToken)
         .then(res => {
           const response = res as { variables: Variable[]; features: FeaturesConfigForm; model_parameters?: Record<string, any>; app_type: string; memory: boolean; }
           toolbarRef.current?.setVariables(response.variables || [])
@@ -142,7 +142,7 @@ const Conversation: FC = () => {
     } else {
       setChatList([])
     }
-  }, [token])
+  }, [shareToken])
 
   /** Group conversation history by date */
   const groupHistoryByDate = (items: HistoryItem[]): Record<string, HistoryItem[]> => {
@@ -159,9 +159,9 @@ const Conversation: FC = () => {
 
   /** Fetch conversation history with pagination */
   const getHistory = (flag: boolean = false) => {
-    if (!token || token === '' || (pageLoading || !hasMore) && !flag) return
+    if (!shareToken || shareToken === '' || (pageLoading || !hasMore) && !flag) return
     setPageLoading(true);
-    getConversationHistory(token, { page: flag ? 1 : page, pagesize: 20 })
+    getConversationHistory(shareToken, { page: flag ? 1 : page, pagesize: 20 })
       .then(res => {
         const response = res as { items: HistoryItem[], page: { hasnext: boolean; page: number; pagesize: number; total: number } }
         const results = response?.items || []
@@ -193,8 +193,8 @@ const Conversation: FC = () => {
   }
 
   const getChatDetail = () => {
-    if (!conversation_id || !token || token === '') return
-    getConversationDetail(token, conversation_id)
+    if (!conversation_id || !shareToken || shareToken === '') return
+    getConversationDetail(shareToken, conversation_id)
       .then(res => {
         const response = res as { messages: ChatItem[] }
         const messages = response?.messages || []
@@ -421,7 +421,7 @@ const Conversation: FC = () => {
   const chatIsEnded = useRef(true)
   /** Send message and handle streaming response */
   const handleSend = (msg?: string) => {
-    if (!token || token === '' || !shareToken || shareToken === '') return
+    if (!shareToken || shareToken === '') return
     const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
     const variables = toolbarRef.current?.getVariables() || []
     let isCanSend = true
@@ -589,14 +589,14 @@ const Conversation: FC = () => {
   }
 
   const deleteMessage = (vo: ChatItem) => {
-    if (!token || token === '' || !vo.id) return
+    if (!shareToken || shareToken === '' || !vo.id) return
     modal.confirm({
       title: t('common.confirmDelete'),
       okText: t('common.delete'),
       cancelText: t('common.cancel'),
       okType: 'danger',
       onOk: () => {
-        deleteConversationMessage(token, vo.id as string)
+        deleteConversationMessage(shareToken, vo.id as string)
           .then(() => {
             getChatDetail()
             messageApi.success(t('common.deleteSuccess'))
@@ -608,7 +608,7 @@ const Conversation: FC = () => {
     reportModalRef.current?.handleOpen(vo)
   }
   const regenerateMessages = (vo: ChatItem) => {
-    if (!token || token === '' || !vo.id) return
+    if (!shareToken || shareToken === '' || !vo.id) return
     const variables = toolbarRef.current?.getVariables() || []
     let isCanSend = true
     const params: Record<string, any> = {}
@@ -717,7 +717,7 @@ const Conversation: FC = () => {
       stream: true,
       variables: params,
       thinking,
-    }, handleStreamMessage, token, (abort) => { abortRef.current = abort })
+    }, handleStreamMessage, shareToken, (abort) => { abortRef.current = abort })
       .catch(() => {
         setLoading(false)
         streamLoadingRef.current = false
@@ -731,8 +731,8 @@ const Conversation: FC = () => {
   }
   // 切换到指定版本的消息
   const handleVersionChange = (page: number, item: ChatItem) => {
-    if (!token || token === '' || !item.id) return
-    switchMessageVersion(token, item.id, page)
+    if (!shareToken || shareToken === '' || !item.id) return
+    switchMessageVersion(shareToken, item.id, page)
       .then(() => {
         setChatList(prev => {
           const lastList = [...prev]
@@ -761,8 +761,8 @@ const Conversation: FC = () => {
   }
 
   const handleFeedback = (feedbackType: 'like' | 'dislike', id?: string) => {
-    if (!token || token === '' || !conversation_id || !id) return
-    feedbackMessage(token, id, { feedback_type: feedbackType })
+    if (!shareToken || shareToken === '' || !conversation_id || !id) return
+    feedbackMessage(shareToken, id, { feedback_type: feedbackType })
       .then((res) => {
         const { feedback_type } = res as { feedback_type: 'like' | 'dislike' | null; }
         messageApi.success( feedback_type === 'dislike'
@@ -1012,10 +1012,11 @@ const Conversation: FC = () => {
           conversationId={conversation_id as string}
           chatList={chatList}
           streamLoading={streamLoadingRef.current}
+          shareToken={shareToken as string}
         />
         <ReportModal
           ref={reportModalRef}
-          token={token as string}
+          shareToken={shareToken as string}
         />
       </Flex>
     )
@@ -1203,10 +1204,11 @@ const Conversation: FC = () => {
         conversationId={conversation_id as string}
         chatList={chatList}
         streamLoading={streamLoadingRef.current}
+        shareToken={shareToken as string}
       />
       <ReportModal
         ref={reportModalRef}
-        token={token as string}
+        shareToken={shareToken as string}
       />
     </Flex>
   )

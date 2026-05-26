@@ -1,15 +1,14 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-05-22 14:07:42 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-05-25 15:38:24 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-05-26 11:12:04
  */
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { Button, App, Flex } from 'antd';
 import { ExclamationCircleFilled } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import copy from 'copy-to-clipboard'
-import { useParams } from 'react-router-dom'
 import dayjs from 'dayjs'
 import html2canvas from 'html2canvas'
 
@@ -28,6 +27,7 @@ interface ShareModalProps {
   conversationId: string | null;
   chatList: Array<ChatItem | ChatItem[]>;
   streamLoading: boolean;
+  shareToken: string | null;
 }
 
 /**
@@ -36,11 +36,11 @@ interface ShareModalProps {
 const ShareModal = forwardRef<ShareModalRef, ShareModalProps>(({
   conversationId,
   chatList,
-  streamLoading
+  streamLoading,
+  shareToken,
 }, ref) => {
   const { t } = useTranslation();
   const { message } = App.useApp()
-  const { token } = useParams()
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false)
   const [shareLink, setShareLink] = useState<string | null>(null)
@@ -54,11 +54,11 @@ const ShareModal = forwardRef<ShareModalRef, ShareModalProps>(({
 
   /** Open modal and generate share link */
   const handleOpen = () => {
-    if (!conversationId || !token || token === '') {
+    if (!conversationId || !shareToken || shareToken === '') {
       return
     }
     setLoading(true)
-    generateShareLink(token, conversationId, { allow_copy: true })
+    generateShareLink(shareToken, conversationId, { allow_copy: true })
       .then(res => {
         const response = res as { share_uuid: string }
         if (response?.share_uuid) {

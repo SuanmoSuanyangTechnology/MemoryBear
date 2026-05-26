@@ -26,12 +26,12 @@ import CustomSelect from '@/components/CustomSelect'
 /** Props interface for ReportModal component */
 interface ReportModalProps {
   /** Share token for API authentication */
-  token: string
+  shareToken: string
 }
 
 /** Report modal component for reporting inappropriate messages */
 const ReportModal = forwardRef<ReportModalRef, ReportModalProps>(({
-  token,
+  shareToken,
 }, ref) => {
   const { t } = useTranslation()
   const { message } = App.useApp()
@@ -57,10 +57,10 @@ const ReportModal = forwardRef<ReportModalRef, ReportModalProps>(({
   const onSubmit = () => {
     form.validateFields()
       .then((values) => {
-        if (!currentItem?.id || !token || token === '') return
+        if (!currentItem?.id || !shareToken || shareToken === '') return
         
         setLoading(true)
-        reportMessage(token, currentItem.id as string, {
+        reportMessage(shareToken, currentItem.id as string, {
           ...values,
           selected_text: currentItem.content || '',
         })
