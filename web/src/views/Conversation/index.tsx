@@ -281,11 +281,11 @@ const Conversation: FC = () => {
           const newFilterItem = [
             ...(Array.isArray(lastChatList[filterIndex])
               ? [...lastChatList[filterIndex].map(v => ({ ...v, is_current: false }))]
-              : [{...filterItem, is_current: false}]
+              : [{...filterItem, version: 1, is_current: false}]
             ),
             {
               ...assistantMsg,
-              version: Array.isArray(lastChatList[filterIndex]) ? lastChatList[filterIndex].length + 2 : 2
+              version: Array.isArray(lastChatList[filterIndex]) ? lastChatList[filterIndex].length + 1 : 2
             }
           ]
           lastChatList[filterIndex] = newFilterItem
@@ -761,12 +761,12 @@ const Conversation: FC = () => {
           if (filterIndex < 0) return lastList
           
           const currentItem: ChatItem[] = lastList[filterIndex] as ChatItem[]
-          lastList[filterIndex] = currentItem.map(msg => {
+          lastList[filterIndex] = [...currentItem.map(msg => {
             return {
               ...msg,
               is_current: msg.id === item.id,
             }
-          })
+          })]
 
           return [...lastList]
         })

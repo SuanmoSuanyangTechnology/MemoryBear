@@ -172,8 +172,10 @@ const ChatContent: FC<ChatContentProps> = ({
     }
     return items
   }
-  const handlePageChange = (page: number, item: ChatItem[]) => {
-    handleVersionChange?.(page, item[page - 1])
+  const handlePageChange = (page: number, vo: ChatItem[]) => {
+    const nextItem = vo.find(v => v.version === page)
+    if (!nextItem) return
+    handleVersionChange?.(page, nextItem)
   }
   return (
     <div ref={scrollContainerRef} className={clsx("rb:relative rb:overflow-y-auto", classNames)}>
@@ -319,7 +321,7 @@ const ChatContent: FC<ChatContentProps> = ({
                                 current={item.version}
                                 defaultCurrent={item.version}
                                 total={vo.length}
-                                onChange={(page) => handlePageChange(page, vo)}
+                                onChange={(page: number) => handlePageChange(page, vo)}
                               />
                             }
                             {handleFeedback && <>
