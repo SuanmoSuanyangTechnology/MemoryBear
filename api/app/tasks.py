@@ -4352,38 +4352,35 @@ def scan_idle_conversations_task() -> None:
 
         logger.info(f"[ScanIdle] 发现 {len(candidate_conv_ids)} 个对话存在未写入消息")
 
-        # 过滤掉无活跃 memory_config 的对话（避免无效派发）
+        # 过滤：确保对话所属 app 已存在已发布版本（current_release_id IS NOT NULL）。
+        # 真正的 memory_config_id 解析（agent / workflow + legacy 兼容）由 FlushTask
+        # 内的 _resolve_release_memory_config_id 完成，这里只做粗筛避免每分钟空跑刷 WARN。
         if candidate_conv_ids:
             try:
-                from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+                from app.models.app_model import App
 
                 with get_db_context() as db:
-                    # 单条 JOIN 查询：直接按"存在活跃 memory_config"过滤候选对话
-                    # distinct 防止 workspace 配置多条 active 记录导致 conv_id 重复
                     valid_conv_ids = [
                         str(cid) for cid in db.execute(
                             select(Conversation.id)
-                            .join(
-                                MemoryConfigModel,
-                                MemoryConfigModel.workspace_id == Conversation.workspace_id,
-                            )
+                            .join(App, App.id == Conversation.app_id)
                             .where(
                                 Conversation.id.in_(candidate_conv_ids),
-                                MemoryConfigModel.state.is_(True),
+                                App.current_release_id.isnot(None),
                             )
                             .distinct()
                         ).scalars().all()
                     ]
 
-                skipped_no_config = len(candidate_conv_ids) - len(valid_conv_ids)
-                if skipped_no_config:
+                skipped_no_release = len(candidate_conv_ids) - len(valid_conv_ids)
+                if skipped_no_release:
                     logger.info(
-                        f"[ScanIdle] 跳过 {skipped_no_config} 个无活跃 memory_config 的对话"
+                        f"[ScanIdle] 跳过 {skipped_no_release} 个 app 未发布的对话"
                     )
                 candidate_conv_ids = valid_conv_ids
             except Exception as e:
                 logger.warning(
-                    f"[ScanIdle] 过滤无配置对话失败，将走 FlushTask 兜底校验: err={e}"
+                    f"[ScanIdle] 过滤未发布 app 失败，将走 FlushTask 兜底校验: err={e}"
                 )
 
         for conv_id_str in candidate_conv_ids:
