@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-24 15:41:20 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-20 16:05:43
+ * @Last Modified time: 2026-05-26 14:06:17
  */
 import { type FC, useRef, useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -143,7 +143,7 @@ const Logs: FC<{ application: Application }> = ({ application }) => {
       }
     })
   }
-  const handleExport = (type: 'csv' | 'jsonl') => {
+  const handleExport = (type: 'csv' | 'json') => {
     if (!id) return
     exportAnnotation(id, type)
   }
@@ -271,9 +271,9 @@ const Logs: FC<{ application: Application }> = ({ application }) => {
                         onClick: () => handleExport('csv'),
                       },
                       {
-                        key: 'JSONL',
-                        label: 'JSONL',
-                        onClick: () => handleExport('jsonl'),
+                        key: 'JSON',
+                        label: 'JSON',
+                        onClick: () => handleExport('json'),
                       },
                     ]
                   },
