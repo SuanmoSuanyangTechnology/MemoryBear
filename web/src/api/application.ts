@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 11:08:24
+ * @Last Modified time: 2026-05-26 14:05:33
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
@@ -276,7 +276,7 @@ export const deleteAllAnnotations = (app_id: string) => {
   return request.delete(`/apps/${app_id}/annotations`)
 }
 // Batch export annotations (CSV / JSON)
-export const exportAnnotation = (app_id: string, format: 'csv' | 'jsonl') => {
+export const exportAnnotation = (app_id: string, format: 'csv' | 'json') => {
   return request.getDownloadFile(`/apps/${app_id}/annotations/export?format=${format}`, `annotations.${format}`)
 }
 // Batch import annotations (CSV)
