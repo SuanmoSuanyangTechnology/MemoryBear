@@ -34,7 +34,7 @@ const MessageFiles = ({ files, contentClassNames, onDownload }: MessageFilesProp
   return (
     <Flex gap={8} vertical align="end" className="rb:mb-2!">
       {files.map((file) => {
-        const key = file.url || file.uid
+        const key = file.url || file.uid || file.file_key
         if (file.type.includes('image')) {
           return (
             <div key={key} className={clsx('rb:inline-block rb:group rb:relative rb:rounded-lg', contentClassNames)}>
@@ -52,7 +52,7 @@ const MessageFiles = ({ files, contentClassNames, onDownload }: MessageFilesProp
         if (file.type.includes('audio')) {
           return (
             <div key={key} className="rb:w-50">
-              <AudioPlayer src={getFileUrl(file)} />
+              <AudioPlayer src={getFileUrl(file)} fileName={file.name} fileSize={file.size} />
             </div>
           )
         }
