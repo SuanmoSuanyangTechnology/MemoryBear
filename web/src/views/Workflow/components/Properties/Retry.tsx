@@ -50,8 +50,8 @@ const Retry: FC = () => {
             className="rb:mb-2!"
           >
             <RbSlider
-              min={100}
-              max={5000}
+              min={10}
+              max={60000}
               step={1}
               isInput={true}
               size="small"

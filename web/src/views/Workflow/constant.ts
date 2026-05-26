@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-21 16:45:01
+ * @Last Modified time: 2026-05-26 17:02:08
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -272,7 +272,7 @@ export const nodeLibrary: NodeLibrary[] = [
             defaultValue: {
               enable: false,
               max_attempts: 3,
-              retry_interval: 1000,
+              retry_interval: 100,
             }
           },
           error_handle: {
