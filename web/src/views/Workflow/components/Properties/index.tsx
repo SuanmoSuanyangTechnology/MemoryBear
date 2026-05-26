@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-22 15:14:47
+ * @Last Modified time: 2026-05-26 15:50:54
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -743,6 +743,7 @@ const Properties: FC<PropertiesProps> = ({
                                   label: t(item.label)
                                 }))}
                                 type="outer"
+                                allowClear={false}
                               />
                             </Form.Item>
                           </div>
