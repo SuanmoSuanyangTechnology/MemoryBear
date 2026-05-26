@@ -29,7 +29,7 @@ search_results.json
 redbear-mem-metrics/
 redbear-mem-benchmark/
 pitch-deck/
-
+output/
 api/migrations/versions
 tmp
 files
