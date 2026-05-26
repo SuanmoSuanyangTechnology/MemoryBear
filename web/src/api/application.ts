@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-25 15:37:35 
+ * @Last Modified time: 2026-05-26 11:08:24
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
@@ -85,10 +85,10 @@ export const shareRelease = (app_id: string, release_id: string) => {
   })
 }
 // Get conversation history
-export const getConversationHistory = (share_token: string, data: { page: number; pagesize: number }) => {
+export const getConversationHistory = (shareToken: string, data: { page: number; pagesize: number }) => {
   return request.get(`/public/share/conversations`, data, {
     headers: {
-      'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
+      'Authorization': `Bearer ${shareToken}`
     }
   })
 }
@@ -101,18 +101,18 @@ export const sendConversation = (values: QueryParams, onMessage: (data: SSEMessa
   }, onAbort)
 }
 // Get conversation details
-export const getConversationDetail = (share_token: string, conversation_id: string) => {
+export const getConversationDetail = (shareToken: string, conversation_id: string) => {
   return request.get(`/public/share/conversations/${conversation_id}`, {}, {
     headers: {
-      'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
+      'Authorization': `Bearer ${shareToken}`
     }
   })
 }
 // Like/Dislike AI response
-export const feedbackMessage = (share_token: string, message_id: string, data: { feedback_type: 'like' | 'dislike' }) => {
+export const feedbackMessage = (shareToken: string, message_id: string, data: { feedback_type: 'like' | 'dislike' }) => {
   return request.post(`/public/share/messages/${message_id}/feedback`, data, {
     headers: {
-      'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
+      'Authorization': `Bearer ${shareToken}`
     }
   })
 }
@@ -137,18 +137,18 @@ export const completeImportWorkflow = (data: { temp_id: string; name?: string; d
   return request.post(`/apps/workflow/import/save`, data)
 }
 // Get experience config
-export const getExperienceConfig = (share_token: string) => {
+export const getExperienceConfig = (shareToken: string) => {
   return request.get(`/public/share/config`, {}, {
     headers: {
-      'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
+      'Authorization': `Bearer ${shareToken}`
     }
   })
 }
 // Generate conversation share link
-export const generateShareLink = (share_token: string, conversation_id: string, data: { allow_copy: boolean; password?: string; expire_hours?: number }) => {
+export const generateShareLink = (shareToken: string, conversation_id: string, data: { allow_copy: boolean; password?: string; expire_hours?: number }) => {
   return request.post(`/public/share/conversations/${conversation_id}/share`, data, {
     headers: {
-      'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
+      'Authorization': `Bearer ${shareToken}`
     }
   })
 }
@@ -157,10 +157,10 @@ export const accessShareConversation = (share_uuid: string) => {
   return request.get(`/apps/share/${share_uuid}`)
 }
 // Delete single message
-export const deleteConversationMessage = (share_token: string, message_id: string) => {
+export const deleteConversationMessage = (shareToken: string, message_id: string) => {
   return request.delete(`/public/share/messages/${message_id}`, {
     headers: {
-      'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
+      'Authorization': `Bearer ${shareToken}`
     }
   })
 }
@@ -170,10 +170,10 @@ export const getReportTypes = () => {
   return request.get(reportTypesUrl)
 }
 // Report content in message
-export const reportMessage = (share_token: string, message_id: string, data: ReportMessageData) => {
+export const reportMessage = (shareToken: string, message_id: string, data: ReportMessageData) => {
   return request.post(`/public/share/messages/${message_id}/report`, data, {
     headers: {
-      'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
+      'Authorization': `Bearer ${shareToken}`
     }
   })
 }
@@ -182,20 +182,20 @@ export const regenerateMessage = (
   message_id: string,
   values: QueryParams,
   onMessage: (data: SSEMessage[]) => void,
-  share_token: string,
+  shareToken: string,
   onAbort?: (abort: () => void) => void
 ) => {
   return handleSSE(`/public/share/messages/${message_id}/regenerate`, values, onMessage, {
     headers: {
-      'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
+      'Authorization': `Bearer ${shareToken}`
     }
   }, onAbort)
 }
 // Switch to specified version message
-export const switchMessageVersion = (share_token: string, message_id: string, version: number) => {
+export const switchMessageVersion = (shareToken: string, message_id: string, version: number) => {
   return request.post(`/public/share/messages/${message_id}/switch-version/${version}`, { version }, {
     headers: {
-      'Authorization': `Bearer ${localStorage.getItem(`shareToken_${share_token}`)}`
+      'Authorization': `Bearer ${shareToken}`
     }
   })
 }

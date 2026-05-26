@@ -2419,6 +2419,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           default: 'Default Value',
           required: 'Required',
           max_length: 'Max Length',
+          maxLengthExceeded: "Input length cannot exceed the {{max}} characters",
           defaultChecked: 'Checked',
           notDefaultChecked: 'Unchecked',
           options: 'Options',

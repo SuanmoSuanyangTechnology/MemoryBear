@@ -2383,6 +2383,7 @@ export const zh = {
           default: '默认值',
           required: '必填',
           max_length: '最大长度',
+          maxLengthExceeded: "输入长度不能超过 {{max}} 个字符",
           defaultChecked: '默认选中',
           notDefaultChecked: '默认不选中',
           options: '选项',
