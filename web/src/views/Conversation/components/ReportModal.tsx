@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-05-21 14:00:00 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-25 15:38:12 
+ * @Last Modified time: 2026-05-26 10:18:42
  */
 /**
  * ReportModal Component
@@ -61,8 +61,7 @@ const ReportModal = forwardRef<ReportModalRef, ReportModalProps>(({
         
         setLoading(true)
         reportMessage(token, currentItem.id as string, {
-          report_type: values.reportType,
-          report_reason: values.description || '',
+          ...values,
           selected_text: currentItem.content || '',
         })
           .then(() => {
@@ -93,7 +92,7 @@ const ReportModal = forwardRef<ReportModalRef, ReportModalProps>(({
       <Form form={form} layout="vertical">
         {/* Report Type Section */}
         <Form.Item
-          name="reportType"
+          name="report_type"
           label={t('memoryConversation.reportType')}
           rules={[{ required: true, message: t('common.pleaseSelect') }]}
         >
@@ -104,11 +103,13 @@ const ReportModal = forwardRef<ReportModalRef, ReportModalProps>(({
         </Form.Item>
 
         {/* Description Section */}
-        <Form.Item name="description">
-          <label className="rb:block rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-medium rb:mb-2">
+        <Form.Item
+          name="report_reason"
+          label={<>
             {t('memoryConversation.additionalDescription')}
             <span className="rb:text-[#9CA3AF]">{t('memoryConversation.optional')}</span>
-          </label>
+          </>}
+        >
           <Input.TextArea
             className="rb:w-full"
             placeholder={t('common.pleaseEnter')}
