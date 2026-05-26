@@ -37,7 +37,7 @@ interface ModelConfigModalProps {
 export const fieldConfigs: Record<string, any> = {
   temperature: {
     type: 'slider',
-    max: 2, 
+    max: 1.99, 
     min: 0, 
     step: 0.1,
     defaultValue: 0.7
