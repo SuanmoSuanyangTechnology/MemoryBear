@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 13:41:40
+ * @Last Modified time: 2026-05-26 16:34:27
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -251,7 +251,7 @@ const ChatContent: FC<ChatContentProps> = ({
                           {isReasoningExpanded(index) && <Markdown content={item.meta_data.reasoning_content} className="rb:text-[#5B6167] rb:text-[12px]" />}
                           </div>
                         }
-                        {((item.status && item.status !== 'completed') || typeof item.meta_data?.error === 'string') &&
+                        {((item.status && item.status !== 'completed') || typeof item.meta_data?.error === 'string') && typeof renderRuntime !== 'function' &&
                           <div className={clsx("rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/conversation/exclamation_circle.svg')] rb:absolute", {
                             'rb:-left-7!': item.status && item.status !== 'completed' && item.role === 'user',
                             'rb:left-0!': item.role === 'assistant' && typeof item.meta_data?.error === 'string',
