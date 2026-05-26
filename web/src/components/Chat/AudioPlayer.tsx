@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-16 15:00:07 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 15:23:14
+ * @Last Modified time: 2026-05-26 13:51:48
  */
 import { type FC, useRef, useState, useEffect } from 'react'
 import { Flex, Dropdown, type MenuProps, Slider } from 'antd'
@@ -49,15 +49,46 @@ const AudioPlayer: FC<AudioPlayerProps> = ({ src, fileName, fileSize }) => {
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
-    const onTime = () => setCurrent(audio.currentTime)
-    const onMeta = () => setDuration(audio.duration)
+
+    const onTime = () => {
+      setCurrent(audio.currentTime)
+      if (duration === 0) {
+        updateDuration()
+      }
+    }
+    
+    const updateDuration = () => {
+      const isValidDuration = audio.duration && audio.duration !== Infinity && !isNaN(audio.duration) && audio.duration > 0
+      if (isValidDuration) {
+        setDuration(audio.duration)
+      } else if (audio.buffered.length > 0) {
+        const bufferedEnd = audio.buffered.end(audio.buffered.length - 1)
+        if (bufferedEnd > 0) {
+          setDuration(bufferedEnd)
+        }
+      } else {
+        setDuration(audio.currentTime * 2)
+      }
+    }
+
+    const onMeta = () => updateDuration()
+    const onCanPlay = () => updateDuration()
+    const onProgress = () => updateDuration()
+    
     const onEnd = () => setPlaying(false)
     audio.addEventListener('timeupdate', onTime)
     audio.addEventListener('loadedmetadata', onMeta)
+    audio.addEventListener('canplay', onCanPlay)
+    audio.addEventListener('progress', onProgress)
     audio.addEventListener('ended', onEnd)
+
+    audio.load()
+
     return () => {
       audio.removeEventListener('timeupdate', onTime)
       audio.removeEventListener('loadedmetadata', onMeta)
+      audio.removeEventListener('canplay', onCanPlay)
+      audio.removeEventListener('progress', onProgress)
       audio.removeEventListener('ended', onEnd)
     }
   }, [src])
@@ -110,10 +141,10 @@ const AudioPlayer: FC<AudioPlayerProps> = ({ src, fileName, fileSize }) => {
   return (
     <div className="rb-border rb:rounded-xl rb:py-2 rb:px-2.5 rb:w-full">
       <audio ref={audioRef} src={src} preload="metadata" />
-      <Flex align="center" justify="space-between" className="rb:mb-2">
-        <Flex align="center" gap={12}>
+      <Flex align="center" wrap={false} justify="space-between" className="rb:mb-2">
+        <Flex align="center" wrap={false} gap={12} className="rb:flex-1!  rb:max-w-[calc(100%-60px)]!">
           <div className="rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/file/audio.svg')]" />
-          <div className="rb:flex-1">
+          <div className="rb:max-w-[calc(100%-32px)]">
             <div className="rb:font-medium rb:leading-5 rb:text-[14px] rb:wrap-break-word rb:line-clamp-1">{fileName}</div>
             <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{fileSize || '-'}</div>
           </div>
