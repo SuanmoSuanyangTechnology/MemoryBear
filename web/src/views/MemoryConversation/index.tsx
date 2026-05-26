@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:09:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-06 18:01:59
+ * @Last Modified time: 2026-05-26 12:23:32
  */
 /**
  * Memory Conversation Page
@@ -114,7 +114,7 @@ const MemoryConversation: FC = () => {
   const [loading, setLoading] = useState<boolean>(false)
   const [chatData, setChatData] = useState<ChatItem[]>([])
   const [logs, setLogs] = useState<LogItem[]>([])
-  const [search_switch, setSearchSwitch] = useState('0')
+  const [search_switch, setSearchSwitch] = useState('2')
   const [msg, setMsg] = useState<string>('')
   const [expandedLogs, setExpandedLogs] = useState<Record<number, boolean>>({})
   const [sessionId, setSessionId] = useState<string | undefined>(undefined)
@@ -209,6 +209,7 @@ const MemoryConversation: FC = () => {
                   ...item,
                   icon: <Tooltip title={t(`memoryConversation.${item.key}`)}>{item.icon}</Tooltip>
                 }))}
+                value={search_switch}
                 shape="round"
                 className={styles.segmented}
                 onChange={handleChange}
