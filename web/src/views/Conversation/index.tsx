@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 11:20:55
+ * @Last Modified time: 2026-05-26 13:38:41
  */
 /**
  * Conversation Page
@@ -279,7 +279,10 @@ const Conversation: FC = () => {
         if (filterIndex !== -1) {
           const filterItem = Array.isArray(lastChatList[filterIndex]) ? lastChatList[filterIndex][0] : lastChatList[filterIndex]
           const newFilterItem = [
-            ...(Array.isArray(lastChatList[filterIndex]) ? [...lastChatList[filterIndex].map(v => ({ ...v, is_current: false })), filterItem] : [{...filterItem, is_current: false}]),
+            ...(Array.isArray(lastChatList[filterIndex])
+              ? [...lastChatList[filterIndex].map(v => ({ ...v, is_current: false }))]
+              : [{...filterItem, is_current: false}]
+            ),
             {
               ...assistantMsg,
               version: Array.isArray(lastChatList[filterIndex]) ? lastChatList[filterIndex].length + 2 : 2
