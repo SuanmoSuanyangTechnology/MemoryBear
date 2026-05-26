@@ -386,7 +386,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
                           name={[field, 'enable']}
                           noStyle
                         >
-                          <Switch disabled={isThinkingOnly} />
+                          <Switch disabled={isThinkingOnly && field === 'thinking'} />
                         </FormItem>
                         <Flex align="center" gap={4}>
                           {t(`workflow.config.llm.${field}`)}
@@ -439,7 +439,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
                             name={[field, 'budget', 'enable']}
                             noStyle
                           >
-                            <Switch disabled={isThinkingOnly} />
+                            <Switch disabled={isThinkingOnly && field === 'thinking'} />
                           </FormItem>
                           <Flex align="center" gap={4}>
                             {t(`workflow.config.llm.${field}_budget`)}
