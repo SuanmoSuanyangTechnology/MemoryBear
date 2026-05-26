@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-05-26 15:39:00 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-05-26 15:39:00 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-05-26 15:44:10
  */
 import { useState, useEffect, useRef, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -80,7 +80,7 @@ const ReflectLogs: FC = () => {
       title: t('userMemory.logId'),
       dataIndex: 'id',
       key: 'id',
-      width: 350
+      render: (id) => <>#{id.split('-')[0]}</>
     },
     {
       title: t('userMemory.time'),

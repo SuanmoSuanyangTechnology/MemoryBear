@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-05-26 15:39:10 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-05-26 15:39:10 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-05-26 15:46:06
  */
 import { useState, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -148,7 +148,7 @@ const ReflectLogDetail = forwardRef<ReflectLogDetailRef>((_, ref) => {
       title={<Flex align="center" gap={8}>
       {t('userMemory.reflectDetail')}
       {data && <>
-        <Tag color="default">{data.id}</Tag>
+        <Tag color="default">#{data.id.split('-')[0]}</Tag>
         <Tag color="processing">{t(`userMemory.${data.sub_problem}`)}</Tag>
         <Tag color={getStatusColor(data.status)}>{t(`userMemory.${data.status}`)}</Tag>
       </>}
