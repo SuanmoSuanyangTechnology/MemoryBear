@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-24 15:41:20 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 14:06:17
+ * @Last Modified time: 2026-05-26 14:30:53
  */
 import { type FC, useRef, useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -24,9 +24,9 @@ import PageTabs from '@/components/PageTabs'
 import HitHistoryDetail from './components/HitHistoryDetail'
 
 const tabKeys = ['logs', 'annotations']
-const Logs: FC<{ application: Application }> = ({ application }) => {
+const Logs: FC<{ application: Application; }> = ({ application }) => {
   const { t } = useTranslation();
-  const { id } = useParams();
+  const { id, source } = useParams();
   const { message, modal } = App.useApp();
   const logDetailRef = useRef<LogDetailModalRef>(null);
   const batchImportRef = useRef<{ handleOpen: () => void; handleClose: () => void }>(null);
@@ -202,14 +202,19 @@ const Logs: FC<{ application: Application }> = ({ application }) => {
       ),
     },
   ]
+  const isHasAnnotations = useMemo(() => {
+    return application.type !== 'multi_agent' && source !== 'sharing'
+  }, [source, application.type])
   return (
     <div className="rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
-      <Flex justify="space-between" className="rb:mb-3!">
-        <PageTabs
-          value={activeTab}
-          options={formatTabItems}
-          onChange={handleChangeTab}
-        />
+      <Flex justify={isHasAnnotations ? "space-between" : 'flex-end'} className="rb:mb-3!">
+        {isHasAnnotations &&
+          <PageTabs
+            value={activeTab}
+            options={formatTabItems}
+            onChange={handleChangeTab}
+          />
+        }
         <Form form={form}>
           <Space size={8}>
             {activeTab === 'logs' &&
@@ -310,7 +315,7 @@ const Logs: FC<{ application: Application }> = ({ application }) => {
         />
         <LogDetailModal ref={logDetailRef} source={application?.type} />
       </>}
-      {activeTab === 'annotations' && <>
+      {isHasAnnotations && activeTab === 'annotations' && <>
         <Table<AnnotationItem>
           ref={annotationsTableRef}
           apiUrl={getAnnotationsListUrl(id || '')}

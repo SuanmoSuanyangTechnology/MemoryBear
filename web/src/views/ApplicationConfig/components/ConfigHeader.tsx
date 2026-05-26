@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:52 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-17 14:53:21
+ * @Last Modified time: 2026-05-26 14:31:02
  */
 import { type FC, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -72,7 +72,6 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
   application, activeTab, handleChangeTab, refresh,
   workflowRef,
   appRef,
-  onFeaturesChange,
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -85,11 +84,12 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
    * Format tab items for display
    */
   const formatTabItems = useMemo(() => {
+    const isHasAnnotations = application?.type !== 'multi_agent' && source !== 'sharing'
     return (source === 'sharing' ? sharingTabKeys : tabKeys).map(key => ({
       key,
-      label: t(`application.${key}`),
+      label: key === 'log' && isHasAnnotations ? t('application.logAnnotations') : t(`application.${key}`),
     }))
-  }, [source, sharingTabKeys, tabKeys])
+  }, [source, sharingTabKeys, tabKeys, application?.type])
   /**
    * Handle menu item click
    */
