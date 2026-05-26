@@ -1998,67 +1998,19 @@ def post_store_dedup_and_alias_merge_task(
                                 EXTRACTED_ENTITY_NODE_SAVE, entities=entity_data
                             )
 
-                        # 删除被合并的冗余节点并重定向边
-                        # id_redirect 中 key != value 的条目表示 key 被合并到了 value
-                        merged_away_ids = [
-                            old_id for old_id, new_id in id_redirect.items()
-                            if old_id != new_id
-                        ]
-                        if merged_away_ids:
-                            # 构建重定向映射列表
-                            redirects = [
-                                {"old_id": old_id, "new_id": id_redirect[old_id]}
-                                for old_id in merged_away_ids
-                            ]
-                            # 重定向指向被合并节点的所有关系边到规范节点，然后删除旧节点
-                            REDIRECT_AND_DELETE_MERGED = """
-                            UNWIND $redirects AS r
-                            MATCH (old:ExtractedEntity {id: r.old_id})
-                            MATCH (canonical:ExtractedEntity {id: r.new_id})
-                            WITH old, canonical
-                            // 重定向所有入边（指向 old 的边改为指向 canonical）
-                            CALL {
-                                WITH old, canonical
-                                MATCH (src)-[rel_in]->(old)
-                                WHERE src <> canonical
-                                WITH src, rel_in, canonical, type(rel_in) AS relType, properties(rel_in) AS relProps
-                                CALL apoc.create.relationship(src, relType, relProps, canonical) YIELD rel AS new_rel
-                                DELETE rel_in
-                                RETURN count(new_rel) AS in_redirected
-                            }
-                            // 重定向所有出边（从 old 出发的边改为从 canonical 出发）
-                            CALL {
-                                WITH old, canonical
-                                MATCH (old)-[rel_out]->(tgt)
-                                WHERE tgt <> canonical
-                                WITH rel_out, canonical, tgt, type(rel_out) AS relType, properties(rel_out) AS relProps
-                                CALL apoc.create.relationship(canonical, relType, relProps, tgt) YIELD rel AS new_rel
-                                DELETE rel_out
-                                RETURN count(new_rel) AS out_redirected
-                            }
-                            // 删除 old 与 canonical 之间可能残留的直连边，再删除 old 节点
-                            WITH old
-                            DETACH DELETE old
-                            RETURN count(old) AS deleted_count
-                            """
-                            try:
-                                delete_result = await connector.execute_query(
-                                    REDIRECT_AND_DELETE_MERGED,
-                                    redirects=redirects,
-                                )
-                                deleted_count = delete_result[0].get("deleted_count", 0) if delete_result else 0
-                                result_info["layer2_nodes_deleted"] = deleted_count
-                                logger.info(
-                                    f"[PostStore] 第二层去重：边重定向+删除冗余节点完成: {deleted_count} 个 "
-                                    f"(merged_ids={merged_away_ids[:5]}{'...' if len(merged_away_ids) > 5 else ''})"
-                                )
-                            except Exception as e:
-                                logger.warning(f"[PostStore] 边重定向+删除冗余节点失败: {e}", exc_info=True)
-                                result_info["layer2_delete_error"] = str(e)
+                        # 删除被合并的冗余节点并重定向边（APOC 合并）
+                        from app.core.memory.storage_services.extraction_engine.deduplication.second_layer_dedup import (
+                            cleanup_merged_entities,
+                        )
+                        cleanup_info = await cleanup_merged_entities(connector, id_redirect)
+                        result_info["layer2_merged_count"] = len(cleanup_info["redirects"])
+                        if cleanup_info["redirects"]:
+                            result_info["layer2_nodes_deleted"] = cleanup_info["deleted_count"]
+                        if "error" in cleanup_info:
+                            result_info["layer2_delete_error"] = cleanup_info["error"]
 
                         result_info["layer2_input"] = len(current_entities)
                         result_info["layer2_output"] = len(fused_entities)
-                        result_info["layer2_merged_count"] = len(merged_away_ids) if merged_away_ids else 0
                         logger.info(
                             f"[PostStore] 第二层去重完成: "
                             f"{len(current_entities)} → {len(fused_entities)} 个实体"

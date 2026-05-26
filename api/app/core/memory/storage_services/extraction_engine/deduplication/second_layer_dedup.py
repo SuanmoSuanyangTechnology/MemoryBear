@@ -1,7 +1,7 @@
-# 导入 Python 的annotations特性，允许在类型注解中使用尚未定义的类（支持 "向前引用"），提升代码中类型注解的灵活性。
+# 导入 Python 的annotations特性，允许在类型注解中使用尚未定义的类（支持 “向前引用”），提升代码中类型注解的灵活性。
 # 这是什么意思？ 该类的属性的类型是这个类本身（递归定义）？
 """
-这段代码是 "第二层去重消歧" 的核心实现，逻辑可分为四步：
+这段代码是 “第二层去重消歧” 的核心实现，逻辑可分为四步:
 1.从第一层去重消歧后的实体中提取核心信息，作为索引查询 Neo4j 中同组的候选实体；
 2.对候选实体去重并转换为统一模型；
 3.构建预重定向关系（第一层实体 ID→数据库实体 ID），确保优先使用数据库 ID；
@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Mapping, Tuple
 
 from app.core.memory.models.graph_models import (
     EntityEntityEdge,
@@ -23,6 +23,7 @@ from app.core.memory.storage_services.extraction_engine.deduplication.deduped_an
     _write_dedup_fusion_report,
     deduplicate_entities_and_edges,
 )
+from app.repositories.neo4j.cypher_queries import MERGE_DEDUPED_ENTITIES
 from app.repositories.neo4j.graph_search import (
     get_dedup_candidates_for_entities,  # 导入ge函数，用于从 Neo4j 中检索与输入实体可能重复的候选实体（去重的核心检索逻辑）。
 )
@@ -31,6 +32,10 @@ from app.repositories.neo4j.graph_search import (
 from app.repositories.neo4j.neo4j_connector import (
     Neo4jConnector,  # 导入 Neo4j 数据库连接器类，用于与 Neo4j 数据库进行交互
 )
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_dt(val: Any) -> datetime: # 定义内部辅助函数_parse_dt，用于将任意类型的输入值解析为datetime对象（处理实体节点中的时间字段）
@@ -105,7 +110,7 @@ async def second_layer_dedup_and_merge_with_neo4j( # 二层去重的核心逻辑
     candidates_map = await get_dedup_candidates_for_entities( # 从 Neo4j 中查询候选实体，并将结果赋值给candidates_map（等待异步操作完成）。
         connector=connector, end_user_id=end_user_id,
         entities=incoming_rows,  # 传入参数：第一层实体的核心信息（作为查询索引）
-        use_contains_fallback=True # 传入参数：启用 "包含关系" 作为匹配失败的降级策略（若精确匹配无结果，用包含关系召回候选），与src\database\cypher_queries.py的307产生联动
+        use_contains_fallback=True # 传入参数：启用 “包含关系” 作为匹配失败的降级策略（若精确匹配无结果，用包含关系召回候选），与src\database\cypher_queries.py的307产生联动
     )
 
     # 拉平候选，转为模型（按 DB 节点优先）
@@ -165,3 +170,50 @@ async def second_layer_dedup_and_merge_with_neo4j( # 二层去重的核心逻辑
     id_redirect: Dict[str, str] = dedup_details.get("id_redirect", {})
 
     return fused_entities, fused_stmt_entity_edges, fused_entity_entity_edges, id_redirect
+
+
+async def cleanup_merged_entities(
+    connector: Neo4jConnector,
+    id_redirect: Mapping[str, str],
+) -> Dict[str, Any]:
+    """把内存去重决策（id_redirect）应用到 Neo4j：删除被合并的冗余实体节点，并重定向其相邻边到规范节点。
+
+    与 `deduplicate_entities_and_edges` / `second_layer_dedup_and_merge_with_neo4j` 的区别：
+    - 上述两个函数是"决策"——在内存对象集合上判定哪些重复，仅产出 id_redirect；
+    - 本函数是"执行"——把决策投影到图数据库，物理上完成节点删除与边重定向。
+
+    依赖 APOC 插件（apoc.refactor.mergeNodes）。
+
+    Args:
+        connector: Neo4j 连接器
+        id_redirect: 被合并实体 ID -> 规范实体 ID 映射；key == value 的条目会被忽略
+
+    Returns:
+        {
+            "redirects": [{"old_id", "new_id"}, ...],   # 实际执行的重定向
+            "deleted_count": int,                         # 被删除的旧节点数（成功时）
+            "error": str (可选),                          # 失败时的错误描述
+        }
+    """
+    redirects: List[Dict[str, str]] = [
+        {"old_id": old, "new_id": new}
+        for old, new in id_redirect.items()
+        if old and new and old != new
+    ]
+    info: Dict[str, Any] = {"redirects": redirects, "deleted_count": 0}
+    if not redirects:
+        return info
+
+    try:
+        rows = await connector.execute_query(MERGE_DEDUPED_ENTITIES, redirects=redirects)
+        info["deleted_count"] = (rows[0].get("deleted_count") if rows else 0) or 0
+        preview = redirects[:5]
+        suffix = "..." if len(redirects) > 5 else ""
+        logger.info(
+            f"[Dedup] 边重定向+合并冗余节点完成: deleted={info['deleted_count']} "
+            f"(sample={preview}{suffix})"
+        )
+    except Exception as e:
+        logger.warning(f"[Dedup] 合并冗余节点失败: {e}", exc_info=True)
+        info["error"] = str(e)
+    return info
