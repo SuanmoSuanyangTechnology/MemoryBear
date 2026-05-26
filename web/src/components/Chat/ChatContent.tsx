@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 11:21:55
+ * @Last Modified time: 2026-05-26 13:41:40
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -309,7 +309,8 @@ const ChatContent: FC<ChatContentProps> = ({
                                 />
                             }
                           </>}
-                          {Array.isArray(vo) && vo.length > 1 && typeof item.version === 'number' && handleVersionChange &&
+                          {isSupportTools && item.role === 'assistant' && !(!isEnded && index === data.length - 1) && !item.is_hidden_refresh && <>
+                            {index === data.length - 1 && Array.isArray(vo) && vo.length > 1 && typeof item.version === 'number' && handleVersionChange &&
                               <Pagination
                                 key={item.id}
                                 size="small"
@@ -321,7 +322,6 @@ const ChatContent: FC<ChatContentProps> = ({
                                 onChange={(page) => handlePageChange(page, vo)}
                               />
                             }
-                          {isSupportTools && item.role === 'assistant' && !(!isEnded && index === data.length - 1) && !item.is_hidden_refresh && <>
                             {handleFeedback && <>
                               <Tooltip title={t('memoryConversation.like')}>
                                 <div
