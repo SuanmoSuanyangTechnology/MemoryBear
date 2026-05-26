@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:28:07 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-21 19:07:06
+ * @Last Modified time: 2026-05-26 17:21:22
  */
 /**
  * Model Configuration Modal
@@ -11,7 +11,7 @@
  */
 
 import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
-import { Form, Switch, Flex, type SelectProps, InputNumber, Select, App, Tooltip } from 'antd';
+import { Form, Switch, Flex, type SelectProps, InputNumber, type InputNumberProps, Select, App, Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx'
 
@@ -63,9 +63,9 @@ export const fieldConfigs: Record<string, any> = {
     value: {
       type: 'slider',
       min: 0.1,
-      max: 0.9,
+      max: 1,
       step: 0.1,
-      defaultValue: 0.7
+      defaultValue: 0.8
     }
   },
   top_k: {
@@ -76,9 +76,9 @@ export const fieldConfigs: Record<string, any> = {
     value: {
       type: 'slider',
       min: 1,
-      max: 99,
+      max: 100,
       step: 1,
-      defaultValue: 1
+      defaultValue: 50
     }
   },
   seed: {
@@ -88,6 +88,8 @@ export const fieldConfigs: Record<string, any> = {
     },
     value: {
       type: 'inputNumber',
+      min: 0,
+      max: 18446744073709551615,
       defaultValue: 1234
     }
   },
@@ -98,7 +100,10 @@ export const fieldConfigs: Record<string, any> = {
     },
     value: {
       type: 'inputNumber',
-      defaultValue: 1.1
+      min: 0.1,
+      max: 2,
+      step: 0.1,
+      defaultValue: 1.0
     }
   },
   // enable_search: {
@@ -153,6 +158,7 @@ export const fieldConfigs: Record<string, any> = {
     value: {
       type: 'select',
       mode: 'tags',
+      maxTagCount: 4,
       defaultValue: []
     }
   },
@@ -164,7 +170,10 @@ export const fieldConfigs: Record<string, any> = {
     },
     value: {
       type: 'inputNumber',
-      defaultValue: 0.2
+      min: -2,
+      max: 2,
+      step: 0.1,
+      defaultValue: 0
     }
   },
   frequency_penalty: {
@@ -175,7 +184,10 @@ export const fieldConfigs: Record<string, any> = {
     },
     value: {
       type: 'inputNumber',
-      defaultValue: 0.2
+      min: -2,
+      max: 2,
+      step: 0.1,
+      defaultValue: 0
     }
   }
 }
@@ -264,6 +276,10 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
     handleClose
   }));
 
+  const handleNumChange = (field: string | string[], value?: InputNumberProps['value'], min?: number) => {
+    form.setFieldValue(field as keyof ModelConfigForm & Record<string, 'value'>, value === undefined || value === null ? min : value)
+  }
+
   return (
     <RbModal
       title={t('application.modelConfig')}
@@ -315,7 +331,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
                         {t(`workflow.config.llm.${field}`)}
                         {!firstFieldConfigs?.hideTip &&
                           <Tooltip title={t(`workflow.config.llm.${field}_tip`)}>
-                            <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
+                            <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')] rb:shrink-0"></div>
                           </Tooltip>
                         }
                       </Flex>
@@ -325,10 +341,14 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
                           noStyle
                         >
                           <RbSlider
-                            {...fieldConfigs}
+                            {...firstFieldConfigs}
                             isInput={true}
                             inputClassName="rb:w-[100px]!"
                             className="rb:w-full!"
+                            size="small"
+                            onChange={(value) => {
+                              handleNumChange([field], value, firstFieldConfigs.min)
+                            }}
                           />
                         </FormItem>
                       </div>
@@ -348,7 +368,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
 
                         {!firstFieldConfigs?.hideTip &&
                           <Tooltip title={t(`workflow.config.llm.${field}_tip`)}>
-                            <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
+                            <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')] rb:shrink-0"></div>
                           </Tooltip>
                         }
                       </Flex>
@@ -373,7 +393,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
 
                           {!firstFieldConfigs?.enable?.hideTip &&
                             <Tooltip title={t(`workflow.config.llm.${field}_tip`)}>
-                              <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
+                              <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')] rb:shrink-0"></div>
                             </Tooltip>
                           }
                         </Flex>
@@ -390,9 +410,14 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
                                   isInput={true}
                                   inputClassName="rb:w-[100px]!"
                                   className="rb:w-full!"
+                                  onChange={(value) => handleNumChange([field, 'value'], value, firstFieldConfigs.value.min)}
                                 />
                               : firstFieldConfigs.value.type === 'inputNumber'
-                              ? <InputNumber {...firstFieldConfigs.value} className="rb:w-full!" />
+                              ? <InputNumber
+                                {...firstFieldConfigs.value}
+                                className="rb:w-full!"
+                                onChange={(value) => handleNumChange([field, 'value'], value, firstFieldConfigs.value.min)}
+                              />
                               : firstFieldConfigs.value.type === 'select'
                               ? <Select {...firstFieldConfigs.value} className="rb:w-full!" />
                               : firstFieldConfigs.value.type === 'editor'
@@ -421,7 +446,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
 
                             {!firstFieldConfigs.budget?.enable?.hideTip &&
                               <Tooltip title={t(`workflow.config.llm.${field}_budget_tip`)}>
-                                <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
+                                <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')] rb:shrink-0"></div>
                               </Tooltip>
                             }
                           </Flex>
@@ -438,11 +463,19 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
                                     isInput={true}
                                     inputClassName="rb:w-[100px]!"
                                     className="rb:w-full!"
+                                    onChange={(value) => handleNumChange([field, 'budget', 'value'], value, firstFieldConfigs.budget.value.min)}
                                   />
                                 : firstFieldConfigs.budget.value.type === 'inputNumber'
-                                ? <InputNumber {...firstFieldConfigs.budget.value} className="rb:w-full!" />
+                                ? <InputNumber
+                                  {...firstFieldConfigs.budget.value}
+                                  className="rb:w-full!"
+                                  onChange={(value) => handleNumChange([field, 'budget', 'value'], value, firstFieldConfigs.budget.value.min)}
+                                />
                                 : firstFieldConfigs.budget.value.type === 'select'
-                                ? <Select {...firstFieldConfigs.budget.value} className="rb:w-full!" />
+                                ? <Select
+                                  {...firstFieldConfigs.budget.value}
+                                  className="rb:w-full!"
+                                />
                                 : null
                               }
                             </FormItem>
