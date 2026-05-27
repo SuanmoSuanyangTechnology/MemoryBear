@@ -30,7 +30,7 @@ class ElasticSearchVector(BaseVector):
     def __init__(self, index_name: str, client: Elasticsearch,
                  embedding_config: ModelApiKey, reranker_config: ModelApiKey):
         super().__init__(index_name.lower())
-        
+
         # 初始化 Embedding 模型（自动支持火山引擎多模态）
         self.embeddings = RedBearEmbeddings(RedBearModelConfig(
             model_name=embedding_config.model_name,
@@ -39,7 +39,7 @@ class ElasticSearchVector(BaseVector):
             base_url=embedding_config.api_base
         ))
         self.is_multimodal_embedding = self.embeddings.is_multimodal_supported()
-        
+
         self.reranker = RedBearRerank(RedBearModelConfig(
             model_name=reranker_config.model_name,
             provider=reranker_config.provider,
@@ -625,7 +625,7 @@ class ElasticSearchVector(BaseVector):
             query=query_str,
         )
         # logger.info(result)
-        
+
         if "errors" in result:
             raise ValueError(f"Error during query: {result['errors']}")
 
@@ -934,12 +934,20 @@ class ElasticSearchVectorFactory:
             raise ValueError(f"embedding_id config error: {str(knowledge.embedding_id)}")
         if knowledge.reranker is None:
             raise ValueError(f"reranker_id config error: {str(knowledge.reranker_id)}")
+        embedding_config = ""
+        if knowledge.embedding.api_keys:
+            embedding_config = knowledge.embedding.api_keys[0]
+            logger.warning(f"No embedding api key found for knowledge {knowledge.id}")
+        reranker_config = ""
+        if knowledge.reranker.api_keys:
+            reranker_config = knowledge.reranker.api_keys[0]
+            logger.warning(f"No reranker api key found for knowledge {knowledge.id}")
 
         return ElasticSearchVector(
             index_name=collection_name,
             client=client,
-            embedding_config=knowledge.embedding.api_keys[0],
-            reranker_config=knowledge.reranker.api_keys[0],
+            embedding_config=embedding_config,
+            reranker_config=reranker_config,
         )
 
     @classmethod
