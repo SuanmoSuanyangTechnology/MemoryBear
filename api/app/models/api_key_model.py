@@ -14,7 +14,8 @@ class ApiKeyType(StrEnum):
     """API Key 类型"""
     AGENT = "agent"  # 智能体
     CLUSTER = "multi_agent"  # 集群
-    WORKFLOW = "workflow"  # 工作流
+    WORKFLOW = "workflow"  # 工作流(对话式)
+    PURE_WORKFLOW = "pure_workflow" # 纯工作流
     SERVICE = "service"  # 服务
 
 

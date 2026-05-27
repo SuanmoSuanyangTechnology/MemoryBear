@@ -44,7 +44,8 @@ class WorkflowConfigRepository:
         variables: list[dict[str, Any]] | None = None,
         execution_config: dict[str, Any] | None = None,
         features: dict[str, Any] | None = None,
-        triggers: list[dict[str, Any]] | None = None
+        triggers: list[dict[str, Any]] | None = None,
+        workflow_type: str = "workflow"
     ) -> WorkflowConfig:
         """创建或更新工作流配置
         
@@ -56,6 +57,7 @@ class WorkflowConfigRepository:
             execution_config: 执行配置
             features: 功能特性
             triggers: 触发器列表
+            workflow_type: 工作流类型
         
         Returns:
             工作流配置
@@ -67,12 +69,15 @@ class WorkflowConfigRepository:
             # 更新现有配置
             existing.nodes = nodes
             existing.edges = edges
+            existing.workflow_type = workflow_type
             if variables is not None:
                 existing.variables = variables
             if execution_config is not None:
                 existing.execution_config = execution_config
             if triggers is not None:
                 existing.triggers = triggers
+            if features is not None:
+                existing.features = features
             self.db.commit()
             self.db.refresh(existing)
             return existing
@@ -85,7 +90,8 @@ class WorkflowConfigRepository:
                 variables=variables or [],
                 execution_config=execution_config or {},
                 features=features or {},
-                triggers=triggers or []
+                triggers=triggers or [],
+                workflow_type=workflow_type
             )
             self.db.add(config)
             self.db.commit()

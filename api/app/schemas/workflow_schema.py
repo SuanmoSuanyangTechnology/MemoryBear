@@ -87,6 +87,7 @@ class WorkflowConfigCreate(BaseModel):
     execution_config: ExecutionConfig = Field(default_factory=ExecutionConfig, description="执行配置")
     triggers: list[TriggerConfig] = Field(default_factory=list, description="触发器列表")
     features: dict = Field(default_factory=dict, description="功能特性配置")
+    workflow_type: str = Field(default="workflow", description="工作流类型: pure_workflow 或 workflow")
 
 
 class WorkflowConfigUpdate(BaseModel):
@@ -97,6 +98,7 @@ class WorkflowConfigUpdate(BaseModel):
     features: dict | None = None
     execution_config: ExecutionConfig | None = None
     triggers: list[TriggerConfig] | None = None
+    workflow_type: str | None = None
 
 
 class WorkflowConfig(BaseModel):
@@ -111,6 +113,7 @@ class WorkflowConfig(BaseModel):
     execution_config: dict[str, Any]
     triggers: list[dict[str, Any]]
     features: dict | None
+    workflow_type: str
     is_active: bool
     created_at: datetime.datetime
     updated_at: datetime.datetime

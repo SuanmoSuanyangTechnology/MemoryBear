@@ -46,7 +46,7 @@ class SkillService:
             for tool_config in skill.tools:
                 tool_id = tool_config.get("tool_id")
                 if tool_id:
-                    tool_info = tool_service.get_tool_info(tool_id, tenant_id)
+                    tool_info = tool_service.get_tool_summary(tool_id, tenant_id)
                     if tool_info:
                         enriched_tool = {
                             "tool_id": tool_id,
@@ -105,7 +105,12 @@ class SkillService:
             raise e
 
     @staticmethod
-    def load_skill_tools(db: Session, skill_ids: List[str], tenant_id: uuid.UUID) -> tuple[List, dict[str, str]]:
+    def load_skill_tools(
+        db: Session,
+        skill_ids: List[str],
+        tenant_id: uuid.UUID,
+        runtime_context: dict | None = None,
+    ) -> tuple[List, dict[str, str]]:
         """加载技能关联的工具
         
         Returns:
@@ -123,6 +128,8 @@ class SkillService:
                     for tool_config in skill.tools:
                         tool = tool_service.get_tool_instance(tool_config.get("tool_id", ""), tenant_id)
                         if tool:
+                            if runtime_context:
+                                tool.set_runtime_context(**runtime_context)
                             langchain_tool = tool.to_langchain_tool(tool_config.get("operation", None))
                             tools.append(langchain_tool)
                             # 建立工具到技能的映射

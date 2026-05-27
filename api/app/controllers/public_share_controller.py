@@ -506,26 +506,31 @@ async def chat(
             config = release.config or {}
             if not config.get("sub_agents"):
                 raise BusinessException("多 Agent 应用未配置子 Agent", BizCode.AGENT_CONFIG_MISSING)
-        elif app_type == AppType.WORKFLOW:
+        elif app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
             # Multi-Agent 类型：验证多 Agent 配置
             pass
         else:
             raise BusinessException(f"不支持的应用类型: {app_type}", BizCode.APP_TYPE_NOT_SUPPORTED)
 
-        # 获取或创建会话（提前验证）
-        conversation = service.create_or_get_conversation(
-            share_token=share_data.share_token,
-            conversation_id=payload.conversation_id,
-            user_id=str(new_end_user.id),  # 转换为字符串
-            password=password
-        )
+        if app_type != AppType.PURE_WORKFLOW and not payload.message:
+            raise BusinessException("当前应用类型要求必须传入 message", BizCode.INVALID_PARAMETER)
+
+        # pure_workflow 无需自动创建会话；传入 conversation_id 时仍允许沿用原会话。
+        conversation = None
+        if app_type != AppType.PURE_WORKFLOW or payload.conversation_id:
+            conversation = service.create_or_get_conversation(
+                share_token=share_data.share_token,
+                conversation_id=payload.conversation_id,
+                user_id=str(new_end_user.id),  # 转换为字符串
+                password=password
+            )
 
         logger.debug(
             "参数验证完成",
             extra={
                 "share_token": share_token,
                 "app_type": app_type,
-                "conversation_id": str(conversation.id),
+                "conversation_id": str(conversation.id) if conversation else None,
                 "stream": payload.stream
             }
         )
@@ -630,7 +635,7 @@ async def chat(
         )
 
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
-    elif app_type == AppType.WORKFLOW:
+    elif app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         config = workflow_config_4_app_release(release)
         if not config.id:
             with get_db_read() as db:
@@ -642,7 +647,7 @@ async def chat(
             async def event_generator():
                 async for event in app_chat_service.workflow_chat_stream(
                         message=payload.message,
-                        conversation_id=conversation.id,  # 使用已创建的会话 ID
+                        conversation_id=conversation.id if conversation else None,
                         user_id=end_user_id,  # 转换为字符串
                         variables=payload.variables,
                         files=payload.files,
@@ -678,7 +683,7 @@ async def chat(
         source = HitLogSource.EXTERNAL
         result = await app_chat_service.workflow_chat(
             message=payload.message,
-            conversation_id=conversation.id,  # 使用已创建的会话 ID
+            conversation_id=conversation.id if conversation else None,
             user_id=end_user_id,  # 转换为字符串
             variables=payload.variables,
             files=payload.files,
@@ -718,7 +723,7 @@ async def config_query(
     share_service = SharedChatService(db)
     share_token = share_data.share_token
     share, release = share_service.get_release_by_share_token(share_token, password)
-    if release.app.type == AppType.WORKFLOW:
+    if release.app.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         workflow_service = WorkflowService(db)
         content = {
             "app_name": release.app.name,
@@ -1063,5 +1068,4 @@ async def switch_message_version(
     )
 
     return success(data=result)
-
 
