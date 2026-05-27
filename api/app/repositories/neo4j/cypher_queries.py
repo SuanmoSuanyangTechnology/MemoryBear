@@ -370,6 +370,53 @@ RETURN s.id AS id,
 ORDER BY score DESC
 LIMIT $limit
 """
+# 第二层去重：批量精确匹配（按 name 或 alias，不依赖全文索引，立即一致）
+# 输入 $rows: [{incoming_id, name}]，返回与 SEARCH_ENTITIES_BY_NAME 字段对齐
+BATCH_EXACT_MATCH_ENTITIES_BY_NAME = """
+UNWIND $rows AS r
+WITH r, toLower(r.name) AS lname
+MATCH (e:ExtractedEntity)
+WHERE e.end_user_id = $end_user_id
+  AND (toLower(e.name) = lname
+       OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = lname))
+OPTIONAL MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e)
+OPTIONAL MATCH (c:Chunk)-[:CONTAINS]->(s)
+RETURN r.incoming_id AS incoming_id,
+       e.id AS id,
+       e.name AS name,
+       e.end_user_id AS end_user_id,
+       e.entity_type AS entity_type,
+       e.created_at AS created_at,
+       e.entity_idx AS entity_idx,
+       e.statement_id AS statement_id,
+       e.description AS description,
+       e.aliases AS aliases,
+       e.name_embedding AS name_embedding,
+       e.connect_strength AS connect_strength,
+       collect(DISTINCT s.id) AS statement_ids,
+       collect(DISTINCT c.id) AS chunk_ids,
+       COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
+       COALESCE(e.importance_score, 0.5) AS importance_score,
+       e.last_access_time AS last_access_time,
+       COALESCE(e.access_count, 0) AS access_count,
+       1.0 AS score
+"""
+
+# 第二层去重：用 APOC 批量合并被淘汰节点到规范节点（重定向边 + 删除冗余节点）
+# 输入 $redirects: [{old_id, new_id}]，返回被删除的节点数
+MERGE_DEDUPED_ENTITIES = """
+UNWIND $redirects AS r
+MATCH (canonical:ExtractedEntity {id: r.new_id})
+MATCH (old:ExtractedEntity {id: r.old_id})
+WHERE canonical <> old
+CALL apoc.refactor.mergeNodes([canonical, old], {
+    properties: 'discard',
+    mergeRels: true,
+    produceSelfRel: false
+}) YIELD node
+RETURN count(node) AS deleted_count
+"""
+
 # 查询实体名称包含指定字符串的实体
 SEARCH_ENTITIES_BY_NAME = """
 CALL db.index.fulltext.queryNodes("entitiesFulltext", $query) YIELD node AS e, score
