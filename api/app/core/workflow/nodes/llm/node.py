@@ -588,6 +588,7 @@ class LLMNode(BaseNode):
                 full_reasoning_content = ""
                 stop_sequences = self.typed_config.stop.value[:4] if (self.typed_config.stop.enable and self.typed_config.stop.value) else None
                 need_buffer = bool(stop_sequences)
+                buffered_chunks = [] if need_buffer else None
                 reasoning_done_sent = False
 
                 last_meta_data = {}
