@@ -190,21 +190,21 @@ async def advance_write_cursor(
 
 def message_to_dict(message: MemoryMessage) -> dict:
     """将 MemoryMessage ORM 对象转换为字典格式。"""
+    def _to_iso(v):
+        """兼容 datetime 与字符串两种类型。"""
+        if v is None:
+            return None
+        if hasattr(v, "isoformat"):
+            return v.isoformat()
+        return str(v)
+
     return {
         "role": message.role,
         "content": message.content,
         "message_seq": message.message_seq,
         "should_memorize": message.should_memorize,
-        "created_at": (
-            message.created_at.isoformat()
-            if message.created_at is not None
-            else None
-        ),
-        "dialog_at": (
-            message.dialog_at.isoformat()
-            if message.dialog_at is not None
-            else None
-        ),
+        "created_at": _to_iso(message.created_at),
+        "dialog_at": _to_iso(message.dialog_at),
         "files": message.files,
     }
 
