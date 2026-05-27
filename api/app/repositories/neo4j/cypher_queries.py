@@ -90,13 +90,14 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
     e.type_id = entity.type_id,
     e.type_description = CASE WHEN entity.type_description IS NOT NULL AND entity.type_description <> '' THEN entity.type_description ELSE coalesce(e.type_description, '') END,
     e.description = CASE
-        WHEN entity.description IS NOT NULL AND entity.description <> '' THEN
-            CASE
-                WHEN e.description IS NULL OR e.description = '' THEN entity.description
-                WHEN e.description CONTAINS entity.description THEN e.description
-                ELSE e.description + '；' + entity.description
-            END
-        ELSE coalesce(e.description, '')
+        WHEN entity.description IS NULL OR entity.description = '' THEN coalesce(e.description, '')
+        WHEN e.description IS NULL OR e.description = '' THEN entity.description
+        // 反向 CONTAINS：新值已包含旧值 → 直接替换（解决第二层去重 fused 写回的指数膨胀）
+        WHEN entity.description CONTAINS e.description THEN entity.description
+        // 正向 CONTAINS：旧值已包含新值 → 保持不变（避免重复追加）
+        WHEN e.description CONTAINS entity.description THEN e.description
+        // 真正的增量 → 追加
+        ELSE e.description + '；' + entity.description
     END,
     e.example = CASE 
         WHEN entity.example IS NOT NULL AND entity.example <> '' 
