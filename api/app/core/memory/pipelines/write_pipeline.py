@@ -1089,7 +1089,8 @@ class WritePipeline:
             logger.info(f"[LanguageDetect][run_with_window] detected={detected}, language={self.language}, text_len={len(user_content)}")
 
         _dialog_at = (
-            dispatch_at
+            target_message.get("dialog_at")
+            or dispatch_at
             or target_message.get("created_at", "")
             or ""
         )

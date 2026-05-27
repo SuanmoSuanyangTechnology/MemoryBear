@@ -200,6 +200,7 @@ def message_to_dict(message: MemoryMessage) -> dict:
             if message.created_at is not None
             else None
         ),
+        "dialog_at": message.dialog_at,
         "files": message.files,
     }
 
@@ -453,6 +454,7 @@ async def write_batch_to_memory_messages(
                 message_seq=next_seq,
                 should_memorize=True,
                 created_at=datetime.now(timezone.utc),
+                dialog_at=(msg.get("dialog_at") or None),
                 files=msg.get("files"),
             )
             db.add(mm)

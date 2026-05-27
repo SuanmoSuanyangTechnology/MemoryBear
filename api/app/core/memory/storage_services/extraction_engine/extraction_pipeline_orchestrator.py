@@ -834,6 +834,10 @@ class NewExtractionOrchestrator:
         assigned_stmt_emb = 0
         assigned_chunk_emb = 0
         assigned_dialog_emb = 0
+        assigned_entity_emb = 0
+
+        # Embedding lookup table (key: f"{entity_idx}_{name}" — matches _build_entity_embedding_input)
+        entity_emb_map = embedding_output.entity_embeddings if embedding_output else {}
 
         for dialog in dialog_data_list:
             dialog_stmts = all_stmt_results.get(dialog.id, {})
@@ -876,9 +880,11 @@ class NewExtractionOrchestrator:
                                 type_description=getattr(e, "type_description", ""),
                                 description=e.description,
                                 is_explicit_memory=e.is_explicit_memory,
+                                name_embedding=entity_emb_map.get(f"{e.entity_idx}_{e.name}"),
                             )
                             for e in triplet_out.entities
                         ]
+                        assigned_entity_emb += sum(1 for e in entities if e.name_embedding is not None)
                         triplets = [
                             TripletRelation(
                                 subject_name=t.subject_name,
@@ -942,11 +948,12 @@ class NewExtractionOrchestrator:
 
         logger.info(
             "Data assignment complete — statements: %d, triplets: %d, "
-            "emotions: %d, stmt_emb: %d, chunk_emb: %d, dialog_emb: %d",
+            "emotions: %d, stmt_emb: %d, chunk_emb: %d, dialog_emb: %d, entity_emb: %d",
             total_stmts,
             assigned_triplets,
             assigned_emotions,
             assigned_stmt_emb,
             assigned_chunk_emb,
             assigned_dialog_emb,
+            assigned_entity_emb,
         )
