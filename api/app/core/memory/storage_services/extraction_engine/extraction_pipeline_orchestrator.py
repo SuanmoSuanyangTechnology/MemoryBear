@@ -884,7 +884,7 @@ class NewExtractionOrchestrator:
                             )
                             for e in triplet_out.entities
                         ]
-                        assigned_entity_emb += sum(1 for e in entities if e.name_embedding)
+                        assigned_entity_emb += sum(1 for e in entities if e.name_embedding is not None)
                         triplets = [
                             TripletRelation(
                                 subject_name=t.subject_name,
