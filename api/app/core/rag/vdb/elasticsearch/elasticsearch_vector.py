@@ -934,13 +934,11 @@ class ElasticSearchVectorFactory:
             raise ValueError(f"embedding_id config error: {str(knowledge.embedding_id)}")
         if knowledge.reranker is None:
             raise ValueError(f"reranker_id config error: {str(knowledge.reranker_id)}")
-        embedding_config = ""
-        if knowledge.embedding.api_keys:
-            embedding_config = knowledge.embedding.api_keys[0]
+        embedding_config = knowledge.embedding.api_keys[0] if knowledge.embedding.api_keys else None
+        if not knowledge.embedding.api_keys:
             logger.warning(f"No embedding api key found for knowledge {knowledge.id}")
-        reranker_config = ""
-        if knowledge.reranker.api_keys:
-            reranker_config = knowledge.reranker.api_keys[0]
+        reranker_config = knowledge.reranker.api_keys[0] if knowledge.reranker.api_keys else None
+        if not knowledge.reranker.api_keys:
             logger.warning(f"No reranker api key found for knowledge {knowledge.id}")
 
         return ElasticSearchVector(
