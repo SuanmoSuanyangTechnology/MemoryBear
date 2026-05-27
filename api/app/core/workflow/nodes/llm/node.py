@@ -587,7 +587,8 @@ class LLMNode(BaseNode):
                 chunk_count = 0
                 full_reasoning_content = ""
                 stop_sequences = self.typed_config.stop.value[:4] if (self.typed_config.stop.enable and self.typed_config.stop.value) else None
-                buffered_chunks = []
+                need_buffer = bool(stop_sequences)
+                reasoning_done_sent = False
 
                 last_meta_data = {}
                 last_usage_metadata = {}
@@ -600,6 +601,7 @@ class LLMNode(BaseNode):
                         last_meta_data = chunk.response_metadata
                     if hasattr(chunk, 'usage_metadata') and chunk.usage_metadata:
                         last_usage_metadata = chunk.usage_metadata
+                    reasoning_chunk = ""
                     if self.typed_config.enable_reasoning_content_extraction:
                         additional_kwargs = getattr(chunk, 'additional_kwargs', None) or {}
                         reasoning_chunk = additional_kwargs.get("reasoning_content") or additional_kwargs.get("reasoning", "")
@@ -608,6 +610,17 @@ class LLMNode(BaseNode):
                             yield {"__final__": False, "chunk": reasoning_chunk, "field": "reasoning_content"}
 
                     if content:
+                        # When reasoning_content has been received but current chunk
+                        # has no new reasoning, reasoning is complete. Emit the done
+                        # signal now so the stream-output cursor advances past the
+                        # reasoning_content segment before output chunks arrive.
+                        if self.typed_config.enable_reasoning_content_extraction \
+                                and full_reasoning_content \
+                                and not reasoning_done_sent \
+                                and not reasoning_chunk:
+                            reasoning_done_sent = True
+                            yield {"__final__": False, "chunk": "", "done": True, "field": "reasoning_content"}
+
                         full_response += content
 
                         if stop_sequences:
@@ -632,16 +645,20 @@ class LLMNode(BaseNode):
                                 break
 
                         chunk_count += 1
-                        buffered_chunks.append(content)
+                        if need_buffer:
+                            buffered_chunks.append(content)
+                        else:
+                            yield {"__final__": False, "chunk": content, "field": "output"}
 
-                # Signal that reasoning_content streaming is complete so the
-                # stream-output cursor can advance past {{node.reasoning_content}}
-                # segments before output chunks arrive.
-                if self.typed_config.enable_reasoning_content_extraction:
+                # Emit reasoning_content done signal if it wasn't sent
+                # during the loop (e.g. model had no reasoning, or every
+                # chunk contained reasoning_content).
+                if self.typed_config.enable_reasoning_content_extraction and not reasoning_done_sent:
                     yield {"__final__": False, "chunk": "", "done": True, "field": "reasoning_content"}
 
-                for c in buffered_chunks:
-                    yield {"__final__": False, "chunk": c, "field": "output"}
+                if need_buffer:
+                    for c in buffered_chunks:
+                        yield {"__final__": False, "chunk": c, "field": "output"}
 
                 yield {
                     "__final__": False,
