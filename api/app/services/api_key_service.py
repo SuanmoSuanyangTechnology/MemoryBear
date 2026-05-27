@@ -82,6 +82,7 @@ class ApiKeyService:
                     ApiKeyType.AGENT.value: AppType.AGENT.value,
                     ApiKeyType.CLUSTER.value: AppType.MULTI_AGENT.value,
                     ApiKeyType.WORKFLOW.value: AppType.WORKFLOW.value,
+                    ApiKeyType.PURE_WORKFLOW.value: AppType.PURE_WORKFLOW.value,
                 }
                 expected_app_type = type_app_type_map.get(data.type)
 

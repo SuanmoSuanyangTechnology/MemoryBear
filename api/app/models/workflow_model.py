@@ -26,6 +26,9 @@ class WorkflowConfig(Base):
         index=True
     )
     
+    # 工作流类型:pure_workflow(纯工作流) | workflow(对话式工作流)
+    workflow_type = Column(String(20), nullable=False, server_default="workflow", index=True)
+    
     # 节点和边的定义（JSON 格式）
     nodes = Column(JSONB, nullable=False, default=list)
     edges = Column(JSONB, nullable=False, default=list)

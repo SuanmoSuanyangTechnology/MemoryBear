@@ -60,16 +60,18 @@ class StartNode(BaseNode):
 
         # 处理自定义变量（传入 pool 避免重复创建）
         custom_vars = self._process_custom_variables(variable_pool)
+        user_message = variable_pool.get_value("sys.message", default=None, strict=False)
 
         # 返回业务数据（包含自定义变量）
         result = {
-            "message": variable_pool.get_value("sys.message"),
             "execution_id": variable_pool.get_value("sys.execution_id"),
             "conversation_id": variable_pool.get_value("sys.conversation_id"),
             "workspace_id": variable_pool.get_value("sys.workspace_id"),
             "user_id": variable_pool.get_value("sys.user_id"),
             **custom_vars  # 自定义变量作为节点输出的一部分
         }
+        if user_message is not None:
+            result["message"] = user_message
 
         logger.debug(
             f"Node {self.node_id} (Start) execution completed, "
@@ -183,10 +185,13 @@ class StartNode(BaseNode):
             输入数据字典
         """
         input_variables = variable_pool.get_value("sys.input_variables", default={}, strict=False)
-        return {
+        result = {
             "execution_id": variable_pool.get_value("sys.execution_id"),
             "conversation_id": variable_pool.get_value("sys.conversation_id"),
-            "message": variable_pool.get_value("sys.message"),
             "conversation_vars": variable_pool.get_all_conversation_vars(),
             "input_variables": input_variables,
         }
+        user_message = variable_pool.get_value("sys.message", default=None, strict=False)
+        if user_message is not None:
+            result["message"] = user_message
+        return result

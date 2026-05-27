@@ -192,8 +192,8 @@ class AppChatService:
         # 获取工具服务
         tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
 
-        tools.extend(self.agent_service.load_tools_config(config.tools, web_search, tenant_id))
-        skill_tools, skill_prompts = self.agent_service.load_skill_config(config.skills, message, tenant_id)
+        tools.extend(self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id))
+        skill_tools, skill_prompts = self.agent_service.load_skill_config(config.skills, message, tenant_id, user_id, workspace_id)
         tools.extend(skill_tools)
         if skill_prompts:
             system_prompt = f"{system_prompt}\n\n{skill_prompts}"
@@ -583,9 +583,9 @@ class AppChatService:
             # 获取工具服务
             tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
 
-            tools.extend(self.agent_service.load_tools_config(config.tools, web_search, tenant_id))
+            tools.extend(self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id))
 
-            skill_tools, skill_prompts = self.agent_service.load_skill_config(config.skills, message, tenant_id)
+            skill_tools, skill_prompts = self.agent_service.load_skill_config(config.skills, message, tenant_id, user_id, workspace_id)
             tools.extend(skill_tools)
             if skill_prompts:
                 system_prompt = f"{system_prompt}\n\n{skill_prompts}"
@@ -1144,8 +1144,8 @@ class AppChatService:
 
     async def workflow_chat(
             self,
-            message: str,
-            conversation_id: uuid.UUID,
+            message: Optional[str],
+            conversation_id: Optional[uuid.UUID],
             config: WorkflowConfig,
             app_id: uuid.UUID,
             release_id: uuid.UUID,
@@ -1163,7 +1163,7 @@ class AppChatService:
         payload = DraftRunRequest(
             message=message,
             variables=variables,
-            conversation_id=str(conversation_id),
+            conversation_id=str(conversation_id) if conversation_id else None,
             stream=True,
             user_id=user_id,
             files=files
@@ -1179,8 +1179,8 @@ class AppChatService:
 
     async def workflow_chat_stream(
             self,
-            message: str,
-            conversation_id: uuid.UUID,
+            message: Optional[str],
+            conversation_id: Optional[uuid.UUID],
             config: WorkflowConfig,
             app_id: uuid.UUID,
             release_id: uuid.UUID,
@@ -1200,7 +1200,7 @@ class AppChatService:
         payload = DraftRunRequest(
             message=message,
             variables=variables,
-            conversation_id=str(conversation_id),
+            conversation_id=str(conversation_id) if conversation_id else None,
             stream=True,
             user_id=user_id,
             files=files

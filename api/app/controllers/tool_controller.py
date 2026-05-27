@@ -89,7 +89,7 @@ async def get_tool(
         service: ToolService = Depends(get_tool_service)
 ):
     """获取工具详情"""
-    tool = service.get_tool_info(tool_id, current_user.tenant_id)
+    tool = service.get_tool_detail(tool_id, current_user.tenant_id)
     if not tool:
         raise HTTPException(status_code=404, detail="工具不存在")
     return success(data=tool, msg="获取工具详情成功")

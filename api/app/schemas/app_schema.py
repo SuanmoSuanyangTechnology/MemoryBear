@@ -329,7 +329,7 @@ class AppCreate(BaseModel):
     description: Optional[str] = None
     icon: Optional[str] = None
     icon_type: Optional[str] = None
-    type: str = Field(pattern=r"^(agent|workflow|multi_agent)$")
+    type: str = Field(pattern=r"^(agent|workflow|pure_workflow|multi_agent)$")
     visibility: Optional[str] = None
     status: Optional[str] = None
     tags: Optional[List[str]] = Field(default_factory=list)
@@ -632,7 +632,7 @@ class AppShare(BaseModel):
 # ---------- Draft Run Schemas ----------
 
 class AppChatRequest(BaseModel):
-    message: str = Field(..., description="用户消息")
+    message: Optional[str] = Field(default=None, description="用户消息，pure_workflow 可不传")
     conversation_id: Optional[str] = Field(default=None, description="会话ID（用于多轮对话）")
     user_id: Optional[str] = Field(default=None, description="用户ID（用于会话管理）")
     variables: Optional[Dict[str, Any]] = Field(default=None, description="自定义变量参数值")
@@ -644,7 +644,7 @@ class AppChatRequest(BaseModel):
 
 class DraftRunRequest(BaseModel):
     """试运行请求"""
-    message: str = Field(..., description="用户消息")
+    message: Optional[str] = Field(default=None, description="用户消息，pure_workflow 可不传")
     conversation_id: Optional[str] = Field(default=None, description="会话ID（用于多轮对话）")
     user_id: Optional[str] = Field(default=None, description="用户ID（用于会话管理）")
     variables: Optional[Dict[str, Any]] = Field(default=None, description="自定义变量参数值")

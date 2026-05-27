@@ -71,7 +71,7 @@ class WorkflowResultBuilder:
             },
             "node_outputs": node_outputs,
             "messages": result.get("messages", []),
-            "conversation_id": execution_context.conversation_id,
+            "conversation_id": execution_context.conversation_id or None,
             "elapsed_time": elapsed_time,
             "token_usage": token_usage,
             "citations": citations,

@@ -63,6 +63,14 @@ class AppService:
         self.db = db
         self.app_repo = AppRepository(self.db)
 
+    def _normalize_workflow_type(self, workflow_type: Any, default: str = AppType.WORKFLOW.value) -> str:
+        """将 workflow_type 归一化为字符串，兼容 None/枚举/普通字符串。"""
+        if workflow_type is None:
+            return default
+        if hasattr(workflow_type, "value"):
+            return str(workflow_type.value)
+        return str(workflow_type)
+
     # ==================== 私有辅助方法 ====================
 
     def _validate_workspace_access(self, app: App, workspace_id: Optional[uuid.UUID]) -> None:
@@ -701,7 +709,7 @@ class AppService:
             if app.type == "multi_agent" and data.multi_agent_config:
                 self._create_multi_agent_config(app.id, data.multi_agent_config, now)
 
-            if app.type == "workflow" and data.workflow_config:
+            if app.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW) and data.workflow_config:
                 from app.schemas.workflow_schema import WorkflowConfigCreate
                 wf_data = WorkflowConfigCreate(**data.workflow_config) if isinstance(data.workflow_config, dict) else data.workflow_config
                 self._create_workflow_config(app.id, wf_data, now)
@@ -926,7 +934,7 @@ class AppService:
                     )
                     self.db.add(new_config)
 
-            elif source_app.type == AppType.WORKFLOW:
+            elif source_app.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
                 source_config = self.db.query(WorkflowConfig).filter(
                     WorkflowConfig.app_id == source_app.id
                 ).first()
@@ -941,6 +949,7 @@ class AppService:
                         execution_config=copy.deepcopy(source_config.execution_config) if source_config.execution_config else {},
                         features=copy.deepcopy(source_config.features) if source_config.features else {},
                         triggers=copy.deepcopy(source_config.triggers) if source_config.triggers else [],
+                        workflow_type=source_config.workflow_type,
                         is_active=True,
                         created_at=now,
                         updated_at=now,
@@ -1361,7 +1370,7 @@ class AppService:
         logger.info("Agent 配置更新成功", extra={"app_id": str(app_id)})
         return agent_cfg
 
-    def _agent_config_from_release(self, release: "AppRelease") -> "AgentConfig":
+    def _agent_config_from_release(self, release: "type[AppRelease]") -> "AgentConfig":
         """从发布版本快照重建 AgentConfig 对象（不入库，仅用于运行）"""
         cfg = release.config or {}
         now = release.created_at or datetime.datetime.now()
@@ -1400,6 +1409,7 @@ class AppService:
             execution_config=cfg.get("execution_config", {}),
             triggers=cfg.get("triggers", []),
             features=cfg.get("features", {}),
+            workflow_type=self._normalize_workflow_type(cfg.get("workflow_type")),
             is_active=True,
             created_at=now,
             updated_at=now,
@@ -1565,8 +1575,8 @@ class AppService:
 
         app = self._get_app_or_404(app_id)
 
-        if app.type != AppType.WORKFLOW:
-            raise BusinessException("只有 Workflow 类型应用支持 Workflow 配置", BizCode.APP_TYPE_NOT_SUPPORTED)
+        if app.type not in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+            raise BusinessException("只有 Workflow 或 Pure_Workflow 类型应用支持 Workflow 配置", BizCode.APP_TYPE_NOT_SUPPORTED)
 
         # 只读操作，允许访问共享应用
         self._validate_app_accessible(app, workspace_id)
@@ -1587,7 +1597,7 @@ class AppService:
 
         # 返回默认配置模板（不保存到数据库）
         logger.debug("配置不存在，返回默认模板", extra={"app_id": str(app_id)})
-        return self._create_default_workflow_config(app_id)
+        return self._create_default_workflow_config(app_id, app.type)
 
     def update_workflow_config(
             self,
@@ -1614,8 +1624,8 @@ class AppService:
 
         app = self._get_app_or_404(app_id)
 
-        if app.type != AppType.WORKFLOW:
-            raise BusinessException("只有 Workflow 类型应用支持 Workflow 配置", BizCode.APP_TYPE_NOT_SUPPORTED)
+        if app.type not in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
+            raise BusinessException("只有 Workflow 或 Pure_Workflow 类型应用支持 Workflow 配置", BizCode.APP_TYPE_NOT_SUPPORTED)
 
         self._validate_app_writable(app, workspace_id)
 
@@ -1635,6 +1645,7 @@ class AppService:
                 execution_config=data.execution_config.model_dump() if data.execution_config else {},
                 triggers=[trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
                 features=data.features or {},
+                workflow_type=self._normalize_workflow_type(data.workflow_type, self._normalize_workflow_type(app.type)),
                 is_active=True,
                 created_at=now,
                 updated_at=now
@@ -1649,6 +1660,10 @@ class AppService:
             workflow_cfg.execution_config = data.execution_config.model_dump() if data.execution_config else {}
             workflow_cfg.triggers = [trigger.model_dump() for trigger in data.triggers] if data.triggers else []
             workflow_cfg.features = data.features or {}
+            workflow_cfg.workflow_type = self._normalize_workflow_type(
+                data.workflow_type,
+                self._normalize_workflow_type(workflow_cfg.workflow_type, self._normalize_workflow_type(app.type))
+            )
             workflow_cfg.updated_at = now
 
         self.db.commit()
@@ -1657,7 +1672,7 @@ class AppService:
         logger.info("Workflow 配置更新成功", extra={"app_id": str(app_id)})
         return workflow_cfg
 
-    def _create_default_workflow_config(self, app_id: uuid.UUID) -> WorkflowConfig:
+    def _create_default_workflow_config(self, app_id: uuid.UUID, workflow_type: Any = AppType.WORKFLOW.value) -> WorkflowConfig:
         """创建默认的 workflow 配置模板（不保存到数据库）
 
         使用 template_loader 加载 simple_qa 模板作为默认配置
@@ -1706,6 +1721,7 @@ class AppService:
             variables=template_data.get('variables', []),
             execution_config=template_data.get('execution_config', {}),
             triggers=template_data.get('triggers', []),
+            workflow_type=self._normalize_workflow_type(workflow_type),
             is_active=True,
             created_at=now,
             updated_at=now
@@ -1894,7 +1910,7 @@ class AppService:
                     "orchestration_mode": multi_agent_cfg.orchestration_mode
                 }
             )
-        elif app.type == AppType.WORKFLOW:
+        elif app.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
             service = WorkflowService(self.db)
             workflow_cfg = service.get_workflow_config(app_id)
             if not workflow_cfg:
@@ -1907,6 +1923,7 @@ class AppService:
                 "variables": workflow_cfg.variables,
                 "execution_config": workflow_cfg.execution_config,
                 "triggers": workflow_cfg.triggers,
+                "workflow_type": workflow_cfg.workflow_type,
                 "features": workflow_cfg.features or {}
             }
 

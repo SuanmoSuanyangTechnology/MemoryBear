@@ -6,7 +6,7 @@ from sqlalchemy import func
 
 from app.models.tool_model import (
     ToolConfig, BuiltinToolConfig, CustomToolConfig, MCPToolConfig,
-    ToolExecution, ToolType, ToolStatus
+    WorkflowToolConfig, ToolExecution, ToolType, ToolStatus
 )
 
 
@@ -200,6 +200,17 @@ class MCPToolRepository:
         return db.query(MCPToolConfig).filter(
             MCPToolConfig.connection_status == "error"
         ).all()
+
+
+class WorkflowToolRepository:
+    """工作流工具仓储类"""
+
+    @staticmethod
+    def find_by_tool_id(db: Session, tool_id: uuid.UUID) -> Optional[WorkflowToolConfig]:
+        """根据工具ID查找工作流工具配置"""
+        return db.query(WorkflowToolConfig).filter(
+            WorkflowToolConfig.id == tool_id
+        ).first()
 
 
 class ToolExecutionRepository:

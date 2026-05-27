@@ -376,7 +376,7 @@ class AgentRunService:
                 raise ValueError(f"The required parameter '{variable.get('name')}' was not provided")
         return input_vars
 
-    def load_tools_config(self, tools_config, web_search, tenant_id) -> list:
+    def load_tools_config(self, tools_config, web_search, tenant_id, user_id=None, workspace_id=None) -> list:
         """加载工具配置"""
         tools = []
         if web_search:
@@ -392,6 +392,7 @@ class AgentRunService:
                     # 根据工具名称查找工具实例
                     tool_instance = tool_service.get_tool_instance(tool_config.get("tool_id", ""), tenant_id)
                     if tool_instance:
+                        tool_instance.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
                         # 转换为LangChain工具
                         langchain_tool = tool_instance.to_langchain_tool(tool_config.get("operation", None))
                         tools.append(langchain_tool)
@@ -406,7 +407,10 @@ class AgentRunService:
     def load_skill_config(
             self,
             skills_config: dict | None,
-            message: str, tenant_id
+            message: str,
+            tenant_id,
+            user_id=None,
+            workspace_id=None,
     ) -> tuple[list, str]:
         if not skills_config:
             return [], ""
@@ -416,7 +420,11 @@ class AgentRunService:
         skill_enable = skills_config.get("enabled", False)
         if skill_enable:
             middleware = AgentMiddleware(skills=skills_config)
-            skill_tools, skill_configs, tool_to_skill_map = middleware.load_skill_tools(self.db, tenant_id)
+            skill_tools, skill_configs, tool_to_skill_map = middleware.load_skill_tools(
+                self.db,
+                tenant_id,
+                runtime_context={"user_id": user_id, "workspace_id": workspace_id},
+            )
 
             # 给技能工具挂载元数据（技能名称）
             for t in skill_tools:
@@ -732,8 +740,8 @@ class AgentRunService:
             tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
 
             # 从配置中获取启用的工具
-            tools.extend(self.load_tools_config(tools_config, web_search, tenant_id))
-            skill_tools, skill_prompts = self.load_skill_config(skills_config, message, tenant_id)
+            tools.extend(self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id))
+            skill_tools, skill_prompts = self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id)
             tools.extend(skill_tools)
             if skill_prompts:
                 system_prompt = f"{system_prompt}\n\n{skill_prompts}"
@@ -1120,8 +1128,8 @@ class AgentRunService:
             tenant_id = ToolRepository.get_tenant_id_by_workspace_id(self.db, str(workspace_id))
 
             # 从配置中获取启用的工具
-            tools.extend(self.load_tools_config(tools_config, web_search, tenant_id))
-            skill_tools, skill_prompts = self.load_skill_config(skills_config, message, tenant_id)
+            tools.extend(self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id))
+            skill_tools, skill_prompts = self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id)
             tools.extend(skill_tools)
             if skill_prompts:
                 system_prompt = f"{system_prompt}\n\n{skill_prompts}"

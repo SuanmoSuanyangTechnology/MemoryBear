@@ -110,7 +110,7 @@ class AppLogService:
             workspace_id=workspace_id
         )
 
-        if app_type == AppType.WORKFLOW:
+        if app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
             messages, node_executions_map = self._get_workflow_messages_and_nodes(conversation_id)
         else:
             messages = self.message_repository.get_messages_by_conversation(

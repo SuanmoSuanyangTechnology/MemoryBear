@@ -19,7 +19,7 @@ from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.validator import validate_workflow_config
 from app.db import get_db
 from app.models import App
-from app.models.workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeExecution
+from app.models.workflow_model import WorkflowConfig, WorkflowExecution
 from app.repositories import knowledge_repository
 from app.repositories.workflow_repository import (
     WorkflowConfigRepository,
@@ -116,6 +116,7 @@ class WorkflowService:
             execution_config: dict[str, Any] | None = None,
             features: dict[str, Any] | None = None,
             triggers: list[dict[str, Any]] | None = None,
+            workflow_type: str = "workflow",
             validate: bool = True
     ) -> WorkflowConfig:
         """创建工作流配置
@@ -128,6 +129,7 @@ class WorkflowService:
             execution_config: 执行配置
             features: 功能特性
             triggers: 触发器列表
+            workflow_type: 工作流类型
             validate: 是否验证配置
 
         Returns:
@@ -143,7 +145,8 @@ class WorkflowService:
             "variables": variables or [],
             "execution_config": execution_config or {},
             "features": features or {},
-            "triggers": triggers or []
+            "triggers": triggers or [],
+            "workflow_type": workflow_type
         }
 
         # 验证配置
@@ -164,7 +167,8 @@ class WorkflowService:
             variables=variables,
             execution_config=execution_config,
             features=features,
-            triggers=triggers
+            triggers=triggers,
+            workflow_type=workflow_type
         )
 
         logger.info(f"创建工作流配置成功: app_id={app_id}, config_id={config.id}")
@@ -188,7 +192,9 @@ class WorkflowService:
             edges: list[dict[str, Any]] | None = None,
             variables: list[dict[str, Any]] | None = None,
             execution_config: dict[str, Any] | None = None,
+            features: dict[str, Any] | None = None,
             triggers: list[dict[str, Any]] | None = None,
+            workflow_type: str | None = None,
             validate: bool = True
     ) -> WorkflowConfig:
         """更新工作流配置
@@ -199,7 +205,9 @@ class WorkflowService:
             edges: 边列表
             variables: 变量列表
             execution_config: 执行配置
+            features: 功能特性
             triggers: 触发器列表
+            workflow_type: 工作流类型
             validate: 是否验证配置
 
         Returns:
@@ -221,7 +229,9 @@ class WorkflowService:
         updated_edges = edges if edges is not None else config.edges
         updated_variables = variables if variables is not None else config.variables
         updated_execution_config = execution_config if execution_config is not None else config.execution_config
+        updated_features = features if features is not None else config.features
         updated_triggers = triggers if triggers is not None else config.triggers
+        updated_workflow_type = workflow_type if workflow_type is not None else config.workflow_type
 
         # 构建配置字典
         config_dict = {
@@ -229,7 +239,9 @@ class WorkflowService:
             "edges": updated_edges,
             "variables": updated_variables,
             "execution_config": updated_execution_config,
-            "triggers": updated_triggers
+            "features": updated_features,
+            "triggers": updated_triggers,
+            "workflow_type": updated_workflow_type
         }
 
         # 验证配置
@@ -249,7 +261,9 @@ class WorkflowService:
             edges=updated_edges,
             variables=updated_variables,
             execution_config=updated_execution_config,
-            triggers=updated_triggers
+            features=updated_features,
+            triggers=updated_triggers,
+            workflow_type=updated_workflow_type
         )
 
         logger.info(f"更新工作流配置成功: app_id={app_id}, config_id={config.id}")
@@ -796,6 +810,8 @@ class WorkflowService:
             error: str,
     ) -> None:
         """将失败时的用户消息和助手错误消息写入会话。"""
+        if not conversation_id:
+            return
         self.conversation_service.add_message(
             conversation_id=conversation_id,
             role="user",
@@ -811,6 +827,40 @@ class WorkflowService:
             meta_data={"error": error},
             sync_memory=False,
         )
+
+    @staticmethod
+    def _supports_conversation(config: WorkflowConfig) -> bool:
+        return getattr(config, "workflow_type", "workflow") == "workflow"
+
+    def _ensure_conversation(
+            self,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            user_id: str | None,
+            conversation_id: uuid.UUID | None,
+            enable_conversation: bool,
+    ) -> uuid.UUID | None:
+        if not enable_conversation:
+            return conversation_id
+        if conversation_id:
+            return conversation_id
+
+        from app.models import Conversation as ConversationModel
+
+        conversation_id = uuid.uuid4()
+        new_conversation = ConversationModel(
+            id=conversation_id,
+            app_id=app_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            is_draft=True,
+            title="草稿会话",
+        )
+        self.db.add(new_conversation)
+        self.db.commit()
+        self.db.refresh(new_conversation)
+        return conversation_id
 
     def _get_history_info(self, conversation_id: uuid.UUID) -> tuple[dict, list] | None:
         executions = self.execution_repo.get_by_conversation_id(
@@ -877,6 +927,8 @@ class WorkflowService:
                 message=f"工作流配置不存在: app_id={app_id}"
             )
 
+        supports_conversation = self._supports_conversation(config)
+
         feature_configs = config.features or {}
         self._validate_file_upload(feature_configs, payload.files)
 
@@ -887,36 +939,37 @@ class WorkflowService:
         )
 
         input_data = {
-            "message": payload.message, "variables": resolved_variables,
-            "conversation_id": payload.conversation_id,
+            "variables": resolved_variables,
             "files": [file.model_dump(mode='json') for file in payload.files]
         }
+        if payload.message is not None:
+            input_data["message"] = payload.message
+        if payload.conversation_id:
+            input_data["conversation_id"] = payload.conversation_id
 
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
+        conversation_id_uuid = self._ensure_conversation(
+            app_id=app_id,
+            workspace_id=workspace_id,
+            user_id=payload.user_id,
+            conversation_id=conversation_id_uuid,
+            enable_conversation=supports_conversation,
+        )
+        if conversation_id_uuid:
+            payload.conversation_id = str(conversation_id_uuid)
+            input_data["conversation_id"] = str(conversation_id_uuid)
 
         # 检查标注命中 — 在创建工作流执行之前，命中则直接返回跳过整个工作流
-        annotation_match = self._check_annotation_match(app_id, payload.message,
-                                                        source=source or HitLogSource.CONSOLE)
+        annotation_match = None
+        if supports_conversation and payload.message:
+            annotation_match = self._check_annotation_match(
+                app_id, payload.message, source=source or HitLogSource.CONSOLE
+            )
         if annotation_match:
-            if not conversation_id_uuid:
-                conversation_id_uuid = uuid.uuid4()
-                from app.models import Conversation as ConversationModel
-                new_conversation = ConversationModel(
-                    id=conversation_id_uuid,
-                    app_id=app_id,
-                    workspace_id=workspace_id,
-                    user_id=payload.user_id,
-                    is_draft=True,
-                    title="草稿会话",
-                )
-                self.db.add(new_conversation)
-                self.db.commit()
-                self.db.refresh(new_conversation)
-
             message_id = uuid.uuid4()
             prev_messages = []
-            history = self._get_history_info(conversation_id_uuid)
+            history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 _, prev_messages = history
             self.conversation_service.add_message(
@@ -1007,7 +1060,7 @@ class WorkflowService:
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
 
-            history = self._get_history_info(conversation_id_uuid)
+            history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 conv_vars, conv_messages = history
                 input_data["conv"] = conv_vars
@@ -1018,7 +1071,12 @@ class WorkflowService:
             is_new_conversation = init_message_length == 0
             if is_new_conversation:
                 opening_cfg = feature_configs.get("opening_statement", {})
-                if isinstance(opening_cfg, dict) and opening_cfg.get("enabled") and opening_cfg.get("statement"):
+                if (
+                        conversation_id_uuid
+                        and isinstance(opening_cfg, dict)
+                        and opening_cfg.get("enabled")
+                        and opening_cfg.get("statement")
+                ):
                     statement = opening_cfg["statement"]
                     suggested_questions = opening_cfg.get("suggested_questions", [])
                     if payload.variables:
@@ -1069,13 +1127,14 @@ class WorkflowService:
                                 })
                     if message["role"] == "assistant":
                         assistant_message = message["content"]
-                self.conversation_service.add_message(
-                    conversation_id=conversation_id_uuid,
-                    role="user",
-                    content=human_message,
-                    meta_data=human_meta,
-                    sync_memory=False,
-                )
+                if conversation_id_uuid:
+                    self.conversation_service.add_message(
+                        conversation_id=conversation_id_uuid,
+                        role="user",
+                        content=human_message,
+                        meta_data=human_meta,
+                        sync_memory=False,
+                    )
                 # 过滤 citations
                 citations = result.get("citations", [])
                 citation_cfg = feature_configs.get("citation", {})
@@ -1092,14 +1151,15 @@ class WorkflowService:
                 assistant_meta = {"usage": token_usage, "audio_url": None}
                 if filtered_citations:
                     assistant_meta["citations"] = filtered_citations
-                self.conversation_service.add_message(
-                    message_id=message_id,
-                    conversation_id=conversation_id_uuid,
-                    role="assistant",
-                    content=assistant_message,
-                    meta_data=assistant_meta,
-                    sync_memory=False,
-                )
+                if conversation_id_uuid:
+                    self.conversation_service.add_message(
+                        message_id=message_id,
+                        conversation_id=conversation_id_uuid,
+                        role="assistant",
+                        content=assistant_message,
+                        meta_data=assistant_meta,
+                        sync_memory=False,
+                    )
                 self.update_execution_status(
                     execution.execution_id,
                     "completed",
@@ -1136,7 +1196,7 @@ class WorkflowService:
                 "message": result.get("output"),  # 最终输出（字符串）
                 "message_id": str(message_id),
                 # "output_data": result.get("node_outputs", {}),  # 所有节点输出（详细数据）
-                "conversation_id": result.get("conversation_id"),  # 所有节点输出（详细数据）payload.,  # 会话 ID
+                "conversation_id": result.get("conversation_id") or (str(conversation_id_uuid) if conversation_id_uuid else None),
                 "error_message": result.get("error"),
                 "elapsed_time": result.get("elapsed_time"),
                 "token_usage": result.get("token_usage"),
@@ -1187,6 +1247,7 @@ class WorkflowService:
                 code=BizCode.CONFIG_MISSING,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
+        supports_conversation = self._supports_conversation(config)
         feature_configs = config.features or {}
         self._validate_file_upload(feature_configs, payload.files)
 
@@ -1197,37 +1258,37 @@ class WorkflowService:
         )
 
         input_data = {
-            "message": payload.message, "variables": resolved_variables,
-            "conversation_id": payload.conversation_id,
+            "variables": resolved_variables,
             "files": [file.model_dump(mode='json') for file in payload.files]
         }
+        if payload.message is not None:
+            input_data["message"] = payload.message
+        if payload.conversation_id:
+            input_data["conversation_id"] = payload.conversation_id
 
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
+        conversation_id_uuid = self._ensure_conversation(
+            app_id=app_id,
+            workspace_id=workspace_id,
+            user_id=payload.user_id,
+            conversation_id=conversation_id_uuid,
+            enable_conversation=supports_conversation,
+        )
+        if conversation_id_uuid:
+            payload.conversation_id = str(conversation_id_uuid)
+            input_data["conversation_id"] = str(conversation_id_uuid)
 
         # 检查标注命中 — 在创建工作流执行之前，命中则直接返回跳过整个工作流
-        annotation_match = self._check_annotation_match(app_id, payload.message,
-                                                        source=source or HitLogSource.CONSOLE)
+        annotation_match = None
+        if supports_conversation and payload.message:
+            annotation_match = self._check_annotation_match(
+                app_id, payload.message, source=source or HitLogSource.CONSOLE
+            )
         if annotation_match:
-            if not conversation_id_uuid:
-                from app.models import Conversation as ConversationModel
-                conversation_id_uuid = uuid.uuid4()
-                new_conversation = ConversationModel(
-                    id=conversation_id_uuid,
-                    app_id=app_id,
-                    workspace_id=workspace_id,
-                    user_id=payload.user_id,
-                    is_draft=True,
-                    title="草稿会话",
-                )
-                self.db.add(new_conversation)
-                self.db.commit()
-                self.db.refresh(new_conversation)
-                payload.conversation_id = str(conversation_id_uuid)
-
             message_id = uuid.uuid4()
             prev_messages = []
-            history = self._get_history_info(conversation_id_uuid)
+            history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 _, prev_messages = history
             self.conversation_service.add_message(
@@ -1342,7 +1403,7 @@ class WorkflowService:
             execution.input_data = input_data
             self.db.commit()
             self.update_execution_status(execution.execution_id, "running")
-            history = self._get_history_info(conversation_id_uuid)
+            history = self._get_history_info(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 conv_vars, conv_messages = history
                 input_data["conv"] = conv_vars
@@ -1355,7 +1416,12 @@ class WorkflowService:
             is_new_conversation = init_message_length == 0
             if is_new_conversation:
                 opening_cfg = feature_configs.get("opening_statement", {})
-                if isinstance(opening_cfg, dict) and opening_cfg.get("enabled") and opening_cfg.get("statement"):
+                if (
+                        conversation_id_uuid
+                        and isinstance(opening_cfg, dict)
+                        and opening_cfg.get("enabled")
+                        and opening_cfg.get("statement")
+                ):
                     statement = opening_cfg["statement"]
                     suggested_questions = opening_cfg.get("suggested_questions", [])
                     if payload.variables:
@@ -1415,13 +1481,14 @@ class WorkflowService:
                                         })
                             if message["role"] == "assistant":
                                 assistant_message = message["content"]
-                        self.conversation_service.add_message(
-                            conversation_id=conversation_id_uuid,
-                            role="user",
-                            content=human_message,
-                            meta_data=human_meta,
-                            sync_memory=False,
-                        )
+                        if conversation_id_uuid:
+                            self.conversation_service.add_message(
+                                conversation_id=conversation_id_uuid,
+                                role="user",
+                                content=human_message,
+                                meta_data=human_meta,
+                                sync_memory=False,
+                            )
                         # 过滤 citations
                         citations = event.get("data", {}).get("citations", [])
                         citation_cfg = feature_configs.get("citation", {})
@@ -1438,14 +1505,15 @@ class WorkflowService:
                         assistant_meta = {"usage": token_usage, "audio_url": None}
                         if filtered_citations:
                             assistant_meta["citations"] = filtered_citations
-                        self.conversation_service.add_message(
-                            message_id=message_id,
-                            conversation_id=conversation_id_uuid,
-                            role="assistant",
-                            content=assistant_message,
-                            meta_data=assistant_meta,
-                            sync_memory=False,
-                        )
+                        if conversation_id_uuid:
+                            self.conversation_service.add_message(
+                                message_id=message_id,
+                                conversation_id=conversation_id_uuid,
+                                role="assistant",
+                                content=assistant_message,
+                                meta_data=assistant_meta,
+                                sync_memory=False,
+                            )
                         self.update_execution_status(
                             execution.execution_id,
                             "completed",

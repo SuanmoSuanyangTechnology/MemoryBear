@@ -75,7 +75,13 @@ class AgentMiddleware:
         
         return filtered_tools, activated_skill_ids
     
-    def load_skill_tools(self, db, tenant_id: uuid.UUID, base_tools: List = None) -> tuple[List, Dict[str, Any], Dict[str, str]]:
+    def load_skill_tools(
+        self,
+        db,
+        tenant_id: uuid.UUID,
+        base_tools: List = None,
+        runtime_context: Optional[Dict[str, Any]] = None,
+    ) -> tuple[List, Dict[str, Any], Dict[str, str]]:
         """
         加载技能关联的工具
         
@@ -83,6 +89,7 @@ class AgentMiddleware:
             db: 数据库会话
             tenant_id: 租户id
             base_tools: 基础工具列表
+            runtime_context: 运行时上下文, 含非业务参数
         
         Returns:
             (工具列表, 技能配置字典, 工具到技能的映射 {tool_name: skill_id})
@@ -121,7 +128,12 @@ class AgentMiddleware:
                     continue
             
             # 加载技能工具并获取映射关系
-            skill_tools, skill_tool_map = SkillService.load_skill_tools(db, skill_ids_to_load, tenant_id)
+            skill_tools, skill_tool_map = SkillService.load_skill_tools(
+                db,
+                skill_ids_to_load,
+                tenant_id,
+                runtime_context=runtime_context,
+            )
             
             # 只添加不冲突的 skill_tools
             for tool in skill_tools:

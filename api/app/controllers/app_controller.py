@@ -4,7 +4,7 @@ import json
 from typing import Optional, Annotated
 
 import yaml
-from fastapi import APIRouter, Depends, Path, Form, UploadFile, File
+from fastapi import APIRouter, Depends, Path, Form, UploadFile, File, Query
 from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.orm import Session
 from urllib.parse import quote
@@ -20,7 +20,7 @@ from app.models.annotation_model import HitLogSource
 from app.models.app_model import AppType
 from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
-from app.schemas import app_schema
+from app.schemas import app_schema, tool_schema
 from app.schemas.response_schema import PageData, PageMeta
 from app.schemas.workflow_schema import WorkflowConfig as WorkflowConfigSchema
 from app.schemas.workflow_schema import WorkflowConfigUpdate, WorkflowImportSave
@@ -319,7 +319,7 @@ def get_opening(
     # 根据应用类型获取 features
     from app.models.app_model import App as AppModel
     app = db.get(AppModel, app_id)
-    if app and app.type == "workflow":
+    if app and app.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         cfg = app_service.get_workflow_config(db=db, app_id=app_id, workspace_id=workspace_id)
         features = cfg.features or {}
     else:
@@ -587,8 +587,11 @@ async def draft_run(
 
     # 1. 验证应用
     app = service._get_app_or_404(app_id)
-    if app.type != AppType.AGENT and app.type != AppType.MULTI_AGENT and app.type != AppType.WORKFLOW:
+    if app.type not in (AppType.AGENT, AppType.MULTI_AGENT, AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         raise BusinessException("只有 Agent , Workflow 类型应用支持试运行", BizCode.APP_TYPE_NOT_SUPPORTED)
+
+    if app.type != AppType.PURE_WORKFLOW and not payload.message:
+        raise BusinessException("当前应用类型要求必须传入 message", BizCode.INVALID_PARAMETER)
 
     # 只读操作，允许访问共享应用
     service._validate_app_accessible(app, workspace_id)
@@ -603,14 +606,15 @@ async def draft_run(
         )
         payload.user_id = str(new_end_user.id)
 
-    # 处理会话ID（创建或验证）
-    conversation_id = await draft_service._ensure_conversation(
-        conversation_id=payload.conversation_id,
-        app_id=app_id,
-        workspace_id=workspace_id,
-        user_id=payload.user_id
-    )
-    payload.conversation_id = conversation_id
+    # pure_workflow 不强制会话；其他类型仍沿用会话逻辑。
+    if app.type != AppType.PURE_WORKFLOW or payload.conversation_id:
+        conversation_id = await draft_service._ensure_conversation(
+            conversation_id=payload.conversation_id,
+            app_id=app_id,
+            workspace_id=workspace_id,
+            user_id=payload.user_id
+        )
+        payload.conversation_id = conversation_id
 
     if app.type == AppType.AGENT:
         service._check_agent_config(app_id)
@@ -675,7 +679,7 @@ async def draft_run(
             "开始非流式试运行",
             extra={
                 "app_id": str(app_id),
-                "message_length": len(payload.message),
+                "message_length": len(payload.message or ""),
                 "has_conversation_id": bool(payload.conversation_id),
                 "has_variables": bool(payload.variables),
                 "has_files": bool(payload.files)
@@ -743,7 +747,7 @@ async def draft_run(
                 "开始多智能体流式试运行",
                 extra={
                     "app_id": str(app_id),
-                    "message_length": len(payload.message),
+                    "message_length": len(payload.message or ""),
                     "has_conversation_id": bool(payload.conversation_id)
                 }
             )
@@ -777,7 +781,7 @@ async def draft_run(
             "开始多智能体非流式试运行",
             extra={
                 "app_id": str(app_id),
-                "message_length": len(payload.message),
+                "message_length": len(payload.message or ""),
                 "has_conversation_id": bool(payload.conversation_id)
             }
         )
@@ -797,7 +801,7 @@ async def draft_run(
             data=result,
             msg="多 Agent 任务执行成功"
         )
-    elif app.type == AppType.WORKFLOW:  # 工作流
+    elif app.type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):  # 工作流 / 对话流
         # 共享应用：从最新发布版本读配置快照，而非草稿
         is_shared = app.workspace_id != workspace_id
         if is_shared:
@@ -815,7 +819,7 @@ async def draft_run(
                 "开始工作流流式试运行",
                 extra={
                     "app_id": str(app_id),
-                    "message_length": len(payload.message),
+                    "message_length": len(payload.message or ""),
                     "has_conversation_id": bool(payload.conversation_id)
                 }
             )
@@ -861,7 +865,7 @@ async def draft_run(
             "开始非流式试运行",
             extra={
                 "app_id": str(app_id),
-                "message_length": len(payload.message),
+                "message_length": len(payload.message or ""),
                 "has_conversation_id": bool(payload.conversation_id)
             }
         )
@@ -1369,6 +1373,53 @@ async def import_app(
         data={"app": app_schema.App.model_validate(result_app), "warnings": warnings},
         msg="应用导入成功" + ("，但部分资源需手动配置" if warnings else "")
     )
+
+
+@router.post("/{app_id}/publish_tool", summary="发布工作流为工具")
+@cur_workspace_access_guard()
+async def publish_workflow_as_tool(
+        app_id: uuid.UUID,
+        payload: tool_schema.WorkflowToolCreateRequest,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    from app.services.workflow_tool_publish_service import WorkflowToolPublishService
+    from app.services.tool_service import ToolService
+
+    service = WorkflowToolPublishService(db)
+    tool_config = service.publish_workflow_as_tool(
+        workflow_app_id=app_id,
+        tool_name=payload.name,
+        tool_description=payload.description or "",
+        tenant_id=current_user.tenant_id,
+        workspace_id=current_user.current_workspace_id,
+        created_by=current_user.id,
+        icon=payload.icon,
+        timeout=payload.timeout,
+        tags=payload.tags,
+        release_id=uuid.UUID(payload.release_id) if payload.release_id else None,
+    )
+
+    detail = ToolService(db).get_tool_detail(str(tool_config.id), current_user.tenant_id)
+    return success(data=detail or tool_schema.ToolDetailSchema.model_validate(tool_config))
+
+
+@router.get("/{app_id}/publish_tool/preview", summary="预览工作流发布为工具的入参和出参")
+@cur_workspace_access_guard()
+async def preview_workflow_tool_publish(
+        app_id: uuid.UUID,
+        release_id: uuid.UUID | None = Query(None, description="指定工作流发布版本ID，不传则使用当前发布版本"),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    from app.services.workflow_tool_publish_service import WorkflowToolPublishService
+
+    preview = WorkflowToolPublishService(db).get_publish_preview(
+        workflow_app_id=app_id,
+        workspace_id=current_user.current_workspace_id,
+        release_id=release_id,
+    )
+    return success(data=preview)
 
 
 @router.get("/citations/{document_id}/download", summary="下载引用文档原始文件")
