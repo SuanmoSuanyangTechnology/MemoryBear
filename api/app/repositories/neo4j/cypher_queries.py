@@ -89,6 +89,8 @@ SET e.name = CASE WHEN entity.name IS NOT NULL AND entity.name <> '' THEN entity
     e.entity_type = CASE WHEN entity.entity_type IS NOT NULL AND entity.entity_type <> '' THEN entity.entity_type ELSE e.entity_type END,
     e.type_id = entity.type_id,
     e.type_description = CASE WHEN entity.type_description IS NOT NULL AND entity.type_description <> '' THEN entity.type_description ELSE coalesce(e.type_description, '') END,
+    // description 合并：先双向 CONTAINS 快速路径，否则做片段级去重追加
+    // 注意：这里只用 CONTAINS 兜底，真正的"按片段去重合并"在 batch_post_store_task 中通过 Python 完成
     e.description = CASE
         WHEN entity.description IS NULL OR entity.description = '' THEN coalesce(e.description, '')
         WHEN e.description IS NULL OR e.description = '' THEN entity.description
@@ -1368,15 +1370,23 @@ WITH target,
 WITH target, tgt_desc, source_names, source_descs, existing_aliases,
      existing_aliases + [n IN source_names WHERE n IS NOT NULL AND n <> '' AND NOT n IN existing_aliases] AS new_aliases
 
-// 2. 合并 description：将所有 source.description 逐一追加（去重，分号分隔）
-WITH target, new_aliases, existing_aliases, source_descs,
-     reduce(desc = tgt_desc, src IN source_descs |
-         CASE
-             WHEN src <> '' AND NOT desc CONTAINS src
-             THEN CASE WHEN desc = '' THEN src ELSE desc + '；' + src END
-             ELSE desc
-         END
-     ) AS new_description
+// 2. 合并 description：先把 target 和所有 source 的 description 全部按 ;/； 拆成片段，
+//    再统一去重拼回。避免 source.description 整段贴一遍导致的"倍数重复"。
+WITH target, new_aliases, existing_aliases,
+     [item IN split(replace(tgt_desc, ';', '；'), '；') WHERE trim(item) <> ''] AS tgt_parts,
+     source_descs
+WITH target, new_aliases, existing_aliases, tgt_parts,
+     reduce(all_parts = tgt_parts, src IN source_descs |
+         all_parts + [item IN split(replace(src, ';', '；'), '；')
+                      WHERE trim(item) <> '' AND NOT trim(item) IN [p IN all_parts | trim(p)]]
+     ) AS merged_parts
+WITH target, new_aliases, existing_aliases, merged_parts,
+     CASE
+         WHEN size(merged_parts) = 0 THEN ''
+         ELSE reduce(s = '', i IN range(0, size(merged_parts) - 1) |
+             CASE WHEN i = 0 THEN trim(merged_parts[i]) ELSE s + '；' + trim(merged_parts[i]) END
+         )
+     END AS new_description
 
 SET target.aliases = new_aliases,
     target.description = new_description
