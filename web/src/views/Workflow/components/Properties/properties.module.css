@@ -166,3 +166,13 @@
 .properties :global(.ant-input-number-affix-wrapper) {
   font-size: 12px;
 }
+.properties .tabs:global(.ant-tabs >.ant-tabs-nav .ant-tabs-nav-wrap),
+.properties .tabs:global(.ant-tabs >div>.ant-tabs-nav .ant-tabs-nav-wrap) {
+  padding: 0 12px;
+}
+.properties .tabs:global(.ant-tabs .ant-tabs-tab-btn) {
+  font-size: 13px;
+}
+.properties .tabs:global(.ant-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn) {
+  font-weight: 500;
+}

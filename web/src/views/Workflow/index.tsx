@@ -120,6 +120,7 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
           chatVariables={chatVariables}
           appId={config?.app_id}
           handleSave={handleSave}
+          nodeClick={nodeClick}
         />
       }
       <Chat
@@ -129,7 +130,10 @@ const Workflow = forwardRef<WorkflowRef, { onFeaturesLoad?: (features: FeaturesC
         graphRef={graphRef}
         appId={config?.app_id as string}
       />
-      <PortClickHandler graph={graphRef.current} />
+      <PortClickHandler
+        graph={graphRef.current}
+        nodeClick={nodeClick}
+      />
 
       <AddChatVariable
         ref={addChatVariableRef}

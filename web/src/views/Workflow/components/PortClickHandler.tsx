@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:30:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-07 18:38:06
+ * @Last Modified time: 2026-05-27 10:14:48
  */
 import { useEffect, useState } from 'react';
 import { Flex, Popover } from 'antd';
@@ -46,9 +46,10 @@ export const adjustCycleContainerSize = (graph: any, cycleId: string) => {
 
 interface PortClickHandlerProps {
   graph: any;
+  nodeClick: ({ node }: { node: any }) => void;
 }
 
-const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
+const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph, nodeClick }) => {
   const { t } = useTranslation();
   const [popoverVisible, setPopoverVisible] = useState(false);
   const [sourceNode, setSourceNode] = useState<any>(null);
@@ -332,6 +333,8 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph }) => {
     } else {
       addedCells.forEach(c => { if (c.isNode?.()) c.toFront(); });
     }
+
+    nodeClick({ node: newNode });
 
     // Re-enable history and manually push one batch frame for all added cells
     graph.enableHistory();
