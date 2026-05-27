@@ -1030,7 +1030,6 @@ const Conversation: FC = () => {
         <ShareModal
           ref={shareModalRef}
           conversationId={conversation_id as string}
-          chatList={chatList}
           streamLoading={streamLoadingRef.current}
           shareToken={shareToken as string}
         />
@@ -1222,7 +1221,6 @@ const Conversation: FC = () => {
       <ShareModal
         ref={shareModalRef}
         conversationId={conversation_id as string}
-        chatList={chatList}
         streamLoading={streamLoadingRef.current}
         shareToken={shareToken as string}
       />

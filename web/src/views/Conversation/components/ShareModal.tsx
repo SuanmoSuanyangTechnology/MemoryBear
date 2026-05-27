@@ -14,7 +14,7 @@ import html2canvas from 'html2canvas'
 
 import type {  ShareModalRef } from '../types'
 import RbModal from '@/components/RbModal'
-import { generateShareLink } from '@/api/application'
+import { generateShareLink, getConversationDetail } from '@/api/application'
 import RbAlert from '@/components/RbAlert'
 import ChatContent from '@/components/Chat/ChatContent';
 import type { ChatItem } from '@/components/Chat/types';
@@ -25,7 +25,6 @@ import type { ChatItem } from '@/components/Chat/types';
 interface ShareModalProps {
   /** Version to share */
   conversationId: string | null;
-  chatList: Array<ChatItem | ChatItem[]>;
   streamLoading: boolean;
   shareToken: string | null;
 }
@@ -35,7 +34,6 @@ interface ShareModalProps {
  */
 const ShareModal = forwardRef<ShareModalRef, ShareModalProps>(({
   conversationId,
-  chatList,
   streamLoading,
   shareToken,
 }, ref) => {
@@ -45,6 +43,7 @@ const ShareModal = forwardRef<ShareModalRef, ShareModalProps>(({
   const [loading, setLoading] = useState(false)
   const [shareLink, setShareLink] = useState<string | null>(null)
   const chatContentRef = useRef<HTMLDivElement>(null)
+  const [chatList, setChatList] = useState<Array<ChatItem | ChatItem[]>>([])
 
   /** Close modal */
   const handleClose = () => {
@@ -57,6 +56,7 @@ const ShareModal = forwardRef<ShareModalRef, ShareModalProps>(({
     if (!conversationId || !shareToken || shareToken === '') {
       return
     }
+
     setLoading(true)
     generateShareLink(shareToken, conversationId, { allow_copy: true })
       .then(res => {
@@ -69,7 +69,24 @@ const ShareModal = forwardRef<ShareModalRef, ShareModalProps>(({
       .finally(() => {
         setLoading(false)
       })
+    getChatDetail()
   };
+
+  const getChatDetail = () => {
+    if (!conversationId || !shareToken || shareToken === '') return
+    getConversationDetail(shareToken, conversationId)
+      .then(res => {
+        const response = res as { messages: ChatItem[] }
+        const messages = response?.messages || []
+        setChatList(messages.map(msg => {
+          if (Array.isArray(msg)) {
+            return msg.filter(item => item.is_current)
+          }
+          msg.status = msg.role === 'user' ? undefined : msg.status
+          return msg
+        }))
+      })
+  }
   /** Copy share link to clipboard */
   const handleCopy = () => {
     if (!shareLink) return
