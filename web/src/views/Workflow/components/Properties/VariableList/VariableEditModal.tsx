@@ -167,6 +167,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
   const fileChange = (file?: any) => {
     const fileObj = file ? {
       ...file,
+      status: file.status || 'uploading',
       type: file.type,
       transfer_method: "local_file",
       upload_file_id: file.response?.data?.file_id,
