@@ -17,7 +17,7 @@ from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.enums import HttpErrorHandle
-from app.core.workflow.nodes.llm.config import LLMNodeConfig, validate_llm_param_constraints
+from app.core.workflow.nodes.llm.config import LLMNodeConfig, validate_llm_param_constraints, strip_unsupported_llm_params, _MULTIMODAL_COMPATIBLE_PROVIDERS
 from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_db_context
 from app.models import ModelType
@@ -219,6 +219,13 @@ class LLMNode(BaseNode):
         if self.typed_config.response_format.enable and self.typed_config.response_format.value == "text":
             json_output = False
 
+        # If the model lacks JSON_OUTPUT capability, disable json_output entirely
+        # so neither API-level response_format nor prompt injection is applied.
+        # The warning is already produced by validate_llm_param_constraints.
+        capability_set = set(model_info.capability or [])
+        if json_output and ModelCapability.JSON_OUTPUT not in capability_set:
+            json_output = False
+
         if self.typed_config.extra_headers.enable and self.typed_config.extra_headers.value:
             try:
                 import json
@@ -226,6 +233,34 @@ class LLMNode(BaseNode):
                 extra_params["default_headers"] = extra_headers_dict
             except json.JSONDecodeError as e:
                 logger.warning(f"节点 {self.node_id}: 额外请求头 JSON 解析失败: {e}")
+
+        # Strip provider-unsupported parameters so they never reach the API call
+        extra_params, strip_warnings = strip_unsupported_llm_params(
+            extra_params, model_info.provider or "", model_info.is_omni
+        )
+        if strip_warnings:
+            for w in strip_warnings:
+                logger.warning(f"节点 {self.node_id} 参数安全剥离: {w} (模型={model_info.model_name}, 提供商={model_info.provider})")
+            self._param_warnings = (self._param_warnings or []) + strip_warnings
+
+        # Vision: only enable for providers whose LLM class accepts
+        # OpenAI-style multimodal content format ([{type: text, text: ...}]).
+        # DashScope non-Omni (ChatTongyi) rejects this format.
+        effective_vision = self.typed_config.vision
+        if effective_vision:
+            try:
+                provider_enum = ModelProvider(model_info.provider.lower())
+            except ValueError:
+                provider_enum = None
+            is_compatible = (
+                provider_enum in _MULTIMODAL_COMPATIBLE_PROVIDERS
+                or (provider_enum == ModelProvider.DASHSCOPE and model_info.is_omni)
+            )
+            if not is_compatible:
+                effective_vision = False
+                logger.warning(
+                    f"节点 {self.node_id}: 模型提供商 {model_info.provider} 不支持 "
+                    f"OpenAI 多模态内容格式，已自动关闭 vision")
 
         llm = RedBearLLM(
             RedBearModelConfig(
@@ -262,31 +297,31 @@ class LLMNode(BaseNode):
                         "content": await self.process_message(
                             model_info,
                             content,
-                            self.typed_config.vision,
+                            effective_vision,
                         )
                     })
                 elif role in ["user", "human"]:
                     messages.append({
                         "role": "user",
-                        "content": await self.process_message(model_info, content, self.typed_config.vision)
+                        "content": await self.process_message(model_info, content, effective_vision)
                     })
                 elif role in ["ai", "assistant"]:
                     messages.append({
                         "role": "assistant",
-                        "content": await self.process_message(model_info, content, self.typed_config.vision)
+                        "content": await self.process_message(model_info, content, effective_vision)
                     })
                 else:
                     logger.warning(f"未知的消息角色: {role}，默认使用 user")
                     messages.append({
                         "role": "user",
-                        "content": await self.process_message(model_info, content, self.typed_config.vision)
+                        "content": await self.process_message(model_info, content, effective_vision)
                     })
 
-            if self.typed_config.vision_input and self.typed_config.vision:
+            if self.typed_config.vision_input and effective_vision:
                 file_content = []
                 files = variable_pool.get_instance(self.typed_config.vision_input)
                 for file in files.value:
-                    content = await self.process_message(model_info, file.value, self.typed_config.vision)
+                    content = await self.process_message(model_info, file.value, effective_vision)
                     if content:
                         file_content.extend(content)
                 if messages and messages[-1]["role"] == 'user':
@@ -301,7 +336,7 @@ class LLMNode(BaseNode):
                     if isinstance(message["content"], list):
                         file_content = []
                         for file in message["content"]:
-                            content = await self.process_message(model_info, file, self.typed_config.vision)
+                            content = await self.process_message(model_info, file, effective_vision)
                             if content:
                                 file_content.extend(content)
                         history_message.append(
@@ -311,7 +346,7 @@ class LLMNode(BaseNode):
                         message["content"] = await self.process_message(
                             model_info,
                             message["content"],
-                            self.typed_config.vision
+                            effective_vision
                         )
                         history_message.append(message)
                 messages = messages[:-1] + history_message + messages[-1:]
@@ -324,11 +359,21 @@ class LLMNode(BaseNode):
 
         # 所有 provider 统一注入 JSON prompt 兜底，确保即使 API 层 response_format 未生效也能引导 JSON 输出
         if json_output:
+            json_prompt_suffix = "\n请以JSON格式输出。"
             system_msg = next((m for m in self.messages if m["role"] == "system"), None)
             if system_msg:
-                system_msg["content"] += "\n请以JSON格式输出。"
+                if isinstance(system_msg["content"], list):
+                    # Multimodal format: append suffix to the last text object
+                    for item in reversed(system_msg["content"]):
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            item["text"] += json_prompt_suffix
+                            break
+                    else:
+                        system_msg["content"].append({"type": "text", "text": json_prompt_suffix})
+                else:
+                    system_msg["content"] += json_prompt_suffix
             else:
-                self.messages.insert(0, {"role": "system", "content": "请以JSON格式输出。"})
+                self.messages.insert(0, {"role": "system", "content": json_prompt_suffix})
 
         return llm
 
@@ -589,13 +634,20 @@ class LLMNode(BaseNode):
                         chunk_count += 1
                         buffered_chunks.append(content)
 
+                # Signal that reasoning_content streaming is complete so the
+                # stream-output cursor can advance past {{node.reasoning_content}}
+                # segments before output chunks arrive.
+                if self.typed_config.enable_reasoning_content_extraction:
+                    yield {"__final__": False, "chunk": "", "done": True, "field": "reasoning_content"}
+
                 for c in buffered_chunks:
-                    yield {"__final__": False, "chunk": c}
+                    yield {"__final__": False, "chunk": c, "field": "output"}
 
                 yield {
                     "__final__": False,
                     "chunk": "",
-                    "done": True
+                    "done": True,
+                    "field": "output"
                 }
 
                 reasoning_content = ""
