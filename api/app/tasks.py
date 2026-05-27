@@ -2207,51 +2207,73 @@ def batch_post_store_task(self, end_user_id: str) -> Dict[str, Any]:
                 logger.warning(f"[BatchPostStore] 别名归并失败: {e}")
 
             # 3.5 description 全局去重（避免追加导致的重复增长）
+            # 3.5 description 全局去重（去时间戳前缀后比较语义重复）
             try:
-                dedup_desc_cypher = """
+                import re as _re
+
+                # 时间戳前缀正则：匹配 [ISO_TIME] 或 [ISO_TIME with milliseconds/timezone]
+                _TIME_PREFIX_RE = _re.compile(
+                    r'^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\]\s*'
+                )
+
+                def _strip_time_prefix(s: str) -> str:
+                    """剥离 [ISO_TIME] 前缀返回纯语义内容（用于去重比较）"""
+                    return _TIME_PREFIX_RE.sub('', s).strip()
+
+                # 加载所有累积实体的当前 description
+                load_desc_query = """
                 UNWIND $entity_ids AS eid
                 MATCH (e:ExtractedEntity {id: eid})
-                WHERE e.description IS NOT NULL AND e.description CONTAINS '；'
-                WITH e, [item IN split(e.description, '；') WHERE trim(item) <> ''] AS parts
-                WITH e, reduce(acc = [], item IN parts |
-                    CASE WHEN trim(item) IN acc THEN acc ELSE acc + trim(item) END
-                ) AS unique_parts
-                SET e.description = apoc.text.join(unique_parts, '；')
-                RETURN count(e) AS count
+                WHERE e.description IS NOT NULL AND e.description <> ''
+                RETURN e.id AS id, e.description AS description
                 """
-                # 不依赖 APOC 的退化版本（如果没装 APOC）
-                dedup_desc_cypher_fallback = """
-                UNWIND $entity_ids AS eid
-                MATCH (e:ExtractedEntity {id: eid})
-                WHERE e.description IS NOT NULL AND e.description CONTAINS '；'
-                WITH e, [item IN split(e.description, '；') WHERE trim(item) <> ''] AS parts
-                WITH e, reduce(acc = [], item IN parts |
-                    CASE WHEN trim(item) IN acc THEN acc ELSE acc + trim(item) END
-                ) AS unique_parts
-                WITH e, reduce(s = '', i IN range(0, size(unique_parts) - 1) |
-                    CASE WHEN i = 0 THEN unique_parts[i] ELSE s + '；' + unique_parts[i] END
-                ) AS new_desc
-                SET e.description = new_desc
-                RETURN count(e) AS count
-                """
-                try:
-                    dedup_count = await connector.execute_query(
-                        dedup_desc_cypher, entity_ids=all_entity_ids
-                    )
-                    result_info["desc_dedup_count"] = dedup_count[0].get("count", 0) if dedup_count else 0
-                except Exception:
-                    # APOC 不可用 fallback
-                    dedup_count = await connector.execute_query(
-                        dedup_desc_cypher_fallback, entity_ids=all_entity_ids
-                    )
-                    result_info["desc_dedup_count"] = dedup_count[0].get("count", 0) if dedup_count else 0
+                desc_records = await connector.execute_query(
+                    load_desc_query, entity_ids=all_entity_ids
+                )
+
+                desc_dedup_count = 0
+                desc_removed_count = 0
+                for rec in desc_records or []:
+                    eid = rec.get("id")
+                    desc = rec.get("description") or ""
+                    if not desc:
+                        continue
+
+                    # 按 ；和 ; 拆分（兼容中英文分号）
+                    parts = [p.strip() for p in desc.replace(';', '；').split('；') if p.strip()]
+                    if len(parts) <= 1:
+                        continue
+
+                    # 用"去时间戳后的文本"作为去重 key，保留首次出现的原文
+                    seen_keys = set()
+                    unique_parts = []
+                    for part in parts:
+                        key = _strip_time_prefix(part)
+                        if not key:
+                            continue
+                        if key in seen_keys:
+                            continue
+                        seen_keys.add(key)
+                        unique_parts.append(part)
+
+                    if len(unique_parts) < len(parts):
+                        new_desc = '；'.join(unique_parts)
+                        await connector.execute_query(
+                            "MATCH (e:ExtractedEntity {id: $id}) SET e.description = $desc",
+                            id=eid, desc=new_desc,
+                        )
+                        desc_dedup_count += 1
+                        desc_removed_count += (len(parts) - len(unique_parts))
+
+                result_info["desc_dedup_entities"] = desc_dedup_count
+                result_info["desc_dedup_removed_fragments"] = desc_removed_count
                 logger.info(
-                    f"[BatchPostStore] description 全局去重完成: "
-                    f"处理 {result_info.get('desc_dedup_count', 0)} 个实体"
+                    f"[BatchPostStore] description 语义去重完成: "
+                    f"处理 {desc_dedup_count} 个实体，移除 {desc_removed_count} 条重复片段"
                 )
             except Exception as e:
                 result_info["desc_dedup_error"] = str(e)
-                logger.warning(f"[BatchPostStore] description 去重失败: {e}")
+                logger.warning(f"[BatchPostStore] description 去重失败: {e}", exc_info=True)
 
             # 4. 第二层去重
             try:
@@ -2376,39 +2398,13 @@ def batch_post_store_task(self, end_user_id: str) -> Dict[str, Any]:
                     if user_entity_nodes:
                         user_entities_payload = collect_user_entities_for_metadata(user_entity_nodes)
 
-                        # 增强：为每个用户实体聚合关联 Statement 的内容
-                        for ue in user_entities_payload:
-                            try:
-                                stmt_query = """
-                                MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e:ExtractedEntity {id: $entity_id})
-                                RETURN s.statement AS statement
-                                UNION
-                                MATCH (e:ExtractedEntity {id: $entity_id})-[:EXTRACTED_RELATIONSHIP]-(e2:ExtractedEntity)
-                                MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e2)
-                                RETURN s.statement AS statement
-                                """
-                                stmt_records = await connector.execute_query(
-                                    stmt_query, entity_id=ue["entity_id"]
-                                )
-                                if stmt_records:
-                                    stmt_texts = [
-                                        r["statement"] for r in stmt_records
-                                        if r.get("statement") and r["statement"].strip()
-                                    ]
-                                    # 去重后追加到 descriptions
-                                    existing_set = set(ue["descriptions"])
-                                    for st in stmt_texts:
-                                        if st not in existing_set:
-                                            ue["descriptions"].append(st)
-                                            existing_set.add(st)
-                                    logger.info(
-                                        f"[BatchPostStore] 元数据增强: entity={ue['entity_name']}, "
-                                        f"追加 {len(stmt_texts)} 条 Statement"
-                                    )
-                            except Exception as stmt_e:
-                                logger.debug(
-                                    f"[BatchPostStore] Statement 聚合失败（不影响主流程）: {stmt_e}"
-                                )
+                        # 注：方案 D — 移除 Statement 聚合增强
+                        # 元数据提取只依赖 entity.description（已经过方案 A 去重 + 累加）
+                        # 不再从 Neo4j 查询关联 Statement 注入到 descriptions
+                        # 原因：
+                        #   1. description 经方案 A 去重后已包含跨轮事实，足够 LLM 提取
+                        #   2. Statement 聚合会引入"The user..."这类不带时间戳的句子，污染 descriptions
+                        #   3. Statement 与 description 语义重叠，混入会让 LLM 重复提取相同 metadata
 
                         if user_entities_payload:
                             # 找到最新的 snapshot 目录传给元数据任务
