@@ -92,6 +92,21 @@ class ReflectionPipeline:
                     factory = MemoryClientFactory(db)
                     self._llm_client = factory.get_llm_client(llm_id)
 
+        # 构建 embedding_client（用于更名后重新生成 name_embedding）
+        if not hasattr(self, '_embedding_client'):
+            self._embedding_client = None
+            embedding_id = getattr(self.memory_config, 'embedding_id', None)
+            if embedding_id:
+                try:
+                    from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+                    from app.db import get_db_context
+                    with get_db_context() as db:
+                        self._embedding_client = ModelClientMixin.get_embedding_client(
+                            db, embedding_id
+                        )
+                except Exception as e:
+                    logger.warning(f"构建 embedding_client 失败: {e}")
+
     async def run_layer2(self, baseline: str = "HYBRID") -> Dict[str, Any]:
         """Layer 2 离线巡检 — 由高频定时任务调用（如每 10 分钟）
 
@@ -110,6 +125,7 @@ class ReflectionPipeline:
             neo4j_connector=connector,
             llm_client=self._llm_client,
             log_repo_factory=_create_log_repo,
+            embedding_client=self._embedding_client,
         )
 
         try:

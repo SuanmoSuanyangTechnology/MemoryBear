@@ -11,9 +11,17 @@ from app.core.memory.storage_services.reflection_engine.deterministic.descriptio
 )
 from app.core.memory.storage_services.reflection_engine.llm.description_synthesizer import (
     merge_description,
+    summarize_extract_and_rename,
+    validate_summary_output,
+    filter_events,
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.repositories.neo4j.cypher_queries import REFLECTION_DESC_UPDATE
+from app.repositories.neo4j.cypher_queries import (
+    REFLECTION_DESC_UPDATE,
+    REFLECTION_RENAME_CHECK_CONFLICT,
+    REFLECTION_RENAME_ENTITY,
+    REFLECTION_UPDATE_NAME_EMBEDDING,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -110,10 +118,12 @@ class ExecutionTracker:
 
 class Layer2Inspector:
     def __init__(self, neo4j_connector: Neo4jConnector, llm_client: Any,
-                 log_repo_factory: Any, config: Optional[Dict[str, Any]] = None):
+                 log_repo_factory: Any, embedding_client: Any = None,
+                 config: Optional[Dict[str, Any]] = None):
         self.connector = neo4j_connector
         self.llm_client = llm_client
         self.log_repo_factory = log_repo_factory
+        self.embedding_client = embedding_client
 
         # 统一配置
         self.config = ReflectionConfig(**(config or {}))
@@ -505,11 +515,12 @@ class Layer2Inspector:
 
     async def _merge_one_entity(self, entity: Dict, end_user_id: str,
                                 baseline: str, language: str) -> bool:
-        """对单个实体执行描述合并"""
+        """对单个实体执行描述合并 + 事件提取 + 更名判断"""
         tracker = ExecutionTracker(model=getattr(self.llm_client, "model_name", ""))
         description = entity["description"]
         existing_summary = entity.get("description_summary")
         existing_timeline = entity.get("description_timeline")
+        existing_event_timeline = entity.get("event_timeline") or ""
 
         fragments = [f.strip() for f in description.split('；') if f.strip()]
         if len(fragments) < self.desc_config.min_fragments:
@@ -523,30 +534,76 @@ class Layer2Inspector:
             timeline = description
         tracker.end_step(f"{len(fragments)} 条碎片")
 
-        # Step 2: LLM 合并
-        tracker.start_step("LLM 合并", "llm")
-        merged_text = await merge_description(
+        # Step 2: LLM 合并 + 事件提取 + 更名判断
+        tracker.start_step("LLM 合并+事件提取+更名", "llm")
+        result = await summarize_extract_and_rename(
             llm_client=self.llm_client,
             entity_name=entity["name"],
             entity_type=entity["entity_type"],
-            summary=existing_summary,       # 首次为 None，模板自动判断
-            fragments=fragments,
+            description=description,
+            summary=existing_summary,
+            event_timeline=existing_event_timeline,
             language=language,
         )
-        if not merged_text:
+
+        if not result:
             tracker.end_step("LLM 调用失败", success=False)
             return False
-        tracker.end_step(f"合并完成，{len(merged_text)} 字符")
 
-        # Step 3: 写入 Neo4j（清空 description，写 summary + timeline）
+        tracker.end_step(
+            f"summary={len(result.description_summary)}字, "
+            f"events={len(result.new_events)}, "
+            f"rename={result.should_rename_entity}"
+        )
+
+        # Step 3: 兜底校验 summary
+        tracker.start_step("校验", "decide")
+        valid, reason = validate_summary_output(existing_summary, result)
+        if not valid:
+            tracker.end_step(f"校验失败: {reason}", success=False)
+            logger.warning(
+                f"描述合并校验失败 entity={entity['name']}, reason={reason}, 跳过写入"
+            )
+            return False
+        tracker.end_step("校验通过")
+
+        # Step 4: 过滤 events
+        tracker.start_step("事件过滤", "decide")
+        valid_events = filter_events(result.new_events)
+
+        # 构建 event_timeline
+        if valid_events:
+            events_str = '；'.join(f'[{e.valid_at}|{e.invalid_at}] {e.fact}' for e in valid_events)
+            if existing_event_timeline:
+                event_timeline = existing_event_timeline + "；" + events_str
+            else:
+                event_timeline = events_str
+        else:
+            event_timeline = existing_event_timeline
+
+        tracker.end_step(
+            f"有效事件 {len(valid_events)}/{len(result.new_events)}"
+        )
+
+        # Step 5: 写入 Neo4j（summary + timeline + event_timeline + 清空 description）
         tracker.start_step("写入", "write")
+        merged_text = result.description_summary
         await self.connector.execute_query(
             REFLECTION_DESC_UPDATE,
             entity_id=entity["entity_id"],
             summary=merged_text,
             timeline=timeline,
+            event_timeline=event_timeline,
         )
         tracker.end_step("写入完成")
+
+        # Step 6: 更名判断
+        if result.should_rename_entity and result.suggested_entity_name:
+            await self._try_rename_entity(
+                entity=entity,
+                suggested_name=result.suggested_entity_name,
+                end_user_id=end_user_id,
+            )
 
         # 写 ReflectionLog（每次创建新 session）
         log_repo = self.log_repo_factory()
@@ -556,7 +613,7 @@ class Layer2Inspector:
             trigger_type="scheduled",
             baseline=baseline,
             strategy="MERGE",
-            confidence=None,                # 描述合并不需要 confidence
+            confidence=None,
             status="resolved",
             summary_text=f'{entity["name"]}: 合并 {len(fragments)} 条碎片',
             entity_ids=[entity["entity_id"]],
@@ -576,3 +633,53 @@ class Layer2Inspector:
             execution_detail=tracker.to_dict(),
         )
         return True
+
+    async def _try_rename_entity(self, entity: Dict, suggested_name: str,
+                                 end_user_id: str):
+        """尝试更名实体，含兜底校验"""
+        old_name = entity["name"]
+
+        # 兜底校验
+        if not suggested_name or not suggested_name.strip():
+            return
+        if suggested_name.strip() == old_name:
+            return
+        if old_name == "用户" or suggested_name.strip() == "用户":
+            return
+
+        # 查重
+        conflict_result = await self.connector.execute_query(
+            REFLECTION_RENAME_CHECK_CONFLICT,
+            end_user_id=end_user_id,
+            suggested_name=suggested_name.strip(),
+            current_entity_id=entity["entity_id"],
+        )
+        if conflict_result and conflict_result[0].get("conflict_count", 0) > 0:
+            logger.warning(
+                f"更名冲突 entity={old_name} -> {suggested_name}, "
+                f"end_user_id={end_user_id}"
+            )
+            return
+
+        # 执行更名
+        await self.connector.execute_query(
+            REFLECTION_RENAME_ENTITY,
+            entity_id=entity["entity_id"],
+            new_name=suggested_name.strip(),
+            old_name=old_name,
+        )
+
+        # 重新生成 name_embedding（同步方法）
+        if self.embedding_client:
+            try:
+                name_embedding = self.embedding_client.embed_query(suggested_name.strip())
+                if name_embedding:
+                    await self.connector.execute_query(
+                        REFLECTION_UPDATE_NAME_EMBEDDING,
+                        entity_id=entity["entity_id"],
+                        name_embedding=name_embedding,
+                    )
+            except Exception as emb_err:
+                logger.warning(f"更名后补 name_embedding 失败: {emb_err}")
+
+        logger.info(f"实体更名: {old_name} → {suggested_name}, entity_id={entity['entity_id']}")

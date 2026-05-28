@@ -2140,17 +2140,39 @@ RETURN e.id AS entity_id,
        e.entity_type AS entity_type,
        e.description AS description,
        e.description_summary AS description_summary,
-       e.description_timeline AS description_timeline
+       e.description_timeline AS description_timeline,
+       e.event_timeline AS event_timeline,
+       e.aliases AS aliases
 ORDER BY size(split(e.description, '；')) DESC
 LIMIT $batch_size
 """
 
-# Clear description, write summary and timeline
+# Clear description, write summary, timeline and event_timeline
 REFLECTION_DESC_UPDATE = """
 MATCH (e:ExtractedEntity {id: $entity_id})
 SET e.description = "",
     e.description_summary = $summary,
-    e.description_timeline = $timeline
+    e.description_timeline = $timeline,
+    e.event_timeline = $event_timeline
+RETURN e.id
+"""
+
+# --- Reflection Engine Layer 2: Entity Rename ---
+REFLECTION_RENAME_CHECK_CONFLICT = """
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id, name: $suggested_name})
+WHERE e.id <> $current_entity_id
+RETURN count(e) AS conflict_count
+"""
+
+REFLECTION_RENAME_ENTITY = """
+MATCH (e:ExtractedEntity {id: $entity_id})
+SET e.name = $new_name
+RETURN e.id
+"""
+
+REFLECTION_UPDATE_NAME_EMBEDDING = """
+MATCH (e:ExtractedEntity {id: $entity_id})
+SET e.name_embedding = $name_embedding
 RETURN e.id
 """
 # --- Reflection Engine Layer 2: Entity Dedup ---
