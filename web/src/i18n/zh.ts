@@ -476,8 +476,10 @@ export const zh = {
       agentDesc: '创建单个智能代理',
       multi_agent: '集群',
       multi_agentDesc: '创建Agent集群',
-      workflow: '工作流',
-      workflowDesc: '创建策略工作流',
+      workflow: '对话工作流',
+      workflowDesc: '创建对话工作流',
+      pure_workflow: '工作流',
+      pure_workflowDesc: '创建策略工作流',
       editApplication: '编辑应用信息',
 
       currentModel: '当前模型',
@@ -2107,6 +2109,7 @@ export const zh = {
       inner: '内置工具',
       custom: '自定义工具',
       market: '工具市场',
+      workflow: '工作流',
       mcpSearchPlaceholder: '搜索MCP服务...',
       innerSearchPlaceholder: '搜索工具...',
       customSearchPlaceholder: '搜索自定义工具...',
@@ -2302,7 +2305,12 @@ export const zh = {
       multimodalInteraction: '多模态交互',
       remoteAgent: '远程 Agent',
 
-
+      publishAsTool: '发布为工具',
+      toolDescription: '工具描述',
+      inputParams: '工具入参',
+      outputParams: '工具出参',
+      typeDesc: '字段类型',
+      editWorkflowTool: '编辑工作流工具',
 
       addCustom: '添加自定义工具',
       editCustom: '编辑自定义工具',
@@ -2378,7 +2386,7 @@ export const zh = {
       nodeProperties: '节点属性',
       empty: "Emmm…盒子是空的，这里什么都没有～",
       nodeName: '节点名称',
-      addvariable: '会话变量',
+      addVariable: '会话变量',
       addChatVariable: '添加会话变量',
       editChatVariable: '编辑会话变量',
       invalidJSON: 'JSON 格式不正确',
@@ -2751,6 +2759,7 @@ export const zh = {
       delete: '删除',
       jumpToNode: '跳转到节点',
       errorBranch: '异常时',
+      systemVariable: '系统变量',
     },
     emotionEngine: {
       emotionEngineConfig: '情感引擎配置',

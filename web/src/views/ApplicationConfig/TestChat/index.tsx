@@ -171,7 +171,7 @@ const TestChat: FC<TestChatProps> = ({
       role: 'assistant',
       content: '',
       created_at: Date.now(),
-      subContent: type === 'workflow' ? [] : undefined,
+      subContent: type?.includes('workflow') ? [] : undefined,
     }])
   }
 
@@ -723,7 +723,7 @@ const TestChat: FC<TestChatProps> = ({
           streamLoading={streamLoading}
           loading={loading}
           onChange={setMessage}
-          onSend={application?.type === 'workflow' ? handleWorkflowSend : handleSend}
+          onSend={application?.type.includes('workflow') ? handleWorkflowSend : handleSend}
           fileList={fileList}
           fileChange={(list) => {
             setFileList(list || [])

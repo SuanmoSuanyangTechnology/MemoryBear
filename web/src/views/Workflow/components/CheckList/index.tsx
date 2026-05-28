@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-04-09 18:58:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-19 15:30:03
+ * @Last Modified time: 2026-05-28 14:55:34
  */
 import { useState, useCallback, useEffect, useRef, type FC } from 'react'
 import { Popover, Flex } from 'antd'
@@ -43,6 +43,7 @@ const nodeConfigMap: Record<string, Record<string, any>> = Object.fromEntries(
 
 // Special validators for fields that need deeper checks beyond simple empty check
 const specialValidators: Record<string, (val: any) => boolean> = {
+  'output.outputs': (val: any[]) => !Array.isArray(val) || !val.every(m => m?.name && String(m.name).trim() && m?.value && String(m.value).trim()),
   // llm.messages: at least one message with non-empty content
   'llm.messages': (val: any[]) => !Array.isArray(val) || !val.some(m => m?.content && String(m.content).trim()),
   // knowledge-retrieval.knowledge_retrieval: knowledge_bases array must be non-empty

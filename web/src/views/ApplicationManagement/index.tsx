@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 11:33:58
+ * @Last Modified time: 2026-05-28 10:03:51
  */
 /**
  * Application Management Page
@@ -234,7 +234,7 @@ const ApplicationManagement: React.FC = () => {
               avatarClassName={clsx({
                 'rb:bg-[#155EEF]': item.type === 'agent',
                 'rb:bg-[#9C6FFF]!': item.type === 'multi_agent',
-                'rb:bg-[#171719]': item.type === 'workflow',
+                'rb:bg-[#171719]': item.type.includes('workflow'),
               })}
               footer={
                 item.is_shared

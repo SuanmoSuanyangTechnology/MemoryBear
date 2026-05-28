@@ -1,10 +1,8 @@
 /*
- * @Description: 
- * @Version: 0.0.1
- * @Author: yujiangping
- * @Date: 2026-01-05 17:22:23
- * @LastEditors: yujiangping
- * @LastEditTime: 2026-03-06 15:11:31
+ * @Author: ZhaoYing 
+ * @Date: 2025-12-26 11:57:50
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-05-28 13:40:24
  */
 import React, { useState, useRef } from 'react';
 import { type SegmentedProps, Flex, Space, Form, Button } from 'antd';
@@ -14,12 +12,13 @@ import Mcp from './Mcp';
 import Inner from './Inner';
 import Custom from './Custom';
 import Market from './Market';
+import Workflow from './Workflow';
 import Tag from '@/components/Tag'
 import PageTabs from '@/components/PageTabs'
 import SearchInput from '@/components/SearchInput'
 import type { McpRef, CustomRef } from './types'
 
-const tabKeys = ['mcp', 'inner', 'custom', 'market'] // 
+const tabKeys = ['mcp', 'inner', 'custom', 'workflow', 'market']
 const ToolManagement: React.FC = () => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<SegmentedProps['value']>('mcp');
@@ -82,6 +81,7 @@ const ToolManagement: React.FC = () => {
       {activeTab === 'inner' && <Inner keyword={name} getStatusTag={getStatusTag} />}
       {activeTab === 'custom' && <Custom ref={customRef} keyword={name} getStatusTag={getStatusTag} />}
       {activeTab === 'market' && <Market getStatusTag={getStatusTag} />}
+      {activeTab === 'workflow' && <Workflow  getStatusTag={getStatusTag} keyword={name} />}
     </>
   );
 };

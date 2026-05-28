@@ -2,13 +2,13 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-27 13:46:08
+ * @Last Modified time: 2026-05-28 15:15:37
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { Graph, Node } from '@antv/x6';
-import { Form, Input, Select, InputNumber, Switch, Flex, Space, Dropdown, type MenuProps, Button, App, Popover, Tabs } from 'antd';
+import { Form, Input, Select, InputNumber, Switch, Flex, Space, Dropdown, type MenuProps, Button, App, Popover } from 'antd';
 
 import type { NodeConfig, ChatVariable } from '../../types'
 import CustomSelect from "@/components/CustomSelect";
@@ -48,6 +48,7 @@ import type { Model } from '@/views/ModelManagement/types';
 import Retry from './Retry'
 import NextStep from './NextStep'
 import RunResultDisplay, { type RunResult } from '../SingleNodeRun/RunResultDisplay'
+import type { Application } from '@/views/ApplicationManagement/types'
 
 /**
  * Props for Properties component
@@ -75,6 +76,8 @@ interface PropertiesProps {
   handleSave: (flag?: boolean) => Promise<unknown>;
   /** Handler for node click */
   nodeClick: ({ node }: { node: Node }) => void;
+  /** Application type */
+  appType?: Application['type'];
 }
 
 /**
@@ -91,13 +94,14 @@ const Properties: FC<PropertiesProps> = ({
   appId,
   handleSave,
   nodeClick,
+  appType,
 }) => {
   const { t } = useTranslation()
   const { message } = App.useApp()
   const [form] = Form.useForm<NodeConfig>();
   const [configs, setConfigs] = useState<Record<string, NodeConfig>>({} as Record<string, NodeConfig>)
   const values = Form.useWatch([], form);
-  const variableList = useVariableList(selectedNode, graphRef, chatVariables)
+  const variableList = useVariableList(selectedNode, graphRef, chatVariables, appType)
   const data = selectedNode.getData() || {}
   console.log('data', data)
 
@@ -171,8 +175,6 @@ const Properties: FC<PropertiesProps> = ({
       }, { deep: false })
     }
   }, [values, selectedNode, form])
-
-
 
   /**
    * Get filtered variable list based on node type and config key
@@ -729,7 +731,6 @@ const Properties: FC<PropertiesProps> = ({
                                     <VariableList
                                       parentName={key}
                                       selectedNode={selectedNode}
-                                      config={config}
                                     />
                                   </Form.Item>
                                 )
@@ -911,6 +912,7 @@ const Properties: FC<PropertiesProps> = ({
                                 )
                               }
                               if (config.type === 'memoryConfig') {
+                                if (appType === 'pure_workflow') return null;
                                 return (
                                   <Form.Item
                                     key={key}

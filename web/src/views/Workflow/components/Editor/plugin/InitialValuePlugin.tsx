@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-02 17:14:15
+ * @Last Modified time: 2026-05-28 13:48:02
  */
 import { useEffect, useRef } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
@@ -74,6 +74,7 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
               const match = part.match(/^\{\{([^.]+)\.([^}]+)\}\}$/);
               const contextMatch = part.match(/^\{\{context\}\}$/);
               const conversationMatch = part.match(/^\{\{conv\.([^}]+)\}\}$/);
+              const systemMatch = part.match(/^\{\{sys\.([^}]+)\}\}$/);
 
               if (contextMatch) {
                 const contextSuggestion = optionsRef.current.find(s => s.isContext && s.label === 'context');
@@ -108,6 +109,29 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
                 }
                 return
               }
+              if (systemMatch) {
+                const [_, variableName] = systemMatch;
+                const fullValue = `sys.${variableName}`;
+                // First try direct match on top-level label
+                let systemSuggestion = optionsRef.current.find(s =>
+                  s.group === 'SYSTEM' && s.label === fullValue
+                );
+                // Then search children by value (e.g. sys.api_key.url)
+                if (!systemSuggestion) {
+                  for (const s of optionsRef.current) {
+                    if (s.group === 'SYSTEM' && s.children) {
+                      const child = s.children.find(c => c.value === fullValue);
+                      if (child) { systemSuggestion = child; break; }
+                    }
+                  }
+                }
+                if (systemSuggestion) {
+                  paragraph.append($createVariableNode(systemSuggestion));
+                } else {
+                  paragraph.append($createTextNode(part));
+                }
+                return
+              }
 
               if (match) {
                 const [_, nodeId, rest] = match;
@@ -117,9 +141,6 @@ const InitialValuePlugin: React.FC<InitialValuePluginProps> = ({ value, options 
                 const label = restParts[restParts.length - 1];
 
                 let suggestion = optionsRef.current.find(s => {
-                  if (nodeId === 'sys') {
-                    return s.nodeData.type === 'start' && s.label === `sys.${rest}`
-                  }
                   return s.nodeData.id === nodeId && s.label === rest
                 });
 
