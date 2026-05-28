@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.tools.base import BaseTool
 from app.models.app_model import App
 from app.models.tool_model import ToolType
-from app.schemas import DraftRunRequest
+from app.schemas.app_schema import DraftRunRequest
 from app.schemas.tool_schema import ParameterType, ToolParameter, ToolResult
 
 

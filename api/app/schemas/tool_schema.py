@@ -174,6 +174,7 @@ class WorkflowToolConfigSchema(BaseModel):
     input_parameters: List[Dict[str, Any]] = Field(default_factory=list, description="输入参数定义")
     output_schema: Dict[str, Any] = Field(default_factory=dict, description="输出结构定义")
     timeout: int = Field(300, description="超时时间（秒）")
+    workspace_id: Optional[str] = Field(None, description="所属空间ID")
 
     class Config:
         from_attributes = True

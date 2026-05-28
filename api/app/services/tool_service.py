@@ -15,7 +15,7 @@ from app.repositories.tool_repository import (
     ToolRepository, BuiltinToolRepository, CustomToolRepository,
     MCPToolRepository, WorkflowToolRepository, ToolExecutionRepository
 )
-
+from app.models.app_model import App
 from app.models.tool_model import (
     ToolConfig, BuiltinToolConfig, CustomToolConfig, MCPToolConfig,
     ToolExecution, ToolType, ToolStatus, ExecutionStatus, AuthType
@@ -1179,6 +1179,10 @@ class ToolService:
         elif config.tool_type == ToolType.WORKFLOW.value:
             cfg = self.workflow_repo.find_by_tool_id(self.db, config.id)
             if cfg:
+                workspace_id = None
+                app = self.db.query(App).filter(App.id == cfg.app_id).first()
+                if app:
+                    workspace_id = str(app.workspace_id)
                 workflow_config = WorkflowToolConfigSchema.model_validate({
                     "app_id": str(cfg.app_id),
                     "workflow_config_id": str(cfg.workflow_config_id),
@@ -1186,6 +1190,7 @@ class ToolService:
                     "input_parameters": cfg.input_parameters or [],
                     "output_schema": cfg.output_schema or {},
                     "timeout": cfg.timeout or 300,
+                    "workspace_id": workspace_id,
                 })
 
         detail_data.update({
@@ -1219,6 +1224,7 @@ class ToolService:
             },
             ToolType.WORKFLOW.value: {
                 "app_id", "workflow_config_id", "release_id", "input_parameters", "output_schema", "timeout",
+                "workspace_id"
             },
         }
         duplicate_fields = duplicate_fields_map.get(tool_type, set())

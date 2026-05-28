@@ -1393,7 +1393,6 @@ async def publish_workflow_as_tool(
         tool_description=payload.description or "",
         tenant_id=current_user.tenant_id,
         workspace_id=current_user.current_workspace_id,
-        created_by=current_user.id,
         icon=payload.icon,
         timeout=payload.timeout,
         tags=payload.tags,

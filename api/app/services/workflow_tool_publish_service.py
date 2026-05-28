@@ -19,7 +19,7 @@ class WorkflowToolPublishService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _validate_workflow_app(self, app_id: uuid.UUID, workspace_id: uuid.UUID) -> type[App]:
+    def _validate_workflow_app(self, app_id: uuid.UUID, workspace_id: uuid.UUID) -> App:
         app = self.db.query(App).filter(
             App.id == app_id,
             App.workspace_id == workspace_id,
@@ -36,7 +36,7 @@ class WorkflowToolPublishService:
             )
         return app
 
-    def _get_workflow_config(self, app_id: uuid.UUID) -> type[WorkflowConfig]:
+    def _get_workflow_config(self, app_id: uuid.UUID) -> WorkflowConfig:
         config = self.db.query(WorkflowConfig).filter(
             WorkflowConfig.app_id == app_id,
             WorkflowConfig.is_active.is_(True)
@@ -46,7 +46,7 @@ class WorkflowToolPublishService:
             raise BusinessException("工作流配置不存在", BizCode.NOT_FOUND)
         return config
 
-    def _get_release(self, app: type[App], release_id: Optional[uuid.UUID]) -> AppRelease:
+    def _get_release(self, app: App, release_id: Optional[uuid.UUID]) -> AppRelease:
         resolved_release_id = release_id or app.current_release_id
         if not resolved_release_id:
             raise BusinessException("请先发布工作流，再将其发布为工具", BizCode.CONFIG_MISSING)
@@ -157,13 +157,11 @@ class WorkflowToolPublishService:
         tool_description: str,
         tenant_id: uuid.UUID,
         workspace_id: uuid.UUID,
-        created_by: uuid.UUID,
         icon: Optional[str] = None,
         timeout: int = 300,
         tags: Optional[List[str]] = None,
         release_id: Optional[uuid.UUID] = None,
-    ) -> type[ToolConfig] | None:
-        _ = created_by
+    ) -> ToolConfig | None:
         app = self._validate_workflow_app(workflow_app_id, workspace_id)
         release = self._get_release(app, release_id)
         workflow_config = self._get_workflow_config(workflow_app_id)
@@ -182,6 +180,7 @@ class WorkflowToolPublishService:
             tool_config = self.db.query(ToolConfig).filter(ToolConfig.id == existing_tool.id).first()
             tool_config.name = tool_name
             tool_config.description = tool_description
+            tool_config.is_active = True
             tool_config.icon = icon
             if tags is not None:
                 tool_config.tags = tags
