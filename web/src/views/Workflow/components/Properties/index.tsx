@@ -713,6 +713,7 @@ const Properties: FC<PropertiesProps> = ({
                           />
                           : selectedNode?.data?.type === 'code'
                             ? <CodeExecution
+                              graphRef={graphRef}
                               selectedNode={selectedNode}
                               options={getFilteredVariableList(selectedNode?.data?.type, 'mapping')}
                             />
