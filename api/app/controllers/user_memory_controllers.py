@@ -19,6 +19,7 @@ from app.services.user_memory_service import (
     analytics_graph_data,
     analytics_community_graph_data,
 )
+from app.services._graph_data_helpers import parse_per_type_limits
 from app.services.memory_entity_relationship_service import MemoryEntityService, MemoryEmotion, MemoryInteraction
 from app.schemas.response_schema import ApiResponse
 from app.schemas.memory_storage_schema import GenerateCacheRequest
@@ -248,6 +249,7 @@ async def get_graph_data_api(
         limit: int = 100,
         depth: int = 1,
         center_node_id: Optional[str] = None,
+        per_type_limits: Optional[str] = None,
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db),
 ) -> dict:
@@ -272,9 +274,24 @@ async def get_graph_data_api(
     if node_types:
         node_types_list = [t.strip() for t in node_types.split(",") if t.strip()]
 
+    # 解析 per_type_limits 参数；失败 → INVALID_PARAMETER
+    try:
+        per_type_limits_map = parse_per_type_limits(per_type_limits, api_logger)
+    except ValueError as e:
+        api_logger.warning(f"per_type_limits 参数解析失败: raw={per_type_limits!r}, error={e}")
+        return fail(BizCode.INVALID_PARAMETER, "per_type_limits 参数格式错误", str(e))
+
+    # 同时传 center_node_id 与 node_types：按设计优先 Center_Mode 并忽略 node_types
+    if center_node_id and node_types_list:
+        api_logger.info(
+            "同时传入 center_node_id 与 node_types，按设计优先 Center_Mode，"
+            f"node_types={node_types_list} 将被忽略"
+        )
+
     api_logger.info(
         f"图数据查询请求: end_user_id={end_user_id}, user={current_user.username}, "
-        f"workspace={workspace_id}, node_types={node_types_list}, limit={limit}, depth={depth}"
+        f"workspace={workspace_id}, node_types={node_types_list}, limit={limit}, depth={depth}, "
+        f"center_node_id={center_node_id}, per_type_limits={per_type_limits_map}"
     )
 
     try:
@@ -284,7 +301,8 @@ async def get_graph_data_api(
             node_types=node_types_list,
             limit=limit,
             depth=depth,
-            center_node_id=center_node_id
+            center_node_id=center_node_id,
+            per_type_limits=per_type_limits_map,
         )
         # 检查是否有错误消息
         if "message" in result and result["statistics"]["total_nodes"] == 0:

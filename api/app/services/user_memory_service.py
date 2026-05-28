@@ -14,6 +14,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_logger
+from app.core.memory.constants.graph_data_constants import (
+    NODE_PROPERTY_WHITELIST,
+    SUPPORTED_NODE_TYPES,
+    _DEFAULT_FIELDS,
+)
 from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import _USER_PLACEHOLDER_NAMES
 from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
@@ -21,6 +26,13 @@ from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.cypher_queries import Graph_Node_query
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.services._graph_data_helpers import (
+    _apply_total_cap_shrink,
+    _query_nodes_by_type_limits,
+    _query_rel_count_batch,
+    _query_total_count_by_type,
+    _resolve_per_type_limits,
+)
 from app.schemas.memory_episodic_schema import EmotionSubject, EmotionType, type_mapping
 from app.services.memory_base_service import MemoryBaseService, MIN_MEMORY_SUMMARY_COUNT
 from app.services.memory_config_service import MemoryConfigService
@@ -1664,201 +1676,286 @@ async def analytics_graph_data(
     node_types: Optional[List[str]] = None,
     limit: int = 130,
     depth: int = 1,
-    center_node_id: Optional[str] = None
+    center_node_id: Optional[str] = None,
+    per_type_limits: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
-    """
-    获取 Neo4j 图数据，用于前端可视化
-    
+    """获取 Neo4j 图数据，用于前端可视化（按 Per_Type_Limit 精细化控制）。
+
+    本函数严格遵循 design ``Algorithm 4``：
+
+    1. 校验 ``end_user_id`` 合法性与用户存在性，失败返回结构化空响应；
+    2. 按 ``center_node_id`` / ``node_types`` 分派 Center_Mode / Filter_Mode /
+       Default_Mode 三条路径，统一使用 ``Per_Type_Limit`` 控制每种类型的返回数量；
+    3. 调用 ``_resolve_per_type_limits`` + ``_apply_total_cap_shrink`` 得到最终
+       生效的 ``{Node_Type: Per_Type_Limit}`` 映射；
+    4. 顺序执行 Q1（节点）→ Q2（批量关联计数）→ Q3（边，try/except 降级）→
+       Q4（按 label 全量计数）四次 Cypher，整体调用次数与节点数 N 无关；
+    5. 通过 :class:`GraphDataResponse` 装配响应，``statistics.per_type`` 包含
+       本次配置内全部 Node_Type 的 ``returned/total/limit/truncated`` 元数据。
+
     Args:
-        db: 数据库会话
-        end_user_id: 终端用户ID
-        node_types: 可选的节点类型列表
-        limit: 返回节点数量限制
-        depth: 图遍历深度
-        center_node_id: 可选的中心节点ID
-        
+        db: SQLAlchemy 会话，用于校验 end_user 是否存在。
+        end_user_id: 终端用户 UUID 字符串。
+        node_types: 可选的 Node_Type 过滤列表。非空 → Filter_Mode；空 →
+            Default_Mode（覆盖全部 :data:`SUPPORTED_NODE_TYPES`）。
+        limit: 兜底 Per_Type_Limit；同时也作为 Center_Mode 下的单一节点上限。
+        depth: 仅在 Center_Mode 下生效，控制邻居跳数。
+        center_node_id: 中心节点 elementId；非空时进入 Center_Mode 并忽略
+            ``node_types`` / ``per_type_limits`` 中的类型过滤语义。
+        per_type_limits: 由 controller 解析得到的 ``{Node_Type: Per_Type_Limit}``
+            映射；本函数不再做格式校验。
+
     Returns:
-        包含节点、边和统计信息的字典
+        ``GraphDataResponse.model_dump()`` 后的字典，顶层键为
+        ``nodes / edges / statistics``，必要时附带 ``message``。
     """
     try:
-        # 1. 获取 end_user_id
-        user_uuid = uuid.UUID(end_user_id)
+        # 1. 用户校验
+        try:
+            user_uuid = uuid.UUID(end_user_id)
+        except (ValueError, TypeError):
+            logger.error(f"无效的 end_user_id 格式: {end_user_id}")
+            return _empty_graph_response("无效的用户ID格式")
+
         repo = EndUserRepository(db)
         end_user = repo.get_by_id(user_uuid)
         if not end_user:
             logger.warning(f"未找到 end_user_id 为 {end_user_id} 的用户")
-            return {
-                "nodes": [],
-                "edges": [],
-                "statistics": {
-                    "total_nodes": 0,
-                    "total_edges": 0,
-                    "node_types": {},
-                    "edge_types": {}
-                },
-                "message": "用户不存在"
-            }
-        
-        # 2. 构建节点查询
+            return _empty_graph_response("用户不存在")
+
+        user_overrides: Dict[str, int] = dict(per_type_limits or {})
+
+        # 2. 模式分派 + Per_Type_Limit 解析
         if center_node_id:
-            # 基于中心节点的扩展查询
-            node_query = f"""
-            MATCH path = (center)-[*1..{depth}]-(connected)
-            WHERE center.end_user_id = $end_user_id
-              AND elementId(center) = $center_node_id
-            WITH collect(DISTINCT center) + collect(DISTINCT connected) as all_nodes
-            UNWIND all_nodes as n
-            RETURN DISTINCT 
-                elementId(n) as id,
-                labels(n)[0] as label,
-                properties(n) as properties
-            LIMIT $limit
-            """
-            node_params = {
-                "end_user_id": end_user_id,
-                "center_node_id": center_node_id,
-                "limit": limit
-            }
-        elif node_types:
-            # 按节点类型过滤查询
-            node_query = """
-            MATCH (n)
-            WHERE n.end_user_id = $end_user_id
-              AND labels(n)[0] IN $node_types
-            RETURN 
-                elementId(n) as id,
-                labels(n)[0] as label,
-                properties(n) as properties
-            LIMIT $limit
-            """
-            node_params = {
-                "end_user_id": end_user_id,
-                "node_types": node_types,
-                "limit": limit
-            }
+            mode = "Center"
+            type_limits: Dict[str, int] = {}
+            node_rows = await _query_center_node_neighbors(
+                end_user_id=end_user_id,
+                center_node_id=center_node_id,
+                depth=depth,
+                limit=limit,
+            )
         else:
-            # 查询所有节点
-            node_query=Graph_Node_query
-            node_params = {
-                "end_user_id": end_user_id,
-                "limit": limit
-            }
-        # 执行节点查询
-        node_results = await _neo4j_connector.execute_query(node_query, **node_params)
-        
-        # 3. 格式化节点数据
-        nodes = []
-        node_ids = []
-        node_type_counts = {}
-        
-        for record in node_results:
-            node_id = record["id"]
-            node_labels = record.get("labels", [])
-            node_label = node_labels[0] if node_labels else "Unknown"
-            node_props = record["properties"]
-            # 根据节点类型提取需要的属性字段
-            filtered_props = await _extract_node_properties(node_label, node_props,node_id)
-            
-            # 直接使用数据库中的 caption，如果没有则使用节点类型作为默认值
+            if node_types:
+                target_types = [t for t in node_types if t in SUPPORTED_NODE_TYPES]
+                mode = "Filter"
+            else:
+                target_types = sorted(SUPPORTED_NODE_TYPES)
+                mode = "Default"
+
+            type_limits = _resolve_per_type_limits(
+                target_types=target_types,
+                user_overrides=user_overrides,
+                fallback_default=limit,
+            )
+            type_limits = _apply_total_cap_shrink(type_limits)
+
+            non_zero_limits = {t: v for t, v in type_limits.items() if v > 0}
+            if non_zero_limits:
+                node_rows = await _query_nodes_by_type_limits(
+                    _neo4j_connector,
+                    end_user_id=end_user_id,
+                    type_limits=non_zero_limits,
+                )
+            else:
+                node_rows = []
+
+        # 3. 节点 ID 收集（Q2 / Q3 都需要）
+        node_ids: List[str] = []
+        node_records: List[Tuple[str, str, Dict[str, Any]]] = []
+        for record in node_rows:
+            node_id = record.get("id")
+            if not node_id:
+                continue
+            labels_value = record.get("labels") or []
+            node_label = labels_value[0] if labels_value else "Unknown"
+            node_props = record.get("properties") or {}
+            node_ids.append(node_id)
+            node_records.append((node_id, node_label, node_props))
+
+        # 4. Q2 批量关联计数（消除 N+1）
+        rel_count_map = await _query_rel_count_batch(_neo4j_connector, node_ids)
+
+        # 5. 节点格式化
+        nodes: List[Dict[str, Any]] = []
+        node_type_counts: Dict[str, int] = {}
+        for node_id, node_label, node_props in node_records:
+            rel_count = int(rel_count_map.get(node_id, 0))
+            filtered_props = _extract_node_properties(
+                node_label, node_props, rel_count=rel_count
+            )
             caption = filtered_props.get("caption", node_label)
-            
             nodes.append({
                 "id": node_id,
                 "label": node_label,
                 "properties": filtered_props,
-                "caption": caption
+                "caption": caption,
             })
-            
-            node_ids.append(node_id)
             node_type_counts[node_label] = node_type_counts.get(node_label, 0) + 1
-        
-        # 4. 查询节点之间的关系
-        if len(node_ids) > 0:
-            edge_query = """
-            MATCH (n)-[r]->(m)
-            WHERE elementId(n) IN $node_ids 
-              AND elementId(m) IN $node_ids
-            RETURN 
-                elementId(r) as id,
-                elementId(n) as source,
-                elementId(m) as target,
-                type(r) as rel_type,
-                properties(r) as properties
-            """
-            edge_results = await _neo4j_connector.execute_query(
-                edge_query,
-                node_ids=node_ids
-            )
+
+        # 6. Q3 边查询（try/except 降级，Requirement 8.4）
+        edges: List[Dict[str, Any]] = []
+        edge_type_counts: Dict[str, int] = {}
+        if node_ids:
+            try:
+                edge_rows = await _query_edges_among_nodes(node_ids)
+            except Exception as e:
+                logger.error(f"边查询失败，降级为空边: {e}", exc_info=True)
+                edge_rows = []
+
+            node_id_set = set(node_ids)
+            for record in edge_rows:
+                source = record.get("source")
+                target = record.get("target")
+                # 防御性双端过滤：Cypher 已过滤悬空边，这里保险起见再校验一次
+                if source not in node_id_set or target not in node_id_set:
+                    continue
+                edge_id = record.get("id")
+                rel_type = record.get("rel_type")
+                edge_props = record.get("properties") or {}
+                cleaned_edge_props = {
+                    key: _clean_neo4j_value(value)
+                    for key, value in edge_props.items()
+                }
+                # caption 取值优先级：
+                #   1. properties.caption（写入端显式提供）
+                #   2. EXTRACTED_RELATIONSHIP 边走 properties.predicate（实体—实体语义关系）
+                #   3. 回落到 rel_type（字面量关系类型）
+                caption = cleaned_edge_props.get("caption")
+                if not caption and rel_type == "EXTRACTED_RELATIONSHIP":
+                    caption = cleaned_edge_props.get("predicate") or rel_type
+                if not caption:
+                    caption = rel_type
+                edges.append({
+                    "id": edge_id,
+                    "source": source,
+                    "target": target,
+                    "type": rel_type,
+                    "properties": cleaned_edge_props,
+                    "caption": caption,
+                })
+                edge_type_counts[rel_type] = edge_type_counts.get(rel_type, 0) + 1
+
+        # 7. Q4 全量计数 + statistics.per_type 装配
+        # Default_Mode 用全部 Supported_Node_Types；Filter_Mode 收敛到 type_limits
+        # 的键集合；Center_Mode 用全部 Supported_Node_Types 以呈现「全量 vs 当前」。
+        if mode == "Filter":
+            stat_types = sorted(type_limits.keys())
         else:
-            edge_results = []
-        
-        # 5. 格式化边数据
-        edges = []
-        edge_type_counts = {}
-        
-        for record in edge_results:
-            edge_id = record["id"]
-            source = record["source"]
-            target = record["target"]
-            rel_type = record["rel_type"]
-            edge_props = record["properties"]
-            
-            # 清理边属性中的 Neo4j 特殊类型
-            # 对于边，我们保留所有属性，但清理特殊类型
-            cleaned_edge_props = {}
-            if edge_props:
-                for key, value in edge_props.items():
-                    cleaned_edge_props[key] = _clean_neo4j_value(value)
-            
-            # 直接使用关系类型作为 caption，如果 properties 中有 caption 则使用它
-            caption = cleaned_edge_props.get("caption", rel_type)
-            
-            edges.append({
-                "id": edge_id,
-                "source": source,
-                "target": target,
-                "type": rel_type,
-                "properties": cleaned_edge_props,
-                "caption": caption
-            })
-            
-            edge_type_counts[rel_type] = edge_type_counts.get(rel_type, 0) + 1
-        
-        # 6. 构建统计信息
+            stat_types = sorted(SUPPORTED_NODE_TYPES)
+
+        total_by_type = await _query_total_count_by_type(
+            _neo4j_connector,
+            end_user_id=end_user_id,
+            supported_types=stat_types,
+        )
+
+        per_type_stat: Dict[str, Dict[str, Any]] = {}
+        for node_type in stat_types:
+            returned = node_type_counts.get(node_type, 0)
+            total = int(total_by_type.get(node_type, 0))
+            type_limit = int(type_limits.get(node_type, 0))
+            per_type_stat[node_type] = {
+                "returned": returned,
+                "total": total,
+                "limit": type_limit,
+                "truncated": total > returned,
+            }
+
         statistics = {
             "total_nodes": len(nodes),
             "total_edges": len(edges),
             "node_types": node_type_counts,
-            "edge_types": edge_type_counts
+            "edge_types": edge_type_counts,
+            "per_type": per_type_stat,
         }
-        
+
+        # 8. 日志输出 returned/total/limit 三元组（Requirement 8.5）
+        per_type_log = ", ".join(
+            f"{t}:returned={v['returned']}/total={v['total']}/limit={v['limit']}"
+            for t, v in per_type_stat.items()
+        )
         logger.info(
-            f"成功获取图数据: end_user_id={end_user_id}, "
-            f"nodes={len(nodes)}, edges={len(edges)}"
+            f"图数据查询: end_user_id={end_user_id} mode={mode} "
+            f"nodes={len(nodes)} edges={len(edges)} per_type=[{per_type_log}]"
         )
 
         return {
             "nodes": nodes,
             "edges": edges,
-            "statistics": statistics
+            "statistics": statistics,
         }
-        
-    except ValueError:
-        logger.error(f"无效的 end_user_id 格式: {end_user_id}")
-        return {
-            "nodes": [],
-            "edges": [],
-            "statistics": {
-                "total_nodes": 0,
-                "total_edges": 0,
-                "node_types": {},
-                "edge_types": {}
-            },
-            "message": "无效的用户ID格式"
-        }
+
     except Exception as e:
         logger.error(f"获取图数据失败: {str(e)}", exc_info=True)
         raise
+
+
+def _empty_graph_response(message: str) -> Dict[str, Any]:
+    """构造空响应结构（用户不存在 / UUID 非法等场景）。"""
+    return {
+        "nodes": [],
+        "edges": [],
+        "statistics": {
+            "total_nodes": 0,
+            "total_edges": 0,
+            "node_types": {},
+            "edge_types": {},
+            "per_type": {},
+        },
+        "message": message,
+    }
+
+
+async def _query_center_node_neighbors(
+    *,
+    end_user_id: str,
+    center_node_id: str,
+    depth: int,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    """以中心节点为起点的 1..depth 跳邻居查询（Center_Mode）。
+
+    Cypher 不允许直接参数化变长路径长度（``[*1..n]``），因此需要将 ``depth``
+    安全拼入字符串；调用方需保证 ``depth`` 已被钳制为 ≤ 3。
+    """
+    safe_depth = max(1, min(int(depth), 3))
+    cypher = f"""
+    MATCH path = (center)-[*1..{safe_depth}]-(connected)
+    WHERE center.end_user_id = $end_user_id
+      AND elementId(center) = $center_node_id
+    WITH collect(DISTINCT center) + collect(DISTINCT connected) as all_nodes
+    UNWIND all_nodes as n
+    RETURN DISTINCT
+        elementId(n) as id,
+        labels(n) as labels,
+        properties(n) as properties
+    LIMIT $limit
+    """
+    rows = await _neo4j_connector.execute_query(
+        cypher,
+        end_user_id=end_user_id,
+        center_node_id=center_node_id,
+        limit=int(limit),
+    )
+    return list(rows)
+
+
+async def _query_edges_among_nodes(node_ids: List[str]) -> List[Dict[str, Any]]:
+    """查询若干节点之间的有向关系（Q3）。Cypher 已过滤悬空边。"""
+    cypher = """
+    MATCH (n)-[r]->(m)
+    WHERE elementId(n) IN $node_ids
+      AND elementId(m) IN $node_ids
+    RETURN
+        elementId(r) as id,
+        elementId(n) as source,
+        elementId(m) as target,
+        type(r) as rel_type,
+        properties(r) as properties
+    """
+    rows = await _neo4j_connector.execute_query(cypher, node_ids=list(node_ids))
+    return list(rows)
 
 
 # 辅助函数
@@ -2007,45 +2104,45 @@ async def analytics_community_graph_data(
         raise
 
 
-async  def _extract_node_properties(label: str, properties: Dict[str, Any],node_id: str) -> Dict[str, Any]:
-    """
-    根据节点类型提取需要的属性字段
-    
-    Args:
-        label: 节点类型标签
-        properties: 节点的所有属性
-        
-    Returns:
-        过滤后的属性字典
-    """
-    # 定义每种节点类型需要的字段（白名单）
-    field_whitelist = {
-        "Dialogue": ["content", "created_at"],
-        "Chunk": ["content", "created_at"],
-        "Statement": ["temporal_info", "stmt_type", "statement", "valid_at", "created_at", "caption","emotion_keywords","emotion_type","emotion_subject"],
-        "ExtractedEntity": ["description", "name", "entity_type", "created_at", "caption","aliases","connect_strength"],
-        "MemorySummary": ["summary", "content", "created_at", "caption"],  # 添加 content 字段
-        "Perceptual": ["file_name", "file_path", "file_type", "domain", "topic", "keywords", "summary"]
-    }
-    
-    # 获取该节点类型的白名单字段
-    allowed_fields = field_whitelist.get(label, [])
+def _extract_node_properties(
+    label: str,
+    properties: Dict[str, Any],
+    *,
+    rel_count: int,
+) -> Dict[str, Any]:
+    """根据节点类型从 ``properties`` 中提取受白名单约束的字段。
 
-    count_neo4j=f"""MATCH (n)-[r]-(m) WHERE elementId(n) ="{node_id}" RETURN count(r) AS rel_count;"""
-    node_results = await (_neo4j_connector.execute_query(count_neo4j))
-    # 提取白名单中的字段
-    filtered_props = {}
+    白名单读取自 :data:`NODE_PROPERTY_WHITELIST`；当 ``label`` 未在白名单中
+    时回落到 :data:`_DEFAULT_FIELDS`（仅 ``caption``）。``associative_memory``
+    由调用方通过 ``rel_count`` 关键字参数注入，本函数不再发起 Cypher 查询，
+    用于消除原先 ``count(r)`` 子查询造成的 N+1。
+
+    保留 ``entity_type`` / ``emotion_type`` / ``emotion_subject`` 三个字段
+    的枚举映射逻辑，以维持响应字段的中文化展示。
+
+    Args:
+        label: 节点类型标签（``labels(n)[0]``）。
+        properties: 节点的全部属性。
+        rel_count: 节点的关联边数量；由调用方批量计数后注入，写入返回字典的
+            ``associative_memory`` 字段。
+
+    Returns:
+        过滤后的属性字典，至少包含 ``associative_memory`` 字段。
+    """
+    allowed_fields = NODE_PROPERTY_WHITELIST.get(label, _DEFAULT_FIELDS)
+
+    filtered_props: Dict[str, Any] = {}
     for field in allowed_fields:
         if field in properties:
             value = properties[field]
-            if  str(field) == 'entity_type':
-                value=type_mapping.get(value,'')
-            if str(field)=="emotion_type":
-                value=EmotionType.EMOTION_MAPPING.get(value)
-            if  str(field)=="emotion_subject":
-                value=EmotionSubject.SUBJECT_MAPPING.get(value)
+            if str(field) == 'entity_type':
+                value = type_mapping.get(value, '')
+            if str(field) == "emotion_type":
+                value = EmotionType.EMOTION_MAPPING.get(value)
+            if str(field) == "emotion_subject":
+                value = EmotionSubject.SUBJECT_MAPPING.get(value)
             filtered_props[field] = _clean_neo4j_value(value)
-    filtered_props['associative_memory']=[i['rel_count'] for i in node_results][0]
+    filtered_props['associative_memory'] = rel_count
     return filtered_props
 
 
