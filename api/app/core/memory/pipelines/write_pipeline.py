@@ -514,14 +514,21 @@ class WritePipeline:
                             source_name
                         ]
 
-                # 将 source.description 拼接到 target.description（分号分隔，去重）
+                # 将 source.description 拼接到 target.description（按片段去重，分号分隔）
+                # 修复：原逻辑用 src_desc not in tgt_desc 检测整段重复，但 src_desc 本身
+                # 可能是多片段聚合字符串，永远不在 tgt_desc 里出现，导致整段贴一遍引起倍数重复。
                 src_desc = (source_node.description or "").strip()
                 if src_desc:
                     tgt_desc = (target_node.description or "").strip()
-                    if src_desc not in tgt_desc:
-                        target_node.description = (
-                            f"{tgt_desc}；{src_desc}" if tgt_desc else src_desc
-                        )
+                    tgt_parts = [p.strip() for p in tgt_desc.replace("；", ";").split(";") if p.strip()]
+                    src_parts = [p.strip() for p in src_desc.replace("；", ";").split(";") if p.strip()]
+                    existing_set = set(tgt_parts)
+                    merged_parts = list(tgt_parts)
+                    for p in src_parts:
+                        if p and p not in existing_set:
+                            merged_parts.append(p)
+                            existing_set.add(p)
+                    target_node.description = "；".join(merged_parts) if merged_parts else ""
 
             # 重定向指向别名节点的边到目标节点
             alias_ids = set(alias_to_target.keys())

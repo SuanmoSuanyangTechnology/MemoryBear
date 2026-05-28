@@ -2229,7 +2229,28 @@ SET keeper.name = $merged_name,
     keeper.description = CASE
       WHEN coalesce(keeper.description, '') = '' THEN coalesce(loser.description, '')
       WHEN coalesce(loser.description, '') = '' THEN coalesce(keeper.description, '')
-      ELSE keeper.description + '；' + loser.description
+      // 按片段去重合并：避免 keeper / loser 都是聚合字符串时整段贴一遍引起倍数重复
+      ELSE reduce(s = '', i IN range(0, size(
+          [item IN split(replace(keeper.description, ';', '；'), '；') WHERE trim(item) <> '']
+          + [item IN split(replace(loser.description, ';', '；'), '；')
+             WHERE trim(item) <> ''
+               AND NOT trim(item) IN [p IN split(replace(keeper.description, ';', '；'), '；') | trim(p)]]
+      ) - 1) |
+          CASE
+            WHEN i = 0 THEN trim((
+                [item IN split(replace(keeper.description, ';', '；'), '；') WHERE trim(item) <> '']
+                + [item IN split(replace(loser.description, ';', '；'), '；')
+                   WHERE trim(item) <> ''
+                     AND NOT trim(item) IN [p IN split(replace(keeper.description, ';', '；'), '；') | trim(p)]]
+            )[i])
+            ELSE s + '；' + trim((
+                [item IN split(replace(keeper.description, ';', '；'), '；') WHERE trim(item) <> '']
+                + [item IN split(replace(loser.description, ';', '；'), '；')
+                   WHERE trim(item) <> ''
+                     AND NOT trim(item) IN [p IN split(replace(keeper.description, ';', '；'), '；') | trim(p)]]
+            )[i])
+          END
+      )
     END,
     keeper.connect_strength = CASE
       WHEN keeper.connect_strength = 'both' OR loser.connect_strength = 'both' THEN 'both'
