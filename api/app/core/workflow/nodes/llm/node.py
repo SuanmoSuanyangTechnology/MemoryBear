@@ -5,6 +5,7 @@ LLM 节点实现
 """
 
 import logging
+import json
 from copy import deepcopy
 from typing import Any
 
@@ -229,7 +230,6 @@ class LLMNode(BaseNode):
 
         if self.typed_config.extra_headers.enable and self.typed_config.extra_headers.value:
             try:
-                import json
                 extra_headers_dict = json.loads(self.typed_config.extra_headers.value)
                 extra_params["default_headers"] = extra_headers_dict
             except json.JSONDecodeError as e:
