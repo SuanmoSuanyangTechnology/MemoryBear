@@ -175,34 +175,24 @@ class WriteSnapshotRecorder:
             entity_rows:  从 Neo4j 查询到的实体属性列表，每项包含
                           id / name / entity_type / description / aliases 字段。
         """
-        import json
+        from app.core.memory.utils.debug.pipeline_snapshot import (
+            upload_stage_snapshot,
+        )
 
-        try:
-            data = {
-                "entity_nodes": [
-                    {
-                        "id": row.get("id"),
-                        "name": row.get("name"),
-                        "entity_type": row.get("entity_type"),
-                        "description": row.get("description"),
-                        "aliases": row.get("aliases", []),
-                    }
-                    for row in entity_rows
-                ],
-                "entity_count": len(entity_rows),
-            }
-            json_bytes = json.dumps(
-                data, ensure_ascii=False, indent=2, default=str
-            ).encode("utf-8")
-
-            from app.core.memory.utils.debug.pipeline_snapshot import _get_oss_bucket
-
-            oss_key = f"{snapshot_dir}/8_after_alias_merge.json"
-            bucket = _get_oss_bucket()
-            bucket.put_object(oss_key, json_bytes)
-            logger.debug(f"[Snapshot] 8_after_alias_merge → oss://{oss_key}")
-        except Exception as e:
-            logger.warning(f"[Snapshot] 保存 8_after_alias_merge 失败: {e}")
+        data = {
+            "entity_nodes": [
+                {
+                    "id": row.get("id"),
+                    "name": row.get("name"),
+                    "entity_type": row.get("entity_type"),
+                    "description": row.get("description"),
+                    "aliases": row.get("aliases", []),
+                }
+                for row in entity_rows
+            ],
+            "entity_count": len(entity_rows),
+        }
+        upload_stage_snapshot(snapshot_dir, "8_after_alias_merge", data)
 
     # ── Stage 0: 汇总 ──
 

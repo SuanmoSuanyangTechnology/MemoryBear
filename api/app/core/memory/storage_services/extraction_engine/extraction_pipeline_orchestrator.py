@@ -75,6 +75,10 @@ class NewExtractionOrchestrator:
         self.embedding_id = embedding_id
         self.progress_callback = progress_callback
 
+        # Snapshot/debug payload populated by ``_extract_all_statements`` —
+        # 在此初始化避免下游依赖 ``getattr`` 兜底。
+        self._last_statement_inputs: Dict[str, Dict[str, "StatementStepInput"]] = {}
+
         # Build shared context for all LLM-based steps
         self.context = StepContext(
             llm_client=llm_client,
@@ -310,7 +314,7 @@ class NewExtractionOrchestrator:
         # Store raw step outputs for snapshot/debugging
         self._last_stage_outputs = {
             "statement_results": all_stmt_results,
-            "statement_inputs": getattr(self, "_last_statement_inputs", {}),
+            "statement_inputs": self._last_statement_inputs,
             "triplet_results": all_triplet_results,
             "emotion_results": {},
             "embedding_output": None,
@@ -464,7 +468,7 @@ class NewExtractionOrchestrator:
         # Store raw step outputs for snapshot/debugging
         self._last_stage_outputs = {
             "statement_results": all_stmt_results,
-            "statement_inputs": getattr(self, "_last_statement_inputs", {}),
+            "statement_inputs": self._last_statement_inputs,
             "triplet_results": all_triplet_results,
             "emotion_results": {},
             "embedding_output": merged_emb,

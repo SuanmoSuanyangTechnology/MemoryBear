@@ -62,6 +62,40 @@ def _get_oss_bucket():
     return _OSS_BUCKET
 
 
+def upload_stage_snapshot(
+    snapshot_dir: str, stage_name: str, data: Any
+) -> bool:
+    """将一个 stage 的数据序列化为 JSON 并上传到 OSS。
+
+    供没有 ``PipelineSnapshot`` 实例的调用方使用（典型场景：Celery worker
+    任务在主流水线之后异步落盘补充数据，需要写入主流水线已创建的同一个
+    OSS 前缀下）。
+
+    Args:
+        snapshot_dir: 主流水线在 OSS 上创建的前缀路径（例如
+            ``snapshot/{end_user_id}/{conversation_id}/seq_xxx_时间戳``）。
+        stage_name: 落盘的 stage 名（不带 ``.json`` 后缀），最终路径为
+            ``<snapshot_dir>/<stage_name>.json``。
+        data: 任意可序列化对象（Pydantic 模型 / dict / list / dataclass）。
+
+    Returns:
+        上传成功返回 True，失败返回 False（失败仅打 warning，不抛异常）。
+    """
+    try:
+        serialized = _safe_serialize(data)
+        json_bytes = json.dumps(
+            serialized, ensure_ascii=False, indent=2, default=str
+        ).encode("utf-8")
+
+        oss_key = f"{snapshot_dir}/{stage_name}.json"
+        _get_oss_bucket().put_object(oss_key, json_bytes)
+        logger.debug(f"[Snapshot] {stage_name} → oss://{oss_key}")
+        return True
+    except Exception as e:
+        logger.warning(f"[Snapshot] 保存 {stage_name} 失败: {e}")
+        return False
+
+
 def _safe_serialize(obj: Any) -> Any:
     """Convert objects to JSON-serializable form."""
     if obj is None:
@@ -144,19 +178,7 @@ class PipelineSnapshot:
         """
         if not self.enabled or self._oss_prefix is None:
             return
-
-        try:
-            serialized = _safe_serialize(data)
-            json_bytes = json.dumps(
-                serialized, ensure_ascii=False, indent=2, default=str
-            ).encode("utf-8")
-
-            oss_key = f"{self._oss_prefix}/{stage_name}.json"
-            bucket = _get_oss_bucket()
-            bucket.put_object(oss_key, json_bytes)
-            logger.debug(f"[Snapshot] {stage_name} → oss://{oss_key}")
-        except Exception as e:
-            logger.warning(f"[Snapshot] 保存 {stage_name} 失败: {e}")
+        upload_stage_snapshot(self._oss_prefix, stage_name, data)
 
     def save_summary(self, stats: Dict[str, Any]) -> None:
         """Save a summary with pipeline metadata and stats.
