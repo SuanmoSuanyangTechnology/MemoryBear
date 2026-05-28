@@ -21,7 +21,7 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
             includes=None
     ) -> MemorySearchResult:
         memory_l0 = None
-        if self.ctx.storage_type == StorageType.NEO4J:
+        if self.ctx.storage_type == StorageType.NEO4J:  
             memory_l0 = await self._get_search_service(includes).memory_l0()
 
         query = QueryPreprocessor.process(query)
@@ -45,6 +45,7 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
             return Neo4jSearchService(
                 self.ctx,
                 self.get_embedding_client(self.db, self.ctx.memory_config.embedding_model_id),
+                self.get_rerank_client(self.db, self.ctx.memory_config.rerank_model_id),
                 self.get_llm_client(self.db, self.ctx.memory_config.llm_model_id),
                 includes=includes,
             )

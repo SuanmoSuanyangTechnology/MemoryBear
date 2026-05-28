@@ -21,7 +21,7 @@ from app.core.memory.read_services.search_engine.result_builder import MetadataB
 from app.core.memory.read_services.search_engine.result_builder import data_builder_factory
 from app.core.memory.read_services.search_engine.tools import make_entity_search_tool, make_relation_search_tool
 from app.core.memory.utils.llm.llm_utils import StructResponse
-from app.core.models import RedBearEmbeddings, RedBearLLM
+from app.core.models import RedBearEmbeddings, RedBearLLM, RedBearRerank
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.repositories import knowledge_repository
 from app.repositories.neo4j.graph_search import get_nodes_by_ids, get_relations_between_entity_pairs, search_graph, \
@@ -44,6 +44,7 @@ class Neo4jSearchService:
             self,
             ctx: MemoryContext,
             embedder: RedBearEmbeddings,
+            reranker: RedBearRerank,
             llm: RedBearLLM,
             includes: list[Neo4jNodeType] | None = None,
             alpha: float = DEFAULT_ALPHA,
@@ -58,6 +59,7 @@ class Neo4jSearchService:
         self.content_score_threshold = content_score_threshold
 
         self.embedder: RedBearEmbeddings = embedder
+        self.reranker: RedBearRerank = reranker
         self.llm: RedBearLLM = llm
         self.connector: Neo4jConnector | None = None
 
@@ -98,18 +100,17 @@ class Neo4jSearchService:
             include=self.includes
         )
 
-    def _rerank(
-            self,
+    @staticmethod
+    def _combine_score(
             keyword_results: list[dict],
             embedding_results: list[dict],
-            limit: int,
     ) -> list[dict]:
-        keyword_results = self._normalize_kw_scores(keyword_results)
+        # keyword_results = self._normalize_kw_scores(keyword_results)
 
         kw_norm_map = {}
         for item in keyword_results:
             item_id = item["id"]
-            kw_norm_map[item_id] = float(item.get("normalized_kw_score", 0))
+            kw_norm_map[item_id] = float(item.get("score", 0))
 
         emb_norm_map = {}
         for item in embedding_results:
@@ -132,24 +133,24 @@ class Neo4jSearchService:
                 combined[item_id]["kw_score"] = kw_norm_map.get(item_id, 0)
                 combined[item_id]["embedding_score"] = emb_norm_map.get(item_id, 0)
 
-        for item in combined.values():
-            item_id = item["id"]
-            kw = float(combined[item_id].get("kw_score", 0) or 0)
-            emb = float(combined[item_id].get("embedding_score", 0) or 0)
-            base = self.alpha * emb + (1 - self.alpha) * kw
-            combined[item_id]["content_score"] = base + min(1 - base, 0.1 * kw * emb)
-        results = sorted(combined.values(), key=lambda x: x["content_score"], reverse=True)
-        # results = [
-        #     res for res in results
-        #     if res["content_score"] > self.content_score_threshold
-        # ]
-        results = results[:limit]
-
-        logger.debug(
-            f"[MemorySearch] rerank: merged={len(combined)}, after_threshold={len(results)} "
-            f"(alpha={self.alpha})"
-        )
-        return results
+        # for item in combined.values():
+        #     item_id = item["id"]
+        #     kw = float(combined[item_id].get("kw_score", 0) or 0)
+        #     emb = float(combined[item_id].get("embedding_score", 0) or 0)
+        #     base = self.alpha * emb + (1 - self.alpha) * kw
+        #     combined[item_id]["content_score"] = base + min(1 - base, 0.1 * kw * emb)
+        # results = sorted(combined.values(), key=lambda x: x["content_score"], reverse=True)
+        # # results = [
+        # #     res for res in results
+        # #     if res["content_score"] > self.content_score_threshold
+        # # ]
+        # results = results[:limit]
+        #
+        # logger.debug(
+        #     f"[MemorySearch] rerank: merged={len(combined)}, after_threshold={len(results)} "
+        #     f"(alpha={self.alpha})"
+        # )
+        return list(combined.values())
 
     def _normalize_kw_scores(self, items: list[dict]) -> list[dict]:
         if not items:
@@ -179,23 +180,28 @@ class Neo4jSearchService:
 
         memories = []
         for node_type in self.includes:
-            reranked = self._rerank(
+            records = self._combine_score(
                 kw_results.get(node_type, []),
                 emb_results.get(node_type, []),
-                limit
             )
-            for record in reranked:
+            for record in records:
                 memory = data_builder_factory(node_type, record)
                 memories.append(Memory(
-                    score=memory.score,
+                    score=0,
                     content=memory.content,
                     data=memory.data,
                     source=node_type,
                     query=query,
                     id=memory.id
                 ))
-        memories.sort(key=lambda x: x.score, reverse=True)
-        return MemorySearchResult(memories=memories[:limit])
+        rerank_res = self.reranker.rerank(query=query, documents=[memory.content for memory in memories], top_n=limit)
+        reranked_memories = []
+        for rerank_record in rerank_res:
+            memory = memories[rerank_record["index"]]
+            memory.score = rerank_record["relevance_score"]
+            reranked_memories.append(memory)
+        # memories.sort(key=lambda x: x.score, reverse=True)
+        return MemorySearchResult(memories=reranked_memories[:limit])
 
     async def _run_relation_agent(self, query: str) -> RelationSearchResult:
         system_prompt = prompt_manager.render(
