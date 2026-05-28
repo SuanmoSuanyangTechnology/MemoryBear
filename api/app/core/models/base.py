@@ -118,7 +118,7 @@ class RedBearModelFactory:
     """模型工厂类"""
 
     _CONFIG_ONLY_KEYS = {
-        "deep_thinking", "thinking_budget_tokens", "streaming",
+        "deep_thinking", "thinking_budget_tokens",
         "enable_search", "enable_thinking", "response_format", "json_output",
         "default_headers",
     }
