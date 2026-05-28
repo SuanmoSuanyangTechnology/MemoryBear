@@ -17,7 +17,7 @@ from app.controllers import manager_router
 # 服务端 API (API Key 认证)
 from app.controllers.service import service_router
 # MCP
-from app.controllers.service import mcp_app
+from app.controllers.service.mcp_memory import mcp_app
 from app.controllers.service.mcp_auth_middleware import MCPAuthMiddleware
 from app.core.config import settings
 from app.core.error_codes import BizCode, HTTP_MAPPING
