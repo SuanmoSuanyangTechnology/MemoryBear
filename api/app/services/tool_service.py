@@ -15,7 +15,7 @@ from app.repositories.tool_repository import (
     ToolRepository, BuiltinToolRepository, CustomToolRepository,
     MCPToolRepository, WorkflowToolRepository, ToolExecutionRepository
 )
-
+from app.models.app_model import App
 from app.models.tool_model import (
     ToolConfig, BuiltinToolConfig, CustomToolConfig, MCPToolConfig,
     ToolExecution, ToolType, ToolStatus, ExecutionStatus, AuthType
@@ -1179,7 +1179,6 @@ class ToolService:
         elif config.tool_type == ToolType.WORKFLOW.value:
             cfg = self.workflow_repo.find_by_tool_id(self.db, config.id)
             if cfg:
-                from app.models.app_model import App
                 workspace_id = None
                 app = self.db.query(App).filter(App.id == cfg.app_id).first()
                 if app:
