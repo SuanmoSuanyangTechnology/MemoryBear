@@ -156,14 +156,46 @@ async def create_vector_indexes():
         await connector.close()
 
 
-async def create_user_indexes():
+async def create_end_user_id_indexes():
+    """为受 graph_data 接口查询的 8 类节点建立 ``end_user_id`` 范围索引。
+
+    所有 graph_data 系列查询（Q1 / Q4）都按 ``n.end_user_id = $end_user_id AND
+    labels(n)[0] = $label`` 过滤；如果不建索引，对每个类型都要全表扫描，
+    在大库下会成为性能瓶颈。
+
+    本函数对全部 8 类受支持节点统一建立单字段范围索引（``IF NOT EXISTS``
+    保证幂等）；首次创建时 Neo4j 会异步在后台填充索引，不阻塞在线查询。
+    """
     connector = Neo4jConnector()
-    await connector.execute_query(
-        """
-        CREATE INDEX user_perceptual IF NOT EXISTS
-        FOR (p:Perceptual) ON (p.end_user_id);
-        """
-    )
+    try:
+        for label, idx_name in [
+            ("Dialogue",          "user_dialogue"),
+            ("Chunk",             "user_chunk"),
+            ("Statement",         "user_statement"),
+            ("ExtractedEntity",   "user_extracted_entity"),
+            ("MemorySummary",     "user_memory_summary"),
+            ("Perceptual",        "user_perceptual"),
+            ("AssistantOriginal", "user_assistant_original"),
+            ("AssistantPruned",   "user_assistant_pruned"),
+        ]:
+            await connector.execute_query(
+                f"""
+                CREATE INDEX {idx_name} IF NOT EXISTS
+                FOR (n:{label}) ON (n.end_user_id);
+                """
+            )
+    finally:
+        await connector.close()
+
+
+async def create_user_indexes():
+    """Deprecated: 历史保留入口；新代码请直接调用 :func:`create_end_user_id_indexes`。
+
+    早期版本只建了 ``Perceptual.end_user_id`` 一条；本函数现已并入到
+    :func:`create_end_user_id_indexes`，统一覆盖 8 类受支持节点。保留本函数
+    名是为了避免破坏外部调用方（如运维脚本）。
+    """
+    await create_end_user_id_indexes()
 
 
 async def create_unique_constraints():
@@ -220,4 +252,5 @@ async def create_all_indexes():
     """Create all indexes and constraints in one go."""
     await create_fulltext_indexes()
     await create_vector_indexes()
+    await create_end_user_id_indexes()
     await create_unique_constraints()

@@ -44,6 +44,9 @@ TOTAL_NODES_CAP: int = 2000
 # Center_Mode 下单一 limit 的硬上限（与控制器现有逻辑保持一致）
 CENTER_MODE_LIMIT_HARD_MAX: int = 1000
 
+# Center_Mode 下 ``depth`` 参数的硬上限（与控制器现有逻辑保持一致）
+DEPTH_HARD_MAX: int = 3
+
 # 节点属性白名单：未在表中的类型 fallback 到 _DEFAULT_FIELDS（Requirement 7.6）
 _DEFAULT_FIELDS: List[str] = ["caption"]
 

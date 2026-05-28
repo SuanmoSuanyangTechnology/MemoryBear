@@ -20,6 +20,10 @@ from app.services.user_memory_service import (
     analytics_community_graph_data,
 )
 from app.services._graph_data_helpers import parse_per_type_limits
+from app.core.memory.constants.graph_data_constants import (
+    CENTER_MODE_LIMIT_HARD_MAX,
+    DEPTH_HARD_MAX,
+)
 from app.services.memory_entity_relationship_service import MemoryEntityService, MemoryEmotion, MemoryInteraction
 from app.schemas.response_schema import ApiResponse
 from app.schemas.memory_storage_schema import GenerateCacheRequest
@@ -261,13 +265,13 @@ async def get_graph_data_api(
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
     # 参数验证
-    if limit > 1000:
-        limit = 1000
-        api_logger.warning("limit 参数超过最大值，已调整为 1000")
+    if limit > CENTER_MODE_LIMIT_HARD_MAX:
+        limit = CENTER_MODE_LIMIT_HARD_MAX
+        api_logger.warning(f"limit 参数超过最大值，已调整为 {CENTER_MODE_LIMIT_HARD_MAX}")
 
-    if depth > 3:
-        depth = 3
-        api_logger.warning("depth 参数超过最大值，已调整为 3")
+    if depth > DEPTH_HARD_MAX:
+        depth = DEPTH_HARD_MAX
+        api_logger.warning(f"depth 参数超过最大值，已调整为 {DEPTH_HARD_MAX}")
 
     # 解析 node_types 参数
     node_types_list = None

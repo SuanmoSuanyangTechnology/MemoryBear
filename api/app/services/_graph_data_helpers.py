@@ -4,12 +4,13 @@
 本模块集中放置不依赖 Neo4j / 数据库的可单测纯逻辑，便于 controller 与 service
 层共享。任何与 Cypher 直接交互的封装均不应放在此处。
 
-Validates: Requirements 2.1, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 7.3, 8.2
+Validates: Requirements 2.1, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 6.1, 6.3, 6.4,
+            7.3, 8.2
 """
 import logging
 import math
 from logging import Logger
-from typing import Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from app.core.memory.constants.graph_data_constants import (
     DEFAULT_PER_TYPE_LIMIT_MAP,
@@ -17,6 +18,12 @@ from app.core.memory.constants.graph_data_constants import (
     SUPPORTED_NODE_TYPES,
     TOTAL_NODES_CAP,
 )
+from app.repositories.neo4j.cypher_queries import (
+    GRAPH_NODES_BY_TYPE_LIMITS,
+    GRAPH_NODES_REL_COUNT_BATCH,
+    GRAPH_NODES_TOTAL_COUNT_BY_TYPE,
+)
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 
 _LOGGER: Logger = logging.getLogger(__name__)
@@ -50,10 +57,7 @@ def parse_per_type_limits(raw: Optional[str], logger: Logger) -> Dict[str, int]:
     Raises:
         ValueError: 当 ``raw`` 中存在格式非法的条目（缺冒号 / 非整数 / 负数）时。
     """
-    if raw is None:
-        return {}
-
-    if raw.strip() == "":
+    if not raw or not raw.strip():
         return {}
 
     result: Dict[str, int] = {}
@@ -241,14 +245,6 @@ def _apply_total_cap_shrink(
 # 3. 输入为空时短路返回空容器，避免向 Neo4j 发起无意义的查询（Requirement 6.3）。
 #
 # Validates: Requirements 6.1, 6.3, 6.4
-from typing import Any, List
-
-from app.repositories.neo4j.cypher_queries import (
-    GRAPH_NODES_BY_TYPE_LIMITS,
-    GRAPH_NODES_REL_COUNT_BATCH,
-    GRAPH_NODES_TOTAL_COUNT_BY_TYPE,
-)
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 
 async def _query_nodes_by_type_limits(
