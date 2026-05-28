@@ -75,7 +75,7 @@ def _get_estimated_pages(file_name: str, file_binary: bytes) -> int | None:
     try:
         if ext == ".pdf":
             from app.core.rag.deepdoc.parser.pdf_parser import RAGPdfParser
-            return RAGPdfParser.total_page_number(binary=file_binary)
+            return RAGPdfParser.total_page_number("", binary=file_binary)
     except Exception:
         pass
     return None
