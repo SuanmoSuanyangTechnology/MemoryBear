@@ -443,6 +443,14 @@ export const nodeLibrary: NodeLibrary[] = [
             filterNodeTypes: ['start', 'knowledge-retrieval', 'iteration', 'loop', 'parameter-extractor', 'code', 'CONVERSATION'],
             // filterVariableNames: ['message']
           },
+          output_type: {
+            type: 'define',
+          },
+          output: {
+            type: 'variableList',
+            required: true,
+            filterChildNodes: true
+          },
           parallel: {
             type: 'switch',
             defaultValue: false
@@ -456,18 +464,20 @@ export const nodeLibrary: NodeLibrary[] = [
             dependsOn: 'parallel',
             dependsOnValue: true
           },
+          error_response: {
+            type: 'select',
+            defaultValue: 'stop',
+            needTranslation: true,
+            options: [
+              { label: 'workflow.config.iteration.stop', value: 'stop' },
+              { label: 'workflow.config.iteration.ignore_error', value: 'ignore_error' },
+              { label: 'workflow.config.iteration.remove_error', value: 'remove_error' },
+            ],
+          },
           flatten: { // Flatten output
             type: 'switch',
             defaultValue: false
           },
-          output: {
-            type: 'variableList',
-            required: true,
-            filterChildNodes: true
-          },
-          output_type: {
-            type: 'define',
-          }
         },
       },
       { type: "loop", icon: 'rb:bg-[url("@/assets/images/workflow/loop.svg")]',
@@ -626,6 +636,20 @@ export const nodeLibrary: NodeLibrary[] = [
             required: true,
             defaultValue: [{name: 'result', type: 'string'}]
           },
+          retry: {
+            type: 'retry',
+            defaultValue: {
+              enable: false,
+              max_attempts: 3,
+              retry_interval: 1000,
+            }
+          },
+          error_handle: {
+            type: 'errorHandle',
+            defaultValue: {
+              method: 'none', // 'none' | 'branch' | 'default'
+            },
+          }
         }
       },
       { type: "jinja-render", icon: 'rb:bg-[url("@/assets/images/workflow/template_rendering.svg")]',

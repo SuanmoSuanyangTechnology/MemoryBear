@@ -2617,6 +2617,10 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           parallel: 'Parallel Mode',
           parallel_count: 'Max Parallelism',
           flatten: 'Flatten Output',
+          error_response: 'Error Response Method',
+          stop: 'Stop on Error',
+          ignore_error: 'Ignore Error and Continue',
+          remove_error: 'Remove Error Output',
         },
         tool: {
           tool_id: 'Tool',

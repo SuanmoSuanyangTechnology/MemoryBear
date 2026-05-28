@@ -337,7 +337,7 @@ export const useWorkflowGraph = ({
           nodeConfig.height = newHeight;
         }
         // Check error_handle.method config for http-request node
-        if (['http-request', 'llm'].includes(type) && (config as any)?.error_handle?.method === 'branch') {
+        if (['code', 'http-request', 'llm'].includes(type) && (config as any)?.error_handle?.method === 'branch') {
           nodeConfig.ports = {
             groups: {
               right: { position: 'right', markup: portMarkup, attrs: portAttrs },
@@ -468,7 +468,7 @@ export const useWorkflowGraph = ({
           }
 
           // If http-request node has label, match corresponding port by label
-          if (['http-request', 'llm'].includes(sourceCell.getData()?.type) && label) {
+          if (['code', 'http-request', 'llm'].includes(sourceCell.getData()?.type) && label) {
             const matchingPort = sourcePorts.find((port: any) => port.id === label);
             if (matchingPort) {
               sourcePort = label;
@@ -1762,7 +1762,7 @@ export const useWorkflowGraph = ({
           }
 
           // If http-request node right port connection, add label
-          if (['http-request', 'llm'].includes(sourceCell?.getData()?.type)) {
+          if (['code', 'http-request', 'llm'].includes(sourceCell?.getData()?.type)) {
             if (sourcePortId === 'ERROR') {
               return {
                 source: sourceCell.getData().id,

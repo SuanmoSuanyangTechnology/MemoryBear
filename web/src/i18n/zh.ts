@@ -2596,6 +2596,10 @@ export const zh = {
           parallel: '并行模式',
           parallel_count: '最大并行度',
           flatten: '扁平化输出',
+          error_response: '错误响应方法',
+          stop: '错误时终止',
+          ignore_error: '忽略错误并继续',
+          remove_error: '移除错误输出',
         },
         tool: {
           tool_id: '工具',
