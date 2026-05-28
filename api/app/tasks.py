@@ -1807,23 +1807,18 @@ def extract_emotion_batch_task(
 
         await asyncio.gather(*[_extract_one(s) for s in statements])
 
-        # 快照落盘（worker 端）：不影响 Neo4j 写入流程，失败只打日志
-        if snapshot_outputs is not None:
-            try:
-                from pathlib import Path as _Path
-                import json as _json
+        # 快照落盘（worker 端）：上传到 OSS，不影响 Neo4j 写入流程，失败只打日志
+        if snapshot_outputs is not None and snapshot_dir:
+            from app.core.memory.utils.debug.pipeline_snapshot import (
+                upload_stage_snapshot,
+            )
 
-                _dir = _Path(snapshot_dir)
-                _dir.mkdir(parents=True, exist_ok=True)
-                _path = _dir / "4_emotion_outputs.json"
-                with open(_path, "w", encoding="utf-8") as _f:
-                    _json.dump(snapshot_outputs, _f, ensure_ascii=False, indent=2, default=str)
+            if upload_stage_snapshot(
+                snapshot_dir, "4_emotion_outputs", snapshot_outputs
+            ):
                 logger.info(
-                    f"[Emotion][Snapshot] 已落盘 {len(snapshot_outputs)} 条情绪结果 → {_path}"
-                )
-            except Exception as _e:
-                logger.warning(
-                    f"[Emotion][Snapshot] 快照落盘失败（不影响主流程）: {_e}"
+                    f"[Emotion][Snapshot] 已落盘 {len(snapshot_outputs)} 条情绪结果 → "
+                    f"oss://{snapshot_dir}/4_emotion_outputs.json"
                 )
 
         # Batch update Neo4j via write transaction
@@ -2546,23 +2541,18 @@ def extract_metadata_batch_task(
         finally:
             await connector.close()
 
-        # 快照落盘
+        # 快照落盘：上传到 OSS
         if snapshot_outputs is not None and snapshot_dir:
-            try:
-                from pathlib import Path as _Path
-                import json as _json
+            from app.core.memory.utils.debug.pipeline_snapshot import (
+                upload_stage_snapshot,
+            )
 
-                _dir = _Path(snapshot_dir)
-                _dir.mkdir(parents=True, exist_ok=True)
-                _path = _dir / "9_metadata_outputs.json"
-                with open(_path, "w", encoding="utf-8") as _f:
-                    _json.dump(snapshot_outputs, _f, ensure_ascii=False, indent=2, default=str)
+            if upload_stage_snapshot(
+                snapshot_dir, "9_metadata_outputs", snapshot_outputs
+            ):
                 logger.info(
-                    f"[Metadata][Snapshot] 已落盘 {len(snapshot_outputs)} 条元数据结果 → {_path}"
-                )
-            except Exception as _e:
-                logger.warning(
-                    f"[Metadata][Snapshot] 快照落盘失败（不影响主流程）: {_e}"
+                    f"[Metadata][Snapshot] 已落盘 {len(snapshot_outputs)} 条元数据结果 → "
+                    f"oss://{snapshot_dir}/9_metadata_outputs.json"
                 )
 
         return {"extracted": extracted, "failed": failed}
