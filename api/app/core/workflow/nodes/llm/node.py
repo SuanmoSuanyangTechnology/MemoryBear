@@ -78,6 +78,7 @@ class LLMNode(BaseNode):
         self.typed_config: LLMNodeConfig | None = None
         self.messages = []
         self.model_info: ModelInfo | None = None
+        self._param_warnings: list[str] = []
 
     def _output_types(self) -> dict[str, VariableType]:
         return {
@@ -89,7 +90,7 @@ class LLMNode(BaseNode):
         }
 
     def _render_context(self, message: str, variable_pool: VariablePool):
-        context = f"<context>{self._render_template(self.typed_config.context, variable_pool)}</context>"
+        context = f"<context>{self._render_template(self.typed_config.context, variable_pool, strict=False)}</context>"
         return message.replace("{{context}}", context)
 
     def _extract_reasoning_content(self, content: str) -> tuple[str, str]:
@@ -179,7 +180,7 @@ class LLMNode(BaseNode):
         if param_warnings:
             for w in param_warnings:
                 logger.warning(f"节点 {self.node_id} 参数限制警告: {w} (模型={model_info.model_name}, 提供商={model_info.provider})")
-            self._param_warnings = param_warnings
+            self._param_warnings.extend(param_warnings)
 
         # 4. 创建 LLM 实例（使用已提取的数据）
         # 注意：对于流式输出，需要在模型初始化时设置 streaming=True
@@ -289,7 +290,7 @@ class LLMNode(BaseNode):
                 role = msg_config.role.lower()
                 content_template = msg_config.content
                 content_template = self._render_context(content_template, variable_pool)
-                content = self._render_template(content_template, variable_pool)
+                content = self._render_template(content_template, variable_pool, strict=False)
                 # 根据角色创建对应的消息对象
                 if role == "system":
                     messages.append({
@@ -354,7 +355,7 @@ class LLMNode(BaseNode):
         else:
             # 使用简单的 prompt 格式（向后兼容）——包装为标准消息列表以兼容所有 provider
             prompt_template = self.config.get("prompt", "")
-            rendered = self._render_template(prompt_template, variable_pool)
+            rendered = self._render_template(prompt_template, variable_pool, strict=False)
             self.messages = [{"role": "user", "content": rendered}]
 
         # 所有 provider 统一注入 JSON prompt 兜底，确保即使 API 层 response_format 未生效也能引导 JSON 输出
