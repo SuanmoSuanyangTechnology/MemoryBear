@@ -12,6 +12,7 @@ from app.celery_app import celery_app
 from app.controllers import file_controller
 from app.core.config import settings
 from app.core.logging_config import get_api_logger
+from app.core.rag.utils.redis_conn import REDIS_CONN
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
 from app.core.response_utils import success
 from app.db import get_db
@@ -26,6 +27,12 @@ from app.services.file_storage_service import FileStorageService, get_file_stora
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
+
+# Redis keys for document parse task tracking
+_PARSE_TASK_KEY = "doc:{doc_id}:parse_task"
+_PARSE_CANCEL_KEY = "doc:{doc_id}:parse_cancel"
+_PARSE_TASK_TTL = 7200  # 2 hours
+_PARSE_CANCEL_TTL = 60  # 1 minute
 
 router = APIRouter(
     prefix="/documents",
@@ -281,15 +288,31 @@ async def delete_document(
         file_id = db_document.file_id
         kb_id = db_document.kb_id
 
-        # 2. Delete vector index (non-404 failures raise, caught by except below)
+        # 2. Cancel any running parse task via Redis
+        task_id = REDIS_CONN.get(_PARSE_TASK_KEY.format(doc_id=document_id))
+        if task_id:
+            api_logger.warning(f"[DELETE] Revoking running parse task: task_id={task_id}, document_id={document_id}")
+            try:
+                celery_app.control.revoke(task_id, terminate=True)
+                api_logger.warning(f"[DELETE] Revoke signal sent for task_id={task_id}")
+            except NotImplementedError:
+                # ThreadPool does not support force termination; rely on Redis cancel marker
+                api_logger.info(f"[DELETE] ThreadPool does not support terminate, relying on Redis cancel marker for task_id={task_id}")
+            except Exception as revoke_err:
+                api_logger.error(f"[DELETE] Failed to revoke task {task_id}: {revoke_err}")
+        # Set cancellation marker and clean up task key
+        REDIS_CONN.set(_PARSE_CANCEL_KEY.format(doc_id=document_id), "1", exp=_PARSE_CANCEL_TTL)
+        REDIS_CONN.delete(_PARSE_TASK_KEY.format(doc_id=document_id))
+
+        # 3. Delete vector index (non-404 failures raise, caught by except below)
         db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
         vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
         vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
 
-        # 3. Delete file (storage errors are swallowed internally)
+        # 4. Delete file (storage errors are swallowed internally)
         await file_controller._delete_file(db=db, file_id=file_id, current_user=current_user, storage_service=storage_service)
 
-        # 4. Delete document from DB (last — if DB fails, external resources are already cleaned)
+        # 5. Delete document from DB (last — if DB fails, external resources are already cleaned)
         api_logger.debug(f"Perform document delete: {db_document.file_name} (ID: {document_id})")
         db.delete(db_document)
         db.commit()
@@ -343,17 +366,37 @@ async def parse_documents(
                 detail="File has no storage key (legacy data not migrated)"
             )
 
-        # 4. Obtain knowledge base information
+        # 4. Atomically claim parse slot via Redis SET NX
+        redis_client = REDIS_CONN.REDIS
+        task_key = _PARSE_TASK_KEY.format(doc_id=document_id)
+        claimed = redis_client.set(task_key, "CLAIMED", ex=_PARSE_TASK_TTL, nx=True)
+        if not claimed:
+            existing_task_id = REDIS_CONN.get(task_key)
+            api_logger.info(f"Document is already being parsed: document_id={document_id}, task_id={existing_task_id}")
+            return success(data={"task_id": existing_task_id or "unknown"}, msg="Document is already being parsed.")
+
+        # 5. Obtain knowledge base information
         api_logger.info(f"Obtain details of the knowledge base: knowledge_id={db_document.kb_id}")
         db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=db_document.kb_id, current_user=current_user)
         if not db_knowledge:
+            # Rollback Redis claim on failure
+            REDIS_CONN.delete(task_key)
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Knowledge base not found")
 
-        # 5. Dispatch parse task with file_key (not file_path)
-        task = celery_app.send_task(
-            "app.core.rag.tasks.parse_document",
-            args=[db_file.file_key, document_id, db_file.file_name]
-        )
+        # 6. Dispatch parse task with file_key (not file_path)
+        try:
+            task = celery_app.send_task(
+                "app.core.rag.tasks.parse_document",
+                args=[db_file.file_key, document_id, db_file.file_name]
+            )
+        except Exception:
+            # Rollback Redis claim if Celery dispatch fails
+            REDIS_CONN.delete(task_key)
+            raise
+
+        # 7. Store real task_id in Redis (overwrite CLAIMED)
+        REDIS_CONN.set(task_key, task.id, exp=_PARSE_TASK_TTL)
+
         result = {
             "task_id": task.id
         }

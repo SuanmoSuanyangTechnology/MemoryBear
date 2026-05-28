@@ -210,7 +210,7 @@ class MinerUParser(RAGPdfParser):
             self.logger.info(f"[MinerU] invoke api: {self.mineru_api}/file_parse")
             if callback:
                 callback(0.20, f"[MinerU] invoke api: {self.mineru_api}/file_parse")
-            response = requests.post(url=f"{self.mineru_api}/file_parse", files=files, data=data, headers=headers, timeout=1800)
+            response = requests.post(url=f"{self.mineru_api}/file_parse", files=files, data=data, headers=headers, timeout=300)
 
             response.raise_for_status()
             if response.headers.get("Content-Type") == "application/zip":
