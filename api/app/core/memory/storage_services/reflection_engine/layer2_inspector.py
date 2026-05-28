@@ -9,11 +9,19 @@ from pydantic import BaseModel
 from app.core.memory.storage_services.reflection_engine.deterministic.description_checker import (
     scan_merge_candidates,
 )
+from app.core.memory.storage_services.reflection_engine.deterministic.unresolved_scanner import (
+    scan_unresolved_candidates,
+    fetch_context_chunks,
+)
 from app.core.memory.storage_services.reflection_engine.llm.description_synthesizer import (
     merge_description,
     summarize_extract_and_rename,
     validate_summary_output,
     filter_events,
+)
+from app.core.memory.storage_services.reflection_engine.llm.unresolved_resolver import (
+    resolve_unresolved_statement,
+    validate_unresolved_output,
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.repositories.neo4j.cypher_queries import (
@@ -21,6 +29,11 @@ from app.repositories.neo4j.cypher_queries import (
     REFLECTION_RENAME_CHECK_CONFLICT,
     REFLECTION_RENAME_ENTITY,
     REFLECTION_UPDATE_NAME_EMBEDDING,
+    UNRESOLVED_CREATE_ENTITY,
+    UNRESOLVED_UPDATE_NAME_EMBEDDING,
+    UNRESOLVED_CREATE_RELATIONSHIP,
+    UNRESOLVED_CREATE_STATEMENT_ENTITY_EDGE,
+    UNRESOLVED_UPDATE_STATEMENT_FLAG,
 )
 
 logger = logging.getLogger(__name__)
@@ -143,7 +156,11 @@ class Layer2Inspector:
         # TODO: 子问题 1 — 过期检测（stale_detection）
         # TODO: 子问题 2 — 事实矛盾检测（fact_contradiction）
        
-        # TODO: 子问题 5 — 未识别实体处理（unresolved_entity）
+        # 子问题 5 — 未识别实体处理（unresolved_entity）
+        results["unresolved_entity"] = await self._run_unresolved_resolver(
+            end_user_id, baseline, language
+        )
+
         # 子问题 3 — 复杂去重消歧（entity_dedup）
         results["entity_dedup"] = await self._run_entity_dedup(end_user_id, baseline)
 
@@ -481,6 +498,199 @@ class Layer2Inspector:
         return True
 
     #子问题6：实体描述合并
+    async def _run_unresolved_resolver(self, end_user_id: str, baseline: str,
+                                       language: str) -> Dict[str, Any]:
+        """子问题 5：未识别实体处理（并发控制）"""
+        candidates = await scan_unresolved_candidates(
+            self.connector, end_user_id, batch_size=30
+        )
+        if not candidates:
+            return {"status": "success", "total": 0, "resolved": 0, "forced": 0}
+
+        async def _resolve_with_limit(stmt):
+            async with self._semaphore:
+                return await self._resolve_one_statement(
+                    stmt, end_user_id, baseline, language
+                )
+
+        tasks = [_resolve_with_limit(stmt) for stmt in candidates]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        resolved_count = 0
+        forced_count = 0
+        failed_count = 0
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(
+                    f"未识别实体处理异常 statement={candidates[i].get('statement_id', '?')}: {result}"
+                )
+                failed_count += 1
+            elif result is None:
+                failed_count += 1
+            elif result:
+                resolved_count += 1
+            else:
+                forced_count += 1
+
+        return {
+            "status": "success",
+            "total": len(candidates),
+            "resolved": resolved_count,
+            "forced": forced_count,
+            "failed": failed_count,
+        }
+
+    async def _resolve_one_statement(self, stmt: Dict, end_user_id: str,
+                                     baseline: str, language: str) -> Optional[bool]:
+        """处理单条 unresolved statement
+
+        Returns:
+            True = 消解成功, False = 强制提取, None = 失败（不改标记）
+        """
+        tracker = ExecutionTracker(model=getattr(self.llm_client, "model_name", ""))
+
+        # Step 1: 获取上下文
+        tracker.start_step("上下文收集", "prompt")
+        context_chunks = await fetch_context_chunks(
+            self.connector,
+            chunk_id=stmt.get("chunk_id"),
+            end_user_id=end_user_id,
+            limit=10,
+        )
+        tracker.end_step(f"获取 {len(context_chunks)} 条 Chunk 上下文")
+
+        # Step 2: LLM 消解 + 提取
+        tracker.start_step("LLM 消解+提取", "llm")
+        result = await resolve_unresolved_statement(
+            llm_client=self.llm_client,
+            statement=stmt,
+            context_chunks=context_chunks,
+            language=language,
+        )
+        if result is None:
+            tracker.end_step("LLM 调用失败", success=False)
+            return None
+        tracker.end_step(
+            f"resolved={result.resolved}, entities={len(result.entities)}, "
+            f"triplets={len(result.triplets)}"
+        )
+
+        # Step 3: 校验
+        tracker.start_step("校验", "decide")
+        validated = validate_unresolved_output(result)
+        if not validated.valid:
+            tracker.end_step(f"校验失败: {validated.reason}", success=False)
+            logger.warning(
+                f"未识别实体校验失败 statement={stmt['statement_id']}, "
+                f"reason={validated.reason}"
+            )
+            return None
+        tracker.end_step(
+            f"有效实体 {len(validated.entities)}, 有效 triplet {len(validated.triplets)}"
+        )
+
+        # Step 4: 写入 Neo4j
+        tracker.start_step("写入Neo4j", "write")
+        created_entity_ids = []
+
+        # 4.1 创建实体
+        for entity in validated.entities:
+            # 跳过"用户"实体（用户节点已存在，不需要重复创建）
+            if entity.name.strip() == "用户":
+                continue
+            entity_result = await self.connector.execute_query(
+                UNRESOLVED_CREATE_ENTITY,
+                end_user_id=end_user_id,
+                name=entity.name,
+                entity_type=entity.type,
+                description=entity.description,
+            )
+            if entity_result:
+                entity_id = entity_result[0].get("entity_id", "")
+                created_entity_ids.append(entity_id)
+                # 补 name_embedding
+                if self.embedding_client:
+                    try:
+                        name_embedding = self.embedding_client.embed_query(entity.name)
+                        if name_embedding:
+                            await self.connector.execute_query(
+                                UNRESOLVED_UPDATE_NAME_EMBEDDING,
+                                entity_id=entity_id,
+                                name_embedding=name_embedding,
+                            )
+                    except Exception as emb_err:
+                        logger.warning(f"补 name_embedding 失败 entity={entity.name}: {emb_err}")
+
+        # 4.2 创建关系边
+        for triplet in validated.triplets:
+            try:
+                await self.connector.execute_query(
+                    UNRESOLVED_CREATE_RELATIONSHIP,
+                    end_user_id=end_user_id,
+                    subject_name=triplet.subject_name,
+                    object_name=triplet.object_name,
+                    predicate=triplet.predicate,
+                    predicate_id=triplet.predicate_id,
+                    predicate_surface=triplet.predicate_surface,
+                    statement_id=stmt["statement_id"],
+                    valid_at=triplet.valid_at,
+                    invalid_at=triplet.invalid_at,
+                )
+            except Exception as rel_err:
+                logger.warning(f"创建关系边失败: {rel_err}")
+
+        # 4.3 创建 REFERENCES_ENTITY 边
+        for entity in validated.entities:
+            await self.connector.execute_query(
+                UNRESOLVED_CREATE_STATEMENT_ENTITY_EDGE,
+                statement_id=stmt["statement_id"],
+                end_user_id=end_user_id,
+                entity_name=entity.name,
+            )
+
+        # 4.4 更新 Statement 标记
+        await self.connector.execute_query(
+            UNRESOLVED_UPDATE_STATEMENT_FLAG,
+            statement_id=stmt["statement_id"],
+        )
+        tracker.end_step(
+            f"创建 {len(validated.entities)} 实体, "
+            f"{len(validated.triplets)} 关系边, 标记已更新"
+        )
+
+        # Step 5: 写反思日志（仅 resolved=true 时）
+        if validated.resolved:
+            log_repo = self.log_repo_factory()
+            log_repo.create(
+                end_user_id=end_user_id,
+                sub_problem="unresolved_entity",
+                trigger_type="scheduled",
+                baseline=baseline,
+                strategy="RESOLVE",
+                confidence=None,
+                status="resolved",
+                summary_text=f"消解为: {', '.join(e.name for e in validated.entities[:3])}",
+                entity_ids=created_entity_ids,
+                statement_ids=[stmt["statement_id"]],
+                trigger_detail={
+                    "statement_id": stmt["statement_id"],
+                    "statement_text": stmt["statement_text"],
+                },
+                solution_detail={
+                    "title": "RESOLVE — 指代消解成功",
+                    "changes": [
+                        {
+                            "field": "unresolved_reference",
+                            "old": "未识别",
+                            "new": ", ".join(e.name for e in validated.entities),
+                        }
+                    ],
+                },
+                execution_detail=tracker.to_dict(),
+            )
+
+        return validated.resolved
+
     async def _run_description_merge(self, end_user_id: str, baseline: str,
                                      language: str) -> Dict[str, Any]:
         """子问题 6：描述合并（并发控制）"""

@@ -2310,3 +2310,94 @@ WHERE e.end_user_id = $end_user_id
   AND NOT toLower(e.name) IN ['用户', '我', 'user', 'ai助手', '助手', '助理', 'ai', 'assistant', 'ai回复']
 RETURN DISTINCT e.entity_type AS entity_type, count(e) AS count
 """
+
+
+# --- Reflection Engine Layer 2: Unresolved Entity (子问题5) ---
+
+UNRESOLVED_STATEMENT_CANDIDATES = """
+MATCH (s:Statement)
+WHERE s.end_user_id = $end_user_id
+  AND s.has_unsolved_reference = true
+RETURN s.id AS statement_id,
+       s.statement AS statement_text,
+       s.dialog_at AS dialog_at,
+       s.chunk_id AS chunk_id,
+       s.stmt_type AS stmt_type,
+       s.temporal_info AS temporal_info,
+       s.speaker AS speaker,
+       s.valid_at AS valid_at,
+       s.invalid_at AS invalid_at
+ORDER BY s.created_at ASC
+LIMIT $batch_size
+"""
+
+UNRESOLVED_CONTEXT_CHUNKS = """
+MATCH (c:Chunk {id: $chunk_id})
+MATCH (nearby:Chunk {end_user_id: $end_user_id})
+WHERE nearby.id <> c.id
+WITH c, nearby
+ORDER BY abs(duration.between(nearby.created_at, c.created_at).seconds) ASC
+LIMIT $limit
+WITH collect(nearby) AS chunks
+UNWIND chunks AS chunk
+RETURN chunk.content AS content, chunk.created_at AS created_at
+ORDER BY chunk.created_at ASC
+"""
+
+UNRESOLVED_CREATE_ENTITY = """
+MERGE (e:ExtractedEntity {
+  end_user_id: $end_user_id,
+  name: $name,
+  entity_type: $entity_type
+})
+ON CREATE SET
+  e.id = randomUUID(),
+  e.description = $description,
+  e.aliases = [],
+  e.connect_strength = "weak",
+  e.source = "reflection_unresolved",
+  e.created_at = localdatetime()
+ON MATCH SET
+  e.description = CASE
+    WHEN e.description IS NULL OR e.description = "" THEN $description
+    ELSE e.description + '；' + $description
+  END
+RETURN e.id AS entity_id, e.name AS name
+"""
+
+UNRESOLVED_UPDATE_NAME_EMBEDDING = """
+MATCH (e:ExtractedEntity {id: $entity_id})
+SET e.name_embedding = $name_embedding
+RETURN e.id
+"""
+
+UNRESOLVED_CREATE_RELATIONSHIP = """
+MATCH (subj:ExtractedEntity {end_user_id: $end_user_id, name: $subject_name})
+MATCH (obj:ExtractedEntity {end_user_id: $end_user_id, name: $object_name})
+CREATE (subj)-[r:EXTRACTED_RELATIONSHIP {
+  predicate: $predicate,
+  predicate_id: $predicate_id,
+  predicate_surface: $predicate_surface,
+  statement_id: $statement_id,
+  valid_at: $valid_at,
+  invalid_at: $invalid_at,
+  end_user_id: $end_user_id,
+  connect_strength: "weak",
+  source: "reflection_unresolved",
+  created_at: datetime()
+}]->(obj)
+RETURN r.predicate AS predicate
+"""
+
+UNRESOLVED_CREATE_STATEMENT_ENTITY_EDGE = """
+MATCH (s:Statement {id: $statement_id})
+MATCH (e:ExtractedEntity {end_user_id: $end_user_id, name: $entity_name})
+MERGE (s)-[:REFERENCES_ENTITY]->(e)
+RETURN s.id AS statement_id
+"""
+
+UNRESOLVED_UPDATE_STATEMENT_FLAG = """
+MATCH (s:Statement {id: $statement_id})
+SET s.has_unsolved_reference = false
+RETURN s.id AS statement_id
+"""
