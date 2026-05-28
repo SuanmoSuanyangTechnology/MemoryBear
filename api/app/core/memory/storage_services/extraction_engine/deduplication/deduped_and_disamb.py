@@ -124,18 +124,23 @@ def _merge_attribute(canonical: ExtractedEntityNode, ent: ExtractedEntityNode):
     except Exception:
         pass
 
-    # 描述合并（去重拼接，分号分隔）
+    # 描述合并（按片段去重拼接，分号分隔）
     try:
         desc_a = (getattr(canonical, "description", "") or "").strip()
         desc_b = (getattr(ent, "description", "") or "").strip()
         if desc_b and desc_b != desc_a:
-            if desc_a:
-                # 将已有 description 按分号拆分，检查新 description 是否已存在
-                existing_parts = {p.strip() for p in desc_a.replace("；", ";").split(";") if p.strip()}
-                if desc_b not in existing_parts:
-                    canonical.description = f"{desc_a}；{desc_b}"
-            else:
-                canonical.description = desc_b
+            # 把 desc_a / desc_b 都按分号拆成片段，去重后保序拼回
+            # 修复：原逻辑只比较整段 desc_b，但 desc_b 可能本身是多片段聚合字符串，
+            # 永远不在 desc_a 的片段 set 里，导致整段贴一遍引起倍数重复。
+            a_parts = [p.strip() for p in desc_a.replace("；", ";").split(";") if p.strip()]
+            b_parts = [p.strip() for p in desc_b.replace("；", ";").split(";") if p.strip()]
+            existing_set = set(a_parts)
+            merged_parts = list(a_parts)
+            for p in b_parts:
+                if p and p not in existing_set:
+                    merged_parts.append(p)
+                    existing_set.add(p)
+            canonical.description = "；".join(merged_parts)
         # 合并事实摘要：统一保留一个“实体: name”行，来源行去重保序
         # TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
         # fact_a = getattr(canonical, "fact_summary", "") or ""
