@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-08 13:38:11
+ * @Last Modified time: 2026-05-19 17:52:22
  */
 /**
  * User Memory Detail Types
@@ -198,6 +198,12 @@ export interface MemoryInsightRef {
  * About me component ref
  */
 export interface AboutMeRef {
+  getData: () => void
+}
+/**
+ * Reflect memory component ref
+ */
+export interface ReflectMemoryRef {
   getData: () => void
 }
 /**

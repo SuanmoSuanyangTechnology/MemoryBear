@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-07 20:37:34 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 11:47:31
+ * @Last Modified time: 2026-05-19 18:31:20
  */
 import { type FC, useState, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -19,6 +19,7 @@ import EpisodicDetail from './EpisodicDetail'
 import ExplicitDetail from './ExplicitDetail'
 import WorkingDetail from './WorkingDetail'
 import GraphDetail from './GraphDetail'
+import ReflectLogs from './ReflectLogs'
 
 /**
  * Detail page for user memory - renders different memory type views
@@ -70,6 +71,10 @@ const Detail: FC = () => {
     } else {
       setLoading(false)
     }
+  }
+
+  if (type === 'REFLECT_LOGS') {
+    return <ReflectLogs />
   }
 
   if (type === 'GRAPH') {

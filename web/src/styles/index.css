@@ -407,7 +407,7 @@ div::-webkit-scrollbar-thumb:hover,
 .ant-select-focused.ant-select-outlined:not(.ant-select-disabled):not(.ant-select-customize-input):not(.ant-pagination-size-changer) .ant-select-selector {
   box-shadow: none;
 }
-.ant-select-dropdown .ant-select-item {
+.ant-select-dropdown .ant-select-item:not(.ant-select-item-option-disabled) {
   color: #212332;
 }
 .ant-select-dropdown .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {

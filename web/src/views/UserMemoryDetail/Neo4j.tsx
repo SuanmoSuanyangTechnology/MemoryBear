@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 16:57:59
+ * @Last Modified time: 2026-05-19 17:22:11
  */
 /**
  * Neo4j User Memory Detail View
@@ -30,6 +30,7 @@ import { useI18n } from '@/store/locale'
 
 import PrivateWrap from '@/components/PrivateWrap'
 import { BrainView } from '@redbear/memory-brick'
+import ReflectMemory from './components/ReflectMemory'
 
 
 const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
@@ -183,6 +184,21 @@ const Neo4j: FC = () => {
                 "rb:bg-[url('@/assets/images/userMemory/memoryInsight_active.svg')]": selectedKey === 'memoryInsight'
               })}></div>
             </Flex>
+
+            <Flex
+              align="center"
+              justify="center"
+              className={clsx("rb:cursor-pointer rb:size-12 rb:rounded-xl rb:group", {
+                'rb:bg-[#171719]': selectedKey === 'reflect',
+                'rb:hover:bg-[#EBEBEB]': selectedKey !== 'reflect',
+              })}
+              onClick={(e) => onOpenChange(e, 'reflect')}
+            >
+              <div className={clsx("rb:size-6 rb:bg-cover", {
+                "rb:bg-[url('@/assets/images/userMemory/reflectLogs.svg')]": selectedKey !== 'reflect',
+                "rb:bg-[url('@/assets/images/userMemory/reflectLogs_active.svg')]": selectedKey === 'reflect'
+              })}></div>
+            </Flex>
           </Flex>
 
           <Flex vertical gap={24}>
@@ -201,7 +217,6 @@ const Neo4j: FC = () => {
       <div onClick={(e) => e.stopPropagation()}>
         <EndUserProfile ref={ref} onDataLoaded={handleNameUpdate} className={selectedKey === 'userProfile' ? 'rb:block!' : 'rb:hidden!'} />
         <AboutMe ref={aboutMeRef} className={selectedKey === 'aboutMe' ? 'rb:block!' : 'rb:hidden!'} />
-        {/* <Provider> */}
         {BrainView && (
           <Suspense fallback={null}>
             <PrivateWrap>
@@ -209,9 +224,9 @@ const Neo4j: FC = () => {
             </PrivateWrap>
           </Suspense>
         )}
-        {/* </Provider> */}
         <InterestDistribution className={selectedKey === 'interestDistribution' ? 'rb:block!' : 'rb:hidden!'} />
         <MemoryInsight ref={memoryInsightRef} className={selectedKey === 'memoryInsight' ? 'rb:block!' : 'rb:hidden!'} />
+        <ReflectMemory className={selectedKey === 'reflect' ? 'rb:block!' : 'rb:hidden!'} />
       </div>
     </div>
   )
