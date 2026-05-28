@@ -1370,7 +1370,7 @@ class AppService:
         logger.info("Agent 配置更新成功", extra={"app_id": str(app_id)})
         return agent_cfg
 
-    def _agent_config_from_release(self, release: "type[AppRelease]") -> "AgentConfig":
+    def _agent_config_from_release(self, release: "AppRelease") -> "AgentConfig":
         """从发布版本快照重建 AgentConfig 对象（不入库，仅用于运行）"""
         cfg = release.config or {}
         now = release.created_at or datetime.datetime.now()
