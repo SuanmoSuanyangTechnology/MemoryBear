@@ -2670,6 +2670,10 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         addVariable: 'Add Variables',
         outputVariable: 'Output Variable',
         duplicateName: 'Variable name cannot be duplicated',
+        times: 'times',
+        ms: 'ms',
+        setting: 'Setting',
+        lastRun: 'Last Run',
       },
 
       clear: 'Clear',
@@ -2756,6 +2760,15 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       variableSelect: {
         empty: 'No variables available',
       },
+      singleRun: 'Run this node',
+      nextStep: 'Next Step',
+      nextStepTip: 'Add the next node in the workflow',
+      addParallelNode: 'Add Parallel Node',
+      chooseNextNode: 'Choose Next Node',
+      disconnect: 'Disconnect',
+      delete: 'Delete',
+      jumpToNode: 'Jump to Node',
+      errorBranch: 'Error Branch',
     },
     emotionEngine: {
       emotionEngineConfig: 'Emotion Engine Configuration',

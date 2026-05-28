@@ -2,9 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-19 15:16:10
+ * @Last Modified time: 2026-05-27 13:47:18
  */
-import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection, type Edge } from '@antv/x6';
+import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
+  // Scroller,
+type Edge } from '@antv/x6';
 import { register as registerReactShape } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 import { App } from 'antd';
@@ -694,6 +696,13 @@ export const useWorkflowGraph = ({
         padding: 5,
       }),
     );
+    // graphRef.current.use(
+    //   new Scroller({
+    //     enabled: true,
+    //     pannable: false,
+    //     autoResize: true,
+    //   }),
+    // );
     graphRef.current.use(
       new Snapline({
         enabled: true,

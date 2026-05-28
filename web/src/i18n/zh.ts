@@ -2654,6 +2654,8 @@ export const zh = {
         duplicateName: '变量名不能重复',
         times: '次',
         ms: '毫秒',
+        setting: '设置',
+        lastRun: '上次运行',
       },
 
       clear: '清空',
@@ -2741,6 +2743,14 @@ export const zh = {
         empty: '暂无变量',
       },
       singleRun: '运行此节点',
+      nextStep: '下一步',
+      nextStepTip: '添加此工作流程中的下一个节点',
+      addParallelNode: '添加并行节点',
+      chooseNextNode: '选择下一个节点',
+      disconnect: '断开连接',
+      delete: '删除',
+      jumpToNode: '跳转到节点',
+      errorBranch: '异常时',
     },
     emotionEngine: {
       emotionEngineConfig: '情感引擎配置',
