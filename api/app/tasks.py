@@ -2323,7 +2323,7 @@ def batch_post_store_task(self, end_user_id: str) -> Dict[str, Any]:
                         except Exception as e:
                             logger.warning(f"[BatchPostStore] 构建 LLM client 失败: {e}")
 
-                    fused, _, _ = await second_layer_dedup_and_merge_with_neo4j(
+                    fused, _, _, id_redirect = await second_layer_dedup_and_merge_with_neo4j(
                         connector=connector,
                         end_user_id=end_user_id,
                         entity_nodes=current_entities,
@@ -2337,11 +2337,23 @@ def batch_post_store_task(self, end_user_id: str) -> Dict[str, Any]:
                         entity_data = [e.model_dump() for e in fused]
                         await connector.execute_query(EXTRACTED_ENTITY_NODE_SAVE, entities=entity_data)
 
+                    # 删除被合并的冗余节点并重定向边（APOC 合并）
+                    from app.core.memory.storage_services.extraction_engine.deduplication.second_layer_dedup import (
+                        cleanup_merged_entities,
+                    )
+                    cleanup_info = await cleanup_merged_entities(connector, id_redirect)
+                    result_info["layer2_merged_count"] = len(cleanup_info["redirects"])
+                    if cleanup_info["redirects"]:
+                        result_info["layer2_nodes_deleted"] = cleanup_info["deleted_count"]
+                    if "error" in cleanup_info:
+                        result_info["layer2_delete_error"] = cleanup_info["error"]
+
                     result_info["layer2_input"] = len(current_entities)
                     result_info["layer2_output"] = len(fused)
                     logger.info(
                         f"[BatchPostStore] 第二层去重完成: "
-                        f"{len(current_entities)} → {len(fused)} 个实体"
+                        f"{len(current_entities)} → {len(fused)} 个实体, "
+                        f"合并删除冗余节点 {cleanup_info.get('deleted_count', 0)} 个"
                     )
 
                     # 快照：第二层去重结果
