@@ -7,12 +7,21 @@ Usage:
     ...
 
 Output structure (OSS):
-    redbear-files/snapshot/
-        {end_user_id}_{YYYYmmdd_HHMMSS}/
-            0_summary.json
-            1_statements.json
-            2_triplets.json
-            ...
+
+    Sliding-window 写入（推荐路径，含完整定位上下文）:
+        redbear-files/snapshot/
+            {end_user_id}/
+                {conversation_id}/
+                    seq_{message_seq:06d}_{YYYYmmdd_HHMMSS}/
+                        0_summary.json
+                        1_assistant_pruning.json
+                        2_statement_outputs.json
+                        ...
+
+    旧的整轮写入（无 conversation/seq 时的兼容路径）:
+        redbear-files/snapshot/
+            {end_user_id}_{YYYYmmdd_HHMMSS}/
+                ...
 
 Controlled by env var PIPELINE_SNAPSHOT_ENABLED (default: false).
 """
@@ -77,18 +86,48 @@ def _safe_serialize(obj: Any) -> Any:
 class PipelineSnapshot:
     """Dump each pipeline stage's output to OSS."""
 
-    def __init__(self, end_user_id: str):
+    def __init__(
+        self,
+        end_user_id: str,
+        conversation_id: Optional[str] = None,
+        message_seq: Optional[int] = None,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ):
         """
         Args:
-            end_user_id: 终端用户 ID，用于快照目录命名以便快速定位。
+            end_user_id: 终端用户 ID，作为 OSS 第一级目录。
+            conversation_id: 对话 ID（滑动窗口写入时传入）。
+                提供后会把它作为第二级目录，便于按对话归集快照。
+            message_seq: 目标 user 消息的 message_seq（滑动窗口写入时传入）。
+                提供后会写入叶子目录名（``seq_{message_seq:06d}_{时间戳}``），
+                字典序与数值序一致，方便在 OSS Browser 里顺序定位。
+            extra_metadata: 任意可序列化的额外字段，会写入 ``0_summary.json``，
+                典型字段：ref_id / dispatch_at / dialog_at / language /
+                target_content_preview。
         """
         self.enabled = _is_enabled()
         self.end_user_id = end_user_id
+        self.conversation_id = conversation_id
+        self.message_seq = message_seq
+        self.extra_metadata: Dict[str, Any] = dict(extra_metadata or {})
         self._oss_prefix: Optional[str] = None
 
         if self.enabled:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self._oss_prefix = f"{_OSS_SNAPSHOT_PREFIX}/{end_user_id}_{ts}"
+            if conversation_id:
+                # 滑动窗口路径：按 user / conversation / seq_xxx_时间戳 三级组织
+                seq_part = (
+                    f"seq_{int(message_seq):06d}_{ts}"
+                    if message_seq is not None
+                    else f"seq_unknown_{ts}"
+                )
+                self._oss_prefix = (
+                    f"{_OSS_SNAPSHOT_PREFIX}/{end_user_id}/"
+                    f"{conversation_id}/{seq_part}"
+                )
+            else:
+                # 兼容旧路径（整轮 messages 写入）
+                self._oss_prefix = f"{_OSS_SNAPSHOT_PREFIX}/{end_user_id}_{ts}"
             logger.debug(f"[Snapshot] 已启用，OSS 前缀: {self._oss_prefix}")
 
     @property
@@ -120,13 +159,22 @@ class PipelineSnapshot:
             logger.warning(f"[Snapshot] 保存 {stage_name} 失败: {e}")
 
     def save_summary(self, stats: Dict[str, Any]) -> None:
-        """Save a summary with pipeline metadata and stats."""
+        """Save a summary with pipeline metadata and stats.
+
+        除统计信息外，还会写入定位元信息（end_user_id / conversation_id /
+        message_seq）以及构造时传入的 ``extra_metadata``，便于在 OSS 上
+        通过 ``0_summary.json`` 直接确认是哪一次写入产生的快照。
+        """
         if not self.enabled or self._oss_prefix is None:
             return
 
-        summary = {
+        summary: Dict[str, Any] = {
             "end_user_id": self.end_user_id,
+            "conversation_id": self.conversation_id,
+            "message_seq": self.message_seq,
             "timestamp": datetime.now().isoformat(),
             "stats": stats,
         }
+        if self.extra_metadata:
+            summary.update(_safe_serialize(self.extra_metadata) or {})
         self.save_stage("0_summary", summary)

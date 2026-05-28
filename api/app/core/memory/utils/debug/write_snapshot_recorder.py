@@ -30,8 +30,19 @@ class WriteSnapshotRecorder:
     当 PIPELINE_SNAPSHOT_ENABLED=false 时，所有方法均为空操作（no-op）。
     """
 
-    def __init__(self, end_user_id: str):
-        self._snapshot = PipelineSnapshot(end_user_id)
+    def __init__(
+        self,
+        end_user_id: str,
+        conversation_id: Optional[str] = None,
+        message_seq: Optional[int] = None,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ):
+        self._snapshot = PipelineSnapshot(
+            end_user_id=end_user_id,
+            conversation_id=conversation_id,
+            message_seq=message_seq,
+            extra_metadata=extra_metadata,
+        )
 
     # ── 属性 ──
 
@@ -79,7 +90,10 @@ class WriteSnapshotRecorder:
         if not stage_outputs:
             return
 
-        self._record_statements(stage_outputs.get("statement_results", {}))
+        self._record_statements(
+            stage_outputs.get("statement_results", {}),
+            stage_outputs.get("statement_inputs", {}),
+        )
         self._record_triplets(stage_outputs.get("triplet_results", {}))
         self._record_emotions(stage_outputs.get("emotion_results", {}))
         self._record_embeddings(stage_outputs.get("embedding_output"))
@@ -198,12 +212,45 @@ class WriteSnapshotRecorder:
 
     # ── 内部方法 ──
 
-    def _record_statements(self, stmt_results: Dict) -> None:
+    def _record_statements(
+        self,
+        stmt_results: Dict,
+        stmt_inputs: Optional[Dict] = None,
+    ) -> None:
+        """记录 statement 抽取结果，并附带 LLM 输入上下文。
+
+        新格式按 chunk 分组，每条记录包含：
+        - dialog_id / chunk_id：定位信息
+        - input：本次 extract_statement 注入给 LLM 的上下文
+            （target_content / target_message_date / dialog_at /
+             supporting_context.msgs）
+        - outputs：LLM 抽取出来的 statement 列表
+        便于人工核对每个 chunk 的输入是否正确、输出是否合理。
+        """
+        stmt_inputs = stmt_inputs or {}
         snapshot_data: List[Dict] = []
-        for _did, chunk_stmts in stmt_results.items():
-            for _cid, stmts in chunk_stmts.items():
-                for s in stmts:
-                    snapshot_data.append(s.model_dump())
+        for did, chunk_stmts in stmt_results.items():
+            chunk_inputs = stmt_inputs.get(did, {})
+            for cid, stmts in chunk_stmts.items():
+                step_input = chunk_inputs.get(cid)
+                input_dump: Optional[Dict[str, Any]] = None
+                if step_input is not None and hasattr(step_input, "model_dump"):
+                    full = step_input.model_dump()
+                    # 仅保留与 extract_statement 提示词相关的字段，避免冗余
+                    input_dump = {
+                        "target_content": full.get("target_content"),
+                        "target_message_date": full.get("target_message_date"),
+                        "dialog_at": full.get("dialog_at"),
+                        "supporting_context": full.get("supporting_context"),
+                    }
+                snapshot_data.append(
+                    {
+                        "dialog_id": did,
+                        "chunk_id": cid,
+                        "input": input_dump,
+                        "outputs": [s.model_dump() for s in stmts],
+                    }
+                )
         self._snapshot.save_stage("2_statement_outputs", snapshot_data)
 
     def _record_triplets(self, triplet_results: Dict) -> None:

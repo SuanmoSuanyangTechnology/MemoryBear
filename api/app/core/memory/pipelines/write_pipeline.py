@@ -206,7 +206,16 @@ class WritePipeline:
                     WriteSnapshotRecorder,
                 )
 
-                self._recorder = WriteSnapshotRecorder(self.end_user_id)
+                # 整轮写入路径：仅按 end_user_id + 时间戳分目录（兼容旧行为），
+                # 但仍把 ref_id / language / mode 写到 0_summary.json 以便辨识。
+                self._recorder = WriteSnapshotRecorder(
+                    end_user_id=self.end_user_id,
+                    extra_metadata={
+                        "mode": "legacy_full_messages",
+                        "ref_id": ref_id,
+                        "language": self.language,
+                    },
+                )
 
                 # Step 1: 预处理 - 消息分块 + AI消息语义剪枝
                 async with bear.step(1, 5, "预处理", "消息分块") as s:
@@ -1113,7 +1122,27 @@ class WritePipeline:
                 from app.core.memory.utils.debug.write_snapshot_recorder import (
                     WriteSnapshotRecorder,
                 )
-                self._recorder = WriteSnapshotRecorder("new")
+                # 滑动窗口写入：按 end_user / conversation / seq 三级组织 OSS 前缀，
+                # 并把定位元信息（ref_id / dispatch_at / dialog_at / 目标消息预览
+                # 等）写入 0_summary.json，便于在大量数据中精确定位本次快照。
+                _target_content = target_message.get("content", "") or ""
+                _preview = _target_content[:200]
+                self._recorder = WriteSnapshotRecorder(
+                    end_user_id=self.end_user_id,
+                    conversation_id=conversation_id,
+                    message_seq=message_seq,
+                    extra_metadata={
+                        "mode": "sliding_window",
+                        "ref_id": ref_id,
+                        "dispatch_at": dispatch_at,
+                        "dialog_at": _dialog_at,
+                        "language": self.language,
+                        "target_content_preview": _preview,
+                        "target_content_length": len(_target_content),
+                        "context_before_count": len(context_before or []),
+                        "context_after_count": len(context_after or []),
+                    },
+                )
 
                 from app.core.memory.pipelines.pruning_pipeline import PruningPipeline
                 pruning_pipeline = PruningPipeline(
