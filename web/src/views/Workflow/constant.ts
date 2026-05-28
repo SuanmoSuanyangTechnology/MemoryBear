@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-21 16:45:01
+ * @Last Modified time: 2026-05-28 14:54:25
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -48,38 +48,6 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           variables: {
             type: 'define',
-            sys: [
-              {
-                name: "message",
-                type: "string",
-                readonly: true
-              },
-              {
-                name: "conversation_id",
-                type: "string",
-                readonly: true
-              },
-              {
-                name: "execution_id",
-                type: "string",
-                readonly: true
-              },
-              {
-                name: "workspace_id",
-                type: "string",
-                readonly: true
-              },
-              {
-                name: "user_id",
-                type: "string",
-                readonly: true
-              },
-              {
-                name: "files",
-                type: "array[file]",
-                readonly: true
-              },
-            ],
             defaultValue: []
           }
         }
@@ -1150,11 +1118,6 @@ export interface OutputVariable {
   }>;
   /** Dynamically defined variable keys */
   define?: string[];
-  /** System-level output variables */
-  sys?: Array<{
-    name: string;
-    type: string;
-  }>;
   /** Error-related output variables */
   error?: Array<{
     name: string;

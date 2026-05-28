@@ -1096,7 +1096,9 @@ export const en = {
       multi_agent: 'Cluster',
       multi_agentDesc: 'Create an Agent Cluster',
       workflow: 'Workflow',
-      workflowDesc: 'To be opened, please stay tuned',
+      workflowDesc: 'Create a conversation workflow',
+      pure_workflow: 'Pure Workflow',
+      pure_workflowDesc: 'Create a strategy workflow',
       editApplication: 'Edit Application Info',
 
 
@@ -2131,6 +2133,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       inner: 'Built-in Tools',
       custom: 'Custom Tools',
       market: 'Tool Market',
+      workflow: 'Workflow',
       mcpSearchPlaceholder: 'Search MCP Services...',
       innerSearchPlaceholder: 'Search Tools...',
       customSearchPlaceholder: 'Search Custom Tools...',
@@ -2326,6 +2329,13 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       multimodalInteraction: 'Multimodal Interaction',
       remoteAgent: 'Remote Agent',
 
+      publishAsTool: 'Publish as Tool',
+      toolDescription: 'Tool Description',
+      inputParams: 'Input Parameters',
+      outputParams: 'Output Parameters',
+      typeDesc: 'Description',
+      editWorkflowTool: 'Edit Workflow Tool',
+
       addCustom: 'Add Custom Tool',
       editCustom: 'Edit Custom Tool',
       schema: 'Schema',
@@ -2400,7 +2410,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       nodeProperties: 'Node Properties',
       empty: "Emmm…The box is empty, there's nothing here～",
       nodeName: 'Node Name',
-      addvariable: 'Chat Variables',
+      addVariable: 'Chat Variables',
       addChatVariable: 'Add Chat Variable',
       editChatVariable: 'Edit Chat Variable',
       invalidJSON: 'Invalid JSON format',
@@ -2773,6 +2783,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       delete: 'Delete',
       jumpToNode: 'Jump to Node',
       errorBranch: 'Error Branch',
+      systemVariable: 'System Variables',
     },
     emotionEngine: {
       emotionEngineConfig: 'Emotion Engine Configuration',

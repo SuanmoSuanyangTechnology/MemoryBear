@@ -54,7 +54,7 @@ const AddChatVariable = forwardRef<AddChatVariableRef, AddChatVariableProps>(({
 
   return (
     <RbDrawer
-      title={t('workflow.addvariable')}
+      title={t('workflow.addVariable')}
       open={open}
       onClose={() => setOpen(false)}
       width={480}

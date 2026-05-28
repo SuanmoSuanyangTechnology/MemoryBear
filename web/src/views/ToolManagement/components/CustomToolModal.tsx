@@ -87,7 +87,7 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
           tool_type: 'custom'
         })
         request.then(() => {
-          message.success(t('tool.addServiceSuccess'));
+          message.success(editVo?.id ? t('common.updateSuccess') : t('common.createSuccess'));
           handleClose();
           refresh()
         })

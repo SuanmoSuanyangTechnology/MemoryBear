@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 11:11:40
+ * @Last Modified time: 2026-05-27 19:01:40
  */
 /**
  * Type definitions for Application Management
@@ -39,7 +39,7 @@ export interface Application {
   /** Icon type */
   icon_type?: string;
   /** Application type: agent, multi_agent, or workflow */
-  type: 'agent' | 'multi_agent' | 'workflow';
+  type: 'agent' | 'multi_agent' | 'workflow' | 'pure_workflow';
   /** Visibility setting */
   visibility: string;
   /** Application status */

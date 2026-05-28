@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-27 13:47:18
+ * @Last Modified time: 2026-05-28 14:57:41
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
   // Scroller,
@@ -23,6 +23,7 @@ import { conditionNodeHeight, conditionNodeItemHeight, conditionNodePortItemArgs
 import type { ChatVariable, HistoryRecord, NodeProperties, WorkflowConfig } from '../types';
 import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils';
 import { useWorkflowStore } from '@/store/workflow';
+import type { Application } from '@/views/ApplicationManagement/types'
 
 const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 
@@ -36,6 +37,8 @@ export interface UseWorkflowGraphProps {
   miniMapRef: RefObject<HTMLDivElement>;
   /** Callback when features config is loaded */
   onFeaturesLoad?: (features: FeaturesConfigForm | undefined) => void;
+  /** Application type */
+  appType?: Application['type'];
 }
 
 /**
@@ -107,6 +110,7 @@ export const useWorkflowGraph = ({
   containerRef,
   miniMapRef,
   onFeaturesLoad,
+  appType,
 }: UseWorkflowGraphProps): UseWorkflowGraphReturn => {
   // Hooks
   const { id } = useParams();
@@ -138,11 +142,18 @@ export const useWorkflowGraph = ({
     graphRef.current.getNodes().forEach(node => {
       const data = node.getData()
       if (data?.type === 'if-else' || data?.type === 'question-classifier') {
-        console.log('chatVariables', chatVariables)
         node.setData({ ...data, chatVariables })
       }
     })
-  }, [chatVariables])
+  }, [chatVariables, graphRef.current])
+
+  useEffect(() => {
+    if (!appType || !graphRef.current) return
+    graphRef.current.getNodes().forEach(node => {
+      const data = node.getData()
+      node.setData({ ...data, appType })
+    })
+  }, [appType, graphRef.current])
 
   useEffect(() => {
     getConfig()

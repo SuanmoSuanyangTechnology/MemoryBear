@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 11:11:44
+ * @Last Modified time: 2026-05-27 19:03:29
  */
 /**
  * Application Modal
@@ -39,7 +39,8 @@ interface ApplicationModalProps {
 export const types = [
   'agent',
   'multi_agent',
-  'workflow'
+  'workflow',
+  'pure_workflow'
 ]
 /**
  * Application type icon mapping
@@ -47,7 +48,8 @@ export const types = [
 const typeIcons: Record<string, string> = {
   agent: AgentIcon,
   multi_agent: ClusterIcon,
-  workflow: WorkflowIcon
+  workflow: WorkflowIcon,
+  pure_workflow: WorkflowIcon,
 }
 
 /**

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:30:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-27 10:14:48
+ * @Last Modified time: 2026-05-28 14:55:24
  */
 import { useEffect, useState } from 'react';
 import { Flex, Popover } from 'antd';
@@ -10,6 +10,8 @@ import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 
 import { nodeLibrary, graphNodeLibrary, edgeAttrs, nodeWidth } from '../constant';
+import { filterNodeByAppType } from '../utils';
+import type { Application } from '@/views/ApplicationManagement/types'
 
 
 // Shared helper: adjust loop/iteration container size to fit child nodes
@@ -47,9 +49,9 @@ export const adjustCycleContainerSize = (graph: any, cycleId: string) => {
 interface PortClickHandlerProps {
   graph: any;
   nodeClick: ({ node }: { node: any }) => void;
+  appType?: Application['type'];
 }
-
-const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph, nodeClick }) => {
+const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph, nodeClick, appType }) => {
   const { t } = useTranslation();
   const [popoverVisible, setPopoverVisible] = useState(false);
   const [sourceNode, setSourceNode] = useState<any>(null);
@@ -381,6 +383,8 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph, nodeClick })
             nodeType.type !== 'start' && nodeType.type !== 'cycle-start' && nodeType.type !== 'break'
           );
         }
+
+        filteredNodes = filteredNodes.filter(nodeType => filterNodeByAppType(nodeType, appType));
         
         if (filteredNodes.length === 0) return null;
         

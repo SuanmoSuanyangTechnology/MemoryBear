@@ -1,4 +1,10 @@
-export type ToolType = 'mcp' | 'builtin' | 'custom'
+/*
+ * @Author: ZhaoYing 
+ * @Date: 2025-12-26 11:57:50
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-05-28 15:12:21
+ */
+export type ToolType = 'mcp' | 'builtin' | 'custom' | 'workflow'
 export interface Query {
   name?: string;
   tool_type: ToolType
@@ -51,6 +57,42 @@ export interface CustomToolItem {
     schema_content: string;
     schema_url: null;
   }
+}
+
+export interface InputParameters {
+  name: string;
+  type: string;
+  description: string;
+  required: boolean;
+}
+
+export interface OutputSchema {
+  type: string;
+  properties: {
+    [key: string]: { type: string };
+  };
+}
+export interface WorkflowToolItem {
+  id?: string;
+  name: string;
+  description: string;
+  icon: string | null;
+  tool_type: ToolType;
+  version: string;
+  parameters: any[];
+  config_data: {
+    app_id: string;
+    workflow_config_id: string;
+    release_id: string;
+    input_parameters: InputParameters[];
+    output_schema: OutputSchema;
+    timeout: number;
+  };
+  status: 'available' | 'unavailable';
+  is_active: boolean;
+  tags: string[];
+  tenant_id: string;
+  created_at: number;
 }
 export interface ToolItem {
   id: string;
@@ -154,4 +196,7 @@ export interface McpRef {
 }
 export interface CustomRef {
   handleEdit: (data?: ToolItem) => void;
+}
+export interface WorkflowToolModalRef {
+  handleOpen: (data: WorkflowToolItem) => void;
 }

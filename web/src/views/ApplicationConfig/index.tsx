@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:37 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 16:53:27
+ * @Last Modified time: 2026-05-28 12:21:17
  */
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
@@ -85,7 +85,7 @@ const ApplicationConfig: React.FC = () => {
         .then(() => {
           setActiveTab(key)
         })
-    } else if (activeTab === 'arrangement' && application?.type === 'workflow' && workflowRef.current) {
+    } else if (activeTab === 'arrangement' && application?.type.includes('workflow') && workflowRef.current) {
       workflowRef.current.handleSave(false)
         .then(() => {
           setActiveTab(key)
@@ -126,15 +126,16 @@ const ApplicationConfig: React.FC = () => {
         handleChangeTab={handleChangeTab}
         application={application as Application}
         refresh={getApplicationInfo}
-        appRef={application?.type === 'agent' ? agentRef : application?.type === 'multi_agent' ? clusterRef : application?.type === 'workflow' ? workflowRef : undefined}
+        appRef={application?.type === 'agent' ? agentRef : application?.type === 'multi_agent' ? clusterRef : application?.type.includes('workflow') ? workflowRef : undefined}
         workflowRef={workflowRef}
         features={features}
-        onFeaturesChange={setFeatures}
       />
       <div className="rb:p-3 rb:flex-1 rb:overflow-auto">
         {activeTab === 'arrangement' && application?.type === 'agent' && <Agent ref={agentRef} onFeaturesLoad={setFeatures} />}
         {activeTab === 'arrangement' && application?.type === 'multi_agent' && <Cluster ref={clusterRef} onFeaturesLoad={setFeatures} />}
-        {activeTab === 'arrangement' && application?.type === 'workflow' && <Workflow ref={workflowRef} onFeaturesLoad={setFeatures} />}
+        {activeTab === 'arrangement' && application?.type.includes('workflow') &&
+          <Workflow ref={workflowRef} onFeaturesLoad={setFeatures} appType={application?.type} />
+        }
         {activeTab === 'api' && <Api application={application} />}
         {activeTab === 'release' && <ReleasePage data={application as Application} refresh={getApplicationInfo} />}
         {activeTab === 'statistics' && <Statistics application={application} />}
