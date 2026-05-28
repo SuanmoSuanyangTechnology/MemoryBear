@@ -326,7 +326,10 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         # 防线1：页数限制
         estimated_pages = _get_estimated_pages(file_name, file_binary)
-        if estimated_pages and estimated_pages > MAX_DOCUMENT_PAGES:
+        logger.info(f"[ParseDoc] document={document_id} estimated_pages={estimated_pages}")
+        if estimated_pages is None:
+            raise ValueError("无法获取文档页数，拒绝解析")
+        if estimated_pages > MAX_DOCUMENT_PAGES:
             raise ValueError(
                 f"文档页数({estimated_pages})超过{MAX_DOCUMENT_PAGES}页限制，拒绝解析"
             )
@@ -2297,7 +2300,7 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
     result["task_id"] = self.request.id
     logger.info(f"反思引擎Layer2 任务完成，耗时 {result['elapsed_time']:.1f}s")
     return result
-    
+
 @celery_app.task(
     name="app.tasks.layer2_dedup_full_scan_task",
     bind=True,
