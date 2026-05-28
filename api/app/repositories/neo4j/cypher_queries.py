@@ -2335,8 +2335,10 @@ UNRESOLVED_CONTEXT_CHUNKS = """
 MATCH (c:Chunk {id: $chunk_id})
 MATCH (nearby:Chunk {end_user_id: $end_user_id})
 WHERE nearby.id <> c.id
-WITH c, nearby
-ORDER BY abs(duration.between(nearby.created_at, c.created_at).seconds) ASC
+WITH c, nearby,
+     abs(duration.between(datetime(nearby.created_at), datetime(c.created_at)).days * 86400
+       + duration.between(datetime(nearby.created_at), datetime(c.created_at)).seconds) AS diff_sec
+ORDER BY diff_sec ASC
 LIMIT $limit
 WITH collect(nearby) AS chunks
 UNWIND chunks AS chunk

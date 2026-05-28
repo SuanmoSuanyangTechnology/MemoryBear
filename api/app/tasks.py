@@ -2173,7 +2173,7 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
                                             timeout=30,
                                             auto_renewal=True,
                                         )
-                                        if not write_lock.acquire():
+                                        if not await asyncio.to_thread(write_lock.acquire):
                                             logger.warning(
                                                 f"反思引擎Layer2 获取锁超时，跳过用户 {user['id']}"
                                             )
@@ -2209,7 +2209,7 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
                                             )
                                     finally:
                                         if write_lock is not None:
-                                            write_lock.release()
+                                            await asyncio.to_thread(write_lock.release)
                                 except Exception as e:
                                     logger.error(f"反思引擎Layer2 巡检失败 user={user['id']}: {e}")
 
