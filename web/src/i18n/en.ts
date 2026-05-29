@@ -1681,6 +1681,8 @@ export const en = {
       ExtractedEntity_connect_strngth: 'Connection Strength',
       ExtractedEntity_importance_score: 'Importance Score',
 
+      AssistantPruned_memory_type: 'Memory Type',
+
       associative_memory: 'Associative Memory',
       unix: 'items',
       completeMemory: 'Complete Memory',

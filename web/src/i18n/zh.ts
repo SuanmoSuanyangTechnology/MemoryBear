@@ -1659,6 +1659,8 @@ export const zh = {
       ExtractedEntity_connect_strngth: '连接强度',
       ExtractedEntity_importance_score: '重要性评分',
 
+      AssistantPruned_memory_type: '记忆类型',
+
       associative_memory: '关联记忆',
       unix: '个',
       completeMemory: '完整记忆',
@@ -1760,6 +1762,10 @@ export const zh = {
       conversation: '对话',
       manual: '手动',
       solution_detail_noChanges: '无变更',
+      resetView: '重置视图',
+      relationshipType: '关系类型',
+      sourceNode: '源节点',
+      targetNode: '目标节点',
     },
     space: {
       createSpace: '创建空间',
