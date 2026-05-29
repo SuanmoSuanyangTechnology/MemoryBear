@@ -349,6 +349,11 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         from app.core.rag.app.naive import chunk
         logger.info(f"[ParseDoc] file_binary size={len(file_binary)} bytes, type={type(file_binary).__name__}, bool={bool(file_binary)}")
 
+        # Early-exit check before chunking
+        if _should_abort(document_id):
+            _clear_redis_state(document_id)
+            return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
+
         parent_child_mode = db_document.is_parent_child_mode
         if parent_child_mode:
             from app.core.rag.app.naive import chunk_parent_child
@@ -377,6 +382,11 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         db_document.progress_msg = _progress_msg()
         db.commit()
         db.refresh(db_document)
+
+        # Early-exit check before vectorization
+        if _should_abort(document_id):
+            _clear_redis_state(document_id)
+            return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
 
         # 2. Document vectorization and storage
         total_chunks = (len(child_res) + len(parent_res)) if parent_child_mode else len(res)
@@ -638,6 +648,10 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         # GraphRAG: 异步派发到独立队列，不阻塞文档解析流程
         if db_knowledge.parser_config and db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False):
+            # Early-exit check before dispatching GraphRAG
+            if _should_abort(document_id):
+                _clear_redis_state(document_id)
+                return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
             progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} GraphRAG enabled, dispatching async task.")
             db_document.progress_msg = _progress_msg()
             db.commit()
