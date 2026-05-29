@@ -18,6 +18,8 @@ from zoneinfo import ZoneInfo
 
 SUPPORTED_TRIGGER_TYPES = {"webhook", "schedule"}
 _IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+TRIGGER_NODES_PREPARED_FLAG = "_trigger_nodes_prepared"
+SCHEDULE_DISPATCH_LEASE_SECONDS = 600
 
 
 def resolve_schedule_timezone(timezone_name: str | None) -> tuple[datetime.tzinfo, str]:
@@ -333,6 +335,13 @@ def is_schedule_trigger_due(
     config = trigger.get("config") or {}
     runtime = trigger.get("runtime") or {}
     last_triggered_at = parse_datetime(runtime.get("last_triggered_at"))
+    last_dispatched_at = parse_datetime(runtime.get("last_dispatched_at"))
+    dispatch_status = str(runtime.get("dispatch_status") or "").strip()
+    dispatch_lease_seconds = int(config.get("dispatch_lease_seconds") or SCHEDULE_DISPATCH_LEASE_SECONDS)
+
+    if dispatch_status in {"queued", "running"} and last_dispatched_at is not None:
+        if (now - last_dispatched_at).total_seconds() < dispatch_lease_seconds:
+            return False
 
     if config.get("interval_seconds") is not None:
         interval_seconds = int(config["interval_seconds"])

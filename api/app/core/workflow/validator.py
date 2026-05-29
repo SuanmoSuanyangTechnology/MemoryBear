@@ -9,7 +9,7 @@ import logging
 from collections import defaultdict, deque
 from typing import Any, Union, TYPE_CHECKING
 
-from app.core.workflow.triggers import validate_trigger_nodes
+from app.core.workflow.triggers import TRIGGER_NODES_PREPARED_FLAG, validate_trigger_nodes
 from app.core.workflow.nodes.enums import NodeType
 
 if TYPE_CHECKING:
@@ -119,6 +119,10 @@ class WorkflowValidator:
         """
         workflow_config = copy.deepcopy(workflow_config)
         errors = []
+        trigger_nodes_prepared = (
+            isinstance(workflow_config, dict)
+            and workflow_config.get(TRIGGER_NODES_PREPARED_FLAG) is True
+        )
 
         graphs = cls.get_subgraph(workflow_config)
         for index, graph in enumerate(graphs):
@@ -137,10 +141,11 @@ class WorkflowValidator:
                     errors.append("工作流必须有一个入口节点（start 或 trigger）")
                 elif len(entry_nodes) > 1:
                     errors.append(f"工作流只能有一个入口节点，当前有 {len(entry_nodes)} 个")
-                try:
-                    validate_trigger_nodes(nodes)
-                except ValueError as exc:
-                    errors.append(str(exc))
+                if not trigger_nodes_prepared:
+                    try:
+                        validate_trigger_nodes(nodes)
+                    except ValueError as exc:
+                        errors.append(str(exc))
             else:
                 entry_nodes = [n for n in nodes if n.get("type") == NodeType.CYCLE_START]
                 if len(entry_nodes) == 0:

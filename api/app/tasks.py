@@ -4575,7 +4575,10 @@ def scan_workflow_schedule_triggers():
                 )
                 runtime = {
                     **(trigger.get("runtime") or {}),
-                    "last_triggered_at": now.isoformat(),
+                    "dispatch_status": "queued",
+                    "last_dispatched_at": now.isoformat(),
+                    "last_scheduled_at": now.isoformat(),
+                    "last_error": None,
                 }
                 service.update_release_trigger_runtime_state(release.id, trigger_id, runtime)
                 service.update_trigger_runtime_state(app.id, trigger_id, runtime)
@@ -4625,13 +4628,48 @@ def run_workflow_schedule_trigger(app_id: str, release_id: str, trigger_id: str,
             logger.warning(f"[WorkflowSchedule] 跳过不存在的 trigger: trigger_id={trigger_id}")
             return {"status": "skipped", "reason": "trigger_not_found"}
 
-        asyncio.run(
-            service.invoke_schedule_trigger(
-                app=app,
-                release=release,
-                config=config,
-                trigger=trigger,
-                now=run_at,
+        runtime = trigger.get("runtime") or {}
+        running_runtime = {
+            **runtime,
+            "dispatch_status": "running",
+            "last_started_at": datetime.now(timezone.utc).isoformat(),
+            "last_scheduled_at": run_at.isoformat(),
+            "last_error": None,
+        }
+        service.update_release_trigger_runtime_state(release.id, trigger_id, running_runtime)
+        service.update_trigger_runtime_state(app.id, trigger_id, running_runtime)
+
+        try:
+            asyncio.run(
+                service.invoke_schedule_trigger(
+                    app=app,
+                    release=release,
+                    config=config,
+                    trigger=trigger,
+                    now=run_at,
+                )
             )
-        )
-        return {"status": "completed", "trigger_id": trigger_id, "scheduled_at": run_at.isoformat()}
+            completed_runtime = {
+                **running_runtime,
+                "dispatch_status": "completed",
+                "last_triggered_at": run_at.isoformat(),
+                "last_completed_at": datetime.now(timezone.utc).isoformat(),
+                "last_error": None,
+            }
+            service.update_release_trigger_runtime_state(release.id, trigger_id, completed_runtime)
+            service.update_trigger_runtime_state(app.id, trigger_id, completed_runtime)
+            return {"status": "completed", "trigger_id": trigger_id, "scheduled_at": run_at.isoformat()}
+        except Exception as exc:
+            failed_runtime = {
+                **running_runtime,
+                "dispatch_status": "failed",
+                "last_failed_at": datetime.now(timezone.utc).isoformat(),
+                "last_error": str(exc),
+            }
+            service.update_release_trigger_runtime_state(release.id, trigger_id, failed_runtime)
+            service.update_trigger_runtime_state(app.id, trigger_id, failed_runtime)
+            logger.error(
+                f"[WorkflowSchedule] 执行失败: app_id={app_id}, release_id={release_id}, trigger_id={trigger_id}, error={exc}",
+                exc_info=True,
+            )
+            raise
