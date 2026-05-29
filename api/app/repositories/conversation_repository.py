@@ -415,11 +415,11 @@ class MessageRepository:
         """
         stmt = select(Message).where(
             Message.conversation_id == conversation_id,
-            Message.is_deleted == False,
+            Message.is_deleted.is_not(True),
         )
 
         if current_only:
-            stmt = stmt.where(Message.is_current == True)
+            stmt = stmt.where(Message.is_current.is_not(False))
 
         stmt = stmt.order_by(Message.created_at)
 
@@ -454,11 +454,11 @@ class MessageRepository:
         """
         stmt = select(Message).where(
             Message.conversation_id == conversation_id,
-            Message.is_deleted == False,
+            Message.is_deleted.is_not(True),
         )
         
         if current_only:
-            stmt = stmt.where(Message.is_current == True)
+            stmt = stmt.where(Message.is_current.is_not(False))
         
         stmt = stmt.order_by(Message.created_at)
 
