@@ -32,7 +32,7 @@ class NodeType(StrEnum):
     NOTES = "notes"
 
 
-BRANCH_NODES = frozenset({NodeType.IF_ELSE, NodeType.HTTP_REQUEST, NodeType.QUESTION_CLASSIFIER, NodeType.LLM})
+BRANCH_NODES = frozenset({NodeType.IF_ELSE, NodeType.HTTP_REQUEST, NodeType.QUESTION_CLASSIFIER, NodeType.LLM, NodeType.CODE})
 
 
 class ComparisonOperator(StrEnum):
@@ -102,6 +102,12 @@ class HttpErrorHandle(StrEnum):
     NONE = "none"
     DEFAULT = "default"
     BRANCH = "branch"
+
+
+class IterationErrorHandleMode(StrEnum):
+    TERMINATED = "terminated"
+    CONTINUE_ON_ERROR = "continue-on-error"
+    REMOVE_ABNORMAL_OUTPUT = "remove-abnormal-output"
 
 
 class ValueInputType(StrEnum):

@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import logging
@@ -13,6 +14,7 @@ from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes import BaseNode
 from app.core.workflow.nodes.code.config import CodeNodeConfig
+from app.core.workflow.nodes.enums import HttpErrorHandle
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 from app.core.config import settings
 
@@ -65,6 +67,7 @@ class CodeNode(BaseNode):
         output_dict = {}
         for output in self.typed_config.output_variables:
             output_dict[output.name] = output.type
+        output_dict["branch_signal"] = VariableType.STRING
         return output_dict
 
     def extract_result(self, content: str):
@@ -137,26 +140,92 @@ class CodeNode(BaseNode):
         else:
             raise ValueError(f"Unsupported language: {self.typed_config.language}")
 
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(
-                f"{settings.SANDBOX_URL}/v1/sandbox/run",
-                headers={
-                    "x-api-key": 'redbear-sandbox'
-                },
-                json={
-                    "language": self.typed_config.language,
-                    "code": base64.b64encode(final_script.encode("utf-8")).decode("utf-8"),
-                    "options": {
-                        "enable_network": True
-                    }
-                }
-            )
-        resp = response.json()
+        max_attempts = self.typed_config.retry.max_attempts + 1 if self.typed_config.retry.enable else 1
+        last_error = None
 
-        match resp['code']:
-            case 31:
-                raise RuntimeError("Operation not permitted")
-            case 0:
-                return self.extract_result(resp["data"]["stdout"])
-            case _:
-                raise Exception(resp["message"])
+        for attempt in range(max_attempts):
+            try:
+                logger.info(f"节点 {self.node_id} 代码执行，尝试 {attempt + 1}/{max_attempts}")
+                async with httpx.AsyncClient(timeout=60) as client:
+                    response = await client.post(
+                        f"{settings.SANDBOX_URL}/v1/sandbox/run",
+                        headers={
+                            "x-api-key": 'redbear-sandbox'
+                        },
+                        json={
+                            "language": self.typed_config.language,
+                            "code": base64.b64encode(final_script.encode("utf-8")).decode("utf-8"),
+                            "options": {
+                                "enable_network": True
+                            }
+                        }
+                    )
+                if response.status_code != 200:
+                    raise RuntimeError(f"Sandbox HTTP error: status={response.status_code}, body={response.text[:200]}")
+
+                resp = response.json()
+
+                if 'code' not in resp:
+                    raise RuntimeError(f"Sandbox returned unexpected response: {json.dumps(resp, ensure_ascii=False)[:200]}")
+
+                match resp['code']:
+                    case 31:
+                        raise RuntimeError("Operation not permitted")
+                    case 0:
+                        result = self.extract_result(resp["data"]["stdout"])
+                        result["branch_signal"] = "SUCCESS"
+                        return result
+                    case _:
+                        raise RuntimeError(resp.get("message", f"Sandbox error code: {resp['code']}"))
+
+            except Exception as e:
+                last_error = e
+                logger.error(f"节点 {self.node_id} 代码执行失败（尝试 {attempt + 1}/{max_attempts}）: {e}")
+
+                if attempt < max_attempts - 1 and self.typed_config.retry.enable:
+                    await asyncio.sleep(self.typed_config.retry.retry_interval / 1000)
+                else:
+                    break
+
+        return self._handle_error(last_error)
+
+    def _handle_error(self, error: Exception) -> dict:
+        """根据 error_handle 配置决定异常处理行为"""
+        if self.typed_config is None:
+            raise error
+
+        match self.typed_config.error_handle.method:
+            case HttpErrorHandle.NONE:
+                raise error
+            case HttpErrorHandle.DEFAULT:
+                logger.warning(f"节点 {self.node_id}: 代码执行失败，返回默认输出")
+                default_output = self.typed_config.error_handle.output or ""
+                result = {}
+                for output_var in self.typed_config.output_variables:
+                    result[output_var.name] = DEFAULT_VALUE(output_var.type)
+                # Assign default output to the first matching variable
+                if default_output and self.typed_config.output_variables:
+                    target_var = next(
+                        (v for v in self.typed_config.output_variables if v.name == "output"),
+                        next((v for v in self.typed_config.output_variables), None)
+                    )
+                    if target_var:
+                        if target_var.type == VariableType.NUMBER:
+                            try:
+                                result[target_var.name] = float(default_output)
+                            except ValueError:
+                                result[target_var.name] = DEFAULT_VALUE(VariableType.NUMBER)
+                        elif target_var.type == VariableType.BOOLEAN:
+                            result[target_var.name] = default_output.lower() in ("true", "1", "yes")
+                        else:
+                            result[target_var.name] = default_output
+                result["branch_signal"] = "SUCCESS"
+                return result
+            case HttpErrorHandle.BRANCH:
+                logger.warning(f"节点 {self.node_id}: 代码执行失败，切换到异常处理分支")
+                result = {"branch_signal": "ERROR"}
+                for output_var in self.typed_config.output_variables:
+                    result[output_var.name] = DEFAULT_VALUE(output_var.type)
+                return result
+
+        raise error

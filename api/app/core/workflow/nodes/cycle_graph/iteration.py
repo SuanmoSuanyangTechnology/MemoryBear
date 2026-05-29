@@ -11,8 +11,8 @@ from langgraph.config import get_stream_writer
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.cycle_graph import IterationNodeConfig
-from app.core.workflow.nodes.enums import NodeType
-from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.nodes.enums import NodeType, IterationErrorHandleMode
+from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 
 logger = logging.getLogger(__name__)
 
@@ -146,61 +146,84 @@ class IterationRuntime:
         Each task builds its own subgraph so the variable pool closure is independent.
 
         Returns:
-            Tuple of (idx, output, result, child_pool, stopped)
+            Tuple of (idx, output, result, child_pool, stopped, success)
+            success is False when the iteration encountered an error.
         """
         graph, child_pool, start_id = self._build_child_graph()
         checkpoint = RunnableConfig(configurable={"thread_id": uuid.uuid4()})
         init_state = await self._init_iteration_state(item, idx, child_pool, start_id)
 
-        if self.stream:
-            async for event in graph.astream(
-                    init_state,
-                    stream_mode=["debug"],
-                    config=checkpoint
-            ):
-                if isinstance(event, tuple) and len(event) == 2:
-                    mode, data = event
-                else:
-                    continue
-                if mode == "debug":
-                    event_type = data.get("type")
-                    payload = data.get("payload", {})
-                    node_name = payload.get("name")
-                    if node_name and node_name.startswith("nop"):
+        try:
+            if self.stream:
+                async for event in graph.astream(
+                        init_state,
+                        stream_mode=["debug"],
+                        config=checkpoint
+                ):
+                    if isinstance(event, tuple) and len(event) == 2:
+                        mode, data = event
+                    else:
                         continue
-                    if event_type == "task_result":
-                        result = payload.get("result", {})
-                        if not result.get("activate", {}).get(node_name):
+                    if mode == "debug":
+                        event_type = data.get("type")
+                        payload = data.get("payload", {})
+                        node_name = payload.get("name")
+                        if node_name and node_name.startswith("nop"):
                             continue
-                        node_type = result.get("node_outputs", {}).get(node_name, {}).get("node_type")
-                        cycle_variable = {"item": item} if node_type == NodeType.CYCLE_START else None
-                        node_cfg = next(
-                            (n for n in self.cycle_nodes if n.get("id") == node_name), None
-                        )
-                        self.event_write({
-                            "type": "cycle_item",
-                            "data": {
-                                "cycle_id": self.node_id,
-                                "cycle_idx": idx,
-                                "node_id": node_name,
-                                "node_type": node_type,
-                                "node_name": node_cfg.get("data", {}).get("label") if node_cfg else node_name,
-                                "status": result.get("node_outputs", {}).get(node_name, {}).get("status", "completed"),
-                                "input": result.get("node_outputs", {}).get(node_name, {}).get("input")
-                                if not cycle_variable else cycle_variable,
-                                "output": result.get("node_outputs", {}).get(node_name, {}).get("output")
-                                if not cycle_variable else cycle_variable,
-                                "elapsed_time": result.get("node_outputs", {}).get(node_name, {}).get("elapsed_time"),
-                                "token_usage": result.get("node_outputs", {}).get(node_name, {}).get("token_usage")
-                            }
-                        })
-            result = graph.get_state(config=checkpoint).values
-        else:
-            result = await graph.ainvoke(init_state, config=checkpoint)
+                        if event_type == "task_result":
+                            result = payload.get("result", {})
+                            if not result.get("activate", {}).get(node_name):
+                                continue
+                            node_type = result.get("node_outputs", {}).get(node_name, {}).get("node_type")
+                            cycle_variable = {"item": item} if node_type == NodeType.CYCLE_START else None
+                            node_cfg = next(
+                                (n for n in self.cycle_nodes if n.get("id") == node_name), None
+                            )
+                            self.event_write({
+                                "type": "cycle_item",
+                                "data": {
+                                    "cycle_id": self.node_id,
+                                    "cycle_idx": idx,
+                                    "node_id": node_name,
+                                    "node_type": node_type,
+                                    "node_name": node_cfg.get("data", {}).get("label") if node_cfg else node_name,
+                                    "status": result.get("node_outputs", {}).get(node_name, {}).get("status", "completed"),
+                                    "input": result.get("node_outputs", {}).get(node_name, {}).get("input")
+                                    if not cycle_variable else cycle_variable,
+                                    "output": result.get("node_outputs", {}).get(node_name, {}).get("output")
+                                    if not cycle_variable else cycle_variable,
+                                    "elapsed_time": result.get("node_outputs", {}).get(node_name, {}).get("elapsed_time"),
+                                    "token_usage": result.get("node_outputs", {}).get(node_name, {}).get("token_usage")
+                                }
+                            })
+                result = graph.get_state(config=checkpoint).values
+            else:
+                result = await graph.ainvoke(init_state, config=checkpoint)
 
-        output = child_pool.get_value(self.output_value)
-        stopped = result["looping"] == 2
-        return idx, output, result, child_pool, stopped
+            output = child_pool.get_value(self.output_value)
+            stopped = result["looping"] == 2
+            return idx, output, result, child_pool, stopped, True
+        except Exception as e:
+            logger.warning(f"Iteration node {self.node_id}: iteration idx={idx} failed: {e}")
+            # Emit a failed cycle_item event for visibility
+            if self.stream:
+                self.event_write({
+                    "type": "cycle_item",
+                    "data": {
+                        "cycle_id": self.node_id,
+                        "cycle_idx": idx,
+                        "node_id": self.node_id,
+                        "node_type": "iteration",
+                        "node_name": self.node_id,
+                        "status": "failed",
+                        "input": {"item": item, "index": idx},
+                        "output": None,
+                        "elapsed_time": 0,
+                        "token_usage": None,
+                        "error_message": str(e),
+                    }
+                })
+            return idx, None, None, None, False, False
 
     def _create_iteration_tasks(self, array_obj, idx):
         """
@@ -239,6 +262,7 @@ class IterationRuntime:
         if not isinstance(array_obj, list):
             raise RuntimeError("Cannot iterate over a non-list variable")
         child_state = []
+        error_mode = self.typed_config.error_handle_mode
         idx = 0
         if self.typed_config.parallel:
             # Execute iterations in parallel batches
@@ -249,13 +273,21 @@ class IterationRuntime:
                 batch = await asyncio.gather(*tasks)
                 # Sort by idx to preserve order, then collect results
                 batch_sorted = sorted(batch, key=lambda x: x[0])
-                for _, output, result, child_pool, stopped in batch_sorted:
+                for _, output, result, child_pool, stopped, success in batch_sorted:
+                    if not success:
+                        if error_mode == IterationErrorHandleMode.TERMINATED:
+                            raise RuntimeError(f"Iteration node {self.node_id}: iteration failed, terminating")
+                        elif error_mode == IterationErrorHandleMode.CONTINUE_ON_ERROR:
+                            self.result.append(DEFAULT_VALUE(self.typed_config.output_type or VariableType.NUMBER))
+                        # REMOVE_ABNORMAL_OUTPUT: skip appending
+                        continue
                     if isinstance(output, list) and self.typed_config.flatten:
                         self.result.extend(output)
                     else:
                         self.result.append(output)
-                    child_state.append(result)
-                    self._merge_conv_vars(child_pool)
+                    if child_pool:
+                        child_state.append(result)
+                        self._merge_conv_vars(child_pool)
                     if stopped:
                         self.looping = False
         else:
@@ -263,7 +295,15 @@ class IterationRuntime:
             while idx < len(array_obj) and self.looping:
                 logger.info(f"Iteration node {self.node_id}: running")
                 item = array_obj[idx]
-                _, output, result, child_pool, stopped = await self.run_task(item, idx)
+                _, output, result, child_pool, stopped, success = await self.run_task(item, idx)
+                if not success:
+                    if error_mode == IterationErrorHandleMode.TERMINATED:
+                        raise RuntimeError(f"Iteration node {self.node_id}: iteration failed, terminating")
+                    elif error_mode == IterationErrorHandleMode.CONTINUE_ON_ERROR:
+                        self.result.append(DEFAULT_VALUE(self.typed_config.output_type or VariableType.NUMBER))
+                    # REMOVE_ABNORMAL_OUTPUT: skip appending
+                    idx += 1
+                    continue
                 if isinstance(output, list) and self.typed_config.flatten:
                     self.result.extend(output)
                 else:
