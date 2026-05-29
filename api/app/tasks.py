@@ -307,6 +307,10 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             return await storage_service.download_file(file_key)
 
         try:
+            # Early-exit check after download
+            if _should_abort(document_id):
+                _clear_redis_state(document_id)
+                return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
             file_binary = asyncio.run(_download())
         except RuntimeError:
             # If there's already a running loop (e.g. in some worker configurations)
@@ -318,11 +322,6 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         if not file_binary:
             raise IOError(f"Downloaded empty file from storage: {file_key}")
         logger.info(f"[ParseDoc] Downloaded {len(file_binary)} bytes from storage key: {file_key}")
-
-        # Early-exit check after download
-        if _should_abort(document_id):
-            _clear_redis_state(document_id)
-            return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
 
         # 防线1：页数限制
         estimated_pages = _get_estimated_pages(file_name, file_binary)
