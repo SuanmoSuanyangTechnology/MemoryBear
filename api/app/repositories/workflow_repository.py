@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, select
 from fastapi import Depends
 
+from app.core.workflow.nodes.enums import NodeType
 from app.models.workflow_model import (
     WorkflowConfig,
     WorkflowExecution,
@@ -35,6 +36,11 @@ class WorkflowConfigRepository:
             WorkflowConfig.app_id == app_id,
             WorkflowConfig.is_active.is_(True)
         ).first()
+
+    def list_active(self) -> list[WorkflowConfig]:
+        """获取所有启用中的工作流配置。"""
+        stmt = select(WorkflowConfig).where(WorkflowConfig.is_active.is_(True))
+        return list(self.db.execute(stmt).scalars())
     
     def create_or_update(
         self,
@@ -97,6 +103,33 @@ class WorkflowConfigRepository:
             self.db.commit()
             self.db.refresh(config)
             return config
+
+    def update_trigger_runtime(
+        self,
+        app_id: uuid.UUID,
+        trigger_id: str,
+        runtime: dict[str, Any],
+    ) -> WorkflowConfig | None:
+        """更新指定触发器的运行时状态。"""
+        config = self.get_by_app_id(app_id)
+        if not config:
+            return None
+
+        nodes = list(config.nodes or [])
+        updated = False
+        for node in nodes:
+            if node.get("type") == NodeType.TRIGGER and node.get("id") == trigger_id:
+                node["runtime"] = runtime
+                updated = True
+                break
+
+        if not updated:
+            return None
+
+        config.nodes = nodes
+        self.db.commit()
+        self.db.refresh(config)
+        return config
 
 
 class WorkflowExecutionRepository:

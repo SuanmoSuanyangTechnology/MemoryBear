@@ -66,8 +66,16 @@ class ExecutionConfig(BaseModel):
 
 class TriggerConfig(BaseModel):
     """触发器配置"""
-    type: str = Field(..., description="触发器类型: schedule, webhook, event")
+    id: str | None = Field(default=None, description="触发器 ID")
+    type: str = Field(..., description="触发器类型: manual, schedule, webhook")
+    name: str | None = Field(default=None, description="触发器名称")
+    enabled: bool = Field(default=True, description="是否启用")
+    start_node_id: str | None = Field(default=None, description="绑定的开始节点 ID")
+    description: str | None = Field(default=None, description="触发器描述")
     config: dict[str, Any] = Field(default_factory=dict, description="触发器配置")
+    auth: dict[str, Any] = Field(default_factory=dict, description="鉴权配置")
+    runtime: dict[str, Any] = Field(default_factory=dict, description="运行时状态")
+    input_mapping: dict[str, Any] = Field(default_factory=dict, description="事件到工作流输入的映射")
 
 
 class WorkflowImportSave(BaseModel):

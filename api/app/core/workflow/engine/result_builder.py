@@ -54,10 +54,16 @@ class WorkflowResultBuilder:
         token_usage = self.aggregate_token_usage(node_outputs)
         conversation_vars = {}
         sys_vars = {}
+        snapshot = {
+            "system": {},
+            "conversation": {},
+            "nodes": {},
+        }
 
         if variable_pool:
             conversation_vars = variable_pool.get_all_conversation_vars()
             sys_vars = variable_pool.get_all_system_vars()
+            snapshot = variable_pool.to_dict()
 
         # 汇总所有 knowledge 节点的 citations
         citations = self.aggregate_citations(node_outputs)
@@ -75,6 +81,7 @@ class WorkflowResultBuilder:
             "elapsed_time": elapsed_time,
             "token_usage": token_usage,
             "citations": citations,
+            "snapshot": snapshot,
             "error": result.get("error"),
         }
 
