@@ -328,12 +328,14 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         estimated_pages = _get_estimated_pages(file_name, file_binary)
         logger.info(f"[ParseDoc] document={document_id} estimated_pages={estimated_pages}")
         if estimated_pages is None:
-            logger.info(f"[ParseDoc] document={document_id} 无法获取页数，继续解析")
+            logger.info(f"[ParseDoc] document={document_id} not obtain page number, parse failed.")
+            progress_lines.append(datetime.now().strftime('%H:%M:%S') + f" parse document '{file_name or document_id}' failed: not obtain page number")
         elif estimated_pages > MAX_DOCUMENT_PAGES:
-            logger.info(f"[ParseDoc] document={document_id} 页数({estimated_pages})超过{MAX_DOCUMENT_PAGES}限制，跳过解析")
+            logger.info(f"[ParseDoc] document={document_id}, estimated page number:({estimated_pages}), exceeds {MAX_DOCUMENT_PAGES}")
+            progress_lines.append(datetime.now().strftime('%H:%M:%S') + f" parse document '{file_name or document_id}' failed: page limit exceeded")
             db_document.progress = -1.0
             db_document.run = 0
-            db_document.progress_msg = _progress_msg() + f"Page count ({estimated_pages}) exceeds limit ({MAX_DOCUMENT_PAGES}), parsing rejected\n"
+            db_document.progress_msg = _progress_msg()
             db.commit()
             _clear_redis_state(document_id)
             return f"parse document '{file_name or document_id}' failed: page limit exceeded"
