@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-24 15:07:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-28 13:52:40
+ * @Last Modified time: 2026-05-29 16:23:50
  */
 
 import { conditionNodePortItemArgsY, conditionNodeHeight } from './constant'
@@ -77,7 +77,7 @@ export const filterNodeByAppType = (nodeType: { type: string }, appType?: Applic
     return !['end', 'memory-read', 'memory-write'].includes(nodeType.type);
   }
   if (appType === 'workflow') {
-    return nodeType.type !== 'output';
+    return !['output', 'trigger'].includes(nodeType.type);
   }
   return true;
 };

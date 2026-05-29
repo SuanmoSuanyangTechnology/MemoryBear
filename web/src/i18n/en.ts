@@ -2418,6 +2418,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
     },
     workflow: {
       coreNode: 'Core Nodes',
+      trigger: 'Trigger',
       start: 'Start',
       end: 'End',
       output: 'Output',
@@ -2458,6 +2459,27 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
       invalidJSON: 'Invalid JSON format',
 
       config: {
+        'trigger': {
+          schedule_trigger: 'Scheduled Trigger',
+          schedule: 'Schedule',
+          useVisualConfig: 'Use Visual Configuration',
+          useCron: 'Use Cron Expression',
+          cron: 'Cron Expression',
+          frequency: 'Frequency',
+          daily: 'Daily',
+          weekly: 'Weekly',
+          monthly: 'Monthly',
+          hourly: 'Hourly',
+          time: 'Time',
+          timezone: 'Timezone',
+          week_days: 'Week Days',
+          month_days: 'Month Days',
+          interval: 'Interval',
+          minute: 'Minute',
+          last_day: 'Last Day',
+          next_5_executions: 'Next 5 Executions',
+          cannot_calculate_execution_time: 'Cannot Calculate Execution Time',
+        },
         llm: {
           model_id: 'Model',
           temperature: 'Temperature',
@@ -2822,6 +2844,8 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         'list-operator.input_list': 'Input list',
         'output.outputs': 'Output Variable',
         'tool.tool_id': 'Tool',
+        'trigger.trigger_type': 'Trigger Type',
+        'trigger.cron': 'Cron Expression',
       },
       checkListHasErrors: 'Please resolve all issues in the checklist before publishing',
       variableSelect: {

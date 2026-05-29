@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-05-26 18:30:00 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-27 12:19:26
+ * @Last Modified time: 2026-05-27 15:39:52
  */
 import { type FC } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -63,7 +63,7 @@ const NextStep: FC<NextStepProps> = ({
         <div className="rb:w-6 rb:relative">
           <svg className="rb:w-6" viewBox={`0 0 24 ${svgHeight}`} preserveAspectRatio="none">
             <g>
-              <path d="M0,18 L24,18" stroke-width="1" fill="none" className="rb:stroke-[#EBEBEB]"></path>
+              <path d="M0,18 L24,18" strokeWidth="1" fill="none" className="rb:stroke-[#EBEBEB]"></path>
               <rect x="0" y="16" width="1" height="4" className="rb:fill-[#171719]"></rect>
               <rect x="23" y="16" width="1" height="4" className="rb:fill-[#171719]"></rect>
             </g>

@@ -2380,6 +2380,7 @@ export const zh = {
     },
     workflow: {
       coreNode: '核心节点',
+      trigger: '触发器',
       start: '开始（Start）',
       end: '结束（End）',
       output: '输出（Output）',
@@ -2420,6 +2421,27 @@ export const zh = {
       invalidJSON: 'JSON 格式不正确',
 
       config: {
+        'trigger': {
+          schedule_trigger: '定时触发器',
+          schedule: '定时触发',
+          useVisualConfig: '使用可视化配置',
+          useCron: '使用 Cron 表达式',
+          cron: 'Cron 表达式',
+          frequency: '频率',
+          daily: '每日',
+          weekly: '每周',
+          monthly: '每月',
+          hourly: '每小时',
+          time: '时间',
+          timezone: '时区',
+          week_days: '星期',
+          month_days: '日期',
+          interval: '间隔',
+          minute: '分钟',
+          last_day: '最后一天',
+          next_5_executions: '接下来5次执行时间',
+          cannot_calculate_execution_time: '无法计算执行时间',
+        },
         llm: {
           model_id: '模型',
           temperature: '温度',
@@ -2788,6 +2810,8 @@ export const zh = {
         'list-operator.input_list': '输入变量',
         'output.outputs': '输出变量',
         'tool.tool_id': '工具',
+        'trigger.trigger_type': '触发器类型',
+        'trigger.cron': 'Cron 表达式',
       },
       checkListHasErrors: '发布前确认检查清单中所有问题均已解决',
       variableSelect: {

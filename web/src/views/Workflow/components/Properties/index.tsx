@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:39:59 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 13:53:33
+ * @Last Modified time: 2026-05-29 16:21:49
  */
 import { type FC, useEffect, useState, useMemo } from "react";
 import clsx from 'clsx'
@@ -49,6 +49,7 @@ import Retry from './Retry'
 import NextStep from './NextStep'
 import RunResultDisplay, { type RunResult } from '../SingleNodeRun/RunResultDisplay'
 import type { Application } from '@/views/ApplicationManagement/types'
+import CronTriggerConfig from './CronTriggerConfig'
 
 /**
  * Props for Properties component
@@ -699,7 +700,9 @@ const Properties: FC<PropertiesProps> = ({
                       </Form.Item>
                       <Button type="primary" size="small" className="rb:text-[12px]!" onClick={handleSureReplace}>{t('workflow.sureReplace')}</Button>
                     </>
-                    : selectedNode?.data?.type === 'http-request'
+                    : selectedNode?.data?.type === 'trigger'
+                      ? <CronTriggerConfig />
+                      : selectedNode?.data?.type === 'http-request'
                       ? <HttpRequest
                         options={variableList}
                         selectedNode={selectedNode}

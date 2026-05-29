@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 18:05:34
+ * @Last Modified time: 2026-05-29 19:51:55
  */
 /**
  * Workflow Chat Component
@@ -514,7 +514,7 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
         labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
         // errorDesc={t('application.ReplyException')}
         renderRuntime={(item, index) => {
-          return <Runtime item={item} index={index} source="workflow" />
+          return <Runtime item={item} index={index} source={appType as string} />
         }}
         onSend={handleSend}
       />
