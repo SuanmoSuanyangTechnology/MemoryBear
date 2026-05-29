@@ -1175,6 +1175,7 @@ class WorkflowService:
                     output_moderation.accumulate(output_text)
                     if output_moderation.check_final():
                         result["output"] = output_moderation.preset_response
+                        result["preset_response"] = output_moderation.preset_response
                         result["moderation_flagged"] = True
 
             # 更新执行结果
@@ -1686,10 +1687,15 @@ class WorkflowService:
                                 meta_data=assistant_meta,
                                 sync_memory=False,
                             )
+                        # 输出审查触发时，将 moderation 信息写入 execution output_data
+                        workflow_output_data = event.get("data") or {}
+                        if output_moderation and output_moderation.is_flagged:
+                            workflow_output_data["moderation_flagged"] = True
+                            workflow_output_data["preset_response"] = output_moderation.preset_response
                         self.update_execution_status(
                             execution.execution_id,
                             "completed",
-                            output_data=event.get("data"),
+                            output_data=workflow_output_data,
                             token_usage=token_usage.get("total_tokens", None)
                         )
                         event.setdefault("data", {})["citations"] = filtered_citations
