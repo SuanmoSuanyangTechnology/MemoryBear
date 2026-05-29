@@ -24,10 +24,10 @@ from app.core.memory.utils.llm.llm_utils import MemoryClientFactory
 from app.db import get_db_context
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.end_user_repository import EndUserRepository
-from app.repositories.neo4j.cypher_queries import Graph_Node_query
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services._graph_data_helpers import (
     assemble_per_type_stat,
+    assemble_center_per_type_stat,
     compute_stat_types,
     resolve_mode_and_type_limits,
     _query_nodes_by_type_limits,
@@ -35,6 +35,7 @@ from app.services._graph_data_helpers import (
     _query_total_count_by_type,
 )
 from app.schemas.memory_episodic_schema import EmotionSubject, EmotionType, type_mapping
+from app.schemas.graph_data_schema import GraphDataResponse
 from app.services.memory_base_service import MemoryBaseService, MIN_MEMORY_SUMMARY_COUNT
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_perceptual_service import MemoryPerceptualService
@@ -1690,9 +1691,12 @@ async def analytics_graph_data(
     3. 调用 ``_resolve_per_type_limits`` + ``_apply_total_cap_shrink`` 得到最终
        生效的 ``{Node_Type: Per_Type_Limit}`` 映射；
     4. 顺序执行 Q1（节点）→ Q2（批量关联计数）→ Q3（边，try/except 降级）→
-       Q4（按 label 全量计数）四次 Cypher，整体调用次数与节点数 N 无关；
-    5. 通过 :class:`GraphDataResponse` 装配响应，``statistics.per_type`` 包含
-       本次配置内全部 Node_Type 的 ``returned/total/limit/truncated`` 元数据。
+       Q4（按 label 全量计数）四类 Cypher。其中 Q1/Q4 为命中 ``end_user_id``
+       label-property 索引，按 :data:`SUPPORTED_NODE_TYPES` 逐类型下发（每类一次
+       NodeIndexSeek），总查询次数 ``≤ 2*类型数 + 2``，与节点数 N 无关；
+    5. 通过 :class:`GraphDataResponse` 装配响应（``model_dump(exclude_none=True)``），
+       ``statistics.per_type`` 包含本次配置内全部 Node_Type 的
+       ``returned/total/limit/truncated`` 元数据。
 
     Args:
         db: SQLAlchemy 会话，用于校验 end_user 是否存在。
@@ -1745,6 +1749,8 @@ async def analytics_graph_data(
             end_user_id=end_user_id,
             type_limits=type_limits,
             node_type_counts=node_type_counts,
+            center_limit=limit,
+            total_returned=len(nodes),
         )
 
         statistics = {
@@ -1765,11 +1771,14 @@ async def analytics_graph_data(
             f"nodes={len(nodes)} edges={len(edges)} per_type=[{per_type_log}]"
         )
 
-        return {
-            "nodes": nodes,
-            "edges": edges,
-            "statistics": statistics,
-        }
+        # 通过 GraphDataResponse 装配响应：拿到 ge=0 / 必填字段校验与向后兼容契约，
+        # 再 model_dump() 回 dict 以维持 controller 接口形态。无 message 时不输出该键。
+        response = GraphDataResponse(
+            nodes=nodes,
+            edges=edges,
+            statistics=statistics,
+        )
+        return response.model_dump(exclude_none=True)
 
     except Exception as e:
         logger.error(f"获取图数据失败: {str(e)}", exc_info=True)
@@ -1918,11 +1927,26 @@ async def _build_per_type_stat(
     end_user_id: str,
     type_limits: Dict[str, int],
     node_type_counts: Dict[str, int],
+    center_limit: int,
+    total_returned: int,
 ) -> Dict[str, Dict[str, Any]]:
     """Q4 全量计数 + 装配 ``statistics.per_type`` 截断元数据。
 
     Default_Mode / Center_Mode 用全部 :data:`SUPPORTED_NODE_TYPES` 以呈现「全量 vs
     当前」；Filter_Mode 收敛到 ``type_limits`` 的键集合。
+
+    Center_Mode 走专用装配（:func:`assemble_center_per_type_stat`）：该模式由单一
+    全局 ``center_limit`` 控制邻居总量，``type_limits`` 为空，逐类型 Per_Type_Limit
+    语义不适用。专用装配把每类 ``limit`` 填全局上限、并按「全局触顶」判定截断，
+    避免 ``truncated`` 恒为 False 误导前端。
+
+    Args:
+        mode: ``{"Center", "Filter", "Default"}`` 之一。
+        end_user_id: 终端用户 UUID 字符串。
+        type_limits: 本次生效的 ``{Node_Type: Per_Type_Limit}``（Center_Mode 下为空）。
+        node_type_counts: 本次响应中按类型聚合的返回数量。
+        center_limit: Center_Mode 实际生效的全局节点上限（已被控制器钳制）。
+        total_returned: 本次响应中的节点总数，用于 Center_Mode 的全局截断判定。
     """
     stat_types = compute_stat_types(mode, type_limits)
 
@@ -1931,6 +1955,15 @@ async def _build_per_type_stat(
         end_user_id=end_user_id,
         supported_types=stat_types,
     )
+
+    if mode == "Center":
+        return assemble_center_per_type_stat(
+            stat_types=stat_types,
+            node_type_counts=node_type_counts,
+            total_by_type=total_by_type,
+            global_limit=center_limit,
+            total_returned=total_returned,
+        )
 
     return assemble_per_type_stat(
         stat_types=stat_types,

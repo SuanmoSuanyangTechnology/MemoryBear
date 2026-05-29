@@ -1,3 +1,4 @@
+from app.core.memory.constants.graph_data_constants import SUPPORTED_NODE_TYPES
 from app.core.memory.enums import Neo4jNodeType
 
 DIALOGUE_NODE_SAVE = """
@@ -1062,26 +1063,45 @@ RETURN DISTINCT
 # ============================================================
 # graph_data 接口的参数化 Cypher 查询（spec: graph-data-per-type-limit）
 # ============================================================
-# 以下三段 Cypher 用于支撑 GET /api/memory-storage/analytics/graph_data 的
-# 「按类型独立 LIMIT + 批量关联计数 + 全量计数」流水线，文本与设计文档
-# `Cypher Queries` 一节保持完全一致（参见
+# 以下查询用于支撑 GET /api/memory-storage/analytics/graph_data 的
+# 「按类型独立 LIMIT + 批量关联计数 + 全量计数」流水线（参见
 # .kiro/specs/graph-data-per-type-limit/design.md）。
+#
+# 索引命中的关键约束（Neo4j 5.x）：
+#   `end_user_id` 范围索引是 label-property 索引（``FOR (n:Label) ON (n.end_user_id)``），
+#   规划器只有在 **label 出现在 MATCH 模式里**（``MATCH (n:Label)``）时才会用
+#   NodeIndexSeek。若把 label 放进 WHERE 用 ``labels(n)[0] = $node_type``，
+#   规划器无法绑定具体 label 索引，只能 AllNodesScan 全表扫描。动态 label
+#   (``MATCH (n:$($node_type))``, Neo4j 5.26+) 同样无法稳定命中索引。
+#   因此 Q1/Q4 改为「把白名单内的 label 字面量内联进 MATCH 模式」的 builder 形式。
+#   label 取自 :data:`SUPPORTED_NODE_TYPES`（已 ``isidentifier`` 校验 + 白名单过滤），
+#   字面量内联不存在注入风险。
 
-# Q1：按单个 Node_Type 与对应 Per_Type_Limit 检索节点。
-#
-# 注意：Neo4j 不允许 ``LIMIT`` 引用运行期变量（``Neo.ClientError.Statement.SyntaxError
-# 50N42 — It is not allowed to refer to variables in LIMIT``），因此本查询采用
-# 「单类型 + 静态 ``$limit`` 参数」的形式；service 层 helper
-# (:func:`app.services._graph_data_helpers._query_nodes_by_type_limits`) 在 Python
-# 侧对每个非零 ``Per_Type_Limit`` 类型循环下发一次本查询并合并结果，整体调用次数
-# 仍与节点总数 N 无关（最多 = 类型数，常数级），符合 Requirement 6.4 的语义。
-#
-# 参数：$end_user_id (STRING), $node_type (STRING), $limit (INTEGER, 静态)
-GRAPH_NODES_BY_TYPE_LIMITS = """
-// GRAPH_NODES_BY_TYPE_LIMITS
-MATCH (n)
+
+def build_graph_nodes_by_type_query(node_type: str) -> str:
+    """构建「按单个 Node_Type 检索节点」的 Cypher（Q1），label 字面量内联以命中索引。
+
+    Neo4j 不允许 ``LIMIT`` 引用运行期变量，故 ``$limit`` 仍以静态参数下发；
+    service 层 helper 对每个非零 ``Per_Type_Limit`` 类型循环调用一次本 builder，
+    整体调用次数与节点总数 N 无关（最多 = 类型数，常数级），符合 Requirement 6.4。
+
+    Args:
+        node_type: 节点 label，必须属于 :data:`SUPPORTED_NODE_TYPES`。
+
+    Returns:
+        把 ``node_type`` 内联进 ``MATCH (n:<label>)`` 后的 Cypher 字符串；
+        运行期参数为 ``$end_user_id`` (STRING) 与 ``$limit`` (INTEGER)。
+
+    Raises:
+        ValueError: 当 ``node_type`` 不在 :data:`SUPPORTED_NODE_TYPES` 中时
+            （防止任何未经白名单校验的字符串被内联进 Cypher）。
+    """
+    if node_type not in SUPPORTED_NODE_TYPES:
+        raise ValueError(f"不支持的 Node_Type，拒绝内联进 Cypher: {node_type!r}")
+    return f"""
+// GRAPH_NODES_BY_TYPE_LIMITS({node_type})
+MATCH (n:{node_type})
 WHERE n.end_user_id = $end_user_id
-  AND labels(n)[0] = $node_type
 RETURN
     elementId(n)        AS id,
     labels(n)           AS labels,
@@ -1089,7 +1109,36 @@ RETURN
 LIMIT $limit
 """
 
+
+def build_graph_total_count_by_type_query(node_type: str) -> str:
+    """构建「单个 Node_Type 全量计数」的 Cypher（Q4），label 字面量内联以命中索引。
+
+    取代旧版「``MATCH (n) WHERE labels(n)[0] IN $supported_types``」单查询——
+    后者无 label 在模式里，会对全库做 AllNodesScan。改为按类型 NodeIndexSeek，
+    service 层循环调用并合并为 ``{label: total}``（调用次数 = 类型数，常数级）。
+
+    Args:
+        node_type: 节点 label，必须属于 :data:`SUPPORTED_NODE_TYPES`。
+
+    Returns:
+        把 ``node_type`` 内联进 ``MATCH (n:<label>)`` 后的计数 Cypher；
+        运行期参数为 ``$end_user_id`` (STRING)。
+
+    Raises:
+        ValueError: 当 ``node_type`` 不在 :data:`SUPPORTED_NODE_TYPES` 中时。
+    """
+    if node_type not in SUPPORTED_NODE_TYPES:
+        raise ValueError(f"不支持的 Node_Type，拒绝内联进 Cypher: {node_type!r}")
+    return f"""
+// GRAPH_NODES_TOTAL_COUNT_BY_TYPE({node_type})
+MATCH (n:{node_type})
+WHERE n.end_user_id = $end_user_id
+RETURN count(n) AS total
+"""
+
+
 # Q2：批量查询若干节点的关联边总数，取代旧实现里每节点一次的 N+1 子查询。
+# Q2 按 ``elementId(n)`` 直接定位节点，无需 label，不涉及上面的索引命中问题。
 #
 # 注意：Neo4j 5 已移除 ``size((n)--())`` 这种「pattern expression in size()」用法，
 # 必须改用 ``COUNT { (n)--() }`` 子查询表达式（见
@@ -1106,19 +1155,9 @@ MATCH (n) WHERE elementId(n) = nid
 RETURN nid AS id, COUNT { (n)--() } AS rel_count
 """
 
-# Q4：按支持类型聚合 end_user 下的节点全量总数，用于 statistics.per_type 元数据。
-# 参数：$end_user_id (STRING), $supported_types (LIST<STRING>)
-GRAPH_NODES_TOTAL_COUNT_BY_TYPE = """
-// GRAPH_NODES_TOTAL_COUNT_BY_TYPE
-MATCH (n)
-WHERE n.end_user_id = $end_user_id
-  AND labels(n)[0] IN $supported_types
-RETURN labels(n)[0] AS label, count(n) AS total
-"""
-
-# DEPRECATED: Graph_Node_query 已被新版 GRAPH_NODES_BY_TYPE_LIMITS 取代，
-# 后者通过参数化 $type_limits 支持任意 Node_Type 与独立 Per_Type_Limit。
-# 此常量仅保留以避免破坏式改动；新代码不应再使用，等迁移完成后再行清理。
+# DEPRECATED: Graph_Node_query 已被 build_graph_nodes_by_type_query() 取代，
+# 后者按 SUPPORTED_NODE_TYPES 内联 label 字面量，可命中 end_user_id 索引并支持
+# 独立 Per_Type_Limit。此常量仅保留以避免破坏式改动；新代码不应再使用。
 Graph_Node_query = """
 MATCH (n:MemorySummary)
 WHERE n.end_user_id = $end_user_id

@@ -19,9 +19,9 @@ from app.core.memory.constants.graph_data_constants import (
     TOTAL_NODES_CAP,
 )
 from app.repositories.neo4j.cypher_queries import (
-    GRAPH_NODES_BY_TYPE_LIMITS,
     GRAPH_NODES_REL_COUNT_BATCH,
-    GRAPH_NODES_TOTAL_COUNT_BY_TYPE,
+    build_graph_nodes_by_type_query,
+    build_graph_total_count_by_type_query,
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
@@ -41,6 +41,7 @@ __all__ = [
     "resolve_mode_and_type_limits",
     "compute_stat_types",
     "assemble_per_type_stat",
+    "assemble_center_per_type_stat",
     # Neo4j 查询封装
     "query_nodes_by_type_limits",
     "query_rel_count_batch",
@@ -386,6 +387,59 @@ def assemble_per_type_stat(
     return per_type_stat
 
 
+def assemble_center_per_type_stat(
+    stat_types: Iterable[str],
+    node_type_counts: Dict[str, int],
+    total_by_type: Dict[str, int],
+    *,
+    global_limit: int,
+    total_returned: int,
+) -> Dict[str, Dict[str, Any]]:
+    """装配 Center_Mode 下的 ``statistics.per_type`` 元数据（纯逻辑）。
+
+    Center_Mode 不做按类型限流，而是用一个**全局** ``limit`` 控制中心节点
+    1..depth 跳邻居的**总**返回量。因此「截断」是全局概念，无法精确归因到
+    某一类型：只要本次返回的节点总数达到了 ``global_limit``，就说明可能有更多
+    邻居因全局上限被丢弃。
+
+    本函数据此装配：
+
+    - 每个类型的 ``limit`` 统一填全局 ``global_limit``（表达「本次受此上限约束」），
+      而非 :func:`assemble_per_type_stat` 里那种逐类型独立的 Per_Type_Limit；
+    - ``truncated``：仅当全局发生截断（``total_returned >= global_limit`` 且
+      该类型 ``total > returned``）时才为 True——既反映全局上限触顶，又避免给
+      「该类型其实已全量返回」的类型误标截断；
+    - ``returned`` / ``total`` 语义与 :func:`assemble_per_type_stat` 一致。
+
+    Args:
+        stat_types: 需要装配的 Node_Type 集合（Center_Mode 下一般为全部
+            :data:`SUPPORTED_NODE_TYPES`，以呈现「全量 vs 当前」对照）。
+        node_type_counts: 本次响应中按类型聚合的返回数量 ``{label: returned}``。
+        total_by_type: Q4 全量计数结果 ``{label: total}``。
+        global_limit: Center_Mode 实际生效的全局节点上限（已被控制器钳制
+            ≤ :data:`CENTER_MODE_LIMIT_HARD_MAX`）。
+        total_returned: 本次响应中的节点总数（所有类型 returned 之和）。
+
+    Returns:
+        ``{Node_Type: {returned, total, limit, truncated}}`` 映射。
+    """
+    limit_int = int(global_limit)
+    global_truncated = limit_int > 0 and int(total_returned) >= limit_int
+
+    per_type_stat: Dict[str, Dict[str, Any]] = {}
+    for node_type in stat_types:
+        returned = node_type_counts.get(node_type, 0)
+        total = int(total_by_type.get(node_type, 0))
+        truncated = global_truncated and total > returned
+        per_type_stat[node_type] = {
+            "returned": returned,
+            "total": total,
+            "limit": limit_int,
+            "truncated": truncated,
+        }
+    return per_type_stat
+
+
 # ---------------------------------------------------------------------------
 # Neo4j 查询 helper（封装 graph_data 接口的 Q1/Q2/Q4）
 # ---------------------------------------------------------------------------
@@ -405,23 +459,30 @@ async def _query_nodes_by_type_limits(
 ) -> List[Dict[str, Any]]:
     """按 ``{Node_Type: Per_Type_Limit}`` 检索节点（封装 Q1）。
 
-    实现方式（必须为「单类型 + 静态 ``$limit``」循环）::
+    实现方式（单类型循环 + label 字面量内联）::
 
         for node_type, limit in type_limits.items():
             if limit <= 0:                  # 0 表示跳过该类型
                 continue
             rows = await connector.execute_query(
-                GRAPH_NODES_BY_TYPE_LIMITS,
+                build_graph_nodes_by_type_query(node_type),
                 end_user_id=end_user_id,
-                node_type=node_type,
                 limit=int(limit),
             )
 
-    背景：Neo4j 不允许 ``LIMIT`` 引用运行期变量（``Neo.ClientError.Statement.SyntaxError
-    50N42``），因此不能用 ``UNWIND $type_limits AS spec ... LIMIT spec.limit`` 写法。
-    单类型循环把 ``$limit`` 作为静态参数下发，对每个非零 limit 类型发起一次查询，
-    调用次数 ``= 非零 limit 类型数``（最多 = ``len(SUPPORTED_NODE_TYPES)`` 个常量），
-    与节点数 N 无关，仍符合 Requirement 6.4「总查询次数与 N 无关」的语义。
+    两点背景：
+
+    1. Neo4j 不允许 ``LIMIT`` 引用运行期变量（``Neo.ClientError.Statement.SyntaxError
+       50N42``），因此不能用 ``UNWIND $type_limits AS spec ... LIMIT spec.limit`` 写法，
+       只能对每个类型单独下发静态 ``$limit``。
+    2. ``end_user_id`` 范围索引是 label-property 索引，规划器只有在 label 出现在
+       MATCH 模式里（``MATCH (n:Statement)``）时才会走 NodeIndexSeek；把 label 放进
+       WHERE 用 ``labels(n)[0] = $node_type``（或动态 label ``MATCH (n:$($node_type))``）
+       都无法稳定命中索引、退化为 AllNodesScan。因此这里改用
+       :func:`build_graph_nodes_by_type_query` 把白名单内的 label 字面量内联进模式。
+
+    对每个非零 limit 类型发起一次查询，调用次数 ``= 非零 limit 类型数``（最多
+    = ``len(SUPPORTED_NODE_TYPES)`` 个常量），与节点数 N 无关，符合 Requirement 6.4。
 
     Args:
         connector: 由调用方注入的 :class:`Neo4jConnector` 实例，便于在测试中 mock。
@@ -444,9 +505,8 @@ async def _query_nodes_by_type_limits(
         if limit_int <= 0:
             continue
         rows = await connector.execute_query(
-            GRAPH_NODES_BY_TYPE_LIMITS,
+            build_graph_nodes_by_type_query(node_type),
             end_user_id=end_user_id,
-            node_type=node_type,
             limit=limit_int,
         )
         if rows:
@@ -493,6 +553,13 @@ async def _query_total_count_by_type(
 ) -> Dict[str, int]:
     """按 label 聚合 end_user 下的全量节点总数（封装 Q4）。
 
+    与 Q1 同理：为命中 ``end_user_id`` 范围索引（label-property 索引），
+    必须把 label 字面量内联进 MATCH 模式。旧版「``MATCH (n) WHERE labels(n)[0]
+    IN $supported_types``」单查询缺少模式内 label，会对全库 AllNodesScan；
+    这里改为对每个类型调用 :func:`build_graph_total_count_by_type_query`
+    单独 NodeIndexSeek 计数，再合并为 ``{label: total}``。调用次数 = 类型数
+    （最多 = ``len(SUPPORTED_NODE_TYPES)``，常数级），与节点数 N 无关。
+
     Args:
         connector: :class:`Neo4jConnector` 实例。
         end_user_id: 终端用户 UUID 字符串。
@@ -507,18 +574,16 @@ async def _query_total_count_by_type(
     if not supported_types:
         return {}
 
-    rows = await connector.execute_query(
-        GRAPH_NODES_TOTAL_COUNT_BY_TYPE,
-        end_user_id=end_user_id,
-        supported_types=list(supported_types),
-    )
-
     result: Dict[str, int] = {}
-    for row in rows:
-        label = row.get("label")
-        if not label:
-            continue
-        result[label] = int(row.get("total", 0) or 0)
+    for node_type in supported_types:
+        rows = await connector.execute_query(
+            build_graph_total_count_by_type_query(node_type),
+            end_user_id=end_user_id,
+        )
+        total = 0
+        if rows:
+            total = int(rows[0].get("total", 0) or 0)
+        result[node_type] = total
     return result
 
 
