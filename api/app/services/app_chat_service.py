@@ -1263,7 +1263,7 @@ class AppChatService:
                     Message.conversation_id == original_msg.conversation_id,
                     Message.role == "user",
                     Message.created_at < original_msg.created_at,
-                    Message.is_deleted == False,
+                    Message.is_deleted.is_not(True),
                 )
                 .order_by(Message.created_at.desc())
                 .limit(1)
@@ -1286,7 +1286,7 @@ class AppChatService:
                 Message.conversation_id == original_msg.conversation_id,
                 Message.parent_message_id == parent_msg_id,
                 Message.role == "assistant",
-                Message.is_deleted == False,
+                Message.is_deleted.is_not(True),
             )
         ).first()
         max_version = max_version_result or 0
@@ -1419,7 +1419,7 @@ class AppChatService:
                     Message.conversation_id == original_msg.conversation_id,
                     Message.role == "user",
                     Message.created_at < original_msg.created_at,
-                    Message.is_deleted == False,
+                    Message.is_deleted.is_not(True),
                 )
                 .order_by(Message.created_at.desc())
                 .limit(1)
@@ -1442,7 +1442,7 @@ class AppChatService:
                 Message.conversation_id == original_msg.conversation_id,
                 Message.parent_message_id == parent_msg_id,
                 Message.role == "assistant",
-                Message.is_deleted == False,
+                Message.is_deleted.is_not(True),
             )
         ).first()
         max_version = max_version_result or 0
@@ -1529,7 +1529,7 @@ class AppChatService:
                 Message.conversation_id == conversation_id,
                 Message.is_current.is_not(False),
                 Message.created_at < before_time,
-                Message.is_deleted == False,
+                Message.is_deleted.is_not(True),
             )
             .order_by(Message.created_at.asc())
             .limit(max_history)

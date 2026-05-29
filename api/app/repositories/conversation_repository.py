@@ -415,7 +415,7 @@ class MessageRepository:
         """
         stmt = select(Message).where(
             Message.conversation_id == conversation_id,
-            Message.is_deleted == False,
+            Message.is_deleted.is_not(True),
         )
 
         if current_only:
@@ -454,7 +454,7 @@ class MessageRepository:
         """
         stmt = select(Message).where(
             Message.conversation_id == conversation_id,
-            Message.is_deleted == False,
+            Message.is_deleted.is_not(True),
         )
         
         if current_only:
