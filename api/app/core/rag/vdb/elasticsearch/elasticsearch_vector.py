@@ -30,7 +30,7 @@ class ElasticSearchVector(BaseVector):
     def __init__(self, index_name: str, client: Elasticsearch,
                  embedding_config: ModelApiKey, reranker_config: ModelApiKey):
         super().__init__(index_name.lower())
-        
+
         # 初始化 Embedding 模型（自动支持火山引擎多模态）
         self.embeddings = RedBearEmbeddings(RedBearModelConfig(
             model_name=embedding_config.model_name,
@@ -39,7 +39,7 @@ class ElasticSearchVector(BaseVector):
             base_url=embedding_config.api_base
         ))
         self.is_multimodal_embedding = self.embeddings.is_multimodal_supported()
-        
+
         self.reranker = RedBearRerank(RedBearModelConfig(
             model_name=reranker_config.model_name,
             provider=reranker_config.provider,
@@ -554,6 +554,7 @@ class ElasticSearchVector(BaseVector):
 
             docs_and_scores.append((DocumentChunk(page_content=page_content, metadata=metadata), score))
 
+        # docs = [doc for doc, score in docs_and_scores]
         docs = []
         for doc, score in docs_and_scores:
             # check score threshold
@@ -624,7 +625,7 @@ class ElasticSearchVector(BaseVector):
             query=query_str,
         )
         # logger.info(result)
-        
+
         if "errors" in result:
             raise ValueError(f"Error during query: {result['errors']}")
 
@@ -648,7 +649,8 @@ class ElasticSearchVector(BaseVector):
             # Normalize the score to the [0,1] interval
             normalized_score = res["_score"] / max_score
             docs_and_scores.append((DocumentChunk(page_content=page_content, metadata=metadata), normalized_score))
-        
+
+        # docs = [doc for doc, score in docs_and_scores]
         docs = []
         for doc, score in docs_and_scores:
             # check score threshold
@@ -740,43 +742,29 @@ class ElasticSearchVector(BaseVector):
 
     def rerank(self, query: str, docs: list[DocumentChunk], top_k: int) -> list[DocumentChunk]:
         """
-        Reorder the list of document blocks and return the top_k results most relevant to the query
-        Args:
-            query: query string
-            docs: List of document chunk to be rearranged
-            top_k: The number of top-level documents returned
-
-        Returns:
-            Rearranged document chunk list (sorted in descending order of relevance)
-
-        Raises:
-            ValueError: If the input document list is empty or top_k is invalid
+        Reorder the list of document blocks and return the top_k results most relevant to the query.
+        Falls back to the original docs (truncated to top_k) if reranking fails.
         """
-        # parameter validation
         if not docs:
             raise ValueError("retrieval chunks be empty")
         if top_k <= 0:
             raise ValueError("top_k must be a positive integer")
         try:
-            # Convert to LangChain Document object
             documents = [
                 Document(
-                    page_content=doc.page_content,  # Ensure that DocumentChunk possesses this attribute
-                    metadata=doc.metadata or {}  # Deal with possible None metadata
+                    page_content=doc.page_content,
+                    metadata=doc.metadata or {}
                 )
                 for doc in docs
             ]
 
-            # Perform reordering (compress_documents will automatically handle relevance scores and indexing)
             reranked_docs = list(self.reranker.compress_documents(documents, query))
             print(reranked_docs)
 
-            # Sort in descending order based on relevance score
             reranked_docs.sort(
                 key=lambda x: x.metadata.get("relevance_score", 0),
                 reverse=True
             )
-            # Convert back to a list of DocumentChunk, and save the relevance_score to metadata["score"]
             result = []
             for item in reranked_docs[:top_k]:
                 for doc in docs:
@@ -785,7 +773,11 @@ class ElasticSearchVector(BaseVector):
                         result.append(doc)
             return result
         except Exception as e:
-            raise RuntimeError(f"Failed to rerank documents: {str(e)}") from e
+            logger.warning(f"Rerank failed, falling back to original results: {str(e)}")
+            for doc in docs[:top_k]:
+                if doc.metadata is not None and "score" not in doc.metadata:
+                    doc.metadata["score"] = 0.5
+            return docs[:top_k]
 
     def create_collection(
         self,
@@ -942,12 +934,18 @@ class ElasticSearchVectorFactory:
             raise ValueError(f"embedding_id config error: {str(knowledge.embedding_id)}")
         if knowledge.reranker is None:
             raise ValueError(f"reranker_id config error: {str(knowledge.reranker_id)}")
+        embedding_config = knowledge.embedding.api_keys[0] if knowledge.embedding.api_keys else None
+        if not knowledge.embedding.api_keys:
+            logger.warning(f"No embedding api key found for knowledge {knowledge.id}")
+        reranker_config = knowledge.reranker.api_keys[0] if knowledge.reranker.api_keys else None
+        if not knowledge.reranker.api_keys:
+            logger.warning(f"No reranker api key found for knowledge {knowledge.id}")
 
         return ElasticSearchVector(
             index_name=collection_name,
             client=client,
-            embedding_config=knowledge.embedding.api_keys[0],
-            reranker_config=knowledge.reranker.api_keys[0],
+            embedding_config=embedding_config,
+            reranker_config=reranker_config,
         )
 
     @classmethod

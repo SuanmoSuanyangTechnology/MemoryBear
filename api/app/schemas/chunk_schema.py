@@ -94,7 +94,7 @@ class ChunkRetrieve(BaseModel):
     file_names_filter: list[str] | None = Field(None)
     similarity_threshold: float | None = Field(None)
     vector_similarity_weight: float | None = Field(None)
-    top_k: int | None = Field(None)
+    top_k: int | None = Field(100, ge=1, le=100)
     retrieve_type: RetrieveType | None = Field(None)
     rerank_score_threshold: float | None = Field(None, ge=0, le=1)
 
