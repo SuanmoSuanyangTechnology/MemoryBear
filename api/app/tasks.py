@@ -6,7 +6,7 @@ import shutil
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from math import ceil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -22,6 +22,7 @@ from app.core.logging_config import get_logger
 from app.core.rag.crawler.web_crawler import WebCrawler
 from app.core.rag.graphrag.general.index import init_graphrag, run_graphrag_for_kb
 from app.core.rag.graphrag.utils import get_llm_cache, set_llm_cache
+from app.core.rag.utils.redis_conn import REDIS_CONN
 from app.core.rag.integrations.feishu.client import FeishuAPIClient
 from app.core.rag.integrations.feishu.models import FileInfo
 from app.core.rag.integrations.yuque.client import YuqueAPIClient
@@ -64,6 +65,25 @@ EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
 EMBEDDING_MAX_WORKERS = int(os.getenv("EMBEDDING_MAX_WORKERS", "3"))
 # auto_questions LLM 并发调用的最大线程数
 AUTO_QUESTIONS_MAX_WORKERS = int(os.getenv("AUTO_QUESTIONS_MAX_WORKERS", "5"))
+# 文档解析页数上限
+MAX_DOCUMENT_PAGES = int(os.getenv("MAX_DOCUMENT_PAGES", "200"))
+
+
+def _get_estimated_pages(file_name: str, file_binary: bytes) -> int | None:
+    """快速获取 PDF 页数，失败返回 None（不阻断）"""
+    ext = os.path.splitext(file_name)[1].lower()
+    try:
+        if ext == ".pdf":
+            from app.core.rag.deepdoc.parser.pdf_parser import RAGPdfParser
+            return RAGPdfParser.total_page_number("", binary=file_binary)
+    except Exception:
+        pass
+    return None
+
+
+# Redis keys for document parse task tracking
+_PARSE_TASK_KEY = "doc:{doc_id}:parse_task"
+_PARSE_CANCEL_KEY = "doc:{doc_id}:parse_cancel"
 
 # 模块级同步 Redis 连接池，供 Celery 任务共享使用
 # 连接 CELERY_BACKEND DB，与 write_message:last_done 时间戳写入保持一致
@@ -229,6 +249,28 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
     def _progress_msg() -> str:
         return "\n".join(progress_lines) + "\n"
 
+    def _should_abort(doc_id: uuid.UUID) -> bool:
+        """Check if the document has been deleted or marked for cancellation via Redis."""
+        cancel = REDIS_CONN.get(_PARSE_CANCEL_KEY.format(doc_id=doc_id))
+        if cancel:
+            logger.info(f"[ParseDoc] document={doc_id} cancelled via Redis -- aborting")
+            return True
+        # Fallback to DB check only when Redis is unavailable
+        if not REDIS_CONN.is_alive():
+            doc = db.query(Document).filter(Document.id == doc_id).first()
+            if doc is None:
+                logger.info(f"[ParseDoc] document={doc_id} deleted -- aborting")
+                return True
+        return False
+
+    def _clear_redis_state(doc_id: uuid.UUID):
+        """Clean up Redis tracking keys."""
+        try:
+            REDIS_CONN.delete(_PARSE_TASK_KEY.format(doc_id=doc_id))
+            REDIS_CONN.delete(_PARSE_CANCEL_KEY.format(doc_id=doc_id))
+        except Exception:
+            logger.warning(f"[ParseDoc] failed to clear Redis state for {doc_id}", exc_info=True)
+
     with get_db_context() as db:
       try:
         if not isinstance(document_id, uuid.UUID):
@@ -265,6 +307,10 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             return await storage_service.download_file(file_key)
 
         try:
+            # Early-exit check after download
+            if _should_abort(document_id):
+                _clear_redis_state(document_id)
+                return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
             file_binary = asyncio.run(_download())
         except RuntimeError:
             # If there's already a running loop (e.g. in some worker configurations)
@@ -277,6 +323,22 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             raise IOError(f"Downloaded empty file from storage: {file_key}")
         logger.info(f"[ParseDoc] Downloaded {len(file_binary)} bytes from storage key: {file_key}")
 
+        # 防线1：页数限制
+        estimated_pages = _get_estimated_pages(file_name, file_binary)
+        logger.info(f"[ParseDoc] document={document_id} estimated_pages={estimated_pages}")
+        if estimated_pages is None:
+            logger.info(f"[ParseDoc] document={document_id} not obtain page number, parse failed.")
+            progress_lines.append(datetime.now().strftime('%H:%M:%S') + f" parse document '{file_name or document_id}' failed: not obtain page number")
+        elif estimated_pages > MAX_DOCUMENT_PAGES:
+            logger.info(f"[ParseDoc] document={document_id}, estimated page number:({estimated_pages}), exceeds {MAX_DOCUMENT_PAGES}")
+            progress_lines.append(datetime.now().strftime('%H:%M:%S') + f" parse document '{file_name or document_id}' failed: page limit exceeded")
+            db_document.progress = -1.0
+            db_document.run = 0
+            db_document.progress_msg = _progress_msg()
+            db.commit()
+            _clear_redis_state(document_id)
+            return f"parse document '{file_name or document_id}' failed: page limit exceeded"
+
         def progress_callback(prog=None, msg=None):
             progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} parse progress: {prog} msg: {msg}.")
 
@@ -285,6 +347,11 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         from app.core.rag.app.naive import chunk
         logger.info(f"[ParseDoc] file_binary size={len(file_binary)} bytes, type={type(file_binary).__name__}, bool={bool(file_binary)}")
+
+        # Early-exit check before chunking
+        if _should_abort(document_id):
+            _clear_redis_state(document_id)
+            return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
 
         parent_child_mode = db_document.is_parent_child_mode
         if parent_child_mode:
@@ -314,6 +381,11 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         db_document.progress_msg = _progress_msg()
         db.commit()
         db.refresh(db_document)
+
+        # Early-exit check before vectorization
+        if _should_abort(document_id):
+            _clear_redis_state(document_id)
+            return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
 
         # 2. Document vectorization and storage
         total_chunks = (len(child_res) + len(parent_res)) if parent_child_mode else len(res)
@@ -575,19 +647,25 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         # GraphRAG: 异步派发到独立队列，不阻塞文档解析流程
         if db_knowledge.parser_config and db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False):
+            # Early-exit check before dispatching GraphRAG
+            if _should_abort(document_id):
+                _clear_redis_state(document_id)
+                return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
             progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} GraphRAG enabled, dispatching async task.")
             db_document.progress_msg = _progress_msg()
             db.commit()
             build_graphrag_for_document.delay(str(document_id), str(db_knowledge.id))
 
+        _clear_redis_state(document_id)
         result = f"parse document '{db_document.file_name}' processed successfully."
         logger.info(f"[ParseDoc] document={document_id} file='{db_document.file_name}' done in {db_document.process_duration:.1f}s, chunks={total_chunks}")
         return result
       except Exception as e:
         logger.error(f"[ParseDoc] document={document_id} failed: {e}", exc_info=True)
+        _clear_redis_state(document_id)
         if db_document is not None:
             try:
-                db.rollback()
+                db_document.progress = -1.0
                 db_document.progress_msg = _progress_msg() + f"Failed to vectorize and import the parsed document:{str(e)}\n"
                 db_document.run = 0
                 db.commit()
@@ -2242,7 +2320,7 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
     result["task_id"] = self.request.id
     logger.info(f"反思引擎Layer2 任务完成，耗时 {result['elapsed_time']:.1f}s")
     return result
-    
+
 @celery_app.task(
     name="app.tasks.layer2_dedup_full_scan_task",
     bind=True,
