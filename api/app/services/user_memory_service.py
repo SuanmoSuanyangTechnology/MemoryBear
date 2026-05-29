@@ -7,7 +7,7 @@ User Memory Service
 import os
 import uuid
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
@@ -2247,6 +2247,23 @@ def _resolve_edge_caption(
     return rel_type
 
 
+def _format_datetime_naive_iso(dt: datetime) -> str:
+    """将 ``datetime`` 序列化为不带时区后缀的 ISO 字符串。
+
+    Neo4j 节点写入端历史上既有用 naive ``datetime`` 的（``Statement`` / ``Chunk`` /
+    ``MemorySummary`` 等），也有用 tz-aware ``datetime`` 的（``AssistantOriginal`` /
+    ``AssistantPruned``）。直接 ``isoformat()`` 会让响应里两类节点的 ``created_at``
+    一会儿带 ``+00:00`` 一会儿不带，前端体验不一致。
+
+    本函数对 tz-aware 的 ``datetime`` 先转换为 UTC，再剥掉 ``tzinfo``，最后调用
+    ``isoformat()``；naive 的 ``datetime`` 直接 ``isoformat()``。结果格式统一为
+    形如 ``"2026-05-28T06:35:16.910751"``。
+    """
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt.isoformat()
+
+
 def _clean_neo4j_value(value: Any) -> Any:
     """
     清理单个值的 Neo4j 特殊类型
@@ -2267,13 +2284,12 @@ def _clean_neo4j_value(value: Any) -> Any:
     # 处理字典
     if isinstance(value, dict):
         return {k: _clean_neo4j_value(v) for k, v in value.items()}
-    
     # 处理 Neo4j DateTime 类型
     if hasattr(value, '__class__') and 'neo4j.time' in str(type(value)):
         try:
             if hasattr(value, 'to_native'):
                 native_dt = value.to_native()
-                return native_dt.isoformat()
+                return _format_datetime_naive_iso(native_dt)
             return str(value)
         except Exception:
             return str(value)
