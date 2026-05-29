@@ -91,9 +91,6 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           max_tokens: { 
             type: 'define',
-            max: 32000, 
-            min: 256, 
-            step: 1, 
             defaultValue: 2000 
           },
           json_output: {
@@ -103,23 +100,17 @@ export const nodeLibrary: NodeLibrary[] = [
           // Top P 采样参数
           top_p: {
             type: 'define',
-            min: 0.1,
-            max: 0.9,
-            step: 0.1,
             defaultValue: {
               enable: false,
-              value: 0.3
+              value: 0.8
             }
           },
           // 取样数量
           top_k: {
             type: 'define',
-            min: 0,
-            max: 99,
-            step: 1,
             defaultValue: {
               enable: false,
-              value: 0
+              value: 50
             }
           },
           // 随机种子
@@ -135,22 +126,21 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'define',
             defaultValue: {
               enable: false,
-              value: 1.1
+              value: 1.0
             }
           },
           // 联网搜索
-          enable_search: {
-            type: 'define',
-            defaultValue: false
-          },
+          // enable_search: {
+          //   type: 'define',
+          //   defaultValue: false
+          // },
           // 思考模式
           thinking: {
             type: 'define',
             defaultValue: {
-              // [1,81901]
               budget: {
                   enable: false,
-                  value: 2048
+                  value: 256
               },
               enable: false
             }
@@ -185,7 +175,7 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'define',
             defaultValue: {
               enable: false,
-              value: 0.2
+              value: 0
             }
           },
           // 频率惩罚
@@ -193,7 +183,7 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'define',
             defaultValue: {
               enable: false,
-              value: 0.2
+              value: 0
             }
           },
 
@@ -240,7 +230,7 @@ export const nodeLibrary: NodeLibrary[] = [
             defaultValue: {
               enable: false,
               max_attempts: 3,
-              retry_interval: 1000,
+              retry_interval: 100,
             }
           },
           error_handle: {

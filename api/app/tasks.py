@@ -4353,6 +4353,40 @@ def scan_idle_conversations_task() -> None:
 
         logger.info(f"[ScanIdle] 发现 {len(candidate_conv_ids)} 个对话存在未写入消息")
 
+        # 过滤掉无活跃 memory_config 的对话（避免无效派发）
+        if candidate_conv_ids:
+            try:
+                from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+
+                with get_db_context() as db:
+                    # 单条 JOIN 查询：直接按"存在活跃 memory_config"过滤候选对话
+                    # distinct 防止 workspace 配置多条 active 记录导致 conv_id 重复
+                    valid_conv_ids = [
+                        str(cid) for cid in db.execute(
+                            select(Conversation.id)
+                            .join(
+                                MemoryConfigModel,
+                                MemoryConfigModel.workspace_id == Conversation.workspace_id,
+                            )
+                            .where(
+                                Conversation.id.in_(candidate_conv_ids),
+                                MemoryConfigModel.state.is_(True),
+                            )
+                            .distinct()
+                        ).scalars().all()
+                    ]
+
+                skipped_no_config = len(candidate_conv_ids) - len(valid_conv_ids)
+                if skipped_no_config:
+                    logger.info(
+                        f"[ScanIdle] 跳过 {skipped_no_config} 个无活跃 memory_config 的对话"
+                    )
+                candidate_conv_ids = valid_conv_ids
+            except Exception as e:
+                logger.warning(
+                    f"[ScanIdle] 过滤无配置对话失败，将走 FlushTask 兜底校验: err={e}"
+                )
+
         for conv_id_str in candidate_conv_ids:
             # 检查 conv_active key 是否存在（存在则对话仍活跃，跳过）
             # conv_active 写在 settings.REDIS_DB（DB 13），需要用专属 client 读取

@@ -84,11 +84,12 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
    * Format tab items for display
    */
   const formatTabItems = useMemo(() => {
+    const isHasAnnotations = application?.type !== 'multi_agent' && source !== 'sharing'
     return (source === 'sharing' ? sharingTabKeys : tabKeys).map(key => ({
       key,
-      label: t(`application.${key}`),
+      label: key === 'log' && isHasAnnotations ? t('application.logAnnotations') : t(`application.${key}`),
     }))
-  }, [source, sharingTabKeys, tabKeys])
+  }, [source, sharingTabKeys, tabKeys, application?.type])
   /**
    * Handle menu item click
    */

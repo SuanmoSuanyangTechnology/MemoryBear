@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:58:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-22 14:20:00
+ * @Last Modified time: 2026-05-26 13:38:41
  */
 /**
  * Conversation Page
@@ -123,14 +123,14 @@ const Conversation: FC = () => {
   }, [token])
 
   useEffect(() => {
-    if (token && page === 1 && hasMore && historyList.length === 0 && shareToken) {
+    if (page === 1 && hasMore && historyList.length === 0 && shareToken) {
       getHistory()
     }
-  }, [token, shareToken, page, hasMore, historyList])
+  }, [shareToken, page, hasMore, historyList])
 
   useEffect(() => {
-    if (shareToken && token) {
-      getExperienceConfig(token)
+    if (shareToken && shareToken !== '') {
+      getExperienceConfig(shareToken)
         .then(res => {
           const response = res as { variables: Variable[]; features: FeaturesConfigForm; model_parameters?: Record<string, any>; app_type: string; memory: boolean; }
           toolbarRef.current?.setVariables(response.variables || [])
@@ -142,7 +142,7 @@ const Conversation: FC = () => {
     } else {
       setChatList([])
     }
-  }, [shareToken, token])
+  }, [shareToken])
 
   /** Group conversation history by date */
   const groupHistoryByDate = (items: HistoryItem[]): Record<string, HistoryItem[]> => {
@@ -159,9 +159,9 @@ const Conversation: FC = () => {
 
   /** Fetch conversation history with pagination */
   const getHistory = (flag: boolean = false) => {
-    if (!token || (pageLoading || !hasMore) && !flag) return
+    if (!shareToken || shareToken === '' || (pageLoading || !hasMore) && !flag) return
     setPageLoading(true);
-    getConversationHistory(token, { page: flag ? 1 : page, pagesize: 20 })
+    getConversationHistory(shareToken, { page: flag ? 1 : page, pagesize: 20 })
       .then(res => {
         const response = res as { items: HistoryItem[], page: { hasnext: boolean; page: number; pagesize: number; total: number } }
         const results = response?.items || []
@@ -193,8 +193,8 @@ const Conversation: FC = () => {
   }
 
   const getChatDetail = () => {
-    if (!conversation_id) return
-    getConversationDetail(token as string, conversation_id)
+    if (!conversation_id || !shareToken || shareToken === '') return
+    getConversationDetail(shareToken, conversation_id)
       .then(res => {
         const response = res as { messages: ChatItem[] }
         const messages = response?.messages || []
@@ -270,6 +270,7 @@ const Conversation: FC = () => {
       role: 'assistant',
       content: '',
       is_current: true,
+      version: 0
     }
     if (message_id) {
       setChatList(prev => {
@@ -278,10 +279,13 @@ const Conversation: FC = () => {
         if (filterIndex !== -1) {
           const filterItem = Array.isArray(lastChatList[filterIndex]) ? lastChatList[filterIndex][0] : lastChatList[filterIndex]
           const newFilterItem = [
-            ...(Array.isArray(lastChatList[filterIndex]) ? [...lastChatList[filterIndex].map(v => ({ ...v, is_current: false })), filterItem] : [{...filterItem, is_current: false}]),
+            ...(Array.isArray(lastChatList[filterIndex])
+              ? [...lastChatList[filterIndex].map(v => ({ ...v, is_current: false }))]
+              : [{...filterItem, version: 1, is_current: false}]
+            ),
             {
               ...assistantMsg,
-              version: Array.isArray(lastChatList[filterIndex]) ? lastChatList[filterIndex].length + 2 : 2
+              version: Array.isArray(lastChatList[filterIndex]) ? lastChatList[filterIndex].length + 1 : 2
             }
           ]
           lastChatList[filterIndex] = newFilterItem
@@ -346,14 +350,31 @@ const Conversation: FC = () => {
     setChatList(prev => {
       const lastList = [...prev]
       const lastIndex = lastList.length - 1
-      const lastChatList = Array.isArray(lastList[lastIndex]) ? lastList[lastIndex] : [lastList[lastIndex]]
-      const lastChatIndex = lastChatList.length - 1
-      const lastMsg = lastChatList[lastChatIndex]
-      if (lastMsg?.role === 'assistant') {
-        return [
-          ...lastList.slice(0, lastIndex),
-          [
-            ...lastChatList.slice(0, lastChatIndex),
+      if (Array.isArray(lastList[lastIndex])) {
+        const lastChatList = lastList[lastIndex]
+        const lastChatIndex = lastChatList.length - 1
+        const lastMsg = lastChatList[lastChatIndex]
+        if (lastMsg?.role === 'assistant') {
+          return [
+            ...lastList.slice(0, lastIndex),
+            [
+              ...lastChatList.slice(0, lastChatIndex),
+              {
+                id: message_id,
+                ...lastMsg,
+                meta_data: {
+                  ...(lastMsg.meta_data || {}),
+                  reasoning_content: (lastMsg.meta_data?.reasoning_content || '') + content
+                }
+              }
+            ]
+          ]
+        }
+      } else {
+        const lastMsg = lastList[lastIndex]
+        if (lastMsg?.role === 'assistant') {
+          return [
+            ...lastList.slice(0, lastIndex),
             {
               id: message_id,
               ...lastMsg,
@@ -363,7 +384,7 @@ const Conversation: FC = () => {
               }
             }
           ]
-        ]
+        }
       }
       return prev
     })
@@ -420,7 +441,7 @@ const Conversation: FC = () => {
   const chatIsEnded = useRef(true)
   /** Send message and handle streaming response */
   const handleSend = (msg?: string) => {
-    if (!token || !shareToken) return
+    if (!shareToken || shareToken === '') return
     const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
     const variables = toolbarRef.current?.getVariables() || []
     let isCanSend = true
@@ -588,14 +609,14 @@ const Conversation: FC = () => {
   }
 
   const deleteMessage = (vo: ChatItem) => {
-    if (!token || !vo.id) return
+    if (!shareToken || shareToken === '' || !vo.id) return
     modal.confirm({
       title: t('common.confirmDelete'),
       okText: t('common.delete'),
       cancelText: t('common.cancel'),
       okType: 'danger',
       onOk: () => {
-        deleteConversationMessage(token, vo.id as string)
+        deleteConversationMessage(shareToken, vo.id as string)
           .then(() => {
             getChatDetail()
             messageApi.success(t('common.deleteSuccess'))
@@ -607,7 +628,7 @@ const Conversation: FC = () => {
     reportModalRef.current?.handleOpen(vo)
   }
   const regenerateMessages = (vo: ChatItem) => {
-    if (!token || !vo.id) return
+    if (!shareToken || shareToken === '' || !vo.id) return
     const variables = toolbarRef.current?.getVariables() || []
     let isCanSend = true
     const params: Record<string, any> = {}
@@ -716,7 +737,7 @@ const Conversation: FC = () => {
       stream: true,
       variables: params,
       thinking,
-    }, handleStreamMessage, token, (abort) => { abortRef.current = abort })
+    }, handleStreamMessage, shareToken, (abort) => { abortRef.current = abort })
       .catch(() => {
         setLoading(false)
         streamLoadingRef.current = false
@@ -730,10 +751,25 @@ const Conversation: FC = () => {
   }
   // 切换到指定版本的消息
   const handleVersionChange = (page: number, item: ChatItem) => {
-    if (!token || !item.id) return
-    switchMessageVersion(token, item.id, page)
+    if (!shareToken || shareToken === '' || !item.id) return
+    switchMessageVersion(shareToken, item.id, page)
       .then(() => {
-        getChatDetail()
+        setChatList(prev => {
+          const lastList = [...prev]
+          const filterIndex = lastList.findIndex(vo => Array.isArray(vo) && vo.filter(msg => msg.id === item.id).length > 0)
+          
+          if (filterIndex < 0) return lastList
+          
+          const currentItem: ChatItem[] = lastList[filterIndex] as ChatItem[]
+          lastList[filterIndex] = [...currentItem.map(msg => {
+            return {
+              ...msg,
+              is_current: msg.id === item.id,
+            }
+          })]
+
+          return [...lastList]
+        })
         messageApi.success(t('common.operateSuccess'))
       })
   }
@@ -745,8 +781,8 @@ const Conversation: FC = () => {
   }
 
   const handleFeedback = (feedbackType: 'like' | 'dislike', id?: string) => {
-    if (!token || !conversation_id || !id) return
-    feedbackMessage(token, id, { feedback_type: feedbackType })
+    if (!shareToken || shareToken === '' || !conversation_id || !id) return
+    feedbackMessage(shareToken, id, { feedback_type: feedbackType })
       .then((res) => {
         const { feedback_type } = res as { feedback_type: 'like' | 'dislike' | null; }
         messageApi.success( feedback_type === 'dislike'
@@ -847,8 +883,6 @@ const Conversation: FC = () => {
             'rb:h-full': isShare,
           })}>
             <Chat
-              userIcon={(isShare) ? null : <div className="rb:size-8 rb:bg-cover rb:bg-[url(@/assets/images/conversation/user.png)]"></div>}
-              assistantIcon={isShare ? null : <div className="rb:size-8 rb:bg-cover rb:bg-[url(@/assets/images/conversation/ai.png)]"></div>}
               empty={isShare ? null : <Empty url={ChatEmpty} className="rb:h-full" size={[320,180]} title={t('memoryConversation.chatEmpty')}subTitle={t('memoryConversation.emptyDesc')} />}
               contentClassName={clsx({
                 'rb:h-full rb:w-full': isShare,
@@ -860,7 +894,7 @@ const Conversation: FC = () => {
               loading={loading}
               onChange={setMessage}
               onSend={handleSend}
-              labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
+              labelFormat={(item) => isFloatBtn ? dayjs(item.created_at).format('HH:mm') : dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
               conversationId={conversation_id}
               fileList={fileList}
               fileChange={(list) => {
@@ -992,6 +1026,17 @@ const Conversation: FC = () => {
             </div>
           </div>
         }
+
+        <ShareModal
+          ref={shareModalRef}
+          conversationId={conversation_id as string}
+          streamLoading={streamLoadingRef.current}
+          shareToken={shareToken as string}
+        />
+        <ReportModal
+          ref={reportModalRef}
+          shareToken={shareToken as string}
+        />
       </Flex>
     )
   }
@@ -1176,12 +1221,12 @@ const Conversation: FC = () => {
       <ShareModal
         ref={shareModalRef}
         conversationId={conversation_id as string}
-        chatList={chatList}
         streamLoading={streamLoadingRef.current}
+        shareToken={shareToken as string}
       />
       <ReportModal
         ref={reportModalRef}
-        token={token as string}
+        shareToken={shareToken as string}
       />
     </Flex>
   )

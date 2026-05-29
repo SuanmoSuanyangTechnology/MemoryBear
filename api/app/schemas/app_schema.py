@@ -847,6 +847,7 @@ class RegenerateRequest(BaseModel):
     web_search: bool = Field(default=False, description="是否启用网络搜索")
     memory: bool = Field(default=True, description="是否启用长期记忆")
     stream: bool = Field(default=False, description="是否流式返回")
+    thinking: bool = Field(default=False, description="是否启用深度思考（需Agent配置支持）")
 
 
 class RegenerateResponse(BaseModel):
