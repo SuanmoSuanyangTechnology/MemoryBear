@@ -328,11 +328,14 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         estimated_pages = _get_estimated_pages(file_name, file_binary)
         logger.info(f"[ParseDoc] document={document_id} estimated_pages={estimated_pages}")
         if estimated_pages is None:
-            raise ValueError("无法获取文档页数，拒绝解析")
-        if estimated_pages > MAX_DOCUMENT_PAGES:
-            raise ValueError(
-                f"文档页数({estimated_pages})超过{MAX_DOCUMENT_PAGES}页限制，拒绝解析"
-            )
+            logger.info(f"[ParseDoc] document={document_id} 无法获取页数，继续解析")
+        elif estimated_pages > MAX_DOCUMENT_PAGES:
+            logger.info(f"[ParseDoc] document={document_id} 页数({estimated_pages})超过{MAX_DOCUMENT_PAGES}限制，跳过解析")
+            db_document.progress = -1.0
+            db_document.run = 0
+            db_document.progress_msg = f"文档页数({estimated_pages})超过{MAX_DOCUMENT_PAGES}页限制，拒绝解析"
+            db.commit()
+            return f"parse document '{file_name or document_id}' failed: page limit exceeded"
 
         def progress_callback(prog=None, msg=None):
             progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} parse progress: {prog} msg: {msg}.")
