@@ -145,4 +145,4 @@ async def read_memory(
             return {"success": False, "error": str(e)}
 
 
-mcp_app = mcp.http_app(path="/memory", transport="streamable-http")
+mcp_app = mcp.http_app(path="/memory", transport="streamable-http", stateless_http=True)

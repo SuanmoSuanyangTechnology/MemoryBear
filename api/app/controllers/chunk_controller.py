@@ -706,6 +706,7 @@ async def create_chunks_batch(
 async def import_qa_new_doc(
         kb_id: uuid.UUID,
         file: UploadFile = File(..., description="CSV 或 Excel 文件（第一行标题跳过，第一列问题，第二列答案）"),
+        parent_id: Optional[uuid.UUID] = Query(None, description="parent folder id"),
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user),
         storage_service: FileStorageService = Depends(get_file_storage_service),
@@ -739,7 +740,7 @@ async def import_qa_new_doc(
     # 4. 创建 File 记录
     file_data = file_schema.FileCreate(
         kb_id=kb_id, created_by=current_user.id,
-        parent_id=uuid.UUID("00000000-0000-0000-0000-000000000000"),
+        parent_id=parent_id,
         file_name=filename, file_ext=file_ext, file_size=file_size,
     )
     db_file = file_service.create_file(db=db, file=file_data, current_user=current_user)

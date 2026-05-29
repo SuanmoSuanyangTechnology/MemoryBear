@@ -68,7 +68,7 @@ class StatementBuiler(BaseBuilder):
     def content(self) -> str:
         parts = ["<statement>"]
         fields = [
-            ("statement", self.record.get("statement", "")),
+            ("content", self.record.get("statement", "")),
         ]
         for tag, value in fields:
             if value:
@@ -207,7 +207,7 @@ class MetadataBuilder(BaseBuilder):
         parts = ["<user-info>"]
         fields = [
             # ("description", self.record.get("description", "")),
-            ("aliases", self.record.get("aliases", [])),
+            ("aliases_name", self.record.get("aliases", [])),
             ("anchors", self.record.get("anchors", [])),
             ("beliefs_or_stances", self.record.get("beliefs_or_stances", [])),
             ("core_facts", self.record.get("core_facts", [])),
@@ -215,7 +215,7 @@ class MetadataBuilder(BaseBuilder):
             ("goals", self.record.get("goals", [])),
             ("interests", self.record.get("interests", [])),
             ("relations", self.record.get("relations", [])),
-            ("traits", self.record.get("traits", [])),
+            # ("traits", self.record.get("traits", [])),
         ]
         for tag, value in fields:
             if value:

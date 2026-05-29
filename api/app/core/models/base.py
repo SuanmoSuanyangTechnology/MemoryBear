@@ -118,22 +118,36 @@ class RedBearModelFactory:
     """模型工厂类"""
 
     _CONFIG_ONLY_KEYS = {
-        "deep_thinking", "thinking_budget_tokens", "streaming",
+        "deep_thinking", "thinking_budget_tokens",
         "enable_search", "enable_thinking", "response_format", "json_output",
         "default_headers",
     }
 
     @staticmethod
-    def _extract_top_k_from_extra_params(extra_params: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[int]]:
-        """从 extra_params 中分离 top_k 和 RedBearModelConfig 专有字段，返回 (过滤后的 extra_params, top_k 值)
+    def _extract_provider_specific_params(extra_params: Dict[str, Any]) -> tuple[Dict[str, Any], dict[str, Any]]:
+        """从 extra_params 中分离提供商特有参数和 RedBearModelConfig 专有字段，
+        返回 (过滤后的 extra_params, provider_specific dict)
 
-        deep_thinking, thinking_budget_tokens, streaming 等字段是 RedBearModelConfig 的配置字段，
-        不应该被展开到最终 LLM 类的构造参数中，否则 OpenAI SDK 等会报 unknown keyword argument。
+        provider_specific 包含需要按提供商路由的参数：
+        - top_k: 仅 Ollama/DashScope 支持，DashScope non-Omni 需通过 model_kwargs
+        - repetition_penalty: 仅 Ollama/DashScope 支持
+        - seed: 仅部分提供商支持，DashScope non-Omni 需通过 model_kwargs
+        - enable_search: 仅 DashScope 支持
+        - stop: 仅 OpenAI 兼容提供商支持顶级传递
+        - temperature: ChatTongyi 不接受顶级传递，需通过 model_kwargs
+        - max_tokens: ChatTongyi 不接受顶级传递，需通过 model_kwargs
+
+        config_only_keys 中的字段是 RedBearModelConfig 配置字段，
+        不应该被展开到最终 LLM 类的构造参数中。
         """
-        top_k_value = extra_params.get("top_k")
+        provider_specific_keys = ("top_k", "repetition_penalty", "seed", "enable_search", "stop", "temperature", "max_tokens")
         config_only_keys = RedBearModelFactory._CONFIG_ONLY_KEYS
-        filtered = {k: v for k, v in extra_params.items() if k not in config_only_keys and k != "top_k"}
-        return filtered, top_k_value
+        provider_specific = {}
+        for key in provider_specific_keys:
+            if key in extra_params:
+                provider_specific[key] = extra_params[key]
+        filtered = {k: v for k, v in extra_params.items() if k not in config_only_keys and k not in provider_specific_keys}
+        return filtered, provider_specific
 
     @classmethod
     def get_model_params(cls, config: RedBearModelConfig) -> Dict[str, Any]:
@@ -145,7 +159,7 @@ class RedBearModelFactory:
         logger = get_business_logger()
         logger.debug(f"获取模型参数 - Provider: {provider}, Model: {config.model_name}, is_omni: {config.is_omni}, deep_thinking: {config.deep_thinking}")
 
-        filtered_extra_params, top_k_value = cls._extract_top_k_from_extra_params(config.extra_params)
+        filtered_extra_params, provider_specific = cls._extract_provider_specific_params(config.extra_params)
         default_headers = config.extra_params.get("default_headers")
         if default_headers:
             logger.info(f"额外请求头已注入: {default_headers}")
@@ -187,6 +201,15 @@ class RedBearModelFactory:
                         extra_body["thinking_budget"] = config.thinking_budget_tokens
                 else:
                     extra_body["enable_thinking"] = False
+            # Omni uses OpenAI-compatible API: all provider-specific params
+            # are top-level args (temperature, max_tokens, seed, stop, etc.)
+            for key in ("temperature", "max_tokens", "seed", "stop", "repetition_penalty"):
+                if key in provider_specific and provider_specific[key] is not None:
+                    if key == "repetition_penalty":
+                        extra_body = params.setdefault("extra_body", {})
+                        extra_body[key] = provider_specific[key]
+                    else:
+                        params[key] = provider_specific[key]
             # JSON 输出模式
             # thinking（A类）模型启用深度思考时，response_format 与思考模式 API 冲突，跳过由调用方 prompt 注入兜底
             if config.json_output:
@@ -209,8 +232,11 @@ class RedBearModelFactory:
             # OllamaLLM 有 top_k 原生字段，可直接传入顶层；
             # ChatOpenAI/CompatibleChatOpenAI 不支持 top_k，OpenAI API 也无此参数，不能放入 model_kwargs
             # 否则会透传到 AsyncCompletions.create() 导致 unexpected keyword argument 错误
-            if provider == ModelProvider.OLLAMA and top_k_value is not None:
-                filtered_extra_params["top_k"] = top_k_value
+            if provider == ModelProvider.OLLAMA:
+                if "top_k" in provider_specific and provider_specific["top_k"] is not None:
+                    filtered_extra_params["top_k"] = provider_specific["top_k"]
+                if "repetition_penalty" in provider_specific and provider_specific["repetition_penalty"] is not None:
+                    filtered_extra_params["repetition_penalty"] = provider_specific["repetition_penalty"]
 
             params: Dict[str, Any] = {
                 "model": config.model_name,
@@ -220,6 +246,13 @@ class RedBearModelFactory:
                 "max_retries": config.max_retries,
                 **filtered_extra_params
             }
+
+            # OpenAI-compatible providers: temperature, max_tokens, seed, stop
+            # are top-level params. Other provider-specific params (top_k,
+            # repetition_penalty) are already handled above for Ollama.
+            for key in ("temperature", "max_tokens", "seed", "stop"):
+                if key in provider_specific and provider_specific[key] is not None:
+                    params[key] = provider_specific[key]
 
             if default_headers and provider != ModelProvider.OLLAMA:
                 params["default_headers"] = default_headers
@@ -265,9 +298,13 @@ class RedBearModelFactory:
                 "max_retries": config.max_retries,
                 **filtered_extra_params
             }
-            if top_k_value is not None:
-                model_kwargs = params.setdefault("model_kwargs", {})
-                model_kwargs["top_k"] = top_k_value
+            # ChatTongyi 不接受 temperature/max_tokens/seed/stop/enable_search
+            # 等参数作为顶级构造器参数，需通过 model_kwargs 传递
+            model_kwargs = params.setdefault("model_kwargs", {})
+            for key in ("top_k", "repetition_penalty", "seed", "enable_search",
+                        "stop", "temperature", "max_tokens"):
+                if key in provider_specific and provider_specific[key] is not None:
+                    model_kwargs[key] = provider_specific[key]
             # thinking 参数处理：
             # - thinking_only（B类）：不能传 enable_thinking，不做任何处理
             # - thinking（A类）：混合思考，流式和非流式均可开关，非流式也支持 thinking_budget
@@ -312,9 +349,19 @@ class RedBearModelFactory:
                 "config": boto_config,
                 **filtered_extra_params
             }
-            if top_k_value is not None:
-                model_kwargs = params.setdefault("model_kwargs", {})
-                model_kwargs["top_k"] = top_k_value
+            model_kwargs = params.setdefault("model_kwargs", {})
+            # Bedrock 专用参数路由：
+            # top_k, seed → model_kwargs 保持原名
+            # stop → model_kwargs 映射为 stop_sequences
+            # temperature, max_tokens → ChatBedrock 有顶级字段，直接传递
+            for key in ("top_k", "seed"):
+                if key in provider_specific and provider_specific[key] is not None:
+                    model_kwargs[key] = provider_specific[key]
+            if "stop" in provider_specific and provider_specific["stop"] is not None:
+                model_kwargs["stop_sequences"] = provider_specific["stop"]
+            for key in ("temperature", "max_tokens"):
+                if key in provider_specific and provider_specific[key] is not None:
+                    params[key] = provider_specific[key]
 
             # 解析 API key (格式: access_key_id:secret_access_key)
             if config.api_key and ":" in config.api_key:
