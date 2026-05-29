@@ -337,7 +337,15 @@ def is_schedule_trigger_due(
     last_triggered_at = parse_datetime(runtime.get("last_triggered_at"))
     last_dispatched_at = parse_datetime(runtime.get("last_dispatched_at"))
     dispatch_status = str(runtime.get("dispatch_status") or "").strip()
-    dispatch_lease_seconds = int(config.get("dispatch_lease_seconds") or SCHEDULE_DISPATCH_LEASE_SECONDS)
+    dispatch_lease_seconds = SCHEDULE_DISPATCH_LEASE_SECONDS
+    raw_dispatch_lease_seconds = config.get("dispatch_lease_seconds")
+    if raw_dispatch_lease_seconds not in (None, ""):
+        try:
+            parsed_dispatch_lease_seconds = int(raw_dispatch_lease_seconds)
+            if parsed_dispatch_lease_seconds > 0:
+                dispatch_lease_seconds = parsed_dispatch_lease_seconds
+        except (TypeError, ValueError):
+            dispatch_lease_seconds = SCHEDULE_DISPATCH_LEASE_SECONDS
 
     if dispatch_status in {"queued", "running"} and last_dispatched_at is not None:
         if (now - last_dispatched_at).total_seconds() < dispatch_lease_seconds:
