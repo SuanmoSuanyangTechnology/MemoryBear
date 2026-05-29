@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-19 17:52:22
+ * @Last Modified time: 2026-05-29 13:31:21
  */
 /**
  * User Memory Detail Types
@@ -61,6 +61,13 @@ export interface BaseProperties {
   created_at: number;
   associative_memory: number;
 }
+export interface AssistantOriginalNodeProperties extends BaseProperties {
+  text: string;
+}
+export interface AssistantPrunedNodeProperties extends BaseProperties {
+  text: string;
+  memory_type: string;
+}
 /**
  * Statement node properties
  */
@@ -71,9 +78,9 @@ export interface StatementNodeProperties {
   valid_at: string;
   created_at: number;
   emotion_keywords: string[];
-  emotion_type: string;
-  emotion_subject: string;
-  importance_score: number;
+  // emotion_type: string;
+  // emotion_subject: string;
+  // importance_score: number;
   associative_memory: number;
 }
 /**
@@ -84,11 +91,19 @@ export interface ExtractedEntityNodeProperties {
   name: string;
   entity_type: string;
   created_at: number;
-  aliases: string;
-  connect_strngth: string;
-  importance_score: number;
+  aliases: string[];
+  connect_strength: string;
   associative_memory: number;
-  community_name?: string;
+}
+export interface PerceptualNodeProperties {
+  file_name: string;
+  file_path: string;
+  file_type: string;
+  domain: string;
+  topic: string;
+  keywords: string[];
+  summary: string;
+  associative_memory: number;
 }
 /**
  * Memory summary node
@@ -109,21 +124,34 @@ export interface MemorySummaryNode {
   caption: string;
   associative_memory: number;
 }
-
 /**
  * Graph node
  */
 export interface Node {
   id: string;
-  label: 'Dialogue' | 'ExtractedEntity' | 'Chunk' | 'MemorySummary' | 'Statement';
+  label:  'AssistantOriginal' | 'AssistantPruned' | 'Chunk' | 'Dialogue' | 'ExtractedEntity' | 'Perceptual' | 'Statement';
   category: number;
   symbolSize: number;
   name: string;
   itemStyle: {
     color: string;
   }
-  properties: BaseProperties | StatementNodeProperties | ExtractedEntityNodeProperties
+  properties: BaseProperties | AssistantOriginalNodeProperties | StatementNodeProperties | ExtractedEntityNodeProperties | PerceptualNodeProperties
   caption: string;
+  type?: 'edge';
+}
+export interface ExtractedEdge {
+  statement: string;
+  run_id: string;
+  predicate: string;
+  end_user_id: string;
+  invalid_at: string;
+  valid_at: string;
+  predicate_description: string;
+  created_at: string | number;
+  predicate_id: number;
+  predicate_surface: string;
+  statement_id: string;
 }
 /**
  * Graph edge
@@ -132,16 +160,16 @@ export interface Edge {
   id: string;
   source: string;
   target: string;
-  type: string;
+  type: 'REFERENCES_ENTITY' | 'EXTRACTED_RELATIONSHIP';
   properties: {
     run_id: string;
-    group_id: string;
-    created_at: string;
-    expired_at: string;
-  }
+    end_user_id: string;
+    pair_id: string;
+    created_at: number | string;
+  } | ExtractedEdge
   caption: string;
-  value: number;
   weight: number;
+  value: number;
 }
 /**
  * Graph data structure
