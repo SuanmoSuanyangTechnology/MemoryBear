@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:27:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-15 14:48:44
+ * @Last Modified time: 2026-05-29 17:48:38
  */
 /**
  * Copy Application Modal
@@ -10,7 +10,7 @@
  */
 
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
-import { Form, Button, Flex } from 'antd';
+import { Form, Button, Flex, Switch } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx'
 
@@ -21,7 +21,10 @@ import FileUploadSettingModal from './FileUploadSettingModal'
 import type { Application } from '@/views/ApplicationManagement/types';
 import type { Capability } from '@/views/ModelManagement/types'
 import OpenStatementSettingModal, { type OpenStatementSettingModalRef } from './OpenStatementSettingModal'
+import ContentModerationSettingModal, { type ContentModerationSettingModalRef } from './ContentModerationSettingModal'
+import type { ContentModerationConfig } from '../../types'
 import type { Variable } from '../VariableList/types'
+import LabelWrapper from '@/components/FormItem/LabelWrapper'
 
 interface FeaturesConfigModalProps {
   refresh: (value: FeaturesConfigForm) => void;
@@ -45,6 +48,7 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
   const values = Form.useWatch([], form)
   const fileUploadSettingModalRef = useRef<any>(null)
   const openStatementSettingModalRef = useRef<OpenStatementSettingModalRef>(null)
+  const contentModerationSettingModalRef = useRef<ContentModerationSettingModalRef>(null)
 
   /** Close modal and reset form */
   const handleClose = () => {
@@ -60,6 +64,7 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
   /** Copy application with new name */
   const handleSave = () => {
     form.validateFields().then((values) => {
+      console.log('feature handleSave values', values)
       setVisible(false);
       refresh(values)
     })
@@ -94,6 +99,22 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
   }
   const handleSaveStatement = (settings: FeaturesConfigForm['opening_statement']) => {
     form.setFieldValue('opening_statement', settings)
+  }
+
+  const handleOpenContentModerationSettings = () => {
+    contentModerationSettingModalRef.current?.handleOpen(values?.sensitive_word_avoidance ?? { type: 'keywords' })
+  }
+
+  const handleSaveContentModeration = (settings: ContentModerationConfig) => {
+    console.log('handleSaveContentModeration settings', settings)
+    form.setFieldValue('sensitive_word_avoidance', { ...settings })
+  }
+  const handleSwitchContentModeration = (checked: boolean) => {
+    if (checked) {
+      handleOpenContentModerationSettings()
+    } else {
+      form.setFieldValue('sensitive_word_avoidance', { ...values?.sensitive_word_avoidance, enabled: false })
+    }
   }
 
   /** Expose methods to parent component */
@@ -169,6 +190,43 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
                 className="rb:mt-2!"
               />
             </div>
+            {source === 'workflow' && <>
+              <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
+                <Flex
+                  align="center"
+                  justify="space-between"
+                >
+                  {/* Label and description section */}
+                  <LabelWrapper title={t('application.sensitive_word_avoidance')}>
+                    {values?.sensitive_word_avoidance?.enabled ? undefined : t('application.sensitive_word_avoidance_desc')}
+                  </LabelWrapper>
+
+                  <Switch value={values?.sensitive_word_avoidance?.enabled} onChange={handleSwitchContentModeration} />
+                </Flex>
+                <Form.Item name="sensitive_word_avoidance" hidden />
+
+              {values?.sensitive_word_avoidance?.enabled && <>
+                  <Flex gap={12} className="rb:py-2!">
+                    <div className="rb:flex-1 rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:bg-white rb:text-[12px]">
+                      <div className="rb:grid rb:grid-cols-2 rb:gap-2 rb:text-[12px] rb:text-[#5B6167] rb:border-b rb:border-b-[#DFE4ED]">
+                        <div className="rb:px-3 rb:py-1">{t(`application.category`)}</div>
+                        <div className="rb:px-3 rb:py-1">{t('application.singleMaxSize')}</div>
+                      </div>
+                      <div className={clsx('rb:grid rb:grid-cols-2 rb:gap-2')}>
+                        <div className="rb:px-3 rb:py-1">{t(`application.${values?.sensitive_word_avoidance?.type}` || '')}</div>
+                        <div className="rb:px-3 rb:py-1">
+                          {[
+                            values?.sensitive_word_avoidance?.config?.inputs_config?.enabled ? t('application.review_input_content') : null,
+                            values?.sensitive_word_avoidance?.config?.outputs_config?.enabled ? t('application.review_output_content') : null,
+                          ].filter(Boolean).join(' | ')}
+                        </div>
+                      </div>
+                    </div>
+                  </Flex>
+                <Button block onClick={() => handleSwitchContentModeration(true)}>{t('application.setting')}</Button>
+              </>}
+              </div>
+            </>}
 
             <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
               <SwitchFormItem
@@ -221,6 +279,10 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
         source={source}
         chatVariables={chatVariables}
         onSave={handleSaveStatement}
+      />
+      <ContentModerationSettingModal
+        ref={contentModerationSettingModalRef}
+        onSave={handleSaveContentModeration}
       />
     </>
   );
