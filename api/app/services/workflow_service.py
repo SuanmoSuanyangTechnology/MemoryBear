@@ -1029,6 +1029,63 @@ class WorkflowService:
                 }
             }
 
+        # 1.5 输入审查（仅对话式工作流 AppType.WORKFLOW）
+        sensitive_cfg = feature_configs.get("sensitive_word_avoidance", {})
+        if payload.message and sensitive_cfg.get("enabled"):
+            from app.core.moderation.input_moderation import InputModeration
+            moderation_type = sensitive_cfg.get("type", "keywords")
+            stop, preset_response, _, _ = InputModeration().check(
+                app_id=str(app_id),
+                tenant_id=str(workspace_id),
+                moderation_type=moderation_type,
+                moderation_config=sensitive_cfg,
+                inputs=payload.variables or {},
+                query=payload.message,
+            )
+            if stop:
+                message_id = uuid.uuid4()
+                if conversation_id_uuid:
+                    self.conversation_service.add_message(
+                        conversation_id=conversation_id_uuid,
+                        role="user",
+                        content=payload.message,
+                        meta_data={"files": []},
+                    )
+                    self.conversation_service.add_message(
+                        message_id=message_id,
+                        conversation_id=conversation_id_uuid,
+                        role="assistant",
+                        content=preset_response,
+                        meta_data={"usage": {}, "moderation_flagged": True},
+                    )
+                execution = self.create_execution(
+                    workflow_config_id=config.id,
+                    app_id=app_id,
+                    trigger_type="manual",
+                    triggered_by=None,
+                    conversation_id=conversation_id_uuid,
+                    input_data={"message": payload.message, "moderation_flagged": True},
+                    release_id=release_id,
+                )
+                execution.status = "completed"
+                execution.output_data = {"answer": preset_response, "moderation_flagged": True}
+                execution.elapsed_time = 0
+                execution.completed_at = datetime.datetime.now()
+                self.db.commit()
+                return {
+                    "execution_id": execution.execution_id,
+                    "status": "completed",
+                    "output": preset_response,
+                    "message": preset_response,
+                    "message_id": str(message_id),
+                    "conversation_id": str(conversation_id_uuid) if conversation_id_uuid else None,
+                    "error_message": None,
+                    "elapsed_time": 0,
+                    "token_usage": {},
+                    "citations": [],
+                    "moderation_flagged": True,
+                }
+
         # 2. 创建执行记录
         execution = self.create_execution(
             workflow_config_id=config.id,
@@ -1102,6 +1159,24 @@ class WorkflowService:
                 memory_storage_type=storage_type,
                 user_rag_memory_id=user_rag_memory_id
             )
+
+            # 输出审查（非流式）
+            if result.get("status") == "completed" and sensitive_cfg.get("enabled"):
+                outputs_enabled = sensitive_cfg.get("config", {}).get("outputs_config", {}).get("enabled", False)
+                if outputs_enabled:
+                    from app.core.moderation.output_moderation import OutputModeration
+                    output_moderation = OutputModeration(
+                        app_id=str(app_id),
+                        tenant_id=str(workspace_id),
+                        moderation_type=sensitive_cfg.get("type", "keywords"),
+                        moderation_config=sensitive_cfg,
+                    )
+                    output_text = result.get("output", "")
+                    output_moderation.accumulate(output_text)
+                    if output_moderation.check_final():
+                        result["output"] = output_moderation.preset_response
+                        result["moderation_flagged"] = True
+
             # 更新执行结果
             if result.get("status") == "completed":
                 token_usage = result.get("token_usage", {}) or {}
@@ -1375,6 +1450,86 @@ class WorkflowService:
                 yield end_event
             return
 
+        # 1.5 输入审查（仅对话式工作流 AppType.WORKFLOW）
+        sensitive_cfg = feature_configs.get("sensitive_word_avoidance", {})
+        if payload.message and sensitive_cfg.get("enabled"):
+            from app.core.moderation.input_moderation import InputModeration
+            moderation_type = sensitive_cfg.get("type", "keywords")
+            stop, preset_response, _, _ = InputModeration().check(
+                app_id=str(app_id),
+                tenant_id=str(workspace_id),
+                moderation_type=moderation_type,
+                moderation_config=sensitive_cfg,
+                inputs=payload.variables or {},
+                query=payload.message,
+            )
+            if stop:
+                message_id = uuid.uuid4()
+                if conversation_id_uuid:
+                    self.conversation_service.add_message(
+                        conversation_id=conversation_id_uuid,
+                        role="user",
+                        content=payload.message,
+                        meta_data={"files": []},
+                    )
+                    self.conversation_service.add_message(
+                        message_id=message_id,
+                        conversation_id=conversation_id_uuid,
+                        role="assistant",
+                        content=preset_response,
+                        meta_data={"usage": {}, "moderation_flagged": True},
+                    )
+                execution = self.create_execution(
+                    workflow_config_id=config.id,
+                    app_id=app_id,
+                    trigger_type="manual",
+                    triggered_by=None,
+                    conversation_id=conversation_id_uuid,
+                    input_data={"message": payload.message, "moderation_flagged": True},
+                    release_id=release_id,
+                )
+                execution.status = "completed"
+                execution.output_data = {"answer": preset_response, "moderation_flagged": True}
+                execution.elapsed_time = 0
+                execution.completed_at = datetime.datetime.now()
+                self.db.commit()
+
+                start_internal_event = {
+                    "event": "workflow_start",
+                    "data": {
+                        "conversation_id": str(conversation_id_uuid),
+                        "message_id": str(message_id)
+                    }
+                }
+                start_event = self._emit(public, start_internal_event)
+                if start_event:
+                    yield start_event
+
+                yield {
+                    "event": "message",
+                    "data": {
+                        "content": preset_response,
+                        "conversation_id": str(conversation_id_uuid),
+                    }
+                }
+
+                end_internal_event = {
+                    "event": "workflow_end",
+                    "data": {
+                        "conversation_id": str(conversation_id_uuid),
+                        "output": preset_response,
+                        "usage": {},
+                        "elapsed_time": 0,
+                        "status": "completed",
+                        "error": "",
+                        "moderation_flagged": True,
+                    }
+                }
+                end_event = self._emit(public, end_internal_event)
+                if end_event:
+                    yield end_event
+                return
+
         # 2. 创建执行记录
         execution = self.create_execution(
             workflow_config_id=config.id,
@@ -1437,6 +1592,23 @@ class WorkflowService:
                     # 注入到 conv_messages，让 LLM 感知开场白
                     input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
                     init_message_length = 1
+
+            output_moderation = None
+            llm_node_ids: set[str] = set()
+            if sensitive_cfg.get("enabled"):
+                outputs_enabled = sensitive_cfg.get("config", {}).get("outputs_config", {}).get("enabled", False)
+                if outputs_enabled:
+                    from app.core.moderation.output_moderation import OutputModeration
+                    output_moderation = OutputModeration(
+                        app_id=str(app_id),
+                        tenant_id=str(workspace_id),
+                        moderation_type=sensitive_cfg.get("type", "keywords"),
+                        moderation_config=sensitive_cfg,
+                    )
+                    for node in (config.nodes or []):
+                        if node.get("type") == "llm":
+                            llm_node_ids.add(node.get("id", ""))
+
 
             async for event in execute_workflow_stream(
                     workflow_config=workflow_config_dict,
@@ -1554,6 +1726,15 @@ class WorkflowService:
                 event = self._emit(public, event)
                 if event:
                     yield event
+
+                if event_type == "message" and output_moderation:
+                    chunk = event_data.get("content", "")
+                    output_moderation.accumulate(chunk)
+
+                if event_type == "node_end" and output_moderation \
+                        and event_data.get("node_id") in llm_node_ids \
+                        and output_moderation.check_final():
+                    yield {"event": "message_replace", "data": {"content": output_moderation.preset_response}}
 
         except Exception as e:
             logger.error(
