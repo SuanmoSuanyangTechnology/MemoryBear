@@ -1775,7 +1775,7 @@ class AgentRunService:
             .where(
                 Message.conversation_id == conversation_id,
                 Message.created_at < before_time,  # 只取截止时间之前的消息
-                Message.is_deleted == False,
+                Message.is_deleted.is_not(True),
             )
             .order_by(Message.created_at.asc())  # 正序排列
             .limit(max_history)
@@ -3105,7 +3105,7 @@ class AgentRunService:
                     Message.conversation_id == original_msg.conversation_id,
                     Message.role == "user",
                     Message.created_at < original_msg.created_at,
-                    Message.is_deleted == False,
+                    Message.is_deleted.is_not(True),
                 )
                 .order_by(Message.created_at.desc())
                 .limit(1)
@@ -3264,7 +3264,7 @@ class AgentRunService:
                     Message.conversation_id == original_msg.conversation_id,
                     Message.role == "user",
                     Message.created_at < original_msg.created_at,
-                    Message.is_deleted == False,
+                    Message.is_deleted.is_not(True),
                 )
                 .order_by(Message.created_at.desc())
                 .limit(1)

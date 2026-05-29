@@ -386,7 +386,7 @@ class ConversationService:
                     Message.conversation_id == conversation_id,
                     Message.role == "assistant",
                     Message.parent_message_id == last_user_msg.id,
-                    Message.is_deleted == False,
+                    Message.is_deleted.is_not(True),
                 )
                 .order_by(Message.version)
             ).all()
@@ -624,7 +624,7 @@ class ConversationService:
             sibling_messages = self.db.query(Message).filter(
                 Message.parent_message_id == message.parent_message_id,
                 Message.role == "assistant",
-                Message.is_deleted == False,
+                Message.is_deleted.is_not(True),
             ).all()
 
             for sibling in sibling_messages:
@@ -661,7 +661,7 @@ class ConversationService:
             versions = self.db.query(Message).filter(
                 Message.parent_message_id == message.parent_message_id,
                 Message.role == "assistant",
-                Message.is_deleted == False,
+                Message.is_deleted.is_not(True),
             ).order_by(Message.version).all()
         else:
             # 如果没有 parent_message_id，则只返回自己
@@ -709,7 +709,7 @@ class ConversationService:
                 Message.parent_message_id == current_msg.parent_message_id,
                 Message.role == "assistant",
                 Message.version == version,
-                Message.is_deleted == False,
+                Message.is_deleted.is_not(True),
             ).first()
         else:
             target_msg = current_msg if current_msg.version == version else None
