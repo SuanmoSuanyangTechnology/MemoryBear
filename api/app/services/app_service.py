@@ -23,7 +23,6 @@ from app.core.exceptions import (
     ResourceNotFoundException,
 )
 from app.core.logging_config import get_business_logger
-from app.core.workflow.triggers import TRIGGER_NODES_PREPARED_FLAG
 from app.core.workflow.validator import WorkflowValidator
 from app.db import get_db
 from app.models import (
@@ -415,19 +414,24 @@ class AppService:
             now: datetime.datetime
     ):
         workflow_service = WorkflowService(self.db)
-        nodes = workflow_service._prepare_nodes([node.model_dump() for node in data.nodes] if data.nodes else [])
-        workflow_cfg = WorkflowConfig(
-            id=uuid.uuid4(),
-            app_id=app_id,
-            nodes=nodes,
+        config_dict = workflow_service._prepare_workflow_config_dict(
+            nodes=[node.model_dump() for node in data.nodes] if data.nodes else [],
             edges=[edge.model_dump() for edge in data.edges] if data.edges else [],
             variables=[var.model_dump() for var in data.variables] if data.variables else [],
             execution_config=data.execution_config.model_dump() if data.execution_config else {},
             features=data.features if data.features else {},
-            triggers=workflow_service._prepare_triggers(
-                [trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
-                nodes,
-            ),
+            triggers=[trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
+            workflow_type=getattr(data, "workflow_type", None),
+        )
+        workflow_cfg = WorkflowConfig(
+            id=uuid.uuid4(),
+            app_id=app_id,
+            nodes=config_dict["nodes"],
+            edges=config_dict["edges"],
+            variables=config_dict["variables"],
+            execution_config=config_dict["execution_config"],
+            features=config_dict["features"],
+            triggers=config_dict["triggers"],
             is_active=True,
             created_at=now,
             updated_at=now
@@ -1635,33 +1639,11 @@ class AppService:
 
         self._validate_app_writable(app, workspace_id)
 
-        config_dict = {
-            "nodes": [node.model_dump() for node in data.nodes] if data.nodes else [],
-            "edges": [edge.model_dump() for edge in data.edges] if data.edges else [],
-            "variables": [var.model_dump() for var in data.variables] if data.variables else [],
-            "execution_config": data.execution_config.model_dump() if data.execution_config else {},
-            "triggers": [trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
-        }
-        is_valid, errors = WorkflowValidator.validate(config_dict)
-        if not is_valid:
-            raise BusinessException(
-                code=BizCode.INVALID_PARAMETER,
-                message=f"工作流配置无效: {'; '.join(errors)}"
-            )
-
         # 获取现有配置
         repo = WorkflowConfigRepository(self.db)
         workflow_cfg = repo.get_by_app_id(app_id)
         now = datetime.datetime.now()
         workflow_service = WorkflowService(self.db)
-        nodes = workflow_service._prepare_nodes([node.model_dump() for node in data.nodes] if data.nodes else [])
-        edges = [edge.model_dump() for edge in data.edges] if data.edges else []
-        variables = [var.model_dump() for var in data.variables] if data.variables else []
-        execution_config = data.execution_config.model_dump() if data.execution_config else {}
-        triggers = workflow_service._prepare_triggers(
-            [trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
-            nodes,
-        )
         features = data.features or {}
         workflow_type = self._normalize_workflow_type(
             data.workflow_type,
@@ -1670,17 +1652,16 @@ class AppService:
                 self._normalize_workflow_type(app.type),
             ),
         )
-
-        is_valid, errors = WorkflowValidator.validate({
-            "nodes": nodes,
-            "edges": edges,
-            "variables": variables,
-            "execution_config": execution_config,
-            "features": features,
-            "triggers": triggers,
-            "workflow_type": workflow_type,
-            TRIGGER_NODES_PREPARED_FLAG: True,
-        })
+        config_dict = workflow_service._prepare_workflow_config_dict(
+            nodes=[node.model_dump() for node in data.nodes] if data.nodes else [],
+            edges=[edge.model_dump() for edge in data.edges] if data.edges else [],
+            variables=[var.model_dump() for var in data.variables] if data.variables else [],
+            execution_config=data.execution_config.model_dump() if data.execution_config else {},
+            features=features,
+            triggers=[trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
+            workflow_type=workflow_type,
+        )
+        is_valid, errors = WorkflowValidator.validate(config_dict)
         if not is_valid:
             raise BusinessException(
                 f"工作流配置无效: {'; '.join(errors)}",
@@ -1692,13 +1673,13 @@ class AppService:
             workflow_cfg = WorkflowConfig(
                 id=uuid.uuid4(),
                 app_id=app_id,
-                nodes=nodes,
-                edges=edges,
-                variables=variables,
-                execution_config=execution_config,
-                triggers=triggers,
-                features=features,
-                workflow_type=workflow_type,
+                nodes=config_dict["nodes"],
+                edges=config_dict["edges"],
+                variables=config_dict["variables"],
+                execution_config=config_dict["execution_config"],
+                triggers=config_dict["triggers"],
+                features=config_dict["features"],
+                workflow_type=config_dict["workflow_type"],
                 is_active=True,
                 created_at=now,
                 updated_at=now
@@ -1707,13 +1688,13 @@ class AppService:
             logger.debug("创建新的 Workflow 配置", extra={"app_id": str(app_id)})
         else:
             # 全量更新现有配置
-            workflow_cfg.nodes = nodes
-            workflow_cfg.edges = edges
-            workflow_cfg.variables = variables
-            workflow_cfg.execution_config = execution_config
-            workflow_cfg.triggers = triggers
-            workflow_cfg.features = features
-            workflow_cfg.workflow_type = workflow_type
+            workflow_cfg.nodes = config_dict["nodes"]
+            workflow_cfg.edges = config_dict["edges"]
+            workflow_cfg.variables = config_dict["variables"]
+            workflow_cfg.execution_config = config_dict["execution_config"]
+            workflow_cfg.triggers = config_dict["triggers"]
+            workflow_cfg.features = config_dict["features"]
+            workflow_cfg.workflow_type = config_dict["workflow_type"]
             workflow_cfg.updated_at = now
 
         self.db.commit()
