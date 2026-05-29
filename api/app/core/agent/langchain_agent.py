@@ -90,15 +90,8 @@ class LangChainAgent:
 
         self.system_prompt = system_prompt or "你是一个专业的AI助手"
 
-        # ChatTongyi 要求 messages 含 'json' 字样才能使用 response_format
-        # 在 system prompt 中注入 JSON 要求
-        from app.models.models_model import ModelProvider
-        if json_output and (
-            (provider.lower() == ModelProvider.DASHSCOPE and not is_omni)
-            or provider.lower() == ModelProvider.VOLCANO
-            # 有工具时 response_format 会被移除，所有 provider 都需要 system prompt 注入保证 JSON 输出
-            or bool(tools)
-        ):
+        # 所有 provider 统一注入 JSON prompt 兜底，确保即使 API 层 response_format 未生效也能引导 JSON 输出
+        if json_output:
             self.system_prompt += "\n请以JSON格式输出。"
 
         logger.debug(

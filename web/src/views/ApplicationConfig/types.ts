@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:49 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-20 15:33:17
+ * @Last Modified time: 2026-05-29 17:34:11
  */
 import type { KnowledgeConfig } from './components/Knowledge/types'
 import type { Variable } from './components/VariableList/types'
@@ -445,6 +445,29 @@ interface FileSetttings {
   max_file_count: number;
   allowed_transfer_methods: string[] | string;
 }
+export type ModerationType = 'openai' | 'keywords' | 'api';
+
+export interface ContentModerationConfig {
+  type: ModerationType;
+  config?: {
+    keywords?: string;
+  
+    api_key?: string;
+    api_name?: string;
+    api_endpoint?: string;
+
+    inputs_config?: {
+      enabled?: boolean;
+      preset_response?: string;
+    };
+    outputs_config?: {
+      enabled?: boolean;
+      preset_response?: string;
+    };
+  };
+  enabled: boolean;
+}
+
 export type FeaturesConfigForm = {
   file_upload: FileSetttings & {
     enabled: boolean;
@@ -471,6 +494,7 @@ export type FeaturesConfigForm = {
     enabled: boolean;
     search_engine: string | null;
   };
+  sensitive_word_avoidance: ContentModerationConfig;
 }
 /**
  * Function config modal ref methods

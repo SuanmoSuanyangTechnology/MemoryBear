@@ -329,16 +329,100 @@ _PARAM_PROVIDER_SUPPORT: dict[str, frozenset[ModelProvider]] = {
     "seed": frozenset({
         ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
         ModelProvider.OLLAMA, ModelProvider.VOLCANO, ModelProvider.DASHSCOPE,
+        ModelProvider.BEDROCK,
     }),
-    "search": frozenset({ModelProvider.DASHSCOPE}),
+    "frequency_penalty": frozenset({
+        ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
+        ModelProvider.VOLCANO, ModelProvider.DASHSCOPE,
+    }),
+    "presence_penalty": frozenset({
+        ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
+        ModelProvider.VOLCANO, ModelProvider.DASHSCOPE,
+    }),
+    "enable_search": frozenset({ModelProvider.DASHSCOPE}),
 }
 
 _PARAM_PROVIDER_WARNINGS: dict[str, str] = {
-    "top_k": "当前提供商不支持取样数量(top_k)参数，该参数不会生效",
-    "repetition_penalty": "当前提供商不支持重复惩罚参数，该参数不会生效",
-    "seed": "当前提供商不支持随机种子参数，该参数不会生效",
-    "search": "当前提供商不支持联网搜索参数，该参数不会生效",
+    "top_k": "当前提供商不支持取样数量(top_k)参数，该参数已自动剥离",
+    "repetition_penalty": "当前提供商不支持重复惩罚参数，该参数已自动剥离",
+    "seed": "当前提供商不支持随机种子参数，该参数已自动剥离",
+    "frequency_penalty": "当前提供商不支持频率惩罚参数，该参数已自动剥离",
+    "presence_penalty": "当前提供商不支持存在惩罚参数，该参数已自动剥离",
+    "enable_search": "当前提供商不支持联网搜索参数，该参数已自动剥离",
 }
+
+# Providers whose LLM chat class accepts OpenAI-style multimodal content
+# format: [{"type": "text", "text": "..."}], [{"type": "image_url", ...}] etc.
+# DashScope non-Omni (ChatTongyi) uses its own format and rejects OpenAI-style lists.
+_MULTIMODAL_COMPATIBLE_PROVIDERS = frozenset({
+    ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
+    ModelProvider.VOLCANO,
+    ModelProvider.OLLAMA,
+    ModelProvider.BEDROCK,
+})
+
+
+def strip_unsupported_llm_params(
+        extra_params: dict[str, Any],
+        provider: str,
+        is_omni: bool = False,
+) -> tuple[dict[str, Any], list[str]]:
+    """Strip provider-unsupported parameters from extra_params.
+
+    Parameters listed in _PARAM_PROVIDER_SUPPORT are only kept when the
+    provider (or, for DashScope, the Omni variant) is in the support set.
+    Other parameters (top_p, frequency_penalty, presence_penalty, etc.)
+    are kept by default — they'll be routed to model_kwargs or top-level
+    by RedBearModelFactory.get_model_params based on the provider.
+
+    Note: temperature, max_tokens, seed, stop, top_k, repetition_penalty,
+    enable_search are extracted from extra_params before reaching
+    RedBearModelFactory and then re-routed per provider. They are not
+    affected by this stripping step.
+
+    Returns:
+        (stripped_params, warnings): filtered params and warning messages
+        for each stripped parameter.
+    """
+    warnings: list[str] = []
+    provider_lower = provider.lower() if provider else ""
+
+    try:
+        provider_enum = ModelProvider(provider_lower)
+    except ValueError:
+        return extra_params, warnings
+
+    # DashScope Omni is OpenAI-compatible; non-Omni (ChatTongyi) is not.
+    # frequency_penalty / presence_penalty are only safe for Omni.
+    # Other params (top_k, seed, enable_search, repetition_penalty) are
+    # supported by ChatTongyi via model_kwargs routing in RedBearModelFactory.
+    effective_provider = provider_enum
+    if provider_enum == ModelProvider.DASHSCOPE and not is_omni:
+        # Map DashScope non-Omni to a virtual "dashscope_native" so that
+        # OpenAI-only params (frequency_penalty, presence_penalty) are
+        # stripped while DashScope-native params (top_k, seed,
+        # enable_search, repetition_penalty via model_kwargs) remain.
+        _DASHSCOPE_NATIVE_SUPPORT: dict[str, bool] = {
+            "top_k": True,
+            "repetition_penalty": True,
+            "seed": True,
+            "frequency_penalty": False,
+            "presence_penalty": False,
+            "enable_search": True,
+        }
+        for param_key, supported in _DASHSCOPE_NATIVE_SUPPORT.items():
+            if param_key in extra_params and not supported:
+                warnings.append(_PARAM_PROVIDER_WARNINGS.get(param_key, f"参数 {param_key} 已自动剥离"))
+                extra_params.pop(param_key, None)
+        return extra_params, warnings
+
+    # General case: check _PARAM_PROVIDER_SUPPORT
+    for param_key, supported_providers in _PARAM_PROVIDER_SUPPORT.items():
+        if param_key in extra_params and provider_enum not in supported_providers:
+            warnings.append(_PARAM_PROVIDER_WARNINGS.get(param_key, f"参数 {param_key} 已自动剥离"))
+            extra_params.pop(param_key, None)
+
+    return extra_params, warnings
 
 
 def validate_llm_param_constraints(
@@ -407,15 +491,25 @@ def validate_llm_param_constraints(
         if provider_enum not in supported:
             warnings.append(_PARAM_PROVIDER_WARNINGS["repetition_penalty"])
 
+    if config.frequency_penalty.enable:
+        supported = _PARAM_PROVIDER_SUPPORT["frequency_penalty"]
+        if provider_enum not in supported:
+            warnings.append(_PARAM_PROVIDER_WARNINGS["frequency_penalty"])
+
+    if config.presence_penalty.enable:
+        supported = _PARAM_PROVIDER_SUPPORT["presence_penalty"]
+        if provider_enum not in supported:
+            warnings.append(_PARAM_PROVIDER_WARNINGS["presence_penalty"])
+
     if config.seed.enable:
         supported = _PARAM_PROVIDER_SUPPORT["seed"]
         if provider_enum not in supported:
             warnings.append(_PARAM_PROVIDER_WARNINGS["seed"])
 
     if config.search:
-        supported = _PARAM_PROVIDER_SUPPORT["search"]
+        supported = _PARAM_PROVIDER_SUPPORT["enable_search"]
         if provider_enum not in supported:
-            warnings.append(_PARAM_PROVIDER_WARNINGS["search"])
+            warnings.append(_PARAM_PROVIDER_WARNINGS["enable_search"])
 
     return warnings
 

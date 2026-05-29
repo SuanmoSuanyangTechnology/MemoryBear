@@ -45,7 +45,13 @@ class EventStreamHandler:
         """
         for node_id in data.keys():
             if activate.get(node_id):
-                node_output_status = self.variable_pool.get_value(f"{node_id}.output", default=None, strict=False)
+                # For branch nodes (LLM, CODE), use branch_signal as status;
+                # for other nodes, use output
+                node_output_status = self.variable_pool.get_value(
+                    f"{node_id}.branch_signal", default=None, strict=False
+                ) or self.variable_pool.get_value(
+                    f"{node_id}.output", default=None, strict=False
+                )
                 self.coordinator.update_scope_activation(node_id, status=node_output_status)
 
     async def handle_updates_event(
@@ -102,34 +108,68 @@ class EventStreamHandler:
           - If all segments are processed, deactivate the End node.
           - Otherwise, yield the current chunk as a streaming message.
 
+        Literal-text segments between variable segments are emitted automatically
+        so the cursor can advance past them during streaming without waiting for
+        emit_activate_chunk.
+
         Args:
             data (dict): Node chunk event data, expected keys:
                          - "node_id": ID of the node producing this chunk
                          - "chunk": Chunk of output text
                          - "done": Boolean indicating whether the node finished producing output
+                         - "field": Field name of the chunk (e.g. "output" or "reasoning_content")
 
         Yields:
             dict: Streaming message event in the format:
-                  {"event": "message", "data": {"chunk": ...}}
+                  {"event": "message", "data": {"content": ...}}
         """
         node_id = data.get("node_id")
-        if self.coordinator.activate_end:
-            end_info = self.coordinator.current_activate_end_info
-            if not end_info or end_info.cursor >= len(end_info.outputs):
+        if not self.coordinator.activate_end:
+            return
+
+        end_info = self.coordinator.current_activate_end_info
+        if not end_info or end_info.cursor >= len(end_info.outputs):
+            return
+
+        # Emit any activated literal-text segments before the target variable
+        # so the cursor can reach the next variable segment during streaming.
+        while end_info.cursor < len(end_info.outputs):
+            seg = end_info.outputs[end_info.cursor]
+            if seg.is_variable:
+                break
+            if not seg.activate and not end_info.force:
+                break
+            yield {
+                "event": "message",
+                "data": {"content": seg.literal}
+            }
+            end_info.cursor += 1
+
+        if end_info.cursor >= len(end_info.outputs):
+            self.coordinator.pop_current_activate_end()
+            return
+
+        current_output = end_info.outputs[end_info.cursor]
+        if current_output.is_variable and current_output.depends_on_scope(node_id):
+            # Field-level matching: route real-time chunks only to the segment
+            # that references the same field. Chunks carrying "reasoning_content"
+            # flow to {{node.reasoning_content}}, "output" to {{node.output}}.
+            chunk_field = data.get("field", "output")
+            segment_field = current_output.get_field() or "output"
+            if chunk_field != segment_field:
                 return
-            current_output = end_info.outputs[end_info.cursor]
-            if current_output.is_variable and current_output.depends_on_scope(node_id):
-                if data.get("done"):
-                    end_info.cursor += 1
-                    if end_info.cursor >= len(end_info.outputs):
-                        self.coordinator.pop_current_activate_end()
-                else:
-                    yield {
-                        "event": "message",
-                        "data": {
-                            "content": data.get("chunk")
-                        }
+
+            if data.get("done"):
+                end_info.cursor += 1
+                if end_info.cursor >= len(end_info.outputs):
+                    self.coordinator.pop_current_activate_end()
+            else:
+                yield {
+                    "event": "message",
+                    "data": {
+                        "content": data.get("chunk")
                     }
+                }
 
     @staticmethod
     async def handle_node_error_event(data: dict):

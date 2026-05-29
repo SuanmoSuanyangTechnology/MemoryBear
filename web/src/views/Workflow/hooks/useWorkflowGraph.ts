@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 16:21:57
+ * @Last Modified time: 2026-05-29 18:50:18
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
   // Scroller,
@@ -99,6 +99,7 @@ export interface UseWorkflowGraphReturn {
   historyRecords: HistoryRecord[];
   /** Clear history records */
   clearHistoryRecords: () => void;
+  lastExecuteId: string;
 }
 
 /**
@@ -119,7 +120,9 @@ export const useWorkflowGraph = ({
   const { t } = useTranslation()
   const { user } = useUser();
   const { chatHistoryMap } = useWorkflowStore()
-  const chatHistory = Object.values(chatHistoryMap).at(-1) ?? []
+  const lastExecuteId = Object.keys(chatHistoryMap).at(-1) ?? ''
+  const chatHistory = chatHistoryMap[lastExecuteId] ?? []
+  console.log('chatHistoryMap', chatHistoryMap, 'lastExecuteId', lastExecuteId)
 
   // Refs
   const graphRef = useRef<Graph>();
@@ -2029,5 +2032,6 @@ export const useWorkflowGraph = ({
     redo,
     historyRecords,
     clearHistoryRecords,
+    lastExecuteId,
   };
 };

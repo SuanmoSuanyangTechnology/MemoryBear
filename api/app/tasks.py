@@ -37,7 +37,7 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
 )
 from app.db import get_db_context
-from app.models import Document, File, Knowledge
+from app.models import App, AppRelease, Document, File, Knowledge
 from app.models.end_user_model import EndUser
 from app.schemas import document_schema, file_schema
 from app.services.memory_agent_service import MemoryAgentService, get_end_user_connected_config
@@ -4452,38 +4452,35 @@ def scan_idle_conversations_task() -> None:
 
         logger.info(f"[ScanIdle] 发现 {len(candidate_conv_ids)} 个对话存在未写入消息")
 
-        # 过滤掉无活跃 memory_config 的对话（避免无效派发）
+        # 过滤：确保对话所属 app 已存在已发布版本（current_release_id IS NOT NULL）。
+        # 真正的 memory_config_id 解析（agent / workflow + legacy 兼容）由 FlushTask
+        # 内的 _resolve_release_memory_config_id 完成，这里只做粗筛避免每分钟空跑刷 WARN。
         if candidate_conv_ids:
             try:
-                from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+                from app.models.app_model import App
 
                 with get_db_context() as db:
-                    # 单条 JOIN 查询：直接按"存在活跃 memory_config"过滤候选对话
-                    # distinct 防止 workspace 配置多条 active 记录导致 conv_id 重复
                     valid_conv_ids = [
                         str(cid) for cid in db.execute(
                             select(Conversation.id)
-                            .join(
-                                MemoryConfigModel,
-                                MemoryConfigModel.workspace_id == Conversation.workspace_id,
-                            )
+                            .join(App, App.id == Conversation.app_id)
                             .where(
                                 Conversation.id.in_(candidate_conv_ids),
-                                MemoryConfigModel.state.is_(True),
+                                App.current_release_id.isnot(None),
                             )
                             .distinct()
                         ).scalars().all()
                     ]
 
-                skipped_no_config = len(candidate_conv_ids) - len(valid_conv_ids)
-                if skipped_no_config:
+                skipped_no_release = len(candidate_conv_ids) - len(valid_conv_ids)
+                if skipped_no_release:
                     logger.info(
-                        f"[ScanIdle] 跳过 {skipped_no_config} 个无活跃 memory_config 的对话"
+                        f"[ScanIdle] 跳过 {skipped_no_release} 个 app 未发布的对话"
                     )
                 candidate_conv_ids = valid_conv_ids
             except Exception as e:
                 logger.warning(
-                    f"[ScanIdle] 过滤无配置对话失败，将走 FlushTask 兜底校验: err={e}"
+                    f"[ScanIdle] 过滤未发布 app 失败，将走 FlushTask 兜底校验: err={e}"
                 )
 
         for conv_id_str in candidate_conv_ids:
@@ -4549,3 +4546,130 @@ def scan_idle_conversations_task() -> None:
     logger.info(
         f"[ScanIdle] 扫描完成: 派发={dispatched}, 跳过(活跃)={skipped_active}, 跳过(已锁)={skipped_locked}"
     )
+
+
+@celery_app.task(name="app.tasks.scan_workflow_schedule_triggers", queue="periodic_tasks")
+def scan_workflow_schedule_triggers():
+    """扫描并派发已发布工作流中的定时触发器。"""
+    from app.services.workflow_service import WorkflowService
+
+    now = datetime.now(timezone.utc)
+    triggered = 0
+
+    with get_db_context() as db:
+        service = WorkflowService(db)
+        due_triggers = service.get_due_schedule_triggers(now)
+        logger.info(f"[WorkflowSchedule] 扫描到 {len(due_triggers)} 个待执行触发器")
+
+        for app, release, _config, trigger in due_triggers:
+            trigger_id = trigger.get("id")
+            try:
+                run_workflow_schedule_trigger.apply_async(
+                    kwargs={
+                        "app_id": str(app.id),
+                        "release_id": str(release.id),
+                        "trigger_id": trigger_id,
+                        "scheduled_at": now.isoformat(),
+                    },
+                    queue="workflow_trigger_tasks",
+                )
+                runtime = {
+                    **(trigger.get("runtime") or {}),
+                    "dispatch_status": "queued",
+                    "last_dispatched_at": now.isoformat(),
+                    "last_scheduled_at": now.isoformat(),
+                    "last_error": None,
+                }
+                service.update_release_trigger_runtime_state(release.id, trigger_id, runtime)
+                service.update_trigger_runtime_state(app.id, trigger_id, runtime)
+                triggered += 1
+                logger.info(
+                    f"[WorkflowSchedule] 已派发: app_id={app.id}, release_id={release.id}, trigger_id={trigger_id}"
+                )
+            except Exception as exc:
+                logger.error(
+                    f"[WorkflowSchedule] 派发失败: app_id={app.id}, trigger_id={trigger_id}, error={exc}",
+                    exc_info=True,
+                )
+
+    return {"triggered": triggered, "scanned_at": now.isoformat()}
+
+
+@celery_app.task(name="app.tasks.run_workflow_schedule_trigger", queue="workflow_trigger_tasks")
+def run_workflow_schedule_trigger(app_id: str, release_id: str, trigger_id: str, scheduled_at: str | None = None):
+    """执行单个已发布的 schedule trigger。"""
+    from app.services.workflow_service import WorkflowService
+
+    run_at = datetime.fromisoformat(scheduled_at) if scheduled_at else datetime.now(timezone.utc)
+    with get_db_context() as db:
+        service = WorkflowService(db)
+        app = db.get(App, uuid.UUID(app_id))
+        release = db.get(AppRelease, uuid.UUID(release_id))
+        if not app or not release:
+            logger.warning(
+                f"[WorkflowSchedule] 跳过不存在的任务: app_id={app_id}, release_id={release_id}, trigger_id={trigger_id}"
+            )
+            return {"status": "skipped", "reason": "app_or_release_not_found"}
+
+        if app.current_release_id != release.id:
+            logger.info(
+                f"[WorkflowSchedule] 跳过过期发布版本任务: "
+                f"app_id={app_id}, queued_release_id={release_id}, current_release_id={app.current_release_id}, "
+                f"trigger_id={trigger_id}"
+            )
+            return {"status": "skipped", "reason": "stale_release"}
+
+        config = service._build_runtime_workflow_config_from_release(
+            release,
+            real_config_id=(app.workflow_config.id if app.workflow_config else None),
+        )
+        trigger = service._find_trigger_node(config.nodes, trigger_id=trigger_id, trigger_type="schedule")
+        if not trigger:
+            logger.warning(f"[WorkflowSchedule] 跳过不存在的 trigger: trigger_id={trigger_id}")
+            return {"status": "skipped", "reason": "trigger_not_found"}
+
+        runtime = trigger.get("runtime") or {}
+        running_runtime = {
+            **runtime,
+            "dispatch_status": "running",
+            "last_started_at": datetime.now(timezone.utc).isoformat(),
+            "last_scheduled_at": run_at.isoformat(),
+            "last_error": None,
+        }
+        service.update_release_trigger_runtime_state(release.id, trigger_id, running_runtime)
+        service.update_trigger_runtime_state(app.id, trigger_id, running_runtime)
+
+        try:
+            asyncio.run(
+                service.invoke_schedule_trigger(
+                    app=app,
+                    release=release,
+                    config=config,
+                    trigger=trigger,
+                    now=run_at,
+                )
+            )
+            completed_runtime = {
+                **running_runtime,
+                "dispatch_status": "completed",
+                "last_triggered_at": run_at.isoformat(),
+                "last_completed_at": datetime.now(timezone.utc).isoformat(),
+                "last_error": None,
+            }
+            service.update_release_trigger_runtime_state(release.id, trigger_id, completed_runtime)
+            service.update_trigger_runtime_state(app.id, trigger_id, completed_runtime)
+            return {"status": "completed", "trigger_id": trigger_id, "scheduled_at": run_at.isoformat()}
+        except Exception as exc:
+            failed_runtime = {
+                **running_runtime,
+                "dispatch_status": "failed",
+                "last_failed_at": datetime.now(timezone.utc).isoformat(),
+                "last_error": str(exc),
+            }
+            service.update_release_trigger_runtime_state(release.id, trigger_id, failed_runtime)
+            service.update_trigger_runtime_state(app.id, trigger_id, failed_runtime)
+            logger.error(
+                f"[WorkflowSchedule] 执行失败: app_id={app_id}, release_id={release_id}, trigger_id={trigger_id}, error={exc}",
+                exc_info=True,
+            )
+            raise

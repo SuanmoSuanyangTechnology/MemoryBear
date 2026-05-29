@@ -17,6 +17,10 @@ SCOPE_PATTERN = re.compile(
     r"\{\{\s*([a-zA-Z0-9_]+)\.[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)?\s*}}"
 )
 
+FIELD_PATTERN = re.compile(
+    r"\{\{\s*[a-zA-Z0-9_]+\.([a-zA-Z0-9_]+)(?:\.[a-zA-Z0-9_]+)?\s*}}"
+)
+
 
 class OutputContent(BaseModel):
     """
@@ -59,6 +63,17 @@ class OutputContent(BaseModel):
         matches = SCOPE_PATTERN.findall(self.literal)
         self._SCOPE = matches[0] if matches else None
         return self._SCOPE
+
+    def get_field(self) -> str | None:
+        """Extract the field name from a variable placeholder.
+
+        For example:
+            "{{llm_qa.output}}"             -> "output"
+            "{{llm_qa.reasoning_content}}"  -> "reasoning_content"
+            "{{sys.message}}"               -> "message"
+        """
+        matches = FIELD_PATTERN.findall(self.literal)
+        return matches[0] if matches else None
 
     def depends_on_scope(self, scope: str) -> bool:
         """

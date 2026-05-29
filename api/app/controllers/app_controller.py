@@ -1161,6 +1161,28 @@ async def get_workflow_config(
     return success(data=WorkflowConfigSchema.model_validate(cfg))
 
 
+@router.get("/{app_id}/workflow/executions/{execution_id}")
+@cur_workspace_access_guard()
+async def get_workflow_execution_detail(
+        app_id: Annotated[uuid.UUID, Path(description="应用 ID")],
+        execution_id: Annotated[str, Path(description="执行 ID")],
+        db: Annotated[Session, Depends(get_db)],
+        current_user: Annotated[User, Depends(get_current_user)],
+        workflow_service: Annotated[WorkflowService, Depends(get_workflow_service)] = None,
+):
+    """获取工作流执行详情与变量快照。"""
+    workspace_id = current_user.current_workspace_id
+    service = AppService(db)
+    app = service._get_app_or_404(app_id)
+    service._validate_app_accessible(app, workspace_id)
+
+    execution_detail = workflow_service.get_execution_detail(execution_id)
+    if not execution_detail or execution_detail.get("app_id") != str(app_id):
+        raise BusinessException("执行记录不存在", BizCode.NOT_FOUND)
+
+    return success(data=execution_detail)
+
+
 @router.put("/{app_id}/workflow", summary="更新 Workflow 配置")
 @cur_workspace_access_guard()
 async def update_workflow_config(

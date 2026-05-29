@@ -124,9 +124,8 @@ class StartNode(BaseNode):
                         except (json.JSONDecodeError, TypeError):
                             raise ValueError(f"变量 '{var_name}' 不是有效的 JSON 对象")
 
-                # paragraph: 长度校验
-                if var_type == VariableType.STRING and ui_type == "paragraph":
-                    max_len = var_def.max_length or 2000
+                if var_type == VariableType.STRING and ui_type != "select":
+                    max_len = var_def.max_length
                     if isinstance(value, str) and len(value) > max_len:
                         raise ValueError(
                             f"变量 '{var_name}' 超过最大长度限制 ({max_len})"
