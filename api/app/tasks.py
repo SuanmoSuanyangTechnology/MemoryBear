@@ -2142,6 +2142,7 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
                 skipped_configs = 0
                 total_dedup_merged = 0
                 total_desc_merged = 0
+                redis_client = get_sync_redis_client()
 
                 for workspace in workspaces:
                     service = WorkspaceAppService(db)
@@ -2162,33 +2163,53 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
 
                             for user in end_users:
                                 try:
-                                    memory_service = MemoryService(
-                                        db=db,
-                                        config_id=config_id,
-                                        end_user_id=str(user['id']),
-                                        workspace_id=str(workspace.id),
-                                    )
-                                    r = await memory_service.run_reflection_layer2(
-                                        baseline=baseline,
-                                    )
-                                    processed_users += 1
-                                    # 增量统计
-                                    dedup_info = r.get("entity_dedup", {})
-                                    merge_info = r.get("description_merge", {})
-                                    total_dedup_merged += dedup_info.get("merged_count", 0)
-                                    total_desc_merged += merge_info.get("merged_count", 0)
-                                    # 只在有实际合并时输出详细日志
-                                    if merge_info.get("merged_count", 0) > 0:
-                                        logger.info(
-                                            f"反思引擎Layer2 用户 {user['id']} 描述合并: "
-                                            f"候选 {merge_info['candidate_count']}, "
-                                            f"合并 {merge_info['merged_count']}"
+                                    # 获取 Redis 锁，和写入 pipeline 互斥
+                                    write_lock = None
+                                    if redis_client is not None:
+                                        write_lock = RedisFairLock(
+                                            key=f"memory_write:{user['id']}",
+                                            redis_client=redis_client,
+                                            expire=600,
+                                            timeout=30,
+                                            auto_renewal=True,
                                         )
-                                    if dedup_info.get("merged_count", 0) > 0:
-                                        logger.info(
-                                            f"反思引擎Layer2 用户 {user['id']} 去重合并: "
-                                            f"合并 {dedup_info['merged_count']}"
+                                        if not await asyncio.to_thread(write_lock.acquire):
+                                            logger.warning(
+                                                f"反思引擎Layer2 获取锁超时，跳过用户 {user['id']}"
+                                            )
+                                            continue
+
+                                    try:
+                                        memory_service = MemoryService(
+                                            db=db,
+                                            config_id=config_id,
+                                            end_user_id=str(user['id']),
+                                            workspace_id=str(workspace.id),
                                         )
+                                        r = await memory_service.run_reflection_layer2(
+                                            baseline=baseline,
+                                        )
+                                        processed_users += 1
+                                        # 增量统计
+                                        dedup_info = r.get("entity_dedup", {})
+                                        merge_info = r.get("description_merge", {})
+                                        total_dedup_merged += dedup_info.get("merged_count", 0)
+                                        total_desc_merged += merge_info.get("merged_count", 0)
+                                        # 只在有实际合并时输出详细日志
+                                        if merge_info.get("merged_count", 0) > 0:
+                                            logger.info(
+                                                f"反思引擎Layer2 用户 {user['id']} 描述合并: "
+                                                f"候选 {merge_info['candidate_count']}, "
+                                                f"合并 {merge_info['merged_count']}"
+                                            )
+                                        if dedup_info.get("merged_count", 0) > 0:
+                                            logger.info(
+                                                f"反思引擎Layer2 用户 {user['id']} 去重合并: "
+                                                f"合并 {dedup_info['merged_count']}"
+                                            )
+                                    finally:
+                                        if write_lock is not None:
+                                            await asyncio.to_thread(write_lock.release)
                                 except Exception as e:
                                     logger.error(f"反思引擎Layer2 巡检失败 user={user['id']}: {e}")
 

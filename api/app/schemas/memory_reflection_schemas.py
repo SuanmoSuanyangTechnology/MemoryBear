@@ -26,6 +26,7 @@ class TriggerTypeEnum(str, Enum):
     """触发方式枚举"""
     SCHEDULED = "scheduled"
     CONVERSATION = "conversation"
+    MANUAL = "manual"
 
 class LogStatusEnum(str, Enum):
     """日志状态枚举"""
