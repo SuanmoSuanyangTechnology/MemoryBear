@@ -60,6 +60,11 @@ class LongTermMemoryInput(BaseModel):
     """长期记忆工具输入参数"""
     question: str = Field(
         description="经过优化重写的查询问题。请将用户的原始问题重写为更合适的检索形式，包含关键词，上下文和具体描述，注意错词检查并且改写")
+    search_mode: str = Field(
+        description="'0':深度检索适用于涉及到复杂问题的检索,关系检索 "
+                    "'1':普通问题检索链路 "
+                    "'2': 推理类型问题检索，工具返回原始检索数据需要根据原始数据进行可能的推断"
+    )
 
 
 def create_long_term_memory_tool(
@@ -87,7 +92,7 @@ def create_long_term_memory_tool(
     logger.info(f"创建长期记忆工具，配置: end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}")
 
     @tool(args_schema=LongTermMemoryInput)
-    def long_term_memory(question: str) -> str:
+    def long_term_memory(question: str, search_mode: str) -> str:
         """
         从用户的历史记忆中检索相关信息。用于了解用户的背景、偏好和历史对话内容。
 
@@ -95,6 +100,7 @@ def create_long_term_memory_tool(
         - 用户明确询问历史信息（如"我之前说过什么"、"上次我们聊了什么"）
         - 用户询问个人信息或偏好（如"我喜欢什么"、"我的习惯是什么"）
         - 需要基于历史上下文提供个性化建议
+        - 需要用户信息进行一些问题的推断
 
         **何时不使用此工具：**
         - 简单问候（如"你好"、"谢谢"、"再见"）
@@ -104,6 +110,9 @@ def create_long_term_memory_tool(
 
         Args:
             question: 需要检索的问题（保持原问题的核心语义，使用清晰的关键词，第三人称描述的偏好、行为通常指用户本人，比如（我，本人，在下，自己，咱，鄙人，吴，余）通指用户）
+            search_mode: '0':深度检索适用于涉及到复杂问题的检索,关系检索
+                        '1':普通问题检索链路
+                        '2': 推理类型问题检索，工具返回原始检索数据需要根据原始数据进行可能的推断
 
         Returns:
             检索到的历史记忆内容
@@ -113,7 +122,7 @@ def create_long_term_memory_tool(
             with get_db_context() as db:
                 memory_service = MemoryService(db, config_id, end_user_id)
                 # TODO: Historical Messages -> Used to refer to coreference resolution
-                search_result = asyncio.run(memory_service.read(question, SearchStrategy.QUICK))
+                search_result = asyncio.run(memory_service.read(question, search_mode))
 
             #     memory_content = asyncio.run(
             #         MemoryAgentService().read_memory(
