@@ -23,8 +23,6 @@ class NodeDefinition(BaseModel):
         description="节点类型: start, end, llm, agent, tool, condition, loop, transform, human, code"
     )
     name: str | None = Field(None, description="节点名称")
-    enabled: bool = Field(default=True, description="节点是否启用")
-    trigger_type: str | None = Field(None, description="触发器子类型: webhook, schedule")
     cycle: str | None = Field(None, description="父循环节点id")
     description: str | None = Field(None, description="节点描述")
     config: dict[str, Any] = Field(default_factory=dict, description="节点配置")

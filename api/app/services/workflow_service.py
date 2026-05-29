@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 
 from app.core.workflow.triggers import (
     build_schedule_now_payload,
+    get_trigger_type,
+    is_trigger_enabled,
     iter_trigger_nodes,
     is_schedule_trigger_due,
     normalize_trigger_nodes,
@@ -135,7 +137,7 @@ class WorkflowService:
     def _build_debug_trigger_context(
         trigger_node: dict[str, Any],
     ) -> tuple[str, str | None, dict[str, Any], dict[str, Any]]:
-        trigger_type = str(trigger_node.get("trigger_type") or "manual").strip()
+        trigger_type = get_trigger_type(trigger_node) or "manual"
         trigger_id = trigger_node.get("id")
         config = trigger_node.get("config") or {}
         current_time = datetime.datetime.now(datetime.timezone.utc)
@@ -303,7 +305,7 @@ class WorkflowService:
                 route_key=route_key,
                 trigger_type="webhook",
             )
-            if trigger and trigger.get("enabled", True):
+            if trigger and is_trigger_enabled(trigger):
                 return app, release, config, trigger
         return None
 
@@ -329,7 +331,7 @@ class WorkflowService:
                 real_config_id=(app.workflow_config.id if app.workflow_config else None),
             )
             for trigger in iter_trigger_nodes(config.nodes, trigger_type="schedule"):
-                if not trigger.get("enabled", True):
+                if not is_trigger_enabled(trigger):
                     continue
                 if is_schedule_trigger_due(trigger, current_time):
                     due_triggers.append((app, release, config, trigger))
@@ -392,15 +394,14 @@ class WorkflowService:
 
     async def invoke_webhook_trigger(
         self,
-        route_key: str,
+        *,
+        app: App,
+        release: AppRelease,
+        config: WorkflowConfig,
+        trigger: dict[str, Any],
         event: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        matched = self.find_published_webhook_trigger(route_key)
-        if not matched:
-            raise BusinessException("Webhook 触发器不存在", BizCode.NOT_FOUND)
-
-        app, release, config, trigger = matched
-        payload = DraftRunRequest(stream=False, variables={}, files=[])
+    ) -> dict[str, Any]:
+        route_key = (trigger.get("config") or {}).get("route_key", "")
         trigger_meta = {
             "source": "webhook",
             "route_key": route_key,
@@ -410,9 +411,9 @@ class WorkflowService:
                 "body": event.get("body"),
             },
         }
-        result = await self.run_with_trigger(
+        return await self.run_with_trigger(
             app_id=app.id,
-            payload=payload,
+            payload=DraftRunRequest(stream=False, variables={}, files=[]),
             config=config,
             workspace_id=app.workspace_id,
             release_id=release.id,
@@ -422,7 +423,6 @@ class WorkflowService:
             trigger_payload=event,
             source=HitLogSource.EXTERNAL,
         )
-        return result, trigger
 
     async def invoke_schedule_trigger(
         self,
@@ -845,6 +845,73 @@ class WorkflowService:
             执行记录或 None
         """
         return self.execution_repo.get_by_execution_id(execution_id)
+
+    @staticmethod
+    def _serialize_execution_value(value: Any) -> Any:
+        if isinstance(value, uuid.UUID):
+            return str(value)
+        if isinstance(value, datetime.datetime):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {k: WorkflowService._serialize_execution_value(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [WorkflowService._serialize_execution_value(item) for item in value]
+        return value
+
+    def get_execution_detail(self, execution_id: str) -> dict[str, Any] | None:
+        execution = self.get_execution(execution_id)
+        if not execution:
+            return None
+
+        node_executions = self.node_execution_repo.get_by_execution_id(execution.id)
+        output_data = self._serialize_execution_value(execution.output_data or {})
+        input_data = self._serialize_execution_value(execution.input_data or {})
+        meta_data = self._serialize_execution_value(execution.meta_data or {})
+        snapshot = {}
+        if isinstance(output_data, dict):
+            snapshot = output_data.get("snapshot") or {}
+
+        return {
+            "execution_id": execution.execution_id,
+            "app_id": str(execution.app_id),
+            "workflow_config_id": str(execution.workflow_config_id),
+            "release_id": str(execution.release_id) if execution.release_id else None,
+            "conversation_id": str(execution.conversation_id) if execution.conversation_id else None,
+            "trigger_type": execution.trigger_type,
+            "status": execution.status,
+            "input_data": input_data,
+            "output_data": output_data,
+            "snapshot": snapshot,
+            "context": self._serialize_execution_value(execution.context or {}),
+            "meta_data": meta_data,
+            "error_message": execution.error_message,
+            "error_node_id": execution.error_node_id,
+            "started_at": execution.started_at.isoformat() if execution.started_at else None,
+            "completed_at": execution.completed_at.isoformat() if execution.completed_at else None,
+            "elapsed_time": execution.elapsed_time,
+            "token_usage": self._serialize_execution_value(execution.token_usage),
+            "node_executions": [
+                {
+                    "node_id": node_execution.node_id,
+                    "node_type": node_execution.node_type,
+                    "node_name": node_execution.node_name,
+                    "execution_order": node_execution.execution_order,
+                    "retry_count": node_execution.retry_count,
+                    "status": node_execution.status,
+                    "input_data": self._serialize_execution_value(node_execution.input_data or {}),
+                    "output_data": self._serialize_execution_value(node_execution.output_data or {}),
+                    "error_message": node_execution.error_message,
+                    "started_at": node_execution.started_at.isoformat() if node_execution.started_at else None,
+                    "completed_at": node_execution.completed_at.isoformat() if node_execution.completed_at else None,
+                    "elapsed_time": node_execution.elapsed_time,
+                    "token_usage": self._serialize_execution_value(node_execution.token_usage),
+                    "cache_hit": node_execution.cache_hit,
+                    "cache_key": node_execution.cache_key,
+                    "meta_data": self._serialize_execution_value(node_execution.meta_data or {}),
+                }
+                for node_execution in node_executions
+            ],
+        }
 
     def get_executions_by_app(
             self,

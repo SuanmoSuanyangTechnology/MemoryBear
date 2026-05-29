@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, select
 from fastapi import Depends
 
+from app.core.workflow.nodes.enums import NodeType
 from app.models.workflow_model import (
     WorkflowConfig,
     WorkflowExecution,
@@ -117,7 +118,7 @@ class WorkflowConfigRepository:
         nodes = list(config.nodes or [])
         updated = False
         for node in nodes:
-            if node.get("type") == "trigger" and node.get("id") == trigger_id:
+            if node.get("type") == NodeType.TRIGGER and node.get("id") == trigger_id:
                 node["runtime"] = runtime
                 updated = True
                 break

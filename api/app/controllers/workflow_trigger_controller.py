@@ -60,9 +60,9 @@ async def trigger_webhook(
     if not matched:
         raise BusinessException("Webhook 触发器不存在", BizCode.NOT_FOUND)
 
-    _, _, _, trigger = matched
-    config = trigger.get("config") or {}
-    expected_method = str(config.get("method", "POST")).upper()
+    app, release, wf_config, trigger = matched
+    trigger_config = trigger.get("config") or {}
+    expected_method = str(trigger_config.get("method", "POST")).upper()
     if request.method.upper() != expected_method:
         raise BusinessException(f"Webhook 仅支持 {expected_method}", BizCode.INVALID_PARAMETER)
 
@@ -76,7 +76,9 @@ async def trigger_webhook(
             "url": str(request.url),
         },
     }
-    result, trigger = await workflow_service.invoke_webhook_trigger(route_key, event)
+    result = await workflow_service.invoke_webhook_trigger(
+        app=app, release=release, config=wf_config, trigger=trigger, event=event
+    )
 
     response_config = ((trigger.get("config") or {}).get("response") or {})
     response_body = _parse_custom_response_body(response_config.get("body"))

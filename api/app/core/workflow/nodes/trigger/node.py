@@ -16,6 +16,7 @@ from app.core.workflow.variable.base_variable import VariableType
 from app.core.workflow.triggers import (
     build_schedule_trigger_output,
     build_webhook_trigger_output,
+    get_trigger_type,
 )
 
 
@@ -24,7 +25,7 @@ class TriggerNode(BaseNode):
 
     def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
         super().__init__(node_config, workflow_config, down_stream_nodes)
-        self.trigger_type = str(node_config.get("trigger_type") or "").strip()
+        self.trigger_type = get_trigger_type(node_config)
 
     def _output_types(self) -> dict[str, VariableType]:
         if self.trigger_type == "webhook":

@@ -87,6 +87,19 @@ def find_start_node_id(nodes: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def get_trigger_config(node: dict[str, Any] | None) -> dict[str, Any]:
+    config = (node or {}).get("config") or {}
+    return config if isinstance(config, dict) else {}
+
+
+def get_trigger_type(node: dict[str, Any] | None) -> str:
+    return str(get_trigger_config(node).get("trigger_type") or "").strip()
+
+
+def is_trigger_enabled(node: dict[str, Any] | None) -> bool:
+    return bool(get_trigger_config(node).get("enabled", True))
+
+
 def iter_trigger_nodes(
     nodes: list[dict[str, Any]] | None,
     trigger_type: str | None = None,
@@ -95,7 +108,7 @@ def iter_trigger_nodes(
     for node in nodes or []:
         if node.get("type") != "trigger":
             continue
-        if trigger_type and node.get("trigger_type") != trigger_type:
+        if trigger_type and get_trigger_type(node) != trigger_type:
             continue
         matched.append(node)
     return matched
@@ -109,15 +122,18 @@ def normalize_trigger_nodes(nodes: list[dict[str, Any]] | None) -> list[dict[str
             normalized_nodes.append(node)
             continue
 
-        trigger_type = str(node.get("trigger_type") or "").strip()
-        config = dict(node.get("config") or {})
+        config = dict(get_trigger_config(node))
+        trigger_type = str(config.get("trigger_type") or "").strip()
         runtime = dict(node.get("runtime") or {})
 
         node["id"] = node.get("id") or f"trigger_{uuid.uuid4().hex[:12]}"
         node["name"] = node.get("name") or f"{trigger_type or 'trigger'}_{index + 1}"
-        node["trigger_type"] = trigger_type
+        config["trigger_type"] = trigger_type
+        config.setdefault("enabled", True)
         node["config"] = config
         node["runtime"] = runtime
+        node.pop("trigger_type", None)
+        node.pop("enabled", None)
 
         if trigger_type == "webhook":
             config.setdefault("method", "POST")
@@ -141,7 +157,7 @@ def normalize_trigger_nodes(nodes: list[dict[str, Any]] | None) -> list[dict[str
 def validate_trigger_nodes(nodes: list[dict[str, Any]] | None) -> None:
     route_keys: set[str] = set()
     for node in iter_trigger_nodes(nodes):
-        trigger_type = node.get("trigger_type")
+        trigger_type = get_trigger_type(node)
         if trigger_type not in SUPPORTED_TRIGGER_TYPES:
             raise ValueError(f"不支持的触发器类型: {trigger_type}")
 
