@@ -419,7 +419,7 @@ class MessageRepository:
         )
 
         if current_only:
-            stmt = stmt.where(Message.is_current == True)
+            stmt = stmt.where(Message.is_current.is_not(False))
 
         stmt = stmt.order_by(Message.created_at)
 
@@ -458,7 +458,7 @@ class MessageRepository:
         )
         
         if current_only:
-            stmt = stmt.where(Message.is_current == True)
+            stmt = stmt.where(Message.is_current.is_not(False))
         
         stmt = stmt.order_by(Message.created_at)
 

@@ -127,7 +127,7 @@ class ConversationShareService:
         messages = self.db.query(Message).filter(
             Message.conversation_id == share.conversation_id,
             Message.is_deleted.is_(False),
-            Message.is_current.is_(True)
+            Message.is_current.is_not(False)
         ).order_by(Message.created_at).all()
 
         logger.info(

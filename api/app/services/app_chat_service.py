@@ -1527,7 +1527,7 @@ class AppChatService:
             select(Message)
             .where(
                 Message.conversation_id == conversation_id,
-                Message.is_current == True,
+                Message.is_current.is_not(False),
                 Message.created_at < before_time,
                 Message.is_deleted == False,
             )
