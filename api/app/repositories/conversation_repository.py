@@ -399,20 +399,29 @@ class MessageRepository:
 
     def get_messages_by_conversation(
             self,
-            conversation_id: uuid.UUID
+            conversation_id: uuid.UUID,
+            current_only: bool = True
     ) -> list[Message]:
         """
         查询会话的所有消息（按时间正序）
 
         Args:
             conversation_id: 会话 ID
+            current_only: If True, only return messages where is_current=True.
+                         If False, return all messages (including all versions).
 
         Returns:
             List[Message]: 消息列表
         """
         stmt = select(Message).where(
-            Message.conversation_id == conversation_id
-        ).order_by(Message.created_at)
+            Message.conversation_id == conversation_id,
+            Message.is_deleted == False,
+        )
+
+        if current_only:
+            stmt = stmt.where(Message.is_current == True)
+
+        stmt = stmt.order_by(Message.created_at)
 
         messages = list(self.db.scalars(stmt).all())
 

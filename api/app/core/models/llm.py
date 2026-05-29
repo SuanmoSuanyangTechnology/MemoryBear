@@ -260,6 +260,19 @@ class RedBearLLM(BaseLLM):
         """
         llm_class = get_provider_llm_class(config, type)
         model_params = RedBearModelFactory.get_model_params(config)
+
+        # ===== 调试日志：追踪惩罚参数是否真正传入 =====
+        penalty_keys = {"repetition_penalty", "frequency_penalty", "presence_penalty"}
+        penalty_in_params = {k: v for k, v in model_params.items() if k in penalty_keys}
+        import logging
+        _penalty_logger = logging.getLogger("business")
+        _penalty_logger.info(
+            f"[LLM惩罚参数追踪] provider={config.provider}, model={config.model_name}, "
+            f"llm_class={llm_class.__name__}, "
+            f"penalty_params={penalty_in_params or '无'}"
+        )
+        # ===== 调试日志 END =====
+
         return llm_class(**model_params)
     
     def get_config(self) -> RedBearModelConfig:

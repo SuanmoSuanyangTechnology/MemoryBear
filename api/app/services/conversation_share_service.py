@@ -126,7 +126,8 @@ class ConversationShareService:
         # 获取会话消息（排除已删除的）
         messages = self.db.query(Message).filter(
             Message.conversation_id == share.conversation_id,
-            Message.is_deleted == False,
+            Message.is_deleted.is_(False),
+            Message.is_current.is_(True)
         ).order_by(Message.created_at).all()
 
         logger.info(
