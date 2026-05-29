@@ -119,6 +119,14 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
             : 'boolean'),
       })
       form.setFieldsValue(variable)
+      if (variable.type === 'file' || variable.type === 'array[file]') {
+        setFileList(Array.isArray(variable.default)
+          ? variable.default
+          : variable.default
+          ? [variable.default]
+          : []
+        )
+      }
     } else {
       form.resetFields();
     }
@@ -159,6 +167,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
   const fileChange = (file?: any) => {
     const fileObj = file ? {
       ...file,
+      status: file.status || 'uploading',
       type: file.type,
       transfer_method: "local_file",
       upload_file_id: file.response?.data?.file_id,
@@ -335,8 +344,19 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
           <FormItem
             name="default"
             label={t('workflow.config.start.default')}
-
-            rules={['json-editor'].includes(values.ui_type) 
+            dependencies={['text-input', 'paragraph'].includes(values.ui_type) ? ['max_length'] : []}
+            rules={
+              ['text-input', 'paragraph'].includes(values.ui_type) && values?.max_length
+                ? [{
+                    validator: (_, value) => {
+                      if (!value) return Promise.resolve();
+                      if (value.length > (values.max_length ?? 0)) {
+                        return Promise.reject(t('workflow.config.start.maxLengthExceeded', { max: values.max_length }));
+                      }
+                      return Promise.resolve();
+                    }
+                  }]
+                : ['json-editor'].includes(values.ui_type)
               ? [{
                 validator: (_, value) => {
                   if (!value) return Promise.resolve();

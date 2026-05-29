@@ -987,6 +987,9 @@ async def regenerate_message(
     # 获取配置
     agent_cfg = agent_config_4_app_release(release)
 
+    if not (agent_cfg.model_parameters.get("deep_thinking", False) and payload.thinking):
+        agent_cfg.model_parameters["deep_thinking"] = False
+
     # 获取存储类型
     storage_type = workspace_service.get_workspace_storage_type_without_auth(db=db, workspace_id=workspace_id)
     if storage_type is None:

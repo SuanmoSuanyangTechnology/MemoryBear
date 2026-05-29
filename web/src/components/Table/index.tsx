@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:29:46 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-20 15:39:39
+ * @Last Modified time: 2026-05-26 10:52:44
  */
 /**
  * RbTable Component
@@ -110,6 +110,8 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
   const [total, setTotal] = useState(0);
   const wrapperRef = useRef<HTMLDivElement>(null)
   const [computedScrollY, setComputedScrollY] = useState<number | undefined>(undefined)
+  const debounceTimerRef = useRef<number | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   // fillHeight 模式：用 ResizeObserver 动态计算 tbody 可用高度
   const measureHeight = useCallback(() => {
@@ -139,14 +141,19 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
     }
   }, [initialData, apiUrl])
 
-  /** Initialize table and load data from first page */
+  /** Initialize table and load data from first page with debounce */
   const loadData = () => {
-    if (apiUrl) {
+    if (!apiUrl) return
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current)
+    }
+    debounceTimerRef.current = setTimeout(() => {
       getList({
         ...currentPagination,
         page: 1
       })
-    }
+    }, 300)
   }
 
   /** Fetch data from API with pagination */
@@ -154,6 +161,14 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
     if (!apiUrl) {
       return
     }
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+
+    const abortController = new AbortController()
+    abortControllerRef.current = abortController
+
     let params = dealSo(apiParams || {})
     if (pagination) {
       setCurrentPagination({
@@ -164,7 +179,7 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
     }
     setLoading(true)
     /** Build query parameters and call API */
-    request.get(apiUrl, params)
+    request.get(apiUrl, params, { signal: abortController.signal })
       .then((res: any) => {
         /** Support two response formats: direct total or total in page object */
         const totalCount = res.page?.total ?? res.total ?? 0;
@@ -173,7 +188,9 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
         setLoading(false)
       })
       .catch(err => {
-        console.log('err', err)
+        if (err.name !== 'AbortError') {
+          console.log('err', err)
+        }
         setLoading(false)
       })
   }

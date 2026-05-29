@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-22 14:14:39
+ * @Last Modified time: 2026-05-26 16:34:27
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -172,8 +172,10 @@ const ChatContent: FC<ChatContentProps> = ({
     }
     return items
   }
-  const handlePageChange = (page: number, item: ChatItem) => {
-    handleVersionChange?.(page, item)
+  const handlePageChange = (page: number, vo: ChatItem[]) => {
+    const nextItem = vo.find(v => v.version === page)
+    if (!nextItem) return
+    handleVersionChange?.(page, nextItem)
   }
   return (
     <div ref={scrollContainerRef} className={clsx("rb:relative rb:overflow-y-auto", classNames)}>
@@ -251,7 +253,7 @@ const ChatContent: FC<ChatContentProps> = ({
                           {isReasoningExpanded(index) && <Markdown content={item.meta_data.reasoning_content} className="rb:text-[#5B6167] rb:text-[12px]" />}
                           </div>
                         }
-                        {((item.status && item.status !== 'completed') || typeof item.meta_data?.error === 'string') &&
+                        {((item.status && item.status !== 'completed') || typeof item.meta_data?.error === 'string') && typeof renderRuntime !== 'function' &&
                           <div className={clsx("rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/conversation/exclamation_circle.svg')] rb:absolute", {
                             'rb:-left-7!': item.status && item.status !== 'completed' && item.role === 'user',
                             'rb:left-0!': item.role === 'assistant' && typeof item.meta_data?.error === 'string',
@@ -289,7 +291,7 @@ const ChatContent: FC<ChatContentProps> = ({
                       </div>
                       {/* Bottom label (such as timestamp, username, etc.) */}
                       {(labelPosition === 'bottom' || item.meta_data?.audio_url || isSupportTools) &&
-                        <Flex gap={16} align="center" justify={item.role === 'user' ? 'end' : 'start'}>
+                        <Flex gap={12} align="center" justify={item.role === 'user' ? 'end' : 'start'}>
                           {labelPosition === 'bottom' &&
                             <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
                               {labelFormat(item)}
@@ -310,7 +312,7 @@ const ChatContent: FC<ChatContentProps> = ({
                             }
                           </>}
                           {isSupportTools && item.role === 'assistant' && !(!isEnded && index === data.length - 1) && !item.is_hidden_refresh && <>
-                            {Array.isArray(vo) && item.version &&
+                            {index === data.length - 1 && Array.isArray(vo) && vo.length > 1 && typeof item.version === 'number' && handleVersionChange &&
                               <Pagination
                                 key={item.id}
                                 size="small"
@@ -319,7 +321,7 @@ const ChatContent: FC<ChatContentProps> = ({
                                 current={item.version}
                                 defaultCurrent={item.version}
                                 total={vo.length}
-                                onChange={(page) => handlePageChange(page, item)}
+                                onChange={(page: number) => handlePageChange(page, vo)}
                               />
                             }
                             {handleFeedback && <>

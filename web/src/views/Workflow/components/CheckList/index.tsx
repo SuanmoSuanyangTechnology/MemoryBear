@@ -75,7 +75,7 @@ const specialValidators: Record<string, (val: any) => boolean> = {
     if (!Array.isArray(val) || !val.length) return false
     return val.some(a => {
       if (!a?.variable_selector || !a?.operation) return true
-      if (a.operation === 'clear') return false
+      if (a.operation === 'clear' || a.operation === 'remove_first' || a.operation === 'remove_last') return false
       return a.value === undefined || a.value === null || a.value === ''
     })
   },

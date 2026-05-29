@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-19 14:31:07
+ * @Last Modified time: 2026-05-26 10:24:55
  */
 import { useEffect, useLayoutEffect, useState, useRef, type FC } from 'react';
 import { createPortal } from 'react-dom';
@@ -431,6 +431,10 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
                 align="center"
                 justify="space-between"
                 onClick={() => !child.disabled && insertMention(child)}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  !child.disabled && insertMention(child)
+                }}
                 onMouseEnter={() => { setActivePanel('child'); setChildActiveIndex(ci); }}
               >
                 <span className="rb:font-medium">

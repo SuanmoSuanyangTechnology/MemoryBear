@@ -58,8 +58,20 @@ class FlushTask:
 
         Requirements: 4.3, 4.5
         """
+        from app.core.memory.sliding_window.window_utils import unmark_conversation_pending
+
         logger.info(f"[FlushTask] 开始处理: conv={conversation_id}")
 
+        try:
+            await self._run_inner(conversation_id)
+        finally:
+            # 兜底清理 Redis Set：本次 flush 已尽力处理（无论成功/早退/异常）
+            # 后续若有新消息写入，实时路径会重新 mark；若处理失败但还需处理，
+            # ScanIdle 的 DB 回退查询（max_seq > write_cursor）仍能发现并派发。
+            unmark_conversation_pending(conversation_id)
+
+    async def _run_inner(self, conversation_id: str) -> None:
+        """run() 的内部实现，提取出来便于 try/finally 统一收尾。"""
         # Step 1: 查询对话信息（end_user_id + workspace_id）
         conversation_info = self._get_conversation_info(conversation_id)
         if conversation_info is None:
@@ -67,6 +79,14 @@ class FlushTask:
             return
 
         write_cursor, end_user_id, workspace_id = conversation_info
+
+        # Step 1.5: 提前校验 memory_config，避免下层抛 ConfigurationError 产生 ERROR 日志噪音
+        if not self._has_active_memory_config(workspace_id):
+            logger.warning(
+                f"[FlushTask] workspace 无活跃记忆配置，跳过 flush: "
+                f"conv={conversation_id}, workspace={workspace_id}"
+            )
+            return
 
         # Step 2: 通过 Layer 2 执行所有 pending user 消息
         # execute_pending_from_pool 内部处理：
@@ -184,6 +204,49 @@ class FlushTask:
                 exc_info=True,
             )
             return None
+
+    def _has_active_memory_config(self, workspace_id: str | None) -> bool:
+        """检查 workspace 是否存在活跃的 memory_config。
+
+        用于在执行 flush 前预校验，避免下层抛 ConfigurationError 产生 ERROR 日志噪音。
+        校验自身出错时返回 True（不阻断主流程，让下层兜底处理）。
+
+        Args:
+            workspace_id: 对话所属工作空间 ID（字符串形式）
+
+        Returns:
+            True 表示 workspace 存在活跃配置或校验失败；False 表示明确无配置应跳过。
+        """
+        if not workspace_id:
+            return True
+
+        import uuid as _uuid
+
+        try:
+            ws_uuid = _uuid.UUID(workspace_id)
+        except (ValueError, AttributeError):
+            return True
+
+        try:
+            from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+
+            with get_db_context() as db:
+                exists = db.execute(
+                    select(MemoryConfigModel.config_id)
+                    .where(
+                        MemoryConfigModel.workspace_id == ws_uuid,
+                        MemoryConfigModel.state.is_(True),
+                    )
+                    .limit(1)
+                ).scalar_one_or_none()
+                return exists is not None
+        except Exception as e:
+            logger.warning(
+                f"[FlushTask] memory_config 预校验异常（继续执行）: "
+                f"workspace={workspace_id}, err={e}",
+                exc_info=True,
+            )
+            return True
 
     def _get_write_cursor(self, conversation_id: str) -> int | None:
         """查询 write_cursor。"""

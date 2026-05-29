@@ -203,6 +203,8 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
                           ? t('common.selectPlaceholder', { title: v.label })
                           : t('common.inputPlaceholder', { title: v.label })
                       }] : undefined}
+                      valuePropName={v.dataType.includes('boolean') ? 'checked' : 'value'}
+                      initialValue={v.dataType.includes('boolean') ? v.default || false : undefined}
                       className="rb:mb-0!"
                     >
                       {v.dataType === 'object'

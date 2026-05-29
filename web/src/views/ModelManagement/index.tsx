@@ -28,7 +28,7 @@ import { modelTypeUrl, modelProviderUrl } from '@/api/models'
 /**
  * Available tab keys
  */
-const tabKeys = ['square', 'group', 'list']
+const tabKeys = ['square', 'list', 'group']
 
 /**
  * Model management main component
