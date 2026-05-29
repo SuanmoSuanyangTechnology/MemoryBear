@@ -21,6 +21,7 @@ from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes import NodeFactory
 from app.core.workflow.nodes.enums import NodeType, BRANCH_NODES, HttpErrorHandle
 from app.core.workflow.nodes.llm import LLMNodeConfig
+from app.core.workflow.nodes.code import CodeNodeConfig
 from app.core.workflow.utils.expression_evaluator import evaluate_condition
 from app.core.workflow.validator import WorkflowValidator
 from app.core.workflow.variable.base_variable import VariableType
@@ -142,12 +143,19 @@ class GraphBuilder:
         non_branch_nodes = []
 
         for node_info in source_nodes:
-            if self.get_node_type(node_info["id"]) == NodeType.LLM and \
-                    LLMNodeConfig(**self.node_map[node_info["id"]]["config"]).error_handle.method in [
+            node_type = self.get_node_type(node_info["id"])
+            node_config = self.node_map[node_info["id"]]["config"]
+            if node_type == NodeType.LLM and \
+                    LLMNodeConfig(**node_config).error_handle.method in [
                 HttpErrorHandle.NONE, HttpErrorHandle.DEFAULT
             ]:
                 non_branch_nodes.append(node_info["id"])
-            elif self.get_node_type(node_info["id"]) in BRANCH_NODES:
+            elif node_type == NodeType.CODE and \
+                    CodeNodeConfig(**node_config).error_handle.method in [
+                HttpErrorHandle.NONE, HttpErrorHandle.DEFAULT
+            ]:
+                non_branch_nodes.append(node_info["id"])
+            elif node_type in BRANCH_NODES:
                 if node_info.get("branch") is not None:
                     branch_nodes.append(
                         (node_info["id"], node_info["branch"])
@@ -324,7 +332,7 @@ class GraphBuilder:
                     # Used later to determine which branch to take based on the node's output
                     # For LLM nodes, use branch_signal field for routing (output is dynamic text)
                     # For other branch nodes (e.g. HTTP), use output field
-                    route_field = "branch_signal" if node_type == NodeType.LLM else "output"
+                    route_field = "branch_signal" if node_type in (NodeType.LLM, NodeType.CODE) else "output"
                     related_edge[idx]['condition'] = (
                         f"node['{node_id}']['{route_field}'] == '{related_edge[idx].get('label') or 'SUCCESS'}'"
                     )
