@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-04-09 18:58:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-28 14:55:34
+ * @Last Modified time: 2026-05-29 19:46:06
  */
 import { useState, useCallback, useEffect, useRef, type FC } from 'react'
 import { Popover, Flex } from 'antd'
@@ -175,7 +175,7 @@ const CheckList: FC<CheckListProps> = ({ workflowRef, appId }) => {
 
       // Check connectivity
       const isChildNode = !!data.cycle
-      const hasIncoming = isChildNode ? childTargetIds.has(node.id) : !['start', 'cycle-start'].includes(data.type) ? targetIds.has(node.id) : true
+      const hasIncoming = isChildNode ? childTargetIds.has(node.id) : !['start', 'cycle-start', 'trigger'].includes(data.type) ? targetIds.has(node.id) : true
       if (!hasIncoming) {
         errors.push({ key: 'notConnected', message: t('workflow.notConnected') })
       }

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-28 14:57:41
+ * @Last Modified time: 2026-05-29 16:21:57
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
   // Scroller,
@@ -15,6 +15,7 @@ import type { RefObject, Dispatch, SetStateAction, MutableRefObject, DragEvent }
 import { createRoot } from 'react-dom/client';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
+import dayjs from 'dayjs';
 
 import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application';
 import { useUser } from '@/store/user';
@@ -216,7 +217,9 @@ export const useWorkflowGraph = ({
 
         if (nodeLibraryConfig?.config) {
           Object.keys(nodeLibraryConfig.config).forEach(key => {
-            if (type === 'loop' && key === 'condition' && nodeLibraryConfig.config) {
+            if (type === 'trigger' && key === 'time' && nodeLibraryConfig.config) {
+              nodeLibraryConfig.config[key].defaultValue = dayjs('12:00 AM', 'h:mm A')
+            } else if (type === 'loop' && key === 'condition' && nodeLibraryConfig.config) {
               const { condition } = config;
               console.log('condition', condition)
               nodeLibraryConfig.config[key].defaultValue = condition ? {
@@ -1560,6 +1563,10 @@ export const useWorkflowGraph = ({
       .find(n => n.type === dragData.type);
     nodeLibraryConfig = JSON.parse(JSON.stringify({ config: {}, ...nodeLibraryConfig })) as NodeProperties
 
+    if (nodeLibraryConfig.type === 'trigger' && nodeLibraryConfig.config?.time) {
+      nodeLibraryConfig.config.time.defaultValue = dayjs(nodeLibraryConfig.config.time.defaultValue, 'h:mm A')
+    }
+
     // Create clean node data, only keep necessary fields
     const cleanNodeData = {
       id: `${dragData.type.replace(/-/g, '_')}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -1665,7 +1672,9 @@ export const useWorkflowGraph = ({
 
           if (data.config) {
             Object.keys(data.config).forEach(key => {
-              if (data.type === 'code' && key === 'code' && data.config[key] && 'defaultValue' in data.config[key]) {
+              if (data.type === 'trigger' && key === 'time' && data.config[key] && 'defaultValue' in data.config[key]) {
+                itemConfig[key] = dayjs(data.config[key].defaultValue, 'h:mm A').format('h:mm A')
+              } else if (data.type === 'code' && key === 'code' && data.config[key] && 'defaultValue' in data.config[key]) {
                 const code = data.config[key].defaultValue || ''
                 itemConfig = {
                   ...itemConfig,

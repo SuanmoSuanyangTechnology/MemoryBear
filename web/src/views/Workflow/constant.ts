@@ -2,10 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-28 14:54:25
+ * @Last Modified time: 2026-05-29 19:46:16
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
+
 import AddNode from './components/Nodes/AddNode';
 import ConditionNode from './components/Nodes/ConditionNode';
 import GroupStartNode from './components/Nodes/GroupStartNode';
@@ -50,6 +51,42 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'define',
             defaultValue: []
           }
+        }
+      },
+      { type: "trigger", icon: 'rb:bg-[url("@/assets/images/workflow/trigger.svg")]',
+        config: {
+          trigger_type: {
+            type: 'define',
+            required: true,
+          },
+          cron: {
+            type: 'define',
+            required: true,
+          },
+          enabled: {
+            type: 'define',
+            defaultValue: true
+          },
+          // frequency: {
+          //   type: 'define',
+          //   defaultValue: 'daily'
+          // },
+          // minute: {
+          //   type: 'define',
+          //   defaultValue: 0,
+          // },
+          // time: {
+          //   type: 'define',
+          //   defaultValue: '12:00 AM',
+          // },
+          // week_days: {
+          //   type: 'define',
+          //   defaultValue: []
+          // },
+          // month_days: {
+          //   type: 'define',
+          //   defaultValue: []
+          // },
         }
       },
       { type: "end", icon: 'rb:bg-[url("@/assets/images/workflow/end.svg")]',
@@ -961,6 +998,15 @@ export const defaultPortItems = [
  * Maps node types to their visual and structural properties
  */
 export const graphNodeLibrary: Record<string, NodeConfig> = {
+  'trigger': {
+    width: nodeWidth,
+    height: 76,
+    shape: 'normal-node',
+    ports: {
+      groups: { right: defaultPortGroup },
+      items: [defaultPortItems[1]],
+    },
+  },
   iteration: {
     width: nodeWidth,
     height: 140,

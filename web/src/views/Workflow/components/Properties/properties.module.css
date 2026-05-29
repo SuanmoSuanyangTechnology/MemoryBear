@@ -176,3 +176,11 @@
 .properties .tabs:global(.ant-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn) {
   font-weight: 500;
 }
+.properties :global(.ant-picker-small) {
+  padding: 2px 8px;
+  height: 28px;
+}
+.properties :global(.ant-picker .ant-picker-suffix),
+.properties :global(.ant-picker-small .ant-picker-input>input) {
+  font-size: 12px;
+}

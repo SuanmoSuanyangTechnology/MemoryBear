@@ -2,12 +2,13 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:30:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-28 14:55:24
+ * @Last Modified time: 2026-05-29 16:21:32
  */
 import { useEffect, useState } from 'react';
 import { Flex, Popover } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
+import dayjs from 'dayjs';
 
 import { nodeLibrary, graphNodeLibrary, edgeAttrs, nodeWidth } from '../constant';
 import { filterNodeByAppType } from '../utils';
@@ -87,6 +88,11 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph, nodeClick, a
     const isCycleSubNode = !!sourceNodeData.cycle;
     const isCycleContainer = (type: string) => type === 'loop' || type === 'iteration';
     const newNodeType = selectedNodeType.type;
+
+    if (selectedNodeType.type === 'trigger' && selectedNodeType.config?.time) {
+      selectedNodeType.config.time.defaultValue = dayjs(selectedNodeType.config.time.defaultValue, 'h:mm A')
+    }
+
 
     // Save add-node placeholder position before disabling history
 
