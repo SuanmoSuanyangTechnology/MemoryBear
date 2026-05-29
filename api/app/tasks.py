@@ -335,6 +335,7 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             db_document.run = 0
             db_document.progress_msg = _progress_msg() + f"Page count ({estimated_pages}) exceeds limit ({MAX_DOCUMENT_PAGES}), parsing rejected\n"
             db.commit()
+            _clear_redis_state(document_id)
             return f"parse document '{file_name or document_id}' failed: page limit exceeded"
 
         def progress_callback(prog=None, msg=None):
