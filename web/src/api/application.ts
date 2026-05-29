@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 13:59:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 14:05:33
+ * @Last Modified time: 2026-05-29 17:54:08
  */
 import { request } from '@/utils/request'
 import type { ApplicationModalData } from '@/views/ApplicationManagement/types'
@@ -297,4 +297,8 @@ export const previewWorkflowToolParams = (app_id: string) => {
 // Publish workflow as tool
 export const workflowPublishAsTool = (app_id: string, data: WorkflowToolForm) => {
   return request.post(`/apps/${app_id}/publish_tool`, data)
+}
+// Get workflow execution details and variable snapshot
+export const getWorkflowExecutionDetail = (app_id: string, execution_id: string) => {
+  return request.get(`/apps/${app_id}/workflow/executions/${execution_id}`)
 }

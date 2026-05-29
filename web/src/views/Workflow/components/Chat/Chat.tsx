@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-28 15:14:06
+ * @Last Modified time: 2026-05-29 18:05:34
  */
 /**
  * Workflow Chat Component
@@ -53,7 +53,6 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
   const { t } = useTranslation()
   const { message: messageApi } = App.useApp()
   const { setChatHistory } = useWorkflowStore()
-  const conversationIdRef = useRef<string>('draft')
   const toolbarRef = useRef<ChatToolbarRef>(null)
   const abortRef = useRef<(() => void) | null>(null)
   const [toolbarReady, setToolbarReady] = useState(false)
@@ -70,6 +69,8 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
   const [fileList, setFileList] = useState<any[]>([])
   const [message, setMessage] = useState<string | undefined>(undefined)
   const variableConfigModalRef = useRef<VariableConfigModalRef>(null)
+  const [executionId, setExecutionId] = useState<string | null>(null)
+  const executionIdRef = useRef<string>('draft')
 
   /**
    * Opens the chat drawer and loads workflow variables from the start node
@@ -122,7 +123,7 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
    * Closes the drawer and resets all state
    */
   const handleClose = () => {
-    setChatHistory(conversationIdRef.current, chatList.map((item: ChatItem) => ({
+    setChatHistory(executionIdRef.current, chatList.map((item: ChatItem) => ({
       ...item,
       subContent: item.subContent?.map(sub => ({
         ...sub,
@@ -135,8 +136,8 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
     setToolbarReady(false)
     setChatList([])
     setVariables([])
-    setConversationId(null)
-    conversationIdRef.current = 'draft'
+    setExecutionId(null)
+    executionIdRef.current = 'draft'
     setMessage(undefined)
     toolbarRef.current?.setFiles([])
     toolbarRef.current?.setVariables([])
@@ -195,8 +196,9 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
      */
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.forEach(item => {
-        const { content, conversation_id, node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status, citations } = item.data as {
+        const { content, execution_id, conversation_id, node_id, cycle_id, cycle_idx, input, output, process, error, elapsed_time, status, citations } = item.data as {
           content: string;
+          execution_id: string | null;
           conversation_id: string | null;
           cycle_id: string;
           cycle_idx: number;
@@ -247,6 +249,7 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
                 if (filterIndex > -1) {
                   newSubContent[filterIndex] = {
                     ...newSubContent[filterIndex],
+                    execution_id,
                     node_id: node_id,
                     node_name: name,
                     node_type: type,
@@ -256,6 +259,7 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
                   }
                 } else {
                   newSubContent.push({
+                    execution_id,
                     id: node_id,
                     node_id: node_id,
                     node_name: name,
@@ -368,8 +372,11 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
         }
 
         if (conversation_id && conversationId !== conversation_id) {
-          conversationIdRef.current = conversation_id
           setConversationId(conversation_id)
+        }
+        if (execution_id && executionId !== execution_id) {
+          executionIdRef.current = execution_id
+          setExecutionId(execution_id)
         }
       })
     }
@@ -478,7 +485,7 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
 
   useEffect(() => {
     if (chatList.length < 1) return
-    setChatHistory(conversationIdRef.current, chatList)
+    setChatHistory(executionIdRef.current, chatList)
   }, [chatList])
 
   // True when any required variable is missing a value, used to highlight the config button

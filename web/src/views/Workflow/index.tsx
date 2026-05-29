@@ -48,6 +48,7 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
     canRedo,
     undo,
     redo,
+    lastExecuteId,
   } = useWorkflowGraph({ containerRef, miniMapRef, onFeaturesLoad });
 
   const onDragOver = (event: React.DragEvent) => {
@@ -113,6 +114,9 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ onFeaturesLoad, appTy
           canRedo={canRedo}
           onUndo={undo}
           onRedo={redo}
+          lastExecuteId={lastExecuteId}
+          config={config}
+          collapsed={collapsed}
         />
       </div>
       
