@@ -43,7 +43,13 @@ class PerTypeStat(BaseModel):
     returned: int = Field(..., ge=0, description="本次响应中该类型的节点数量")
     total: int = Field(..., ge=0, description="end_user 下该类型的全量节点总数")
     limit: int = Field(..., ge=0, description="本次请求该类型实际生效的 Per_Type_Limit")
-    truncated: bool = Field(..., description="total > returned 即为 True")
+    truncated: bool = Field(
+        ...,
+        description=(
+            "是否因 Per_Type_Limit 限制而截断：limit>0 且 total>returned 时为 True。"
+            "limit==0（主动跳过该类型）时恒为 False。"
+        ),
+    )
 
 
 class GraphStatistics(BaseModel):

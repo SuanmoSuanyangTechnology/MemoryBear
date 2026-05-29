@@ -17,7 +17,6 @@ from app.core.logging_config import get_logger
 from app.core.memory.constants.graph_data_constants import (
     DEPTH_HARD_MAX,
     NODE_PROPERTY_WHITELIST,
-    SUPPORTED_NODE_TYPES,
     _DEFAULT_FIELDS,
 )
 from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import _USER_PLACEHOLDER_NAMES
@@ -28,11 +27,12 @@ from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.neo4j.cypher_queries import Graph_Node_query
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services._graph_data_helpers import (
-    _apply_total_cap_shrink,
+    assemble_per_type_stat,
+    compute_stat_types,
+    resolve_mode_and_type_limits,
     _query_nodes_by_type_limits,
     _query_rel_count_batch,
     _query_total_count_by_type,
-    _resolve_per_type_limits,
 )
 from app.schemas.memory_episodic_schema import EmotionSubject, EmotionType, type_mapping
 from app.services.memory_base_service import MemoryBaseService, MIN_MEMORY_SUMMARY_COUNT
@@ -1806,19 +1806,11 @@ async def _collect_node_query(
         )
         return "Center", {}, node_rows
 
-    if node_types:
-        target_types = [t for t in node_types if t in SUPPORTED_NODE_TYPES]
-        mode = "Filter"
-    else:
-        target_types = sorted(SUPPORTED_NODE_TYPES)
-        mode = "Default"
-
-    type_limits = _resolve_per_type_limits(
-        target_types=target_types,
-        user_overrides=dict(per_type_limits or {}),
-        fallback_default=limit,
+    mode, type_limits = resolve_mode_and_type_limits(
+        node_types=node_types,
+        limit=limit,
+        per_type_limits=per_type_limits,
     )
-    type_limits = _apply_total_cap_shrink(type_limits)
 
     non_zero_limits = {t: v for t, v in type_limits.items() if v > 0}
     if not non_zero_limits:
@@ -1932,10 +1924,7 @@ async def _build_per_type_stat(
     Default_Mode / Center_Mode 用全部 :data:`SUPPORTED_NODE_TYPES` 以呈现「全量 vs
     当前」；Filter_Mode 收敛到 ``type_limits`` 的键集合。
     """
-    if mode == "Filter":
-        stat_types = sorted(type_limits.keys())
-    else:
-        stat_types = sorted(SUPPORTED_NODE_TYPES)
+    stat_types = compute_stat_types(mode, type_limits)
 
     total_by_type = await _query_total_count_by_type(
         _neo4j_connector,
@@ -1943,18 +1932,12 @@ async def _build_per_type_stat(
         supported_types=stat_types,
     )
 
-    per_type_stat: Dict[str, Dict[str, Any]] = {}
-    for node_type in stat_types:
-        returned = node_type_counts.get(node_type, 0)
-        total = int(total_by_type.get(node_type, 0))
-        type_limit = int(type_limits.get(node_type, 0))
-        per_type_stat[node_type] = {
-            "returned": returned,
-            "total": total,
-            "limit": type_limit,
-            "truncated": total > returned,
-        }
-    return per_type_stat
+    return assemble_per_type_stat(
+        stat_types=stat_types,
+        type_limits=type_limits,
+        node_type_counts=node_type_counts,
+        total_by_type=total_by_type,
+    )
 
 
 def _empty_graph_response(message: str) -> Dict[str, Any]:

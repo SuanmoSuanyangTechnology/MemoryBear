@@ -10,7 +10,7 @@ Validates: Requirements 2.1, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 6.1, 6.3, 6.4,
 import logging
 import math
 from logging import Logger
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from app.core.memory.constants.graph_data_constants import (
     DEFAULT_PER_TYPE_LIMIT_MAP,
@@ -27,6 +27,25 @@ from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 
 _LOGGER: Logger = logging.getLogger(__name__)
+
+
+# 受支持的「公开」接口。带下划线前缀的函数历史上已被同功能域的 service 与测试
+# 直接引用；为明确表达它们是受支持的图数据编排接口，这里通过 ``__all__`` 公开，
+# 并为跨模块稳定使用的函数提供无下划线别名（旧名保留以维持向后兼容）。
+__all__ = [
+    # 查询字符串解析 / 类型解析 / 总量缩减
+    "parse_per_type_limits",
+    "resolve_per_type_limits",
+    "apply_total_cap_shrink",
+    # 编排纯逻辑
+    "resolve_mode_and_type_limits",
+    "compute_stat_types",
+    "assemble_per_type_stat",
+    # Neo4j 查询封装
+    "query_nodes_by_type_limits",
+    "query_rel_count_batch",
+    "query_total_count_by_type",
+]
 
 
 def parse_per_type_limits(raw: Optional[str], logger: Logger) -> Dict[str, int]:
@@ -177,7 +196,9 @@ def _apply_total_cap_shrink(
       但每个类型不超过其用户原值（已达原值则跳过，保留确定性）。
     - 缩减发生时记录 warning 日志（Requirement 8.2）。
     - 类型不在 :data:`DEFAULT_PER_TYPE_LIMIT_MAP` 中时按权重 0 处理；若全部权重均为 0，
-      则原样返回（极端兜底，调用方在常规路径上不会触发）。
+      则退化为「非零 limit 类型权重相等」的均匀分布（零 limit 类型不占用 cap），
+      复用同一套等比缩减算法，确保 TOTAL_NODES_CAP 约束仍然生效；
+      若全部 limit 均为 0，则原样返回。
 
     Args:
         limits: 经过 :func:`_resolve_per_type_limits` 解析后得到的初始 Per_Type_Limit
@@ -196,18 +217,29 @@ def _apply_total_cap_shrink(
     if total <= cap:
         return limits
 
-    weight_sum = sum(
-        DEFAULT_PER_TYPE_LIMIT_MAP.get(t, 0) for t in limits
-    )
+    # 计算各类型权重。常规路径直接取 DEFAULT_PER_TYPE_LIMIT_MAP 中的默认值；
+    # 当所有类型都无默认权重（weight_sum == 0）时，退化为「非零 limit 类型权重=1」
+    # 的均匀分布。均匀分布本质上是等比分布的特例，因此下方复用同一套缩减算法，
+    # 避免逻辑重复并保持 tie-break 行为一致。
+    weights: Dict[str, int] = {
+        t: DEFAULT_PER_TYPE_LIMIT_MAP.get(t, 0) for t in limits
+    }
+    weight_sum = sum(weights.values())
+    uniform_fallback = False
     if weight_sum == 0:
-        # 极端兜底：所有类型都不在 DEFAULT_PER_TYPE_LIMIT_MAP 中，无法按比例缩减。
-        return limits
+        # 极端兜底：所有类型都不在 DEFAULT_PER_TYPE_LIMIT_MAP 中。
+        # 对非零 limit 类型赋予均匀权重（零 limit 表示跳过，不占用 cap）。
+        weights = {t: (1 if v > 0 else 0) for t, v in limits.items()}
+        weight_sum = sum(weights.values())
+        uniform_fallback = True
+        if weight_sum == 0:
+            # 所有类型 limit 均为 0，无可分配份额，原样返回。
+            return limits
 
     floored: Dict[str, int] = {}
     fractions: Dict[str, float] = {}
     for t, user_value in limits.items():
-        weight = DEFAULT_PER_TYPE_LIMIT_MAP.get(t, 0)
-        share = cap * (weight / weight_sum)
+        share = cap * (weights[t] / weight_sum)
         share_floor = int(math.floor(share))
         # 防上溢：缩减后不应大于用户原值。
         floored[t] = min(share_floor, user_value)
@@ -226,13 +258,132 @@ def _apply_total_cap_shrink(
                 floored[t] += 1
                 remaining -= 1
 
-    log.warning(
-        "per_type_limits 合计 %d 超过 TOTAL_NODES_CAP=%d，已等比缩减为 %s",
-        total,
-        cap,
-        floored,
-    )
+    if uniform_fallback:
+        log.warning(
+            "per_type_limits 合计 %d 超过 TOTAL_NODES_CAP=%d，"
+            "且所有类型均无默认权重，已按均匀分布缩减为 %s",
+            total,
+            cap,
+            floored,
+        )
+    else:
+        log.warning(
+            "per_type_limits 合计 %d 超过 TOTAL_NODES_CAP=%d，已等比缩减为 %s",
+            total,
+            cap,
+            floored,
+        )
     return floored
+
+
+# ---------------------------------------------------------------------------
+# 编排纯逻辑（模式分派 / 统计装配）—— 不触碰 Neo4j，便于单测
+# ---------------------------------------------------------------------------
+#
+# 这几个函数从 service 层 ``analytics_graph_data`` 的编排流程中抽离出「不依赖
+# Neo4j」的决策与装配逻辑，使其可脱离数据库直接单测：
+#
+# - :func:`resolve_mode_and_type_limits` —— Filter/Default 模式分派 + Per_Type_Limit
+#   解析 + 总量上限缩减（不含 Center_Mode，后者直接走邻居查询无需类型解析）。
+# - :func:`compute_stat_types` —— 依据模式推导 ``statistics.per_type`` 应覆盖的
+#   Node_Type 集合。
+# - :func:`assemble_per_type_stat` —— 依据 returned/total/limit 装配每类型的截断元数据。
+#
+# Validates: Requirements 1.3, 1.4, 2.9, 3.1, 3.7, 7.3, 8.2
+
+
+def resolve_mode_and_type_limits(
+    node_types: Optional[List[str]],
+    limit: int,
+    per_type_limits: Optional[Dict[str, int]],
+) -> Tuple[str, Dict[str, int]]:
+    """Filter/Default 模式分派 + Per_Type_Limit 解析 + 总量上限缩减（纯逻辑）。
+
+    本函数不涉及 Center_Mode（中心节点查询不需要按类型解析 limit），仅处理
+    ``analytics_graph_data`` 在非 Center 路径下的类型决策，便于脱离 Neo4j 单测。
+
+    Args:
+        node_types: 可选的 Node_Type 过滤列表。非空 → Filter_Mode（取与
+            :data:`SUPPORTED_NODE_TYPES` 的交集）；空 → Default_Mode（覆盖全部
+            :data:`SUPPORTED_NODE_TYPES`）。
+        limit: 兜底 Per_Type_Limit，透传给 :func:`_resolve_per_type_limits`。
+        per_type_limits: 用户显式指定的 ``{Node_Type: Per_Type_Limit}`` 映射，
+            可为 ``None``。
+
+    Returns:
+        ``(mode, type_limits)`` —— ``mode`` ∈ ``{"Filter", "Default"}``；
+        ``type_limits`` 为经 cap 缩减后的 ``{Node_Type: Per_Type_Limit}`` 映射。
+    """
+    if node_types:
+        target_types = [t for t in node_types if t in SUPPORTED_NODE_TYPES]
+        mode = "Filter"
+    else:
+        target_types = sorted(SUPPORTED_NODE_TYPES)
+        mode = "Default"
+
+    type_limits = _resolve_per_type_limits(
+        target_types=target_types,
+        user_overrides=dict(per_type_limits or {}),
+        fallback_default=limit,
+    )
+    type_limits = _apply_total_cap_shrink(type_limits)
+    return mode, type_limits
+
+
+def compute_stat_types(mode: str, type_limits: Dict[str, int]) -> List[str]:
+    """推导 ``statistics.per_type`` 应覆盖的 Node_Type 集合（纯逻辑）。
+
+    - Filter_Mode 收敛到 ``type_limits`` 的键集合（用户显式关心的类型）。
+    - 其余模式（Default / Center）使用全部 :data:`SUPPORTED_NODE_TYPES`，
+      以呈现「全量 vs 当前」对照。
+
+    Args:
+        mode: ``{"Filter", "Default", "Center"}`` 之一。
+        type_limits: 本次生效的 ``{Node_Type: Per_Type_Limit}`` 映射。
+
+    Returns:
+        排序后的 Node_Type 列表（字典序，保证确定性）。
+    """
+    if mode == "Filter":
+        return sorted(type_limits.keys())
+    return sorted(SUPPORTED_NODE_TYPES)
+
+
+def assemble_per_type_stat(
+    stat_types: Iterable[str],
+    type_limits: Dict[str, int],
+    node_type_counts: Dict[str, int],
+    total_by_type: Dict[str, int],
+) -> Dict[str, Dict[str, Any]]:
+    """装配 ``statistics.per_type`` 的 returned/total/limit/truncated 元数据（纯逻辑）。
+
+    截断语义：``limit==0`` 表示调用方主动跳过该类型的节点查询（Requirement 2.9），
+    此时 ``returned`` 必为 0 属于预期行为，不应标记为「截断」；否则客户端会把
+    「主动跳过」误解为「后端因容量限制截断」。仅当 ``limit>0`` 且 ``total>returned``
+    时才认为发生了真正的截断。
+
+    Args:
+        stat_types: 需要装配的 Node_Type 集合（一般来自 :func:`compute_stat_types`）。
+        type_limits: 本次生效的 ``{Node_Type: Per_Type_Limit}`` 映射。
+        node_type_counts: 本次响应中按类型聚合的返回数量 ``{label: returned}``。
+        total_by_type: Q4 全量计数结果 ``{label: total}``。
+
+    Returns:
+        ``{Node_Type: {returned, total, limit, truncated}}`` 映射。
+    """
+    per_type_stat: Dict[str, Dict[str, Any]] = {}
+    for node_type in stat_types:
+        returned = node_type_counts.get(node_type, 0)
+        total = int(total_by_type.get(node_type, 0))
+        type_limit = int(type_limits.get(node_type, 0))
+        truncated = type_limit > 0 and total > returned
+        per_type_stat[node_type] = {
+            "returned": returned,
+            "total": total,
+            "limit": type_limit,
+            "truncated": truncated,
+        }
+    return per_type_stat
 
 
 # ---------------------------------------------------------------------------
@@ -369,3 +520,17 @@ async def _query_total_count_by_type(
             continue
         result[label] = int(row.get("total", 0) or 0)
     return result
+
+
+# ---------------------------------------------------------------------------
+# 无下划线公开别名
+# ---------------------------------------------------------------------------
+#
+# 以下函数历史上以 ``_`` 前缀定义并被同功能域的 service/测试直接引用。为对外
+# 明确表达「这是受支持的图数据编排接口」，提供无下划线别名；下划线旧名保留，
+# 以维持既有 import 的向后兼容，避免一次性大规模重命名。
+resolve_per_type_limits = _resolve_per_type_limits
+apply_total_cap_shrink = _apply_total_cap_shrink
+query_nodes_by_type_limits = _query_nodes_by_type_limits
+query_rel_count_batch = _query_rel_count_batch
+query_total_count_by_type = _query_total_count_by_type
