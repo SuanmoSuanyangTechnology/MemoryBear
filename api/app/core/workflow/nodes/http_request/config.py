@@ -23,6 +23,13 @@ class HttpAuthConfig(BaseModel):
         description="API key for authentication (used if auth_type is not NONE)",
     )
 
+    @field_validator("header", "api_key", mode="before")
+    @classmethod
+    def normalize_nullable_string(cls, v):
+        if v is None:
+            return ""
+        return v
+
     @field_validator("header")
     @classmethod
     def validate_header(cls, v, info):

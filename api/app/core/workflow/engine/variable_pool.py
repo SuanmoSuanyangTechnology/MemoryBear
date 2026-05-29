@@ -577,6 +577,10 @@ class VariablePoolInitializer:
             "input_variables": (input_variables, VariableType.OBJECT),
             "files": (user_files, VariableType.ARRAY_FILE)
         }
+        if input_data.get("trigger") is not None:
+            sys_vars["trigger"] = (input_data.get("trigger"), VariableType.OBJECT)
+        if input_data.get("trigger_payload") is not None:
+            sys_vars["trigger_payload"] = (input_data.get("trigger_payload"), VariableType.OBJECT)
         if "message" in input_data and input_data.get("message") is not None:
             sys_vars["message"] = (input_data.get("message"), VariableType.STRING)
         for key, var_def in sys_vars.items():

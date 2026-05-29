@@ -47,6 +47,7 @@ from . import (
     upload_controller,
     user_controller,
     user_memory_controllers,
+    workflow_trigger_controller,
     workspace_controller,
     ontology_controller,
     skill_controller,
@@ -105,5 +106,6 @@ manager_router.include_router(i18n_controller.router)
 manager_router.include_router(tenant_subscription_controller.router)
 manager_router.include_router(tenant_subscription_controller.public_router)
 manager_router.include_router(message_interaction_controller.router)  # 消息交互功能
+manager_router.include_router(workflow_trigger_controller.router)
 
 __all__ = ["manager_router"]

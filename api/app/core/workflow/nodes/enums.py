@@ -3,6 +3,7 @@ from enum import StrEnum
 
 class NodeType(StrEnum):
     START = "start"
+    TRIGGER = "trigger"
     END = "end"
     ANSWER = "answer"
     LLM = "llm"

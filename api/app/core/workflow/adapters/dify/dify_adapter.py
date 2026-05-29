@@ -28,6 +28,7 @@ logger = get_logger()
 class DifyAdapter(BasePlatformAdapter, DifyConverter):
     NODE_TYPE_MAPPING = {
         "start": NodeType.START,
+        "trigger": NodeType.TRIGGER,
         "llm": NodeType.LLM,
         "answer": NodeType.END,
         "end": NodeType.OUTPUT,

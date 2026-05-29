@@ -135,7 +135,7 @@ class GraphBuilder:
                   complete before this node activates.
         """
         source_nodes = self._reverse_adj[target_node]
-        if not source_nodes and self.get_node_type(target_node) in [NodeType.START, NodeType.CYCLE_START]:
+        if not source_nodes and self.get_node_type(target_node) in [NodeType.START, NodeType.TRIGGER, NodeType.CYCLE_START]:
             return tuple(), tuple()
 
         branch_nodes = []
@@ -522,7 +522,7 @@ class GraphBuilder:
         for node in nodes:
             if (node.get("cycle") or '') == self.cycle:
                 node_type = node.get("type")
-                if node_type in [NodeType.START, NodeType.CYCLE_START]:
+                if node_type in [NodeType.START, NodeType.TRIGGER, NodeType.CYCLE_START]:
                     self.start_node_id = node.get("id")
                 elif node_type == NodeType.NOTES:
                     continue
