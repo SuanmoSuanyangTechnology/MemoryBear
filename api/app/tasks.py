@@ -378,11 +378,6 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         db.commit()
         db.refresh(db_document)
 
-        # Early-exit check after chunking
-        if _should_abort(document_id):
-            _clear_redis_state(document_id)
-            return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
-
         # 2. Document vectorization and storage
         total_chunks = (len(child_res) + len(parent_res)) if parent_child_mode else len(res)
         progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Generate {total_chunks} chunks.")
@@ -390,11 +385,6 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         if total_chunks == 0:
             progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} No chunks generated, skipping vectorization.")
         else:
-            # Early-exit check before vectorization
-            if _should_abort(document_id):
-                _clear_redis_state(document_id)
-                return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
-
             total_batches = ceil(total_chunks / EMBEDDING_BATCH_SIZE)
             progress_per_batch = 0.2 / total_batches
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
@@ -636,11 +626,6 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             db.commit()
             db.refresh(db_document)
 
-        # Early-exit check after vectorization
-        if _should_abort(document_id):
-            _clear_redis_state(document_id)
-            return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
-
         # Vectorization and data entry completed
         progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Indexing done.")
         db_document.chunk_num = total_chunks
@@ -653,10 +638,6 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         # GraphRAG: 异步派发到独立队列，不阻塞文档解析流程
         if db_knowledge.parser_config and db_knowledge.parser_config.get("graphrag", {}).get("use_graphrag", False):
-            # Check again before dispatching GraphRAG
-            if _should_abort(document_id):
-                _clear_redis_state(document_id)
-                return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
             progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} GraphRAG enabled, dispatching async task.")
             db_document.progress_msg = _progress_msg()
             db.commit()
