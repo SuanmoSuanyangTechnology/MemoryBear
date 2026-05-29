@@ -85,7 +85,7 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
         results.content_str = await RetrievalSummaryProcessor.summary(
             query,
             results.content,
-            memory_l0.content,
+            memory_l0.content if memory_l0 else '',
             self.get_llm_client(self.db, self.ctx.memory_config.llm_model_id)
         )
         return results
@@ -106,7 +106,7 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
         results.content_str = await RetrievalSummaryProcessor.summary(
             query,
             results.content,
-            memory_l0.content,
+            memory_l0.content if memory_l0 else '',
             self.get_llm_client(self.db, self.ctx.memory_config.llm_model_id)
         )
         return results
