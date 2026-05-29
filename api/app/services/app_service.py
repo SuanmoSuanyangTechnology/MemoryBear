@@ -1619,6 +1619,20 @@ class AppService:
 
         self._validate_app_writable(app, workspace_id)
 
+        config_dict = {
+            "nodes": [node.model_dump() for node in data.nodes] if data.nodes else [],
+            "edges": [edge.model_dump() for edge in data.edges] if data.edges else [],
+            "variables": [var.model_dump() for var in data.variables] if data.variables else [],
+            "execution_config": data.execution_config.model_dump() if data.execution_config else {},
+            "triggers": [trigger.model_dump() for trigger in data.triggers] if data.triggers else [],
+        }
+        is_valid, errors = WorkflowValidator.validate(config_dict)
+        if not is_valid:
+            raise BusinessException(
+                code=BizCode.INVALID_PARAMETER,
+                message=f"工作流配置无效: {'; '.join(errors)}"
+            )
+
         # 获取现有配置
         repo = WorkflowConfigRepository(self.db)
         workflow_cfg = repo.get_by_app_id(app_id)

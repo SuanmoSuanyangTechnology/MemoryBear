@@ -318,6 +318,7 @@ class BaseNode(ABC):
                     chunk_count += 1
                     content = str(item.get("chunk"))
                     done = item.get("done", False)
+                    field = item.get("field", "output")
                     chunks.append(content)
 
                     # Send chunks for all nodes (including End nodes for suffix)
@@ -328,7 +329,8 @@ class BaseNode(ABC):
                         "type": "node_chunk",
                         "node_id": self.node_id,
                         "chunk": content,
-                        "done": done
+                        "done": done,
+                        "field": field
                     })
 
             elapsed_time = (time.time() - start_time) * 1000

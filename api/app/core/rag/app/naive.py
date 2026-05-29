@@ -48,7 +48,7 @@ def by_mineru(filename, binary=None, from_page=0, to_page=100000, lang="Chinese"
     mineru_api = os.environ.get("MINERU_APISERVER", "http://host.docker.internal:9987")
     pdf_parser = MinerUParser(mineru_path=mineru_executable, mineru_api=mineru_api)
 
-    if not pdf_parser.check_installation():
+    if not pdf_parser.check_installation()[0]:
         callback(-1, "MinerU not found.")
         return None, None, pdf_parser
 
@@ -843,6 +843,14 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
     return res
 
 
+FULL_DOC_MAX_CHARS = 10000
+
+
+def truncate_to_chars(text: str, max_chars: int) -> str:
+    """按字符数截断文本，保留前半部分。"""
+    return text if len(text) <= max_chars else text[:max_chars]
+
+
 def chunk_parent_child(
     filename, binary=None, from_page=0, to_page=100000,
     lang="Chinese", callback=None, vision_model=None, **kwargs
@@ -878,7 +886,19 @@ def chunk_parent_child(
     )
     logging.info(f"[ParentChild] child: token_num={child_token_num}, chunk_count={len(child_res)}")
 
-    # Build parents by merging consecutive children
+    parent_chunk_mode = parser_config.get("parent_chunk_mode", "paragraph")
+
+    # Full-doc mode: single parent chunk, truncated to FULL_DOC_MAX_TOKENS
+    if parent_chunk_mode == "full-doc":
+        all_texts = [child["content_with_weight"] for child in child_res]
+        full_text = "\n\n".join(all_texts)
+        truncated = truncate_to_chars(full_text, FULL_DOC_MAX_CHARS)
+        parent_res = [{"content_with_weight": truncated, "image": None}]
+        parent_id_map = {i: 0 for i in range(len(child_res))}
+        logging.info(f"[ParentChild] parent: mode=full-doc, max_chars={FULL_DOC_MAX_CHARS}, chunk_count=1")
+        return child_res, parent_res, parent_id_map
+
+    # Paragraph mode (default): merge consecutive children up to parent_token_num
     parent_res: list[dict] = []
     parent_id_map: dict[int, int] = {}
     buf_texts: list[str] = []
@@ -916,8 +936,7 @@ def chunk_parent_child(
     if buf_texts:
         flush_parent()
 
-    logging.info(f"[ParentChild] parent: token_num={parent_token_num}, chunk_count={len(parent_res)}")
-
+    logging.info(f"[ParentChild] parent: mode=paragraph, token_num={parent_token_num}, chunk_count={len(parent_res)}")
     return child_res, parent_res, parent_id_map
 
 

@@ -27,8 +27,10 @@ from app.repositories.workflow_repository import (
     WorkflowNodeExecutionRepository
 )
 from app.schemas import DraftRunRequest, FileInput, FileType
+from app.services.annotation_service import AnnotationService
 from app.services.conversation_service import ConversationService
 from app.services.multi_agent_service import convert_uuids_to_str
+from app.models.annotation_model import HitLogSource
 from app.services.multimodal_service import MultimodalService
 from app.services.workspace_service import get_workspace_storage_type_without_auth
 
@@ -47,6 +49,61 @@ class WorkflowService:
         self.multimodal_service = MultimodalService(db)
 
         self.registry = PlatformAdapterRegistry
+
+    def _check_annotation_match(self, app_id: uuid.UUID, message: str,
+                              source: str = "") -> Optional[dict]:
+        """检查是否命中标注
+
+        Args:
+            app_id: 应用ID
+            message: 用户消息
+            source: 来源（用于记录命中来源）
+        """
+        try:
+            service = AnnotationService(self.db)
+            setting = service.get_setting(app_id)
+            if not setting or not setting.enabled:
+                return None
+            if not setting.model_config_id:
+                return None
+
+            annotations = service.repo.get_all_active_by_app(app_id)
+            if not annotations:
+                return None
+
+            from app.models.models_model import ModelConfig
+            from app.services.model_service import ModelApiKeyService
+            model_cfg = self.db.query(ModelConfig).filter(
+                ModelConfig.id == setting.model_config_id
+            ).first()
+            if not model_cfg:
+                return None
+
+            api_key_obj = ModelApiKeyService.get_available_api_key(self.db, setting.model_config_id)
+            if not api_key_obj:
+                return None
+
+            from app.core.models.base import RedBearModelConfig
+            config = RedBearModelConfig(
+                model_name=api_key_obj.model_name,
+                provider=api_key_obj.provider,
+                api_key=api_key_obj.api_key,
+                base_url=api_key_obj.api_base or None,
+                timeout=60,
+                max_retries=3,
+            )
+
+            return service.find_best_match(
+                query=message,
+                annotations=annotations,
+                threshold=setting.similarity_threshold,
+                model_config=config,
+                app_id=app_id,
+                source=source,
+            )
+        except Exception as e:
+            logger.warning(f"标注匹配检查失败: {e}")
+            return None
 
     # ==================== 配置管理 ====================
 
@@ -519,6 +576,84 @@ class WorkflowService:
                 files_struct.append(await fetch_remote_file_meta(url, file_type, origin_file_type))
         return files_struct
 
+    async def _resolve_start_node_file_variables(
+            self,
+            start_node_vars: list[dict[str, Any]],
+            variables: dict[str, Any]
+    ) -> dict[str, Any]:
+        """解析开始节点变量中文件类型的运行时值
+        
+        对于 type=file 或 type=array[file] 的变量，如果用户传入的是
+        FileInput 格式的 dict/list，则将其转换为 FileObject 格式。
+        
+        Args:
+            start_node_vars: 开始节点变量定义列表
+            variables: 用户传入的变量值字典
+            
+        Returns:
+            解析后的变量值字典
+        """
+        from app.core.workflow.utils.file_processor import (
+            resolve_local_file_object_dict,
+            build_file_object_dict_from_meta,
+            fetch_remote_file_meta,
+        )
+
+        resolved = dict(variables)
+
+        for var_def in start_node_vars:
+            var_name = var_def.get("name")
+            var_type = var_def.get("type", "")
+            ui_type = var_def.get("ui_type")
+
+            if ui_type not in ("file-upload", "file-list-upload"):
+                continue
+
+            if var_name not in resolved:
+                continue
+
+            value = resolved[var_name]
+
+            if var_type == "file" and isinstance(value, dict) and not value.get("is_file"):
+                url = value.get("url", "")
+                transfer_method = value.get("transfer_method", "local_file" if value.get("upload_file_id") else "remote_url")
+                file_type = str(FileType.trans(value.get("type", "document")))
+                origin_file_type = value.get("file_type") or file_type
+
+                if transfer_method == "local_file" and value.get("upload_file_id"):
+                    fo = resolve_local_file_object_dict(self.db, value["upload_file_id"], file_type, origin_file_type)
+                    resolved[var_name] = fo or build_file_object_dict_from_meta(
+                        file_type=file_type, transfer_method="local_file",
+                        origin_file_type=origin_file_type,
+                        file_id=str(value["upload_file_id"]), url=url,
+                    )
+                elif url:
+                    resolved[var_name] = await fetch_remote_file_meta(url, file_type, origin_file_type)
+
+            elif var_type == "array[file]" and isinstance(value, list):
+                resolved_list = []
+                for item in value:
+                    if isinstance(item, dict) and item.get("is_file"):
+                        resolved_list.append(item)
+                    elif isinstance(item, dict):
+                        url = item.get("url", "")
+                        transfer_method = item.get("transfer_method", "local_file" if item.get("upload_file_id") else "remote_url")
+                        file_type = str(FileType.trans(item.get("type", "document")))
+                        origin_file_type = item.get("file_type") or file_type
+
+                        if transfer_method == "local_file" and item.get("upload_file_id"):
+                            fo = resolve_local_file_object_dict(self.db, item["upload_file_id"], file_type, origin_file_type)
+                            resolved_list.append(fo or build_file_object_dict_from_meta(
+                                file_type=file_type, transfer_method="local_file",
+                                origin_file_type=origin_file_type,
+                                file_id=str(item["upload_file_id"]), url=url,
+                            ))
+                        elif url:
+                            resolved_list.append(await fetch_remote_file_meta(url, file_type, origin_file_type))
+                resolved[var_name] = resolved_list
+
+        return resolved
+
     @staticmethod
     def _map_public_event(event: dict) -> dict | None:
         """
@@ -666,6 +801,7 @@ class WorkflowService:
             role="user",
             content=human_message,
             meta_data=human_meta,
+            sync_memory=False,
         )
         self.conversation_service.add_message(
             **({"message_id": message_id} if message_id else {}),
@@ -673,6 +809,7 @@ class WorkflowService:
             role="assistant",
             content="",
             meta_data={"error": error},
+            sync_memory=False,
         )
 
     def _get_history_info(self, conversation_id: uuid.UUID) -> tuple[dict, list] | None:
@@ -687,10 +824,22 @@ class WorkflowService:
             if isinstance(last_state, dict):
                 variables = last_state.get("variables", {})
                 conv_vars = variables.get("conv", {})
-                # input_data["conv"] = conv_vars
-                # input_data["conv_messages"] = last_state.get("messages") or []
                 conv_messages = last_state.get("messages") or []
                 return conv_vars, conv_messages
+
+        messages = self.conversation_service.message_repo.get_message_by_conversation_id(
+            conversation_id,
+            limit=None
+        )
+        if messages:
+            conv_messages = []
+            for msg in messages:
+                conv_messages.append({
+                    "role": msg.role,
+                    "content": msg.content
+                })
+            return {}, conv_messages
+
         return None
 
     # ==================== 工作流执行 ====================
@@ -702,6 +851,7 @@ class WorkflowService:
             config: WorkflowConfig,
             workspace_id: uuid.UUID,
             release_id: uuid.UUID | None = None,
+            source: str = "",
     ):
         """运行工作流
 
@@ -730,14 +880,101 @@ class WorkflowService:
         feature_configs = config.features or {}
         self._validate_file_upload(feature_configs, payload.files)
 
+        # 解析开始节点文件类型的变量值
+        start_node_vars = self.get_start_node_variables({"nodes": config.nodes})
+        resolved_variables = await self._resolve_start_node_file_variables(
+            start_node_vars, payload.variables or {}
+        )
+
         input_data = {
-            "message": payload.message, "variables": payload.variables,
+            "message": payload.message, "variables": resolved_variables,
             "conversation_id": payload.conversation_id,
             "files": [file.model_dump(mode='json') for file in payload.files]
         }
 
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
+
+        # 检查标注命中 — 在创建工作流执行之前，命中则直接返回跳过整个工作流
+        annotation_match = self._check_annotation_match(app_id, payload.message,
+                                                        source=source or HitLogSource.CONSOLE)
+        if annotation_match:
+            if not conversation_id_uuid:
+                conversation_id_uuid = uuid.uuid4()
+                from app.models import Conversation as ConversationModel
+                new_conversation = ConversationModel(
+                    id=conversation_id_uuid,
+                    app_id=app_id,
+                    workspace_id=workspace_id,
+                    user_id=payload.user_id,
+                    is_draft=True,
+                    title="草稿会话",
+                )
+                self.db.add(new_conversation)
+                self.db.commit()
+                self.db.refresh(new_conversation)
+
+            message_id = uuid.uuid4()
+            prev_messages = []
+            history = self._get_history_info(conversation_id_uuid)
+            if history:
+                _, prev_messages = history
+            self.conversation_service.add_message(
+                conversation_id=conversation_id_uuid,
+                role="user",
+                content=payload.message,
+                meta_data={"files": []}
+            )
+            self.conversation_service.add_message(
+                message_id=message_id,
+                conversation_id=conversation_id_uuid,
+                role="assistant",
+                content=annotation_match["answer"],
+                meta_data={"usage": {}}
+            )
+
+            # 创建 WorkflowExecution 记录，用于日志显示
+            execution = self.create_execution(
+                workflow_config_id=config.id,
+                app_id=app_id,
+                trigger_type="manual",
+                triggered_by=None,
+                conversation_id=conversation_id_uuid,
+                input_data=input_data,
+                release_id=release_id,
+            )
+            execution.status = "completed"
+            output_messages = prev_messages + [
+                {"role": "user", "content": payload.message},
+                {"role": "assistant", "content": annotation_match["answer"]}
+            ]
+            execution.output_data = {
+                "answer": annotation_match["answer"],
+                "messages": output_messages,
+                "annotation_hit": {
+                    "annotation_id": str(annotation_match["annotation_id"]),
+                    "similarity": annotation_match["similarity"],
+                    "question": annotation_match["question"],
+                }
+            }
+            execution.token_usage = {}
+            execution.elapsed_time = 0
+            execution.completed_at = datetime.datetime.now()
+            self.db.commit()
+
+            return {
+                "status": "completed",
+                "answer": annotation_match["answer"],
+                "messages": output_messages,
+                "conversation_id": str(conversation_id_uuid),
+                "token_usage": {},
+                "elapsed_time": 0,
+                "annotation_hit": {
+                    "annotation_id": str(annotation_match["annotation_id"]),
+                    "similarity": annotation_match["similarity"],
+                    "question": annotation_match["question"],
+                }
+            }
 
         # 2. 创建执行记录
         execution = self.create_execution(
@@ -763,6 +1000,9 @@ class WorkflowService:
             files = await self._handle_file_input(payload.files)
             storage_type, user_rag_memory_id = self._get_memory_store_info(workspace_id)
             input_data["files"] = files
+            # 更新 execution.input_data，确保数据库中的 files 包含 URL
+            execution.input_data = input_data
+            self.db.commit()
             message_id = uuid.uuid4()
             # 更新状态为运行中
             self.update_execution_status(execution.execution_id, "running")
@@ -788,7 +1028,8 @@ class WorkflowService:
                         conversation_id=conversation_id_uuid,
                         role="assistant",
                         content=statement,
-                        meta_data={"suggested_questions": suggested_questions}
+                        meta_data={"suggested_questions": suggested_questions},
+                        sync_memory=False,
                     )
                     # 注入到 conv_messages，让 LLM 感知开场白
                     input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
@@ -832,7 +1073,8 @@ class WorkflowService:
                     conversation_id=conversation_id_uuid,
                     role="user",
                     content=human_message,
-                    meta_data=human_meta
+                    meta_data=human_meta,
+                    sync_memory=False,
                 )
                 # 过滤 citations
                 citations = result.get("citations", [])
@@ -855,7 +1097,8 @@ class WorkflowService:
                     conversation_id=conversation_id_uuid,
                     role="assistant",
                     content=assistant_message,
-                    meta_data=assistant_meta
+                    meta_data=assistant_meta,
+                    sync_memory=False,
                 )
                 self.update_execution_status(
                     execution.execution_id,
@@ -917,7 +1160,8 @@ class WorkflowService:
             config: WorkflowConfig,
             workspace_id: uuid.UUID,
             release_id: Optional[uuid.UUID] = None,
-            public: bool = False
+            public: bool = False,
+            source: str = "",
     ):
         """运行工作流（流式）
 
@@ -946,14 +1190,129 @@ class WorkflowService:
         feature_configs = config.features or {}
         self._validate_file_upload(feature_configs, payload.files)
 
+        # 解析开始节点文件类型的变量值
+        start_node_vars = self.get_start_node_variables({"nodes": config.nodes})
+        resolved_variables = await self._resolve_start_node_file_variables(
+            start_node_vars, payload.variables or {}
+        )
+
         input_data = {
-            "message": payload.message, "variables": payload.variables,
+            "message": payload.message, "variables": resolved_variables,
             "conversation_id": payload.conversation_id,
             "files": [file.model_dump(mode='json') for file in payload.files]
         }
 
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
+
+        # 检查标注命中 — 在创建工作流执行之前，命中则直接返回跳过整个工作流
+        annotation_match = self._check_annotation_match(app_id, payload.message,
+                                                        source=source or HitLogSource.CONSOLE)
+        if annotation_match:
+            if not conversation_id_uuid:
+                from app.models import Conversation as ConversationModel
+                conversation_id_uuid = uuid.uuid4()
+                new_conversation = ConversationModel(
+                    id=conversation_id_uuid,
+                    app_id=app_id,
+                    workspace_id=workspace_id,
+                    user_id=payload.user_id,
+                    is_draft=True,
+                    title="草稿会话",
+                )
+                self.db.add(new_conversation)
+                self.db.commit()
+                self.db.refresh(new_conversation)
+                payload.conversation_id = str(conversation_id_uuid)
+
+            message_id = uuid.uuid4()
+            prev_messages = []
+            history = self._get_history_info(conversation_id_uuid)
+            if history:
+                _, prev_messages = history
+            self.conversation_service.add_message(
+                conversation_id=conversation_id_uuid,
+                role="user",
+                content=payload.message,
+                meta_data={"files": []}
+            )
+            self.conversation_service.add_message(
+                message_id=message_id,
+                conversation_id=conversation_id_uuid,
+                role="assistant",
+                content=annotation_match["answer"],
+                meta_data={"usage": {}}
+            )
+
+            # 创建 WorkflowExecution 记录，用于日志显示
+            execution = self.create_execution(
+                workflow_config_id=config.id,
+                app_id=app_id,
+                trigger_type="manual",
+                triggered_by=None,
+                conversation_id=conversation_id_uuid,
+                input_data=input_data,
+                release_id=release_id,
+            )
+            execution.status = "completed"
+            output_messages = prev_messages + [
+                {"role": "user", "content": payload.message},
+                {"role": "assistant", "content": annotation_match["answer"]}
+            ]
+            execution.output_data = {
+                "answer": annotation_match["answer"],
+                "messages": output_messages,
+                "annotation_hit": {
+                    "annotation_id": str(annotation_match["annotation_id"]),
+                    "similarity": annotation_match["similarity"],
+                    "question": annotation_match["question"],
+                }
+            }
+            execution.token_usage = {}
+            execution.elapsed_time = 0
+            execution.completed_at = datetime.datetime.now()
+            self.db.commit()
+
+            start_internal_event = {
+                "event": "workflow_start",
+                "data": {
+                    "conversation_id": str(conversation_id_uuid),
+                    "message_id": str(message_id)
+                }
+            }
+            start_event = self._emit(public, start_internal_event)
+            if start_event:
+                yield start_event
+
+            answer = annotation_match["answer"]
+            yield {
+                "event": "message",
+                "data": {
+                    "content": answer,
+                    "conversation_id": str(conversation_id_uuid),
+                }
+            }
+
+            end_internal_event = {
+                "event": "workflow_end",
+                "data": {
+                    "conversation_id": str(conversation_id_uuid),
+                    "output": answer,
+                    "usage": {},
+                    "elapsed_time": 0,
+                    "status": "completed",
+                    "error": "",
+                    "annotation_hit": {
+                        "annotation_id": str(annotation_match["annotation_id"]),
+                        "similarity": annotation_match["similarity"],
+                        "question": annotation_match["question"],
+                    }
+                }
+            }
+            end_event = self._emit(public, end_internal_event)
+            if end_event:
+                yield end_event
+            return
 
         # 2. 创建执行记录
         execution = self.create_execution(
@@ -979,6 +1338,9 @@ class WorkflowService:
             files = await self._handle_file_input(payload.files)
             storage_type, user_rag_memory_id = self._get_memory_store_info(workspace_id)
             input_data["files"] = files
+            # 更新 execution.input_data，确保数据库中的 files 包含 URL
+            execution.input_data = input_data
+            self.db.commit()
             self.update_execution_status(execution.execution_id, "running")
             history = self._get_history_info(conversation_id_uuid)
             if history:
@@ -1003,7 +1365,8 @@ class WorkflowService:
                         conversation_id=conversation_id_uuid,
                         role="assistant",
                         content=statement,
-                        meta_data={"suggested_questions": suggested_questions}
+                        meta_data={"suggested_questions": suggested_questions},
+                        sync_memory=False,
                     )
                     # 注入到 conv_messages，让 LLM 感知开场白
                     input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
@@ -1056,7 +1419,8 @@ class WorkflowService:
                             conversation_id=conversation_id_uuid,
                             role="user",
                             content=human_message,
-                            meta_data=human_meta
+                            meta_data=human_meta,
+                            sync_memory=False,
                         )
                         # 过滤 citations
                         citations = event.get("data", {}).get("citations", [])
@@ -1079,7 +1443,8 @@ class WorkflowService:
                             conversation_id=conversation_id_uuid,
                             role="assistant",
                             content=assistant_message,
-                            meta_data=assistant_meta
+                            meta_data=assistant_meta,
+                            sync_memory=False,
                         )
                         self.update_execution_status(
                             execution.execution_id,
@@ -1155,6 +1520,24 @@ class WorkflowService:
         node_config = next((n for n in config.nodes if n.get("id") == node_id), None)
         if not node_config:
             raise BusinessException(code=BizCode.NOT_FOUND, message=f"节点不存在: node_id={node_id}")
+
+        # 如果目标节点是开始节点，将 inputs 中的变量值注入到 variables（sys.input_variables）
+        if node_config.get("type") == NodeType.START:
+            start_node_vars = node_config.get("config", {}).get("variables", [])
+            start_node_id = node_config.get("id")
+            inputs = input_data.get("inputs") or {}
+            variables = input_data.get("variables") or {}
+            for var_def in start_node_vars:
+                var_name = var_def.get("name")
+                # 优先匹配 start_node_id.var_name 格式，其次匹配裸 var_name
+                keyed_value = inputs.get(f"{start_node_id}.{var_name}")
+                bare_value = inputs.get(var_name)
+                value = keyed_value if keyed_value is not None else bare_value
+                if value is not None:
+                    variables[var_name] = value
+            # 解析开始节点文件类型的变量值
+            variables = await self._resolve_start_node_file_variables(start_node_vars, variables)
+            input_data["variables"] = variables
 
         workflow_config_dict = {
             "nodes": config.nodes,

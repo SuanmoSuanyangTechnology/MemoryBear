@@ -45,6 +45,9 @@ class Conversation(Base):
     # 统计信息
     message_count = Column(Integer, default=0, comment="消息数量")
 
+    # 滑动窗口写入游标：最后一条已处理的 memory_messages 表中消息的 message_seq；should_memorize=FALSE 时也推进
+    write_cursor = Column(Integer, nullable=False, default=0, server_default="0", comment="最后一条已处理的 memory_messages 表中消息的 message_seq；should_memorize=FALSE 时也推进")
+
     # 状态
     is_active = Column(Boolean, default=True, nullable=False, comment="是否活跃")
 
@@ -86,17 +89,17 @@ class Message(Base):
     content = Column(Text, nullable=False, comment="消息内容")
 
     # === 版本化支持（重新生成功能） ===
-    version = Column(Integer, default=1, comment="版本号（重新生成时递增）")
-    is_current = Column(Boolean, default=True, comment="是否为当前展示版本")
+    version = Column(Integer, server_default="1", default=1, comment="版本号（重新生成时递增）")
+    is_current = Column(Boolean, server_default="true", default=True, comment="是否为当前展示版本")
     parent_message_id = Column(UUID(as_uuid=True), comment="父消息ID（用于重新生成时关联原用户消息）")
 
     # === 逻辑删除 ===
-    is_deleted = Column(Boolean, default=False, comment="逻辑删除标记")
+    is_deleted = Column(Boolean, server_default="false", default=False, comment="逻辑删除标记")
 
     # === 统计字段（冗余，便于查询） ===
-    like_count = Column(Integer, default=0, comment="点赞数")
-    dislike_count = Column(Integer, default=0, comment="点踩数")
-    report_count = Column(Integer, default=0, comment="举报数")
+    like_count = Column(Integer, server_default="0", default=0, comment="点赞数")
+    dislike_count = Column(Integer, server_default="0", default=0, comment="点踩数")
+    report_count = Column(Integer, server_default="0", default=0, comment="举报数")
 
     # 元数据（避免使用 metadata 保留字）
     meta_data = Column(JSON, comment="消息元数据（如模型、token使用等）")

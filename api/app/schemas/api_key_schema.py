@@ -1,7 +1,7 @@
 """API Key Schema"""
 import datetime
 import uuid
-from pydantic import BaseModel, Field, ConfigDict, field_validator, field_serializer, computed_field
+from pydantic import BaseModel, Field, ConfigDict, field_validator, field_serializer, computed_field, model_validator
 from typing import Optional, List
 
 from app.models.api_key_model import ApiKeyType
@@ -47,6 +47,18 @@ class ApiKeyCreate(BaseModel):
             if scope not in valid_scopes:
                 raise ValueError(f"无效范围: {scope}")
         return v
+
+    @model_validator(mode='after')
+    def validate_type_constraints(self):
+        if self.type == ApiKeyType.SERVICE:
+            if "app" in self.scopes:
+                raise ValueError("SERVICE 类型 API Key 的权限范围不能包含 app")
+        else:
+            if "app" not in self.scopes:
+                raise ValueError(f"{self.type.value} 类型 API Key 的权限范围必须包含 app")
+            if not self.resource_id:
+                raise ValueError(f"{self.type.value} 类型 API Key 必须指定 resource_id（指向应用）")
+        return self
 
 
 class ApiKeyUpdate(BaseModel):

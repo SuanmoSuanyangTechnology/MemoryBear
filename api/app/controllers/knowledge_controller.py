@@ -25,12 +25,14 @@ from app.db import get_db
 from app.dependencies import get_current_user
 from app.models import knowledge_model
 from app.models import file_model
+from app.models.document_model import Document
 from app.models.user_model import User
 from app.schemas import knowledge_schema
 from app.schemas import file_schema
 from app.schemas.response_schema import ApiResponse
 from app.services import knowledge_service, document_service
 from app.services import file_service
+from app.services.file_service import _is_qa_doc, _build_qa_export
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
 from app.services.model_service import ModelConfigService
 from app.core.quota_stub import check_knowledge_capacity_quota
@@ -246,6 +248,50 @@ async def get_knowledge(
         raise
 
 
+@router.get("/{knowledge_id}/chunk-policy", response_model=ApiResponse)
+async def get_knowledge_chunk_policy(
+        knowledge_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """
+    查询知识库的分块策略锁定状态
+    - 知识库为空（无文档）→ parent_child_mode: null，未锁定，可自由选择
+    - 知识库有文档且使用普通分块 → parent_child_mode: false，锁定为普通模式
+    - 知识库有文档且使用父子分块 → parent_child_mode: true，锁定为父子模式
+    """
+    api_logger.info(f"Query knowledge base chunk policy: knowledge_id={knowledge_id}, username: {current_user.username}")
+
+    # 1. 验证知识库存在
+    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=knowledge_id, current_user=current_user)
+    if not db_knowledge:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The knowledge base does not exist or access is denied"
+        )
+
+    # 2. 查询该知识库下所有文档的 parser_config
+    try:
+        documents = db.query(Document).filter(Document.kb_id == knowledge_id).all()
+
+        if not documents:
+            # 无文档 → 未锁定
+            api_logger.info(f"Knowledge base chunk policy: knowledge_id={knowledge_id}, locked=null, doc_count=0")
+            return success(data={"parent_child_mode": None}, msg="Successfully obtained knowledge base chunk policy")
+
+        # 有文档 → 取第一个文档的分块模式作为锁定模式
+        # （正常情况下同一知识库下所有文档分块模式一致）
+        first_doc_mode = documents[0].parser_config.get("parent_child_mode", False)
+        api_logger.info(f"Knowledge base chunk policy: knowledge_id={knowledge_id}, parent_child_mode={first_doc_mode}, doc_count={len(documents)}")
+        return success(data={"parent_child_mode": first_doc_mode}, msg="Successfully obtained knowledge base chunk policy")
+    except Exception as e:
+        api_logger.error(f"Failed to query knowledge base chunk policy: knowledge_id={knowledge_id} - {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to query chunk policy: {str(e)}"
+        )
+
+
 @router.put("/{knowledge_id}", response_model=ApiResponse)
 async def update_knowledge(
         knowledge_id: uuid.UUID,
@@ -284,12 +330,21 @@ async def kb_batch_download(
     if not files:
         raise BusinessException("该知识库下没有可下载的文件", BizCode.NOT_FOUND)
 
+    # 预取 QA 文档内容
+    pre_fetched: dict[str, bytes] = {}
+    for f in files:
+        if _is_qa_doc(db, f.id):
+            result = _build_qa_export(db, f.id, f.kb_id)
+            if result:
+                content, _, _ = result
+                pre_fetched[f.file_key] = content
+
     entries = file_service.build_zip_arcnames(files)
     zip_name = file_service.make_zip_filename(files, request_body.zip_filename, base_name=db_knowledge.name)
 
     from urllib.parse import quote
     return StreamingResponse(
-        file_service.stream_zip_files(entries, storage_service, api_logger),
+        file_service.stream_zip_files(entries, storage_service, api_logger, pre_fetched),
         media_type="application/zip",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}",

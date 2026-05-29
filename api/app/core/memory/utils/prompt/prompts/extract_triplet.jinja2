@@ -15,6 +15,9 @@ Extract entities and knowledge triplets from the given statement.
 - `description` 必须使用中文。
 - 每个实体的 `description` 必须以输入中的 `dialog_at` 时间戳开头，格式为 `[dialog_at] 描述文本`；如果输入中 `dialog_at` 为空或不存在，则使用 `[NULL]`。
 - `type`、`predicate` 必须使用上方预定义的中文标签。
+- 每个实体必须输出 `type_id`，并且必须与 `type` 对应的本体 ID 完全一致。
+- 每个 triplet 必须输出 `predicate_id`，并且必须与 `predicate` 对应的本体 ID 完全一致。
+- 每个 triplet 必须输出 `predicate_surface`：尽量使用当前陈述中表达该关系的原文关系短语；如果没有更贴近原文的短语，则使用 canonical `predicate`。
 - 除 `type`、`predicate` 外，其余输出文本字段都必须与输入语言一致；因此在中文输入下，`type_description`、`predicate_description` 也必须使用中文。
 - 每个 `triplet` 都必须携带 `valid_at` 和 `invalid_at`，并直接复制输入中的同名字段，不要自行改写或推断新的时间边界。
   {% else %}
@@ -30,6 +33,9 @@ Extract entities and knowledge triplets from the given statement.
 - Generate `description` in English.
 - Every entity `description` MUST start with the input `dialog_at` timestamp, formatted as `[dialog_at] description text`; if `dialog_at` is empty or absent, use `[NULL]`.
 - Always generate `type` and `predicate` using the predefined Chinese labels above.
+- Every entity MUST include `type_id`, and it MUST exactly match the ontology ID for `type`.
+- Every triplet MUST include `predicate_id`, and it MUST exactly match the ontology ID for `predicate`.
+- Every triplet MUST include `predicate_surface`: use the source-text relation phrase that expresses this relation when available; otherwise use the canonical `predicate`.
 - Except for `type` and `predicate`, all other output text fields must match the input language; therefore under English input, `type_description` and `predicate_description` must be written in English.
 - Every `triplet` MUST include `valid_at` and `invalid_at`, copied directly from the input fields with the same names; do not rewrite or infer new temporal bounds.
   {% endif %}
@@ -360,6 +366,41 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - `沟通于`: 两个实体之间发生沟通或交流
 - `关联于`: 当存在明确、稳定且具有记忆价值的联系，但无更精确关系时使用的弱关系；不得用于泛化概念、抽象命题片段、口号式表达或仅为补全结构的联系
 
+===本体 ID 映射===
+`type_id` 与 `predicate_id` 是跨语言稳定 ID，必须与 canonical 中文标签一一对应。不要根据输入语言、description 语言或 `predicate_surface` 改变 ID。
+
+实体类型 ID：
+
+- `1`: `生命体`
+- `2`: `组织`
+- `3`: `群体`
+- `4`: `角色职业`
+- `5`: `地点设施`
+- `6`: `物品设备`
+- `7`: `软件平台`
+- `8`: `识别联系信息`
+- `9`: `文档媒体`
+- `10`: `知识能力`
+- `11`: `偏好习惯`
+- `12`: `具体目标`
+- `13`: `称呼别名`
+
+关系谓词 ID：
+
+- `1`: `别名属于`
+- `2`: `属于类型`
+- `3`: `位于`
+- `4`: `前往`
+- `5`: `组成部分`
+- `6`: `拥有`
+- `7`: `使用`
+- `8`: `创建了`
+- `9`: `了解`
+- `10`: `偏好`
+- `11`: `负责`
+- `12`: `沟通于`
+- `13`: `关联于`
+
 ===Extraction Order===
 {% if language == "zh" %}
 按以下顺序执行：
@@ -473,11 +514,17 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
 - {% if language == "zh" %}`type_description` 必须直接复用对应 `type` 的中文定义。{% else %}`type_description` must restate the corresponding `type` definition in English, while keeping the underlying `type` label itself in Chinese.{% endif %}
 - {% if language == "zh" %}不要把当前实体实例描述写进 `type_description`。{% else %}Do not put the current entity instance description into `type_description`.{% endif %}
 
+**Type ID (`type_id`):**
+
+- {% if language == "zh" %}`type_id` 必须只由 `type` 决定，并严格使用“本体 ID 映射”中的整数；不要自行发明、重排或留空。{% else %}`type_id` must be determined only by `type` and must strictly use the integer from the ontology ID mapping; do not invent, reorder, or omit it.{% endif %}
+
 **Triplet Extraction:**
 {% if language == "zh" %}
 
 - 只有当陈述中表达了清晰关系时，才抽取 `(subject, predicate, object)`。
 - `predicate` 只能使用上方预定义的中文关系类型。
+- `predicate_id` 必须只由 `predicate` 决定，并严格使用“本体 ID 映射”中的整数。
+- `predicate_surface` 用于记录当前陈述中更贴近原文的关系表达；它可以比 `predicate` 更自然或更细，但不得改变 `predicate_id` 和 `predicate` 的 canonical 判断。
 - 如果没有任何预定义关系适用，返回 `triplets: []`。
 - 不要为了保留一句抽象判断或泛因果命题，而强行构造“用户-拥有-努力”“努力-导致-回报”这类低价值 triplet。
 - `关联于` 不用于补救无法成立的关系，也不用于连接“努力”“回报”“成功”“意义”这类抽象概念。
@@ -488,6 +535,8 @@ Each relation class now keeps only one canonical `covered_predicates` value. Onc
   {% else %}
 - Extract `(subject, predicate, object)` only when there is a clear relation expressed in the statement.
 - `predicate` must use one of the predefined Chinese relation labels above.
+- `predicate_id` must be determined only by `predicate` and must strictly use the integer from the ontology ID mapping.
+- `predicate_surface` records the relation expression closer to the source statement; it may be more natural or specific than `predicate`, but it must not change the canonical `predicate_id` or `predicate`.
 - If no predefined relation fits, return `triplets: []`.
 - Do not force low-value triplets such as "user-has-effort" or "effort-causes-reward" just to preserve a generic causal belief or slogan-like proposition.
 - Do not use `关联于` as a rescue relation when no real relation exists, and do not connect abstract concepts such as "effort", "reward", "success", or "meaning" with it.
@@ -546,11 +595,11 @@ Input JSON includes: `"dialog_at": "2025-04-10T14:30:00Z"`
 Output:
 {
   "triplets": [
-    {"subject_name": "用户", "subject_id": 0, "predicate": "位于", "predicate_description": "表达实体与地点、场所、空间位置之间的稳定位置关系。", "object_name": "巴黎", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
+    {"subject_name": "用户", "subject_id": 0, "predicate_id": 3, "predicate": "位于", "predicate_surface": "住在", "predicate_description": "表达实体与地点、场所、空间位置之间的稳定位置关系。", "object_name": "巴黎", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[2025-04-10T14:30:00Z] 居住在巴黎的说话者", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "巴黎", "type": "地点设施", "type_description": "具有地理意义或功能性空间意义的位置与场所。", "description": "[2025-04-10T14:30:00Z] 用户居住的城市", "is_explicit_memory": false}
+    {"entity_idx": 0, "name": "用户", "type_id": 1, "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[2025-04-10T14:30:00Z] 居住在巴黎的说话者", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "巴黎", "type_id": 5, "type": "地点设施", "type_description": "具有地理意义或功能性空间意义的位置与场所。", "description": "[2025-04-10T14:30:00Z] 用户居住的城市", "is_explicit_memory": false}
   ]
 }
 
@@ -562,11 +611,11 @@ Input JSON includes: `"dialog_at": "2025-05-01T09:00:00Z"`
 Output:
 {
   "triplets": [
-    {"subject_name": "张明", "subject_id": 0, "predicate": "属于类型", "predicate_description": "表达主体所属的类别、身份、职业、角色，或其与组织、群体、集合之间的归属关系。", "object_name": "腾讯", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
+    {"subject_name": "张明", "subject_id": 0, "predicate_id": 2, "predicate": "属于类型", "predicate_surface": "在...工作", "predicate_description": "表达主体所属的类别、身份、职业、角色，或其与组织、群体、集合之间的归属关系。", "object_name": "腾讯", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "张明", "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[2025-05-01T09:00:00Z] 在腾讯工作的人员", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "腾讯", "type": "组织", "type_description": "公司、机构、学校、实验室、团队、社群等组织性主体。", "description": "[2025-05-01T09:00:00Z] 张明归属的组织", "is_explicit_memory": false}
+    {"entity_idx": 0, "name": "张明", "type_id": 1, "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[2025-05-01T09:00:00Z] 在腾讯工作的人员", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "腾讯", "type_id": 2, "type": "组织", "type_description": "公司、机构、学校、实验室、团队、社群等组织性主体。", "description": "[2025-05-01T09:00:00Z] 张明归属的组织", "is_explicit_memory": false}
   ]
 }
 
@@ -577,13 +626,13 @@ Input JSON includes: `"dialog_at": "2025-03-20T16:00:00Z"`
 Output:
 {
   "triplets": [
-    {"subject_name": "用户", "subject_id": 0, "predicate": "前往", "predicate_description": "表达主体前往、到访某地点、场所、组织或活动对象的关系。", "object_name": "图书馆", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"},
-    {"subject_name": "用户", "subject_id": 0, "predicate": "了解", "predicate_description": "表达主体与知识、技能、学科、语言等知识能力对象之间的认知、学习或兴趣关系。", "object_name": "微积分", "object_id": 2, "valid_at": "NULL", "invalid_at": "NULL"}
+    {"subject_name": "用户", "subject_id": 0, "predicate_id": 4, "predicate": "前往", "predicate_surface": "常去", "predicate_description": "表达主体前往、到访某地点、场所、组织或活动对象的关系。", "object_name": "图书馆", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"},
+    {"subject_name": "用户", "subject_id": 0, "predicate_id": 9, "predicate": "了解", "predicate_surface": "学", "predicate_description": "表达主体与知识、技能、学科、语言等知识能力对象之间的认知、学习或兴趣关系。", "object_name": "微积分", "object_id": 2, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[2025-03-20T16:00:00Z] 经常在图书馆学习微积分的说话者", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "图书馆", "type": "地点设施", "type_description": "具有地理意义或功能性空间意义的位置与场所。", "description": "[2025-03-20T16:00:00Z] 用户经常前往学习的地点", "is_explicit_memory": false},
-    {"entity_idx": 2, "name": "微积分", "type": "知识能力", "type_description": "可学习、掌握、使用或讨论的知识主题、技能、学科或语言。", "description": "[2025-03-20T16:00:00Z] 用户经常学习的主题", "is_explicit_memory": true}
+    {"entity_idx": 0, "name": "用户", "type_id": 1, "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[2025-03-20T16:00:00Z] 经常在图书馆学习微积分的说话者", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "图书馆", "type_id": 5, "type": "地点设施", "type_description": "具有地理意义或功能性空间意义的位置与场所。", "description": "[2025-03-20T16:00:00Z] 用户经常前往学习的地点", "is_explicit_memory": false},
+    {"entity_idx": 2, "name": "微积分", "type_id": 10, "type": "知识能力", "type_description": "可学习、掌握、使用或讨论的知识主题、技能、学科或语言。", "description": "[2025-03-20T16:00:00Z] 用户经常学习的主题", "is_explicit_memory": true}
   ]
 }
 
@@ -594,12 +643,12 @@ Input JSON includes: `"dialog_at": "NULL"`
 Output:
 {
   "triplets": [
-    {"subject_name": "山哥", "subject_id": 2, "predicate": "别名属于", "predicate_description": "表达实体名称、别名、称呼之间的对应关系。", "object_name": "用户", "object_id": 0, "valid_at": "NULL", "invalid_at": "NULL"}
+    {"subject_name": "山哥", "subject_id": 2, "predicate_id": 1, "predicate": "别名属于", "predicate_surface": "叫", "predicate_description": "表达实体名称、别名、称呼之间的对应关系。", "object_name": "用户", "object_id": 0, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[NULL] 被朋友称作山哥的说话者", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "我的朋友", "type": "群体", "type_description": "边界相对稳定、可被当作整体引用的一组人。", "description": "[NULL] 使用山哥这一称呼的人群", "is_explicit_memory": false},
-    {"entity_idx": 2, "name": "山哥", "type": "称呼别名", "type_description": "用于指代或称呼实体的名字。", "description": "[NULL] 朋友用来称呼用户的昵称", "is_explicit_memory": false}
+    {"entity_idx": 0, "name": "用户", "type_id": 1, "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[NULL] 被朋友称作山哥的说话者", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "我的朋友", "type_id": 3, "type": "群体", "type_description": "边界相对稳定、可被当作整体引用的一组人。", "description": "[NULL] 使用山哥这一称呼的人群", "is_explicit_memory": false},
+    {"entity_idx": 2, "name": "山哥", "type_id": 13, "type": "称呼别名", "type_description": "用于指代或称呼实体的名字。", "description": "[NULL] 朋友用来称呼用户的昵称", "is_explicit_memory": false}
   ]
 }
 
@@ -611,7 +660,7 @@ Output:
 {
   "triplets": [],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[2025-06-15T20:00:00Z] 认为努力就会有回报的说话者", "is_explicit_memory": false}
+    {"entity_idx": 0, "name": "用户", "type_id": 1, "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[2025-06-15T20:00:00Z] 认为努力就会有回报的说话者", "is_explicit_memory": false}
   ]
 }
 
@@ -622,13 +671,13 @@ Input JSON includes: `"dialog_at": "2025-02-28T11:00:00Z"`
 Output:
 {
   "triplets": [
-    {"subject_name": "用户", "subject_id": 0, "predicate": "拥有", "predicate_description": "表达主体拥有、持有、配有某对象、账号、联系方式或标识的关系。", "object_name": "GitHub账号", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"},
-    {"subject_name": "GitHub账号", "subject_id": 1, "predicate": "拥有", "predicate_description": "表达主体拥有、持有、配有某对象、账号、联系方式或标识的关系。", "object_name": "chen4", "object_id": 2, "valid_at": "NULL", "invalid_at": "NULL"}
+    {"subject_name": "用户", "subject_id": 0, "predicate_id": 6, "predicate": "拥有", "predicate_surface": "用户名是", "predicate_description": "表达主体拥有、持有、配有某对象、账号、联系方式或标识的关系。", "object_name": "GitHub账号", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"},
+    {"subject_name": "GitHub账号", "subject_id": 1, "predicate_id": 6, "predicate": "拥有", "predicate_surface": "用户名是", "predicate_description": "表达主体拥有、持有、配有某对象、账号、联系方式或标识的关系。", "object_name": "chen4", "object_id": 2, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[2025-02-28T11:00:00Z] 拥有该 GitHub 账号的说话者", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "GitHub账号", "type": "识别联系信息", "type_description": "账号、用户名、编号、邮箱、手机号等与识别、联系或登录相关的信息对象。", "description": "[2025-02-28T11:00:00Z] 用户拥有的 GitHub 账号", "is_explicit_memory": false},
-    {"entity_idx": 2, "name": "chen4", "type": "识别联系信息", "type_description": "账号、用户名、编号、邮箱、手机号等与识别、联系或登录相关的信息对象。", "description": "[2025-02-28T11:00:00Z] 用户的 GitHub 账号的用户名", "is_explicit_memory": false}
+    {"entity_idx": 0, "name": "用户", "type_id": 1, "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[2025-02-28T11:00:00Z] 拥有该 GitHub 账号的说话者", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "GitHub账号", "type_id": 8, "type": "识别联系信息", "type_description": "账号、用户名、编号、邮箱、手机号等与识别、联系或登录相关的信息对象。", "description": "[2025-02-28T11:00:00Z] 用户拥有的 GitHub 账号", "is_explicit_memory": false},
+    {"entity_idx": 2, "name": "chen4", "type_id": 8, "type": "识别联系信息", "type_description": "账号、用户名、编号、邮箱、手机号等与识别、联系或登录相关的信息对象。", "description": "[2025-02-28T11:00:00Z] 用户的 GitHub 账号的用户名", "is_explicit_memory": false}
   ]
 }
 
@@ -639,11 +688,11 @@ Input JSON includes: `"dialog_at": "2025-07-01T08:30:00Z"`
 Output:
 {
   "triplets": [
-    {"subject_name": "用户", "subject_id": 0, "predicate": "偏好", "predicate_description": "表达主体对对象的稳定偏好、厌恶，或对具体明确目标的指向关系。", "object_name": "通过雅思", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
+    {"subject_name": "用户", "subject_id": 0, "predicate_id": 10, "predicate": "偏好", "predicate_surface": "想", "predicate_description": "表达主体对对象的稳定偏好、厌恶，或对具体明确目标的指向关系。", "object_name": "通过雅思", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[2025-07-01T08:30:00Z] 想通过雅思的说话者", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "通过雅思", "type": "具体目标", "type_description": "用户具体、明确、可验证、可长期追踪的目标结果或目标性安排。", "description": "[2025-07-01T08:30:00Z] 用户想达成的具体目标", "is_explicit_memory": false}
+    {"entity_idx": 0, "name": "用户", "type_id": 1, "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[2025-07-01T08:30:00Z] 想通过雅思的说话者", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "通过雅思", "type_id": 12, "type": "具体目标", "type_description": "用户具体、明确、可验证、可长期追踪的目标结果或目标性安排。", "description": "[2025-07-01T08:30:00Z] 用户想达成的具体目标", "is_explicit_memory": false}
   ]
 }
 
@@ -654,13 +703,13 @@ Input JSON includes: `"dialog_at": "2025-01-15T19:00:00Z"`
 Output:
 {
   "triplets": [
-    {"subject_name": "用户", "subject_id": 0, "predicate": "拥有", "predicate_description": "表达主体拥有、持有、配有某对象、账号、联系方式或标识的关系。", "object_name": "用户的小狗", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"},
-    {"subject_name": "多多", "subject_id": 2, "predicate": "别名属于", "predicate_description": "表达实体名称、别名、称呼之间的对应关系。", "object_name": "用户的小狗", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
+    {"subject_name": "用户", "subject_id": 0, "predicate_id": 6, "predicate": "拥有", "predicate_surface": "用户的", "predicate_description": "表达主体拥有、持有、配有某对象、账号、联系方式或标识的关系。", "object_name": "用户的小狗", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"},
+    {"subject_name": "多多", "subject_id": 2, "predicate_id": 1, "predicate": "别名属于", "predicate_surface": "叫", "predicate_description": "表达实体名称、别名、称呼之间的对应关系。", "object_name": "用户的小狗", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[2025-01-15T19:00:00Z] 拥有一只叫多多的小狗的说话者", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "用户的小狗", "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[2025-01-15T19:00:00Z] 用户拥有的、名字叫多多的小狗", "is_explicit_memory": false},
-    {"entity_idx": 2, "name": "多多", "type": "称呼别名", "type_description": "用于指代或称呼实体的名字。", "description": "[2025-01-15T19:00:00Z] 用户的小狗的名字", "is_explicit_memory": false}
+    {"entity_idx": 0, "name": "用户", "type_id": 1, "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[2025-01-15T19:00:00Z] 拥有一只叫多多的小狗的说话者", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "用户的小狗", "type_id": 1, "type": "生命体", "type_description": "可稳定指向、可被当作具体个体区分和归并的生命体个体。", "description": "[2025-01-15T19:00:00Z] 用户拥有的、名字叫多多的小狗", "is_explicit_memory": false},
+    {"entity_idx": 2, "name": "多多", "type_id": 13, "type": "称呼别名", "type_description": "用于指代或称呼实体的名字。", "description": "[2025-01-15T19:00:00Z] 用户的小狗的名字", "is_explicit_memory": false}
   ]
 }
 
@@ -682,11 +731,11 @@ Input JSON includes: `"dialog_at": "2025-04-10T14:30:00Z"`
 Output:
 {
   "triplets": [
-    {"subject_name": "用户", "subject_id": 0, "predicate": "位于", "predicate_description": "A stable location relation between an entity and a place, facility, or spatial location.", "object_name": "Paris", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
+    {"subject_name": "用户", "subject_id": 0, "predicate_id": 3, "predicate": "位于", "predicate_surface": "live in", "predicate_description": "A stable location relation between an entity and a place, facility, or spatial location.", "object_name": "Paris", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[2025-04-10T14:30:00Z] The speaker who lives in Paris.", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "Paris", "type": "地点设施", "type_description": "A location or place with geographic meaning or functional spatial meaning.", "description": "[2025-04-10T14:30:00Z] The city where the user lives.", "is_explicit_memory": false}
+    {"entity_idx": 0, "name": "用户", "type_id": 1, "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[2025-04-10T14:30:00Z] The speaker who lives in Paris.", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "Paris", "type_id": 5, "type": "地点设施", "type_description": "A location or place with geographic meaning or functional spatial meaning.", "description": "[2025-04-10T14:30:00Z] The city where the user lives.", "is_explicit_memory": false}
   ]
 }
 
@@ -698,11 +747,11 @@ Input JSON includes: `"dialog_at": "2025-05-01T09:00:00Z"`
 Output:
 {
   "triplets": [
-    {"subject_name": "Zhang Ming", "subject_id": 0, "predicate": "属于类型", "predicate_description": "A relation expressing the type, identity, profession, role, or organizational/group affiliation of a subject.", "object_name": "Tencent", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
+    {"subject_name": "Zhang Ming", "subject_id": 0, "predicate_id": 2, "predicate": "属于类型", "predicate_surface": "works at", "predicate_description": "A relation expressing the type, identity, profession, role, or organizational/group affiliation of a subject.", "object_name": "Tencent", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "Zhang Ming", "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[2025-05-01T09:00:00Z] A person who works at Tencent.", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "Tencent", "type": "组织", "type_description": "An organizational actor such as a company, institution, school, lab, team, or community.", "description": "[2025-05-01T09:00:00Z] The organization Zhang Ming belongs to.", "is_explicit_memory": false}
+    {"entity_idx": 0, "name": "Zhang Ming", "type_id": 1, "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[2025-05-01T09:00:00Z] A person who works at Tencent.", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "Tencent", "type_id": 2, "type": "组织", "type_description": "An organizational actor such as a company, institution, school, lab, team, or community.", "description": "[2025-05-01T09:00:00Z] The organization Zhang Ming belongs to.", "is_explicit_memory": false}
   ]
 }
 
@@ -713,13 +762,13 @@ Input JSON includes: `"dialog_at": "2025-03-20T16:00:00Z"`
 Output:
 {
   "triplets": [
-    {"subject_name": "用户", "subject_id": 0, "predicate": "前往", "predicate_description": "A relation expressing that a subject goes to or visits a place, facility, organization, or other visit-worthy target.", "object_name": "the library", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"},
-    {"subject_name": "用户", "subject_id": 0, "predicate": "了解", "predicate_description": "A relation expressing cognition, learning, or knowledge-oriented interest between a subject and a `KnowledgeOrSkill` object.", "object_name": "calculus", "object_id": 2, "valid_at": "NULL", "invalid_at": "NULL"}
+    {"subject_name": "用户", "subject_id": 0, "predicate_id": 4, "predicate": "前往", "predicate_surface": "often go to", "predicate_description": "A relation expressing that a subject goes to or visits a place, facility, organization, or other visit-worthy target.", "object_name": "the library", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"},
+    {"subject_name": "用户", "subject_id": 0, "predicate_id": 9, "predicate": "了解", "predicate_surface": "study", "predicate_description": "A relation expressing cognition, learning, or knowledge-oriented interest between a subject and a `KnowledgeOrSkill` object.", "object_name": "calculus", "object_id": 2, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[2025-03-20T16:00:00Z] The speaker who often goes to the library to study calculus.", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "the library", "type": "地点设施", "type_description": "A location or place with geographic meaning or functional spatial meaning.", "description": "[2025-03-20T16:00:00Z] The place the user often goes to for studying.", "is_explicit_memory": false},
-    {"entity_idx": 2, "name": "calculus", "type": "知识能力", "type_description": "A knowledge topic, skill, field, or language that can be learned, mastered, used, or discussed.", "description": "[2025-03-20T16:00:00Z] The topic the user often studies.", "is_explicit_memory": true}
+    {"entity_idx": 0, "name": "用户", "type_id": 1, "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[2025-03-20T16:00:00Z] The speaker who often goes to the library to study calculus.", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "the library", "type_id": 5, "type": "地点设施", "type_description": "A location or place with geographic meaning or functional spatial meaning.", "description": "[2025-03-20T16:00:00Z] The place the user often goes to for studying.", "is_explicit_memory": false},
+    {"entity_idx": 2, "name": "calculus", "type_id": 10, "type": "知识能力", "type_description": "A knowledge topic, skill, field, or language that can be learned, mastered, used, or discussed.", "description": "[2025-03-20T16:00:00Z] The topic the user often studies.", "is_explicit_memory": true}
   ]
 }
 
@@ -730,12 +779,12 @@ Input JSON includes: `"dialog_at": "NULL"`
 Output:
 {
   "triplets": [
-    {"subject_name": "Shan Ge", "subject_id": 2, "predicate": "别名属于", "predicate_description": "A relation expressing correspondence between names, aliases, and forms of address.", "object_name": "用户", "object_id": 0, "valid_at": "NULL", "invalid_at": "NULL"}
+    {"subject_name": "Shan Ge", "subject_id": 2, "predicate_id": 1, "predicate": "别名属于", "predicate_surface": "called", "predicate_description": "A relation expressing correspondence between names, aliases, and forms of address.", "object_name": "用户", "object_id": 0, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[NULL] The speaker who is called Shan Ge by friends.", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "my friends", "type": "群体", "type_description": "A relatively stable group of people that can be referred to as a whole.", "description": "[NULL] The group of people who use the name Shan Ge.", "is_explicit_memory": false},
-    {"entity_idx": 2, "name": "Shan Ge", "type": "称呼别名", "type_description": "A name used to refer to or address an entity.", "description": "[NULL] The nickname used by the friends to address the user.", "is_explicit_memory": false}
+    {"entity_idx": 0, "name": "用户", "type_id": 1, "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[NULL] The speaker who is called Shan Ge by friends.", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "my friends", "type_id": 3, "type": "群体", "type_description": "A relatively stable group of people that can be referred to as a whole.", "description": "[NULL] The group of people who use the name Shan Ge.", "is_explicit_memory": false},
+    {"entity_idx": 2, "name": "Shan Ge", "type_id": 13, "type": "称呼别名", "type_description": "A name used to refer to or address an entity.", "description": "[NULL] The nickname used by the friends to address the user.", "is_explicit_memory": false}
   ]
 }
 
@@ -747,7 +796,7 @@ Output:
 {
   "triplets": [],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[2025-06-15T20:00:00Z] The speaker who believes that effort brings reward.", "is_explicit_memory": false}
+    {"entity_idx": 0, "name": "用户", "type_id": 1, "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[2025-06-15T20:00:00Z] The speaker who believes that effort brings reward.", "is_explicit_memory": false}
   ]
 }
 
@@ -758,13 +807,13 @@ Input JSON includes: `"dialog_at": "2025-02-28T11:00:00Z"`
 Output:
 {
   "triplets": [
-    {"subject_name": "用户", "subject_id": 0, "predicate": "拥有", "predicate_description": "A relation expressing that a subject owns, holds, carries, or is associated with an identity/contact object.", "object_name": "GitHub account", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"},
-    {"subject_name": "GitHub account", "subject_id": 1, "predicate": "拥有", "predicate_description": "A relation expressing that a subject owns, holds, carries, or is associated with an identity/contact object.", "object_name": "chen4", "object_id": 2, "valid_at": "NULL", "invalid_at": "NULL"}
+    {"subject_name": "用户", "subject_id": 0, "predicate_id": 6, "predicate": "拥有", "predicate_surface": "username is", "predicate_description": "A relation expressing that a subject owns, holds, carries, or is associated with an identity/contact object.", "object_name": "GitHub account", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"},
+    {"subject_name": "GitHub account", "subject_id": 1, "predicate_id": 6, "predicate": "拥有", "predicate_surface": "username is", "predicate_description": "A relation expressing that a subject owns, holds, carries, or is associated with an identity/contact object.", "object_name": "chen4", "object_id": 2, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[2025-02-28T11:00:00Z] The speaker who has this GitHub account.", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "GitHub account", "type": "识别联系信息", "type_description": "An information object related to identification, contact, or login, such as an account, username, ID number, email, or phone number.", "description": "[2025-02-28T11:00:00Z] The GitHub account owned by the user.", "is_explicit_memory": false},
-    {"entity_idx": 2, "name": "chen4", "type": "识别联系信息", "type_description": "An information object related to identification, contact, or login, such as an account, username, ID number, email, or phone number.", "description": "[2025-02-28T11:00:00Z] The username of the user's GitHub account.", "is_explicit_memory": false}
+    {"entity_idx": 0, "name": "用户", "type_id": 1, "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[2025-02-28T11:00:00Z] The speaker who has this GitHub account.", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "GitHub account", "type_id": 8, "type": "识别联系信息", "type_description": "An information object related to identification, contact, or login, such as an account, username, ID number, email, or phone number.", "description": "[2025-02-28T11:00:00Z] The GitHub account owned by the user.", "is_explicit_memory": false},
+    {"entity_idx": 2, "name": "chen4", "type_id": 8, "type": "识别联系信息", "type_description": "An information object related to identification, contact, or login, such as an account, username, ID number, email, or phone number.", "description": "[2025-02-28T11:00:00Z] The username of the user's GitHub account.", "is_explicit_memory": false}
   ]
 }
 
@@ -775,11 +824,11 @@ Input JSON includes: `"dialog_at": "2025-07-01T08:30:00Z"`
 Output:
 {
   "triplets": [
-    {"subject_name": "用户", "subject_id": 0, "predicate": "偏好", "predicate_description": "A relation expressing a stable preference, aversion, or a specific concrete goal of a subject.", "object_name": "pass IELTS", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
+    {"subject_name": "用户", "subject_id": 0, "predicate_id": 10, "predicate": "偏好", "predicate_surface": "want to", "predicate_description": "A relation expressing a stable preference, aversion, or a specific concrete goal of a subject.", "object_name": "pass IELTS", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[2025-07-01T08:30:00Z] The speaker who wants to pass IELTS.", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "pass IELTS", "type": "具体目标", "type_description": "A specific, explicit, verifiable, and trackable goal result or goal-oriented plan of the user.", "description": "[2025-07-01T08:30:00Z] A concrete goal the user wants to achieve.", "is_explicit_memory": false}
+    {"entity_idx": 0, "name": "用户", "type_id": 1, "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[2025-07-01T08:30:00Z] The speaker who wants to pass IELTS.", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "pass IELTS", "type_id": 12, "type": "具体目标", "type_description": "A specific, explicit, verifiable, and trackable goal result or goal-oriented plan of the user.", "description": "[2025-07-01T08:30:00Z] A concrete goal the user wants to achieve.", "is_explicit_memory": false}
   ]
 }
 
@@ -790,13 +839,13 @@ Input JSON includes: `"dialog_at": "2025-01-15T19:00:00Z"`
 Output:
 {
   "triplets": [
-    {"subject_name": "用户", "subject_id": 0, "predicate": "拥有", "predicate_description": "A relation expressing that a subject owns, holds, carries, or is associated with an object, account, contact method, or identifier.", "object_name": "the user's dog", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"},
-    {"subject_name": "Duoduo", "subject_id": 2, "predicate": "别名属于", "predicate_description": "A relation expressing correspondence between names, aliases, and forms of address.", "object_name": "the user's dog", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
+    {"subject_name": "用户", "subject_id": 0, "predicate_id": 6, "predicate": "拥有", "predicate_surface": "my", "predicate_description": "A relation expressing that a subject owns, holds, carries, or is associated with an object, account, contact method, or identifier.", "object_name": "the user's dog", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"},
+    {"subject_name": "Duoduo", "subject_id": 2, "predicate_id": 1, "predicate": "别名属于", "predicate_surface": "called", "predicate_description": "A relation expressing correspondence between names, aliases, and forms of address.", "object_name": "the user's dog", "object_id": 1, "valid_at": "NULL", "invalid_at": "NULL"}
   ],
   "entities": [
-    {"entity_idx": 0, "name": "用户", "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[2025-01-15T19:00:00Z] The speaker who has a dog called Duoduo.", "is_explicit_memory": false},
-    {"entity_idx": 1, "name": "the user's dog", "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[2025-01-15T19:00:00Z] The dog owned by the user and named Duoduo.", "is_explicit_memory": false},
-    {"entity_idx": 2, "name": "Duoduo", "type": "称呼别名", "type_description": "A name used to refer to or address an entity.", "description": "[2025-01-15T19:00:00Z] The name of the user's dog.", "is_explicit_memory": false}
+    {"entity_idx": 0, "name": "用户", "type_id": 1, "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[2025-01-15T19:00:00Z] The speaker who has a dog called Duoduo.", "is_explicit_memory": false},
+    {"entity_idx": 1, "name": "the user's dog", "type_id": 1, "type": "生命体", "type_description": "A living individual that can be stably referred to, distinguished, and deduplicated as a specific entity.", "description": "[2025-01-15T19:00:00Z] The dog owned by the user and named Duoduo.", "is_explicit_memory": false},
+    {"entity_idx": 2, "name": "Duoduo", "type_id": 13, "type": "称呼别名", "type_description": "A name used to refer to or address an entity.", "description": "[2025-01-15T19:00:00Z] The name of the user's dog.", "is_explicit_memory": false}
   ]
 }
 
@@ -824,6 +873,9 @@ JSON 要求：
 - `name`、`subject_name`、`object_name` 默认保持原文中的表面形式，但用户自指必须规范成 `用户`，可稳定解析的其他代词必须替换为具体指代实体名
 - `description` 必须使用中文，并且每个实体都必须以输入 `dialog_at` 的方括号时间戳开头；如果 `dialog_at` 为空或不存在，则以 `[NULL]` 开头
 - `type`、`predicate` 必须使用上方预定义的中文标签；`type_description`、`predicate_description` 必须使用中文说明
+- 每个 entity 都必须包含 `type_id`，且必须与 `type` 的本体 ID 一致
+- 每个 triplet 都必须包含 `predicate_id`，且必须与 `predicate` 的本体 ID 一致
+- 每个 triplet 都必须包含 `predicate_surface`；中文输入下使用中文或原文中的关系表达
 - 每个 triplet 都必须包含 `valid_at` 和 `invalid_at`，并与输入中的同名字段完全一致
 - 如果 `has_unsolved_reference` 是 `true`，输出必须是 `{"entities": [], "triplets": []}`
 - 如果存在无法稳定解析的代词或指示表达，输出也必须是 `{"entities": [], "triplets": []}`
@@ -837,6 +889,9 @@ JSON 要求：
 - `name`, `subject_name`, and `object_name` keep their original surface forms by default, but user self-reference must be normalized to `用户` and other stably resolvable references must be replaced by their resolved entity names
 - `description` must be in English, and every entity description must start with the bracketed input `dialog_at` timestamp; if `dialog_at` is empty or absent, start with `[NULL]`
 - `type` and `predicate` must use the predefined Chinese labels above; `type_description` and `predicate_description` must be written in English
+- Every entity must include `type_id`, exactly matching the ontology ID for `type`
+- Every triplet must include `predicate_id`, exactly matching the ontology ID for `predicate`
+- Every triplet must include `predicate_surface`; for English input, use English or the source-text relation expression
 - Every triplet must include `valid_at` and `invalid_at`, exactly matching the input fields with the same names
 - If `has_unsolved_reference` is `true`, the output must be `{"entities": [], "triplets": []}`
 - If unresolved references still remain, the output must also be `{"entities": [], "triplets": []}`
@@ -855,17 +910,20 @@ Output JSON structure:
     {
       "entity_idx": 0,
       "name": "string",
+      "type_id": 0,
       "type": "string",
       "type_description": "string",
       "description": "string",
-      "is_explicit_memory": false
+      "is_explicit_memory": "<boolean>"
     }
   ],
   "triplets": [
     {
       "subject_name": "string",
       "subject_id": 0,
+      "predicate_id": 0,
       "predicate": "string",
+      "predicate_surface": "string",
       "predicate_description": "string",
       "object_name": "string",
       "object_id": 0,

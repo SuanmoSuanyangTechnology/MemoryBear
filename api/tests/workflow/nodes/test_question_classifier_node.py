@@ -645,3 +645,111 @@ async def test_classify_with_special_characters():
     assert isinstance(result, dict)
     assert result["class_name"] in ["价格咨询", "促销活动"]
     assert result["output"] in ["CASE1", "CASE2"]
+
+
+# ==================== 视觉分类测试 ====================
+@pytest.mark.asyncio
+async def test_classify_with_vision_disabled():
+    """测试视觉功能关闭时的分类"""
+    state = simple_state()
+    variable_pool = await simple_vairable_pool("这张图片里有什么产品？")
+    
+    config = {
+        "id": "classifier_vision_test",
+        "type": "question-classifier",
+        "name": "问题分类测试节点",
+        "config": {
+            "model_id": TEST_MODEL_ID,
+            "input_variable": "这张图片里有什么产品？",
+            "categories": [
+                {
+                    "class_name": "产品咨询"
+                },
+                {
+                    "class_name": "图片分析"
+                }
+            ],
+            "system_prompt": "你是一个问题分类器，请根据用户问题选择最合适的分类。只返回分类名称，不要其他内容。",
+            "user_prompt": "问题：{question}\n\n可选分类：{categories}\n\n补充指令：{supplement_prompt}\n\n请选择最合适的分类。",
+            "user_supplement_prompt": None,
+            "vision": False,
+            "vision_input": None
+        }
+    }
+    
+    result = await QuestionClassifierNode(config, {}).execute(state, variable_pool)
+    
+    assert isinstance(result, dict)
+    assert "class_name" in result
+    assert "output" in result
+    assert result["class_name"] in ["产品咨询", "图片分析"]
+
+
+@pytest.mark.asyncio
+async def test_classify_with_vision_enabled_no_files():
+    """测试视觉功能开启但没有文件输入时的分类"""
+    state = simple_state()
+    variable_pool = await simple_vairable_pool("请分析这个产品图片")
+    
+    config = {
+        "id": "classifier_vision_test",
+        "type": "question-classifier",
+        "name": "问题分类测试节点",
+        "config": {
+            "model_id": TEST_MODEL_ID,
+            "input_variable": "请分析这个产品图片",
+            "categories": [
+                {
+                    "class_name": "产品咨询"
+                },
+                {
+                    "class_name": "图片反馈"
+                }
+            ],
+            "system_prompt": "你是一个问题分类器，请根据用户问题和图片内容选择最合适的分类。只返回分类名称，不要其他内容。",
+            "user_prompt": "问题：{question}\n\n可选分类：{categories}\n\n补充指令：{supplement_prompt}\n\n请选择最合适的分类。",
+            "user_supplement_prompt": "请结合图片内容进行分类判断",
+            "vision": True,
+            "vision_input": "{{sys.files}}"
+        }
+    }
+    
+    result = await QuestionClassifierNode(config, {}).execute(state, variable_pool)
+    
+    assert isinstance(result, dict)
+    assert "class_name" in result
+    assert "output" in result
+    assert result["class_name"] in ["产品咨询", "图片反馈"]
+
+
+@pytest.mark.asyncio
+async def test_classify_with_vision_config_structure():
+    """测试视觉配置结构正确性"""
+    config = {
+        "id": "classifier_vision_test",
+        "type": "question-classifier",
+        "name": "视觉分类测试节点",
+        "config": {
+            "model_id": TEST_MODEL_ID,
+            "input_variable": "{{sys.message}}",
+            "categories": [
+                {"class_name": "产品图片"},
+                {"class_name": "截图反馈"},
+                {"class_name": "其他"}
+            ],
+            "system_prompt": "你是一个问题分类器，请根据用户问题和图片内容选择最合适的分类。",
+            "user_prompt": "问题：{question}\n\n可选分类：{categories}\n\n补充指令：{supplement_prompt}\n\n请选择最合适的分类。",
+            "user_supplement_prompt": "请结合图片内容进行分类判断",
+            "vision": True,
+            "vision_input": "{{sys.files}}"
+        }
+    }
+    
+    from app.core.workflow.nodes.question_classifier.config import QuestionClassifierNodeConfig
+    
+    typed_config = QuestionClassifierNodeConfig(**config["config"])
+    
+    assert typed_config.vision is True
+    assert typed_config.vision_input == "{{sys.files}}"
+    assert len(typed_config.categories) == 3
+    assert typed_config.categories[0].class_name == "产品图片"

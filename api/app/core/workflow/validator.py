@@ -191,6 +191,18 @@ class WorkflowValidator:
             var_errors = ExpressionEvaluator.validate_variable_names(variables)
             errors.extend(var_errors)
 
+            # 9. 验证开始节点变量的默认值长度
+            for node in nodes:
+                if node.get("type") not in [NodeType.START, NodeType.CYCLE_START]:
+                    continue
+                for var_def in node.get("config", {}).get("variables", []):
+                    if var_def.get("type") == "string" and isinstance(var_def.get("default"), str):
+                        max_length = var_def.get("max_length")
+                        if max_length is not None and len(var_def["default"]) > max_length:
+                            errors.append(
+                                f"开始节点变量 '{var_def.get('name')}' 的默认值长度 ({len(var_def['default'])}) 超过最大长度限制 ({max_length})"
+                            )
+
         return len(errors) == 0, errors
 
     @staticmethod

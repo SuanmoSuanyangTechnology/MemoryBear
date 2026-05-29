@@ -18,6 +18,7 @@ from app.core.memory.models.graph_models import (
     ExtractedEntityNode,
     StatementEntityEdge,
 )
+from app.core.memory.utils.data.ontology import get_type_id
 from app.core.memory.models.variate_config import DedupConfig
 from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (  # 导入报告写入以在跳过时追加说明
     _write_dedup_fusion_report,
@@ -68,6 +69,7 @@ def _row_to_entity(row: Dict[str, Any]) -> ExtractedEntityNode:
         entity_idx=int(row.get("entity_idx") or 0),
         statement_id=row.get("statement_id") or "",
         entity_type=row.get("entity_type") or "",
+        type_id=row.get("type_id") or get_type_id(row.get("entity_type") or ""),
         description=row.get("description") or "",
         aliases=row.get("aliases") or [],
         name_embedding=row.get("name_embedding") or [],

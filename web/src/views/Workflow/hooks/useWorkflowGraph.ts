@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-14 13:59:06
+ * @Last Modified time: 2026-05-19 15:16:10
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection, type Edge } from '@antv/x6';
 import { register as registerReactShape } from '@antv/x6-react-shape';
@@ -264,6 +264,12 @@ export const useWorkflowGraph = ({
           name,
           data: { ...node, ...nodeLibraryConfig, ...((type === 'if-else' || type === 'question-classifier') ? { chatVariables } : {}) },
           ...position,
+        }
+
+        if (type === 'start' && config?.variables && Array.isArray(config.variables)) {
+          config?.variables?.forEach(item => {
+            item.ui_type = item.ui_type || (item.type === 'string' ? 'text-input' : item.type === 'number' ? 'number' : 'boolean')
+          })
         }
 
         if (type === 'notes') {

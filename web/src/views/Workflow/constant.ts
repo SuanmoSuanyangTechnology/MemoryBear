@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-07 18:17:40
+ * @Last Modified time: 2026-05-26 17:02:08
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -33,7 +33,6 @@ export const hasProcessNodes = [
 ]
 // support single run node
 export const cannotRunNodes = [
-  'start',
   'end',
   'output',
 ]
@@ -117,24 +116,109 @@ export const nodeLibrary: NodeLibrary[] = [
             valueKey: 'id',
             labelKey: 'name',
           },
+          // 温度参数
           temperature: {
             type: 'define',
-            max: 2, 
-            min: 0, 
-            step: 0.1,
             defaultValue: 0.7
           },
           max_tokens: { 
             type: 'define',
-            max: 32000, 
-            min: 256, 
-            step: 1, 
             defaultValue: 2000 
           },
           json_output: {
             type: 'define',
             defaultValue: false
           },
+          // Top P 采样参数
+          top_p: {
+            type: 'define',
+            defaultValue: {
+              enable: false,
+              value: 0.8
+            }
+          },
+          // 取样数量
+          top_k: {
+            type: 'define',
+            defaultValue: {
+              enable: false,
+              value: 50
+            }
+          },
+          // 随机种子
+          seed: {
+            type: 'define',
+            defaultValue: {
+              enable: false,
+              value: 1234
+            }
+          },
+          // 重复惩罚
+          repetition_penalty: {
+            type: 'define',
+            defaultValue: {
+              enable: false,
+              value: 1.0
+            }
+          },
+          // 联网搜索
+          // enable_search: {
+          //   type: 'define',
+          //   defaultValue: false
+          // },
+          // 思考模式
+          thinking: {
+            type: 'define',
+            defaultValue: {
+              budget: {
+                  enable: false,
+                  value: 256
+              },
+              enable: false
+            }
+          },
+          // 回复格式
+          response_format: {
+            type: 'define',
+            options: [
+              { label: 'text', value: 'text' },
+              { label: 'json_object', value: 'json_object' },
+            ],
+            defaultValue: 'text',
+          },
+          // 额外请求头，字符串格式
+          extra_headers: {
+            type: 'define',
+            defaultValue: {
+              enable: false,
+              value: undefined
+            }
+          },
+          // 停止序列, 输入序列并按 Tab 键
+          stop: {
+            type: 'define',
+            defaultValue: {
+              enable: false,
+              value: []
+            }
+          },
+          // 存在惩罚
+          presence_penalty: {
+            type: 'define',
+            defaultValue: {
+              enable: false,
+              value: 0
+            }
+          },
+          // 频率惩罚
+          frequency_penalty: {
+            type: 'define',
+            defaultValue: {
+              enable: false,
+              value: 0
+            }
+          },
+
           context: {
             type: 'variableList',
             placeholder: 'workflow.config.llm.contextPlaceholder'
@@ -165,6 +249,21 @@ export const nodeLibrary: NodeLibrary[] = [
           vision_input: {
             type: 'variableList',
             onFilterVariableType: ['array[file]', 'file']
+          },
+          // 启用推理标签分离
+          enable_reasoning_content_extraction: {
+            type: 'switch',
+            tip: 'workflow.config.llm.enable_reasoning_content_extraction_tip',
+            defaultValue: false
+          },
+          // 失败重试
+          retry: {
+            type: 'retry',
+            defaultValue: {
+              enable: false,
+              max_attempts: 3,
+              retry_interval: 100,
+            }
           },
           error_handle: {
             type: 'errorHandle',
@@ -209,6 +308,14 @@ export const nodeLibrary: NodeLibrary[] = [
             titleVariant: 'borderless',
             placeholder: 'workflow.config.parameter-extractor.promptPlaceholder'
           },
+          inference_mode: {
+            type: 'define',
+            defaultValue: 'prompt',
+            options: [
+              { value: 'function_calling', label: 'workflow.config.parameter-extractor.function_calling' },
+              { value: 'prompt', label: 'workflow.config.parameter-extractor.promptCall' },
+            ]
+          }
         }
       }
     ]
@@ -295,6 +402,13 @@ export const nodeLibrary: NodeLibrary[] = [
             type: 'variableList',
             required: true,
           },
+          vision: {
+            type: 'switch'
+          },
+          vision_input: {
+            type: 'variableList',
+            onFilterVariableType: ['array[file]', 'file']
+          },
           categories: {
             type: 'categoryList',
             required: true,
@@ -316,8 +430,8 @@ export const nodeLibrary: NodeLibrary[] = [
           input: {
             type: 'variableList',
             required: true,
-            filterNodeTypes: ['knowledge-retrieval', 'iteration', 'loop', 'parameter-extractor', 'code', 'CONVERSATION'],
-            filterVariableNames: ['message']
+            filterNodeTypes: ['start', 'knowledge-retrieval', 'iteration', 'loop', 'parameter-extractor', 'code', 'CONVERSATION'],
+            // filterVariableNames: ['message']
           },
           parallel: {
             type: 'switch',
@@ -451,7 +565,9 @@ export const nodeLibrary: NodeLibrary[] = [
           retry: {
             type: 'switch',
             defaultValue: {
-              enable: false
+              enable: false,
+              max_attempts: 3,
+              retry_interval: 1000,
             }
           },
           error_handle: {

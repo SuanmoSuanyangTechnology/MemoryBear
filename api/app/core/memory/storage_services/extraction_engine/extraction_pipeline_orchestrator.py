@@ -203,7 +203,21 @@ class NewExtractionOrchestrator:
     def _build_supporting_context(
         dialog: DialogData,
     ) -> SupportingContext:
-        """Build a SupportingContext from a dialog's content for pronoun resolution."""
+        """Build a SupportingContext from a dialog for pronoun resolution.
+
+        Priority:
+            1. If ``dialog.metadata["supporting_context"]`` exists (injected by
+               the sliding-window write path via ``get_chunked_dialogs``), use
+               the structured ``List[MessageItem]`` directly.
+            2. Otherwise fall back to wrapping ``dialog.content`` as a single
+               ``MessageItem(role="context", ...)`` for backward compatibility
+               with non-sliding-window call paths.
+        """
+        # Prefer structured context injected by the sliding-window write path
+        if dialog.metadata and "supporting_context" in dialog.metadata:
+            return SupportingContext(msgs=dialog.metadata["supporting_context"])
+
+        # Fallback: legacy string-concatenation path
         msgs: List[MessageItem] = []
         if hasattr(dialog, "content") and dialog.content:
             # dialog.content is the raw conversation string; wrap as single msg
@@ -745,13 +759,16 @@ class NewExtractionOrchestrator:
     ) -> List[Dict[str, str]]:
         """Collect user statements for async emotion extraction.
 
+        Only includes statements where has_emotional_state=True,
+        indicating the statement reflects user's emotional state.
+
         Returns a list of dicts ready to be sent as Celery task payload.
         """
         statements_payload: List[Dict[str, str]] = []
         for _dialog_id, chunk_stmts in all_stmt_results.items():
             for _chunk_id, stmts in chunk_stmts.items():
                 for s in stmts:
-                    if s.speaker == "user":
+                    if s.speaker == "user" and s.has_emotional_state:
                         statements_payload.append({
                             "statement_id": s.statement_id,
                             "statement_text": s.statement_text,
@@ -855,6 +872,7 @@ class NewExtractionOrchestrator:
                                 entity_idx=e.entity_idx,
                                 name=e.name,
                                 type=e.type,
+                                type_id=e.type_id,
                                 type_description=getattr(e, "type_description", ""),
                                 description=e.description,
                                 is_explicit_memory=e.is_explicit_memory,
@@ -866,6 +884,8 @@ class NewExtractionOrchestrator:
                                 subject_name=t.subject_name,
                                 subject_id=t.subject_id,
                                 predicate=t.predicate,
+                                predicate_id=t.predicate_id,
+                                predicate_surface=t.predicate_surface,
                                 predicate_description=getattr(t, "predicate_description", ""),
                                 object_name=t.object_name,
                                 object_id=t.object_id,

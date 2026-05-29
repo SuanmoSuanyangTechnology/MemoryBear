@@ -4,7 +4,7 @@ import io
 from typing import Any, Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+from fastapi import APIRouter, Body, Depends, HTTPException, status, Query, UploadFile, File
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
@@ -27,6 +27,7 @@ from app.schemas.response_schema import ApiResponse
 from app.services import knowledge_service, document_service, file_service, knowledgeshare_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service, generate_kb_file_key
 from app.services.model_service import ModelApiKeyService
+from app.core.rag.utils.preview_utils import _build_preview_hierarchy
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
@@ -93,20 +94,10 @@ async def get_preview_chunks(
         )
 
     from app.services.file_storage_service import FileStorageService
-    import asyncio
     storage_service = FileStorageService()
 
-    async def _download():
-        return await storage_service.download_file(db_file.file_key)
-
     try:
-        file_binary = asyncio.run(_download())
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        try:
-            file_binary = loop.run_until_complete(_download())
-        finally:
-            loop.close()
+        file_binary = await storage_service.download_file(db_file.file_key)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -217,6 +208,169 @@ async def get_preview_chunks(
     }
     api_logger.info(f"Querying the document block preview list successful: total={total}, returned={len(chunks)} records")
     return success(data=jsonable_encoder(result), msg="Querying the document block preview list succeeded")
+
+
+@router.post("/{kb_id}/{document_id}/preview", response_model=ApiResponse)
+async def get_preview_chunks_hierarchy(
+        kb_id: uuid.UUID,
+        document_id: uuid.UUID,
+        page: int = Query(1, gt=0),
+        pagesize: int = Query(20, gt=0, le=100),
+        keywords: Optional[str] = Query(None, description="The keywords used to match chunk content"),
+        parser_config_param: Optional[dict] = Body(None, description="Parser config overrides, e.g. {\"layout_recognize\":\"mineru\",\"chunk_token_num\":130,\"parent_child_mode\":true,\"parent_chunk_mode\":\"full-doc\"}"),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """
+    分页查询文档分块预览（嵌套结构）
+    - 支持普通分块、父子分块、QA 分块三种模式
+    - 返回嵌套的 DocumentChunk 结构，children 字段包含子块
+    - 分页按父块（顶层 chunk）层级切片
+    """
+    api_logger.info(f"Paged query document chunk preview hierarchy: kb_id={kb_id}, document_id={document_id}, page={page}, pagesize={pagesize}")
+
+    # 1. 参数校验
+    if page < 1 or pagesize < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The paging parameter must be greater than 0"
+        )
+
+    # 2. 获取知识库信息
+    db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    if not db_knowledge:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The knowledge base does not exist or access is denied"
+        )
+
+    # 3. 检查文档
+    db_document = document_service.get_document_by_id(db, document_id=document_id, current_user=current_user)
+    if not db_document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The document does not exist or you do not have permission to access it"
+        )
+
+    # 4. 检查文件
+    db_file = file_service.get_file_by_id(db, file_id=db_document.file_id)
+    if not db_file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The file does not exist or you do not have permission to access it"
+        )
+
+    # 5. 获取文件内容
+    if not db_file.file_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File has no storage key (legacy data not migrated)"
+        )
+
+    from app.services.file_storage_service import FileStorageService
+    storage_service = FileStorageService()
+
+    try:
+        file_binary = await storage_service.download_file(db_file.file_key)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File not found in storage: {e}"
+        )
+
+    # 6. 文档解析 & 分块
+    def progress_callback(prog=None, msg=None):
+        print(f"prog: {prog} msg: {msg}\n")
+
+    vision_model = QWenCV(
+        key=db_knowledge.image2text.api_keys[0].api_key,
+        model_name=db_knowledge.image2text.api_keys[0].model_name,
+        lang="Chinese",
+        base_url=db_knowledge.image2text.api_keys[0].api_base
+    )
+    from app.core.rag.app.naive import chunk, chunk_parent_child
+
+    parser_config = dict(db_document.parser_config)
+
+    # 如果传入了覆盖参数，直接合并
+    if parser_config_param and isinstance(parser_config_param, dict):
+        # 兼容 {"parser_config": {...}} 和直接 {...} 两种传法
+        actual_config = parser_config_param.get("parser_config", parser_config_param)
+        if isinstance(actual_config, dict):
+            parser_config.update(actual_config)
+
+    chunk_mode = parser_config.get("chunk_mode", "normal")
+    parent_child_mode = parser_config.get("parent_child_mode", False)
+
+    if parent_child_mode:
+        chunk_mode = "parent_child"
+
+    try:
+        if chunk_mode == "parent_child":
+            child_res, parent_res, parent_id_map = chunk_parent_child(
+                filename=db_file.file_name,
+                binary=file_binary,
+                from_page=0,
+                to_page=5,
+                callback=progress_callback,
+                vision_model=vision_model,
+                parser_config=parser_config,
+                is_root=False,
+            )
+            hierarchy = _build_preview_hierarchy(
+                child_res,
+                chunk_mode="parent_child",
+                parent_chunks=parent_res,
+                parent_id_map=parent_id_map,
+            )
+        elif chunk_mode == "qa":
+            res = chunk(
+                filename=db_file.file_name,
+                binary=file_binary,
+                from_page=0,
+                to_page=5,
+                callback=progress_callback,
+                vision_model=vision_model,
+                parser_config=parser_config,
+                is_root=False,
+            )
+            hierarchy = _build_preview_hierarchy(res, chunk_mode="qa")
+        else:
+            res = chunk(
+                filename=db_file.file_name,
+                binary=file_binary,
+                from_page=0,
+                to_page=5,
+                callback=progress_callback,
+                vision_model=vision_model,
+                parser_config=parser_config,
+                is_root=False,
+            )
+            hierarchy = _build_preview_hierarchy(res, chunk_mode="normal")
+    except Exception as e:
+        api_logger.error(f"Document parsing failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Document parsing failed: {str(e)}"
+        )
+
+    # 7. 父块分页
+    total = len(hierarchy)
+    start_index = (page - 1) * pagesize
+    end_index = start_index + pagesize
+    paginated = hierarchy[start_index:end_index]
+
+    result = {
+        "items": paginated,
+        "page": {
+            "page": page,
+            "pagesize": pagesize,
+            "total": total,
+            "has_next": page * pagesize < total
+        }
+    }
+    api_logger.info(f"Querying document chunk preview hierarchy succeeded: total={total}, returned={len(paginated)}")
+    return success(data=jsonable_encoder(result), msg="Querying document chunk preview hierarchy succeeded")
 
 
 @router.get("/{kb_id}/{document_id}/chunks", response_model=ApiResponse)
@@ -406,6 +560,7 @@ async def create_chunks_batch(
 async def import_qa_new_doc(
         kb_id: uuid.UUID,
         file: UploadFile = File(..., description="CSV 或 Excel 文件（第一行标题跳过，第一列问题，第二列答案）"),
+        parent_id: Optional[uuid.UUID] = Query(None, description="parent folder id"),
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user),
         storage_service: FileStorageService = Depends(get_file_storage_service),
@@ -439,7 +594,7 @@ async def import_qa_new_doc(
     # 4. 创建 File 记录
     file_data = file_schema.FileCreate(
         kb_id=kb_id, created_by=current_user.id,
-        parent_id=uuid.UUID("00000000-0000-0000-0000-000000000000"),
+        parent_id=parent_id,
         file_name=filename, file_ext=file_ext, file_size=file_size,
     )
     db_file = file_service.create_file(db=db, file=file_data, current_user=current_user)

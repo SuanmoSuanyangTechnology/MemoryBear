@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-05-07 18:37:23 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-09 11:43:48
+ * @Last Modified time: 2026-05-19 15:16:29
  */
 import { type FC, useState, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -15,15 +15,16 @@ import FileList from '@/components/Chat/FileList'
 import { getFileInfoByUrl } from '@/api/fileStorage'
 
 interface FileVarInputProps {
-  name: string | string[]
-  dataType: string
-  form: FormInstance
+  name: string | string[];
+  dataType: string;
+  form: FormInstance;
+  defaultValue?: any[];
 }
 
-const FileVarInput: FC<FileVarInputProps> = ({ name, form }) => {
+const FileVarInput: FC<FileVarInputProps> = ({ name, form, defaultValue = [] }) => {
   const { t } = useTranslation()
   const uploadFileListModalRef = useRef<UploadFileListModalRef>(null)
-  const [fileList, setFileList] = useState<any[]>([])
+  const [fileList, setFileList] = useState<any[]>(Array.isArray(defaultValue) ? defaultValue : defaultValue ? [defaultValue] : [])
 
   const setFormFileValue = (updated: any[]) => {
     form.setFieldValue(name, updated)

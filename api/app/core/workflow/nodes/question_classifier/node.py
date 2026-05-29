@@ -11,6 +11,7 @@ from app.core.workflow.nodes.question_classifier.config import QuestionClassifie
 from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_db_read
 from app.models import ModelType
+from app.schemas.model_schema import ModelInfo
 from app.services.model_service import ModelConfigService
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,58 @@ class QuestionClassifierNode(BaseNode):
             category_map[category_name] = case_tag
         return category_map
 
+    def _get_model_info(self) -> ModelInfo:
+        """获取模型信息（用于视觉处理）"""
+        with get_db_read() as db:
+            config = ModelConfigService.get_model_by_id(db=db, model_id=self.typed_config.model_id)
+            if not config:
+                raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
+            
+            api_config = self.model_balance(config)
+            return ModelInfo(
+                model_name=api_config.model_name,
+                model_type=ModelType(config.type),
+                api_key=api_config.api_key,
+                api_base=api_config.api_base,
+                provider=api_config.provider,
+                is_omni=api_config.is_omni,
+                capability=api_config.capability
+            )
+
+    async def _build_vision_message(
+        self, 
+        model_info: ModelInfo, 
+        user_prompt: str, 
+        variable_pool: VariablePool
+    ) -> str | list:
+        """构建视觉消息
+        
+        如果启用视觉且配置了视觉输入变量，将文件与文本组合成多模态消息。
+        否则返回纯文本消息。
+        """
+        if not self.typed_config.vision or not self.typed_config.vision_input:
+            return user_prompt
+        
+        try:
+            files_variable = variable_pool.get_instance(self.typed_config.vision_input)
+            if not files_variable or not files_variable.value:
+                return user_prompt
+        except Exception:
+            logger.warning(f"节点 {self.node_id} 获取视觉变量失败: {self.typed_config.vision_input}")
+            return user_prompt
+        
+        content = [{"type": "text", "text": user_prompt}]
+        
+        for file in files_variable.value:
+            file_content = await self.process_message(model_info, file.value, self.typed_config.vision)
+            if file_content:
+                if isinstance(file_content, list):
+                    content.extend(file_content)
+                else:
+                    content.append(file_content)
+        
+        return content
+
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict:
         """执行问题分类"""
         self.typed_config = QuestionClassifierNodeConfig(**self.config)
@@ -127,6 +180,7 @@ class QuestionClassifierNode(BaseNode):
 
         try:
             llm = self._get_llm_instance()
+            model_info = self._get_model_info()
 
             # 渲染用户提示词模板，支持工作流变量
             user_prompt = self._render_template(
@@ -138,9 +192,16 @@ class QuestionClassifierNode(BaseNode):
                 variable_pool
             )
 
+            # 构建视觉消息
+            user_content = await self._build_vision_message(
+                model_info, 
+                user_prompt, 
+                variable_pool
+            )
+
             messages = [
                 ("system", self.typed_config.system_prompt),
-                ("user", user_prompt),
+                ("user", user_content),
             ]
             self._last_messages = [{"role": r, "content": c} for r, c in messages]
 

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-04-09 18:58:21 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-07 18:35:54
+ * @Last Modified time: 2026-05-26 15:55:51
  */
 import { useState, useCallback, useEffect, useRef, type FC } from 'react'
 import { Popover, Flex } from 'antd'
@@ -59,6 +59,12 @@ const specialValidators: Record<string, (val: any) => boolean> = {
     }
     return val.some(c => !c?.expressions?.length || c.expressions.some((expr: any) => !isExprSet(expr)))
   },
+  // vision.vision_input: if vision is true, vision_input must be non-empty array
+  'question-classifier.vision_input': (val: any) => {
+    console.log('vision_input',val)
+    
+    return false
+  },
   // question-classifier.categories: every category must have a value
   'question-classifier.categories': (val: any[]) => !Array.isArray(val) || !val.every(c => c?.class_name && String(c.class_name).trim()),
   // var-aggregator.group_variables: must be non-empty array
@@ -68,7 +74,7 @@ const specialValidators: Record<string, (val: any) => boolean> = {
     if (!Array.isArray(val) || !val.length) return false
     return val.some(a => {
       if (!a?.variable_selector || !a?.operation) return true
-      if (a.operation === 'clear') return false
+      if (a.operation === 'clear' || a.operation === 'remove_first' || a.operation === 'remove_last') return false
       return a.value === undefined || a.value === null || a.value === ''
     })
   },
@@ -107,13 +113,13 @@ function validateNode(type: string, config: Record<string, any>): CheckError[] {
   })
 
   // llm: vision_input required when vision is enabled
-  if (type === 'llm') {
+  if (type === 'llm' || type === 'question-classifier') {
     const vision = get('vision')
     if (vision === true || vision === 'true') {
       const visionInput = get('vision_input')
       console.log('vision', vision, isEmpty(visionInput))
       if (isEmpty(visionInput)) {
-        errors.push({ key: 'llm.vision_input', message: '' })
+        errors.push({ key: `${type}.vision_input`, message: '' })
       }
     }
   }

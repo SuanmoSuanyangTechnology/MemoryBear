@@ -2,10 +2,10 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:11:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-20 14:25:26
+ * @Last Modified time: 2026-05-26 13:59:14
  */
 import { type FC, useRef, useState } from 'react'
-import RecordRTC from 'recordrtc'
+import RecordRTC, { StereoAudioRecorder } from 'recordrtc'
 import { App, Tooltip } from 'antd'
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
@@ -16,7 +16,7 @@ import { request } from '@/utils/request'
 /** Props for the AudioRecorder component */
 interface AudioRecorderProps {
   /** Callback fired when recording is complete, receives uploaded file info and raw blob */
-  onRecordingComplete?: (file: { file_id: string; file_key: string; url: string; type?: string; }, blob?: Blob) => void
+  onRecordingComplete?: (file: { file_id: string; file_key: string; url: string; type?: string; name: string; size: number; }, blob?: Blob) => void
   className?: string;
   /** Upload endpoint URL, defaults to fileUploadUrlWithoutApiPrefix */
   action?: string;
@@ -26,6 +26,7 @@ interface AudioRecorderProps {
   maxSize?: number;
 }
 
+const mimeType = 'audio/wav'
 const AudioRecorder: FC<AudioRecorderProps> = ({
   onRecordingComplete,
   className = '',
@@ -48,7 +49,8 @@ const AudioRecorder: FC<AudioRecorderProps> = ({
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       recorderRef.current = new RecordRTC(stream, {
         type: 'audio',
-        mimeType: 'audio/webm'
+        recorderType: StereoAudioRecorder,
+        mimeType: mimeType,
       })
       recorderRef.current.startRecording()
       setIsRecording(true)
@@ -71,14 +73,17 @@ const AudioRecorder: FC<AudioRecorderProps> = ({
         }
 
         const formData = new FormData()
-        formData.append('file', blob, `recording_${Date.now()}.webm`)
+        const fileName = `recording_${Date.now()}.wav`
+        formData.append('file', blob, fileName)
         request
           .uploadFile(action, formData, requestConfig)
           .then(res => {
             onRecordingComplete?.({
               ...(res as { file_id: string; file_key: string }),
-              type: blob.type,
-              url
+              type: mimeType,
+              url,
+              size: blob.size,
+              name: fileName,
             }, blob)
             // Release recorder resources after upload
             recorderRef.current?.destroy()

@@ -733,3 +733,290 @@ async def test_start_node_with_description():
     
     assert "api_endpoint" in str(exc_info.value)
     assert "API 端点 URL" in str(exc_info.value)
+
+
+# ==================== 新增变量类型测试 ====================
+
+PARAGRAPH_CONFIG = {
+    "id": "start_test",
+    "type": "start",
+    "name": "开始节点",
+    "config": {
+        "variables": [
+            {
+                "name": "bio",
+                "type": "string",
+                "ui_type": "paragraph",
+                "required": False,
+                "default": "",
+                "description": "个人简介",
+                "max_length": 2000
+            }
+        ]
+    }
+}
+
+SELECT_CONFIG = {
+    "id": "start_test",
+    "type": "start",
+    "name": "开始节点",
+    "config": {
+        "variables": [
+            {
+                "name": "category",
+                "type": "string",
+                "ui_type": "select",
+                "required": True,
+                "options": ["technology", "science", "art", "business"],
+                "default": "technology",
+                "description": "内容分类"
+            }
+        ]
+    }
+}
+
+FILE_CONFIG = {
+    "id": "start_test",
+    "type": "start",
+    "name": "开始节点",
+    "config": {
+        "variables": [
+            {
+                "name": "attachment",
+                "type": "file",
+                "ui_type": "file-upload",
+                "required": False,
+                "allowed_file_types": ["document", "image"],
+                "max_file_size_mb": 20.0,
+                "description": "附件"
+            }
+        ]
+    }
+}
+
+FILE_LIST_CONFIG = {
+    "id": "start_test",
+    "type": "start",
+    "name": "开始节点",
+    "config": {
+        "variables": [
+            {
+                "name": "documents",
+                "type": "array[file]",
+                "ui_type": "file-list-upload",
+                "required": False,
+                "allowed_file_types": ["document"],
+                "max_file_count": 5,
+                "max_file_size_mb": 100.0,
+                "description": "文档列表"
+            }
+        ]
+    }
+}
+
+JSON_CONFIG = {
+    "id": "start_test",
+    "type": "start",
+    "name": "开始节点",
+    "config": {
+        "variables": [
+            {
+                "name": "settings",
+                "type": "object",
+                "ui_type": "json-editor",
+                "required": False,
+                "default": {"theme": "light", "lang": "zh"},
+                "description": "配置JSON"
+            }
+        ]
+    }
+}
+
+
+@pytest.mark.asyncio
+async def test_start_node_paragraph_variable():
+    """测试段落变量正常输入"""
+    state = simple_state()
+    input_vars = {"bio": "这是一段多行文本...\n第二行内容"}
+    variable_pool = await create_variable_pool_with_inputs("test", input_vars)
+    result = await StartNode(PARAGRAPH_CONFIG, {}).execute(state, variable_pool)
+    assert result["bio"] == "这是一段多行文本...\n第二行内容"
+
+
+@pytest.mark.asyncio
+async def test_start_node_paragraph_default():
+    """测试段落变量默认值"""
+    state = simple_state()
+    input_vars = {}
+    variable_pool = await create_variable_pool_with_inputs("test", input_vars)
+    result = await StartNode(PARAGRAPH_CONFIG, {}).execute(state, variable_pool)
+    assert result["bio"] == ""
+
+
+@pytest.mark.asyncio
+async def test_start_node_paragraph_exceeds_max_length():
+    """测试段落超过最大长度"""
+    state = simple_state()
+    input_vars = {"bio": "a" * 2001}
+    variable_pool = await create_variable_pool_with_inputs("test", input_vars)
+    with pytest.raises(ValueError) as exc_info:
+        await StartNode(PARAGRAPH_CONFIG, {}).execute(state, variable_pool)
+    assert "bio" in str(exc_info.value)
+    assert "2000" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_start_node_select_variable():
+    """测试下拉选项正常值"""
+    state = simple_state()
+    input_vars = {"category": "science"}
+    variable_pool = await create_variable_pool_with_inputs("test", input_vars)
+    result = await StartNode(SELECT_CONFIG, {}).execute(state, variable_pool)
+    assert result["category"] == "science"
+
+
+@pytest.mark.asyncio
+async def test_start_node_select_default():
+    """测试下拉选项默认值"""
+    state = simple_state()
+    input_vars = {}
+    variable_pool = await create_variable_pool_with_inputs("test", input_vars)
+    result = await StartNode(SELECT_CONFIG, {}).execute(state, variable_pool)
+    assert result["category"] == "technology"
+
+
+@pytest.mark.asyncio
+async def test_start_node_select_invalid_option():
+    """测试下拉选项非候选值"""
+    state = simple_state()
+    input_vars = {"category": "invalid_category"}
+    variable_pool = await create_variable_pool_with_inputs("test", input_vars)
+    with pytest.raises(ValueError) as exc_info:
+        await StartNode(SELECT_CONFIG, {}).execute(state, variable_pool)
+    assert "invalid_category" in str(exc_info.value)
+    assert "可选范围内" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_start_node_file_variable():
+    """测试单文件变量输入"""
+    state = simple_state()
+    file_value = {
+        "type": "document",
+        "url": "https://example.com/doc.pdf",
+        "is_file": True,
+        "transfer_method": "remote_url",
+        "origin_file_type": "document",
+        "file_id": "test_file_id"
+    }
+    input_vars = {"attachment": file_value}
+    variable_pool = await create_variable_pool_with_inputs("test", input_vars)
+    result = await StartNode(FILE_CONFIG, {}).execute(state, variable_pool)
+    assert result["attachment"]["type"] == "document"
+
+
+@pytest.mark.asyncio
+async def test_start_node_file_invalid_type():
+    """测试单文件类型不允许"""
+    state = simple_state()
+    file_value = {
+        "type": "video",
+        "url": "https://example.com/video.mp4",
+        "is_file": True,
+        "transfer_method": "remote_url",
+        "origin_file_type": "video",
+        "file_id": "test_file_id"
+    }
+    input_vars = {"attachment": file_value}
+    variable_pool = await create_variable_pool_with_inputs("test", input_vars)
+    with pytest.raises(ValueError) as exc_info:
+        await StartNode(FILE_CONFIG, {}).execute(state, variable_pool)
+    assert "video" in str(exc_info.value)
+    assert "允许范围内" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_start_node_file_list_variable():
+    """测试文件列表变量输入"""
+    state = simple_state()
+    files_list = [
+        {"type": "document", "url": "https://example.com/a.pdf", "is_file": True, "origin_file_type": "document"},
+        {"type": "document", "url": "https://example.com/b.pdf", "is_file": True, "origin_file_type": "document"},
+    ]
+    input_vars = {"documents": files_list}
+    variable_pool = await create_variable_pool_with_inputs("test", input_vars)
+    result = await StartNode(FILE_LIST_CONFIG, {}).execute(state, variable_pool)
+    assert len(result["documents"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_start_node_file_list_exceeds_count():
+    """测试文件列表数量超限"""
+    state = simple_state()
+    files_list = [
+        {"type": "document", "url": f"https://example.com/{i}.pdf", "is_file": True, "origin_file_type": "document"}
+        for i in range(6)
+    ]
+    input_vars = {"documents": files_list}
+    variable_pool = await create_variable_pool_with_inputs("test", input_vars)
+    with pytest.raises(ValueError) as exc_info:
+        await StartNode(FILE_LIST_CONFIG, {}).execute(state, variable_pool)
+    assert "超过限制" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_start_node_file_list_invalid_type():
+    """测试文件列表中包含不允许的文件类型"""
+    state = simple_state()
+    files_list = [
+        {"type": "document", "url": "https://example.com/a.pdf", "is_file": True, "origin_file_type": "document"},
+        {"type": "image", "url": "https://example.com/b.jpg", "is_file": True, "origin_file_type": "image"},
+    ]
+    input_vars = {"documents": files_list}
+    variable_pool = await create_variable_pool_with_inputs("test", input_vars)
+    with pytest.raises(ValueError) as exc_info:
+        await StartNode(FILE_LIST_CONFIG, {}).execute(state, variable_pool)
+    assert "image" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_start_node_json_variable():
+    """测试 JSON 变量正常输入"""
+    state = simple_state()
+    input_vars = {"settings": {"theme": "dark", "lang": "en"}}
+    variable_pool = await create_variable_pool_with_inputs("test", input_vars)
+    result = await StartNode(JSON_CONFIG, {}).execute(state, variable_pool)
+    assert result["settings"]["theme"] == "dark"
+    assert result["settings"]["lang"] == "en"
+
+
+@pytest.mark.asyncio
+async def test_start_node_json_default():
+    """测试 JSON 变量默认值"""
+    state = simple_state()
+    input_vars = {}
+    variable_pool = await create_variable_pool_with_inputs("test", input_vars)
+    result = await StartNode(JSON_CONFIG, {}).execute(state, variable_pool)
+    assert result["settings"]["theme"] == "light"
+
+
+@pytest.mark.asyncio
+async def test_start_node_json_string_auto_parse():
+    """测试传入 JSON 字符串自动解析为 dict"""
+    state = simple_state()
+    input_vars = {"settings": '{"theme": "dark", "lang": "en"}'}
+    variable_pool = await create_variable_pool_with_inputs("test", input_vars)
+    result = await StartNode(JSON_CONFIG, {}).execute(state, variable_pool)
+    assert result["settings"]["theme"] == "dark"
+    assert result["settings"]["lang"] == "en"
+
+
+@pytest.mark.asyncio
+async def test_start_node_json_invalid_string():
+    """测试非 JSON 字符串触发 ValueError"""
+    state = simple_state()
+    input_vars = {"settings": "not a json string"}
+    variable_pool = await create_variable_pool_with_inputs("test", input_vars)
+    with pytest.raises(ValueError) as exc_info:
+        await StartNode(JSON_CONFIG, {}).execute(state, variable_pool)
+    assert "不是有效的 JSON 对象" in str(exc_info.value)

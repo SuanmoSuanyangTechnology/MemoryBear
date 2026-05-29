@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-23 16:22:51 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-06 15:06:03
+ * @Last Modified time: 2026-05-26 10:24:55
  */
 import { useEffect, useLayoutEffect, useState, useRef, type FC } from 'react';
 import { createPortal } from 'react-dom';
@@ -28,6 +28,9 @@ export interface Suggestion {
   children?: Suggestion[]; // Sub-variables (e.g. file fields)
   parentLabel?: string; // Parent variable label (for child display)
   default?: any;
+  ui_type?: string;
+  options?: string[];
+  required?: boolean;
 }
 
 // Autocomplete plugin for variable suggestions triggered by '/' character
@@ -428,6 +431,10 @@ const AutocompletePlugin: FC<{ options: Suggestion[] }> = ({ options }) => {
                 align="center"
                 justify="space-between"
                 onClick={() => !child.disabled && insertMention(child)}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  !child.disabled && insertMention(child)
+                }}
                 onMouseEnter={() => { setActivePanel('child'); setChildActiveIndex(ci); }}
               >
                 <span className="rb:font-medium">

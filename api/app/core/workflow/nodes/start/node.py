@@ -4,6 +4,7 @@ Start 节点实现
 工作流的起始节点，定义输入变量并输出系统参数。
 """
 
+import json
 import logging
 from typing import Any
 
@@ -100,11 +101,59 @@ class StartNode(BaseNode):
         for var_def in self.typed_config.variables:
             var_name = var_def.name
             var_type = var_def.type
+            ui_type = var_def.ui_type
 
             # 检查变量是否存在
             if var_name in input_variables:
-                # 使用用户提供的值
-                processed[var_name] = input_variables[var_name]
+                value = input_variables[var_name]
+
+                # select: 值必须在 options 列表中
+                if ui_type == "select" and var_def.options:
+                    if value not in var_def.options:
+                        raise ValueError(
+                            f"变量 '{var_name}' 的值 '{value}' 不在可选范围内: {var_def.options}"
+                        )
+
+                # json-editor: 校验 JSON 格式
+                if var_type == VariableType.OBJECT and ui_type == "json-editor":
+                    if not isinstance(value, dict):
+                        try:
+                            value = json.loads(value) if isinstance(value, str) else value
+                        except (json.JSONDecodeError, TypeError):
+                            raise ValueError(f"变量 '{var_name}' 不是有效的 JSON 对象")
+
+                if var_type == VariableType.STRING and ui_type != "select":
+                    max_len = var_def.max_length
+                    if isinstance(value, str) and len(value) > max_len:
+                        raise ValueError(
+                            f"变量 '{var_name}' 超过最大长度限制 ({max_len})"
+                        )
+
+                # file: 文件类型校验
+                if var_type == VariableType.FILE and var_def.allowed_file_types:
+                    if isinstance(value, dict):
+                        file_type = value.get("type", value.get("origin_file_type", ""))
+                        if file_type and file_type not in var_def.allowed_file_types:
+                            raise ValueError(
+                                f"变量 '{var_name}' 的文件类型 '{file_type}' 不在允许范围内: "
+                                f"{var_def.allowed_file_types}"
+                            )
+
+                # array[file]: 数量与类型校验
+                if var_type == VariableType.ARRAY_FILE and isinstance(value, list):
+                    if var_def.max_file_count and len(value) > var_def.max_file_count:
+                        raise ValueError(
+                            f"变量 '{var_name}' 的文件数量 {len(value)} 超过限制 {var_def.max_file_count}"
+                        )
+                    if var_def.allowed_file_types:
+                        for f in value:
+                            file_type = f.get("type", f.get("origin_file_type", "")) if isinstance(f, dict) else ""
+                            if file_type and file_type not in var_def.allowed_file_types:
+                                raise ValueError(
+                                    f"变量 '{var_name}' 中包含不允许的文件类型 '{file_type}'"
+                                )
+
+                processed[var_name] = value
 
             elif var_def.required:
                 # 必需变量缺失
@@ -116,9 +165,7 @@ class StartNode(BaseNode):
             elif var_def.default is not None:
                 # 使用默认值
                 processed[var_name] = var_def.default
-                logger.debug(
-                    f"变量 '{var_name}' 使用默认值: {var_def.default}"
-                )
+                logger.debug(f"变量 '{var_name}' 使用默认值: {var_def.default}")
             else:
                 processed[var_name] = DEFAULT_VALUE(var_type)
             self.output_var_types[var_name] = var_type
@@ -134,9 +181,11 @@ class StartNode(BaseNode):
         Returns:
             输入数据字典
         """
+        input_variables = variable_pool.get_value("sys.input_variables", default={}, strict=False)
         return {
             "execution_id": variable_pool.get_value("sys.execution_id"),
             "conversation_id": variable_pool.get_value("sys.conversation_id"),
             "message": variable_pool.get_value("sys.message"),
-            "conversation_vars": variable_pool.get_all_conversation_vars()
+            "conversation_vars": variable_pool.get_all_conversation_vars(),
+            "input_variables": input_variables,
         }

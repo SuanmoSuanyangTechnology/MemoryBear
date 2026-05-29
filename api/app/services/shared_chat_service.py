@@ -31,6 +31,34 @@ class SharedChatService:
         self.conversation_service = ConversationService(db)
         self.share_service = ReleaseShareService(db)
 
+    def _build_kb_names(self, kb_ids: list[str]) -> list[dict]:
+        from app.models import Knowledge
+        from app.models.knowledgeshare_model import KnowledgeShare
+
+        kb_names = []
+        try:
+            rows = self.db.query(Knowledge.id, Knowledge.name).filter(
+                Knowledge.id.in_(kb_ids)
+            ).all()
+            kb_names = [{"id": str(r.id), "name": r.name} for r in rows]
+
+            target_kb_ids = [uuid.UUID(kid) for kid in kb_ids]
+            share_rows = self.db.query(
+                KnowledgeShare.source_kb_id, KnowledgeShare.target_kb_id
+            ).filter(
+                KnowledgeShare.target_kb_id.in_(target_kb_ids)
+            ).all()
+            if share_rows:
+                id_to_name = {str(r.id): r.name for r in rows}
+                for sr in share_rows:
+                    source_name = id_to_name.get(str(sr.target_kb_id))
+                    if source_name:
+                        kb_names.append({"id": str(sr.source_kb_id), "name": source_name})
+        except Exception:
+            kb_names = [{"id": kid, "name": kid} for kid in kb_ids]
+
+        return kb_names
+
     def get_release_by_share_token(
             self,
             share_token: str,
@@ -207,7 +235,8 @@ class SharedChatService:
             knowledge_bases = knowledge_retrieval.get("knowledge_bases", [])
             kb_ids = [kb.get("kb_id") for kb in knowledge_bases if kb.get("kb_id")]
             if kb_ids:
-                kb_tool = create_knowledge_retrieval_tool(knowledge_retrieval, kb_ids, user_id)
+                kb_names = self._build_kb_names(kb_ids)
+                kb_tool = create_knowledge_retrieval_tool(knowledge_retrieval, kb_ids, user_id, kb_names=kb_names)
                 tools.append(kb_tool)
 
         # 添加长期记忆工具
@@ -412,7 +441,8 @@ class SharedChatService:
                 knowledge_bases = knowledge_retrieval.get("knowledge_bases", [])
                 kb_ids = [kb.get("kb_id") for kb in knowledge_bases if kb.get("kb_id")]
                 if kb_ids:
-                    kb_tool = create_knowledge_retrieval_tool(knowledge_retrieval, kb_ids, user_id)
+                    kb_names = self._build_kb_names(kb_ids)
+                    kb_tool = create_knowledge_retrieval_tool(knowledge_retrieval, kb_ids, user_id, kb_names=kb_names)
                     tools.append(kb_tool)
 
             # 添加长期记忆工具
@@ -499,7 +529,8 @@ class SharedChatService:
             self.conversation_service.add_message(
                 conversation_id=conversation.id,
                 role="user",
-                content=message
+                content=message,
+                should_memorize=memory,
             )
 
             self.conversation_service.add_message(
@@ -509,7 +540,8 @@ class SharedChatService:
                 meta_data={
                     "model": api_key_obj.model_name,
                     "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens}
-                }
+                },
+                should_memorize=memory,
             )
 
             ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
@@ -650,7 +682,8 @@ class SharedChatService:
         self.conversation_service.add_message(
             conversation_id=conversation.id,
             role="user",
-            content=message
+            content=message,
+            should_memorize=memory,
         )
 
         self.conversation_service.add_message(
@@ -661,7 +694,8 @@ class SharedChatService:
                 "mode": result.get("mode"),
                 "elapsed_time": result.get("elapsed_time"),
                 "sub_results": result.get("sub_results")
-            }
+            },
+            should_memorize=memory,
         )
 
         return {
@@ -787,7 +821,8 @@ class SharedChatService:
             self.conversation_service.add_message(
                 conversation_id=conversation.id,
                 role="user",
-                content=message
+                content=message,
+                should_memorize=memory,
             )
 
             self.conversation_service.add_message(
@@ -796,7 +831,8 @@ class SharedChatService:
                 content=full_content,
                 meta_data={
                     "elapsed_time": elapsed_time
-                }
+                },
+                should_memorize=memory,
             )
 
             logger.info(

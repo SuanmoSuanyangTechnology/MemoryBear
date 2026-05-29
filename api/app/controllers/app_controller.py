@@ -16,6 +16,7 @@ from app.core.response_utils import success, fail
 from app.db import get_db
 from app.dependencies import get_current_user, cur_workspace_access_guard
 from app.models import User
+from app.models.annotation_model import HitLogSource
 from app.models.app_model import AppType
 from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
@@ -641,6 +642,7 @@ async def draft_run(
 
         # 流式返回
         if payload.stream:
+            source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
             async def event_generator():
 
                 async for event in draft_service.run_stream(
@@ -653,7 +655,8 @@ async def draft_run(
                         variables=payload.variables,
                         storage_type=storage_type,
                         user_rag_memory_id=user_rag_memory_id,
-                        files=payload.files  # 传递多模态文件
+                        files=payload.files,  # 传递多模态文件
+                        source=source
                 ):
                     yield event
 
@@ -681,6 +684,7 @@ async def draft_run(
 
         from app.services.draft_run_service import AgentRunService
         draft_service = AgentRunService(db)
+        source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
         result = await draft_service.run(
             agent_config=agent_cfg,
             model_config=model_config,
@@ -691,7 +695,8 @@ async def draft_run(
             variables=payload.variables,
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
-            files=payload.files  # 传递多模态文件
+            files=payload.files,  # 传递多模态文件
+            source=source
         )
 
         logger.debug(
@@ -815,6 +820,7 @@ async def draft_run(
                 }
             )
 
+            source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
             async def event_generator():
                 """工作流事件生成器
                 
@@ -829,7 +835,8 @@ async def draft_run(
                         app_id=app_id,
                         payload=payload,
                         config=config,
-                        workspace_id=current_user.current_workspace_id
+                        workspace_id=current_user.current_workspace_id,
+                        source=source
                 ):
                     # 提取事件类型和数据
                     event_type = event.get("event", "message")
@@ -859,7 +866,8 @@ async def draft_run(
             }
         )
 
-        result = await workflow_service.run(app_id, payload, config, current_user.current_workspace_id)
+        source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
+        result = await workflow_service.run(app_id, payload, config, current_user.current_workspace_id, source=source)
 
         logger.debug(
             "工作流试运行返回结果",
@@ -1006,6 +1014,7 @@ async def draft_run_compare(
 
     # 流式返回
     if payload.stream:
+        source = HitLogSource.CONSOLE
         async def event_generator():
             from app.services.draft_run_service import AgentRunService
             draft_service = AgentRunService(db)
@@ -1023,7 +1032,8 @@ async def draft_run_compare(
                     memory=True,
                     parallel=payload.parallel,
                     timeout=payload.timeout or 60,
-                    files=payload.files
+                    files=payload.files,
+                    source=source
             ):
                 yield event
 
@@ -1040,6 +1050,7 @@ async def draft_run_compare(
     # 非流式返回
     from app.services.draft_run_service import AgentRunService
     draft_service = AgentRunService(db)
+    source = HitLogSource.CONSOLE
     result = await draft_service.run_compare(
         agent_config=agent_cfg,
         models=model_configs,
@@ -1054,7 +1065,8 @@ async def draft_run_compare(
         memory=True,
         parallel=payload.parallel,
         timeout=payload.timeout or 60,
-        files=payload.files
+        files=payload.files,
+        source=source
     )
 
     logger.info(

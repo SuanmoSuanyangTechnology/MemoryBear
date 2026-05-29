@@ -14,6 +14,7 @@ from app.core.quota_manager import check_end_user_quota
 from app.core.response_utils import success, fail
 from app.db import get_db, get_db_read
 from app.dependencies import get_share_user_id, ShareTokenData
+from app.models.annotation_model import HitLogSource
 from app.models.app_model import AppType
 from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
@@ -25,6 +26,8 @@ from app.services.app_chat_service import AppChatService, get_app_chat_service
 from app.services.app_service import AppService
 from app.services.auth_service import create_access_token
 from app.services.conversation_service import ConversationService
+from app.services.conversation_share_service import ConversationShareService
+from app.services.message_report_service import ReportService
 from app.services.release_share_service import ReleaseShareService
 from app.services.shared_chat_service import SharedChatService
 from app.services.workflow_service import WorkflowService
@@ -270,28 +273,43 @@ def get_conversation(
         password=password
     )
 
-    # 获取消息
+    # 获取所有消息（包括多版本）
     conv_service = ConversationService(db)
-    messages = conv_service.get_messages(conversation_id)
+    messages = conv_service.get_conversation_with_messages(conversation_id)
 
     file_ids = []
     message_file_id_map = {}
 
     # 第一次遍历：解析 audio_url，收集所有有效的 file_id
     for idx, m in enumerate(messages):
-        if m.role == "assistant" and m.meta_data:
-            audio_url = m.meta_data.get("audio_url")
-            if not audio_url:
-                continue
-            try:
-                file_id = uuid.UUID(audio_url.rstrip("/").split("/")[-1])
-            except (ValueError, IndexError):
-                # audio_url 无法解析为 UUID，标记为 unknown
-                m.meta_data["audio_status"] = "unknown"
-                continue
-
-            file_ids.append(file_id)
-            message_file_id_map[idx] = file_id
+        # 处理多版本列表的情况
+        if isinstance(m, list):
+            # assistant 多版本列表
+            for ver_idx, ver_msg in enumerate(m):
+                if ver_msg.role == "assistant" and ver_msg.meta_data:
+                    audio_url = ver_msg.meta_data.get("audio_url")
+                    if not audio_url:
+                        continue
+                    try:
+                        file_id = uuid.UUID(audio_url.rstrip("/").split("/")[-1])
+                    except (ValueError, IndexError):
+                        ver_msg.meta_data["audio_status"] = "unknown"
+                        continue
+                    file_ids.append(file_id)
+                    message_file_id_map[(idx, ver_idx)] = file_id
+        else:
+            # 单条消息
+            if m.role == "assistant" and m.meta_data:
+                audio_url = m.meta_data.get("audio_url")
+                if not audio_url:
+                    continue
+                try:
+                    file_id = uuid.UUID(audio_url.rstrip("/").split("/")[-1])
+                except (ValueError, IndexError):
+                    m.meta_data["audio_status"] = "unknown"
+                    continue
+                file_ids.append(file_id)
+                message_file_id_map[(idx, None)] = file_id
 
     # 批量查询所有相关的 FileMetadata
     file_status_map = {}
@@ -304,39 +322,53 @@ def get_conversation(
         file_status_map = {fm.id: fm.status for fm in file_metas}
 
     # 第二次遍历：将查询结果映射回消息
-    for idx, file_id in message_file_id_map.items():
-        m = messages[idx]
-        m.meta_data["audio_status"] = file_status_map.get(file_id, "unknown")
-
-    # 批量查询当前用户对所有助手消息的反馈
-    message_ids = [m.id for m in messages if m.role == "assistant"]
-    user_feedback_map = {}
-    if message_ids:
-        from app.models.message_feedback_model import MessageFeedback
-        feedbacks = db.query(MessageFeedback).filter(
-            MessageFeedback.message_id.in_(message_ids),
-            MessageFeedback.user_id == share_data.user_id,
-        ).all()
-        user_feedback_map = {f.message_id: (f.feedback_type, f.feedback_content) for f in feedbacks}
+    for (idx, ver_idx), file_id in message_file_id_map.items():
+        status = file_status_map.get(file_id, "unknown")
+        if ver_idx is not None:
+            # 多版本列表
+            messages[idx][ver_idx].meta_data["audio_status"] = status
+        else:
+            # 单条消息
+            messages[idx].meta_data["audio_status"] = status
 
     # 构建消息响应列表
     message_responses = []
     for m in messages:
-        feedback_type, feedback_content = (None, None)
-        if m.role == "assistant" and m.id in user_feedback_map:
-            feedback_type, feedback_content = user_feedback_map[m.id]
-        
-        message_responses.append(conversation_schema.Message(
-            id=m.id,
-            conversation_id=m.conversation_id,
-            role=m.role,
-            content=m.content,
-            status=m.status,
-            meta_data=m.meta_data,
-            created_at=m.created_at,
-            feedback_type=feedback_type,
-            feedback_content=feedback_content,
-        ))
+        if isinstance(m, list):
+            # assistant 多版本列表
+            version_responses = []
+            for ver_msg in m:
+                version_responses.append(conversation_schema.Message(
+                    id=ver_msg.id,
+                    conversation_id=ver_msg.conversation_id,
+                    role=ver_msg.role,
+                    content=ver_msg.content,
+                    status=ver_msg.status,
+                    meta_data=ver_msg.meta_data,
+                    created_at=ver_msg.created_at,
+                    feedback_type=ver_msg.feedbacks[0].feedback_type if ver_msg.feedbacks else None,
+                    feedback_content=ver_msg.feedbacks[0].feedback_content if ver_msg.feedbacks else None,
+                    version=ver_msg.version,
+                    is_current=ver_msg.is_current,
+                    parent_message_id=ver_msg.parent_message_id,
+                ))
+            message_responses.append(version_responses)
+        else:
+            # 单条消息（user 或单个 assistant）
+            message_responses.append(conversation_schema.Message(
+                id=m.id,
+                conversation_id=m.conversation_id,
+                role=m.role,
+                content=m.content,
+                status=m.status,
+                meta_data=m.meta_data,
+                created_at=m.created_at,
+                feedback_type=m.feedbacks[0].feedback_type if m.feedbacks else None,
+                feedback_content=m.feedbacks[0].feedback_content if m.feedbacks else None,
+                version=m.version,
+                is_current=m.is_current,
+                parent_message_id=m.parent_message_id,
+            ))
 
     conv_dict = conversation_schema.Conversation.model_validate(conversation).model_dump(mode="json")
     conv_dict["messages"] = message_responses
@@ -511,8 +543,9 @@ async def chat(
             agent_config.model_parameters["deep_thinking"] = False
 
         if payload.stream:
+            source = HitLogSource.EXTERNAL
             async def event_generator():
-                async for event in app_chat_service.agnet_chat_stream(
+                async for event in app_chat_service.agent_chat_stream(
                         message=payload.message,
                         conversation_id=conversation.id,  # 使用已创建的会话 ID
                         user_id=str(new_end_user.id),  # 转换为字符串
@@ -523,7 +556,8 @@ async def chat(
                         storage_type=storage_type,
                         user_rag_memory_id=user_rag_memory_id,
                         workspace_id=workspace_id,
-                        files=payload.files  # 传递多模态文件
+                        files=payload.files,  # 传递多模态文件
+                        source=source
                 ):
                     yield event
 
@@ -536,7 +570,8 @@ async def chat(
                     "X-Accel-Buffering": "no"
                 }
             )
-        result = await app_chat_service.agnet_chat(
+        source = HitLogSource.EXTERNAL
+        result = await app_chat_service.agent_chat(
             message=payload.message,
             conversation_id=conversation.id,  # 使用已创建的会话 ID
             user_id=str(new_end_user.id),  # 转换为字符串
@@ -547,7 +582,8 @@ async def chat(
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
             workspace_id=workspace_id,
-            files=payload.files  # 传递多模态文件
+            files=payload.files,  # 传递多模态文件
+            source=source
         )
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type == AppType.MULTI_AGENT:
@@ -602,6 +638,7 @@ async def chat(
                 config.id = source_config.id
         config.id = uuid.UUID(config.id)
         if payload.stream:
+            source = HitLogSource.EXTERNAL
             async def event_generator():
                 async for event in app_chat_service.workflow_chat_stream(
                         message=payload.message,
@@ -617,7 +654,8 @@ async def chat(
                         app_id=release.app_id,
                         workspace_id=workspace_id,
                         release_id=release.id,
-                        public=True
+                        public=True,
+                        source=source
                 ):
                     event_type = event.get("event", "message")
                     event_data = event.get("data", {})
@@ -637,6 +675,7 @@ async def chat(
             )
 
         # 多 Agent 非流式返回
+        source = HitLogSource.EXTERNAL
         result = await app_chat_service.workflow_chat(
             message=payload.message,
             conversation_id=conversation.id,  # 使用已创建的会话 ID
@@ -650,7 +689,8 @@ async def chat(
             user_rag_memory_id=user_rag_memory_id,
             app_id=release.app_id,
             workspace_id=workspace_id,
-            release_id=release.id
+            release_id=release.id,
+            source=source
         )
         logger.debug(
             "工作流试运行返回结果",
@@ -763,3 +803,268 @@ async def get_user_feedback(
     result = feedback_service.get_user_feedback(message_id, share_data.user_id)
 
     return success(data=result)
+
+
+@router.post("/conversations/{conversation_id}/share", summary="分享会话")
+async def share_conversation(
+        conversation_id: uuid.UUID,
+        payload: app_schema.ShareConversationRequest,
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
+):
+    """生成会话分享链接
+
+    分享链接：生成可公开访问的对话链接，他人点击即可查看完整对话内容（只读视角）
+    """
+    # 通过 share_token 获取 workspace_id
+    service = SharedChatService(db)
+    share, release = service.get_release_by_share_token(share_data.share_token, None)
+    workspace_id = release.app.workspace_id
+    end_user_repo = EndUserRepository(db)
+    end_user = end_user_repo.get_or_create_end_user(
+        app_id=share.app_id,
+        workspace_id=workspace_id,
+        other_id=share_data.user_id
+    )
+
+    share_service = ConversationShareService(db)
+    result = share_service.create_share(
+        conversation_id=conversation_id,
+        workspace_id=workspace_id,
+        user_id=end_user.id,
+        password=payload.password,
+        expire_hours=payload.expire_hours,
+        allow_copy=payload.allow_copy,
+    )
+    return success(data=app_schema.ShareConversationResponse(**result))
+
+
+@router.delete("/conversations/share/{share_uuid}", summary="撤销分享链接")
+async def revoke_share(
+        share_uuid: str,
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
+):
+    """撤销会话分享链接"""
+    # 通过 share_token 获取 workspace_id
+    service = SharedChatService(db)
+    share, release = service.get_release_by_share_token(share_data.share_token, None)
+    workspace_id = release.app.workspace_id
+
+    share_service = ConversationShareService(db)
+    share_service.revoke_share(share_uuid, workspace_id)
+
+    return success(msg="分享链接已撤销")
+
+
+@router.get("/conversations/{conversation_id}/shares", summary="列出会话的分享链接")
+async def list_conversation_shares(
+        conversation_id: uuid.UUID,
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
+):
+    """列出会话的所有分享链接"""
+    # 通过 share_token 获取 workspace_id
+    service = SharedChatService(db)
+    share, release = service.get_release_by_share_token(share_data.share_token, None)
+    workspace_id = release.app.workspace_id
+
+    share_service = ConversationShareService(db)
+    result = share_service.list_shares(conversation_id, workspace_id)
+
+    return success(data=result)
+
+
+@router.delete("/messages/{message_id}", summary="删除消息")
+async def delete_message(
+        message_id: uuid.UUID,
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
+):
+    """删除单条消息（逻辑删除）
+
+    删除中间某条消息后，后续会话上下文自动断层，新追问不再携带被删除的消息
+    """
+    # 通过 share_token 获取 workspace_id
+    service = SharedChatService(db)
+    share, release = service.get_release_by_share_token(share_data.share_token, None)
+    workspace_id = release.app.workspace_id
+
+    conv_service = ConversationService(db)
+    await conv_service.delete_message(message_id, workspace_id)
+
+    return success(msg="消息已删除")
+
+
+@router.post("/messages/{message_id}/report", summary="举报消息")
+async def report_message(
+        message_id: uuid.UUID,
+        payload: app_schema.MessageReportRequest,
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
+):
+    """举报消息中的违规内容
+
+    支持选中反馈：
+    - 用户选中回复中的某段文本，提交举报或反馈，标记不当内容
+    - 上报数据包含：message_id + 文本起始偏移、结束偏移
+    """
+    # 验证消息存在
+    message = db.get(Message, message_id)
+    if not message:
+        raise BusinessException("消息不存在", BizCode.NOT_FOUND)
+
+    # 通过 share_token 获取 workspace_id
+    service = SharedChatService(db)
+    share, release = service.get_release_by_share_token(share_data.share_token, None)
+    workspace_id = release.app.workspace_id
+
+    end_user_repo = EndUserRepository(db)
+    end_user = end_user_repo.get_or_create_end_user(
+        app_id=share.app_id,
+        workspace_id=workspace_id,
+        other_id=share_data.user_id
+    )
+
+    report_service = ReportService(db)
+    result = report_service.submit_report(
+        message_id=message_id,
+        conversation_id=message.conversation_id,
+        workspace_id=workspace_id,
+        reported_by=end_user.id,
+        report_type=payload.report_type,
+        report_reason=payload.report_reason,
+        text_start_offset=payload.text_start_offset,
+        text_end_offset=payload.text_end_offset,
+        selected_text=payload.selected_text,
+    )
+
+    return success(data=app_schema.MessageReportResponse(**result))
+
+
+@router.post("/messages/{message_id}/regenerate", summary="重新生成回复")
+async def regenerate_message(
+        message_id: uuid.UUID,
+        payload: app_schema.RegenerateRequest,
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
+        app_chat_service: Annotated[AppChatService, Depends(get_app_chat_service)] = None,
+):
+    """重新生成AI回复，支持多版本切换和流式输出
+
+    核心逻辑：
+    - 保持同一上下文、同一前置对话、同一用户提问
+    - 不新增用户消息，只是复用当前会话截止到上一轮的 messages 上下文数组
+    - 再次调用 LLM 生成新回答
+    - 多版本历史保留、可切换回看
+
+    支持流式输出：
+    - stream=false: 返回完整的 JSON 响应
+    - stream=true: 返回 SSE 流式事件
+    """
+    # 验证消息存在
+    message = db.get(Message, message_id)
+    if not message:
+        raise BusinessException("消息不存在", BizCode.NOT_FOUND)
+
+    # 通过 share_token 获取 workspace_id
+    service = SharedChatService(db)
+    share, release = service.get_release_by_share_token(share_data.share_token, None)
+    workspace_id = release.app.workspace_id
+
+    end_user_repo = EndUserRepository(db)
+    end_user = end_user_repo.get_or_create_end_user(
+        app_id=share.app_id,
+        workspace_id=workspace_id,
+        other_id=share_data.user_id
+    )
+
+    # 获取配置
+    agent_cfg = agent_config_4_app_release(release)
+
+    if not (agent_cfg.model_parameters.get("deep_thinking", False) and payload.thinking):
+        agent_cfg.model_parameters["deep_thinking"] = False
+
+    # 获取存储类型
+    storage_type = workspace_service.get_workspace_storage_type_without_auth(db=db, workspace_id=workspace_id)
+    if storage_type is None:
+        storage_type = 'neo4j'
+    user_rag_memory_id = ''
+    if storage_type == 'rag':
+        if workspace_id:
+            knowledge = knowledge_repository.get_knowledge_by_name(
+                db=db, name="USER_RAG_MERORY", workspace_id=workspace_id
+            )
+            if knowledge:
+                user_rag_memory_id = str(knowledge.id)
+
+    if payload.stream:
+        # 流式返回
+        async def event_generator():
+            async for event in app_chat_service.regenerate_stream(
+                    message_id=message_id,
+                    config=agent_cfg,
+                    workspace_id=workspace_id,
+                    user_id=str(end_user.id),
+                    variables=payload.variables,
+                    web_search=payload.web_search,
+                    memory=payload.memory,
+                    storage_type=storage_type,
+                    user_rag_memory_id=user_rag_memory_id,
+            ):
+                yield event
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+    else:
+        # 非流式返回
+        result = await app_chat_service.regenerate(
+            message_id=message_id,
+            config=agent_cfg,
+            workspace_id=workspace_id,
+            user_id=str(end_user.id),
+            variables=payload.variables,
+            web_search=payload.web_search,
+            memory=payload.memory,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+        )
+
+        return success(data=app_schema.RegenerateResponse(**result))
+
+
+@router.post("/messages/{message_id}/switch-version/{version}", summary="切换消息版本")
+async def switch_message_version(
+        message_id: uuid.UUID,
+        version: int,
+        share_data: ShareTokenData = Depends(get_share_user_id),
+        db: Session = Depends(get_db),
+):
+    """切换到指定版本的消息（仅限历史版本切换）"""
+    # 验证消息存在
+    message = db.get(Message, message_id)
+    if not message:
+        raise BusinessException("消息不存在", BizCode.NOT_FOUND)
+
+    # 通过 share_token 获取 workspace_id
+    service = SharedChatService(db)
+    share, release = service.get_release_by_share_token(share_data.share_token, None)
+    workspace_id = release.app.workspace_id
+    conv_service = ConversationService(db)
+
+    result = conv_service.switch_message_version(
+        message_id=message_id,
+        version=version,
+        workspace_id=workspace_id,
+    )
+
+    return success(data=result)
+
+
