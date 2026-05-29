@@ -565,6 +565,25 @@ async def create_chunk(
             detail="The document does not exist or you do not have permission to access it"
         )
 
+    # 校验 chunk_type 与文档分块模式的一致性
+    if db_document.is_parent_child_mode:
+        if create_data.chunk_type not in (chunk_schema.ChunkType.PARENT, chunk_schema.ChunkType.CHILD):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="父子分块模式下仅允许创建 parent 或 child 类型块"
+            )
+        if create_data.chunk_type == chunk_schema.ChunkType.CHILD and not create_data.parent_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="创建子块时必须提供 parent_id"
+            )
+    else:
+        if create_data.chunk_type in (chunk_schema.ChunkType.PARENT, chunk_schema.ChunkType.CHILD):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="当前文档未启用父子分块模式，不允许创建 parent/child 类型块"
+            )
+
     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
     # 2. Get the sort ID
@@ -584,8 +603,9 @@ async def create_chunk(
         "knowledge_id": str(kb_id),
         "sort_id": sort_id,
         "status": 1,
+        **create_data.type_metadata,
     }
-    # QA chunk: 注入 chunk_type/question/answer 到 metadata
+    # QA chunk: 注入 question/answer 到 metadata
     if create_data.is_qa:
         metadata.update(create_data.qa_metadata)
     chunk = DocumentChunk(page_content=content, metadata=metadata)
@@ -626,6 +646,27 @@ async def create_chunks_batch(
     if not db_document:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The document does not exist or you do not have permission to access it")
 
+    # 批量校验 chunk_type
+    if db_document.is_parent_child_mode:
+        for item in batch_data.items:
+            if item.chunk_type not in (chunk_schema.ChunkType.PARENT, chunk_schema.ChunkType.CHILD):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="父子分块模式下仅允许创建 parent 或 child 类型块"
+                )
+            if item.chunk_type == chunk_schema.ChunkType.CHILD and not item.parent_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="创建子块时必须提供 parent_id"
+                )
+    else:
+        for item in batch_data.items:
+            if item.chunk_type in (chunk_schema.ChunkType.PARENT, chunk_schema.ChunkType.CHILD):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="当前文档未启用父子分块模式，不允许创建 parent/child 类型块"
+                )
+
     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
     # Get current max sort_id
@@ -647,6 +688,7 @@ async def create_chunks_batch(
             "knowledge_id": str(kb_id),
             "sort_id": sort_id,
             "status": 1,
+            **create_data.type_metadata,
         }
         if create_data.is_qa:
             metadata.update(create_data.qa_metadata)

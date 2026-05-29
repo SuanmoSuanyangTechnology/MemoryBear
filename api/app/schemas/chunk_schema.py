@@ -13,10 +13,20 @@ class RetrieveType(StrEnum):
     Graph = "graph"
 
 
+class ChunkType(StrEnum):
+    """Chunk type enumeration"""
+    CHUNK = "chunk"
+    PARENT = "parent"
+    CHILD = "child"
+    QA = "qa"
+
+
 class ChunkCreate(BaseModel):
     content: Union[str, QAChunk] = Field(
         description="Content can be either a string or a QAChunk object"
     )
+    chunk_type: ChunkType = Field(default=ChunkType.CHUNK, description="chunk 类型")
+    parent_id: str | None = Field(default=None, description="父块 doc_id（仅 child 类型必填）")
 
     @property
     def chunk_content(self) -> str:
@@ -27,7 +37,7 @@ class ChunkCreate(BaseModel):
 
     @property
     def is_qa(self) -> bool:
-        return isinstance(self.content, QAChunk)
+        return isinstance(self.content, QAChunk) or self.chunk_type == ChunkType.QA
 
     @property
     def qa_metadata(self) -> dict:
@@ -39,6 +49,14 @@ class ChunkCreate(BaseModel):
                 "answer": self.content.answer,
             }
         return {}
+
+    @property
+    def type_metadata(self) -> dict:
+        """根据 chunk_type 返回对应的 metadata 字段"""
+        meta = {"chunk_type": self.chunk_type.value}
+        if self.chunk_type == ChunkType.CHILD and self.parent_id:
+            meta["parent_id"] = self.parent_id
+        return meta
 
 
 class ChunkUpdate(BaseModel):
