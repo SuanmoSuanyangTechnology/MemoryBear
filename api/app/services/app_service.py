@@ -23,6 +23,7 @@ from app.core.exceptions import (
     ResourceNotFoundException,
 )
 from app.core.logging_config import get_business_logger
+from app.core.workflow.triggers import TRIGGER_NODES_PREPARED_FLAG
 from app.core.workflow.validator import WorkflowValidator
 from app.db import get_db
 from app.models import (
@@ -1664,6 +1665,7 @@ class AppService:
             "features": features,
             "triggers": triggers,
             "workflow_type": workflow_type,
+            TRIGGER_NODES_PREPARED_FLAG: True,
         })
         if not is_valid:
             raise BusinessException(

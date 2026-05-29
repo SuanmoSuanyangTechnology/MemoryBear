@@ -18,6 +18,7 @@ from app.core.workflow.triggers import (
     iter_trigger_nodes,
     is_schedule_trigger_due,
     normalize_trigger_nodes,
+    TRIGGER_NODES_PREPARED_FLAG,
 )
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -43,8 +44,6 @@ from app.services.multimodal_service import MultimodalService
 from app.services.workspace_service import get_workspace_storage_type_without_auth
 
 logger = logging.getLogger(__name__)
-
-
 class WorkflowService:
     """工作流服务"""
 
@@ -66,7 +65,7 @@ class WorkflowService:
         """从发布版本快照重建运行时 WorkflowConfig。"""
         cfg = release.config or {}
         now = release.created_at or datetime.datetime.now()
-        normalized_nodes = normalize_trigger_nodes(cfg.get("nodes", []))
+        normalized_nodes = WorkflowService._prepare_nodes(cfg.get("nodes", []))
         return WorkflowConfig(
             id=real_config_id or cfg.get("id") or uuid.uuid4(),
             app_id=release.app_id,
@@ -86,7 +85,13 @@ class WorkflowService:
     def _prepare_nodes(
         nodes: list[dict[str, Any]] | None,
     ) -> list[dict[str, Any]]:
-        return normalize_trigger_nodes(nodes)
+        try:
+            return normalize_trigger_nodes(nodes)
+        except ValueError as exc:
+            raise BusinessException(
+                code=BizCode.INVALID_PARAMETER,
+                message=f"工作流触发器配置无效: {exc}",
+            ) from exc
 
     @staticmethod
     def _prepare_triggers(
@@ -94,6 +99,30 @@ class WorkflowService:
         _nodes: list[dict[str, Any]] | None,
     ) -> list[dict[str, Any]]:
         return triggers or []
+
+    def _prepare_workflow_config_dict(
+        self,
+        *,
+        nodes: list[dict[str, Any]] | None,
+        edges: list[dict[str, Any]] | None,
+        variables: list[dict[str, Any]] | None,
+        execution_config: dict[str, Any] | None,
+        features: dict[str, Any] | None,
+        triggers: list[dict[str, Any]] | None,
+        workflow_type: str | None,
+    ) -> dict[str, Any]:
+        normalized_nodes = self._prepare_nodes(nodes)
+        normalized_triggers = self._prepare_triggers(triggers, normalized_nodes)
+        return {
+            "nodes": normalized_nodes,
+            "edges": edges or [],
+            "variables": variables or [],
+            "execution_config": execution_config or {},
+            "features": features or {},
+            "triggers": normalized_triggers,
+            "workflow_type": workflow_type or "workflow",
+            TRIGGER_NODES_PREPARED_FLAG: True,
+        }
 
     @staticmethod
     def _merge_trigger_context(
@@ -547,19 +576,17 @@ class WorkflowService:
         Raises:
             BusinessException: 配置无效时抛出
         """
-        normalized_nodes = self._prepare_nodes(nodes)
-        normalized_triggers = self._prepare_triggers(triggers, normalized_nodes)
-
-        # 构建配置字典
-        config_dict = {
-            "nodes": normalized_nodes,
-            "edges": edges,
-            "variables": variables or [],
-            "execution_config": execution_config or {},
-            "features": features or {},
-            "triggers": normalized_triggers,
-            "workflow_type": workflow_type
-        }
+        config_dict = self._prepare_workflow_config_dict(
+            nodes=nodes,
+            edges=edges,
+            variables=variables,
+            execution_config=execution_config,
+            features=features,
+            triggers=triggers,
+            workflow_type=workflow_type,
+        )
+        normalized_nodes = config_dict["nodes"]
+        normalized_triggers = config_dict["triggers"]
 
         # 验证配置
         if validate:
@@ -637,27 +664,22 @@ class WorkflowService:
             )
 
         # 合并配置
-        updated_nodes = self._prepare_nodes(nodes if nodes is not None else config.nodes)
-        updated_edges = edges if edges is not None else config.edges
-        updated_variables = variables if variables is not None else config.variables
-        updated_execution_config = execution_config if execution_config is not None else config.execution_config
-        updated_features = features if features is not None else config.features
-        updated_triggers = self._prepare_triggers(
-            triggers if triggers is not None else config.triggers,
-            updated_nodes,
+        config_dict = self._prepare_workflow_config_dict(
+            nodes=nodes if nodes is not None else config.nodes,
+            edges=edges if edges is not None else config.edges,
+            variables=variables if variables is not None else config.variables,
+            execution_config=execution_config if execution_config is not None else config.execution_config,
+            features=features if features is not None else config.features,
+            triggers=triggers if triggers is not None else config.triggers,
+            workflow_type=workflow_type if workflow_type is not None else config.workflow_type,
         )
-        updated_workflow_type = workflow_type if workflow_type is not None else config.workflow_type
-
-        # 构建配置字典
-        config_dict = {
-            "nodes": updated_nodes,
-            "edges": updated_edges,
-            "variables": updated_variables,
-            "execution_config": updated_execution_config,
-            "features": updated_features,
-            "triggers": updated_triggers,
-            "workflow_type": updated_workflow_type
-        }
+        updated_nodes = config_dict["nodes"]
+        updated_edges = config_dict["edges"]
+        updated_variables = config_dict["variables"]
+        updated_execution_config = config_dict["execution_config"]
+        updated_features = config_dict["features"]
+        updated_triggers = config_dict["triggers"]
+        updated_workflow_type = config_dict["workflow_type"]
 
         # 验证配置
         if validate:
@@ -743,16 +765,24 @@ class WorkflowService:
                 "工作流配置不存在，无法运行",
                 BizCode.CONFIG_MISSING
             )
-        # validator 现在支持直接接受 Pydantic 模型
-        is_valid, errors = validate_workflow_config(config, for_publish=False)
+        config_dict = self._prepare_workflow_config_dict(
+            nodes=config.nodes,
+            edges=config.edges,
+            variables=config.variables,
+            execution_config=config.execution_config,
+            features=config.features,
+            triggers=config.triggers,
+            workflow_type=config.workflow_type,
+        )
+        is_valid, errors = validate_workflow_config(config_dict, for_publish=False)
         if not is_valid:
             logger.warning(f"工作流配置验证失败: {errors}")
             raise BusinessException(
                 code=BizCode.INVALID_PARAMETER,
                 message=f"工作流配置无效: {'; '.join(errors)}"
             )
-        self._prepare_triggers(config.triggers, config.nodes)
-        self._prepare_nodes(config.nodes)
+        config.nodes = config_dict["nodes"]
+        config.triggers = config_dict["triggers"]
         return config
 
     def validate_workflow_config_for_publish(
@@ -777,13 +807,15 @@ class WorkflowService:
                 message=f"工作流配置不存在: app_id={app_id}"
             )
 
-        config_dict = {
-            "nodes": self._prepare_nodes(config.nodes),
-            "edges": config.edges,
-            "variables": config.variables,
-            "execution_config": config.execution_config,
-            "triggers": self._prepare_triggers(config.triggers, config.nodes),
-        }
+        config_dict = self._prepare_workflow_config_dict(
+            nodes=config.nodes,
+            edges=config.edges,
+            variables=config.variables,
+            execution_config=config.execution_config,
+            features=config.features,
+            triggers=config.triggers,
+            workflow_type=config.workflow_type,
+        )
 
         return validate_workflow_config(config_dict, for_publish=True)
 
