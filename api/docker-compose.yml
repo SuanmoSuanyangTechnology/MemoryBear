@@ -63,6 +63,22 @@ services:
     networks:
       - celery
 
+  # Workflow trigger worker - For triggering workflows (prefork, low concurrency)
+  worker-workflow-trigger:
+    image: redbear-mem-open:latest
+    container_name: worker-workflow-trigger
+    env_file:
+      - .env
+    volumes:
+      - ./files:/files
+      - /etc/localtime:/etc/localtime:ro
+    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=2 --queues=workflow_trigger_tasks --max-tasks-per-child=50 -n workflow_trigger_worker@%h
+    restart: unless-stopped
+    depends_on:
+      - redis
+    networks:
+      - celery
+
   celery-task-scheduler:
     image: redbear-mem-open:latest
     container_name: celery-task-scheduler

@@ -1,0 +1,78 @@
+# 纯工作流默认模板
+id: pure_workflow_simple_qa_v1
+name: 纯工作流默认模板
+description: 纯工作流的默认问答模板，使用 output 节点作为结束节点
+category: basic
+version: "1.0.0"
+author: RedBear Memory Team
+tags:
+  - 纯工作流
+  - 问答
+  - Output
+
+nodes:
+  - id: start
+    type: start
+    name: 开始
+    position:
+      x: 100
+      y: 100
+
+  - id: llm_qa
+    type: llm
+    name: LLM 问答
+    config:
+      messages:
+        - role: system
+          content: |
+            你是一个专业、友好且乐于助人的 AI 助手。
+
+            你的职责：
+            - 准确理解用户的问题并提供有价值的回答
+            - 保持回答的专业性和准确性
+            - 如果不确定答案，诚实地告知用户
+            - 使用清晰、易懂的语言进行交流
+
+            回答风格：
+            - 简洁明了，直击要点
+            - 必要时提供详细解释和示例
+            - 使用友好、礼貌的语气
+            - 适当使用格式化（如列表、段落）提高可读性。
+        - role: user
+          content: "{{sys.message}}"
+      model_id: null
+      temperature: 0.7
+      max_tokens: 1000
+      json_output: false
+    position:
+      x: 400
+      y: 100
+
+  - id: output_node
+    type: output
+    name: 输出
+    config:
+      outputs:
+        - name: result
+          type: string
+          value: "{{llm_qa.output}}"
+    position:
+      x: 700
+      y: 100
+
+edges:
+  - source: start
+    target: llm_qa
+    label: 开始处理
+
+  - source: llm_qa
+    target: output_node
+    label: 完成
+
+variables: []
+
+execution_config:
+  max_execution_time: 60
+  max_iterations: 1
+
+triggers: []

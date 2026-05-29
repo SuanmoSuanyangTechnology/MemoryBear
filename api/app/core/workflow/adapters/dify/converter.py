@@ -79,6 +79,7 @@ class DifyConverter(BaseConverter):
     def __init__(self):
         self.CONFIG_CONVERT_MAP = {
             NodeType.START: self.convert_start_node_config,
+            NodeType.TRIGGER: lambda x: x,
             NodeType.LLM: self.convert_llm_node_config,
             NodeType.END: self.convert_end_node_config,
             NodeType.OUTPUT: self.convert_output_node_config,

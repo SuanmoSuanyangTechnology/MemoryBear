@@ -22,6 +22,7 @@ from app.core.workflow.nodes.llm import LLMNode
 from app.core.workflow.nodes.memory import MemoryReadNode, MemoryWriteNode
 from app.core.workflow.nodes.parameter_extractor import ParameterExtractorNode
 from app.core.workflow.nodes.start import StartNode
+from app.core.workflow.nodes.trigger import TriggerNode
 from app.core.workflow.nodes.variable_aggregator import VariableAggregatorNode
 from app.core.workflow.nodes.question_classifier import QuestionClassifierNode
 from app.core.workflow.nodes.breaker import BreakNode
@@ -35,6 +36,7 @@ logger = logging.getLogger(__name__)
 WorkflowNode = Union[
     BaseNode,
     StartNode,
+    TriggerNode,
     EndNode,
     LLMNode,
     IfElseNode,
@@ -68,6 +70,7 @@ class NodeFactory:
     # 节点类型注册表
     _node_types: dict[str, type[WorkflowNode]] = {
         NodeType.START: StartNode,
+        NodeType.TRIGGER: TriggerNode,
         NodeType.END: EndNode,
         NodeType.LLM: LLMNode,
         NodeType.AGENT: AgentNode,

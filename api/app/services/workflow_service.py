@@ -11,6 +11,12 @@ import yaml
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from app.core.workflow.triggers import (
+    build_schedule_now_payload,
+    iter_trigger_nodes,
+    is_schedule_trigger_due,
+    normalize_trigger_nodes,
+)
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.workflow.adapters.registry import PlatformAdapterRegistry
@@ -18,7 +24,7 @@ from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.validator import validate_workflow_config
 from app.db import get_db
-from app.models import App
+from app.models import App, AppRelease
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution
 from app.repositories import knowledge_repository
 from app.repositories.workflow_repository import (
@@ -49,6 +55,409 @@ class WorkflowService:
         self.multimodal_service = MultimodalService(db)
 
         self.registry = PlatformAdapterRegistry
+
+    @staticmethod
+    def _build_runtime_workflow_config_from_release(
+        release: AppRelease,
+        real_config_id: uuid.UUID | None = None,
+    ) -> WorkflowConfig:
+        """从发布版本快照重建运行时 WorkflowConfig。"""
+        cfg = release.config or {}
+        now = release.created_at or datetime.datetime.now()
+        normalized_nodes = normalize_trigger_nodes(cfg.get("nodes", []))
+        return WorkflowConfig(
+            id=real_config_id or cfg.get("id") or uuid.uuid4(),
+            app_id=release.app_id,
+            nodes=normalized_nodes,
+            edges=cfg.get("edges", []),
+            variables=cfg.get("variables", []),
+            execution_config=cfg.get("execution_config", {}),
+            triggers=cfg.get("triggers", []),
+            features=cfg.get("features", {}),
+            workflow_type=cfg.get("workflow_type", "workflow"),
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        )
+
+    @staticmethod
+    def _prepare_nodes(
+        nodes: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        return normalize_trigger_nodes(nodes)
+
+    @staticmethod
+    def _prepare_triggers(
+        triggers: list[dict[str, Any]] | None,
+        _nodes: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        return triggers or []
+
+    @staticmethod
+    def _merge_trigger_context(
+        input_data: dict[str, Any],
+        trigger_type: str,
+        trigger_id: str | None,
+        trigger_meta: dict[str, Any] | None,
+        trigger_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not trigger_id and not trigger_meta and trigger_type == "manual" and not trigger_payload:
+            return input_data
+
+        merged = dict(input_data)
+        merged["trigger"] = {
+            "type": trigger_type,
+            "id": trigger_id,
+            "meta": trigger_meta or {},
+        }
+        if trigger_payload is not None:
+            merged["trigger_payload"] = trigger_payload
+        return merged
+
+    @staticmethod
+    def _find_debug_trigger_node(
+        nodes: list[dict[str, Any]] | None,
+        *,
+        preferred_node_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        if preferred_node_id:
+            for node in nodes or []:
+                if node.get("id") == preferred_node_id and node.get("type") == NodeType.TRIGGER:
+                    return node
+
+        for node in nodes or []:
+            if node.get("type") == NodeType.TRIGGER:
+                return node
+
+        return None
+
+    @staticmethod
+    def _build_debug_trigger_context(
+        trigger_node: dict[str, Any],
+    ) -> tuple[str, str | None, dict[str, Any], dict[str, Any]]:
+        trigger_type = str(trigger_node.get("trigger_type") or "manual").strip()
+        trigger_id = trigger_node.get("id")
+        config = trigger_node.get("config") or {}
+        current_time = datetime.datetime.now(datetime.timezone.utc)
+        generated_at = current_time.isoformat()
+
+        if trigger_type == "schedule":
+            return (
+                "schedule",
+                trigger_id,
+                {"source": "debug", "mode": "test_run", "generated_at": generated_at},
+                {
+                    "now": build_schedule_now_payload(current_time, config.get("timezone", "UTC")),
+                    "meta": {
+                        "trigger_type": "schedule",
+                        "source": "debug",
+                    },
+                },
+            )
+
+        if trigger_type == "webhook":
+            return (
+                "webhook",
+                trigger_id,
+                {"source": "debug", "mode": "test_run", "generated_at": generated_at},
+                {
+                    "body": {},
+                    "query": {},
+                    "headers": {},
+                    "meta": {
+                        "trigger_type": "webhook",
+                        "source": "debug",
+                    },
+                },
+            )
+
+        return (
+            trigger_type or "manual",
+            trigger_id,
+            {"source": "debug", "mode": "test_run", "generated_at": generated_at},
+            {},
+        )
+
+    def _ensure_debug_trigger_args(
+        self,
+        nodes: list[dict[str, Any]] | None,
+        trigger_type: str,
+        trigger_id: str | None,
+        trigger_meta: dict[str, Any] | None,
+        trigger_payload: dict[str, Any] | None,
+    ) -> tuple[str, str | None, dict[str, Any] | None, dict[str, Any] | None]:
+        if trigger_payload is not None:
+            return trigger_type, trigger_id, trigger_meta, trigger_payload
+
+        trigger_node = self._find_debug_trigger_node(nodes)
+        if not trigger_node:
+            return trigger_type, trigger_id, trigger_meta, trigger_payload
+
+        debug_trigger_type, debug_trigger_id, debug_trigger_meta, debug_trigger_payload = (
+            self._build_debug_trigger_context(trigger_node)
+        )
+        return (
+            debug_trigger_type,
+            debug_trigger_id,
+            trigger_meta or debug_trigger_meta,
+            debug_trigger_payload,
+        )
+
+    def _ensure_debug_trigger_input_data(
+        self,
+        nodes: list[dict[str, Any]] | None,
+        input_data: dict[str, Any],
+        *,
+        preferred_node_id: str | None = None,
+    ) -> dict[str, Any]:
+        if input_data.get("trigger_payload") is not None:
+            return input_data
+
+        trigger_node = self._find_debug_trigger_node(nodes, preferred_node_id=preferred_node_id)
+        if not trigger_node:
+            return input_data
+
+        trigger_type, trigger_id, trigger_meta, trigger_payload = self._build_debug_trigger_context(trigger_node)
+        merged = dict(input_data)
+        merged["trigger"] = {
+            "type": trigger_type,
+            "id": trigger_id,
+            "meta": trigger_meta,
+        }
+        merged["trigger_payload"] = trigger_payload
+        return merged
+
+    def update_trigger_runtime_state(
+        self,
+        app_id: uuid.UUID,
+        trigger_id: str,
+        runtime: dict[str, Any],
+    ) -> WorkflowConfig | None:
+        return self.config_repo.update_trigger_runtime(app_id, trigger_id, runtime)
+
+    def update_release_trigger_runtime_state(
+        self,
+        release_id: uuid.UUID,
+        trigger_id: str,
+        runtime: dict[str, Any],
+    ) -> AppRelease | None:
+        release = self.db.get(AppRelease, release_id)
+        if not release or not isinstance(release.config, dict):
+            return None
+
+        config = dict(release.config or {})
+        nodes = list(config.get("nodes") or [])
+        updated = False
+        for node in nodes:
+            if node.get("type") == NodeType.TRIGGER and node.get("id") == trigger_id:
+                node["runtime"] = runtime
+                updated = True
+                break
+
+        if not updated:
+            return None
+
+        config["nodes"] = nodes
+        release.config = config
+        self.db.commit()
+        self.db.refresh(release)
+        return release
+
+    @staticmethod
+    def _find_trigger_node(
+        nodes: list[dict[str, Any]] | None,
+        *,
+        trigger_id: str | None = None,
+        route_key: str | None = None,
+        trigger_type: str | None = None,
+    ) -> dict[str, Any] | None:
+        for node in iter_trigger_nodes(nodes, trigger_type=trigger_type):
+            config = node.get("config") or {}
+            if trigger_id and node.get("id") == trigger_id:
+                return node
+            if route_key and config.get("route_key") == route_key:
+                return node
+        return None
+
+    def find_published_webhook_trigger(
+        self,
+        route_key: str,
+    ) -> tuple[App, AppRelease, WorkflowConfig, dict[str, Any]] | None:
+        apps = self.db.query(App).filter(
+            App.is_active.is_(True),
+            App.current_release_id.isnot(None),
+            App.type.in_(["workflow", "pure_workflow"]),
+        ).all()
+
+        for app in apps:
+            release = app.current_release
+            if not release or not isinstance(release.config, dict):
+                continue
+
+            config = self._build_runtime_workflow_config_from_release(
+                release,
+                real_config_id=(app.workflow_config.id if app.workflow_config else None),
+            )
+            trigger = self._find_trigger_node(
+                config.nodes,
+                route_key=route_key,
+                trigger_type="webhook",
+            )
+            if trigger and trigger.get("enabled", True):
+                return app, release, config, trigger
+        return None
+
+    def get_due_schedule_triggers(
+        self,
+        now: datetime.datetime | None = None,
+    ) -> list[tuple[App, AppRelease, WorkflowConfig, dict[str, Any]]]:
+        current_time = now or datetime.datetime.now(datetime.timezone.utc)
+        due_triggers: list[tuple[App, AppRelease, WorkflowConfig, dict[str, Any]]] = []
+        apps = self.db.query(App).filter(
+            App.is_active.is_(True),
+            App.current_release_id.isnot(None),
+            App.type.in_(["workflow", "pure_workflow"]),
+        ).all()
+
+        for app in apps:
+            release = app.current_release
+            if not release or not isinstance(release.config, dict):
+                continue
+
+            config = self._build_runtime_workflow_config_from_release(
+                release,
+                real_config_id=(app.workflow_config.id if app.workflow_config else None),
+            )
+            for trigger in iter_trigger_nodes(config.nodes, trigger_type="schedule"):
+                if not trigger.get("enabled", True):
+                    continue
+                if is_schedule_trigger_due(trigger, current_time):
+                    due_triggers.append((app, release, config, trigger))
+
+        return due_triggers
+
+    @staticmethod
+    def _build_draft_payload_from_trigger_data(
+        trigger_data: dict[str, Any],
+    ) -> DraftRunRequest:
+        return DraftRunRequest(
+            message=trigger_data.get("message"),
+            variables=trigger_data.get("variables") or {},
+            conversation_id=trigger_data.get("conversation_id"),
+            user_id=trigger_data.get("user_id"),
+            stream=False,
+            files=[],
+        )
+
+    @staticmethod
+    def _store_trigger_meta(
+        execution: WorkflowExecution,
+        trigger_id: str | None,
+        trigger_meta: dict[str, Any] | None,
+        external_event_id: str | None = None,
+    ) -> None:
+        execution.meta_data = {
+            **(execution.meta_data or {}),
+            "trigger_id": trigger_id,
+            "trigger_meta": trigger_meta or {},
+            "external_event_id": external_event_id,
+        }
+
+    async def run_with_trigger(
+        self,
+        *,
+        app_id: uuid.UUID,
+        payload: DraftRunRequest,
+        config: WorkflowConfig,
+        workspace_id: uuid.UUID,
+        trigger_type: str,
+        trigger_id: str | None = None,
+        trigger_meta: dict[str, Any] | None = None,
+        trigger_payload: dict[str, Any] | None = None,
+        release_id: uuid.UUID | None = None,
+        source: str = "",
+    ) -> dict[str, Any]:
+        return await self.run(
+            app_id=app_id,
+            payload=payload,
+            config=config,
+            workspace_id=workspace_id,
+            release_id=release_id,
+            source=source,
+            trigger_type=trigger_type,
+            trigger_id=trigger_id,
+            trigger_meta=trigger_meta,
+            trigger_payload=trigger_payload,
+        )
+
+    async def invoke_webhook_trigger(
+        self,
+        route_key: str,
+        event: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        matched = self.find_published_webhook_trigger(route_key)
+        if not matched:
+            raise BusinessException("Webhook 触发器不存在", BizCode.NOT_FOUND)
+
+        app, release, config, trigger = matched
+        payload = DraftRunRequest(stream=False, variables={}, files=[])
+        trigger_meta = {
+            "source": "webhook",
+            "route_key": route_key,
+            "request": {
+                "query": event.get("query", {}),
+                "headers": event.get("headers", {}),
+                "body": event.get("body"),
+            },
+        }
+        result = await self.run_with_trigger(
+            app_id=app.id,
+            payload=payload,
+            config=config,
+            workspace_id=app.workspace_id,
+            release_id=release.id,
+            trigger_type="webhook",
+            trigger_id=trigger.get("id"),
+            trigger_meta=trigger_meta,
+            trigger_payload=event,
+            source=HitLogSource.EXTERNAL,
+        )
+        return result, trigger
+
+    async def invoke_schedule_trigger(
+        self,
+        *,
+        app: App,
+        release: AppRelease,
+        config: WorkflowConfig,
+        trigger: dict[str, Any],
+        now: datetime.datetime | None = None,
+    ) -> dict[str, Any]:
+        current_time = now or datetime.datetime.now(datetime.timezone.utc)
+        schedule_event = {
+            "now": build_schedule_now_payload(
+                current_time,
+                (trigger.get("config") or {}).get("timezone", "UTC"),
+            ),
+            "meta": {
+                "trigger_type": "schedule",
+                "app_id": str(app.id),
+            },
+        }
+        payload = DraftRunRequest(stream=False, variables={}, files=[])
+        result = await self.run_with_trigger(
+            app_id=app.id,
+            payload=payload,
+            config=config,
+            workspace_id=app.workspace_id,
+            release_id=release.id,
+            trigger_type="schedule",
+            trigger_id=trigger.get("id"),
+            trigger_meta={"source": "schedule", "run_at": current_time.isoformat()},
+            trigger_payload=schedule_event,
+            source="schedule",
+        )
+        return result
 
     def _check_annotation_match(self, app_id: uuid.UUID, message: str,
                               source: str = "") -> Optional[dict]:
@@ -138,14 +547,17 @@ class WorkflowService:
         Raises:
             BusinessException: 配置无效时抛出
         """
+        normalized_nodes = self._prepare_nodes(nodes)
+        normalized_triggers = self._prepare_triggers(triggers, normalized_nodes)
+
         # 构建配置字典
         config_dict = {
-            "nodes": nodes,
+            "nodes": normalized_nodes,
             "edges": edges,
             "variables": variables or [],
             "execution_config": execution_config or {},
             "features": features or {},
-            "triggers": triggers or [],
+            "triggers": normalized_triggers,
             "workflow_type": workflow_type
         }
 
@@ -162,12 +574,12 @@ class WorkflowService:
         # 创建或更新配置
         config = self.config_repo.create_or_update(
             app_id=app_id,
-            nodes=nodes,
+            nodes=normalized_nodes,
             edges=edges,
             variables=variables,
             execution_config=execution_config,
             features=features,
-            triggers=triggers,
+            triggers=normalized_triggers,
             workflow_type=workflow_type
         )
 
@@ -225,12 +637,15 @@ class WorkflowService:
             )
 
         # 合并配置
-        updated_nodes = nodes if nodes is not None else config.nodes
+        updated_nodes = self._prepare_nodes(nodes if nodes is not None else config.nodes)
         updated_edges = edges if edges is not None else config.edges
         updated_variables = variables if variables is not None else config.variables
         updated_execution_config = execution_config if execution_config is not None else config.execution_config
         updated_features = features if features is not None else config.features
-        updated_triggers = triggers if triggers is not None else config.triggers
+        updated_triggers = self._prepare_triggers(
+            triggers if triggers is not None else config.triggers,
+            updated_nodes,
+        )
         updated_workflow_type = workflow_type if workflow_type is not None else config.workflow_type
 
         # 构建配置字典
@@ -336,6 +751,8 @@ class WorkflowService:
                 code=BizCode.INVALID_PARAMETER,
                 message=f"工作流配置无效: {'; '.join(errors)}"
             )
+        self._prepare_triggers(config.triggers, config.nodes)
+        self._prepare_nodes(config.nodes)
         return config
 
     def validate_workflow_config_for_publish(
@@ -361,11 +778,11 @@ class WorkflowService:
             )
 
         config_dict = {
-            "nodes": config.nodes,
+            "nodes": self._prepare_nodes(config.nodes),
             "edges": config.edges,
             "variables": config.variables,
             "execution_config": config.execution_config,
-            "triggers": config.triggers
+            "triggers": self._prepare_triggers(config.triggers, config.nodes),
         }
 
         return validate_workflow_config(config_dict, for_publish=True)
@@ -902,6 +1319,10 @@ class WorkflowService:
             workspace_id: uuid.UUID,
             release_id: uuid.UUID | None = None,
             source: str = "",
+            trigger_type: str = "manual",
+            trigger_id: str | None = None,
+            trigger_meta: dict[str, Any] | None = None,
+            trigger_payload: dict[str, Any] | None = None,
     ):
         """运行工作流
 
@@ -926,6 +1347,14 @@ class WorkflowService:
                 code=BizCode.CONFIG_MISSING,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
+        config.nodes = self._prepare_nodes(config.nodes)
+        trigger_type, trigger_id, trigger_meta, trigger_payload = self._ensure_debug_trigger_args(
+            config.nodes,
+            trigger_type,
+            trigger_id,
+            trigger_meta,
+            trigger_payload,
+        )
 
         supports_conversation = self._supports_conversation(config)
 
@@ -946,6 +1375,7 @@ class WorkflowService:
             input_data["message"] = payload.message
         if payload.conversation_id:
             input_data["conversation_id"] = payload.conversation_id
+        input_data = self._merge_trigger_context(input_data, trigger_type, trigger_id, trigger_meta, trigger_payload)
 
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
@@ -990,12 +1420,13 @@ class WorkflowService:
             execution = self.create_execution(
                 workflow_config_id=config.id,
                 app_id=app_id,
-                trigger_type="manual",
+                trigger_type=trigger_type,
                 triggered_by=None,
                 conversation_id=conversation_id_uuid,
                 input_data=input_data,
                 release_id=release_id,
             )
+            self._store_trigger_meta(execution, trigger_id, trigger_meta)
             execution.status = "completed"
             output_messages = prev_messages + [
                 {"role": "user", "content": payload.message},
@@ -1033,12 +1464,14 @@ class WorkflowService:
         execution = self.create_execution(
             workflow_config_id=config.id,
             app_id=app_id,
-            trigger_type="manual",
+            trigger_type=trigger_type,
             triggered_by=None,
             conversation_id=conversation_id_uuid,
             input_data=input_data,
             release_id=release_id,
         )
+        self._store_trigger_meta(execution, trigger_id, trigger_meta)
+        self.db.commit()
 
         # 3. 构建工作流配置字典
         workflow_config_dict = {
@@ -1222,6 +1655,10 @@ class WorkflowService:
             release_id: Optional[uuid.UUID] = None,
             public: bool = False,
             source: str = "",
+            trigger_type: str = "manual",
+            trigger_id: str | None = None,
+            trigger_meta: dict[str, Any] | None = None,
+            trigger_payload: dict[str, Any] | None = None,
     ):
         """运行工作流（流式）
 
@@ -1247,6 +1684,14 @@ class WorkflowService:
                 code=BizCode.CONFIG_MISSING,
                 message=f"工作流配置不存在: app_id={app_id}"
             )
+        config.nodes = self._prepare_nodes(config.nodes)
+        trigger_type, trigger_id, trigger_meta, trigger_payload = self._ensure_debug_trigger_args(
+            config.nodes,
+            trigger_type,
+            trigger_id,
+            trigger_meta,
+            trigger_payload,
+        )
         supports_conversation = self._supports_conversation(config)
         feature_configs = config.features or {}
         self._validate_file_upload(feature_configs, payload.files)
@@ -1265,6 +1710,7 @@ class WorkflowService:
             input_data["message"] = payload.message
         if payload.conversation_id:
             input_data["conversation_id"] = payload.conversation_id
+        input_data = self._merge_trigger_context(input_data, trigger_type, trigger_id, trigger_meta, trigger_payload)
 
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
@@ -1309,12 +1755,13 @@ class WorkflowService:
             execution = self.create_execution(
                 workflow_config_id=config.id,
                 app_id=app_id,
-                trigger_type="manual",
+                trigger_type=trigger_type,
                 triggered_by=None,
                 conversation_id=conversation_id_uuid,
                 input_data=input_data,
                 release_id=release_id,
             )
+            self._store_trigger_meta(execution, trigger_id, trigger_meta)
             execution.status = "completed"
             output_messages = prev_messages + [
                 {"role": "user", "content": payload.message},
@@ -1379,12 +1826,14 @@ class WorkflowService:
         execution = self.create_execution(
             workflow_config_id=config.id,
             app_id=app_id,
-            trigger_type="manual",
+            trigger_type=trigger_type,
             triggered_by=None,
             conversation_id=conversation_id_uuid,
             input_data=input_data,
             release_id=release_id,
         )
+        self._store_trigger_meta(execution, trigger_id, trigger_meta)
+        self.db.commit()
 
         # 3. 构建工作流配置字典
         workflow_config_dict = {
@@ -1585,6 +2034,12 @@ class WorkflowService:
         if not config:
             raise BusinessException(code=BizCode.CONFIG_MISSING, message="工作流配置不存在")
 
+        input_data = self._ensure_debug_trigger_input_data(
+            config.nodes,
+            input_data,
+            preferred_node_id=node_id,
+        )
+
         node_config = next((n for n in config.nodes if n.get("id") == node_id), None)
         if not node_config:
             raise BusinessException(code=BizCode.NOT_FOUND, message=f"节点不存在: node_id={node_id}")
@@ -1778,7 +2233,7 @@ class WorkflowService:
         for node in nodes:
             if node.get("type") == NodeType.START:
                 return node.get("config", {}).get("variables", [])
-        raise BusinessException("workflow config error - start node not found")
+        return []
 
     @staticmethod
     def is_memory_enable(config: dict) -> bool:
