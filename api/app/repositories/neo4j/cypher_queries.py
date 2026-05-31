@@ -2225,6 +2225,32 @@ ON CREATE SET r.id = edge.id,
     r.created_at = edge.created_at
 RETURN elementId(r) AS uuid
 """
+
+# Conversation hub node：会话级中心节点，用 MERGE 保证跨写入任务幂等复用。
+# 所有 AssistantOriginal 通过 BELONGS_TO_CONVERSATION 挂到该节点上，
+# 从而把同一会话的 assistant 剪枝节点聚成一个连通子图。
+CONVERSATION_NODE_SAVE = """
+UNWIND $conversations AS c
+MERGE (n:Conversation {id: c.id})
+ON CREATE SET n.name = c.name,
+    n.end_user_id = c.end_user_id,
+    n.conversation_id = c.conversation_id,
+    n.run_id = c.run_id,
+    n.created_at = c.created_at
+RETURN n.id AS uuid
+"""
+
+ASSISTANT_CONVERSATION_EDGE_SAVE = """
+UNWIND $edges AS edge
+MATCH (orig:AssistantOriginal {id: edge.source, end_user_id: edge.end_user_id})
+MATCH (conv:Conversation {id: edge.target})
+MERGE (orig)-[r:BELONGS_TO_CONVERSATION]->(conv)
+ON CREATE SET r.id = edge.id,
+    r.end_user_id = edge.end_user_id,
+    r.run_id = edge.run_id,
+    r.created_at = edge.created_at
+RETURN elementId(r) AS uuid
+"""
 # --- Reflection Engine Layer 2: Description Merge ---
 
 # Find entities whose description has accumulated >= min_fragments
