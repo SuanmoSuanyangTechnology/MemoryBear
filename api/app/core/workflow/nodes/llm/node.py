@@ -353,7 +353,7 @@ class LLMNode(BaseNode):
                         )
                         history_message.append(message)
                 messages = messages[:-1] + history_message + messages[-1:]
-                self.history_messages = history_messages
+                self.history_messages = history_message
             self.messages = messages
         else:
             # 使用简单的 prompt 格式（向后兼容）——包装为标准消息列表以兼容所有 provider
