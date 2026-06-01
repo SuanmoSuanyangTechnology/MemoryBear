@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-10 14:06:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-31 23:22:47
+ * @Last Modified time: 2026-06-01 11:52:56
  */
 /**
  * GraphNetworkChart Component
@@ -63,6 +63,7 @@ interface GraphNetworkChartProps {
   onNodeClick: Dispatch<SetStateAction<Node | EdgeClickData | null>>;
   selectedNodeId?: string | null;
   selectedCategory?: string | null;
+  regionId?: string | null;
 }
 
 interface D3Node extends d3.SimulationNodeDatum {
@@ -83,6 +84,16 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
   label?: string;
 }
 
+const regionMapping: Record<string, string[]> = {
+  prefrontal: ['Statement'],
+  frontal: ['ExtractedEntity'],
+  parietal: ['Perceptual'],
+  occipital: ['Chunk'],
+  cerebellum: ['AssistantPruned', 'AssistantOriginal'],
+  brainstem: ['Dialogue', 'Conversation'],
+  hippocampus: ['MemorySummary'],
+  amygdala: ['Statement'],
+}
 const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
   nodes,
   links,
@@ -91,6 +102,7 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
   onNodeClick,
   selectedNodeId,
   selectedCategory,
+  regionId,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
@@ -706,6 +718,102 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
     }
 
   }, [selectedNodeId])
+
+  useEffect(() => {
+    if (!regionId || !nodeSelRef.current || !linkSelRef.current || !graphStateRef.current) return
+
+    const { nodes: graphNodes, links: graphLinks } = graphStateRef.current
+
+    const targetTypes = regionMapping[regionId] || []
+    
+    const highlightedNodeIds = new Set<string>()
+    const highlightedLinkIds = new Set<string>()
+
+    graphNodes.forEach(node => {
+      const originalNode = nodes.find(n => n.id === node.id)
+      if (!originalNode) return
+
+      const nodeType = originalNode.caption
+
+      if (regionId === 'amygdala') {
+        if (nodeType === 'Statement' && 
+            originalNode.properties && 
+            (originalNode.properties.emotion_type !== undefined || 
+             originalNode.properties.emotion_intensity !== undefined)) {
+          highlightedNodeIds.add(node.id)
+        }
+      } else {
+        if (targetTypes.includes(nodeType)) {
+          highlightedNodeIds.add(node.id)
+        }
+      }
+    })
+
+    graphLinks.forEach(link => {
+      const sourceId = typeof link.source === 'string' ? link.source : link.source.id
+      const targetId = typeof link.target === 'string' ? link.target : link.target.id
+      if (highlightedNodeIds.has(sourceId) || highlightedNodeIds.has(targetId)) {
+        highlightedLinkIds.add(link.id as string)
+      }
+    })
+
+    nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle')
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize * 1.2 : d.symbolSize * 0.8)
+      .attr('fill-opacity', d => highlightedNodeIds.has(d.id) ? 0.85 : 0.15)
+      .attr('stroke', d => highlightedNodeIds.has(d.id) ? '#fff' : '#ccc')
+      .attr('stroke-width', d => highlightedNodeIds.has(d.id) ? 1.5 : 0.5)
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize : d.symbolSize * 0.8)
+
+    nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle.ring')
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize * 1.35 * 1.2 : d.symbolSize * 1.35 * 0.8)
+      .attr('stroke-opacity', d => highlightedNodeIds.has(d.id) ? 0.6 : 0.1)
+      .transition()
+      .duration(200)
+      .attr('r', d => highlightedNodeIds.has(d.id) ? d.symbolSize * 1.35 : d.symbolSize * 1.35 * 0.8)
+      .attr('stroke-opacity', d => highlightedNodeIds.has(d.id) ? 0.4 : 0.1)
+
+    nodeSelRef.current.selectAll<SVGTextElement, D3Node>('text')
+      .attr('fill', d => highlightedNodeIds.has(d.id) ? '#171719' : '#bbb')
+      .attr('font-weight', 'normal')
+      .style('display', d => {
+        if (!d.name) return 'none'
+        const textWidth = d.name.length * 6
+        const shouldShow = d.symbolSize * zoomScaleRef.current >= textWidth / 2
+        if (highlightedNodeIds.has(d.id)) return shouldShow ? 'block' : 'none'
+        return 'none'
+      })
+
+    linkSelRef.current
+      .attr('stroke', '#A8ABB2')
+      .attr('stroke-opacity', d => {
+        const linkId = d.id as string
+        return highlightedLinkIds.has(linkId) ? 0.6 : 0.15
+      })
+      .attr('stroke-width', d => {
+        const linkId = d.id as string
+        return highlightedLinkIds.has(linkId) ? 1.5 : 0.5
+      })
+      .attr('marker-end', d => {
+        const linkId = d.id as string
+        return highlightedLinkIds.has(linkId) ? 'url(#arrow-highlight)' : 'url(#arrow)'
+      })
+      .attr('stroke-dasharray', 'none')
+
+    if (linkLabelSelRef.current) {
+      linkLabelSelRef.current
+        .style('display', d => {
+          const linkId = d.id as string
+          return highlightedLinkIds.has(linkId) ? 'block' : 'none'
+        })
+    }
+
+  }, [regionId, nodes])
 
   if (!nodes || nodes.length === 0) {
     return <PageEmpty />

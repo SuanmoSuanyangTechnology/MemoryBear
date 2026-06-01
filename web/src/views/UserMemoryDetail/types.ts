@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 13:31:21
+ * @Last Modified time: 2026-06-01 11:17:20
  */
 /**
  * User Memory Detail Types
@@ -129,7 +129,7 @@ export interface MemorySummaryNode {
  */
 export interface Node {
   id: string;
-  label:  'AssistantOriginal' | 'AssistantPruned' | 'Chunk' | 'Dialogue' | 'ExtractedEntity' | 'Perceptual' | 'Statement';
+  label:  'AssistantOriginal' | 'AssistantPruned' | 'Chunk' | 'Dialogue' | 'ExtractedEntity' | 'Perceptual' | 'Statement' | 'Conversation' | 'MemorySummary';
   category: number;
   symbolSize: number;
   name: string;
