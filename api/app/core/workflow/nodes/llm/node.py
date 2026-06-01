@@ -77,6 +77,7 @@ class LLMNode(BaseNode):
         super().__init__(node_config, workflow_config, down_stream_nodes)
         self.typed_config: LLMNodeConfig | None = None
         self.messages = []
+        self.history_messages = []
         self.model_info: ModelInfo | None = None
         self._param_warnings: list[str] = []
 
@@ -87,6 +88,7 @@ class LLMNode(BaseNode):
             "reasoning_content": VariableType.STRING,
             "token_usage": VariableType.OBJECT,
             "param_warnings": VariableType.ARRAY_STRING,
+            "history": VariableType.ARRAY_OBJECT,
         }
 
     def _render_context(self, message: str, variable_pool: VariablePool):
@@ -351,6 +353,7 @@ class LLMNode(BaseNode):
                         )
                         history_message.append(message)
                 messages = messages[:-1] + history_message + messages[-1:]
+                self.history_messages = history_messages
             self.messages = messages
         else:
             # 使用简单的 prompt 格式（向后兼容）——包装为标准消息列表以兼容所有 provider
@@ -422,13 +425,15 @@ class LLMNode(BaseNode):
                 result = {
                     "llm_result": AIMessage(content=content, response_metadata={
                         **response.response_metadata,
-                        "token_usage": getattr(response, 'usage_metadata', None) or response.response_metadata.get('token_usage'),
+                        "token_usage": getattr(response, 'usage_metadata', None) or response.response_metadata.get(
+                            'token_usage'),
                         "reasoning_content": reasoning_content if reasoning_content else None
                     }),
                     "branch_signal": "SUCCESS",
                 }
                 
                 result["reasoning_content"] = reasoning_content
+                result["history"] = self.history_messages
                 
                 if hasattr(self, '_param_warnings') and self._param_warnings:
                     result["param_warnings"] = self._param_warnings
@@ -493,6 +498,7 @@ class LLMNode(BaseNode):
                     "branch_signal": business_result["branch_signal"],
                 }
             result["reasoning_content"] = business_result.get("reasoning_content") or ""
+            result["history"] = business_result.get("history") or []
             if business_result.get("param_warnings"):
                 result["param_warnings"] = business_result["param_warnings"]
             token_usage = self._extract_token_usage(business_result)
@@ -692,6 +698,7 @@ class LLMNode(BaseNode):
 
                 result = {"llm_result": final_message, "branch_signal": "SUCCESS"}
                 result["reasoning_content"] = reasoning_content
+                result["history"] = self.history_messages
 
                 if hasattr(self, '_param_warnings') and self._param_warnings:
                     result["param_warnings"] = self._param_warnings

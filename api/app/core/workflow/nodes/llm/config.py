@@ -252,6 +252,11 @@ class LLMNodeConfig(BaseNodeConfig):
                 name="token_usage",
                 type=VariableType.OBJECT,
                 description="Token 使用情况"
+            ),
+            VariableDefinition(
+                name="history",
+                type=VariableType.ARRAY_OBJECT,
+                description="本次 LLM 调用注入的历史消息列表"
             )
         ],
         description="输出变量定义（自动生成，通常不需要修改）"
