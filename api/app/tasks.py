@@ -637,6 +637,14 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         # Vectorization and data entry completed
         progress_lines.append(f"{datetime.now().strftime('%H:%M:%S')} Indexing done.")
+
+        # Early-exit check after data write: if doc deleted, remove written data
+        if _should_abort(document_id):
+            logger.info(f"[ParseDoc] document={document_id} deleted after data write -- rolling back vectors")
+            vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
+            _clear_redis_state(document_id)
+            return f"parse document '{file_name or document_id}' aborted (deleted or cancelled)."
+
         db_document.chunk_num = total_chunks
         db_document.progress = 1.0
         db_document.process_duration = time.time() - start_time
