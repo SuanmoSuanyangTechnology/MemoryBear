@@ -41,7 +41,8 @@ SET s += {
     access_history: statement.access_history,
     last_access_time: statement.last_access_time,
     access_count: statement.access_count,
-    dialog_at: statement.dialog_at
+    dialog_at: statement.dialog_at,
+    has_unsolved_reference: statement.has_unsolved_reference
 }
 RETURN s.id AS uuid
 """
