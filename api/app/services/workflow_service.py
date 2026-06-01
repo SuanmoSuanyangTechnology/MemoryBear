@@ -2159,6 +2159,9 @@ class WorkflowService:
                             llm_node_ids.add(node.get("id", ""))
 
 
+            moderation_flagged = False
+            active_llm_nodes: set[str] = set()  # 已 node_start 但尚未 node_end 的 LLM 节点
+
             async for event in execute_workflow_stream(
                     workflow_config=workflow_config_dict,
                     input_data=input_data,
@@ -2170,6 +2173,94 @@ class WorkflowService:
             ):
                 event_type = event.get("event")
                 event_data = event.get("data", {})
+
+                # 审查触发后，跳过所有后续 message 事件（不再向客户端输出模型流式文本）
+                if moderation_flagged and event_type == "message":
+                    continue
+
+                # message 事件：先审查再 yield，检测到关键词立即触发 message_replace 并结束流式
+                if event_type == "message" and output_moderation and not moderation_flagged:
+                    chunk = event_data.get("content", "")
+                    if output_moderation.accumulate(chunk):
+                        moderation_flagged = True
+                        yield {"event": "message_replace",
+                               "data": {"content": output_moderation.preset_response}}
+
+                        # 审查触发后，立即保存对话、更新执行状态，合成结束事件并退出循环
+                        preset_response = output_moderation.preset_response
+                        human_message, human_meta = self._extract_human_message_and_meta(
+                            [], payload.message or "", files
+                        )
+                        if conversation_id_uuid:
+                            self.conversation_service.add_message(
+                                conversation_id=conversation_id_uuid,
+                                role="user",
+                                content=human_message,
+                                meta_data=human_meta,
+                                sync_memory=False,
+                            )
+                            self.conversation_service.add_message(
+                                message_id=message_id,
+                                conversation_id=conversation_id_uuid,
+                                role="assistant",
+                                content=preset_response,
+                                meta_data={"usage": {}, "audio_url": None, "moderation_flagged": True},
+                                sync_memory=False,
+                            )
+                        # 更新执行状态为完成，标记审查触发
+                        workflow_output_data = {
+                            "moderation_flagged": True,
+                            "preset_response": preset_response,
+                        }
+                        if _cycle_items and execution.output_data:
+                            import copy
+                            new_output_data = copy.deepcopy(execution.output_data)
+                            node_outputs = new_output_data.setdefault("node_outputs", {})
+                            for cycle_node_id, items in _cycle_items.items():
+                                if cycle_node_id in node_outputs:
+                                    node_outputs[cycle_node_id]["cycle_items"] = items
+                                else:
+                                    node_outputs[cycle_node_id] = {"cycle_items": items}
+                            workflow_output_data.update(new_output_data)
+                        self.update_execution_status(
+                            execution.execution_id,
+                            "completed",
+                            output_data=workflow_output_data,
+                        )
+                        # 合成 LLM node_end 事件：只为当前正在执行的 LLM 节点补发
+                        import datetime as _dt
+                        for llm_node_id in active_llm_nodes:
+                            node_end_event = {
+                                "event": "node_end",
+                                "data": {
+                                    "node_id": llm_node_id,
+                                    "conversation_id": str(conversation_id_uuid) if conversation_id_uuid else None,
+                                    "execution_id": execution.execution_id,
+                                    "timestamp": int(_dt.datetime.now().timestamp() * 1000),
+                                    "output": preset_response,
+                                    "elapsed_time": 0,
+                                }
+                            }
+                            node_end_mapped = self._emit(public, node_end_event)
+                            if node_end_mapped:
+                                yield node_end_mapped
+                        # 合成 workflow_end 事件并退出，不再等待 LLM 静默执行完成
+                        end_internal_event = {
+                            "event": "workflow_end",
+                            "data": {
+                                "conversation_id": str(conversation_id_uuid) if conversation_id_uuid else None,
+                                "output": preset_response,
+                                "usage": {},
+                                "elapsed_time": 0,
+                                "status": "completed",
+                                "error": "",
+                                "moderation_flagged": True,
+                            }
+                        }
+                        end_event = self._emit(public, end_internal_event)
+                        if end_event:
+                            yield end_event
+                        break
 
                 if event_type == "cycle_item":
                     cycle_id = event_data.get("cycle_id")
@@ -2277,18 +2368,14 @@ class WorkflowService:
                         self.db.commit()
                 elif event.get("event") == "workflow_start":
                     event["data"]["message_id"] = str(message_id)
+                # 记录活跃 LLM 节点：node_start 加入，node_end 移除，合成时只为活跃节点补发
+                if event_type == "node_start" and event_data.get("node_id") in llm_node_ids:
+                    active_llm_nodes.add(event_data.get("node_id"))
+                if event_type == "node_end" and event_data.get("node_id") in llm_node_ids:
+                    active_llm_nodes.discard(event_data.get("node_id"))
                 event = self._emit(public, event)
                 if event:
                     yield event
-
-                if event_type == "message" and output_moderation:
-                    chunk = event_data.get("content", "")
-                    output_moderation.accumulate(chunk)
-
-                if event_type == "node_end" and output_moderation \
-                        and event_data.get("node_id") in llm_node_ids \
-                        and output_moderation.check_final():
-                    yield {"event": "message_replace", "data": {"content": output_moderation.preset_response}}
 
         except Exception as e:
             logger.error(
