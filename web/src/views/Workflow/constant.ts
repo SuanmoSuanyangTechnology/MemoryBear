@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 19:46:16
+ * @Last Modified time: 2026-06-01 12:17:51
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -128,7 +128,7 @@ export const nodeLibrary: NodeLibrary[] = [
           },
           max_tokens: { 
             type: 'define',
-            defaultValue: 2000 
+            defaultValue: 8000 
           },
           json_output: {
             type: 'define',
