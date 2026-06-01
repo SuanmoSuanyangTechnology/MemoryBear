@@ -892,8 +892,8 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
                 for i, row in enumerate(reader):
                     if i == 0:
                         continue
-                    if len(row) >= 2 and row[0].strip() and row[1].strip():
-                        qa_pairs.append({"question": row[0].strip(), "answer": row[1].strip()})
+                    if len(row) >= 2 and row[0].strip():
+                        qa_pairs.append({"question": row[0].strip(), "answer": row[1].strip() if row[1].strip() else ""})
                     elif len(row) >= 1 and row[0].strip():
                         failed_rows.append(i + 1)
 
@@ -905,10 +905,10 @@ def import_qa_chunks(kb_id: str, document_id: str, filename: str, contents: byte
                         for i, row in enumerate(sheet.iter_rows(values_only=True)):
                             if i == 0:
                                 continue
-                            if len(row) >= 2 and row[0] and row[1]:
+                            if len(row) >= 2 and row[0]:
                                 q = str(row[0]).strip()
-                                a = str(row[1]).strip()
-                                if q and a:
+                                a = str(row[1]).strip() if row[1] else ""
+                                if q:
                                     qa_pairs.append({"question": q, "answer": a})
                             elif len(row) >= 1 and row[0]:
                                 failed_rows.append(i + 1)
