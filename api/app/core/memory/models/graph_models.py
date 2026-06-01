@@ -632,3 +632,22 @@ class AssistantPrunedEdge(Edge):
 class AssistantDialogEdge(Edge):
     """Edge connecting an AssistantOriginal node to its parent Dialogue node (BELONGS_TO_DIALOG)."""
     pass
+
+
+class ConversationNode(Node):
+    """Hub node representing a conversation session.
+
+    Used to cluster all AssistantOriginal / AssistantPruned nodes that belong to
+    the same conversation into a single connected component in the graph.
+    The node id equals the conversation_id, so it is stable and reused
+    (via MERGE) across multiple sliding-window write tasks.
+
+    Attributes:
+        conversation_id: The conversation/session ID (equals node id)
+    """
+    conversation_id: str = Field(..., description="The conversation/session ID (equals node id)")
+
+
+class AssistantConversationEdge(Edge):
+    """Edge connecting an AssistantOriginal node to its Conversation hub node (BELONGS_TO_CONVERSATION)."""
+    pass
