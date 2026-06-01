@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:00 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 20:02:38
+ * @Last Modified time: 2026-05-31 23:19:24
  */
 /**
  * Relationship Network Component
@@ -197,8 +197,16 @@ const RelationshipNetwork: FC = () => {
 
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const handleClickCategory = (category: string | null) => {
-    setSelectedCategory(prev => category === prev ? null : category)
     setSelectedNode(null)
+    setTimeout(() => {
+      setSelectedCategory(prev => category === prev ? null : category)
+    }, 0)
+  }
+  const handleClickNode = (node: GraphNode) => {
+    setSelectedCategory(null)
+    setTimeout(() => {
+      setSelectedNode(node)
+    }, 0)
   }
   console.log('selectedCategory', selectedCategory, selectedNode)
   return (
@@ -216,7 +224,7 @@ const RelationshipNetwork: FC = () => {
       </div>
       {activeTab === 'communityNetwork'
         ? <CommunityNetwork onSelectCommunity={community => setSelectedNode(community)} />
-        : <div>
+        : <div className="rb:h-full rb:w-full">
           {categories.length > 0 &&
             <Flex gap={24} align="center" justify="space-between" wrap={false}
               className={clsx('rb:absolute! rb:top-4 rb:left-0 rb:bg-[#FFFFFF] rb:rounded-xl rb:py-2! rb:px-3!', {
@@ -230,13 +238,15 @@ const RelationshipNetwork: FC = () => {
                     key={item.name}
                     gap={4}
                     align="center"
-                    className={clsx("rb:px-2! rb:py-1! rb:rounded-full rb:text-[12px] rb:leading-4 rb:text-[#000000]", {
+                    className={clsx("rb:cursor-pointer rb:px-2! rb:py-1! rb:rounded-full rb:text-[12px] rb:leading-4 rb:text-[#000000]", {
                       'rb:border rb:border-[#171719]': selectedCategory === item.name,
                       'rb-border': selectedCategory !== item.name
                     })}
                     onClick={() => handleClickCategory(item.name)}
                   >
-                    <div className={clsx(`rb:size-1.25 rb:rounded-full rb:mr-2`, `rb:bg-[${Colors[index]}]`)}></div>
+                    <div className={clsx(`rb:size-1.25 rb:rounded-full rb:mr-2`)}
+                      style={{ backgroundColor: Colors[index] }}
+                    ></div>
                     {item.name}
                     <div className="rb:px-1 rb:rounded-full rb:bg-[#F6F6F6] rb:text-[10px] rb:h-3.5">{item.value}</div>
                   </Flex>
@@ -251,7 +261,7 @@ const RelationshipNetwork: FC = () => {
             categories={categories.map(vo => ({
               name: t(`userMemory.${vo.name}`)
             })) || []}
-            onNodeClick={(node) => setSelectedNode(node as GraphNode)}
+            onNodeClick={(node) => handleClickNode(node as GraphNode)}
             selectedNodeId={selectedNode?.id}
             selectedCategory={selectedCategory}
           />
