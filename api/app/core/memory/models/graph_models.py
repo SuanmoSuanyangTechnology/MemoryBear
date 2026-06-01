@@ -284,6 +284,12 @@ class StatementNode(Node):
     invalid_at: Optional[datetime] = Field(None, description="Temporal validity end")
     dialog_at: Optional[datetime] = Field(None, description="Absolute timestamp of the conversation this statement belongs to")
 
+    # Reference resolution
+    has_unsolved_reference: bool = Field(
+        False,
+        description="Whether the statement has unresolved references (used by reflection engine layer 2)"
+    )
+
     # Embedding and other fields
     statement_embedding: Optional[List[float]] = Field(None, description="Statement embedding vector")
     chunk_embedding: Optional[List[float]] = Field(None, description="Chunk embedding vector")
