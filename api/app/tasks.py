@@ -1807,23 +1807,18 @@ def extract_emotion_batch_task(
 
         await asyncio.gather(*[_extract_one(s) for s in statements])
 
-        # 快照落盘（worker 端）：不影响 Neo4j 写入流程，失败只打日志
-        if snapshot_outputs is not None:
-            try:
-                from pathlib import Path as _Path
-                import json as _json
+        # 快照落盘（worker 端）：写入本地文件系统，不影响 Neo4j 写入流程，失败只打日志
+        if snapshot_outputs is not None and snapshot_dir:
+            from app.core.memory.utils.debug.pipeline_snapshot import (
+                upload_stage_snapshot,
+            )
 
-                _dir = _Path(snapshot_dir)
-                _dir.mkdir(parents=True, exist_ok=True)
-                _path = _dir / "4_emotion_outputs.json"
-                with open(_path, "w", encoding="utf-8") as _f:
-                    _json.dump(snapshot_outputs, _f, ensure_ascii=False, indent=2, default=str)
+            if upload_stage_snapshot(
+                snapshot_dir, "4_emotion_outputs", snapshot_outputs
+            ):
                 logger.info(
-                    f"[Emotion][Snapshot] 已落盘 {len(snapshot_outputs)} 条情绪结果 → {_path}"
-                )
-            except Exception as _e:
-                logger.warning(
-                    f"[Emotion][Snapshot] 快照落盘失败（不影响主流程）: {_e}"
+                    f"[Emotion][Snapshot] 已落盘 {len(snapshot_outputs)} 条情绪结果 → "
+                    f"{snapshot_dir}/4_emotion_outputs.json"
                 )
 
         # Batch update Neo4j via write transaction
@@ -2191,6 +2186,12 @@ def batch_post_store_task(self, end_user_id: str) -> Dict[str, Any]:
             None,
         )
         language = records[-1].get("language", "zh")
+        # 取最近一条非空的 snapshot_dir，作为本批写入快照补充落盘的目标目录。
+        # 各轮写入由 BatchPostStoreAccumulator 累积时已携带各自的 snapshot_dir。
+        snapshot_dir = next(
+            (r["snapshot_dir"] for r in reversed(records) if r.get("snapshot_dir")),
+            None,
+        )
 
         logger.info(
             f"[BatchPostStore] 消费完成: end_user_id={end_user_id}, "
@@ -2356,24 +2357,19 @@ def batch_post_store_task(self, end_user_id: str) -> Dict[str, Any]:
                         f"合并删除冗余节点 {cleanup_info.get('deleted_count', 0)} 个"
                     )
 
-                    # 快照：第二层去重结果
-                    try:
-                        from app.core.memory.utils.debug.write_snapshot_recorder import WriteSnapshotRecorder
-                        # 找到最新的 snapshot 目录
-                        import glob
-                        snapshot_base = "logs/memory-output/snapshots"
-                        snapshot_dirs = sorted(glob.glob(f"{snapshot_base}/new_*"), reverse=True)
-                        if snapshot_dirs:
-                            latest_dir = snapshot_dirs[0]
+                    # 快照：第二层去重结果（写入主流水线创建的同一本地目录）
+                    if snapshot_dir:
+                        try:
+                            from app.core.memory.utils.debug.write_snapshot_recorder import WriteSnapshotRecorder
                             WriteSnapshotRecorder.save_alias_merge_result(
-                                latest_dir,
+                                snapshot_dir,
                                 [{"id": e.id, "name": e.name, "entity_type": e.entity_type,
                                   "description": e.description, "aliases": e.aliases or []}
                                  for e in fused],
                             )
-                            logger.info(f"[BatchPostStore] 快照 8_after_alias_merge 已写入: {latest_dir}")
-                    except Exception as snap_e:
-                        logger.debug(f"[BatchPostStore] 快照写入失败（不影响主流程）: {snap_e}")
+                            logger.info(f"[BatchPostStore] 快照 8_after_alias_merge 已写入: {snapshot_dir}")
+                        except Exception as snap_e:
+                            logger.debug(f"[BatchPostStore] 快照写入失败（不影响主流程）: {snap_e}")
                 else:
                     result_info["layer2_skipped"] = "no entities loaded"
             except Exception as e:
@@ -2430,15 +2426,9 @@ def batch_post_store_task(self, end_user_id: str) -> Dict[str, Any]:
                         #   3. Statement 与 description 语义重叠，混入会让 LLM 重复提取相同 metadata
 
                         if user_entities_payload:
-                            # 找到最新的 snapshot 目录传给元数据任务
-                            _meta_snapshot_dir = None
-                            try:
-                                import glob as _glob
-                                _snap_dirs = sorted(_glob.glob("logs/memory-output/snapshots/new_*"), reverse=True)
-                                if _snap_dirs:
-                                    _meta_snapshot_dir = _snap_dirs[0]
-                            except Exception:
-                                pass
+                            # 复用本批消费记录里携带的 snapshot_dir 传给元数据任务，
+                            # 让 9_metadata_outputs.json 落到主流水线创建的同一目录。
+                            _meta_snapshot_dir = snapshot_dir
 
                             # 派发已有的 extract_metadata_batch_task
                             celery_app.send_task(
@@ -2995,23 +2985,18 @@ def extract_metadata_batch_task(
         finally:
             await connector.close()
 
-        # 快照落盘
+        # 快照落盘：写入本地文件系统
         if snapshot_outputs is not None and snapshot_dir:
-            try:
-                from pathlib import Path as _Path
-                import json as _json
+            from app.core.memory.utils.debug.pipeline_snapshot import (
+                upload_stage_snapshot,
+            )
 
-                _dir = _Path(snapshot_dir)
-                _dir.mkdir(parents=True, exist_ok=True)
-                _path = _dir / "9_metadata_outputs.json"
-                with open(_path, "w", encoding="utf-8") as _f:
-                    _json.dump(snapshot_outputs, _f, ensure_ascii=False, indent=2, default=str)
+            if upload_stage_snapshot(
+                snapshot_dir, "9_metadata_outputs", snapshot_outputs
+            ):
                 logger.info(
-                    f"[Metadata][Snapshot] 已落盘 {len(snapshot_outputs)} 条元数据结果 → {_path}"
-                )
-            except Exception as _e:
-                logger.warning(
-                    f"[Metadata][Snapshot] 快照落盘失败（不影响主流程）: {_e}"
+                    f"[Metadata][Snapshot] 已落盘 {len(snapshot_outputs)} 条元数据结果 → "
+                    f"{snapshot_dir}/9_metadata_outputs.json"
                 )
 
         return {"extracted": extracted, "failed": failed}

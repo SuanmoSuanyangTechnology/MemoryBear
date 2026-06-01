@@ -4,7 +4,7 @@
 让 Pipeline 只做编排，不关心调试输出的数据格式。
 
 Pipeline 侧调用示例：
-    recorder = WriteSnapshotRecorder()
+    recorder = WriteSnapshotRecorder(end_user_id="abc123")
     recorder.record_stage_outputs(orchestrator.last_stage_outputs)
     recorder.record_graph_before_dedup(graph)
     recorder.record_dedup_result(dedup_result)
@@ -30,8 +30,19 @@ class WriteSnapshotRecorder:
     当 PIPELINE_SNAPSHOT_ENABLED=false 时，所有方法均为空操作（no-op）。
     """
 
-    def __init__(self, pipeline_name: str = "new"):
-        self._snapshot = PipelineSnapshot(pipeline_name)
+    def __init__(
+        self,
+        end_user_id: str,
+        conversation_id: Optional[str] = None,
+        message_seq: Optional[int] = None,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ):
+        self._snapshot = PipelineSnapshot(
+            end_user_id=end_user_id,
+            conversation_id=conversation_id,
+            message_seq=message_seq,
+            extra_metadata=extra_metadata,
+        )
 
     # ── 属性 ──
 
@@ -79,7 +90,10 @@ class WriteSnapshotRecorder:
         if not stage_outputs:
             return
 
-        self._record_statements(stage_outputs.get("statement_results", {}))
+        self._record_statements(
+            stage_outputs.get("statement_results", {}),
+            stage_outputs.get("statement_inputs", {}),
+        )
         self._record_triplets(stage_outputs.get("triplet_results", {}))
         self._record_emotions(stage_outputs.get("emotion_results", {}))
         self._record_embeddings(stage_outputs.get("embedding_output"))
@@ -154,36 +168,32 @@ class WriteSnapshotRecorder:
         """将别名归并+节点删除后的 Neo4j 实体状态写入 8_after_alias_merge.json。
 
         由 Celery post_store_dedup_and_alias_merge 任务在完成归并和删除后调用，
-        直接写入已有的 snapshot 目录，无需重建 WriteSnapshotRecorder 实例。
+        直接写入已有的 snapshot 目录前缀下，无需重建 WriteSnapshotRecorder 实例。
 
         Args:
-            snapshot_dir: 主流水线创建的 snapshot 目录绝对路径。
+            snapshot_dir: 主流水线创建的本地 snapshot 目录路径（如
+                          "<...>/snapshots/{end_user_id}/{conversation_id}/seq_xxx_时间戳"）。
             entity_rows:  从 Neo4j 查询到的实体属性列表，每项包含
                           id / name / entity_type / description / aliases 字段。
         """
-        import json
-        from pathlib import Path
+        from app.core.memory.utils.debug.pipeline_snapshot import (
+            upload_stage_snapshot,
+        )
 
-        try:
-            path = Path(snapshot_dir) / "8_after_alias_merge.json"
-            data = {
-                "entity_nodes": [
-                    {
-                        "id": row.get("id"),
-                        "name": row.get("name"),
-                        "entity_type": row.get("entity_type"),
-                        "description": row.get("description"),
-                        "aliases": row.get("aliases", []),
-                    }
-                    for row in entity_rows
-                ],
-                "entity_count": len(entity_rows),
-            }
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2, default=str)
-            logger.debug(f"[Snapshot] 8_after_alias_merge → {path}")
-        except Exception as e:
-            logger.warning(f"[Snapshot] 保存 8_after_alias_merge 失败: {e}")
+        data = {
+            "entity_nodes": [
+                {
+                    "id": row.get("id"),
+                    "name": row.get("name"),
+                    "entity_type": row.get("entity_type"),
+                    "description": row.get("description"),
+                    "aliases": row.get("aliases", []),
+                }
+                for row in entity_rows
+            ],
+            "entity_count": len(entity_rows),
+        }
+        upload_stage_snapshot(snapshot_dir, "8_after_alias_merge", data)
 
     # ── Stage 0: 汇总 ──
 
@@ -193,12 +203,45 @@ class WriteSnapshotRecorder:
 
     # ── 内部方法 ──
 
-    def _record_statements(self, stmt_results: Dict) -> None:
+    def _record_statements(
+        self,
+        stmt_results: Dict,
+        stmt_inputs: Optional[Dict] = None,
+    ) -> None:
+        """记录 statement 抽取结果，并附带 LLM 输入上下文。
+
+        新格式按 chunk 分组，每条记录包含：
+        - dialog_id / chunk_id：定位信息
+        - input：本次 extract_statement 注入给 LLM 的上下文
+            (target_content / target_message_date / dialog_at /
+             supporting_context.msgs)
+        - outputs：LLM 抽取出来的 statement 列表
+        便于人工核对每个 chunk 的输入是否正确、输出是否合理。
+        """
+        stmt_inputs = stmt_inputs or {}
         snapshot_data: List[Dict] = []
-        for _did, chunk_stmts in stmt_results.items():
-            for _cid, stmts in chunk_stmts.items():
-                for s in stmts:
-                    snapshot_data.append(s.model_dump())
+        for did, chunk_stmts in stmt_results.items():
+            chunk_inputs = stmt_inputs.get(did, {})
+            for cid, stmts in chunk_stmts.items():
+                step_input = chunk_inputs.get(cid)
+                input_dump: Optional[Dict[str, Any]] = None
+                if step_input is not None and hasattr(step_input, "model_dump"):
+                    full = step_input.model_dump()
+                    # 仅保留与 extract_statement 提示词相关的字段，避免冗余
+                    input_dump = {
+                        "target_content": full.get("target_content"),
+                        "target_message_date": full.get("target_message_date"),
+                        "dialog_at": full.get("dialog_at"),
+                        "supporting_context": full.get("supporting_context"),
+                    }
+                snapshot_data.append(
+                    {
+                        "dialog_id": did,
+                        "chunk_id": cid,
+                        "input": input_dump,
+                        "outputs": [s.model_dump() for s in stmts],
+                    }
+                )
         self._snapshot.save_stage("2_statement_outputs", snapshot_data)
 
     def _record_triplets(self, triplet_results: Dict) -> None:

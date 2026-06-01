@@ -1,23 +1,28 @@
-"""Pipeline stage snapshot — dump each extraction stage's output to JSON for comparison.
+"""Pipeline stage snapshot — dump each extraction stage's output to the local
+filesystem for comparison.
 
 Usage:
-    snapshot = PipelineSnapshot("legacy")   # or "new"
+    snapshot = PipelineSnapshot(end_user_id="abc123-def456")
     snapshot.save_stage("1_statements", data)
     snapshot.save_stage("2_triplets", data)
     ...
 
-Output structure:
-    logs/memory-output/snapshots/
-        legacy_20260422_123456/
-            1_statements.json
-            2_triplets.json
-            3_nodes_edges.json
-            4_dedup.json
-        new_20260422_123500/
-            1_statements.json
-            2_triplets.json
-            3_nodes_edges.json
-            4_dedup.json
+Output structure (local filesystem, root = settings.MEMORY_OUTPUT_DIR/snapshots):
+
+    Sliding-window 写入（推荐路径，含完整定位上下文）:
+        logs/memory-output/snapshots/
+            {end_user_id}/
+                {conversation_id}/
+                    seq_{message_seq:06d}_{YYYYmmdd_HHMMSS}/
+                        0_summary.json
+                        1_assistant_pruning.json
+                        2_statement_outputs.json
+                        ...
+
+    旧的整轮写入（无 conversation/seq 时的兼容路径）:
+        logs/memory-output/snapshots/
+            {end_user_id}_{YYYYmmdd_HHMMSS}/
+                ...
 
 Controlled by env var PIPELINE_SNAPSHOT_ENABLED (default: false).
 """
@@ -29,11 +34,14 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 _ENABLED: Optional[bool] = None
+
+# 本地快照文件的根子目录（位于 settings.MEMORY_OUTPUT_DIR 下）
+_SNAPSHOT_SUBDIR = "snapshots"
 
 
 def _is_enabled() -> bool:
@@ -41,6 +49,44 @@ def _is_enabled() -> bool:
     if _ENABLED is None:
         _ENABLED = os.getenv("PIPELINE_SNAPSHOT_ENABLED", "false").lower() == "true"
     return _ENABLED
+
+
+def _snapshot_root() -> Path:
+    """快照根目录：``<MEMORY_OUTPUT_DIR>/snapshots``。"""
+    from app.core.config import settings
+
+    return Path(settings.MEMORY_OUTPUT_DIR) / _SNAPSHOT_SUBDIR
+
+
+def upload_stage_snapshot(snapshot_dir: str, stage_name: str, data: Any) -> bool:
+    """将一个 stage 的数据序列化为 JSON 并写入本地文件系统。
+
+    供没有 ``PipelineSnapshot`` 实例的调用方使用（典型场景：Celery worker
+    任务在主流水线之后异步落盘补充数据，需要写入主流水线已创建的同一个
+    本地目录下）。
+
+    Args:
+        snapshot_dir: 主流水线创建的本地目录绝对/相对路径（例如
+            ``<...>/snapshots/{end_user_id}/{conversation_id}/seq_xxx_时间戳``）。
+        stage_name: 落盘的 stage 名（不带 ``.json`` 后缀），最终路径为
+            ``<snapshot_dir>/<stage_name>.json``。
+        data: 任意可序列化对象（Pydantic 模型 / dict / list / dataclass）。
+
+    Returns:
+        写入成功返回 True，失败返回 False（失败仅打 warning，不抛异常）。
+    """
+    try:
+        serialized = _safe_serialize(data)
+        target_dir = Path(snapshot_dir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        path = target_dir / f"{stage_name}.json"
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(serialized, f, ensure_ascii=False, indent=2, default=str)
+        logger.debug(f"[Snapshot] {stage_name} → {path}")
+        return True
+    except Exception as e:
+        logger.warning(f"[Snapshot] 保存 {stage_name} 失败: {e}")
+        return False
 
 
 def _safe_serialize(obj: Any) -> Any:
@@ -65,31 +111,58 @@ def _safe_serialize(obj: Any) -> Any:
 
 
 class PipelineSnapshot:
-    """Dump each pipeline stage's output to a timestamped directory."""
+    """Dump each pipeline stage's output to the local filesystem."""
 
-    def __init__(self, pipeline_name: str):
+    def __init__(
+        self,
+        end_user_id: str,
+        conversation_id: Optional[str] = None,
+        message_seq: Optional[int] = None,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ):
         """
         Args:
-            pipeline_name: "legacy" or "new", used as directory prefix.
+            end_user_id: 终端用户 ID，作为第一级目录。
+            conversation_id: 对话 ID（滑动窗口写入时传入）。
+                提供后会把它作为第二级目录，便于按对话归集快照。
+            message_seq: 目标 user 消息的 message_seq（滑动窗口写入时传入）。
+                提供后会写入叶子目录名（``seq_{message_seq:06d}_{时间戳}``），
+                字典序与数值序一致，方便顺序定位。
+            extra_metadata: 任意可序列化的额外字段，会写入 ``0_summary.json``，
+                典型字段：ref_id / dispatch_at / dialog_at / language /
+                target_content_preview。
         """
         self.enabled = _is_enabled()
-        self.pipeline_name = pipeline_name
+        self.end_user_id = end_user_id
+        self.conversation_id = conversation_id
+        self.message_seq = message_seq
+        self.extra_metadata: Dict[str, Any] = dict(extra_metadata or {})
         self._dir: Optional[Path] = None
 
         if self.enabled:
-            from app.core.config import settings
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self._dir = Path(settings.MEMORY_OUTPUT_DIR) / "snapshots" / f"{pipeline_name}_{ts}"
+            root = _snapshot_root()
+            if conversation_id:
+                # 滑动窗口路径：按 user / conversation / seq_xxx_时间戳 三级组织
+                seq_part = (
+                    f"seq_{int(message_seq):06d}_{ts}"
+                    if message_seq is not None
+                    else f"seq_unknown_{ts}"
+                )
+                self._dir = root / end_user_id / conversation_id / seq_part
+            else:
+                # 兼容旧路径（整轮 messages 写入）
+                self._dir = root / f"{end_user_id}_{ts}"
             self._dir.mkdir(parents=True, exist_ok=True)
             logger.debug(f"[Snapshot] 已启用，输出目录: {self._dir}")
 
     @property
     def directory(self) -> Optional[str]:
-        """Absolute path (str) of this snapshot's output directory, or None when disabled."""
+        """本地输出目录路径（str），未启用时返回 None。"""
         return str(self._dir) if self._dir is not None else None
 
     def save_stage(self, stage_name: str, data: Any) -> None:
-        """Save a stage's output as JSON.
+        """Save a stage's output as JSON to the local filesystem.
 
         Args:
             stage_name: e.g. "1_statements", "2_triplets"
@@ -97,24 +170,25 @@ class PipelineSnapshot:
         """
         if not self.enabled or self._dir is None:
             return
-
-        try:
-            path = self._dir / f"{stage_name}.json"
-            serialized = _safe_serialize(data)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(serialized, f, ensure_ascii=False, indent=2, default=str)
-            logger.debug(f"[Snapshot] {stage_name} → {path}")
-        except Exception as e:
-            logger.warning(f"[Snapshot] 保存 {stage_name} 失败: {e}")
+        upload_stage_snapshot(str(self._dir), stage_name, data)
 
     def save_summary(self, stats: Dict[str, Any]) -> None:
-        """Save a summary with pipeline metadata and stats."""
+        """Save a summary with pipeline metadata and stats.
+
+        除统计信息外，还会写入定位元信息（end_user_id / conversation_id /
+        message_seq）以及构造时传入的 ``extra_metadata``，便于通过
+        ``0_summary.json`` 直接确认是哪一次写入产生的快照。
+        """
         if not self.enabled or self._dir is None:
             return
 
-        summary = {
-            "pipeline": self.pipeline_name,
+        summary: Dict[str, Any] = {
+            "end_user_id": self.end_user_id,
+            "conversation_id": self.conversation_id,
+            "message_seq": self.message_seq,
             "timestamp": datetime.now().isoformat(),
             "stats": stats,
         }
+        if self.extra_metadata:
+            summary.update(_safe_serialize(self.extra_metadata) or {})
         self.save_stage("0_summary", summary)
