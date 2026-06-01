@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:30:28 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-29 16:21:32
+ * @Last Modified time: 2026-06-01 15:06:07
  */
 import { useEffect, useState } from 'react';
 import { Flex, Popover } from 'antd';
@@ -428,6 +428,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph, nodeClick, a
       onOpenChange={(visible) => {
         if (!visible) handlePopoverClose();
       }}
+      trigger="click"
       placement="right"
       autoAdjustOverflow
       getPopupContainer={() => document.body}

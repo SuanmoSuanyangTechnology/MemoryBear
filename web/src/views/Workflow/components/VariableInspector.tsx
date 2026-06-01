@@ -47,7 +47,7 @@ const VariableInspector: FC<VariableInspectorProps> = ({
   }, [lastExecuteId, id])
 
   const getVariables = () => {
-    if (!lastExecuteId || !id) return
+    if (!lastExecuteId || lastExecuteId === 'draft' || !id) return
     getWorkflowExecutionDetail(id, lastExecuteId)
       .then((res) => {
         setVariables((res as any).snapshot)
@@ -215,14 +215,21 @@ const VariableInspector: FC<VariableInspectorProps> = ({
               </div>
             </Flex>
           ) : (
-            <div className="rb:h-full rb:flex rb:flex-col rb:items-center rb:justify-center rb:text-center">
-              <div className="rb:w-12 rb:h-12 rb:bg-[#F0F1F5] rb:rounded-full rb:flex rb:items-center rb:justify-center rb:mb-3">
-                <CodeOutlined className="rb:text-[#BBBFC4] rb:text-xl" />
+            <Flex vertical gap={12} className="rb:h-full!">
+              <Flex align="center" justify="end">
+                <div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/close_grey.svg')]"
+                  onClick={onClose}
+                ></div>
+              </Flex>
+              <div className="rb:flex-1 rb:flex rb:flex-col rb:items-center rb:justify-center rb:text-center">
+                <div className="rb:w-12 rb:h-12 rb:bg-[#F0F1F5] rb:rounded-full rb:flex rb:items-center rb:justify-center rb:mb-3">
+                  <CodeOutlined className="rb:text-[#BBBFC4] rb:text-xl" />
+                </div>
+                <div className="rb:text-xs rb:text-[#BBBFC4]">
+                  {t('workflow.selectVariable')}
+                </div>
               </div>
-              <div className="rb:text-xs rb:text-[#BBBFC4]">
-                {t('workflow.selectVariable')}
-              </div>
-            </div>
+            </Flex>
           )}
         </div>
       </Flex>
