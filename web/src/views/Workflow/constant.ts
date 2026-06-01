@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-01 12:17:51
+ * @Last Modified time: 2026-06-01 12:29:17
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -459,14 +459,14 @@ export const nodeLibrary: NodeLibrary[] = [
             dependsOn: 'parallel',
             dependsOnValue: true
           },
-          error_response: {
+          error_handle_mode: {
             type: 'select',
-            defaultValue: 'stop',
+            defaultValue: 'terminated',
             needTranslation: true,
             options: [
-              { label: 'workflow.config.iteration.stop', value: 'stop' },
-              { label: 'workflow.config.iteration.ignore_error', value: 'ignore_error' },
-              { label: 'workflow.config.iteration.remove_error', value: 'remove_error' },
+              { label: 'workflow.config.iteration.terminated', value: 'terminated' },
+              { label: 'workflow.config.iteration.continue-on-error', value: 'continue-on-error' },
+              { label: 'workflow.config.iteration.remove-abnormal-output', value: 'remove-abnormal-output' },
             ],
           },
           flatten: { // Flatten output
