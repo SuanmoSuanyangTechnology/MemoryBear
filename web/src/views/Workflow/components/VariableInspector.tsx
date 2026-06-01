@@ -47,7 +47,7 @@ const VariableInspector: FC<VariableInspectorProps> = ({
   }, [lastExecuteId, id])
 
   const getVariables = () => {
-    if (!lastExecuteId || !id) return
+    if (!lastExecuteId || lastExecuteId === 'draft' || !id) return
     getWorkflowExecutionDetail(id, lastExecuteId)
       .then((res) => {
         setVariables((res as any).snapshot)
