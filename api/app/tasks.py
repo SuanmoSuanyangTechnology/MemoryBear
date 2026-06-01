@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -1134,7 +1135,14 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
             case "Third-party":  # Integration of knowledge bases from three parties
                 yuque_user_id = db_knowledge.parser_config.get("yuque_user_id", "")
                 feishu_app_id = db_knowledge.parser_config.get("feishu_app_id", "")
-                if yuque_user_id:  # Yuque Knowledge Base
+
+                # Determine source by existing files; skip unrelated source to avoid auth errors
+                existing_files = db.query(File).filter(File.kb_id == db_knowledge.id).all()
+                has_yuque = any(f.file_url and "yuque.com" in f.file_url for f in existing_files)
+                has_feishu = any(f.file_url and "feishu.cn" in f.file_url for f in existing_files)
+
+                if yuque_user_id and yuque_user_id not in ("User ID", "", None) \
+                        and (not existing_files or has_yuque):  # Yuque Knowledge Base
                     yuque_token = db_knowledge.parser_config.get("yuque_token", "")
                     # Create yuqueAPIClient
                     api_client = YuqueAPIClient(
@@ -1297,7 +1305,8 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
 
                     except Exception as e:
                         logger.error(f"[SyncKB] Error during fetch yuque: {e}", exc_info=True)
-                if feishu_app_id:  # Feishu Knowledge Base
+                if feishu_app_id and feishu_app_id not in ("App ID", "", None) \
+                        and (not existing_files or has_feishu):  # Feishu Knowledge Base
                     feishu_app_secret = db_knowledge.parser_config.get("feishu_app_secret", "")
                     feishu_folder_token = db_knowledge.parser_config.get("feishu_folder_token", "")
                     # Create feishuAPIClient
@@ -1327,11 +1336,8 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                     continue
                                 else:  # --update
                                     # 1. update file
-                                    # Construct a save path：/files/{kb_id}/{parent_id}/{file.id}{file_extension}
-                                    save_dir = os.path.join(settings.FILE_PATH, str(db_knowledge.id),
-                                                            str(db_knowledge.id))
-                                    Path(save_dir).mkdir(parents=True,
-                                                         exist_ok=True)  # Ensure that the directory exists
+                                    # Use temp dir for download, will upload to storage backend later
+                                    save_dir = tempfile.mkdtemp()
 
                                     # download document from Feishu FileInfo
                                     async def async_download_document(api_client: FeishuAPIClient, doc: FileInfo,
@@ -1392,10 +1398,8 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                         parse_document(file_key=db_file.file_key, document_id=db_document.id, file_name=db_file.file_name)
                             else:  # --add
                                 # 1. update file
-                                # Construct a save path：/files/{kb_id}/{parent_id}/{file.id}{file_extension}
-                                save_dir = os.path.join(settings.FILE_PATH, str(db_knowledge.id),
-                                                        str(db_knowledge.id))
-                                Path(save_dir).mkdir(parents=True, exist_ok=True)  # Ensure that the directory exists
+                                # Use temp dir for download, will upload to storage backend later
+                                save_dir = tempfile.mkdtemp()
 
                                 # download document from Feishu FileInfo
                                 async def async_download_document(api_client: FeishuAPIClient, doc: FileInfo,
