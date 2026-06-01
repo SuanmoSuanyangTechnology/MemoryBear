@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-10 14:06:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-01 11:52:56
+ * @Last Modified time: 2026-06-01 17:15:54
  */
 /**
  * GraphNetworkChart Component
@@ -112,6 +112,7 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
   const graphStateRef = useRef<{ nodes: D3Node[]; links: D3Link[] } | null>(null)
   const zoomScaleRef = useRef<number>(1)
   const transformRef = useRef<d3.ZoomTransform | null>(null)
+  const svgRef = useRef<d3.Selection<SVGSVGElement, unknown, any, unknown> | null>(null)
 
   const graphState = useMemo(() => {
     if (!nodes || nodes.length === 0) return null
@@ -157,6 +158,8 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
       .attr('height', height)
       .style('width', '100%')
       .style('height', '100%')
+    
+    svgRef.current = svg
 
     const g = svg.append('g')
 
@@ -173,6 +176,19 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
             const textWidth = d.name.length * 6
             return d.symbolSize * currentZoom >= textWidth / 2 ? 'block' : 'none'
           })
+        
+        if (selectedNodeId && linkLabelSelRef.current && currentZoom >= 1.5) {
+          linkLabelSelRef.current.style('display', d => {
+            const sourceId = typeof d.source === 'string' ? d.source : d.source.id
+            const targetId = typeof d.target === 'string' ? d.target : d.target.id
+            if (sourceId === selectedNodeId || targetId === selectedNodeId) {
+              return 'block'
+            }
+            return 'none'
+          })
+        } else if (linkLabelSelRef.current) {
+          linkLabelSelRef.current.style('display', 'none')
+        }
       })
     svg.call(zoom)
 
@@ -624,6 +640,19 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
     }
 
     if (!selectedNodeId && !selectedCategory) {
+      if (svgRef.current) {
+        const width = containerRef.current?.clientWidth || 600
+        const height = containerRef.current?.clientHeight || 518
+        const defaultZoom = graphState?.nodes && graphState?.nodes?.length < 30 ? 1.2 : graphState?.nodes && graphState?.nodes?.length < 80 ? 0.9 : 0.6
+        svgRef.current.transition().duration(500).call(
+          d3.zoom<SVGSVGElement, unknown>().transform,
+          d3.zoomIdentity
+            .translate(width / 2 * (1 - defaultZoom), height / 2 * (1 - defaultZoom))
+            .scale(defaultZoom)
+        )
+        zoomScaleRef.current = defaultZoom
+      }
+      
       nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle')
         .transition()
         .duration(200)
@@ -659,6 +688,25 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
       }
 
       return
+    }
+
+    if (selectedNodeId && !selectedCategory && svgRef.current) {
+      const selectedNode = (graphState?.nodes || []).find(n => n.id === selectedNodeId)
+      if (selectedNode && selectedNode.x !== undefined && selectedNode.y !== undefined) {
+        const width = containerRef.current?.clientWidth || 600
+        const height = containerRef.current?.clientHeight || 518
+        const targetZoom = Math.min(2, Math.max(1.2, 80 / selectedNode.symbolSize))
+        
+        const newTransform = d3.zoomIdentity
+          .translate(width / 2 - selectedNode.x * targetZoom, height / 2 - selectedNode.y * targetZoom)
+          .scale(targetZoom)
+        
+        svgRef.current.transition().duration(500).call(
+          d3.zoom<SVGSVGElement, unknown>().transform,
+          newTransform
+        )
+        zoomScaleRef.current = targetZoom
+      }
     }
 
     nodeSelRef.current.selectAll<SVGCircleElement, D3Node>('circle')
@@ -717,7 +765,7 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
         })
     }
 
-  }, [selectedNodeId])
+  }, [selectedNodeId, graphState])
 
   useEffect(() => {
     if (!regionId || !nodeSelRef.current || !linkSelRef.current || !graphStateRef.current) return
