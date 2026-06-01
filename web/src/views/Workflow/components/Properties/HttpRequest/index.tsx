@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-09 18:35:43 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 17:36:53
+ * @Last Modified time: 2026-06-01 14:43:33
  */
 import { type FC, useMemo, useRef, useState } from "react";
 import { useTranslation } from 'react-i18next'
@@ -112,7 +112,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
   const jsonRawFilterVariables = useMemo(() => {
     const filterList: Suggestion[] = []
     options.forEach(variable => {
-      if (['number', 'string', 'array[string]', 'array[number]'].includes(variable.dataType)) {
+      if (['number', 'string', 'array[string]', 'array[number]', 'object'].includes(variable.dataType)) {
         filterList.push(variable)
       } else if (variable.dataType === 'file') {
         filterList.push({
