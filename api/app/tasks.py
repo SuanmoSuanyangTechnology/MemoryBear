@@ -1342,11 +1342,22 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
 
                                     file_path = asyncio.run(async_download_document(api_client, doc, save_dir))
 
-                                    save_path = os.path.join(save_dir, f"{db_file.id}{db_file.file_ext}")
-                                    # update file
-                                    if os.path.exists(save_path):
-                                        os.remove(save_path)  # Delete a single file
-                                    shutil.copyfile(file_path, save_path)
+                                    # Upload to storage backend
+                                    from app.services.file_storage_service import generate_kb_file_key, FileStorageService
+                                    _file_key = generate_kb_file_key(
+                                        kb_id=db_knowledge.id, file_id=db_file.id, file_ext=db_file.file_ext
+                                    )
+                                    _storage_service = FileStorageService()
+                                    with open(file_path, "rb") as _f:
+                                        _content = _f.read()
+
+                                    async def _do_upload():
+                                        await _storage_service.storage.upload(
+                                            file_key=_file_key, content=_content, content_type="application/octet-stream"
+                                        )
+
+                                    asyncio.run(_do_upload())
+
                                     # update db_file
                                     file_name = os.path.basename(file_path)
                                     _, file_extension = os.path.splitext(file_name)
@@ -1355,8 +1366,17 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                     db_file.file_ext = file_extension.lower()
                                     db_file.file_size = file_size
                                     db_file.created_at = doc.modified_time
+                                    db_file.file_key = _file_key
                                     db.commit()
                                     db.refresh(db_file)
+
+                                    # Clean up local temp file
+                                    try:
+                                        if os.path.exists(file_path):
+                                            os.remove(file_path)
+                                    except Exception:
+                                        pass
+
                                     # 2. update a document
                                     db_document = db.query(Document).filter(Document.kb_id == db_knowledge.id,
                                                                             Document.file_id == db_file.id).first()
@@ -1369,7 +1389,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                         db.commit()
                                         db.refresh(db_document)
                                         # 3. Document parsing, vectorization, and storage
-                                        parse_document(file_path=save_path, document_id=db_document.id)
+                                        parse_document(file_key=db_file.file_key, document_id=db_document.id, file_name=db_file.file_name)
                             else:  # --add
                                 # 1. update file
                                 # Construct a save path：/files/{kb_id}/{parent_id}/{file.id}{file_extension}
@@ -1402,12 +1422,34 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                 db_file = File(**upload_file.model_dump())
                                 db.add(db_file)
                                 db.commit()
-                                # Save file
-                                save_path = os.path.join(save_dir, f"{db_file.id}{db_file.file_ext}")
-                                # update file
-                                if os.path.exists(save_path):
-                                    os.remove(save_path)  # Delete a single file
-                                shutil.copyfile(file_path, save_path)
+                                # Upload to storage backend
+                                from app.services.file_storage_service import generate_kb_file_key, FileStorageService
+                                _file_key = generate_kb_file_key(
+                                    kb_id=db_knowledge.id, file_id=db_file.id, file_ext=db_file.file_ext
+                                )
+                                _storage_service = FileStorageService()
+                                with open(file_path, "rb") as _f:
+                                    _content = _f.read()
+
+                                async def _do_upload2():
+                                    await _storage_service.storage.upload(
+                                        file_key=_file_key, content=_content, content_type="application/octet-stream"
+                                    )
+
+                                asyncio.run(_do_upload2())
+
+                                # Save file_key
+                                db_file.file_key = _file_key
+                                db.commit()
+                                db.refresh(db_file)
+
+                                # Clean up local temp file
+                                try:
+                                    if os.path.exists(file_path):
+                                        os.remove(file_path)
+                                except Exception:
+                                    pass
+
                                 # 2. Create a document
                                 create_document_data = document_schema.DocumentCreate(
                                     kb_id=db_knowledge.id,
@@ -1431,7 +1473,7 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                 db.add(db_document)
                                 db.commit()
                                 # 3. Document parsing, vectorization, and storage
-                                parse_document(file_path=save_path, document_id=db_document.id)
+                                parse_document(file_key=db_file.file_key, document_id=db_document.id, file_name=db_file.file_name)
                         db_files = db.query(File).filter(File.kb_id == db_knowledge.id,
                                                          File.file_url.notin_(file_urls)).all()
                         if db_files:  # --delete
@@ -1444,15 +1486,23 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
                                                                             value=str(db_document.id))
                                     # 2. Delete document
                                     db.delete(db_document)
-                                # 3. Delete file
-                                file_path = Path(
+                                # 3. Delete file from storage backend
+                                if db_file.file_key:
+                                    from app.services.file_storage_service import FileStorageService
+                                    storage_service = FileStorageService()
+                                    try:
+                                        asyncio.run(storage_service.delete_file(db_file.file_key))
+                                    except Exception:
+                                        pass
+                                # 3.5 Delete local temp file (legacy)
+                                _legacy_path = Path(
                                     settings.FILE_PATH,
                                     str(db_file.kb_id),
                                     str(db_file.parent_id),
                                     f"{db_file.id}{db_file.file_ext}"
                                 )
-                                if file_path.exists():
-                                    file_path.unlink()  # Delete a single file
+                                if _legacy_path.exists():
+                                    _legacy_path.unlink()
                                 db.delete(db_file)
                             # commit transaction
                             db.commit()
