@@ -89,12 +89,35 @@ class EventItem(BaseModel):
     valid_at: str
     invalid_at: str
     fact: str
+    title: str = "NULL"
+    category: str = "NULL"
+    category_id: str = "NULL"   # 稳定分类ID，按需求直接存、不做枚举校验
+
+
+# event_timeline category 固定枚举（13 类，单值）；仅校验 category，category_id 不校验
+_CATEGORY_ENUM = {
+    "教育学习", "职业工作", "项目里程碑", "居住迁移", "关系家庭",
+    "宠物照护", "健康医疗", "旅行到访", "购买资产", "创作发布",
+    "成就荣誉", "财务法务行政", "其他生活事件",
+}
+
+
+def _sanitize_field(value: str) -> str:
+    """清洗字段内的分隔符，防止破坏 [valid_at|invalid_at] fact|title|category|category_id 结构。
+
+    与现有 summary `；`->`，` 的清洗先例一致：
+    - `|`  -> `/`
+    - `；` -> `，`
+    """
+    if not value:
+        return ""
+    return value.replace('|', '/').replace('；', '，').strip()
 
 
 class SummarizeExtractRenameOutput(BaseModel):
     """LLM 输出：合并摘要 + 事件列表 + 更名判断"""
     description_summary: str
-    new_events: List[EventItem] = []
+    events: List[EventItem] = []
     should_rename_entity: bool = False
     suggested_entity_name: Optional[str] = None
 
@@ -120,12 +143,12 @@ def validate_summary_output(
 
 
 def filter_events(
-    new_events: List[EventItem],
+    events: List[EventItem],
 ) -> List[EventItem]:
     """过滤无效事件
 
     Args:
-        new_events: LLM 输出的新事件列表
+        events: LLM 输出的新事件列表
 
     Returns:
         过滤后的有效事件列表
@@ -133,7 +156,7 @@ def filter_events(
     valid_events = []
     seen_facts = set()
 
-    for event in new_events:
+    for event in events:
         # 过滤 fact 为空
         if not event.fact or not event.fact.strip():
             continue
@@ -147,6 +170,13 @@ def filter_events(
         if fact_lower in seen_facts:
             continue
         seen_facts.add(fact_lower)
+
+        # 写入前兜底：清洗分隔符 + category 枚举校验，保证拼接结构稳定
+        event.fact = _sanitize_field(event.fact)
+        event.title = _sanitize_field(event.title) if (event.title and event.title != "NULL") else "NULL"
+        event.category = event.category if event.category in _CATEGORY_ENUM else "NULL"
+        # category_id 不做枚举校验，仅清洗分隔符后原样透传（后续检索/聚合使用）
+        event.category_id = _sanitize_field(event.category_id) if (event.category_id and event.category_id != "NULL") else "NULL"
 
         valid_events.append(event)
 
@@ -202,7 +232,7 @@ async def summarize_extract_and_rename(
         elif isinstance(response, dict):
             result = SummarizeExtractRenameOutput(
                 description_summary=response.get("description_summary", ""),
-                new_events=[EventItem(**e) for e in response.get("new_events", [])],
+                events=[EventItem(**e) for e in response.get("events", [])],
                 should_rename_entity=response.get("should_rename_entity", False),
                 suggested_entity_name=response.get("suggested_entity_name"),
             )
@@ -210,7 +240,7 @@ async def summarize_extract_and_rename(
             data = response.model_dump()
             result = SummarizeExtractRenameOutput(
                 description_summary=data.get("description_summary", ""),
-                new_events=[EventItem(**e) for e in data.get("new_events", [])],
+                events=[EventItem(**e) for e in data.get("events", [])],
                 should_rename_entity=data.get("should_rename_entity", False),
                 suggested_entity_name=data.get("suggested_entity_name"),
             )

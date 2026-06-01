@@ -762,7 +762,7 @@ class Layer2Inspector:
 
         tracker.end_step(
             f"summary={len(result.description_summary)}字, "
-            f"events={len(result.new_events)}, "
+            f"events={len(result.events)}, "
             f"rename={result.should_rename_entity}"
         )
 
@@ -779,11 +779,16 @@ class Layer2Inspector:
 
         # Step 4: 过滤 events
         tracker.start_step("事件过滤", "decide")
-        valid_events = filter_events(result.new_events)
+        valid_events = filter_events(result.events)
 
         # 构建 event_timeline
+        # 单条格式：[valid_at|invalid_at] fact|title|category|category_id
+        # title / category / category_id 已在 filter_events 内兜底为合法值或 "NULL"
         if valid_events:
-            events_str = '；'.join(f'[{e.valid_at}|{e.invalid_at}] {e.fact}' for e in valid_events)
+            events_str = '；'.join(
+                f'[{e.valid_at}|{e.invalid_at}] {e.fact}|{e.title}|{e.category}|{e.category_id}'
+                for e in valid_events
+            )
             if existing_event_timeline:
                 event_timeline = existing_event_timeline + "；" + events_str
             else:
@@ -792,7 +797,7 @@ class Layer2Inspector:
             event_timeline = existing_event_timeline
 
         tracker.end_step(
-            f"有效事件 {len(valid_events)}/{len(result.new_events)}"
+            f"有效事件 {len(valid_events)}/{len(result.events)}"
         )
 
         # Step 5: 写入 Neo4j（summary + timeline + event_timeline + 清空 description）
