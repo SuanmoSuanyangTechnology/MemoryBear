@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:41 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-28 15:10:39
+ * @Last Modified time: 2026-06-01 12:14:43
  */
 import { type FC, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -149,7 +149,7 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
               {selectedVersion && <>
                 {data?.type !== 'multi_agent' && <RbButton onClick={handleExport}>{t('common.export')}</RbButton>}
                 {data.current_release_id !== selectedVersion.id && <RbButton onClick={handleRollback}>{t('application.willRollToThisVersion')}</RbButton>}
-                {data?.type === 'workflow' && <>
+                {data?.type !== 'pure_workflow' && <>
                   <RbButton type="primary" ghost onClick={() => releaseShareModalRef.current?.handleOpen()}>{t('application.share')}</RbButton>
                   <RbButton type="primary" ghost onClick={() => embedWebsiteModalRef.current?.handleOpen()}>{t('application.embedWebsite')}</RbButton>
                 </>}
