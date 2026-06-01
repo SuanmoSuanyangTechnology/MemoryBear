@@ -2255,8 +2255,8 @@ def post_store_dedup_and_alias_merge_task(
     ignore_result=False,
     max_retries=0,
     acks_late=False,
-    time_limit=600,
-    soft_time_limit=540,
+    time_limit=1860,
+    soft_time_limit=1800,
 )
 def layer2_reflection_task(self) -> Dict[str, Any]:
     """Layer 2 离线巡检（描述合并等）— 每 10 分钟
