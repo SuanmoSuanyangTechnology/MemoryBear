@@ -2160,6 +2160,7 @@ class WorkflowService:
 
 
             moderation_flagged = False
+            active_llm_nodes: set[str] = set()  # 已 node_start 但尚未 node_end 的 LLM 节点
 
             async for event in execute_workflow_stream(
                     workflow_config=workflow_config_dict,
@@ -2226,6 +2227,23 @@ class WorkflowService:
                             "completed",
                             output_data=workflow_output_data,
                         )
+                        # 合成 LLM node_end 事件：只为当前正在执行的 LLM 节点补发
+                        import datetime as _dt
+                        for llm_node_id in active_llm_nodes:
+                            node_end_event = {
+                                "event": "node_end",
+                                "data": {
+                                    "node_id": llm_node_id,
+                                    "conversation_id": str(conversation_id_uuid) if conversation_id_uuid else None,
+                                    "execution_id": execution.execution_id,
+                                    "timestamp": int(_dt.datetime.now().timestamp() * 1000),
+                                    "output": preset_response,
+                                    "elapsed_time": 0,
+                                }
+                            }
+                            node_end_mapped = self._emit(public, node_end_event)
+                            if node_end_mapped:
+                                yield node_end_mapped
                         # 合成 workflow_end 事件并退出，不再等待 LLM 静默执行完成
                         end_internal_event = {
                             "event": "workflow_end",
@@ -2350,6 +2368,11 @@ class WorkflowService:
                         self.db.commit()
                 elif event.get("event") == "workflow_start":
                     event["data"]["message_id"] = str(message_id)
+                # 记录活跃 LLM 节点：node_start 加入，node_end 移除，合成时只为活跃节点补发
+                if event_type == "node_start" and event_data.get("node_id") in llm_node_ids:
+                    active_llm_nodes.add(event_data.get("node_id"))
+                if event_type == "node_end" and event_data.get("node_id") in llm_node_ids:
+                    active_llm_nodes.discard(event_data.get("node_id"))
                 event = self._emit(public, event)
                 if event:
                     yield event
