@@ -2254,6 +2254,41 @@ def post_store_dedup_and_alias_merge_task(
         if loop:
             _shutdown_loop_gracefully(loop)
 
+def _should_skip_reflection_by_inactivity(db, end_user_id: str, inactive_days: int = 3) -> bool:
+    """反思任务前置过滤：用户最近一次会话更新距今 >= inactive_days 天则跳过。
+
+    通过 conversations.user_id（存的是 end_user_id 的 UUID 字符串）取该用户所有会话
+    的最新 updated_at（最后写入时间），与当前 UTC 时间比较。
+
+    Returns:
+        True  -> 跳过反思（无会话记录，或最近更新已超过 inactive_days 天）
+        False -> 正常执行反思
+    """
+    from sqlalchemy import func
+    from app.models.conversation_model import Conversation
+
+    try:
+        last_updated = (
+            db.query(func.max(Conversation.updated_at))
+            .filter(Conversation.user_id == str(end_user_id))
+            .scalar()
+        )
+    except Exception as e:
+        # 查询异常时不跳过，保证反思仍能执行（保守策略）
+        logger.warning(f"反思活跃度前置查询失败 user={end_user_id}: {e}")
+        return False
+
+    if last_updated is None:
+        # 无任何会话记录 -> 没有可反思的新数据，跳过
+        return True
+
+    # updated_at 为 UTC naive，当前时间取 UTC naive 以对齐比较
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    if last_updated.tzinfo is not None:
+        last_updated = last_updated.astimezone(timezone.utc).replace(tzinfo=None)
+    return (now_utc - last_updated) >= timedelta(days=inactive_days)
+
+
 @celery_app.task(
     name="app.tasks.layer2_reflection_task",
     bind=True,
@@ -2264,12 +2299,42 @@ def post_store_dedup_and_alias_merge_task(
     soft_time_limit=1800,
 )
 def layer2_reflection_task(self) -> Dict[str, Any]:
-    """Layer 2 离线巡检（描述合并等）— 每 10 分钟
+    """Layer 2 离线巡检（描述合并等）
 
     遍历所有 workspace → app → end_user，对每个启用了 enable_self_reflexion 的配置
     调用 MemoryService.run_reflection_layer2()。
+
+    单例锁：单轮巡检耗时可能超过 10 分钟调度间隔，若不加锁，新一轮会与上一轮
+    重叠执行（并发数 > 1），两个实例同时加载实体 + embedding + 调 LLM 导致内存
+    叠加，超出容器内存上限被 OOMKill (SIGKILL)。这里用 Redis NX 锁保证任意时刻
+    只有一个实例在跑，重叠触发时直接跳过本轮。
     """
     start_time = time.time()
+
+    # 单例锁：防止上一轮未结束时本轮重叠执行造成内存叠加。
+    # TTL 略大于 time_limit(1860s)，确保任务被硬超时杀掉前锁一定仍有效，避免临界窗口重叠。
+    _lock_redis = get_sync_redis_client()
+    _lock_key = "lock:layer2_reflection_task"
+    _lock_acquired = False
+    if _lock_redis is not None:
+        try:
+            _lock_acquired = bool(
+                _lock_redis.set(_lock_key, self.request.id or "1", ex=1920, nx=True)
+            )
+        except Exception as e:
+            # Redis 异常时降级为不加锁，避免任务永久无法执行
+            logger.warning(f"反思引擎Layer2 获取单例锁异常，降级为不加锁执行: {e}")
+            _lock_acquired = False
+            _lock_redis = None
+        else:
+            if not _lock_acquired:
+                logger.warning("反思引擎Layer2 上一轮任务仍在执行，本轮跳过")
+                return {
+                    "status": "SKIPPED",
+                    "reason": "previous run still in progress",
+                    "task_id": self.request.id,
+                    "elapsed_time": time.time() - start_time,
+                }
 
     async def _run() -> Dict[str, Any]:
         from app.models.workspace_model import Workspace
@@ -2285,6 +2350,7 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
                 logger.info(f"反思引擎Layer2 巡检开始，共 {len(workspaces)} 个工作空间")
                 processed_users = 0
                 skipped_configs = 0
+                skipped_inactive = 0
                 total_dedup_merged = 0
                 total_desc_merged = 0
                 redis_client = get_sync_redis_client()
@@ -2308,6 +2374,11 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
 
                             for user in end_users:
                                 try:
+                                    # 前置过滤：最近一次会话更新距今 >= 3 天则跳过（仅对活跃用户反思）
+                                    if _should_skip_reflection_by_inactivity(db, str(user['id'])):
+                                        skipped_inactive += 1
+                                        continue
+
                                     # 获取 Redis 锁，和写入 pipeline 互斥
                                     write_lock = None
                                     if redis_client is not None:
@@ -2360,13 +2431,15 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
 
                 logger.info(
                     f"反思引擎Layer2 巡检遍历完成: 处理 {processed_users} 个用户, "
-                    f"跳过 {skipped_configs} 个未启用反思的配置"
+                    f"跳过 {skipped_configs} 个未启用反思的配置, "
+                    f"跳过 {skipped_inactive} 个 3 天内无会话更新的用户"
                 )
 
                 return {
                     "status": "SUCCESS",
                     "processed_users": processed_users,
                     "skipped_configs": skipped_configs,
+                    "skipped_inactive": skipped_inactive,
                     "total_dedup_merged": total_dedup_merged,
                     "total_desc_merged": total_desc_merged,
                 }
@@ -2382,6 +2455,16 @@ def layer2_reflection_task(self) -> Dict[str, Any]:
         result = {"status": "FAILED", "error": str(e)}
     finally:
         _shutdown_loop_gracefully(loop)
+        # 释放单例锁：仅当锁值仍是本次 task_id 时才删除，避免误删后续实例的锁
+        if _lock_redis is not None and _lock_acquired:
+            try:
+                _release_lua = (
+                    "if redis.call('get', KEYS[1]) == ARGV[1] "
+                    "then return redis.call('del', KEYS[1]) else return 0 end"
+                )
+                _lock_redis.eval(_release_lua, 1, _lock_key, self.request.id or "1")
+            except Exception as e:
+                logger.warning(f"反思引擎Layer2 释放单例锁失败（将靠 TTL 自动过期）: {e}")
 
     result["elapsed_time"] = time.time() - start_time
     result["task_id"] = self.request.id
@@ -2417,6 +2500,7 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
 
             processed_users = 0
             skipped_configs = 0
+            skipped_inactive = 0
             total_merged = 0
 
             for workspace in workspaces:
@@ -2438,6 +2522,11 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
 
                         for user in end_users:
                             try:
+                                # 前置过滤：最近一次会话更新距今 >= 3 天则跳过
+                                if _should_skip_reflection_by_inactivity(db, str(user['id'])):
+                                    skipped_inactive += 1
+                                    continue
+
                                 memory_service = MemoryService(
                                     db=db,
                                     config_id=config_id,
@@ -2460,12 +2549,14 @@ def layer2_dedup_full_scan_task(self) -> Dict[str, Any]:
             logger.info(
                 f"方案B全量扫描完成: 处理 {processed_users} 用户, "
                 f"跳过 {skipped_configs} 个未启用配置, "
+                f"跳过 {skipped_inactive} 个 3 天内无会话更新的用户, "
                 f"总合并 {total_merged} 对"
             )
             return {
                 "status": "SUCCESS",
                 "processed_users": processed_users,
                 "skipped_configs": skipped_configs,
+                "skipped_inactive": skipped_inactive,
                 "total_merged": total_merged,
             }
 
