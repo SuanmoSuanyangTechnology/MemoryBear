@@ -50,7 +50,7 @@ async def _read_request_body(request: Request) -> Any:
         return raw.hex()
 
 
-@router.api_route("/webhook/{route_key}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+@router.api_route("/webhook/{route_key}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
 async def trigger_webhook(
     route_key: str,
     request: Request,
