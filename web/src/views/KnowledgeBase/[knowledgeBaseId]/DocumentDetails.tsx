@@ -50,6 +50,7 @@ const DocumentDetails: FC = () => {
   const [infoItems, setInfoItems] = useState<InfoItem[]>([]);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  const [total, setTotal] = useState(0);
   const [chunkLoading, setChunkLoading] = useState(false);
   const [keywords, setKeywords] = useState('');
   const [fileUrl, setFileUrl] = useState('');
@@ -219,6 +220,7 @@ const DocumentDetails: FC = () => {
       }
       
       setHasMore(response.page?.has_next ?? false);
+      setTotal(response.page?.total ?? 0);
     } catch (error) {
       console.error('Failed to fetch document details:', error);
       message.error(t('common.loadFailed') || '加载失败');
@@ -472,6 +474,7 @@ const DocumentDetails: FC = () => {
           <RecallTestResult 
             refresh={refreshChunks}
             data={chunkList} 
+            total={total}
             showEmpty={false}
             hasMore={hasMore}
             loadMore={loadMoreChunks}

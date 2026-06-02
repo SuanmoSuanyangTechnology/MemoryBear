@@ -23,6 +23,7 @@ interface RecallTestResultProps {
   data: RecallTestData[];
   showEmpty?: boolean;
   hasMore?: boolean;
+  total?: number;
   loadMore?: () => void;
   refresh?: () => void;
   loading?: boolean;
@@ -38,6 +39,7 @@ const RecallTestResult = ({
   data, 
   showEmpty = true,
   hasMore = false,
+  total = 0,
   loadMore,
   refresh,
   loading = false,
@@ -395,7 +397,7 @@ const RecallTestResult = ({
         <div className='rb:flex rb:items-center rb:justify-start rb:gap-2'>
           <span className='rb:text-lg rb:font-medium'>{t('knowledgeBase.recallResult')}</span>
           <span className='rb:text-gray-500 rb:text-xs rb:pt-0.5'>
-            (<span className='rb:text-[#155EEF]'>{data.length}</span> results)
+            (<span className='rb:text-[#155EEF]'>{total || data.length}</span> results)
           </span>
         </div>
         <InfiniteScroll
