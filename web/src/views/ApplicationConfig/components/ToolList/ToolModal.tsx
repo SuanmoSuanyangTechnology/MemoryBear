@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:26:06 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 16:26:06 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-06-02 18:20:03
  */
 /**
  * Tool Selection Modal
@@ -43,6 +43,7 @@ const ToolModal = forwardRef<ToolModalRef, ToolModalProps>(({
     { value: 'mcp', label: t('tool.mcp'), isLeaf: false },
     { value: 'builtin', label: t('tool.inner'), isLeaf: false },
     { value: 'custom', label: t('tool.custom'), isLeaf: false },
+    { value: 'workflow', label: t('tool.workflow'), isLeaf: false },
   ])
   const [selectdTools, setSelectedTools] = useState<ToolOption[]>([])
 
