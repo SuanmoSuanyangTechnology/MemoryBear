@@ -523,6 +523,13 @@ class ElasticSearchVector(BaseVector):
                 }
             }
 
+        # If document_ids_filter is passed in, append to filter
+        document_ids_filter = kwargs.get("document_ids_filter")
+        if document_ids_filter:
+            query_str["bool"]["filter"].append({
+                "terms": {"metadata.document_id": document_ids_filter}
+            })
+
         result = self._client.search(
             index=indices,
             from_=0,
@@ -617,6 +624,13 @@ class ElasticSearchVector(BaseVector):
                     ],
                 }
             }
+
+        # If document_ids_filter is passed in, append to filter
+        document_ids_filter = kwargs.get("document_ids_filter")
+        if document_ids_filter:
+            query_str["bool"]["filter"].append({
+                "terms": {"metadata.document_id": document_ids_filter}
+            })
 
         result = self._client.search(
             index=indices,
