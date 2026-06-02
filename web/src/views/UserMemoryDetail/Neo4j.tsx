@@ -94,7 +94,11 @@ const Neo4j: FC = () => {
     e.preventDefault();
     e.stopPropagation();
     setSelectedKey(type)
-    if (type !== 'Brain') setBrainMemories([])
+    if (type !== 'Brain') {
+      setSelectedKey(null);
+      setBrainMemories([]);
+      setRegionId(null);
+    }
   }
 
   return (
@@ -233,7 +237,7 @@ const Neo4j: FC = () => {
                 ref={brainViewRef}
                 className={selectedKey === 'Brain' ? 'rb:block!' : 'rb:hidden!'}
                 onMemoriesChange={handleBrainMemoriesChange}
-                onClose={() => { setSelectedKey(null); setBrainMemories([]) }}
+                onClose={() => { setSelectedKey(null); setBrainMemories([]); setRegionId(null) }}
               />
             </PrivateWrap>
           </Suspense>
