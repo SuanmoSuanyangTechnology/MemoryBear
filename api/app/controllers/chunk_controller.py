@@ -227,21 +227,19 @@ async def get_preview_chunks_hierarchy(
         current_user: User = Depends(get_current_user)
 ):
     """
-    分页查询文档分块预览（嵌套结构）
-    - 支持普通分块、父子分块、QA 分块三种模式
-    - 返回嵌套的 DocumentChunk 结构，children 字段包含子块
-    - 分页按父块（顶层 chunk）层级切片
+    Paged query document chunk preview (nested structure)
+    - Supports three modes: normal chunk, parent-child chunk, and QA chunk
+    - Returns nested DocumentChunk structure, children field contains sub-chunks
+    - Pagination slices at the parent chunk (top-level chunk) level
     """
     api_logger.info(f"Paged query document chunk preview hierarchy: kb_id={kb_id}, document_id={document_id}, page={page}, pagesize={pagesize}")
 
-    # 1. 参数校验
     if page < 1 or pagesize < 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="The paging parameter must be greater than 0"
         )
 
-    # 2. 获取知识库信息
     db_knowledge = knowledge_service.get_knowledge_by_id(db, knowledge_id=kb_id, current_user=current_user)
     if not db_knowledge:
         raise HTTPException(
@@ -249,7 +247,6 @@ async def get_preview_chunks_hierarchy(
             detail="The knowledge base does not exist or access is denied"
         )
 
-    # 3. 检查文档
     db_document = document_service.get_document_by_id(db, document_id=document_id, current_user=current_user)
     if not db_document:
         raise HTTPException(
@@ -257,7 +254,6 @@ async def get_preview_chunks_hierarchy(
             detail="The document does not exist or you do not have permission to access it"
         )
 
-    # 4. 检查文件
     db_file = file_service.get_file_by_id(db, file_id=db_document.file_id)
     if not db_file:
         raise HTTPException(
@@ -265,7 +261,6 @@ async def get_preview_chunks_hierarchy(
             detail="The file does not exist or you do not have permission to access it"
         )
 
-    # 5. 获取文件内容
     if not db_file.file_key:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -283,7 +278,6 @@ async def get_preview_chunks_hierarchy(
             detail=f"File not found in storage: {e}"
         )
 
-    # 6. 文档解析 & 分块
     def progress_callback(prog=None, msg=None):
         print(f"prog: {prog} msg: {msg}\n")
 
@@ -297,7 +291,6 @@ async def get_preview_chunks_hierarchy(
 
     parser_config = dict(db_document.parser_config)
 
-    # 如果传入了覆盖参数，直接合并
     if parser_config_param and isinstance(parser_config_param, dict):
         # 兼容 {"parser_config": {...}} 和直接 {...} 两种传法
         actual_config = parser_config_param.get("parser_config", parser_config_param)
@@ -359,7 +352,6 @@ async def get_preview_chunks_hierarchy(
             detail=f"Document parsing failed: {str(e)}"
         )
 
-    # 7. 父块分页
     total = len(hierarchy)
     start_index = (page - 1) * pagesize
     end_index = start_index + pagesize

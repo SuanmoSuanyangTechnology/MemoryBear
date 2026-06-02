@@ -30,7 +30,7 @@ class StringFilterStrategy(FilterStrategy):
     ]
 
     def apply(self, field_name: str, operator: str, value: Any):
-        json_path = f"metadata->>'{field_name}'"
+        json_path = f"meta_data->>'{field_name}'"
 
         match operator:
             case "eq":
@@ -66,41 +66,45 @@ class StringFilterStrategy(FilterStrategy):
 
 
 class NumberFilterStrategy(FilterStrategy):
-    """数字类型过滤策略（整数）"""
+    """数字类型过滤策略（支持整数和小数）"""
 
     supported_operators = ["eq", "ne", "gt", "lt", "gte", "lte", "is_empty", "not_empty"]
 
     def apply(self, field_name: str, operator: str, value: Any):
-        json_path = f"(metadata->>'{field_name}')::bigint"
+        json_path = f"(meta_data->>'{field_name}')::numeric"
+
+        def _num(v):
+            f = float(v)
+            return int(f) if f.is_integer() else f
 
         match operator:
             case "eq":
-                return text(f"{json_path} = :val").bindparams(val=int(value))
+                return text(f"{json_path} = :val").bindparams(val=_num(value))
             case "ne":
-                return text(f"{json_path} != :val").bindparams(val=int(value))
+                return text(f"{json_path} != :val").bindparams(val=_num(value))
             case "gt":
-                return text(f"{json_path} > :val").bindparams(val=int(value))
+                return text(f"{json_path} > :val").bindparams(val=_num(value))
             case "lt":
-                return text(f"{json_path} < :val").bindparams(val=int(value))
+                return text(f"{json_path} < :val").bindparams(val=_num(value))
             case "gte":
-                return text(f"{json_path} >= :val").bindparams(val=int(value))
+                return text(f"{json_path} >= :val").bindparams(val=_num(value))
             case "lte":
-                return text(f"{json_path} <= :val").bindparams(val=int(value))
+                return text(f"{json_path} <= :val").bindparams(val=_num(value))
             case "is_empty":
-                return text(f"(metadata->>'{field_name}') IS NULL")
+                return text(f"(meta_data->>'{field_name}') IS NULL")
             case "not_empty":
-                return text(f"(metadata->>'{field_name}') IS NOT NULL")
+                return text(f"(meta_data->>'{field_name}') IS NOT NULL")
 
         raise ValueError(f"NumberFilterStrategy: unsupported operator '{operator}'")
 
 
 class TimeFilterStrategy(FilterStrategy):
-    """时间类型过滤策略（格式: YYYY-MM-DD HH:MM:SS）"""
+    """时间类型过滤策略（格式: YYYY-MM-DD HH:MM）"""
 
     supported_operators = ["eq", "before", "after", "is_empty", "not_empty"]
 
     def apply(self, field_name: str, operator: str, value: Any):
-        json_path = f"(metadata->>'{field_name}')::timestamp"
+        json_path = f"(meta_data->>'{field_name}')::timestamp"
 
         match operator:
             case "eq":
@@ -110,8 +114,8 @@ class TimeFilterStrategy(FilterStrategy):
             case "after":
                 return text(f"{json_path} > :val").bindparams(val=str(value))
             case "is_empty":
-                return text(f"(metadata->>'{field_name}') IS NULL")
+                return text(f"(meta_data->>'{field_name}') IS NULL")
             case "not_empty":
-                return text(f"(metadata->>'{field_name}') IS NOT NULL")
+                return text(f"(meta_data->>'{field_name}') IS NOT NULL")
 
         raise ValueError(f"TimeFilterStrategy: unsupported operator '{operator}'")

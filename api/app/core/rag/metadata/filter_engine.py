@@ -120,13 +120,13 @@ class MetadataFilterEngine:
             case "ne":
                 return col != str(value)
             case "contains":
-                return col.ilike(f"%{value}%")
+                return col.like(f"%{value}%")
             case "not_contains":
-                return ~col.ilike(f"%{value}%")
+                return ~col.like(f"%{value}%")
             case "starts_with":
-                return col.ilike(f"{value}%")
+                return col.like(f"{value}%")
             case "ends_with":
-                return col.ilike(f"%{value}")
+                return col.like(f"%{value}")
             case "is_empty":
                 return or_(col.is_(None), col == "")
             case "not_empty":

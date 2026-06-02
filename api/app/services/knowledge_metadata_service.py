@@ -123,7 +123,7 @@ class KnowledgeMetadataService:
         db.query(Document).filter(
             Document.kb_id == knowledge_id
         ).update(
-            {Document.doc_metadata: Document.doc_metadata.op("-")(field_name)},
+            {Document.meta_data: Document.meta_data.op("-")(field_name)},
             synchronize_session=False,
         )
 
@@ -205,43 +205,45 @@ class KnowledgeMetadataService:
         custom_fields = KnowledgeMetadataRepository.get_by_knowledge_id(db, knowledge_id)
         field_defs = {f.name: f for f in custom_fields}
 
-        success_count = 0
+        # 阶段一：全量校验（不写库）
         failed_items = []
+        for item in items:
+            doc_id = item["document_id"]
+            metadata = item["metadata"]
+            doc = doc_map.get(doc_id)
 
+            if not doc:
+                failed_items.append({"document_id": str(doc_id), "error": "文档不存在"})
+                continue
+
+            for field_name, value in metadata.items():
+                field_def = field_defs.get(field_name)
+                if not field_def:
+                    failed_items.append({
+                        "document_id": str(doc_id),
+                        "error": f"字段 '{field_name}' 未在知识库中定义",
+                    })
+                elif not KnowledgeMetadataService._validate_value_type(field_def.type, value):
+                    failed_items.append({
+                        "document_id": str(doc_id),
+                        "error": f"字段 '{field_name}' 的值类型不匹配，期望 {field_def.type}",
+                    })
+
+        if failed_items:
+            return {"success_count": 0, "failed_items": failed_items}
+
+        # 阶段二：全部通过才写入
+        success_count = 0
         try:
             for item in items:
                 doc_id = item["document_id"]
                 metadata = item["metadata"]
-                doc = doc_map.get(doc_id)
+                doc = doc_map[doc_id]
 
-                if not doc:
-                    failed_items.append({"document_id": str(doc_id), "error": "文档不存在"})
-                    continue
+                doc.meta_data.update(metadata)
+                flag_modified(doc, "meta_data")
+                doc.updated_at = datetime.datetime.now()
 
-                # 校验每个字段
-                for field_name, value in metadata.items():
-                    field_def = field_defs.get(field_name)
-                    if not field_def:
-                        failed_items.append({
-                            "document_id": str(doc_id),
-                            "error": f"字段 '{field_name}' 未在知识库中定义",
-                        })
-                        raise Exception("validation failed")
-
-                    # 校验值类型
-                    if not KnowledgeMetadataService._validate_value_type(field_def.type, value):
-                        failed_items.append({
-                            "document_id": str(doc_id),
-                            "error": f"字段 '{field_name}' 的值类型不匹配，期望 {field_def.type}",
-                        })
-                        raise Exception("validation failed")
-
-                # 更新 metadata JSON
-                doc.doc_metadata.update(metadata)
-                flag_modified(doc, "doc_metadata")
-                doc.updated_at = __import__('datetime').datetime.now()
-
-                # 创建/更新绑定记录
                 for field_name in metadata.keys():
                     field_def = field_defs[field_name]
                     if not KnowledgeMetadataRepository.binding_exists(
@@ -259,14 +261,11 @@ class KnowledgeMetadataService:
                 success_count += 1
 
             db.commit()
-
         except Exception:
             db.rollback()
-            # 如果已经有部分失败的记录，保留
-            if not failed_items:
-                raise
+            raise
 
-        return {"success_count": success_count, "failed_items": failed_items}
+        return {"success_count": success_count, "failed_items": []}
 
     @staticmethod
     def update_document_metadata(
@@ -311,8 +310,8 @@ class KnowledgeMetadataService:
                 )
 
         # 4. 更新 metadata JSON
-        doc.doc_metadata.update(metadata)
-        flag_modified(doc, "doc_metadata")
+        doc.meta_data.update(metadata)
+        flag_modified(doc, "meta_data")
         doc.updated_at = datetime.datetime.now()
 
         # 5. 创建/更新绑定记录
@@ -357,7 +356,7 @@ class KnowledgeMetadataService:
 
         result = {
             "document_id": str(document_id),
-            "metadata": doc.doc_metadata or {},
+            "metadata": doc.meta_data or {},
             "fields": [],
         }
 
@@ -368,7 +367,7 @@ class KnowledgeMetadataService:
                     "field_id": str(field_def.id),
                     "name": field_def.name,
                     "type": field_def.type,
-                    "value": doc.doc_metadata.get(field_def.name) if doc.doc_metadata else None,
+                    "value": doc.meta_data.get(field_def.name) if doc.meta_data else None,
                 })
 
         return result
@@ -396,9 +395,9 @@ class KnowledgeMetadataService:
 
         if field_names is None or len(field_names) == 0:
             # 清空全部
-            deleted_fields = list(doc.doc_metadata.keys()) if doc.doc_metadata else []
-            doc.doc_metadata = {}
-            flag_modified(doc, "doc_metadata")
+            deleted_fields = list(doc.meta_data.keys()) if doc.meta_data else []
+            doc.meta_data = {}
+            flag_modified(doc, "meta_data")
             # 删除所有绑定
             KnowledgeMetadataRepository.delete_bindings_by_document_id(db, document_id)
         else:
@@ -407,8 +406,8 @@ class KnowledgeMetadataService:
             field_defs = {f.name: f for f in custom_fields}
 
             for field_name in field_names:
-                if field_name in doc.doc_metadata:
-                    del doc.doc_metadata[field_name]
+                if field_name in doc.meta_data:
+                    del doc.meta_data[field_name]
                     deleted_fields.append(field_name)
 
                 # 删除对应绑定
@@ -420,7 +419,7 @@ class KnowledgeMetadataService:
                     ).delete()
 
             if deleted_fields:
-                flag_modified(doc, "doc_metadata")
+                flag_modified(doc, "meta_data")
 
         db.commit()
         db.refresh(doc)
@@ -441,7 +440,13 @@ class KnowledgeMetadataService:
             case "number":
                 return isinstance(value, (int, float)) and not isinstance(value, bool)
             case "time":
-                return isinstance(value, str)
+                if not isinstance(value, str):
+                    return False
+                try:
+                    datetime.datetime.strptime(value, "%Y-%m-%d %H:%M")
+                    return True
+                except ValueError:
+                    return False
             case _:
                 return False
 

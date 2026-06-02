@@ -16,7 +16,7 @@ class Document(Base):
     file_ext = Column(String, index=True, nullable=False, comment="file extension")
     file_size = Column(Integer, default=0, comment="file size(byte)")
     file_meta = Column(JSON, nullable=False, default={})
-    doc_metadata = Column("metadata", JSON, nullable=False, default={}, comment="文档元数据 {field_name: value}")
+    meta_data = Column("meta_data", JSON, nullable=False, default={}, comment="文档元数据 {field_name: value}")
     parser_id = Column(String, index=True, nullable=False, comment="default parser ID")
     parser_config = Column(JSON, nullable=False,
                            default={
