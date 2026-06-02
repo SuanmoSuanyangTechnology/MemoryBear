@@ -1,12 +1,10 @@
 """
 去重功能函数
+
+第一层去重：仅执行 (end_user_id, name, entity_type) 精确匹配合并。
+更精细的去重（模糊匹配、alias-to-name、LLM 决策）留给反思阶段执行。
 """
-import asyncio
-import difflib  # 提供字符串相似度计算工具
-import importlib
 import logging
-import os
-import re
 from datetime import datetime
 from typing import Any, Dict, List, Tuple
 
@@ -353,18 +351,24 @@ def clean_cross_role_aliases(
 
 
 def accurate_match(
-    entity_nodes: List[ExtractedEntityNode]
+    entity_nodes: List[ExtractedEntityNode],
 ) -> Tuple[List[ExtractedEntityNode], Dict[str, str], Dict[str, Dict]]:
     """
     精确匹配：按 (end_user_id, name, entity_type) 合并实体并建立重定向与合并记录。
-    同时检测某实体的 name 是否命中另一实体的 aliases，若命中则直接合并。
+    
+    仅当 name 和 entity_type 完全相同时才合并实体。
+    更精细的去重（模糊匹配、alias-to-name、LLM 决策）留给反思阶段执行。
+    
+    Args:
+        entity_nodes: 待去重的实体节点列表
+    
     返回: (deduped_entities, id_redirect, exact_merge_map)
     """
     exact_merge_map: Dict[str, Dict] = {}
     canonical_map: Dict[str, ExtractedEntityNode] = {}
     id_redirect: Dict[str, str] = {}
 
-    # 1) 构建规范实体映射（按名称+类型+group 精确匹配）
+    # 构建规范实体映射（按 end_user_id + name + entity_type 精确匹配）
     for ent in entity_nodes:
         name_norm = (getattr(ent, "name", "") or "").strip()
         type_norm = (getattr(ent, "entity_type", "") or "").strip()
@@ -379,7 +383,7 @@ def accurate_match(
         # 执行精确属性与强弱合并，并建立重定向
         _merge_attribute(canonical, ent)
         id_redirect[ent.id] = canonical.id
-        # 记录精确匹配的合并项（使用规范化键，避免外层变量误用）
+        # 记录精确匹配的合并项
         try:
             k = f"{canonical.end_user_id}|{(canonical.name or '').strip()}|{(canonical.entity_type or '').strip()}"
             if k not in exact_merge_map:
@@ -395,492 +399,7 @@ def accurate_match(
             pass
 
     deduped_entities = list(canonical_map.values())
-
-    # 2) 第二轮：检测某实体的 name 是否命中另一实体的 aliases（alias-to-name 精确合并）
-    #    场景：LLM 把 aliases 中的词（如"齐齐"）又单独抽取为独立实体，需在此阶段合并掉
-    #    优化：先构建 (end_user_id, alias_lower) -> canonical 的反向索引，查找 O(1)
-    alias_index: Dict[tuple, ExtractedEntityNode] = {}
-    for canonical in deduped_entities:
-        uid = getattr(canonical, "end_user_id", None)
-        for alias in (getattr(canonical, "aliases", []) or []):
-            alias_lower = alias.strip().lower()
-            if alias_lower:
-                alias_index[(uid, alias_lower)] = canonical
-
-    i = 0
-    while i < len(deduped_entities):
-        ent = deduped_entities[i]
-        ent_name = (getattr(ent, "name", "") or "").strip().lower()
-        ent_uid = getattr(ent, "end_user_id", None)
-        canonical = alias_index.get((ent_uid, ent_name))
-        # 确保不是自身
-        if canonical is not None and canonical.id != ent.id:
-            # 保护：禁止跨角色合并（用户实体和AI助手实体不能互相合并）
-            if _would_merge_cross_role(canonical, ent):
-                i += 1
-                continue
-            _merge_attribute(canonical, ent)
-            id_redirect[ent.id] = canonical.id
-            for k, v in list(id_redirect.items()):
-                if v == ent.id:
-                    id_redirect[k] = canonical.id
-            try:
-                k = f"{canonical.end_user_id}|{(canonical.name or '').strip()}|{(canonical.entity_type or '').strip()}"
-                if k not in exact_merge_map:
-                    exact_merge_map[k] = {
-                        "canonical_id": canonical.id,
-                        "end_user_id": canonical.end_user_id,
-                        "name": canonical.name,
-                        "entity_type": canonical.entity_type,
-                        "merged_ids": set(),
-                    }
-                exact_merge_map[k]["merged_ids"].add(ent.id)
-            except Exception:
-                pass
-            deduped_entities.pop(i)
-        else:
-            i += 1
-
     return deduped_entities, id_redirect, exact_merge_map
-
-def fuzzy_match(
-    deduped_entities: List[ExtractedEntityNode],
-    statement_entity_edges: List[StatementEntityEdge],
-    id_redirect: Dict[str, str],
-    config: DedupConfig | None = None,
-) -> Tuple[List[ExtractedEntityNode], Dict[str, str], List[str]]:
-    """
-    模糊匹配：基于名称、别名、类型相似度进行实体去重合并。
-    
-    判断因素：
-    - 名称相似度（包含别名匹配）：70%权重
-    - 类型相似度：30%权重
-    
-    返回: (updated_entities, updated_redirect, fuzzy_merge_records)
-    """
-    fuzzy_merge_records: List[str] = []
-
-    # ========== 工具函数（从 utils.name_similarity 导入） ==========
-    from app.core.memory.utils.name_similarity_utils import (
-        name_similarity_with_aliases as _name_similarity_with_aliases,
-    )
-    
-    # ========== 类型相似度工具函数 ==========
-    
-    def _canonicalize_type(t: str) -> str:
-        """类型标准化：将各种类型别名映射到规范类型"""
-        t = (t or "").strip()
-        if not t:
-            return ""
-        t_up = t.upper()
-        TYPE_ALIASES = {
-            "PERSON": {"生命体", "人物", "人", "个人", "人名", "PERSON", "PEOPLE", "INDIVIDUAL"},
-            "ORG": {"组织", "ORG"},
-            "COMPANY": {"公司", "企业", "COMPANY"},
-            "INSTITUTION": {"机构", "INSTITUTION"},
-            "LOCATION": {"地点", "位置", "LOCATION"},
-            "CITY": {"城市", "CITY"},
-            "COUNTRY": {"国家", "COUNTRY"},
-            "EVENT": {"事件", "EVENT"},
-            # 扩展活动与技能近义，统一到 ACTIVITY，便于本地模糊匹配
-            "ACTIVITY": {"活动", "技术活动", "技能", "ACTIVITY", "SKILL"},
-            "PRODUCT": {"产品", "商品", "物品", "OBJECT", "PRODUCT"},
-            "TOOL": {"工具", "TOOL"},
-            "SOFTWARE": {"软件", "SOFTWARE"},
-            "FOOD": {"食品", "食物", "FOOD"},
-            "INGREDIENT": {"食材", "配料", "原料", "INGREDIENT"},
-            "SWEETMEATS": {"甜点", "甜品", "甜食", "SWEETMEATS"},
-            # 统一本地与 LLM 阶段：将 EQUIPMENT/装备 映射为 APPLIANCE
-            "APPLIANCE": {"设备", "器材", "摄影器材", "摄影设备", "电器", "烤箱", "装备","镜头", "EQUIPMENT", "APPLIANCE"},
-            "ART": {"艺术", "艺术形式", "ART"},
-            "FLOWER": {"花卉", "鲜花", "FLOWER"},
-            "PLANT": {"植物", "PLANT"},
-            "AGENT": {"AI助手", "助手", "人工智能助手", "智能助手", "智能体", "Agent", "AGENTA"},
-            "ROLE": {"角色", "ROLE"},
-            "SCENE_ELEMENT": {"场景元素", "SCENE_ELEMENT"},
-            "UNKNOWN": {"UNKNOWN", "未知", "不明"},
-        }
-        for canon, aliases in TYPE_ALIASES.items():
-            if t_up in {a.upper() for a in aliases}:
-                return canon
-        return t_up
-
-    def _type_similarity(t1: str, t2: str) -> float:
-        """类型相似度：计算两个类型的相似度（基于规范化和相似度表）"""
-        import difflib
-        c1 = _canonicalize_type(t1)
-        c2 = _canonicalize_type(t2)
-        if not c1 or not c2:
-            return 0.0
-        if c1 == c2:
-            return 0.5 if c1 == "UNKNOWN" else 1.0
-        if c1 == "UNKNOWN" or c2 == "UNKNOWN":
-            return 0.5
-        sim_table = {
-            ("ORG", "COMPANY"): 0.9, ("COMPANY", "ORG"): 0.9,
-            ("ORG", "INSTITUTION"): 0.85, ("INSTITUTION", "ORG"): 0.85,
-            ("LOCATION", "CITY"): 0.9, ("CITY", "LOCATION"): 0.9,
-            ("LOCATION", "COUNTRY"): 0.9, ("COUNTRY", "LOCATION"): 0.9,
-            ("EVENT", "ACTIVITY"): 0.8, ("ACTIVITY", "EVENT"): 0.8,
-            ("PRODUCT", "TOOL"): 0.8, ("TOOL", "PRODUCT"): 0.8,
-            ("PRODUCT", "SOFTWARE"): 0.8, ("SOFTWARE", "PRODUCT"): 0.8,
-            ("FOOD", "SWEETMEATS"): 0.8, ("SWEETMEATS", "FOOD"): 0.8,
-            ("INGREDIENT", "FOOD"): 0.85, ("FOOD", "INGREDIENT"): 0.85,
-            ("APPLIANCE", "TOOL"): 0.8, ("TOOL", "APPLIANCE"): 0.8,
-            ("APPLIANCE", "PRODUCT"): 0.7, ("PRODUCT", "APPLIANCE"): 0.7,
-            ("FLOWER", "PLANT"): 0.9, ("PLANT", "FLOWER"): 0.9,
-            ("AGENT", "SOFTWARE"): 0.85, ("SOFTWARE", "AGENT"): 0.85,
-            ("AGENT", "PRODUCT"): 0.7, ("PRODUCT", "AGENT"): 0.7,
-            ("AGENT", "ROLE"): 0.9, ("ROLE", "AGENT"): 0.9,
-            ("SCENE_ELEMENT", "PRODUCT"): 0.6, ("PRODUCT", "SCENE_ELEMENT"): 0.6,
-        }
-        base = sim_table.get((c1, c2), 0.0)
-        if base:
-            return base
-        t1n = (t1 or "").strip().lower()
-        t2n = (t2 or "").strip().lower()
-        seq_ratio = difflib.SequenceMatcher(None, t1n, t2n).ratio()
-        return seq_ratio * 0.6
-    # 阈值与权重设定
-    _defaults = DedupConfig()
-    
-    # 核心阈值
-    T_NAME_STRICT = (config.fuzzy_name_threshold_strict if config is not None else _defaults.fuzzy_name_threshold_strict)
-    T_TYPE_STRICT = (config.fuzzy_type_threshold_strict if config is not None else _defaults.fuzzy_type_threshold_strict)
-    T_OVERALL = (config.fuzzy_overall_threshold if config is not None else _defaults.fuzzy_overall_threshold)
-    UNKNOWN_NAME_T = (config.fuzzy_unknown_type_name_threshold if config is not None else _defaults.fuzzy_unknown_type_name_threshold)
-    UNKNOWN_TYPE_T = (config.fuzzy_unknown_type_type_threshold if config is not None else _defaults.fuzzy_unknown_type_type_threshold)
-    
-    # 权重：名称70%，类型30%
-    W_NAME = 0.7
-    W_TYPE = 0.3
-
-
-    def _merge_entities_with_aliases(canonical: ExtractedEntityNode, losing: ExtractedEntityNode):
-        """模糊匹配中的实体合并（别名部分）。
-        
-        用户实体的 aliases 由 PgSQL end_user_info 作为唯一权威源，跳过合并。
-        """
-        canonical_name = (getattr(canonical, "name", "") or "").strip()
-        if canonical_name.lower() in _USER_PLACEHOLDER_NAMES:
-            return
-
-        losing_name = (getattr(losing, "name", "") or "").strip()
-        
-        all_aliases = list(getattr(canonical, "aliases", []) or [])
-        if losing_name and losing_name != canonical_name:
-            all_aliases.append(losing_name)
-        all_aliases.extend(getattr(losing, "aliases", []) or [])
-        
-        try:
-            from app.core.memory.utils.alias_utils import normalize_aliases
-            canonical.aliases = normalize_aliases(canonical_name, all_aliases)
-        except Exception:
-            seen_normalized = set()
-            unique_aliases = []
-            for alias in all_aliases:
-                if not alias:
-                    continue
-                alias_stripped = str(alias).strip()
-                if not alias_stripped or alias_stripped == canonical_name:
-                    continue
-                alias_normalized = alias_stripped.lower()
-                if alias_normalized not in seen_normalized:
-                    seen_normalized.add(alias_normalized)
-                    unique_aliases.append(alias_stripped)
-            canonical.aliases = sorted(unique_aliases)
-    
-    # ========== 主循环：遍历所有实体对进行模糊匹配 ==========
-    i = 0
-    while i < len(deduped_entities):
-        a = deduped_entities[i]
-        j = i + 1
-        while j < len(deduped_entities):
-            b = deduped_entities[j]
-            
-            # 跳过不同业务组的实体
-            if getattr(a, "end_user_id", None) != getattr(b, "end_user_id", None):
-                j += 1
-                continue
-            
-            # ========== 第一步：计算相似度分数 ==========
-            
-            # 1.1 名称+别名相似度（包含完全匹配检测）
-            s_name, emb_sim, j_primary, j_alias, max_alias_sim, has_exact_match = _name_similarity_with_aliases(a, b)
-            
-            # 1.2 类型相似度
-            s_type = _type_similarity(getattr(a, "entity_type", None), getattr(b, "entity_type", None))
-            
-            # ========== 第二步：动态调整阈值 ==========
-            
-            # 2.1 检测是否存在UNKNOWN类型
-            unknown_present = (
-                str(getattr(a, "entity_type", "")).upper() == "UNKNOWN"
-                or str(getattr(b, "entity_type", "")).upper() == "UNKNOWN"
-            )
-            
-            # 2.2 根据类型设置名称阈值
-            tn = UNKNOWN_NAME_T if unknown_present else T_NAME_STRICT
-            
-            # 2.3 如果有完全别名匹配，降低名称相似度阈值
-            if has_exact_match:
-                tn = min(tn, 0.75)
-            
-            # 2.4 设置类型阈值和综合阈值
-            type_threshold = UNKNOWN_TYPE_T if unknown_present else T_TYPE_STRICT
-            tover = T_OVERALL
-            
-            # ========== 第三步：计算综合评分 ==========
-            # 公式：overall = 名称权重(70%) × 名称相似度 + 类型权重(30%) × 类型相似度
-            overall = W_NAME * s_name + W_TYPE * s_type
-            
-            # ========== 第四步：特殊规则判断（别名完全匹配快速通道）==========
-            
-            # 4.1 检查主名称是否相同
-            name_a_normalized = (getattr(a, "name", "") or "").strip().lower()
-            name_b_normalized = (getattr(b, "name", "") or "").strip().lower()
-            same_name = (name_a_normalized == name_b_normalized) and name_a_normalized != ""
-            
-            # 4.2 别名匹配特殊规则（满足任一条件即可快速合并）
-            alias_match_merge = False
-            
-            # 规则1：别名完全匹配 + 类型相似度 ≥ 0.7
-            if has_exact_match and s_type >= 0.7:
-                alias_match_merge = True
-            
-            # 规则2：名称相同 + 别名匹配 + 类型相似度 ≥ 0.5
-            elif same_name and has_exact_match and s_type >= 0.5:
-                alias_match_merge = True
-            
-            # 规则3：名称相同 + 别名匹配 + 类型完全相同
-            elif same_name and has_exact_match and s_type >= 1.0:
-                alias_match_merge = True
-
-            # ========== 第五步：最终合并判断 ==========
-            # 满足以下任一条件即执行合并：
-            # 条件A（快速通道）：alias_match_merge = True
-            # 条件B（标准通道）：s_name ≥ tn AND s_type ≥ type_threshold AND overall ≥ tover
-            if alias_match_merge or (s_name >= tn and s_type >= type_threshold and overall >= tover):
-                #  保护：禁止跨角色合并（用户实体和AI助手实体不能互相合并）
-                if _would_merge_cross_role(a, b):
-                    j += 1
-                    continue
-
-                # ========== 第六步：执行实体合并 ==========
-                
-                # 6.1 合并别名
-                _merge_entities_with_aliases(a, b)
-                
-                # 6.2 合并其他属性（描述、事实摘要、时间范围等）
-                _merge_attribute(a, b)
-                
-                # 6.3 记录合并日志
-                try:
-                    merge_reason = "[别名匹配]" if alias_match_merge else "[模糊]"
-                    merge_reason = "[别名匹配]" if alias_match_merge else "[模糊]"
-                    fuzzy_merge_records.append(
-                        f"{merge_reason} 规范实体 {a.id} ({a.end_user_id}|{a.name}|{a.entity_type}) <- 合并实体 {b.id} ({b.end_user_id}|{b.name}|{b.entity_type}) | "
-                        f"s_name={s_name:.3f}, s_type={s_type:.3f}, overall={overall:.3f}, exact_alias={has_exact_match}"
-                    )
-                except Exception:
-                    pass
-                
-                # 6.4 建立 ID 重定向映射
-                try:
-                    canonical_id = id_redirect.get(getattr(a, "id", None), getattr(a, "id", None))
-                    losing_id = getattr(b, "id", None)
-                    if losing_id and canonical_id:
-                        # 将被合并实体的ID指向规范实体
-                        id_redirect[losing_id] = canonical_id
-                        
-                        # 扁平化重定向链：确保所有指向losing_id的映射都指向canonical_id
-                        for k, v in list(id_redirect.items()):
-                            if v == losing_id:
-                                id_redirect[k] = canonical_id
-                except Exception:
-                    pass
-                
-                # 6.5 从列表中移除被合并的实体
-                deduped_entities.pop(j)
-                continue  # 不增加j，继续检查当前位置的下一个实体
-            
-            # ========== 未达到合并条件：检查下一对 ==========
-            else:
-                j += 1  # 移动到下一个实体
-        i += 1
-
-    return deduped_entities, id_redirect, fuzzy_merge_records
-
-async def LLM_decision(  # 决策中包含去重和消歧的功能
-    deduped_entities: List[ExtractedEntityNode],
-    statement_entity_edges: List[StatementEntityEdge],
-    entity_entity_edges: List[EntityEntityEdge],
-    id_redirect: Dict[str, str],
-    config: DedupConfig,
-    llm_client = None,
-) -> Tuple[List[ExtractedEntityNode], Dict[str, str], List[str]]:
-    """
-    基于迭代分块并发的 LLM 判定，生成实体重定向并在本地应用融合。
-    返回 (updated_entities, updated_redirect, llm_records)。
-    - 仅在配置 enable_llm_dedup_blockwise 为 True 时启用；
-      若未提供配置，则使用 DedupConfig 的默认值作为回退。
-    - 内部调用 llm_dedup_entities_iterative_blocks 获取 pairwise 的重定向映射。
-    - 将映射应用到 deduped_entities 与 id_redirect，并记录融合日志。
-    """
-    llm_records: List[str] = []
-    try:
-        if not bool(config.enable_llm_dedup_blockwise):
-            return deduped_entities, id_redirect, llm_records
-        # 从配置读取 LLM 迭代参数
-        block_size = config.llm_block_size
-        block_concurrency = config.llm_block_concurrency
-        pair_concurrency = config.llm_pair_concurrency
-        max_rounds = config.llm_max_rounds
-
-        try:
-            llm_mod = importlib.import_module("app.core.memory.storage_services.extraction_engine.deduplication.entity_dedup_llm")
-            llm_fn = llm_mod.llm_dedup_entities_iterative_blocks
-        except Exception as e:
-            llm_records.append(f"[LLM错误] 无法导入 entity_dedup_llm 模块: {e}")
-            return deduped_entities, id_redirect, llm_records
-
-        # 验证 LLM 客户端
-        if llm_client is None:
-            llm_records.append("[LLM错误] LLM 客户端未提供")
-            return deduped_entities, id_redirect, llm_records
-
-        llm_redirect, llm_records = await llm_fn(
-            entity_nodes=deduped_entities,
-            statement_entity_edges=statement_entity_edges,
-            entity_entity_edges=entity_entity_edges,
-            llm_client=llm_client,
-            block_size=block_size,
-            block_concurrency=block_concurrency,
-            pair_concurrency=pair_concurrency,
-            max_rounds=max_rounds,
-        )
-    except Exception as e:
-        # 记录错误，不中断主流程
-        llm_records.append(f"[LLM错误] 迭代分块执行失败: {e}")
-        return deduped_entities, id_redirect, llm_records
-
-    # 若存在 LLM 的重定向，应用到实体与映射
-    # 确保实体集合与 id_redirect 完整反映 LLM 的合并结果；否则后续边重定向不会指向规范 ID，实体仍然重复
-    if llm_redirect:
-        entity_by_id: Dict[str, ExtractedEntityNode] = {e.id: e for e in deduped_entities}
-        for losing_id, canonical_id in list(llm_redirect.items()):
-            if losing_id == canonical_id:
-                continue
-            a = entity_by_id.get(canonical_id)
-            b = entity_by_id.get(losing_id)
-            if not a or not b: # 若不存在 a 或 b，可能已在精确或模糊阶段合并，在之前阶段合并之后，不会再处理但是处于审计的目的会记录
-                continue
-            # 保护：禁止跨角色合并（用户实体和AI助手实体不能互相合并）
-            if _would_merge_cross_role(a, b):
-                llm_records.append(
-                    f"[LLM阻断] 跨角色合并被阻止: {a.id} ({a.name}) 与 {b.id} ({b.name})"
-                )
-                continue
-            _merge_attribute(a, b)
-            # ID 重定向
-            try:
-                id_redirect[b.id] = a.id
-                for k, v in list(id_redirect.items()):
-                    if v == b.id:
-                        id_redirect[k] = a.id
-            except Exception:
-                pass
-            # 记录 LLM 融合日志
-            try:
-                llm_records.append(
-                    f"[LLM融合] 规范实体 {a.id} ({a.end_user_id}|{a.name}|{a.entity_type}) <- 合并实体 {b.id} ({b.end_user_id}|{b.name}|{b.entity_type})"
-                )
-                # 详细的“同类名称相似”记录改由 LLM 去重模块统一生成以携带 conf/reason
-            except Exception:
-                pass
-            # 移除 losing 实体
-            try:
-                if b in deduped_entities:
-                    deduped_entities.remove(b)
-                    entity_by_id.pop(b.id, None)
-            except Exception:
-                pass
-
-    return deduped_entities, id_redirect, llm_records
-
-async def LLM_disamb_decision(
-    deduped_entities: List[ExtractedEntityNode],
-    statement_entity_edges: List[StatementEntityEdge],
-    entity_entity_edges: List[EntityEntityEdge],
-    id_redirect: Dict[str, str],
-    config: DedupConfig,
-    llm_client = None,
-) -> Tuple[List[ExtractedEntityNode], Dict[str, str], set[tuple[str, str]], List[str]]:
-    """
-    预消歧阶段：对“同名但类型不同”的实体对调用LLM进行消歧，
-    产出：需阻断的实体对(blocked_pairs)与必要的合并(merge_redirect)。
-    返回 (updated_entities, updated_redirect, blocked_pairs, disamb_records)。
-    - 仅在配置开关 enable_llm_disambiguation 为 True 时启用；否则返回空阻断列表。
-    """
-    disamb_records: List[str] = []
-    blocked_pairs: set[tuple[str, str]] = set()
-    try:
-        if not bool(config.enable_llm_disambiguation):
-            return deduped_entities, id_redirect, blocked_pairs, disamb_records
-
-        from app.core.memory.storage_services.extraction_engine.deduplication.entity_dedup_llm import (
-            llm_disambiguate_pairs_iterative,
-        )
-        
-        # 验证 LLM 客户端
-        if llm_client is None:
-            disamb_records.append("[DISAMB错误] LLM 客户端未提供")
-            return deduped_entities, id_redirect, blocked_pairs, disamb_records
-        
-        merge_redirect, block_list, disamb_records = await llm_disambiguate_pairs_iterative(
-                entity_nodes=deduped_entities,
-                statement_entity_edges=statement_entity_edges,
-                entity_entity_edges=entity_entity_edges,
-                llm_client=llm_client,
-            )
-
-        # 应用LLM消歧的合并建议
-        if merge_redirect:
-            entity_by_id: Dict[str, ExtractedEntityNode] = {e.id: e for e in deduped_entities}
-            for losing_id, canonical_id in list(merge_redirect.items()):
-                if losing_id == canonical_id:
-                    continue
-                a = entity_by_id.get(canonical_id)
-                b = entity_by_id.get(losing_id)
-                if not a or not b:
-                    continue
-                _merge_attribute(a, b)
-                id_redirect[b.id] = a.id
-                for k, v in list(id_redirect.items()):
-                    if v == b.id:
-                        id_redirect[k] = a.id
-                try:
-                    disamb_records.append(
-                        f"[DISAMB合并应用] 规范实体 {a.id} ({a.end_user_id}|{a.name}|{a.entity_type}) <- 合并实体 {b.id} ({b.end_user_id}|{b.name}|{b.entity_type})"
-                    )
-                except Exception:
-                    pass
-                try:
-                    if b in deduped_entities:
-                        deduped_entities.remove(b)
-                        entity_by_id.pop(b.id, None)
-                except Exception:
-                    pass
-        # 保存阻断对
-        try:
-            blocked_pairs = {tuple(sorted(p)) for p in (block_list or [])}
-        except Exception:
-            blocked_pairs = set()
-    except Exception as e:
-        disamb_records.append(f"[DISAMB错误] 消歧执行失败: {e}")
-        return deduped_entities, id_redirect, blocked_pairs, disamb_records
-
-    return deduped_entities, id_redirect, blocked_pairs, disamb_records
 
 async def deduplicate_entities_and_edges(
     entity_nodes: List[ExtractedEntityNode],
@@ -898,89 +417,34 @@ async def deduplicate_entities_and_edges(
     Dict[str, Any]  # 新增：返回详细的去重消歧记录
 ]:
     """
-    主流程：依次执行精确匹配、模糊匹配与（可选）LLM 决策融合，随后对边做重定向与去重。之后再处理边，是关系去重和消歧
+    第一层去重：仅执行 (end_user_id, name, entity_type) 精确匹配合并，随后对边做重定向与去重。
+
+    更精细的去重（模糊匹配、alias-to-name、LLM 决策）留给反思阶段执行。
+
     返回：去重后的实体、语句→实体边、实体↔实体边。
     """
-    local_llm_records: List[str] = [] # 作为“审计日志”的本地收集器 初始化，保留为了之后对于LLM决策追溯
     # 0) 标准化用户和AI助手实体名称（确保多轮对话中的变体名称统一）
     _normalize_special_entity_names(entity_nodes)
 
-    # 1) 精确匹配
+    # 1) 精确匹配：仅按 (end_user_id, name, entity_type) 合并
     deduped_entities, id_redirect, exact_merge_map = accurate_match(entity_nodes)
 
-    # 1.5) LLM 决策消歧：阻断同名不同类型的高相似对，并应用必要的合并
-    deduped_entities, id_redirect, blocked_pairs, disamb_records = await LLM_disamb_decision(
-        deduped_entities, statement_entity_edges, entity_entity_edges, id_redirect, config=dedup_config, llm_client=llm_client
+    logger.info(
+        f"[第一层去重] 精确匹配完成: {len(entity_nodes)} -> {len(deduped_entities)} 实体"
     )
 
-    # 2) 模糊匹配（本地规则）
-    deduped_entities, id_redirect, fuzzy_merge_records = fuzzy_match(
-        deduped_entities, statement_entity_edges, id_redirect, config=dedup_config
-    )
-
-    # 3) LLM 决策（仅按配置开关）
-    try:
-        enable_switch = (
-            dedup_config.enable_llm_dedup_blockwise
-            if dedup_config is not None
-            else DedupConfig().enable_llm_dedup_blockwise
-        )
-        should_trigger_llm = bool(enable_switch)
-        # 将触发信息写入阶段备注，便于输出报告审计
-        if report_stage_notes is None:
-            report_stage_notes = []
-        report_stage_notes.append(f"LLM触发: {'是' if should_trigger_llm else '否'}")
-    except Exception:
-        should_trigger_llm = False
-
-    if should_trigger_llm:
-        deduped_entities, id_redirect, llm_decision_records = await LLM_decision(
-            deduped_entities, statement_entity_edges, entity_entity_edges, id_redirect, config=dedup_config, llm_client=llm_client
-        )
-    else:
-        llm_decision_records = []
-    # 累加 LLM 记录  把 LLM_decision 返回的日志 llm_decision_records 追加到 local_llm_records
-    try:
-        local_llm_records.extend(llm_decision_records or [])
-    except Exception:
-        pass
-
+    # 初始化空记录（模糊匹配和LLM决策已移除，保留结构以兼容报告格式）
+    fuzzy_merge_records: List[str] = []
+    disamb_records: List[str] = []
+    blocked_pairs: set = set()
+    local_llm_records: List[str] = []
 
 # 在主流程这里 这里是之后关系去重和消歧的地方，方法可以写在其他地方
 # 此处统一对边进行处理，使用累积的 id_redirect 把边的 source/target 改成规范ID
     # 4) 边重定向与去重
-    # 4.0 预处理：将 "别名属于" 关系的 source.name/description 归并到 target 节点
-    #     必须在边重定向之前执行，此时 id_redirect 已包含精确/模糊/LLM 的合并结果
-    try:
-        entity_by_id: Dict[str, ExtractedEntityNode] = {e.id: e for e in deduped_entities}
-        for edge in entity_entity_edges:
-            if getattr(edge, "relation_type", "") != "别名属于":
-                continue
-            # 通过 id_redirect 找到合并后的规范节点
-            source_id = id_redirect.get(edge.source, edge.source)
-            target_id = id_redirect.get(edge.target, edge.target)
-            if source_id == target_id:
-                continue
-            source_node = entity_by_id.get(source_id)
-            target_node = entity_by_id.get(target_id)
-            if not source_node or not target_node:
-                continue
-
-            # 将 source.name 追加到 target.aliases（去重，忽略大小写）
-            source_name = (source_node.name or "").strip()
-            if source_name:
-                existing_lower = {a.lower() for a in (target_node.aliases or [])}
-                if source_name.lower() not in existing_lower and source_name.lower() != (target_node.name or "").lower():
-                    target_node.aliases = list(target_node.aliases or []) + [source_name]
-
-            # 将 source.description 追加到 target.description（分号分隔，去重）
-            src_desc = (source_node.description or "").strip()
-            if src_desc:
-                tgt_desc = (target_node.description or "").strip()
-                if src_desc not in tgt_desc:
-                    target_node.description = f"{tgt_desc}；{src_desc}" if tgt_desc else src_desc
-    except Exception:
-        pass
+    #    注意：写入阶段不再处理 "别名属于" 关系（不把 source.name 写入 target.aliases，
+    #    也不归并 description），别名合并统一延迟到反思阶段执行。
+    #    这里仅根据精确匹配产生的 id_redirect 做边的端点重写与去重。
 
     # 4.1 语句→实体边：重复时优先保留 strong
     stmt_ent_map: Dict[str, StatementEntityEdge] = {}

@@ -117,9 +117,6 @@ celery_app.conf.update(
         # Async emotion extraction → memory_tasks queue (IO-bound LLM calls)
         'app.tasks.extract_emotion_batch': {'queue': 'memory_tasks'},
 
-        # Post-store dedup + alias merge → memory_tasks queue
-        'app.tasks.post_store_dedup_and_alias_merge': {'queue': 'memory_tasks'},
-
         # Async metadata extraction → memory_tasks queue
         'app.tasks.extract_metadata_batch': {'queue': 'memory_tasks'},
 

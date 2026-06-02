@@ -340,30 +340,25 @@ async def run_dedup(
     is_pilot_run: bool = False,
     progress_callback: Optional[Callable] = None,
 ) -> DedupResult:
-    """Two-stage entity deduplication and disambiguation.
+    """第一层实体去重：仅 (name, entity_type) 精确匹配。
 
-    Full mode:
-        Layer 1 — exact / fuzzy / LLM matching
-        Layer 2 — Neo4j joint dedup + cross-role alias cleaning
-
-    Pilot-run mode:
-        Layer 1 only (skip Neo4j layer 2 and alias cleaning).
+    更精细的去重（模糊匹配、alias-to-name、LLM 决策）留给反思阶段执行。
 
     Args:
         entity_nodes: Pre-dedup entity nodes.
         statement_entity_edges: Pre-dedup statement-entity edges.
         entity_entity_edges: Pre-dedup entity-entity edges.
-        dialog_data_list: Source dialogue data (used to detect end_user_id).
+        dialog_data_list: Source dialogue data (unused, kept for API compatibility).
         pipeline_config: Pipeline configuration (contains DedupConfig).
-        connector: Optional Neo4j connector for layer-2 dedup.
-        llm_client: Optional LLM client for LLM-based dedup decisions.
-        is_pilot_run: When True, only execute layer-1 dedup.
+        connector: Unused, kept for API compatibility.
+        llm_client: Unused, kept for API compatibility.
+        is_pilot_run: Unused, kept for API compatibility.
         progress_callback: Optional async callable for progress reporting.
 
     Returns:
         A ``DedupResult`` with deduplicated nodes, edges, and statistics.
     """
-    logger.info("开始两阶段实体去重和消歧")
+    logger.info("开始第一层实体去重")
 
     if progress_callback:
         await progress_callback("deduplication", "正在去重消歧...")
@@ -380,59 +375,24 @@ async def run_dedup(
     original_ent_edge_count = len(entity_entity_edges)
 
     try:
-        if is_pilot_run:
-            # --- pilot run: layer 1 only ---
-            logger.info("试运行模式：仅执行第一层去重，跳过第二层数据库去重")
-            from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
-                deduplicate_entities_and_edges,
-            )
+        from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
+            deduplicate_entities_and_edges,
+        )
 
-            (
-                dedup_entity_nodes,
-                dedup_stmt_edges,
-                dedup_ent_edges,
-                raw_details,
-            ) = await deduplicate_entities_and_edges(
-                entity_nodes,
-                statement_entity_edges,
-                entity_entity_edges,
-                report_stage="第一层去重消歧（试运行）",
-                report_append=False,
-                dedup_config=pipeline_config.deduplication,
-                llm_client=llm_client,
-            )
-
-            final_entities = dedup_entity_nodes
-            final_stmt_edges = dedup_stmt_edges
-            final_ent_edges = dedup_ent_edges
-        else:
-            # --- full mode: two-stage dedup ---
-            from app.core.memory.storage_services.extraction_engine.deduplication.two_stage_dedup import (
-                dedup_layers_and_merge_and_return,
-            )
-
-            (
-                _dialogue_nodes,
-                _chunk_nodes,
-                _statement_nodes,
-                final_entities,
-                _statement_chunk_edges,
-                final_stmt_edges,
-                final_ent_edges,
-                raw_details,
-            ) = await dedup_layers_and_merge_and_return(
-                dialogue_nodes=[],
-                chunk_nodes=[],
-                statement_nodes=[],
-                entity_nodes=entity_nodes,
-                statement_chunk_edges=[],
-                statement_entity_edges=statement_entity_edges,
-                entity_entity_edges=entity_entity_edges,
-                dialog_data_list=dialog_data_list,
-                pipeline_config=pipeline_config,
-                connector=connector,
-                llm_client=llm_client,
-            )
+        (
+            final_entities,
+            final_stmt_edges,
+            final_ent_edges,
+            raw_details,
+        ) = await deduplicate_entities_and_edges(
+            entity_nodes,
+            statement_entity_edges,
+            entity_entity_edges,
+            report_stage="第一层去重消歧",
+            report_append=False,
+            dedup_config=pipeline_config.deduplication,
+            llm_client=llm_client,
+        )
 
         # Parse raw details into structured records
         merge_records, disamb_records, _id_redirect = save_dedup_details(
@@ -502,5 +462,5 @@ async def run_dedup(
         )
 
     except Exception as e:
-        logger.error("两阶段去重失败: %s", e, exc_info=True)
+        logger.error("第一层去重失败: %s", e, exc_info=True)
         raise
