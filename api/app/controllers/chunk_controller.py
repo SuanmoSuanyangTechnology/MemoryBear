@@ -9,6 +9,8 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.exceptions import BusinessException
+from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
 from app.core.rag.common.settings import kg_retriever
 from app.core.rag.llm.chat_model import Base
@@ -16,6 +18,8 @@ from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.llm.embedding_model import OpenAIEmbed
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
+from app.core.rag.metadata.filter_engine import MetadataFilterEngine, FilterCondition, FilterGroup
+from app.services.knowledge_metadata_service import KnowledgeMetadataService
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
@@ -1008,6 +1012,47 @@ async def retrieve_chunks(
             detail="The knowledge base does not exist or access is denied"
         )
 
+    # === 元数据过滤 ===
+    document_ids_filter = None
+    if retrieve_data.metadata_filters and retrieve_data.metadata_filter_mode.value == "manual":
+        all_document_ids = set()
+        for pk_kb_id in private_kb_ids:
+            metadata_defs = KnowledgeMetadataService.get_metadata_defs_for_filtering(db, pk_kb_id)
+
+            # 校验所有过滤字段是否已定义
+            for group in retrieve_data.metadata_filters:
+                for cond in group.conditions:
+                    if cond.field not in metadata_defs:
+                        raise BusinessException(
+                            f"过滤字段 '{cond.field}' 未在知识库中定义",
+                            code=BizCode.METADATA_FIELD_NOT_FOUND,
+                        )
+
+            # 执行过滤
+            engine = MetadataFilterEngine(db)
+            filter_groups = [
+                FilterGroup(
+                    conditions=[
+                        FilterCondition(field=c.field, operator=c.operator, value=c.value)
+                        for c in group.conditions
+                    ],
+                    logic=group.logic,
+                )
+                for group in retrieve_data.metadata_filters
+            ]
+
+            document_ids = engine.execute(
+                knowledge_id=pk_kb_id,
+                filter_groups=filter_groups,
+                metadata_defs=metadata_defs,
+            )
+            all_document_ids.update(document_ids)
+
+        if not all_document_ids:
+            return success(data=[], msg="retrieval successful")
+
+        document_ids_filter = [str(d) for d in all_document_ids]
+
     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
     # default value is topk
@@ -1016,14 +1061,14 @@ async def retrieve_chunks(
     # 1 participle search, 2 semantic search, 3 hybrid search
     match retrieve_data.retrieve_type:
         case chunk_schema.RetrieveType.PARTICIPLE:
-            rs = vector_service.search_by_full_text(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter)
+            rs = vector_service.search_by_full_text(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
             return success(data=jsonable_encoder(rs), msg="retrieval successful")
         case chunk_schema.RetrieveType.SEMANTIC:
-            rs = vector_service.search_by_vector(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter)
+            rs = vector_service.search_by_vector(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
             return success(data=jsonable_encoder(rs), msg="retrieval successful")
         case _:
-            rs1 = vector_service.search_by_vector(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter)
-            rs2 = vector_service.search_by_full_text(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter)
+            rs1 = vector_service.search_by_vector(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.vector_similarity_weight, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
+            rs2 = vector_service.search_by_full_text(query=retrieve_data.query, top_k=topn, indices=indices, score_threshold=retrieve_data.similarity_threshold, file_names_filter=retrieve_data.file_names_filter, document_ids_filter=document_ids_filter)
             # Efficient deduplication
             seen_ids = set()
             unique_rs = []
