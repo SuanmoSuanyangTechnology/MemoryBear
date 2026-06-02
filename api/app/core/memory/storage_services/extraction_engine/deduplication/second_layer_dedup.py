@@ -81,6 +81,7 @@ def _row_to_entity(row: Dict[str, Any]) -> ExtractedEntityNode:
         # TODO: fact_summary 功能暂时禁用，待后续开发完善后启用
         # fact_summary=row.get("fact_summary") or "",
         connect_strength=row.get("connect_strength") or "",
+        is_explicit_memory=bool(row.get("is_explicit_memory", False)),
     )
 
 
