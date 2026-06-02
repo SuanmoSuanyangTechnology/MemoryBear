@@ -84,7 +84,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
                 kb_ids: knowledgeBaseId ? [knowledgeBaseId] : [],
                 similarity_threshold: values.similarity_threshold || 0.2,
                 vector_similarity_weight: values.vector_similarity_weight || 0.3,
-                top_k: values.top_k || 1024,
+                top_k: values.top_k || 100,
                 // hybrid: values.retrieve_type !== hybrid ? true : false,
                 retrieve_type: retrieveType,
             };
