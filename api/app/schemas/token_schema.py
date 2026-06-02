@@ -1,6 +1,7 @@
 from pydantic import BaseModel, EmailStr, field_serializer
 from typing import Optional
 import datetime
+from app.core.utils.datetime_utils import to_timestamp_ms
 
 class Token(BaseModel):
     access_token: str
@@ -11,11 +12,11 @@ class Token(BaseModel):
 
     @field_serializer("expires_at", when_used="json")
     def _serialize_expires_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("refresh_expires_at", when_used="json")
     def _serialize_refresh_expires_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 class TokenData(BaseModel):
     userId: Optional[str] = None

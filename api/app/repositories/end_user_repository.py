@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_db_logger
 from app.models.app_model import App
 from app.models.end_user_model import EndUser
@@ -274,7 +275,7 @@ class EndUserRepository:
                         EndUser.behavior_pattern: behavior_pattern,
                         EndUser.key_findings: key_findings,
                         EndUser.growth_trajectory: growth_trajectory,
-                        EndUser.memory_insight_updated_at: datetime.datetime.now()
+                        EndUser.memory_insight_updated_at: utcnow_naive()
                     },
                     synchronize_session=False
                 )
@@ -324,7 +325,7 @@ class EndUserRepository:
                         EndUser.personality_traits: personality,
                         EndUser.core_values: core_values,
                         EndUser.one_sentence_summary: one_sentence,
-                        EndUser.user_summary_updated_at: datetime.datetime.now()
+                        EndUser.user_summary_updated_at: utcnow_naive()
                     },
                     synchronize_session=False
                 )
@@ -371,7 +372,7 @@ class EndUserRepository:
                         EndUser.user_summary: user_summary,
                         EndUser.rag_tags: rag_tags,
                         EndUser.rag_personas: rag_personas,
-                        EndUser.rag_summary_updated_at: datetime.datetime.now(),
+                        EndUser.rag_summary_updated_at: utcnow_naive(),
                     },
                     synchronize_session=False
                 )
@@ -409,7 +410,7 @@ class EndUserRepository:
                 .update(
                     {
                         EndUser.memory_insight: memory_insight,
-                        EndUser.memory_insight_updated_at: datetime.datetime.now(),
+                        EndUser.memory_insight_updated_at: utcnow_naive(),
                     },
                     synchronize_session=False
                 )

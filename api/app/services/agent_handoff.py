@@ -11,6 +11,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 from pydantic import BaseModel, Field
 
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.logging_config import get_business_logger
 
 logger = get_business_logger()
@@ -21,13 +22,13 @@ class HandoffContext(BaseModel):
     from_agent_id: str = Field(..., description="源 Agent ID")
     to_agent_id: str = Field(..., description="目标 Agent ID")
     reason: str = Field(..., description="切换原因")
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = Field(default_factory=utcnow_naive)
     user_message: Optional[str] = Field(None, description="触发切换的用户消息")
     context_summary: Optional[str] = Field(None, description="上下文摘要")
     
     class Config:
         json_encoders = {
-            datetime: lambda v: v.isoformat()
+            datetime: lambda v: to_iso_z(v)
         }
 
 
@@ -70,14 +71,14 @@ class HandoffState(BaseModel):
     current_agent_id: str = Field(..., description="当前活跃的 Agent ID")
     handoff_history: List[HandoffContext] = Field(default_factory=list, description="切换历史")
     context_data: Dict[str, Any] = Field(default_factory=dict, description="共享上下文数据")
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=utcnow_naive)
+    updated_at: datetime = Field(default_factory=utcnow_naive)
     
     def add_handoff(self, context: HandoffContext):
         """添加 handoff 记录"""
         self.handoff_history.append(context)
         self.current_agent_id = context.to_agent_id
-        self.updated_at = datetime.now()
+        self.updated_at = utcnow_naive()
         
         logger.info(
             "Agent handoff 记录",
@@ -99,7 +100,7 @@ class HandoffState(BaseModel):
     
     class Config:
         json_encoders = {
-            datetime: lambda v: v.isoformat()
+            datetime: lambda v: to_iso_z(v)
         }
 
 

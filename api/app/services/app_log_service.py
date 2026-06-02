@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_business_logger
 from app.models.app_model import AppType
 from app.models.conversation_model import Conversation, Message
@@ -194,7 +195,7 @@ class AppLogService:
                 ))
 
         for execution in executions:
-            started_at = execution.started_at or dt.datetime.now()
+            started_at = execution.started_at or dt.utcnow_naive()
             completed_at = execution.completed_at or started_at
 
             # assistant message 的 id，同时作为 node_executions_map 的 key

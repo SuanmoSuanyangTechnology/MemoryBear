@@ -6,6 +6,7 @@ from sqlalchemy.orm import relationship
 
 from app.base.type import PydanticType
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 from app.schemas.app_schema import ModelParameters
 
 
@@ -41,8 +42,8 @@ class AgentConfig(Base):
 
     # 状态与时间戳
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.now)
-    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
+    created_at = Column(DateTime, default=utcnow_naive)
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     # 关系
     app = relationship("App", back_populates="agent_config")

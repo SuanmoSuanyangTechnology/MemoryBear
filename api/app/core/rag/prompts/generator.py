@@ -12,6 +12,7 @@ from app.core.rag.nlp import rag_tokenizer
 from .template import load_prompt
 from app.core.rag.common.constants import TAG_FLD
 from app.core.rag.common.token_utils import encoder, num_tokens_from_string
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 STOP_TOKEN="<|STOP|>"
@@ -201,9 +202,10 @@ def full_question(messages=[], language=None, chat_mdl=None):
             continue
         conv.append("{}: {}".format(m["role"].upper(), m["content"]))
     conversation = "\n".join(conv)
-    today = datetime.date.today().isoformat()
-    yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
-    tomorrow = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+    current_date = utcnow_naive().date()
+    today = current_date.isoformat()
+    yesterday = (current_date - datetime.timedelta(days=1)).isoformat()
+    tomorrow = (current_date + datetime.timedelta(days=1)).isoformat()
 
     template = PROMPT_JINJA_ENV.from_string(FULL_QUESTION_PROMPT_TEMPLATE)
     rendered_prompt = template.render(
@@ -347,7 +349,7 @@ def next_step(chat_mdl, history:list, tools_description: list[dict], task_desc, 
         hist[-1]["content"] += user_prompt
     else:
         hist.append({"role": "user", "content": user_prompt})
-    json_str = chat_mdl.chat(template.render(task_analysis=task_desc, desc=desc, today=datetime.datetime.now().strftime("%Y-%m-%d")),
+    json_str = chat_mdl.chat(template.render(task_analysis=task_desc, desc=desc, today=utcnow_naive().strftime("%Y-%m-%d")),
                              hist[1:], stop=["<|stop|>"])
     tk_cnt = num_tokens_from_string(json_str)
     json_str = re.sub(r"^.*</think>", "", json_str, flags=re.DOTALL)
@@ -407,7 +409,7 @@ def rank_memories(chat_mdl, goal:str, sub_goal:str, tool_call_summaries: list[st
 
 def gen_meta_filter(chat_mdl, meta_data:dict, query: str) -> list:
     sys_prompt = PROMPT_JINJA_ENV.from_string(META_FILTER).render(
-        current_date=datetime.datetime.today().strftime('%Y-%m-%d'),
+        current_date=utcnow_naive().strftime('%Y-%m-%d'),
         metadata_keys=json.dumps(meta_data),
         user_question=query
     )

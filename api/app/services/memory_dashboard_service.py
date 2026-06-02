@@ -4,6 +4,7 @@ from typing import List, Optional, Dict, Any
 import uuid
 from fastapi import HTTPException
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.models.user_model import User
 from app.models.app_model import App
 from app.models.end_user_model import EndUser, EndUser as EndUserModel
@@ -632,7 +633,7 @@ def get_dashboard_yesterday_changes(
 
     business_logger.info(f"计算昨日对比百分比: workspace_id={workspace_id}, storage_type={storage_type}")
 
-    now_local = datetime.now()
+    now_local = utcnow_naive()
     today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
 
     changes = {

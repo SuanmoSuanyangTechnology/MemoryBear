@@ -8,6 +8,7 @@ from sqlalchemy.orm import relationship
 from enum import StrEnum
 
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class ApiKeyType(StrEnum):
@@ -55,8 +56,8 @@ class ApiKey(Base):
 
     # 审计
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, comment="创建者")
-    created_at = Column(DateTime, nullable=False, default=datetime.datetime.now, comment="创建时间")
-    updated_at = Column(DateTime, nullable=False, default=datetime.datetime.now, onupdate=datetime.datetime.now,
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive, comment="创建时间")
+    updated_at = Column(DateTime, nullable=False, default=utcnow_naive, onupdate=utcnow_naive,
                         comment="更新时间")
 
     # 关系
@@ -88,7 +89,7 @@ class ApiKeyLog(Base):
     tokens_used = Column(Integer, comment="使用的 Token 数")
 
     # 时间
-    created_at = Column(DateTime, nullable=False, default=datetime.datetime.now, index=True, comment="创建时间")
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive, index=True, comment="创建时间")
 
     # 关系
     api_key = relationship("ApiKey", back_populates="logs")

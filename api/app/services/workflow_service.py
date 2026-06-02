@@ -11,6 +11,7 @@ import yaml
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.workflow.triggers import (
     build_schedule_now_payload,
     get_trigger_type,
@@ -64,7 +65,7 @@ class WorkflowService:
     ) -> WorkflowConfig:
         """从发布版本快照重建运行时 WorkflowConfig。"""
         cfg = release.config or {}
-        now = release.created_at or datetime.datetime.now()
+        now = release.created_at or utcnow_naive()
         normalized_nodes = WorkflowService._prepare_nodes(cfg.get("nodes", []))
         return WorkflowConfig(
             id=real_config_id or cfg.get("id") or uuid.uuid4(),
@@ -170,7 +171,7 @@ class WorkflowService:
         trigger_id = trigger_node.get("id")
         config = trigger_node.get("config") or {}
         current_time = datetime.datetime.now(datetime.timezone.utc)
-        generated_at = current_time.isoformat()
+        generated_at = to_iso_z(current_time)
 
         if trigger_type == "schedule":
             return (
@@ -504,7 +505,7 @@ class WorkflowService:
             release_id=release.id,
             trigger_type="schedule",
             trigger_id=trigger.get("id"),
-            trigger_meta={"source": "schedule", "run_at": current_time.isoformat()},
+            trigger_meta={"source": "schedule", "run_at": to_iso_z(current_time)},
             trigger_payload=schedule_event,
             source="schedule",
         )
@@ -905,7 +906,7 @@ class WorkflowService:
         if isinstance(value, uuid.UUID):
             return str(value)
         if isinstance(value, datetime.datetime):
-            return value.isoformat()
+            return to_iso_z(value)
         if isinstance(value, dict):
             return {k: WorkflowService._serialize_execution_value(v) for k, v in value.items()}
         if isinstance(value, list):
@@ -940,8 +941,8 @@ class WorkflowService:
             "meta_data": meta_data,
             "error_message": execution.error_message,
             "error_node_id": execution.error_node_id,
-            "started_at": execution.started_at.isoformat() if execution.started_at else None,
-            "completed_at": execution.completed_at.isoformat() if execution.completed_at else None,
+            "started_at": to_iso_z(execution.started_at),
+            "completed_at": to_iso_z(execution.completed_at),
             "elapsed_time": execution.elapsed_time,
             "token_usage": self._serialize_execution_value(execution.token_usage),
             "node_executions": [
@@ -955,8 +956,8 @@ class WorkflowService:
                     "input_data": self._serialize_execution_value(node_execution.input_data or {}),
                     "output_data": self._serialize_execution_value(node_execution.output_data or {}),
                     "error_message": node_execution.error_message,
-                    "started_at": node_execution.started_at.isoformat() if node_execution.started_at else None,
-                    "completed_at": node_execution.completed_at.isoformat() if node_execution.completed_at else None,
+                    "started_at": to_iso_z(node_execution.started_at),
+                    "completed_at": to_iso_z(node_execution.completed_at),
                     "elapsed_time": node_execution.elapsed_time,
                     "token_usage": self._serialize_execution_value(node_execution.token_usage),
                     "cache_hit": node_execution.cache_hit,
@@ -1030,7 +1031,7 @@ class WorkflowService:
         # 如果是完成状态，计算耗时
         if status in ["completed", "failed", "cancelled", "timeout"]:
             if not execution.completed_at:
-                execution.completed_at = datetime.datetime.now()
+                execution.completed_at = utcnow_naive()
                 elapsed = (execution.completed_at - execution.started_at).total_seconds()
                 execution.elapsed_time = elapsed
 
@@ -1564,7 +1565,7 @@ class WorkflowService:
             }
             execution.token_usage = {}
             execution.elapsed_time = 0
-            execution.completed_at = datetime.datetime.now()
+            execution.completed_at = utcnow_naive()
             self.db.commit()
 
             return {
@@ -1622,7 +1623,7 @@ class WorkflowService:
                 execution.status = "completed"
                 execution.output_data = {"answer": preset_response, "moderation_flagged": True}
                 execution.elapsed_time = 0
-                execution.completed_at = datetime.datetime.now()
+                execution.completed_at = utcnow_naive()
                 self.db.commit()
                 return {
                     "execution_id": execution.execution_id,
@@ -1975,7 +1976,7 @@ class WorkflowService:
             }
             execution.token_usage = {}
             execution.elapsed_time = 0
-            execution.completed_at = datetime.datetime.now()
+            execution.completed_at = utcnow_naive()
             self.db.commit()
 
             start_internal_event = {
@@ -2060,7 +2061,7 @@ class WorkflowService:
                 execution.status = "completed"
                 execution.output_data = {"answer": preset_response, "moderation_flagged": True}
                 execution.elapsed_time = 0
-                execution.completed_at = datetime.datetime.now()
+                execution.completed_at = utcnow_naive()
                 self.db.commit()
 
                 start_internal_event = {

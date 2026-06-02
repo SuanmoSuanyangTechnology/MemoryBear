@@ -7,6 +7,7 @@ import uuid
 import datetime
 
 from app.models.memory_short_model import ShortTermMemory, LongTermMemory
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_db_logger
 
 # 获取数据库专用日志器
@@ -117,7 +118,7 @@ class ShortTermMemoryRepository:
             List[ShortTermMemory]: 记忆记录列表，按创建时间倒序
         """
         try:
-            cutoff_time = datetime.datetime.now() - datetime.timedelta(hours=hours)
+            cutoff_time = utcnow_naive() - datetime.timedelta(hours=hours)
             
             # 使用复合索引 ix_memory_short_term_user_time 优化查询
             memories = (
@@ -178,7 +179,7 @@ class ShortTermMemoryRepository:
             int: 删除的记录数
         """
         try:
-            cutoff_time = datetime.datetime.now() - datetime.timedelta(days=days)
+            cutoff_time = utcnow_naive() - datetime.timedelta(days=days)
             
             deleted_count = (
                 self.db.query(ShortTermMemory)
@@ -499,5 +500,4 @@ class LongTermMemoryRepository:
             self.db.rollback()
             db_logger.error(f"创建或更新长期记忆记录时出错: {str(e)}")
             raise
-
 

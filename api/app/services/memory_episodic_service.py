@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
+from app.core.utils.datetime_utils import to_iso_z
 from app.core.logging_config import get_logger
 from app.services.memory_base_service import MemoryBaseService
 
@@ -187,7 +188,7 @@ class MemoryEpisodicService(MemoryBaseService):
             return None
         
         # 返回ISO格式字符串
-        return start_time.isoformat()
+        return to_iso_z(start_time)
     
     async def get_episodic_memory_overview(
         self,

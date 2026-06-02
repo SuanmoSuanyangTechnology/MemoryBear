@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class MessageReportType(StrEnum):
@@ -76,8 +77,8 @@ class MessageReport(Base):
     # 处理结果
     action_taken = Column(String(50), comment="处理措施: warning/content_removed/user_banned/no_action")
 
-    created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")
-    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now, comment="更新时间")
+    created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, comment="更新时间")
 
     # 关联关系
     message = relationship("Message", back_populates="reports")

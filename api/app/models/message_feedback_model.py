@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class MessageFeedback(Base):
@@ -31,7 +32,7 @@ class MessageFeedback(Base):
     feedback_type = Column(String(20), nullable=False, comment="反馈类型: like/dislike")
     feedback_content = Column(Text, comment="反馈原因（点踩时填写）")
 
-    created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")
+    created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
 
     # 联合唯一约束：一个用户对一条消息只能有一条反馈
     __table_args__ = (

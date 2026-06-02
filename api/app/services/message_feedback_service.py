@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import to_timestamp_ms
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
@@ -170,5 +171,5 @@ class FeedbackService:
         return {
             "feedback_type": feedback.feedback_type,
             "feedback_content": feedback.feedback_content,
-            "created_at": int(feedback.created_at.timestamp() * 1000),
+            "created_at": to_timestamp_ms(feedback.created_at),
         }

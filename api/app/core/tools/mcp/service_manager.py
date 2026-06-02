@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.models.tool_model import MCPToolConfig, ToolConfig, ToolType, ToolStatus
 from app.core.logging_config import get_business_logger
 from app.core.tools.mcp.base import MCPToolManager
@@ -66,7 +67,7 @@ class MCPServiceManager:
                 connection_config=connection_config,
                 available_tools=[tool_name],
                 health_status="unknown",
-                last_health_check=datetime.now()
+                last_health_check=utcnow_naive()
             )
             
             self.db.add(mcp_config)

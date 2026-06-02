@@ -4,6 +4,7 @@ from sqlalchemy import func, Table, MetaData
 from uuid import UUID
 from typing import Dict, Optional, Any
 
+from app.core.utils.datetime_utils import to_timestamp_ms
 from app.models.end_user_model import EndUser
 from app.models.user_model import User
 from app.models.workspace_model import Workspace, WorkspaceMember
@@ -84,7 +85,7 @@ class HomePageRepository:
         workspace_ids = db.query(Workspace.id).filter(
             Workspace.tenant_id == tenant_id,
             Workspace.is_active.is_(True)
-        ).subquery()
+        ).scalar_subquery()
 
         total_users = db.query(EndUser).join(
             App,
@@ -124,7 +125,7 @@ class HomePageRepository:
         workspace_ids = db.query(Workspace.id).filter(
             Workspace.tenant_id == tenant_id,
             Workspace.is_active.is_(True)
-        ).subquery()
+        ).scalar_subquery()
         
         running_apps = db.query(App).filter(
             App.workspace_id.in_(workspace_ids),
@@ -226,13 +227,13 @@ class HomePageRepository:
             version_info = {
                 "introduction": {
                     "codeName": note.code_name or "",
-                    "releaseDate": int(datetime.combine(note.release_date, time()).timestamp() * 1000) if note.release_date else 0,
+                    "releaseDate": to_timestamp_ms(datetime.combine(note.release_date, time())) if note.release_date else 0,
                     "upgradePosition": note.upgrade_position or "",
                     "coreUpgrades": note.core_upgrades or []
                 },
                 "introduction_en": {
                     "codeName": note.code_name_en or note.code_name or "",
-                    "releaseDate": int(datetime.combine(note.release_date, time()).timestamp() * 1000) if note.release_date else 0,
+                    "releaseDate": to_timestamp_ms(datetime.combine(note.release_date, time())) if note.release_date else 0,
                     "upgradePosition": note.upgrade_position_en or note.upgrade_position or "",
                     "coreUpgrades": note.core_upgrades_en or []
                 }
@@ -274,13 +275,13 @@ class HomePageRepository:
             return {
                 "introduction": {
                     "codeName": note.code_name or "",
-                    "releaseDate": int(datetime.combine(note.release_date, time()).timestamp() * 1000) if note.release_date else 0,
+                    "releaseDate": to_timestamp_ms(datetime.combine(note.release_date, time())) if note.release_date else 0,
                     "upgradePosition": note.upgrade_position or "",
                     "coreUpgrades": note.core_upgrades or []
                 },
                 "introduction_en": {
                     "codeName": note.code_name_en or note.code_name or "",
-                    "releaseDate": int(datetime.combine(note.release_date, time()).timestamp() * 1000) if note.release_date else 0,
+                    "releaseDate": to_timestamp_ms(datetime.combine(note.release_date, time())) if note.release_date else 0,
                     "upgradePosition": note.upgrade_position_en or note.upgrade_position or "",
                     "coreUpgrades": note.core_upgrades_en or []
                 }

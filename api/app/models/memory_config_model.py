@@ -4,6 +4,7 @@ from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class MemoryConfig(Base):
@@ -90,8 +91,8 @@ class MemoryConfig(Base):
     emotion_enable_subject = Column(Boolean, default=True, comment="是否启用主体分类")
     
     # 时间戳
-    created_at = Column(DateTime, default=datetime.datetime.now, comment="创建时间")
-    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now, comment="更新时间")
+    created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, comment="更新时间")
 
     def __repr__(self):
         return f"<MemoryConfig(config_id={self.config_id}, config_name={self.config_name})>"

@@ -3,13 +3,13 @@ import time
 import uuid
 from functools import wraps
 from typing import Optional, List
-from datetime import datetime
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.core.api_key_utils import add_rate_limit_headers
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.exceptions import (
     BusinessException,
     RateLimitException,
@@ -199,7 +199,7 @@ async def log_api_key_usage(
             "status_code": response.status_code if hasattr(response, "status_code") else None,
             "response_time": round(response_time),
             "tokens_used": None,
-            "created_at": datetime.now()
+            "created_at": utcnow_naive()
         }
 
         ApiKeyLogRepository.create(db, log_data)

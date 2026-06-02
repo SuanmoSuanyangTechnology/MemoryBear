@@ -8,6 +8,7 @@ import langid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import to_timestamp_ms
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
@@ -113,7 +114,7 @@ class MemoryPerceptualService:
                 "keywords": content.keywords,
                 "topic": content.topic,
                 "domain": content.domain,
-                "created_time": int(memory.created_time.timestamp() * 1000),
+                "created_time": to_timestamp_ms(memory.created_time),
                 **detail
             }
 
@@ -176,7 +177,7 @@ class MemoryPerceptualService:
                     topic=topic,
                     domain=domain,
                     keywords=keywords,
-                    created_time=int(memory.created_time.timestamp() * 1000),
+                    created_time=to_timestamp_ms(memory.created_time),
                     storage_service=FileStorageService(memory.storage_service),
                 )
                 memory_items.append(memory_item)

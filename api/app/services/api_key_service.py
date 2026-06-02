@@ -3,11 +3,12 @@ import time
 import uuid
 import math
 from typing import Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
+from app.core.utils.datetime_utils import as_utc_aware, utcnow_naive
 from app.aioRedis import aio_redis
 from app.models.api_key_model import ApiKey, ApiKeyType
 from app.repositories.api_key_repository import ApiKeyRepository, ApiKeyLogRepository
@@ -340,15 +341,15 @@ class RateLimiterService:
         """检查日调用量限制。
         使用原子 INCR，先写后判断，极低概率下允许轻微超限（并发场景下可接受）。
         """
-        today = datetime.now().strftime("%Y%m%d")
+        today = utcnow_naive().strftime("%Y%m%d")
         key = f"rate_limit:daily:{api_key_id}:{today}"
 
-        now = datetime.now()
+        now = utcnow_naive()
         tomorrow_0 = (now + timedelta(days=1)).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
         expire_seconds = int((tomorrow_0 - now).total_seconds())
-        reset_time = int(tomorrow_0.timestamp())
+        reset_time = int(as_utc_aware(tomorrow_0).timestamp())
 
         async with self.redis.pipeline() as pipe:
             pipe.incr(key)
@@ -467,7 +468,7 @@ class ApiKeyAuthService:
         if not api_key_obj.is_active:
             return None
 
-        if api_key_obj.expires_at and datetime.now() > api_key_obj.expires_at:
+        if api_key_obj.expires_at and utcnow_naive() > api_key_obj.expires_at:
             return None
 
         if api_key_obj.quota_limit and api_key_obj.quota_used >= api_key_obj.quota_limit:

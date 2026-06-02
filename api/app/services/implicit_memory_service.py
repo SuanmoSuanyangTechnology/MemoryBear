@@ -11,6 +11,7 @@ import asyncio
 from datetime import datetime
 from typing import List, Optional
 
+from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.core.memory.analytics.implicit_memory.analyzers.dimension_analyzer import (
     DimensionAnalyzer,
 )
@@ -168,7 +169,7 @@ class ImplicitMemoryService:
             if date_range:
                 time_range = TimeRange(
                     start_date=date_range.start_date or datetime.min,
-                    end_date=date_range.end_date or datetime.now()
+                    end_date=date_range.end_date or utcnow_naive()
                 )
             
             user_summaries = await self.extract_user_summaries(
@@ -382,7 +383,7 @@ class ImplicitMemoryService:
 
     def _build_empty_profile(self) -> dict:
         """构建 MemorySummary 不足时返回的固定空白画像数据"""
-        now_ms = int(datetime.utcnow().timestamp() * 1000)
+        now_ms = to_timestamp_ms(utcnow_naive())
         insufficient = "Insufficient data for analysis"
 
         def _empty_dimension(name: str) -> dict:

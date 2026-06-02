@@ -1,7 +1,8 @@
 import json
-from typing import Any, List, Dict, Optional
-from datetime import datetime, timedelta
+from typing import Any, List, Dict
+from datetime import timedelta
 
+from app.core.utils.datetime_utils import utcnow_naive
 
 def serialize_messages(messages: Any) -> str:
     """
@@ -112,7 +113,7 @@ def filter_by_time_range(items: List[Dict], minutes: int) -> List[Dict]:
     Returns:
         List[Dict]: 过滤后的数据列表
     """
-    time_threshold = datetime.now() - timedelta(minutes=minutes)
+    time_threshold = utcnow_naive() - timedelta(minutes=minutes)
     time_threshold_str = time_threshold.strftime("%Y-%m-%d %H:%M:%S")
     
     filtered_items = []
@@ -183,4 +184,4 @@ def get_current_timestamp() -> str:
     Returns:
         str: 格式化的时间字符串 "YYYY-MM-DD HH:MM:SS"
     """
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return utcnow_naive().strftime("%Y-%m-%d %H:%M:%S")

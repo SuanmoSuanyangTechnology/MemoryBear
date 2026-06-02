@@ -11,6 +11,7 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 
 from app.aioRedis import get_thread_safe_redis
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class ActivityStatsCache:
             key = cls._get_key(workspace_id)
             payload = {
                 "stats": stats,
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": to_iso_z(utcnow_naive()),
                 "workspace_id": workspace_id,
                 "cached": True,
             }

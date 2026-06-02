@@ -8,6 +8,7 @@ from sqlalchemy import Column, String, Boolean, DateTime, Integer, Float, Foreig
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class WorkflowConfig(Base):
@@ -45,12 +46,12 @@ class WorkflowConfig(Base):
     
     # 状态
     is_active = Column(Boolean, nullable=False, default=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.datetime.now)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
     updated_at = Column(
         DateTime,
         nullable=False,
-        default=datetime.datetime.now,
-        onupdate=datetime.datetime.now
+        default=utcnow_naive,
+        onupdate=utcnow_naive
     )
     
     # 关系
@@ -122,7 +123,7 @@ class WorkflowExecution(Base):
     error_node_id = Column(String(100))
     
     # 性能指标
-    started_at = Column(DateTime, nullable=False, default=datetime.datetime.now, index=True)
+    started_at = Column(DateTime, nullable=False, default=utcnow_naive, index=True)
     completed_at = Column(DateTime)
     elapsed_time = Column(Float)  # 耗时（秒）
     
@@ -132,7 +133,7 @@ class WorkflowExecution(Base):
     # 元数据（使用 meta_data 避免与 SQLAlchemy 保留字 metadata 冲突）
     meta_data = Column(JSONB, default=dict)
     
-    created_at = Column(DateTime, nullable=False, default=datetime.datetime.now)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
     
     # 关系
     workflow_config = relationship("WorkflowConfig", back_populates="executions")
@@ -185,7 +186,7 @@ class WorkflowNodeExecution(Base):
     error_message = Column(Text)
     
     # 性能指标
-    started_at = Column(DateTime, nullable=False, default=datetime.datetime.now)
+    started_at = Column(DateTime, nullable=False, default=utcnow_naive)
     completed_at = Column(DateTime)
     elapsed_time = Column(Float)  # 耗时（秒）
     
@@ -199,7 +200,7 @@ class WorkflowNodeExecution(Base):
     # 元数据（使用 meta_data 避免与 SQLAlchemy 保留字 metadata 冲突）
     meta_data = Column(JSONB, default=dict)
     
-    created_at = Column(DateTime, nullable=False, default=datetime.datetime.now)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
     
     # 关系
     execution = relationship("WorkflowExecution", back_populates="node_executions")

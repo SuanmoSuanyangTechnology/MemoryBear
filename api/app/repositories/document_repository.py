@@ -1,6 +1,7 @@
 import uuid
 import datetime
 from sqlalchemy.orm import Session
+from app.core.utils.datetime_utils import utcnow_naive
 from app.models.document_model import Document
 from app.schemas import document_schema
 from app.core.logging_config import get_db_logger
@@ -108,7 +109,7 @@ def reset_documents_progress_by_kb_id(db: Session, kb_id: uuid.UUID) -> int:
             Document.progress_msg: "Pending",
             Document.process_duration: 0,
             Document.run: 0,  # Reset run status
-            Document.updated_at: datetime.datetime.now()
+            Document.updated_at: utcnow_naive()
         }
 
         # Perform batch update

@@ -2,6 +2,7 @@ from typing import List, Optional
 import hashlib
 from datetime import datetime
 from uuid import uuid4
+from app.core.utils.datetime_utils import to_iso_z
 from app.repositories.neo4j.cypher_queries import CHUNK_STATEMENT_EDGE_SAVE, MEMORY_SUMMARY_STATEMENT_EDGE_SAVE
 from app.core.memory.models.message_models import Chunk
 # 使用新的仓储层
@@ -85,7 +86,7 @@ async def add_memory_summary_statement_edges(summaries: List[MemorySummaryNode],
                     "chunk_id": chunk_id,
                     "end_user_id": s.end_user_id,
                     "run_id": s.run_id,
-                    "created_at": s.created_at.isoformat() if s.created_at else None,
+                    "created_at": to_iso_z(s.created_at),
                 })
 
         if not edges:

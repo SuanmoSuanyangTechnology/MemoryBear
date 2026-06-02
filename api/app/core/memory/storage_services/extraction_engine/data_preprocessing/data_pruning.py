@@ -21,6 +21,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.memory.models.message_models import (
     DialogData,
     ConversationMessage,
@@ -279,7 +280,7 @@ class SemanticPruner:
                     original_text=asst_msg.msg,
                     pruned_text=result.assistant_memory_hint,
                     memory_type=result.assistant_memory_type,
-                    created_at=datetime.now().isoformat(),
+                    created_at=to_iso_z(utcnow_naive()),
                 ))
 
                 if result.assistant_memory_hint == "NULL":

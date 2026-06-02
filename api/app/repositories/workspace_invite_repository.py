@@ -4,6 +4,7 @@ from typing import List, Optional
 import datetime
 import uuid
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.models.workspace_model import WorkspaceInvite, InviteStatus
 from app.schemas.workspace_schema import WorkspaceInviteCreate
 
@@ -20,7 +21,7 @@ class WorkspaceInviteRepository:
         created_by_user_id: uuid.UUID
     ) -> WorkspaceInvite:
         """创建工作空间邀请"""
-        expires_at = datetime.datetime.now() + datetime.timedelta(days=invite_data.expires_in_days)
+        expires_at = utcnow_naive() + datetime.timedelta(days=invite_data.expires_in_days)
         
         db_invite = WorkspaceInvite(
             workspace_id=workspace_id,
@@ -92,7 +93,7 @@ class WorkspaceInviteRepository:
             invite.status = status
             if accepted_at:
                 invite.accepted_at = accepted_at
-            invite.updated_at = datetime.datetime.now()
+            invite.updated_at = utcnow_naive()
             self.db.commit()
             self.db.refresh(invite)
         return invite
@@ -103,7 +104,7 @@ class WorkspaceInviteRepository:
 
     def expire_old_invites(self) -> int:
         """将过期的邀请标记为已过期"""
-        now = datetime.datetime.now()
+        now = utcnow_naive()
         expired_count = self.db.query(WorkspaceInvite).filter(
             and_(
                 WorkspaceInvite.status == InviteStatus.pending,

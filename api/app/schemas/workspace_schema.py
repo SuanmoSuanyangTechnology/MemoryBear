@@ -3,6 +3,7 @@ import email
 import uuid
 from typing import Literal, Optional
 
+from app.core.utils.datetime_utils import to_timestamp_ms
 from app.models.workspace_model import InviteStatus, WorkspaceRole
 from pydantic import (
     BaseModel,
@@ -50,7 +51,7 @@ class Workspace(WorkspaceBase):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class WorkspaceResponse(WorkspaceBase):
@@ -63,7 +64,7 @@ class WorkspaceResponse(WorkspaceBase):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp()) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class WorkspaceMemberBase(BaseModel):
@@ -125,7 +126,7 @@ class WorkspaceMemberItem(BaseModel):
     # 将最后登录时间序列化为毫秒时间戳，便于前端统一格式化
     @field_serializer("last_login_at", when_used="json")
     def _serialize_last_login(self, dt: datetime.datetime | None):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     # # 动态计算角色中文标签
     # @computed_field
@@ -154,17 +155,17 @@ class WorkspaceInviteResponse(BaseModel):
 
     @field_serializer("expires_at", when_used="json")
     def _serialize_expires_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     model_config = ConfigDict(from_attributes=True)
 
     @field_serializer("accepted_at", when_used="json")
     def _serialize_accepted_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
     
 
 class InviteValidateResponse(BaseModel):

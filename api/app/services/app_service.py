@@ -17,6 +17,7 @@ from sqlalchemy import and_, column, delete, exists, func, or_, select, update a
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.error_codes import BizCode
 from app.core.exceptions import (
     BusinessException,
@@ -690,7 +691,7 @@ class AppService:
             raise BusinessException(message="已存在同名应用", code=BizCode.RESOURCE_ALREADY_EXISTS)
 
         try:
-            now = datetime.datetime.now()
+            now = utcnow_naive()
 
             app = App(
                 id=uuid.uuid4(),
@@ -769,7 +770,7 @@ class AppService:
                 changed = True
 
         if changed:
-            app.updated_at = datetime.datetime.now()
+            app.updated_at = utcnow_naive()
             self.db.commit()
             self.db.refresh(app)
             logger.info("应用更新成功", extra={"app_id": str(app_id)})
@@ -808,7 +809,7 @@ class AppService:
             AppShare.is_active.is_(True)
         ).values(
             is_active=False,
-            updated_at=datetime.datetime.now()
+            updated_at=utcnow_naive()
         )
         self.db.execute(stmt)
         
@@ -861,7 +862,7 @@ class AppService:
                 new_name = f"{source_app.name} - 副本"
             new_name = self._unique_app_name(new_name, target_workspace_id, source_app.type)
 
-            now = datetime.datetime.now()
+            now = utcnow_naive()
 
             # 创建新应用（复制基础信息）
             new_app = App(
@@ -1338,7 +1339,7 @@ class AppService:
         stmt = select(AgentConfig).where(AgentConfig.app_id == app_id, AgentConfig.is_active.is_(True)).order_by(
             AgentConfig.updated_at.desc())
         agent_cfg: Optional[AgentConfig] = self.db.scalars(stmt).first()
-        now = datetime.datetime.now()
+        now = utcnow_naive()
 
         if not agent_cfg:
             agent_cfg = AgentConfig(
@@ -1383,7 +1384,7 @@ class AppService:
     def _agent_config_from_release(self, release: "AppRelease") -> "AgentConfig":
         """从发布版本快照重建 AgentConfig 对象（不入库，仅用于运行）"""
         cfg = release.config or {}
-        now = release.created_at or datetime.datetime.now()
+        now = release.created_at or utcnow_naive()
         agent_cfg = AgentConfig(
             id=uuid.uuid4(),
             app_id=release.app_id,
@@ -1405,7 +1406,7 @@ class AppService:
     def _workflow_config_from_release(self, release: "AppRelease") -> "WorkflowConfig":
         """从发布版本快照重建 WorkflowConfig 对象（不入库，仅用于运行）"""
         cfg = release.config or {}
-        now = release.created_at or datetime.datetime.now()
+        now = release.created_at or utcnow_naive()
         from app.models.workflow_model import WorkflowConfig as WorkflowConfigModel
         # 查出源应用真实的 WorkflowConfig id，供 workflow_executions 外键使用
         real_config = WorkflowConfigRepository(self.db).get_by_app_id(release.app_id)
@@ -1523,7 +1524,7 @@ class AppService:
         Returns:
             AgentConfig: 默认配置对象
         """
-        now = datetime.datetime.now()
+        now = utcnow_naive()
 
         # 创建一个临时的配置对象，不添加到数据库
         default_config = AgentConfig(
@@ -1642,7 +1643,7 @@ class AppService:
         # 获取现有配置
         repo = WorkflowConfigRepository(self.db)
         workflow_cfg = repo.get_by_app_id(app_id)
-        now = datetime.datetime.now()
+        now = utcnow_naive()
         workflow_service = WorkflowService(self.db)
         features = data.features or {}
         workflow_type = self._normalize_workflow_type(
@@ -1716,7 +1717,7 @@ class AppService:
         """
         from app.core.workflow.template_loader import load_workflow_template
 
-        now = datetime.datetime.now()
+        now = utcnow_naive()
         normalized_workflow_type = self._normalize_workflow_type(workflow_type)
 
         template_id = "pure_workflow_simple_qa" \
@@ -1985,7 +1986,7 @@ class AppService:
                 "应用发布配置准备完成"
             )
 
-        now = datetime.datetime.now()
+        now = utcnow_naive()
         version = self._get_next_version(app_id)
 
         release = AppRelease(
@@ -2170,7 +2171,7 @@ class AppService:
             )
 
         app.current_release_id = release.id
-        app.updated_at = datetime.datetime.now()
+        app.updated_at = utcnow_naive()
 
         self.db.commit()
         self.db.refresh(release)
@@ -2243,7 +2244,7 @@ class AppService:
                 )
 
         # 3. 创建分享记录
-        now = datetime.datetime.now()
+        now = utcnow_naive()
         shares = []
 
         for target_ws_id in target_workspace_ids:
@@ -2587,7 +2588,7 @@ class AppService:
             )
 
         share.permission = permission
-        share.updated_at = datetime.datetime.now()
+        share.updated_at = utcnow_naive()
         self.db.commit()
         self.db.refresh(share)
 

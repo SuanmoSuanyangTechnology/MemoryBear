@@ -28,6 +28,7 @@ from app.services import knowledge_service, document_service, file_service, know
 from app.services.file_storage_service import FileStorageService, get_file_storage_service, generate_kb_file_key
 from app.services.model_service import ModelApiKeyService
 from app.core.rag.utils.preview_utils import _build_preview_hierarchy
+from app.core.utils.datetime_utils import to_timestamp_ms
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
@@ -139,7 +140,7 @@ async def get_preview_chunks(
                 "doc_id": pid,
                 "file_id": str(db_document.file_id),
                 "file_name": db_document.file_name,
-                "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                "file_created_at": to_timestamp_ms(db_document.created_at),
                 "document_id": str(db_document.id),
                 "knowledge_id": str(db_document.kb_id),
                 "sort_id": idx,
@@ -153,7 +154,7 @@ async def get_preview_chunks(
                 "doc_id": uuid.uuid4().hex,
                 "file_id": str(db_document.file_id),
                 "file_name": db_document.file_name,
-                "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                "file_created_at": to_timestamp_ms(db_document.created_at),
                 "document_id": str(db_document.id),
                 "knowledge_id": str(db_document.kb_id),
                 "sort_id": idx,
@@ -187,7 +188,7 @@ async def get_preview_chunks(
                 "doc_id": uuid.uuid4().hex,
                 "file_id": str(db_document.file_id),
                 "file_name": db_document.file_name,
-                "file_created_at": int(db_document.created_at.timestamp() * 1000),
+                "file_created_at": to_timestamp_ms(db_document.created_at),
                 "document_id": str(db_document.id),
                 "knowledge_id": str(db_document.kb_id),
                 "sort_id": idx,
@@ -598,7 +599,7 @@ async def create_chunk(
         "doc_id": doc_id,
         "file_id": str(db_document.file_id),
         "file_name": db_document.file_name,
-        "file_created_at": int(db_document.created_at.timestamp() * 1000),
+        "file_created_at": to_timestamp_ms(db_document.created_at),
         "document_id": str(document_id),
         "knowledge_id": str(kb_id),
         "sort_id": sort_id,
@@ -683,7 +684,7 @@ async def create_chunks_batch(
             "doc_id": doc_id,
             "file_id": str(db_document.file_id),
             "file_name": db_document.file_name,
-            "file_created_at": int(db_document.created_at.timestamp() * 1000),
+            "file_created_at": to_timestamp_ms(db_document.created_at),
             "document_id": str(document_id),
             "knowledge_id": str(kb_id),
             "sort_id": sort_id,

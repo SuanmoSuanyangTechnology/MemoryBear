@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import Callable, Optional
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success
 from app.db import get_db
@@ -789,7 +790,7 @@ def export_missing_translations(
     translation_logger = translation_service.translation_logger
     
     # Generate filename with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = utcnow_naive().strftime("%Y%m%d_%H%M%S")
     locale_suffix = f"_{locale}" if locale else "_all"
     output_file = f"logs/i18n/missing_translations{locale_suffix}_{timestamp}.json"
     

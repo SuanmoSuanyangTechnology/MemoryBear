@@ -5,6 +5,7 @@ from sqlalchemy import Column, String, DateTime, ForeignKey, Float, Integer, Tex
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class HitLogSource(StrEnum):
@@ -32,8 +33,8 @@ class AppAnnotation(Base):
     hit_count = Column(Integer, default=0, nullable=False, comment="命中次数")
 
     is_active = Column(Integer, default=1, nullable=False, comment="是否激活: 1=是, 0=否")
-    created_at = Column(DateTime, default=datetime.datetime.now, nullable=False, comment="创建时间")
-    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now, nullable=False, comment="更新时间")
+    created_at = Column(DateTime, default=utcnow_naive, nullable=False, comment="创建时间")
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, nullable=False, comment="更新时间")
 
     # 复合索引：加速按应用ID查询
     __table_args__ = (
@@ -60,8 +61,8 @@ class AppAnnotationSetting(Base):
     # 是否启用标注功能
     enabled = Column(Integer, default=0, nullable=False, comment="是否启用: 1=是, 0=否")
 
-    created_at = Column(DateTime, default=datetime.datetime.now, nullable=False, comment="创建时间")
-    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now, nullable=False, comment="更新时间")
+    created_at = Column(DateTime, default=utcnow_naive, nullable=False, comment="创建时间")
+    updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, nullable=False, comment="更新时间")
 
     def __repr__(self):
         return f"<AppAnnotationSetting(app_id={self.app_id}, threshold={self.similarity_threshold}, enabled={self.enabled})>"
@@ -79,7 +80,7 @@ class AppAnnotationHitLog(Base):
     matched_question = Column(Text, nullable=False, comment="匹配到的标注问题")
     answer = Column(Text, nullable=False, comment="返回的标注答案")
     similarity = Column(Float, nullable=False, comment="相似度分数")
-    hit_at = Column(DateTime, default=datetime.datetime.now, nullable=False, comment="命中时间")
+    hit_at = Column(DateTime, default=utcnow_naive, nullable=False, comment="命中时间")
 
     __table_args__ = (
         Index("idx_hit_log_annotation", "annotation_id", "hit_at"),

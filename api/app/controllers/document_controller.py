@@ -8,6 +8,7 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.celery_app import celery_app
 from app.controllers import file_controller
 from app.core.config import settings
@@ -243,7 +244,7 @@ async def update_document(
     if updated_fields:
         api_logger.debug(f"updated fields: {', '.join(updated_fields)}")
 
-    db_document.updated_at = datetime.datetime.now()
+    db_document.updated_at = utcnow_naive()
 
     # 4. Save to database
     try:

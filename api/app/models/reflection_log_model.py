@@ -5,6 +5,7 @@ from sqlalchemy import Column, DateTime, Float, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 
 from app.db import Base
+from app.core.utils.datetime_utils import utcnow_naive
 
 
 class MemoryReflectionLog(Base):
@@ -29,4 +30,4 @@ class MemoryReflectionLog(Base):
     solution_detail = Column(JSONB, nullable=True)
     execution_detail = Column(JSONB, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.datetime.now, nullable=False)
+    created_at = Column(DateTime, default=utcnow_naive, nullable=False)

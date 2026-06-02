@@ -2,6 +2,7 @@
 import json
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.logging_config import get_business_logger
 
 logger = get_business_logger()
@@ -89,7 +90,7 @@ class ConversationStateManager:
         state["current_agent_id"] = agent_id
         state["last_message"] = message
         state["last_topic"] = topic
-        state["updated_at"] = datetime.now().isoformat()
+        state["updated_at"] = to_iso_z(utcnow_naive())
         
         # 添加到历史
         history_item = {
@@ -98,7 +99,7 @@ class ConversationStateManager:
             "topic": topic,
             "confidence": confidence,
             "agent_changed": agent_changed,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": to_iso_z(utcnow_naive())
         }
         state["routing_history"].append(history_item)
         
@@ -196,8 +197,8 @@ class ConversationStateManager:
             "last_topic": None,
             "switch_count": 0,
             "same_agent_turns": 0,
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat()
+            "created_at": to_iso_z(utcnow_naive()),
+            "updated_at": to_iso_z(utcnow_naive())
         }
         
         # 保存初始状态

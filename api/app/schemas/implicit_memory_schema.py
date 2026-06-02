@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from app.core.utils.datetime_utils import to_timestamp_ms
 
 
 class FrequencyPattern(str, Enum):
@@ -36,11 +37,11 @@ class TimeRange(BaseModel):
 
     @field_serializer("start_date", when_used="json")
     def _serialize_start_date(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("end_date", when_used="json")
     def _serialize_end_date(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class DateRange(BaseModel):
@@ -57,11 +58,11 @@ class DateRange(BaseModel):
 
     @field_serializer("start_date", when_used="json")
     def _serialize_start_date(self, dt: Optional[datetime.datetime]):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("end_date", when_used="json")
     def _serialize_end_date(self, dt: Optional[datetime.datetime]):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class AnalysisConfig(BaseModel):
@@ -90,11 +91,11 @@ class PreferenceTagResponse(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class DimensionScoreResponse(BaseModel):
@@ -122,7 +123,7 @@ class DimensionPortraitResponse(BaseModel):
 
     @field_serializer("analysis_timestamp", when_used="json")
     def _serialize_analysis_timestamp(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class InterestCategoryResponse(BaseModel):
@@ -153,7 +154,7 @@ class InterestAreaDistributionResponse(BaseModel):
 
     @field_serializer("analysis_timestamp", when_used="json")
     def _serialize_analysis_timestamp(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class BehaviorHabitResponse(BaseModel):
@@ -171,11 +172,11 @@ class BehaviorHabitResponse(BaseModel):
 
     @field_serializer("first_observed", when_used="json")
     def _serialize_first_observed(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("last_observed", when_used="json")
     def _serialize_last_observed(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class UserProfileResponse(BaseModel):
@@ -194,11 +195,11 @@ class UserProfileResponse(BaseModel):
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 # Internal/Business Logic Schemas
@@ -215,7 +216,7 @@ class MemorySummary(BaseModel):
 
     @field_serializer("timestamp", when_used="json")
     def _serialize_timestamp(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class UserMemorySummary(BaseModel):
@@ -230,7 +231,7 @@ class UserMemorySummary(BaseModel):
 
     @field_serializer("timestamp", when_used="json")
     def _serialize_timestamp(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 class SummaryAnalysisResult(BaseModel):
@@ -246,7 +247,7 @@ class SummaryAnalysisResult(BaseModel):
 
     @field_serializer("analysis_timestamp", when_used="json")
     def _serialize_analysis_timestamp(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)
 
 
 # Aliases for backward compatibility with existing code
@@ -277,4 +278,4 @@ class CompleteProfileResponse(BaseModel):
     
     @field_serializer("generated_at", when_used="json")
     def _serialize_generated_at(self, dt: datetime.datetime):
-        return int(dt.timestamp() * 1000) if dt else None
+        return to_timestamp_ms(dt)

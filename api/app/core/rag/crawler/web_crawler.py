@@ -6,6 +6,7 @@ from typing import Iterator, Optional, List, Set
 from urllib.parse import urlparse
 import logging
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.core.rag.crawler.url_normalizer import URLNormalizer
 from app.core.rag.crawler.robots_parser import RobotsParser
 from app.core.rag.crawler.rate_limiter import RateLimiter
@@ -86,7 +87,7 @@ class WebCrawler:
             CrawledDocument: Structured document with extracted content
         """
         logger.info(f"Starting crawl from {self.entry_url} (max_pages: {self.max_pages})")
-        self.start_time = datetime.now()
+        self.start_time = utcnow_naive()
         
         # Add entry URL to queue
         normalized_entry = self.url_normalizer.normalize(self.entry_url)
@@ -151,7 +152,7 @@ class WebCrawler:
                     title=extracted.title,
                     content=extracted.text,
                     content_length=len(extracted.text),
-                    crawl_timestamp=datetime.now(),
+                    crawl_timestamp=utcnow_naive(),
                     http_status=fetch_result.status_code,
                     metadata={
                         'word_count': extracted.word_count,
@@ -179,7 +180,7 @@ class WebCrawler:
                 self._record_error(f"Processing error: {str(e)}")
                 continue
         
-        self.end_time = datetime.now()
+        self.end_time = utcnow_naive()
         logger.info(f"Crawl completed. Processed {self.pages_processed} pages.")
     
     def get_summary(self) -> CrawlSummary:
@@ -190,9 +191,9 @@ class WebCrawler:
             CrawlSummary: Statistics including success/error/skip counts
         """
         if not self.start_time:
-            self.start_time = datetime.now()
+            self.start_time = utcnow_naive()
         if not self.end_time:
-            self.end_time = datetime.now()
+            self.end_time = utcnow_naive()
         
         duration = (self.end_time - self.start_time).total_seconds()
         
