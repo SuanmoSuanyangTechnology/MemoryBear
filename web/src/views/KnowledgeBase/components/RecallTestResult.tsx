@@ -356,7 +356,7 @@ const RecallTestResult = ({
                     return renderTextContent(formattedContent);
                   }
                   return children?.length > 0
-                    ? <div className="rb:max-h-12.5 rb:overflow-hidden">
+                    ? <div className="rb:line-clamp-3 rb:overflow-hidden">
                       {renderTextContent(item.page_content)}
                     </div>
                     : renderTextContent(item.page_content);
