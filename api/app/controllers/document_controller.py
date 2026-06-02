@@ -489,3 +489,75 @@ async def update_document_metadata(
         data=jsonable_encoder(document_schema.Document.model_validate(updated_doc)),
         msg="文档元数据更新成功",
     )
+
+
+@router.get("/{document_id}/metadata", response_model=ApiResponse)
+async def get_document_metadata(
+    document_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取单个文档的元数据"""
+    api_logger.info(
+        f"Get document metadata: document_id={document_id}, user={current_user.username}"
+    )
+
+    # 校验文档存在且有权访问
+    db_document = document_service.get_document_by_id(
+        db, document_id=document_id, current_user=current_user
+    )
+    if not db_document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The document does not exist or you do not have permission to access it"
+        )
+
+    result = KnowledgeMetadataService.get_document_metadata(
+        db=db,
+        document_id=document_id,
+    )
+
+    return success(
+        data=result,
+        msg="获取文档元数据成功",
+    )
+
+
+@router.delete("/{document_id}/metadata", response_model=ApiResponse)
+async def delete_document_metadata(
+    document_id: uuid.UUID,
+    data: metadata_schema.DocumentMetadataDeleteRequest | None = Body(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    删除单个文档的元数据
+    - 不传 body 或 field_names 为空时，清空全部元数据
+    - 传 field_names 时，仅删除指定字段
+    """
+    api_logger.info(
+        f"Delete document metadata: document_id={document_id}, user={current_user.username}"
+    )
+
+    # 校验文档存在且有权访问
+    db_document = document_service.get_document_by_id(
+        db, document_id=document_id, current_user=current_user
+    )
+    if not db_document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The document does not exist or you do not have permission to access it"
+        )
+
+    field_names = data.field_names if data else None
+
+    result = KnowledgeMetadataService.delete_document_metadata(
+        db=db,
+        document_id=document_id,
+        field_names=field_names,
+    )
+
+    return success(
+        data=result,
+        msg="文档元数据删除成功",
+    )

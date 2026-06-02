@@ -89,3 +89,25 @@ class BatchUpdateMetadataRequest(BaseModel):
 
 class DocumentMetadataUpdateRequest(BaseModel):
     metadata: dict[str, Any] = Field(..., description="元数据 {field_name: value}")
+
+
+class DocumentMetadataDeleteRequest(BaseModel):
+    field_names: list[str] | None = Field(None, description="要删除的字段名列表，不传则清空全部")
+
+
+class DocumentMetadataFieldResponse(BaseModel):
+    field_id: str = Field(..., description="字段定义ID")
+    name: str = Field(..., description="字段名")
+    type: str = Field(..., description="字段类型")
+    value: Any | None = Field(None, description="字段值")
+
+
+class DocumentMetadataResponse(BaseModel):
+    document_id: str = Field(..., description="文档ID")
+    metadata: dict[str, Any] = Field(..., description="元数据 {field_name: value}")
+    fields: list[DocumentMetadataFieldResponse] = Field(..., description="字段列表")
+
+
+class DocumentMetadataDeleteResponse(BaseModel):
+    document_id: str = Field(..., description="文档ID")
+    deleted_fields: list[str] = Field(..., description="已删除的字段名列表")

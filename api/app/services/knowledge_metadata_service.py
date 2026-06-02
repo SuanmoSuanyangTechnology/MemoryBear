@@ -335,6 +335,102 @@ class KnowledgeMetadataService:
         return doc
 
     @staticmethod
+    def get_document_metadata(
+        db: Session,
+        document_id: uuid.UUID,
+    ) -> dict:
+        """
+        获取单个文档的元数据
+        Returns: {"document_id": str, "metadata": {field_name: value}, "bindings": [...]}
+        """
+        doc = db.query(Document).filter(Document.id == document_id).first()
+        if not doc:
+            raise ResourceNotFoundException("文档", str(document_id))
+
+        # 获取绑定记录
+        bindings = KnowledgeMetadataRepository.get_bindings_by_document_id(db, document_id)
+        binding_fields = {b.metadata_id: b for b in bindings}
+
+        # 获取字段定义
+        custom_fields = KnowledgeMetadataRepository.get_by_knowledge_id(db, doc.kb_id)
+        field_map = {f.id: f for f in custom_fields}
+
+        result = {
+            "document_id": str(document_id),
+            "metadata": doc.doc_metadata or {},
+            "fields": [],
+        }
+
+        for metadata_id, binding in binding_fields.items():
+            field_def = field_map.get(metadata_id)
+            if field_def:
+                result["fields"].append({
+                    "field_id": str(field_def.id),
+                    "name": field_def.name,
+                    "type": field_def.type,
+                    "value": doc.doc_metadata.get(field_def.name) if doc.doc_metadata else None,
+                })
+
+        return result
+
+    @staticmethod
+    def delete_document_metadata(
+        db: Session,
+        document_id: uuid.UUID,
+        field_names: list[str] | None = None,
+    ) -> dict:
+        """
+        删除单个文档的元数据
+        Args:
+            document_id: 文档ID
+            field_names: 要删除的字段名列表，None 表示清空全部
+        Returns:
+            {"document_id": str, "deleted_fields": [str]}
+        """
+        doc = db.query(Document).filter(Document.id == document_id).first()
+        if not doc:
+            raise ResourceNotFoundException("文档", str(document_id))
+
+        knowledge_id = doc.kb_id
+        deleted_fields = []
+
+        if field_names is None or len(field_names) == 0:
+            # 清空全部
+            deleted_fields = list(doc.doc_metadata.keys()) if doc.doc_metadata else []
+            doc.doc_metadata = {}
+            flag_modified(doc, "doc_metadata")
+            # 删除所有绑定
+            KnowledgeMetadataRepository.delete_bindings_by_document_id(db, document_id)
+        else:
+            # 删除指定字段
+            custom_fields = KnowledgeMetadataRepository.get_by_knowledge_id(db, knowledge_id)
+            field_defs = {f.name: f for f in custom_fields}
+
+            for field_name in field_names:
+                if field_name in doc.doc_metadata:
+                    del doc.doc_metadata[field_name]
+                    deleted_fields.append(field_name)
+
+                # 删除对应绑定
+                field_def = field_defs.get(field_name)
+                if field_def:
+                    db.query(KnowledgeMetadataBinding).filter(
+                        KnowledgeMetadataBinding.document_id == document_id,
+                        KnowledgeMetadataBinding.metadata_id == field_def.id,
+                    ).delete()
+
+            if deleted_fields:
+                flag_modified(doc, "doc_metadata")
+
+        db.commit()
+        db.refresh(doc)
+
+        return {
+            "document_id": str(document_id),
+            "deleted_fields": deleted_fields,
+        }
+
+    @staticmethod
     def _validate_value_type(field_type: str, value: Any) -> bool:
         """校验值类型是否与字段定义一致"""
         if value is None:
