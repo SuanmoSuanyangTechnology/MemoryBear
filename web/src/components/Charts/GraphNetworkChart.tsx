@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-10 14:06:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-01 17:15:54
+ * @Last Modified time: 2026-06-02 10:35:00
  */
 /**
  * GraphNetworkChart Component
@@ -262,7 +262,6 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
       })
     linkSelRef.current = linkSel
 
-    console.log('graphState', graphState.links.filter(l => l.label))
     const linkLabelSel = g.append('g').selectAll<SVGTextElement, D3Link>('text')
       .data(graphState.links.filter(l => l.label))
       .enter()
@@ -324,19 +323,74 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
       })
 
     nodeSel.append('text')
-      .text(d => d.name)
       .attr('x', 0)
-      .attr('dy', 4)
+      .attr('y', 0)
       .attr('text-anchor', 'middle')
-      .attr('font-size', '10px')
+      .attr('dominant-baseline', 'middle')
+      .attr('font-size', d => {
+        const fontSize = Math.max(6, Math.min(12, d.symbolSize * 0.25))
+        return `${fontSize}px`
+      })
       .attr('fill', '#171719')
       .style('pointer-events', 'none')
       .style('user-select', 'none')
       .style('display', d => {
         if (!d.name) return 'none'
-        const textWidth = d.name.length * 6
         const currentZoom = defaultZoom
-        return d.symbolSize * currentZoom >= textWidth / 2 ? 'block' : 'none'
+        return d.symbolSize * currentZoom >= 20 ? 'block' : 'none'
+      })
+      .each(function(d) {
+        const text = d3.select(this)
+        const name = d.name || ''
+        const fontSize = Math.max(6, Math.min(12, d.symbolSize * 0.25))
+        const maxWidth = d.symbolSize * 1.2
+        const lineHeight = fontSize * 1.2
+        const maxLines = Math.floor((d.symbolSize * 1.2) / lineHeight) || 1
+        
+        const words = name.split('')
+        let line: string[] = []
+        let lines: string[] = []
+        let currentWidth = 0
+        const charWidth = fontSize * 0.55
+        
+        for (let i = 0; i < words.length; i++) {
+          const word = words[i]
+          const wordWidth = charWidth
+          if (currentWidth + wordWidth > maxWidth && line.length > 0) {
+            lines.push(line.join(''))
+            line = [word]
+            currentWidth = wordWidth
+          } else {
+            line.push(word)
+            currentWidth += wordWidth
+          }
+        }
+        if (line.length > 0) {
+          lines.push(line.join(''))
+        }
+        
+        if (lines.length > maxLines) {
+          lines = lines.slice(0, maxLines)
+          if (lines[maxLines - 1]) {
+            lines[maxLines - 1] = lines[maxLines - 1].slice(0, -1) + '...'
+          }
+        }
+        
+        text.selectAll('tspan').remove()
+        
+        if (lines.length === 1) {
+          text.text(lines[0])
+        } else {
+          const totalHeight = (lines.length - 1) * lineHeight
+          const startY = -totalHeight / 2
+          
+          lines.forEach((lineText, i) => {
+            text.append('tspan')
+              .attr('x', 0)
+              .attr('dy', i === 0 ? `${startY / fontSize}em` : `${lineHeight / fontSize}em`)
+              .text(lineText)
+          })
+        }
       })
 
     const highlightNodes = () => {
