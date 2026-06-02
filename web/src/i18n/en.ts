@@ -2481,6 +2481,13 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
           last_day: 'Last Day',
           next_5_executions: 'Next 5 Executions',
           cannot_calculate_execution_time: 'Cannot Calculate Execution Time',
+
+          webhook: 'Webhook Trigger',
+          content_type: 'Content Type',
+          response: 'Response',
+          status_code: 'Status Code',
+          response_body: 'Response Body',
+          copyTip: 'Click to copy',
         },
         llm: {
           model_id: 'Model',
@@ -2747,6 +2754,7 @@ Memory Bear: After the rebellion, regional warlordism intensified for several re
         name: 'Key',
         type: 'Type',
         value: 'Value',
+        required: 'Required',
         addCase: 'Add Condition',
         addVariable: 'Add Variables',
         outputVariable: 'Output Variable',

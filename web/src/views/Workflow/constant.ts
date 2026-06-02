@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:06:18 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-01 12:29:17
+ * @Last Modified time: 2026-06-02 16:05:27
  */
 import type { ReactShapeConfig } from '@antv/x6-react-shape';
 import type { GroupMetadata, PortMetadata } from '@antv/x6/lib/model/port';
@@ -37,6 +37,64 @@ export const cannotRunNodes = [
   'end',
   'output',
 ]
+export const scheduleNodeConfig = {
+  cron: {
+    type: 'define',
+    // required: true,
+  },
+  // frequency: {
+  //   type: 'define',
+  //   defaultValue: 'daily'
+  // },
+  // minute: {
+  //   type: 'define',
+  //   defaultValue: 0,
+  // },
+  // time: {
+  //   type: 'define',
+  //   defaultValue: '12:00 AM',
+  // },
+  // week_days: {
+  //   type: 'define',
+  //   defaultValue: []
+  // },
+  // month_days: {
+  //   type: 'define',
+  //   defaultValue: []
+  // },
+}
+export const webhookNodeInitConfig = {
+  method: {
+    type: 'define',
+    defaultValue: 'POST'
+  },
+  route_key: {
+    type: 'define',
+  },
+  content_type: {
+    type: 'define',
+    defaultValue: 'application/json',
+  },
+  query_params: {
+    type: 'define',
+    defaultValue: []
+  },
+  header_params: {
+    type: 'define',
+    defaultValue: []
+  },
+  req_body_params: {
+    type: 'define',
+    defaultValue: []
+  },
+  response: {
+    type: 'define',
+    defaultValue: {
+      status_code: 200,
+      body: undefined
+    }
+  }
+}
 /**
  * Workflow node library configuration
  * Defines all available node types, their icons, and configuration schemas
@@ -57,15 +115,14 @@ export const nodeLibrary: NodeLibrary[] = [
         config: {
           trigger_type: {
             type: 'define',
-            required: true,
-          },
-          cron: {
-            type: 'define',
-            required: true,
           },
           enabled: {
             type: 'define',
             defaultValue: true
+          },
+          cron: {
+            type: 'define',
+            // required: true,
           },
           // frequency: {
           //   type: 'define',
@@ -87,6 +144,36 @@ export const nodeLibrary: NodeLibrary[] = [
           //   type: 'define',
           //   defaultValue: []
           // },
+          method: {
+            type: 'define',
+            defaultValue: 'POST'
+          },
+          route_key: {
+            type: 'define',
+          },
+          content_type: {
+            type: 'define',
+            defaultValue: 'application/json',
+          },
+          query_params: {
+            type: 'define',
+            defaultValue: []
+          },
+          header_params: {
+            type: 'define',
+            defaultValue: []
+          },
+          req_body_params: {
+            type: 'define',
+            defaultValue: []
+          },
+          response: {
+            type: 'define',
+            defaultValue: {
+              status_code: 200,
+              body: undefined
+            }
+          }
         }
       },
       { type: "end", icon: 'rb:bg-[url("@/assets/images/workflow/end.svg")]',

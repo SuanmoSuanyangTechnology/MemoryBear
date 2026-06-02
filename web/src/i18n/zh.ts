@@ -2447,6 +2447,13 @@ export const zh = {
           last_day: '最后一天',
           next_5_executions: '接下来5次执行时间',
           cannot_calculate_execution_time: '无法计算执行时间',
+
+          webhook: 'Webhook 触发器',
+          content_type: '内容类型',
+          response: '响应',
+          status_code: '状态码',
+          response_body: '响应体',
+          copyTip: '点击复制',
         },
         llm: {
           model_id: '模型',
@@ -2717,6 +2724,7 @@ export const zh = {
         name: '键',
         type: '类型',
         value: '值',
+        required: '必填',
         addCase: '添加条件',
         addVariable: '添加变量',
         outputVariable: '输出变量',
