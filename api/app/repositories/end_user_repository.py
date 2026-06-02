@@ -449,6 +449,46 @@ class EndUserRepository:
             db_logger.error(f"查询工作空间 {workspace_id} 下的终端用户时出错: {str(e)}")
             raise
 
+    def get_filtered_by_workspace(
+        self,
+        workspace_id: uuid.UUID,
+        end_user_id: Optional[uuid.UUID] = None,
+        other_id: Optional[str] = None,
+        other_name: Optional[str] = None,
+    ) -> List[EndUser]:
+        """获取工作空间下按条件过滤的终端用户
+
+        所有过滤条件均为可选，多个条件之间为 AND 关系。
+
+        Args:
+            workspace_id: 工作空间ID（必填）
+            end_user_id: 终端用户ID（可选）
+            other_id: 第三方ID（可选）
+            other_name: 用户名称（可选，模糊匹配）
+
+        Returns:
+            List[EndUser]: 匹配的终端用户列表
+        """
+        try:
+            query = self.db.query(EndUser).filter(EndUser.workspace_id == workspace_id)
+
+            if end_user_id is not None:
+                query = query.filter(EndUser.id == end_user_id)
+            if other_id is not None:
+                query = query.filter(EndUser.other_id == other_id)
+            if other_name is not None:
+                query = query.filter(EndUser.other_name.ilike(f"%{other_name}%"))
+
+            end_users = query.all()
+            db_logger.info(
+                f"成功按条件查询工作空间 {workspace_id} 下的 {len(end_users)} 个终端用户"
+            )
+            return end_users
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"按条件查询工作空间 {workspace_id} 下的终端用户时出错: {str(e)}")
+            raise
+
     def get_all_active_workspaces(self) -> List[uuid.UUID]:
         """获取所有活动工作空间的ID
         

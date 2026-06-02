@@ -1,10 +1,12 @@
-import uuid
 import datetime
-from typing import Optional
+import uuid
+from typing import Optional, List
+
 from pydantic import BaseModel, Field
 from pydantic import ConfigDict
 
 from app.core.utils.datetime_utils import utcnow_naive
+
 
 class EndUser(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -24,3 +26,16 @@ class EndUser(BaseModel):
     memory_insight_updated_at: Optional[datetime.datetime] = Field(description="洞察报告最后更新时间", default=None)
     #用户记忆节点总数（Neo4j模式）
     memory_count: int = Field(description="记忆节点总数", default=0)
+
+
+class EndUserMappingItem(BaseModel):
+    """终端用户 ID 映射项"""
+    end_user_id: str = Field(description="终端用户ID（UUID）")
+    other_id: str = Field(description="外部用户标识")
+    other_name: str = Field(description="用户名称")
+
+
+class EndUserMappingResponse(BaseModel):
+    """终端用户 ID 映射响应"""
+    users: List[EndUserMappingItem] = Field(description="用户映射列表", default_factory=list)
+    total: int = Field(description="用户总数", default=0)

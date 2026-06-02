@@ -2,19 +2,20 @@
 MemoryService — 记忆模块统一入口（Facade）
 
 所有外部调用方（controllers、Celery tasks、API service、Agent 对话、Workflow MemoryWriteNode）
-只依赖此类。
 
 职责：
 - 接收已加载的 MemoryConfig，选择并调用对应的 Pipeline
 - 检查应用级记忆门禁（memory.enabled）
 - 将消息写入 memory_messages 表
 - 分派给 SlidingWindowScheduler
+- 提供 create_long_term_memory_tool() —— 创建 LangChain 长期记忆检索 tool 的工厂函数
 - 不包含任何业务逻辑实现
 - 不直接操作数据库或 LLM（除 memory_messages 写入外）
 
 依赖方向：外部调用方 → MemoryService → Pipeline → Engine → Repository
 """
 
+import asyncio
 import logging
 import uuid
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
@@ -29,7 +30,7 @@ from app.models.memory_message_model import MemoryMessage
 
 from app.core.memory.enums import SearchStrategy, StorageType
 from app.core.memory.models.message_models import DialogData
-from app.core.memory.models.service_models import MemoryContext, MemorySearchResult
+from app.core.memory.models.service_models import LongTermMemoryInput, MemoryContext, MemorySearchResult
 from app.core.memory.pipelines.memory_read import ReadPipeLine
 from app.core.memory.pipelines.pilot_write_pipeline import PilotWriteResult
 from app.core.memory.pipelines.write_pipeline import WriteResult
@@ -608,3 +609,91 @@ class MemoryService:
                 f"conv={conversation_id}, err={e}",
                 exc_info=True,
             )
+
+    @staticmethod
+    async def get_conv_history(db: Session, conv_id: str):
+        return
+
+
+def create_long_term_memory_tool(
+        memory_config: Dict[str, Any],
+        end_user_id: str,
+        storage_type: Optional[str] = None,
+        user_rag_memory_id: Optional[str] = None,
+        memory_name: Optional[str] = None,
+        db: Optional[Session] = None,
+):
+    """创建长期记忆检索工具。
+
+    若未启用或缺少用户 ID 则返回 None。
+
+    Args:
+        memory_config: 记忆配置字典（来自 app_releases.config.memory）
+        end_user_id: 用户 ID
+        storage_type: 存储类型（可选）
+        user_rag_memory_id: 用户 RAG 记忆 ID（可选）
+        memory_name: 记忆配置名称（可选，若提供 db 则自动查询）
+        db: 数据库会话（可选，用于自动查询 memory_name）
+
+    Returns:
+        长期记忆工具，或 None
+    """
+    if not memory_config or not memory_config.get("enabled") or not end_user_id:
+        return None
+
+    from langchain.tools import tool
+
+    config_id = memory_config.get("memory_config_id") or memory_config.get("memory_content", None)
+
+    # 若未显式传入 memory_name 但提供了 db，则自动查询
+    if not memory_name and config_id and db is not None:
+        try:
+            from app.models import MemoryConfig
+            mc = db.query(MemoryConfig.config_name).filter(
+                MemoryConfig.config_id == config_id
+            ).first()
+            memory_name = mc.config_name if mc else None
+        except Exception:
+            pass
+
+    logger.info(f"创建长期记忆工具，配置: end_user_id={end_user_id}, config_id={config_id}, storage_type={storage_type}")
+
+    @tool(args_schema=LongTermMemoryInput)
+    def long_term_memory(question: str, search_mode: str) -> str:
+        """
+        从用户的历史记忆中检索相关信息。用于了解用户的背景、偏好和历史对话内容。
+
+        **何时使用此工具：**
+        - 用户明确询问历史信息（如"我之前说过什么"、"上次我们聊了什么"）
+        - 用户询问个人信息或偏好（如"我喜欢什么"、"我的习惯是什么"）
+        - 需要基于历史上下文提供个性化建议
+        - 需要用户信息进行一些问题的推断
+
+        **何时不使用此工具：**
+        - 简单问候（如"你好"、"谢谢"、"再见"）
+        - 纯任务性请求（如"写代码"、"翻译文字"、"分析图片"）
+        - 用户已提供完整信息（如提供了文本、图片、文档等内容）
+        - 创作性任务（如"写诗"、"编故事"、"创作谜语"）
+
+        Args:
+            question: 需要检索的问题
+            search_mode: '0':深度检索  '1':普通检索  '2': 推理类型检索
+
+        Returns:
+            检索到的历史记忆内容
+        """
+        logger.info(f" 长期记忆工具被调用！question={question}, user={end_user_id}")
+        try:
+            with get_db_context() as db_ctx:
+                memory_service = MemoryService(db_ctx, config_id, end_user_id)
+                search_result = asyncio.run(memory_service.read(question, SearchStrategy(search_mode)))
+            return f"检索到以下历史记忆：\n\n{search_result.content}"
+        except Exception as e:
+            logger.error("长期记忆检索失败", extra={"error": str(e), "error_type": type(e).__name__})
+            return f"记忆检索失败: {str(e)}"
+
+    long_term_memory._tool_meta = {
+        "tool_type": "long_term_memory",
+        "sources": [{"id": config_id, "name": memory_name or config_id}],
+    }
+    return long_term_memory

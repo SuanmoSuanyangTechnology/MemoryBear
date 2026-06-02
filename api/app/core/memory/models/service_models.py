@@ -6,6 +6,17 @@ from app.core.memory.enums import Neo4jNodeType, StorageType
 from app.schemas.memory_config_schema import MemoryConfig
 
 
+class LongTermMemoryInput(BaseModel):
+    """长期记忆工具输入参数"""
+    question: str = Field(
+        description="经过优化重写的查询问题。请将用户的原始问题重写为更合适的检索形式，包含关键词，上下文和具体描述，注意错词检查并且改写")
+    search_mode: str = Field(
+        description="'0':深度检索适用于涉及到复杂问题的检索,关系检索 "
+                    "'1':普通问题检索链路 "
+                    "'2': 推理类型问题检索，工具返回原始检索数据需要根据原始数据进行可能的推断"
+    )
+
+
 class MemoryContext(BaseModel):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 

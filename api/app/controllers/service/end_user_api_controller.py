@@ -2,7 +2,7 @@
 
 import uuid
 
-from fastapi import APIRouter, Body, Depends, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.controllers import user_memory_controllers
@@ -124,6 +124,69 @@ async def create_end_user(
     }
 
     return success(data=CreateEndUserResponse(**result).model_dump(), msg="End user created successfully")
+
+
+@router.get("/mapping")
+@require_api_key(scopes=["memory"])
+async def get_end_user_mapping(
+    request: Request,
+    end_user_id: str = Query(None, description="Filter by end_user_id (UUID)"),
+    other_id: str = Query(None, description="Filter by other_id (exact match)"),
+    other_name: str = Query(None, description="Filter by other_name (fuzzy match)"),
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Query the mapping of end_user_id → other_id / other_name under a workspace.
+
+    Authenticated by workspace-level API key. Returns all end users belonging
+    to the workspace associated with the API key.
+
+    Supports optional filtering by end_user_id, other_id, and/or other_name.
+    Multiple filters are combined with AND logic.
+    """
+    import uuid as uuid_mod
+
+    workspace_id = api_key_auth.workspace_id
+    logger.info(
+        f"Query end user mapping for workspace: {workspace_id}, "
+        f"filters: end_user_id={end_user_id}, other_id={other_id}, other_name={other_name}"
+    )
+
+    # Parse end_user_id to UUID if provided
+    end_user_id_uuid = None
+    if end_user_id:
+        try:
+            end_user_id_uuid = uuid_mod.UUID(end_user_id)
+        except ValueError:
+            raise BusinessException(
+                f"Invalid end_user_id format: {end_user_id}",
+                BizCode.INVALID_PARAMETER,
+            )
+
+    end_user_repo = EndUserRepository(db)
+    end_users = end_user_repo.get_filtered_by_workspace(
+        workspace_id=workspace_id,
+        end_user_id=end_user_id_uuid,
+        other_id=other_id,
+        other_name=other_name,
+    )
+
+    from app.schemas.end_user_schema import EndUserMappingItem, EndUserMappingResponse
+
+    user_items = [
+        EndUserMappingItem(
+            end_user_id=str(user.id),
+            other_id=user.other_id or "",
+            other_name=user.other_name or "",
+        )
+        for user in end_users
+    ]
+
+    return success(
+        data=EndUserMappingResponse(users=user_items, total=len(user_items)).model_dump(),
+        msg="End user mapping retrieved successfully",
+    )
 
 
 @router.get("/info")

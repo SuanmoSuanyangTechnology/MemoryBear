@@ -10,6 +10,8 @@ from app.core.memory.read_services.search_engine.content_search import Neo4jSear
 
 logger = logging.getLogger(__name__)
 
+CONVERSATION_WINDOW = 8
+
 
 class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
     async def run(
@@ -35,9 +37,6 @@ class ReadPipeLine(ModelClientMixin, DBRequiredPipeline):
             case _:
                 raise RuntimeError("Unsupported search strategy")
 
-        # if memory_l0 is not None:
-        #     res.content_str = memory_l0.content + '\n' + res.content
-        #     res.memories.insert(0, memory_l0)
         return res
 
     def _get_search_service(self, includes=None):
