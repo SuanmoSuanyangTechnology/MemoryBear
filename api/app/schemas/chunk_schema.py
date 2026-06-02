@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 import uuid
 from enum import StrEnum
 from app.core.rag.models.chunk import QAChunk
-from typing import Union
+from typing import Union, Any
 
 
 class RetrieveType(StrEnum):
@@ -87,6 +87,22 @@ class ChunkUpdate(BaseModel):
         return {}
 
 
+class FilterCondition(BaseModel):
+    field: str = Field(..., description="元数据字段名")
+    operator: str = Field(..., description="操作符")
+    value: Any | None = Field(None, description="值")
+
+
+class FilterGroup(BaseModel):
+    conditions: list[FilterCondition] = Field(..., description="条件列表")
+    logic: str = Field("AND", description="组内逻辑: AND | OR")
+
+
+class MetadataFilterMode(StrEnum):
+    MANUAL = "manual"
+    AUTO = "auto"
+
+
 class ChunkRetrieve(BaseModel):
     query: str
     kb_ids: list[uuid.UUID]
@@ -97,6 +113,10 @@ class ChunkRetrieve(BaseModel):
     top_k: int | None = Field(100, ge=1, le=100)
     retrieve_type: RetrieveType | None = Field(None)
     rerank_score_threshold: float | None = Field(None, ge=0, le=1)
+
+    # === 新增：元数据过滤 ===
+    metadata_filters: list[FilterGroup] | None = Field(None, description="元数据过滤条件")
+    metadata_filter_mode: MetadataFilterMode = Field(MetadataFilterMode.MANUAL, description="过滤模式")
 
 
 class ChunkBatchCreate(BaseModel):
