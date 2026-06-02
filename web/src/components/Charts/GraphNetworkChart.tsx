@@ -122,7 +122,7 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
     
     const d3Nodes: D3Node[] = nodes.map(n => ({
       id: n.id,
-      name: n.name,
+      name: n.name || `${n.caption}_${n.id.slice(0, 5)}`,
       category: n.category,
       symbolSize: n.symbolSize || 35,
       color: n.itemStyle?.color || getColor(n.category),
@@ -203,12 +203,27 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
         g.attr('transform', e.transform)
         zoomScaleRef.current = e.transform.k
         const currentZoom = e.transform.k
-        g.selectAll<SVGTextElement, D3Node>('g text')
-          .style('display', d => {
-            if (!d.name) return 'none'
-            const textWidth = d.name.length * 6
-            return d.symbolSize * currentZoom >= textWidth / 2 ? 'block' : 'none'
-          })
+        g.selectAll<SVGGElement, D3Node>('g').each(function(d) {
+          const nodeGroup = d3.select(this)
+          const textEl = nodeGroup.select<SVGTextElement>('text')
+          
+          if (!d.name) {
+            textEl.style('display', 'none')
+            return
+          }
+          
+          const fontSize = Math.max(6, Math.min(12, d.symbolSize * 0.25 * currentZoom))
+          const maxWidth = d.symbolSize * currentZoom * 1.2
+          const charWidth = fontSize * 0.55
+          const maxChars = Math.floor(maxWidth / charWidth)
+          
+          if (d.name.length <= maxChars) {
+            textEl.text(d.name)
+          } else {
+            textEl.text(d.name.slice(0, maxChars - 1) + '...')
+          }
+          textEl.style('display', 'block')
+        })
         
         if (selectedNodeId && linkLabelSelRef.current) {
           linkLabelSelRef.current.style('display', d => {
@@ -342,11 +357,6 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
       .attr('fill', '#171719')
       .style('pointer-events', 'none')
       .style('user-select', 'none')
-      .style('display', d => {
-        if (!d.name) return 'none'
-        const currentZoom = defaultZoom
-        return d.symbolSize * currentZoom >= 20 ? 'block' : 'none'
-      })
       .each(function(d) {
         const text = d3.select(this)
         const name = d.name || ''
@@ -418,11 +428,6 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
         nodeSel.selectAll<SVGTextElement, D3Node>('text')
           .attr('fill', '#171719')
           .attr('font-weight', 'normal')
-          .style('display', d => {
-            if (!d.name) return 'none'
-            const textWidth = d.name.length * 6
-            return d.symbolSize * zoomScaleRef.current >= textWidth / 2 ? 'block' : 'none'
-          })
         linkSel
           .attr('stroke', '#A8ABB2')
           .attr('stroke-opacity', 0.4)
@@ -483,16 +488,6 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
       nodeSel.selectAll<SVGTextElement, D3Node>('text')
         .attr('fill', d => highlightedLinkIds.size ? '#171719' : (highlightedNodeIds.has(d.id) ? '#171719' : '#bbb'))
         .attr('font-weight', d => selectedNodeId && !highlightedLinkIds.size && d.id === selectedNodeId ? 'bold' : 'normal')
-        .style('display', d => {
-          if (!d.name) return 'none'
-          const textWidth = d.name.length * 6
-          const shouldShow = d.symbolSize * zoomScaleRef.current >= textWidth / 2
-          if (highlightedLinkIds.size) {
-            return shouldShow ? 'block' : 'none'
-          }
-          if (highlightedNodeIds.has(d.id)) return shouldShow ? 'block' : 'none'
-          return 'none'
-        })
 
       linkSel
         .attr('stroke', d => {
@@ -650,13 +645,6 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
     nodeSelRef.current.selectAll<SVGTextElement, D3Node>('text')
       .attr('fill', d => highlightedNodeIds.has(d.id) ? '#171719' : '#bbb')
       .attr('font-weight', 'normal')
-      .style('display', d => {
-        if (!d.name) return 'none'
-        const textWidth = d.name.length * 6
-        const shouldShow = d.symbolSize * zoomScaleRef.current >= textWidth / 2
-        if (highlightedNodeIds.has(d.id)) return shouldShow ? 'block' : 'none'
-        return 'none'
-      })
 
     linkSelRef.current
       .attr('stroke', '#A8ABB2')
@@ -719,11 +707,6 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
       nodeSelRef.current.selectAll<SVGTextElement, D3Node>('text')
         .attr('fill', '#171719')
         .attr('font-weight', 'normal')
-        .style('display', d => {
-          if (!d.name) return 'none'
-          const textWidth = d.name.length * 6
-          return d.symbolSize * zoomScaleRef.current >= textWidth / 2 ? 'block' : 'none'
-        })
       
       linkSelRef.current
         .attr('stroke', '#A8ABB2')
@@ -763,13 +746,6 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
     nodeSelRef.current.selectAll<SVGTextElement, D3Node>('text')
       .attr('fill', d => highlightedNodeIds.has(d.id) ? '#171719' : '#bbb')
       .attr('font-weight', d => selectedNodeId && d.id === selectedNodeId ? 'bold' : 'normal')
-      .style('display', d => {
-        if (!d.name) return 'none'
-        const textWidth = d.name.length * 6
-        const shouldShow = d.symbolSize * zoomScaleRef.current >= textWidth / 2
-        if (highlightedNodeIds.has(d.id)) return shouldShow ? 'block' : 'none'
-        return 'none'
-      })
 
     linkSelRef.current
       .attr('stroke', '#A8ABB2')
@@ -860,13 +836,6 @@ const GraphNetworkChart: FC<GraphNetworkChartProps> = ({
     nodeSelRef.current.selectAll<SVGTextElement, D3Node>('text')
       .attr('fill', d => highlightedNodeIds.has(d.id) ? '#171719' : '#bbb')
       .attr('font-weight', 'normal')
-      .style('display', d => {
-        if (!d.name) return 'none'
-        const textWidth = d.name.length * 6
-        const shouldShow = d.symbolSize * zoomScaleRef.current >= textWidth / 2
-        if (highlightedNodeIds.has(d.id)) return shouldShow ? 'block' : 'none'
-        return 'none'
-      })
 
     linkSelRef.current
       .attr('stroke', '#A8ABB2')
