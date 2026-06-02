@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-01 15:39:33
+ * @Last Modified time: 2026-06-02 15:41:46
  */
 /**
  * Workflow Chat Component
@@ -137,6 +137,7 @@ const Chat = forwardRef<ChatRef, { appId: string; appType?: Application['type'];
     setChatList([])
     setVariables([])
     setExecutionId(null)
+    setConversationId(null)
     executionIdRef.current = 'draft'
     setMessage(undefined)
     toolbarRef.current?.setFiles([])
