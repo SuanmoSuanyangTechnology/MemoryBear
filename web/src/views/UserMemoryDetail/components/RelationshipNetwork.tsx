@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:32:00 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-01 12:26:24
+ * @Last Modified time: 2026-06-02 17:36:44
  */
 /**
  * Relationship Network Component
@@ -106,15 +106,15 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
         }
         let symbolSize = 0
         if (connections <= 1) {
-          symbolSize = 5
+          symbolSize = 30
         } else if (connections <= 10) {
-          symbolSize = 10
+          symbolSize = 40
         } else if (connections <= 15) {
-          symbolSize = 15
+          symbolSize = 50
         } else if (connections <= 20) {
-          symbolSize = 25
+          symbolSize = 60
         } else {
-          symbolSize = 35
+          symbolSize = 70
         }
 
         curNodes.push({
