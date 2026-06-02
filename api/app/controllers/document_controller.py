@@ -15,6 +15,8 @@ from app.core.config import settings
 from app.core.logging_config import get_api_logger
 from app.core.rag.utils.redis_conn import REDIS_CONN
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
+from app.core.exceptions import BusinessException
+from app.core.error_codes import BizCode
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
@@ -24,6 +26,8 @@ from app.schemas import document_schema
 from app.schemas.response_schema import ApiResponse
 from app.services import document_service, file_service, knowledge_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
+from app.schemas import knowledge_metadata_schema as metadata_schema
+from app.services.knowledge_metadata_service import KnowledgeMetadataService
 
 
 # Obtain a dedicated API logger
@@ -405,3 +409,42 @@ async def parse_documents(
     except Exception as e:
         api_logger.error(f"Failed to parse document: document_id={document_id} - {str(e)}")
         raise
+
+
+@router.post("/metadata/batch", response_model=ApiResponse)
+async def batch_update_document_metadata(
+    data: metadata_schema.BatchUpdateMetadataRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    批量更新文档元数据
+    - 所有文档必须属于同一知识库
+    - 事务性：全成功或全回滚
+    """
+    api_logger.info(
+        f"Batch update document metadata: count={len(data.items)}, user={current_user.username}"
+    )
+
+    if len(data.items) > 100:
+        raise BusinessException(
+            "单次批量更新最多 100 条文档",
+            code=BizCode.VALIDATION_FAILED,
+        )
+
+    items = [
+        {
+            "document_id": item.document_id,
+            "metadata": item.metadata,
+        }
+        for item in data.items
+    ]
+
+    result = KnowledgeMetadataService.batch_update_document_metadata(
+        db=db,
+        items=items,
+        tenant_id=current_user.tenant_id,
+        created_by=current_user.id,
+    )
+
+    return success(data=result, msg="批量更新完成")
