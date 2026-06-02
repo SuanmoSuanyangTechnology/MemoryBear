@@ -33,6 +33,7 @@ from app.core.logging_config import get_business_logger
 from app.core.tools.base import BaseTool
 from app.core.tools.custom.base import CustomTool
 from app.core.tools.mcp.base import MCPTool
+from app.core.tools.serialization import serialize_tool_parameter
 from app.core.tools.workflow.base import WorkflowAsTool
 
 logger = get_business_logger()
@@ -432,22 +433,6 @@ class ToolService:
             logger.error(f"获取工具方法失败: {tool_id}, {e}")
             return []
 
-    @staticmethod
-    def _serialize_tool_parameter(param: Any) -> Dict[str, Any]:
-        """兼容 ToolParameter.type 为枚举或字符串两种情况。"""
-        param_type = getattr(param.type, "value", param.type)
-        return {
-            "name": param.name,
-            "type": param_type,
-            "description": param.description,
-            "required": param.required,
-            "default": param.default,
-            "enum": param.enum,
-            "minimum": param.minimum,
-            "maximum": param.maximum,
-            "pattern": param.pattern
-        }
-
     async def _get_builtin_tool_methods(self, config: ToolConfig) -> List[Dict[str, Any]]:
         """获取内置工具的方法"""
         builtin_config = self.builtin_repo.find_by_tool_id(self.db, config.id)
@@ -502,7 +487,7 @@ class ToolService:
         
         # 其他工具的默认处理：返回除operation外的所有参数
         return [
-            self._serialize_tool_parameter(param)
+            serialize_tool_parameter(param)
             for param in tool_instance.parameters
             if param.name != "operation"
         ]
@@ -1250,7 +1235,7 @@ class ToolService:
             "method_id": config.name,
             "name": config.name,
             "description": config.description,
-            "parameters": [self._serialize_tool_parameter(param) for param in tool_instance.parameters]
+            "parameters": [serialize_tool_parameter(param) for param in tool_instance.parameters]
         }]
 
     def _create_type_config(self, tool_config: ToolConfig, config: Dict[str, Any]):
