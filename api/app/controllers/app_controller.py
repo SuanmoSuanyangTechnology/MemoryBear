@@ -840,7 +840,8 @@ async def draft_run(
                         payload=payload,
                         config=config,
                         workspace_id=current_user.current_workspace_id,
-                        source=source
+                        source=source,
+                        trigger_payload=payload.trigger_payload
                 ):
                     # 提取事件类型和数据
                     event_type = event.get("event", "message")
@@ -871,7 +872,7 @@ async def draft_run(
         )
 
         source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
-        result = await workflow_service.run(app_id, payload, config, current_user.current_workspace_id, source=source)
+        result = await workflow_service.run(app_id, payload, config, current_user.current_workspace_id, source=source, trigger_payload=payload.trigger_payload)
 
         logger.debug(
             "工作流试运行返回结果",
@@ -1111,6 +1112,7 @@ async def run_single_workflow_node(
         "message": raw_inputs.pop("sys.message", ""),
         "files": raw_inputs.pop("sys.files", []),
         "user_id": raw_inputs.pop("sys.user_id", str(current_user.id)),
+        "trigger_payload": raw_inputs.pop("trigger_payload", None),
         "inputs": raw_inputs,
         "conversation_id": "",
         "conv_messages": [],

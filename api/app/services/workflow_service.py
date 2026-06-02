@@ -198,6 +198,8 @@ class WorkflowService:
                     "meta": {
                         "trigger_type": "webhook",
                         "source": "debug",
+                        "method": str(config.get("method", "POST")).upper(),
+                        "route_key": config.get("route_key", ""),
                     },
                 },
             )
@@ -241,10 +243,30 @@ class WorkflowService:
         *,
         preferred_node_id: str | None = None,
     ) -> dict[str, Any]:
+        trigger_node = self._find_debug_trigger_node(nodes, preferred_node_id=preferred_node_id)
+
         if input_data.get("trigger_payload") is not None:
+            # trigger_payload 已有，只补全缺失的 trigger / meta
+            if trigger_node and get_trigger_type(trigger_node) == "webhook":
+                cfg = trigger_node.get("config") or {}
+                merged = dict(input_data)
+                payload = dict(input_data["trigger_payload"])
+                if not payload.get("meta"):
+                    payload["meta"] = {
+                        "trigger_type": "webhook",
+                        "method": str(cfg.get("method", "POST")).upper(),
+                        "route_key": cfg.get("route_key", ""),
+                    }
+                    merged["trigger_payload"] = payload
+                if not merged.get("trigger"):
+                    merged["trigger"] = {
+                        "type": "webhook",
+                        "id": trigger_node.get("id"),
+                        "meta": {"source": "debug", "mode": "test_run"},
+                    }
+                return merged
             return input_data
 
-        trigger_node = self._find_debug_trigger_node(nodes, preferred_node_id=preferred_node_id)
         if not trigger_node:
             return input_data
 
