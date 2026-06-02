@@ -33,6 +33,7 @@ from app.core.logging_config import get_business_logger
 from app.core.tools.base import BaseTool
 from app.core.tools.custom.base import CustomTool
 from app.core.tools.mcp.base import MCPTool
+from app.core.tools.serialization import serialize_tool_parameter
 from app.core.tools.workflow.base import WorkflowAsTool
 
 logger = get_business_logger()
@@ -485,17 +486,11 @@ class ToolService:
             return self._get_openclaw_tool_params(operation)
         
         # 其他工具的默认处理：返回除operation外的所有参数
-        return [{
-            "name": param.name,
-            "type": param.type.value,
-            "description": param.description,
-            "required": param.required,
-            "default": param.default,
-            "enum": param.enum,
-            "minimum": param.minimum,
-            "maximum": param.maximum,
-            "pattern": param.pattern
-        } for param in tool_instance.parameters if param.name != "operation"]
+        return [
+            serialize_tool_parameter(param)
+            for param in tool_instance.parameters
+            if param.name != "operation"
+        ]
     
     def _get_datetime_tool_params(self, operation: str) -> List[Dict[str, Any]]:
         """获取datetime_tool特定操作的参数"""
@@ -1240,17 +1235,7 @@ class ToolService:
             "method_id": config.name,
             "name": config.name,
             "description": config.description,
-            "parameters": [{
-                "name": param.name,
-                "type": param.type.value,
-                "description": param.description,
-                "required": param.required,
-                "default": param.default,
-                "enum": param.enum,
-                "minimum": param.minimum,
-                "maximum": param.maximum,
-                "pattern": param.pattern
-            } for param in tool_instance.parameters]
+            "parameters": [serialize_tool_parameter(param) for param in tool_instance.parameters]
         }]
 
     def _create_type_config(self, tool_config: ToolConfig, config: Dict[str, Any]):
